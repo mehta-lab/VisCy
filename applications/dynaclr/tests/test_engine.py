@@ -1,11 +1,23 @@
 """Smoke tests for DynaCLR engine modules."""
 
 import torch
-from helpers import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder, SyntheticTripletDataModule
+from helpers import (
+    SYNTH_C,
+    SYNTH_D,
+    SYNTH_H,
+    SYNTH_N_CLASSES,
+    SYNTH_W,
+    SimpleEncoder,
+    SyntheticLabeledTripletDataModule,
+    SyntheticTripletDataModule,
+)
 from lightning.pytorch import Trainer, seed_everything
 from torch import nn
 
 from dynaclr.engine import ContrastiveModule
+from viscy_models.components.heads import ClassificationHead
+
+SYNTH_FLAT_DIM = SYNTH_C * SYNTH_D * SYNTH_H * SYNTH_W
 
 
 def test_contrastive_module_init():
@@ -84,6 +96,82 @@ def test_embedding_pca_skipped_when_none():
     trainer.fit(module, datamodule=SyntheticTripletDataModule())
 
     assert logged == []
+
+
+def test_auxiliary_heads_registered_as_module_dict():
+    """auxiliary_heads are stored in an nn.ModuleDict so parameters are tracked."""
+    head = ClassificationHead("gene_ko", "gene_ko", in_dims=64, hidden_dims=32, num_classes=SYNTH_N_CLASSES)
+    module = ContrastiveModule(
+        encoder=SimpleEncoder(),
+        auxiliary_heads={"gene_ko": head},
+        example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+    )
+    assert isinstance(module.auxiliary_heads, nn.ModuleDict)
+    assert "gene_ko" in module.auxiliary_heads
+    assert any("auxiliary_heads" in name for name, _ in module.named_parameters())
+
+
+def test_auxiliary_heads_training_step_runs():
+    """ContrastiveModule with a ClassificationHead trains without error."""
+    seed_everything(0)
+    head = ClassificationHead("gene_ko", "gene_ko", in_dims=64, hidden_dims=32, num_classes=SYNTH_N_CLASSES)
+    module = ContrastiveModule(
+        encoder=SimpleEncoder(),
+        loss_function=nn.TripletMarginLoss(margin=0.5),
+        auxiliary_heads={"gene_ko": head},
+        example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+    )
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        logger=False,
+    )
+    trainer.fit(module, datamodule=SyntheticLabeledTripletDataModule())
+
+
+def test_auxiliary_heads_labels_from_anchor_meta():
+    """Labels are correctly extracted from anchor_meta["labels"] and aux loss is nonzero."""
+    seed_everything(0)
+    head = ClassificationHead("gene_ko", "gene_ko", in_dims=64, hidden_dims=32, num_classes=SYNTH_N_CLASSES)
+    module = ContrastiveModule(
+        encoder=SimpleEncoder(),
+        loss_function=nn.TripletMarginLoss(margin=0.5),
+        auxiliary_heads={"gene_ko": head},
+        example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+    )
+    # Simulate collated anchor_meta: one dict with batched values
+    anchor_meta = [{"labels": {"gene_ko": torch.tensor([0, 1, 2, 3])}}]
+    features = torch.randn(4, 64)
+
+    y = module._get_labels({"anchor_meta": anchor_meta}, "gene_ko")
+    assert y is not None
+    assert y.shape == (4,)
+    assert y.dtype == torch.long
+
+    aux_loss = module._run_auxiliary_heads(features, {"anchor_meta": anchor_meta}, "train")
+    assert aux_loss.item() > 0
+
+
+def test_auxiliary_heads_none_no_extra_loss():
+    """ContrastiveModule with no auxiliary heads trains identically to before."""
+    seed_everything(0)
+    module = ContrastiveModule(
+        encoder=SimpleEncoder(),
+        loss_function=nn.TripletMarginLoss(margin=0.5),
+        auxiliary_heads=None,
+        example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+    )
+    assert len(module.auxiliary_heads) == 0
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        logger=False,
+    )
+    trainer.fit(module, datamodule=SyntheticTripletDataModule())
 
 
 def test_embedding_accumulator_cleared_after_epoch():

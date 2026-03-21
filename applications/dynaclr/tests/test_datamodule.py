@@ -437,3 +437,82 @@ class TestFovLevelSplit:
         train_fovs = set(dm.train_dataset.index.tracks["fov_name"].unique())
         val_fovs = set(dm.val_dataset.index.tracks["fov_name"].unique())
         assert train_fovs.isdisjoint(val_fovs)
+
+
+class TestNewPositiveParams:
+    """Test new positive_cell_source / positive_match_columns / positive_channel_source params."""
+
+    def test_positive_cell_source_self_stores_on_dm(self, two_experiments):
+        """positive_cell_source='self' is stored and passed to datasets."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_cell_source="self",
+        )
+        assert dm.positive_cell_source == "self"
+        dm.setup("fit")
+        assert dm.train_dataset.positive_cell_source == "self"
+
+    def test_positive_match_columns_stored_on_dm(self, two_experiments):
+        """positive_match_columns is stored on datamodule."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_match_columns=["condition"],
+        )
+        assert dm.positive_match_columns == ["condition"]
+
+    def test_positive_channel_source_any_stored(self, two_experiments):
+        """positive_channel_source='any' is stored on datamodule and dataset."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_channel_source="any",
+        )
+        assert dm.positive_channel_source == "any"
+        dm.setup("fit")
+        assert dm.train_dataset.positive_channel_source == "any"
+
+    def test_self_positive_all_tracks_are_valid_anchors(self, two_experiments):
+        """With positive_cell_source='self', all tracks become valid anchors."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_cell_source="self",
+        )
+        dm.setup("fit")
+        n_tracks = len(dm.train_dataset.index.tracks)
+        n_anchors = len(dm.train_dataset.index.valid_anchors)
+        assert n_anchors == n_tracks

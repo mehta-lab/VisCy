@@ -22,6 +22,7 @@ from viscy_data.cell_index import (
     _parse_bbox_min_size,
     _parse_bbox_to_centroid,
     build_timelapse_cell_index,
+    convert_ops_parquet,
     read_cell_index,
     validate_cell_index,
     write_cell_index,
@@ -357,3 +358,73 @@ class TestCrossParadigm:
         # Schema columns all present
         for field in CELL_INDEX_SCHEMA:
             assert field.name in combined.columns
+
+
+# ---------------------------------------------------------------------------
+# convert_ops_parquet (tests 18–20)
+# ---------------------------------------------------------------------------
+
+
+def _make_ops_merged_parquet(tmp_path: Path, n: int = 4) -> Path:
+    """Write a synthetic OPS merged parquet mimicking the pipeline output."""
+    df = pd.DataFrame(
+        {
+            "store_key": [f"2023_store_{i % 2}" for i in range(n)],
+            "well": [f"A/{i}/0" for i in range(n)],
+            "bbox": [f"({10 + i}, {20 + i}, {30 + i}, {40 + i})" for i in range(n)],
+            "gene_name": ["RPL35", "NTC", "TP53", "RPL35"],
+            "reporter": ["Phase", "Phase", "GFP", "Phase"],
+            "sgRNA": ["sg1", "sg2", "sg3", "sg1"],
+            "channel": ["Phase", "Phase", "GFP", "Phase"],
+            "total_index": [100, 101, 102, 103],
+        }
+    )
+    path = tmp_path / "ops_merged.parquet"
+    df.to_parquet(path)
+    return path
+
+
+class TestConvertOpsParquet:
+    """Tests for convert_ops_parquet()."""
+
+    def test_produces_valid_schema(self, tmp_path):
+        """18. Converted parquet passes validate_cell_index."""
+        ops_path = _make_ops_merged_parquet(tmp_path)
+        output = tmp_path / "ops_cell_index.parquet"
+        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        warnings = validate_cell_index(df)
+        assert isinstance(warnings, list)
+
+    def test_fov_and_well_mapping(self, tmp_path):
+        """19. OPS 'well' maps to fov; parent path maps to well."""
+        ops_path = _make_ops_merged_parquet(tmp_path)
+        output = tmp_path / "ops_cell_index.parquet"
+        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        # fov should be the original OPS well path (e.g. "A/0/0")
+        assert df["fov"].iloc[0] == "A/0/0"
+        # well should be the parent (e.g. "A/0")
+        assert df["well"].iloc[0] == "A/0"
+
+    def test_cell_id_unique(self, tmp_path):
+        """20. cell_id is unique across all rows."""
+        ops_path = _make_ops_merged_parquet(tmp_path)
+        output = tmp_path / "ops_cell_index.parquet"
+        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        assert not df["cell_id"].duplicated().any()
+
+    def test_gene_name_and_condition(self, tmp_path):
+        """OPS gene_name populates condition column."""
+        ops_path = _make_ops_merged_parquet(tmp_path)
+        output = tmp_path / "ops_cell_index.parquet"
+        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        assert df["gene_name"].iloc[0] == "RPL35"
+        assert df["condition"].iloc[0] == "RPL35"
+
+    def test_round_trip_parquet(self, tmp_path):
+        """Written parquet can be read back with correct schema."""
+        ops_path = _make_ops_merged_parquet(tmp_path)
+        output = tmp_path / "ops_cell_index.parquet"
+        convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        result = read_cell_index(output)
+        for field in CELL_INDEX_SCHEMA:
+            assert field.name in result.columns

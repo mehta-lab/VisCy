@@ -135,6 +135,11 @@ class SampleMeta(TypedDict, total=False):
     """Biological metadata carried in train-mode batches for sampler debugging.
 
     Joinable against valid_anchors on (global_track_id, t).
+
+    Core fields are defined here. Domain-specific fields should be added by
+    subclassing ``SampleMeta`` (e.g. ``OpsSampleMeta``). The ``labels`` field
+    is an open-ended dict of integer labels that auxiliary heads can consume
+    via ``batch_key`` without requiring a subclass.
     """
 
     experiment: OneOrSeq[str]
@@ -145,6 +150,7 @@ class SampleMeta(TypedDict, total=False):
     t: OneOrSeq[int]
     hours_post_perturbation: OneOrSeq[float]
     lineage_id: OneOrSeq[int]
+    labels: dict[str, int]
 
 
 class TripletSample(TypedDict):

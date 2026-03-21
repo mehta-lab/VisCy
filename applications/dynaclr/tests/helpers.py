@@ -244,3 +244,44 @@ class SyntheticTripletDataModule(LightningDataModule):
             SyntheticTripletDataset(self.num_samples),
             batch_size=self.batch_size,
         )
+
+
+SYNTH_N_CLASSES = 10
+
+
+class SyntheticLabeledTripletDataset(Dataset):
+    """Triplet dataset with integer class labels for auxiliary head testing."""
+
+    def __init__(self, size: int = 8, n_classes: int = SYNTH_N_CLASSES):
+        self.size = size
+        self.n_classes = n_classes
+
+    def __len__(self) -> int:
+        return self.size
+
+    def __getitem__(self, idx: int) -> TripletSample:
+        sample = {
+            "anchor": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "positive": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "negative": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "index": {"fov_name": f"fov_{idx}", "id": idx, "track_id": idx % 3, "t": idx},
+            "anchor_meta": [
+                {"experiment": "exp_a", "condition": "control", "t": idx, "labels": {"gene_ko": idx % self.n_classes}}
+            ],
+        }
+        return sample
+
+
+class SyntheticLabeledTripletDataModule(LightningDataModule):
+    """DataModule wrapping SyntheticLabeledTripletDataset for auxiliary head tests."""
+
+    def __init__(self, batch_size: int = 4, num_samples: int = 8):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_samples = num_samples
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(SyntheticLabeledTripletDataset(self.num_samples), batch_size=self.batch_size)
+
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(SyntheticLabeledTripletDataset(self.num_samples), batch_size=self.batch_size)

@@ -176,6 +176,8 @@ class MultiExperimentIndex:
         exclude_fovs: list[str] | None = None,
         cell_index_path: str | Path | None = None,
         num_workers: int = 1,
+        positive_cell_source: str = "lookup",
+        positive_match_columns: list[str] | None = None,
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
@@ -215,7 +217,11 @@ class MultiExperimentIndex:
 
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
-        self.valid_anchors = self._compute_valid_anchors(tau_range_hours)
+        self.valid_anchors = self._compute_valid_anchors(
+            tau_range_hours,
+            positive_cell_source=positive_cell_source,
+            positive_match_columns=positive_match_columns,
+        )
 
     # ------- internal methods -------
 
@@ -424,18 +430,31 @@ class MultiExperimentIndex:
 
         return tracks
 
-    def _compute_valid_anchors(self, tau_range_hours: tuple[float, float]) -> pd.DataFrame:
+    def _compute_valid_anchors(
+        self,
+        tau_range_hours: tuple[float, float],
+        positive_cell_source: str = "lookup",
+        positive_match_columns: list[str] | None = None,
+    ) -> pd.DataFrame:
         """Return the subset of ``self.tracks`` that are valid training anchors.
 
-        An anchor is valid when there exists at least one tau in the
-        per-experiment frame range such that another row with the **same
-        lineage_id** and ``t == anchor_t + tau`` is present in the tracks.
+        When ``positive_cell_source="self"`` or ``positive_match_columns`` does
+        not include ``"lineage_id"``, all tracks are valid anchors (no tau
+        filtering needed).  Tau filtering only runs for the temporal case where
+        ``positive_cell_source="lookup"`` and ``"lineage_id"`` is in
+        ``positive_match_columns`` (or ``positive_match_columns`` is ``None``,
+        which defaults to lineage-based temporal matching).
 
         Parameters
         ----------
         tau_range_hours : tuple[float, float]
             ``(min_hours, max_hours)`` used with each experiment's
             ``interval_minutes`` for frame conversion.
+        positive_cell_source : str
+            ``"self"`` or ``"lookup"``. When ``"self"``, all tracks are valid.
+        positive_match_columns : list[str] | None
+            Columns used for positive lookup. When ``None`` or contains
+            ``"lineage_id"``, tau filtering is applied.
 
         Returns
         -------
@@ -445,6 +464,13 @@ class MultiExperimentIndex:
         if self.tracks.empty:
             return self.tracks.copy()
 
+        # Non-temporal modes: all tracks are valid anchors
+        if positive_cell_source == "self":
+            return self.tracks.reset_index(drop=True)
+        if positive_match_columns is not None and "lineage_id" not in positive_match_columns:
+            return self.tracks.reset_index(drop=True)
+
+        # Temporal mode: filter to tracks that have a positive at t+tau
         valid_mask = pd.Series(False, index=self.tracks.index)
 
         for exp in self.registry.experiments:

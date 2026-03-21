@@ -525,3 +525,133 @@ class TestCrossScopePositive:
                 fit=True,
                 cross_scope_fraction=0.5,
             )
+
+
+class TestSelfPositive:
+    """Tests for positive_cell_source='self' (SimCLR-style)."""
+
+    def test_self_positive_same_values(self, single_experiment_index):
+        """positive_cell_source='self': positive rows are same as anchor rows."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            positive_cell_source="self",
+        )
+        assert len(ds) > 0
+        batch = ds.__getitems__([0, 1])
+        assert "anchor" in batch
+        assert "positive" in batch
+        # For self-positive, anchor and positive should have identical pixel values
+        # (augmentation happens later in on_after_batch_transfer)
+        assert batch["anchor"].shape == batch["positive"].shape
+
+    def test_self_positive_all_tracks_are_valid_anchors(self, tmp_path):
+        """positive_cell_source='self': when index built with self mode, all tracks are valid."""
+        from iohub.ngff import open_ome_zarr
+
+        from dynaclr.data.experiment import ExperimentRegistry
+        from viscy_data.collection import Collection, ExperimentEntry, SourceChannel
+
+        zarr_path = tmp_path / "self_test.zarr"
+        tracks_root = tmp_path / "tracks_self"
+        with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=["Phase"]) as plate:
+            pos = plate.create_position("A", "1", "0")
+            arr = pos.create_zeros("0", shape=(N_T, 1, N_Z, IMG_H, IMG_W), dtype=np.float32)
+            arr[:] = np.random.default_rng(0).standard_normal(arr.shape).astype(np.float32)
+            make_tracks_csv(tracks_root / "A/1/0" / "tracks.csv", n_tracks=N_TRACKS, n_t=N_T)
+
+        exp = ExperimentEntry(
+            name="self_exp",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=["Phase"],
+            condition_wells={"control": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        collection = Collection(
+            name="self_test",
+            source_channels=[SourceChannel(label="labelfree", per_experiment={"self_exp": "Phase"})],
+            experiments=[exp],
+        )
+        registry = ExperimentRegistry(collection=collection, z_window=1)
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="self",
+        )
+        n_tracks = len(index.tracks)
+        n_anchors = len(index.valid_anchors)
+        assert n_anchors == n_tracks, (
+            f"positive_cell_source='self': all {n_tracks} tracks should be valid anchors, got {n_anchors}"
+        )
+
+    def test_self_positive_pixel_values_identical(self, single_experiment_index):
+        """positive_cell_source='self': anchor and positive tensors are equal."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            positive_cell_source="self",
+        )
+        batch = ds.__getitems__([0])
+        assert torch.equal(batch["anchor"], batch["positive"]), (
+            "Self-positive: anchor and positive tensors must be identical before augmentation"
+        )
+
+
+class TestColumnMatchPositive:
+    """Tests for positive_cell_source='lookup' with non-lineage columns."""
+
+    def _build_index_with_gene_name(self, tmp_path: Path) -> "MultiExperimentIndex":
+        """Build an index where tracks have gene_name/reporter columns for matching."""
+        index = _build_index(tmp_path)
+        n = len(index.tracks)
+        # Alternate between two genes so there are always candidates for each key
+        index.tracks["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(n)]
+        index.tracks["reporter"] = "Phase"
+        # valid_anchors is a view/copy — keep it in sync
+        index.valid_anchors["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(len(index.valid_anchors))]
+        index.valid_anchors["reporter"] = "Phase"
+        return index
+
+    def test_column_match_positive_different_cell(self, tmp_path):
+        """positive_match_columns=['gene_name','reporter'] finds different cell with same values."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        index = self._build_index_with_gene_name(tmp_path)
+        ds = MultiExperimentTripletDataset(
+            index=index,
+            fit=True,
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name", "reporter"],
+        )
+        rng = np.random.default_rng(0)
+        # Find an anchor and its positive — use valid_anchors which has the gene_name column
+        anchor_row = ds.index.valid_anchors.iloc[0]
+        pos = ds._find_positive(anchor_row, rng)
+        assert pos is not None, "Should find a column-match positive"
+        assert pos["gene_name"] == anchor_row["gene_name"], "Positive must share gene_name"
+        assert pos["reporter"] == anchor_row["reporter"], "Positive must share reporter"
+        # Must be a different row (different integer index)
+        assert pos.name != anchor_row.name, "Positive must be a different cell"
+
+    def test_column_match_no_self_as_positive(self, tmp_path):
+        """Column-match lookup never returns the anchor itself."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        index = self._build_index_with_gene_name(tmp_path)
+        ds = MultiExperimentTripletDataset(
+            index=index,
+            fit=True,
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name", "reporter"],
+        )
+        rng = np.random.default_rng(42)
+        for _, anchor_row in ds.index.valid_anchors.iterrows():
+            pos = ds._find_positive(anchor_row, rng)
+            if pos is not None:
+                assert pos.name != anchor_row.name, "Positive must not be the anchor itself"

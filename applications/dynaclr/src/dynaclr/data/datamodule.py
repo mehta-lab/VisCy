@@ -49,6 +49,8 @@ class MultiExperimentDataModule(LightningDataModule):
     ----------
     collection_path : str
         Path to collection YAML for ExperimentRegistry.from_collection().
+        Required for temporal mode. Optional (can be ``None``) when
+        ``positive_cell_source`` does not require lineage lookup.
     z_window : int
         Number of Z slices the model consumes.  Per-experiment Z
         centering is resolved from ``focus_slice`` zattrs or explicit
@@ -128,16 +130,26 @@ class MultiExperimentDataModule(LightningDataModule):
     reference_pixel_size_z_um : float or None
         Reference voxel size in Z (micrometers) for physical-scale normalization.
         None = no rescaling. Default: None.
+    positive_cell_source : str
+        ``"self"`` — SimCLR: anchor and positive are the same crop.
+        ``"lookup"`` (default) — find a different cell via ``positive_match_columns``.
+    positive_match_columns : list[str] | None
+        Columns defining "same identity" for positive lookup.
+        Defaults to ``["lineage_id"]`` (temporal matching).
+        For OPS perturbation: ``["gene_name", "reporter"]``.
+    positive_channel_source : str
+        ``"same"`` (default) — anchor and positive share channel index.
+        ``"any"`` — positive draws independently. Only affects bag-of-channels mode.
     cross_scope_fraction : float
-        Fraction of positives sampled as cross-microscope positives.
-        0.0 = pure temporal positives. Default: 0.0.
+        Deprecated. Use ``positive_match_columns=["condition"]`` instead.
+        Fraction of positives sampled as cross-microscope positives. Default: 0.0.
     hpi_window : float
-        Half-width of HPI window (hours) for cross-scope positive matching. Default: 1.0.
+        Deprecated. Half-width of HPI window for cross-scope matching. Default: 1.0.
     """
 
     def __init__(
         self,
-        collection_path: str,
+        collection_path: str | None,
         z_window: int,
         yx_patch_size: tuple[int, int],
         final_yx_patch_size: tuple[int, int],
@@ -174,6 +186,9 @@ class MultiExperimentDataModule(LightningDataModule):
         num_workers_index: int = 1,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
+        positive_cell_source: str = "lookup",
+        positive_match_columns: list[str] | None = None,
+        positive_channel_source: str = "same",
         cross_scope_fraction: float = 0.0,
         hpi_window: float = 1.0,
     ) -> None:
@@ -222,6 +237,9 @@ class MultiExperimentDataModule(LightningDataModule):
         self.num_workers_index = num_workers_index
         self.reference_pixel_size_xy_um = reference_pixel_size_xy_um
         self.reference_pixel_size_z_um = reference_pixel_size_z_um
+        self.positive_cell_source = positive_cell_source
+        self.positive_match_columns = positive_match_columns
+        self.positive_channel_source = positive_channel_source
         self.cross_scope_fraction = cross_scope_fraction
         self.hpi_window = hpi_window
 
@@ -256,6 +274,8 @@ class MultiExperimentDataModule(LightningDataModule):
             Lightning stage: ``"fit"``, ``"predict"``, etc.
         """
         if stage == "fit" or stage is None:
+            if self.collection_path is None:
+                raise ValueError("collection_path is required for setup(). Provide a collection YAML path.")
             registry = ExperimentRegistry.from_collection(
                 self.collection_path,
                 z_window=self.z_window,
@@ -309,6 +329,8 @@ class MultiExperimentDataModule(LightningDataModule):
             exclude_fovs=self.exclude_fovs,
             cell_index_path=self.cell_index_path,
             num_workers=self.num_workers_index,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
@@ -317,6 +339,9 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_decay_rate=self.tau_decay_rate,
             cache_pool_bytes=self.cache_pool_bytes,
             bag_of_channels=self.bag_of_channels,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
+            positive_channel_source=self.positive_channel_source,
             cross_scope_fraction=self.cross_scope_fraction,
             hpi_window=self.hpi_window,
         )
@@ -331,6 +356,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 exclude_fovs=self.exclude_fovs,
                 cell_index_path=self.cell_index_path,
                 num_workers=self.num_workers_index,
+                positive_cell_source=self.positive_cell_source,
+                positive_match_columns=self.positive_match_columns,
             )
             self.val_dataset = MultiExperimentTripletDataset(
                 index=val_index,
@@ -339,6 +366,9 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_decay_rate=self.tau_decay_rate,
                 cache_pool_bytes=self.cache_pool_bytes,
                 bag_of_channels=self.bag_of_channels,
+                positive_cell_source=self.positive_cell_source,
+                positive_match_columns=self.positive_match_columns,
+                positive_channel_source=self.positive_channel_source,
                 cross_scope_fraction=self.cross_scope_fraction,
                 hpi_window=self.hpi_window,
             )
@@ -354,6 +384,8 @@ class MultiExperimentDataModule(LightningDataModule):
             exclude_fovs=self.exclude_fovs,
             cell_index_path=self.cell_index_path,
             num_workers=self.num_workers_index,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
         )
 
         # Split FOVs per experiment to maintain proportional representation
@@ -385,6 +417,8 @@ class MultiExperimentDataModule(LightningDataModule):
             exclude_fovs=train_exclude,
             cell_index_path=self.cell_index_path,
             num_workers=self.num_workers_index,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
@@ -393,6 +427,9 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_decay_rate=self.tau_decay_rate,
             cache_pool_bytes=self.cache_pool_bytes,
             bag_of_channels=self.bag_of_channels,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
+            positive_channel_source=self.positive_channel_source,
             cross_scope_fraction=self.cross_scope_fraction,
             hpi_window=self.hpi_window,
         )
@@ -407,6 +444,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 exclude_fovs=val_exclude,
                 cell_index_path=self.cell_index_path,
                 num_workers=self.num_workers_index,
+                positive_cell_source=self.positive_cell_source,
+                positive_match_columns=self.positive_match_columns,
             )
             self.val_dataset = MultiExperimentTripletDataset(
                 index=val_index,
@@ -415,6 +454,9 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_decay_rate=self.tau_decay_rate,
                 cache_pool_bytes=self.cache_pool_bytes,
                 bag_of_channels=self.bag_of_channels,
+                positive_cell_source=self.positive_cell_source,
+                positive_match_columns=self.positive_match_columns,
+                positive_channel_source=self.positive_channel_source,
                 cross_scope_fraction=self.cross_scope_fraction,
                 hpi_window=self.hpi_window,
             )

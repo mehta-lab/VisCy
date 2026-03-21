@@ -225,9 +225,10 @@ class ContrastiveModule(LightningModule):
             return batch[batch_key]
         meta = batch.get("anchor_meta")
         if meta and "labels" in meta[0] and batch_key in meta[0]["labels"]:
-            vals = [m["labels"][batch_key] for m in meta]
-            ints = [v.item() if isinstance(v, torch.Tensor) else int(v) for v in vals]
-            return torch.tensor(ints, dtype=torch.long, device=self.device)
+            val = meta[0]["labels"][batch_key]
+            if isinstance(val, torch.Tensor):
+                return val.long().to(self.device)
+            return torch.tensor(val, dtype=torch.long, device=self.device)
         return None
 
     def _run_auxiliary_heads(self, anchor_features: Tensor, batch: TripletSample, stage: str) -> Tensor:

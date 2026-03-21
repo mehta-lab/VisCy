@@ -1,8 +1,16 @@
-"""Multi-experiment triplet dataset with lineage-aware positive sampling.
+"""Multi-experiment triplet dataset with flexible positive sampling.
 
 Provides :class:`MultiExperimentTripletDataset` which reads cell patches from
-multi-experiment OME-Zarr stores, samples temporal positives following lineage
-through division events, and produces the exact batch format expected by
+multi-experiment OME-Zarr stores and samples positives via three strategies:
+
+* ``positive_cell_source="lookup"`` with ``positive_match_columns=["lineage_id"]``
+  (default) — temporal positive: same lineage at ``t+tau``.
+* ``positive_cell_source="lookup"`` with other columns (e.g. ``["gene_name",
+  "reporter"]``) — perturbation positive: different cell with same column values.
+* ``positive_cell_source="self"`` — SimCLR-style: anchor and positive are the
+  same crop; augmentation creates two views.
+
+Produces the exact batch format expected by
 :class:`dynaclr.engine.ContrastiveModule`.
 """
 
@@ -73,11 +81,10 @@ def _rescale_patch(patch: Tensor, scale: tuple[float, float, float], target: tup
 
 
 class MultiExperimentTripletDataset(Dataset):
-    """Dataset for multi-experiment triplet sampling with lineage-aware positives.
+    """Dataset for multi-experiment triplet sampling with flexible positive strategies.
 
     Works with :class:`~dynaclr.index.MultiExperimentIndex` to sample
-    anchor/positive cell patches across multiple experiments, following lineage
-    through division events.
+    anchor/positive cell patches across multiple experiments.
 
     The batch dict produced by :meth:`__getitems__` is directly compatible
     with :meth:`dynaclr.engine.ContrastiveModule.training_step`:
@@ -97,6 +104,8 @@ class MultiExperimentTripletDataset(Dataset):
         return anchor + index metadata for prediction.
     tau_range_hours : tuple[float, float]
         ``(min_hours, max_hours)`` converted to frames per experiment.
+        Only used when ``positive_cell_source="lookup"`` and
+        ``"lineage_id"`` is in ``positive_match_columns``.
     tau_decay_rate : float
         Exponential decay rate for :func:`~dynaclr.tau_sampling.sample_tau`.
     return_negative : bool
@@ -108,12 +117,25 @@ class MultiExperimentTripletDataset(Dataset):
         If ``True``, randomly select one source channel per sample instead
         of reading all source channels.  Output shape is ``(B, 1, Z, Y, X)``
         instead of ``(B, C, Z, Y, X)``.
+    positive_cell_source : str
+        ``"self"`` — SimCLR: positive is the same crop as anchor (augmentation
+        creates two views).  ``"lookup"`` (default) — find a different cell
+        using ``positive_match_columns``.
+    positive_match_columns : list[str] | None
+        Columns that define "same identity" for positive lookup.  Defaults to
+        ``["lineage_id"]`` (temporal matching).  For OPS perturbation use
+        ``["gene_name", "reporter"]``.  When ``"lineage_id"`` is in the list,
+        tau constraint is applied.
+    positive_channel_source : str
+        ``"same"`` (default) — anchor and positive use the same channel index
+        (bag-of-channels mode).  ``"any"`` — positive draws its channel
+        independently from anchor.  Only meaningful when
+        ``bag_of_channels=True``.
     cross_scope_fraction : float
-        Fraction of positives sampled as cross-microscope positives
-        (same condition + HPI window, different microscope).
-        0.0 = pure temporal positives (default).
+        Deprecated. Use ``positive_match_columns=["condition"]`` instead.
+        Fraction of positives sampled as cross-microscope positives. Default: 0.0.
     hpi_window : float
-        Half-width of HPI window (hours) for cross-scope positive matching.
+        Deprecated. Used only with ``cross_scope_fraction > 0``. Default: 1.0.
     """
 
     def __init__(
@@ -125,6 +147,9 @@ class MultiExperimentTripletDataset(Dataset):
         return_negative: bool = False,
         cache_pool_bytes: int = 0,
         bag_of_channels: bool = False,
+        positive_cell_source: str = "lookup",
+        positive_match_columns: list[str] | None = None,
+        positive_channel_source: str = "same",
         cross_scope_fraction: float = 0.0,
         hpi_window: float = 1.0,
     ) -> None:
@@ -138,10 +163,20 @@ class MultiExperimentTripletDataset(Dataset):
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
         self.bag_of_channels = bag_of_channels
+        self.positive_cell_source = positive_cell_source
+        self.positive_match_columns = positive_match_columns if positive_match_columns is not None else ["lineage_id"]
+        self.positive_channel_source = positive_channel_source
         self.cross_scope_fraction = cross_scope_fraction
         self.hpi_window = hpi_window
 
         if cross_scope_fraction > 0:
+            import warnings
+
+            warnings.warn(
+                "cross_scope_fraction is deprecated. Use positive_match_columns=['condition'] instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             missing_microscope = [e.name for e in index.registry.experiments if not e.microscope]
             if missing_microscope:
                 raise ValueError(
@@ -150,7 +185,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         self._rng = np.random.default_rng()
         self._setup_tensorstore_context(cache_pool_bytes)
-        self._build_lineage_lookup()
+        self._build_match_lookup()
 
     # ------------------------------------------------------------------
     # Initialization helpers
@@ -168,16 +203,34 @@ class MultiExperimentTripletDataset(Dataset):
         )
         self._tensorstores: dict[str, ts.TensorStore] = {}
 
-    def _build_lineage_lookup(self) -> None:
-        """Build ``_lineage_timepoints`` for O(1) positive candidate lookup.
+    def _build_match_lookup(self) -> None:
+        """Build lookup structures for O(1) positive candidate lookup.
 
-        Structure: ``{(experiment, lineage_id): {t: [row_indices_in_tracks]}}``
+        For ``positive_cell_source="self"``, no lookup is needed.
+
+        For temporal mode (``"lineage_id"`` in ``positive_match_columns``),
+        builds ``_lineage_timepoints``:
+        ``{(experiment, lineage_id): {t: [row_indices_in_tracks]}}``.
+
+        For generic column-match mode, builds ``_match_lookup``:
+        ``{match_key_tuple: [row_indices_in_tracks]}``.
         """
-        self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
+        if self.positive_cell_source == "self":
+            return
 
-        for idx, row in self.index.tracks.iterrows():
-            key = (row["experiment"], row["lineage_id"])
-            self._lineage_timepoints[key][row["t"]].append(idx)
+        if "lineage_id" in self.positive_match_columns:
+            self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(
+                lambda: defaultdict(list)
+            )
+            for idx, row in self.index.tracks.iterrows():
+                key = (row["experiment"], row["lineage_id"])
+                self._lineage_timepoints[key][row["t"]].append(idx)
+        else:
+            cols = self.positive_match_columns
+            self._match_lookup: dict[tuple, list[int]] = defaultdict(list)
+            for idx, row in self.index.tracks.iterrows():
+                key = tuple(row[c] for c in cols)
+                self._match_lookup[key].append(idx)
 
     # ------------------------------------------------------------------
     # Dataset protocol
@@ -212,7 +265,7 @@ class MultiExperimentTripletDataset(Dataset):
         anchor_rows = self.index.valid_anchors.iloc[indices]
 
         # In bag-of-channels mode, pre-sample one channel index per item so that
-        # anchor and positive always use the same channel (phase↔phase, fluor↔fluor).
+        # anchor and positive use the same channel (when positive_channel_source="same").
         if self.bag_of_channels:
             n_channels = len(self.index.registry.source_channel_labels)
             forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
@@ -228,7 +281,13 @@ class MultiExperimentTripletDataset(Dataset):
 
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
-            positive_patches, positive_norms = self._slice_patches(positive_rows, forced_channel_indices)
+            # positive_channel_source="any": positive draws its channel independently
+            if self.bag_of_channels and self.positive_channel_source == "any":
+                n_channels = len(self.index.registry.source_channel_labels)
+                pos_forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
+            else:
+                pos_forced_channel_indices = forced_channel_indices
+            positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_indices)
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
             sample["positive_meta"] = self._extract_meta(positive_rows)
@@ -269,12 +328,11 @@ class MultiExperimentTripletDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _sample_positives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
-        """Sample one positive for each anchor using lineage-aware lookup.
+        """Sample one positive for each anchor.
 
-        When ``cross_scope_fraction > 0``, a fraction of positives are sampled
-        as cross-microscope positives (same condition + HPI window, different
-        microscope).  Falls back to temporal positive when no cross-scope
-        candidate is found.
+        When ``positive_cell_source="self"``, returns a copy of ``anchor_rows``
+        (same crop; augmentation creates two views).  Otherwise delegates to
+        :meth:`_find_positive`.
 
         Parameters
         ----------
@@ -286,23 +344,17 @@ class MultiExperimentTripletDataset(Dataset):
         pd.DataFrame
             One row per anchor from ``self.index.tracks``.
         """
-        n = len(anchor_rows)
-        n_cross = int(n * self.cross_scope_fraction)
-        cross_mask = [True] * n_cross + [False] * (n - n_cross)
-        self._rng.shuffle(cross_mask)
+        if self.positive_cell_source == "self":
+            return anchor_rows.copy().reset_index(drop=True)
 
         pos_rows = []
-        for use_cross, (_, row) in zip(cross_mask, anchor_rows.iterrows()):
-            if use_cross:
-                pos = self._find_cross_scope_positive(row, self._rng)
-                if pos is None:
-                    pos = self._find_positive(row, self._rng)
-            else:
-                pos = self._find_positive(row, self._rng)
+        for _, row in anchor_rows.iterrows():
+            pos = self._find_positive(row, self._rng)
             if pos is None:
                 raise RuntimeError(
                     f"No positive found for anchor (experiment={row.get('experiment')}, "
-                    f"lineage_id={row.get('lineage_id')}, t={row.get('t')}). "
+                    f"match_key={tuple(row.get(c) for c in self.positive_match_columns)}, "
+                    f"t={row.get('t')}). "
                     "This anchor should have been filtered out by valid_anchors."
                 )
             pos_rows.append(pos)
@@ -315,10 +367,31 @@ class MultiExperimentTripletDataset(Dataset):
     ) -> pd.Series | None:
         """Find a positive sample for a given anchor.
 
-        Searches for a row in ``self.index.tracks`` with the same
-        ``lineage_id`` at ``t + tau``.  When multiple candidates exist
-        (e.g. parent and daughter at the same timepoint), one is chosen
-        randomly.
+        Dispatches to temporal or generic column-match lookup based on
+        ``positive_match_columns``.
+
+        Parameters
+        ----------
+        anchor_row : pd.Series
+            A single row from ``valid_anchors``.
+        rng : numpy.random.Generator
+            Random number generator for tau sampling and tie-breaking.
+
+        Returns
+        -------
+        pd.Series or None
+            A track row for the positive, or ``None`` if no positive found.
+        """
+        if "lineage_id" in self.positive_match_columns:
+            return self._find_temporal_positive(anchor_row, rng)
+        return self._find_column_match_positive(anchor_row, rng)
+
+    def _find_temporal_positive(
+        self,
+        anchor_row: pd.Series,
+        rng: np.random.Generator,
+    ) -> pd.Series | None:
+        """Find a temporal positive: same lineage at ``t + tau``.
 
         Parameters
         ----------
@@ -336,17 +409,14 @@ class MultiExperimentTripletDataset(Dataset):
         lineage_id = anchor_row["lineage_id"]
         anchor_t = anchor_row["t"]
 
-        # Convert tau range to frames for this experiment
         tau_min, tau_max = self.index.registry.tau_range_frames(exp_name, self.tau_range_hours)
 
-        # Get lineage-timepoint lookup
         lt_key = (exp_name, lineage_id)
         lt_map = self._lineage_timepoints.get(lt_key)
         if lt_map is None:
             return None
 
-        # Sample tau and search for positive
-        # Try sampled tau first, then scan the full range as fallback
+        # Try sampled tau first, then scan full range as fallback
         sampled_tau = sample_tau(tau_min, tau_max, rng, self.tau_decay_rate)
         target_t = anchor_t + sampled_tau
         candidates = lt_map.get(target_t, [])
@@ -354,17 +424,44 @@ class MultiExperimentTripletDataset(Dataset):
             chosen_idx = candidates[rng.integers(len(candidates))]
             return self.index.tracks.iloc[chosen_idx]
 
-        # Fallback: try all taus in range (skip tau=0)
         for tau in range(tau_min, tau_max + 1):
             if tau == 0:
                 continue
-            target_t_fb = anchor_t + tau
-            candidates_fb = lt_map.get(target_t_fb, [])
+            candidates_fb = lt_map.get(anchor_t + tau, [])
             if candidates_fb:
                 chosen_idx = candidates_fb[rng.integers(len(candidates_fb))]
                 return self.index.tracks.iloc[chosen_idx]
 
         return None
+
+    def _find_column_match_positive(
+        self,
+        anchor_row: pd.Series,
+        rng: np.random.Generator,
+    ) -> pd.Series | None:
+        """Find a positive by matching column values, excluding the anchor itself.
+
+        Parameters
+        ----------
+        anchor_row : pd.Series
+            A single row from ``valid_anchors``.
+        rng : numpy.random.Generator
+            Random number generator for tie-breaking.
+
+        Returns
+        -------
+        pd.Series or None
+            A track row for the positive, or ``None`` if no candidates found.
+        """
+        cols = self.positive_match_columns
+        key = tuple(anchor_row[c] for c in cols)
+        all_candidates = self._match_lookup.get(key, [])
+        # Exclude the anchor row itself by integer index
+        candidates = [i for i in all_candidates if i != anchor_row.name]
+        if not candidates:
+            return None
+        chosen_idx = candidates[rng.integers(len(candidates))]
+        return self.index.tracks.iloc[chosen_idx]
 
     def _find_cross_scope_positive(
         self,
@@ -373,8 +470,7 @@ class MultiExperimentTripletDataset(Dataset):
     ) -> pd.Series | None:
         """Find a cross-microscope positive for a given anchor.
 
-        Searches for a row with a different ``microscope``, same ``condition``,
-        and ``hours_post_perturbation`` within ``self.hpi_window`` of the anchor.
+        Deprecated. Use ``positive_match_columns=["condition"]`` instead.
 
         Parameters
         ----------

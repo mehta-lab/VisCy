@@ -34,6 +34,7 @@ __all__ = [
     "CELL_INDEX_SCHEMA",
     "build_ops_cell_index",
     "build_timelapse_cell_index",
+    "convert_ops_parquet",
     "read_cell_index",
     "validate_cell_index",
     "write_cell_index",
@@ -567,6 +568,100 @@ def build_ops_cell_index(
 
     write_cell_index(df, output_path)
     return df
+
+
+# ---------------------------------------------------------------------------
+# OPS parquet converter
+# ---------------------------------------------------------------------------
+
+
+def convert_ops_parquet(
+    ops_parquet_path: str | Path,
+    output_path: str | Path,
+    experiment_name: str,
+    store_root: str = "/hpc/projects/icd.fast.ops",
+    store_suffix: str = "3-assembly/phenotyping_v3.zarr",
+    source_channels: list[str] | None = None,
+) -> pd.DataFrame:
+    """Convert an OPS merged parquet to the canonical cell index schema.
+
+    Parameters
+    ----------
+    ops_parquet_path : str | Path
+        Path to the OPS merged parquet file (e.g. ``373genes_filtered.parquet``).
+    output_path : str | Path
+        Destination parquet path.
+    experiment_name : str
+        Name for this experiment (used for ``experiment`` and ``cell_id`` columns).
+    store_root : str
+        Root directory for OPS zarr stores. Default: ``"/hpc/projects/icd.fast.ops"``.
+    store_suffix : str
+        Suffix appended after ``store_key`` to form ``store_path``.
+        Default: ``"3-assembly/phenotyping_v3.zarr"``.
+    source_channels : list[str] | None
+        Channel names for ``source_channels`` JSON field.
+        None derives from ``channel`` column (one channel per row).
+
+    Returns
+    -------
+    pd.DataFrame
+        The written cell index.
+    """
+    df = pd.read_parquet(Path(ops_parquet_path))
+
+    out = pd.DataFrame()
+
+    # store_path from store_key
+    out["store_path"] = df["store_key"].apply(lambda k: f"{store_root}/{k}/{store_suffix}")
+
+    # OPS 'well' column is the position path (our fov), e.g. "A/1/0"
+    out["fov"] = df["well"]
+    # Our well = parent of fov, e.g. "A/1"
+    out["well"] = df["well"].apply(lambda w: w.rsplit("/", 1)[0])
+
+    # Centroid from bbox
+    centroids = df["bbox"].apply(_parse_bbox_to_centroid)
+    out["y"] = centroids.apply(lambda c: c[0]).astype("float32")
+    out["x"] = centroids.apply(lambda c: c[1]).astype("float32")
+    out["z"] = pd.array([0] * len(df), dtype="int16")
+
+    # source_channels JSON
+    if source_channels is not None:
+        out["source_channels"] = json.dumps(source_channels)
+    elif "channel" in df.columns:
+        out["source_channels"] = df["channel"].apply(lambda c: json.dumps([c]))
+    else:
+        out["source_channels"] = json.dumps([])
+
+    # OPS-specific columns
+    out["gene_name"] = df["gene_name"].fillna("NTC") if "gene_name" in df.columns else None
+    out["reporter"] = df["reporter"] if "reporter" in df.columns else None
+    out["sgRNA"] = df["sgRNA"] if "sgRNA" in df.columns else None
+    out["channel_name"] = df["channel"] if "channel" in df.columns else ""
+
+    # condition = gene_name for perturbation mode
+    out["condition"] = out["gene_name"] if "gene_name" in df.columns else "unknown"
+
+    # OPS is single-timepoint
+    out["t"] = pd.array([0] * len(df), dtype="Int32")
+    id_series = df["total_index"].astype(str) if "total_index" in df.columns else pd.Series(range(len(df))).astype(str)
+    out["track_id"] = (
+        df["total_index"].astype("Int32") if "total_index" in df.columns else pd.array(range(len(df)), dtype="Int32")
+    )
+    # cell_id, global_track_id, lineage_id: each cell is its own lineage
+    out["cell_id"] = experiment_name + "_" + id_series
+    out["global_track_id"] = experiment_name + "_" + id_series
+    out["lineage_id"] = experiment_name + "_" + id_series
+    out["parent_track_id"] = pd.array([-1] * len(df), dtype="Int32")
+    out["hours_post_perturbation"] = pd.array([0.0] * len(df), dtype="float32")
+
+    out["experiment"] = experiment_name
+    out["tracks_path"] = ""
+    out["microscope"] = ""
+
+    write_cell_index(out, output_path)
+    _logger.info("Converted %d OPS cells to %s", len(out), output_path)
+    return out
 
 
 # ---------------------------------------------------------------------------

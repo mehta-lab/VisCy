@@ -85,20 +85,23 @@ model:
         # temperature_start: 0.1
         # temperature_warmup_epochs: 50
     lr: 0.00002
-    # Optional auxiliary classification heads (loss weight cosine ramp-up example):
+    # Optional auxiliary classification heads.
+    # head_name: used for logging (loss/aux/{head_name}/{stage})
+    # batch_key: key in anchor_meta["labels"] that carries integer class labels
+    # Multiple heads can be added — each runs independently and its loss is
+    # added to the contrastive loss weighted by loss_weight.
     # auxiliary_heads:
     #   condition:
     #     class_path: viscy_models.components.heads.ClassificationHead
     #     init_args:
     #       head_name: condition
-    #       batch_key: condition_label
-    #       in_dims: 768
+    #       batch_key: condition       # must match a key in anchor_meta["labels"]
+    #       in_dims: 768               # must match encoder embedding_dim
     #       hidden_dims: 256
     #       num_classes: 4
-    #       loss_weight: 1.0
-    #       weight_schedule: cosine   # ramp from weight_start → loss_weight
-    #       weight_start: 0.0
-    #       weight_warmup_epochs: 50
+    #       cosine_classifier: true    # L2-normalised head (recommended for large n_classes)
+    #       loss_weight: 0.5
+    #       top_k: 5                   # logs top-1 and top-5 accuracy
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     # PCA pairplot logged to WandB every N val epochs (null = disabled, WandB logger only)
