@@ -215,6 +215,18 @@ def make_synthetic_combined_datamodule(**kwargs):
 
 
 @pytest.fixture
+def _SyntheticHCSDataModule():
+    """Return the SyntheticHCSDataModule class."""
+    return SyntheticHCSDataModule
+
+
+@pytest.fixture
+def _make_synthetic_combined_datamodule():
+    """Return the make_synthetic_combined_datamodule factory function."""
+    return make_synthetic_combined_datamodule
+
+
+@pytest.fixture
 def tiny_hcs_zarr(tmp_path):
     """Create a minimal HCS OME-Zarr with 4 positions for integration tests.
 

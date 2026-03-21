@@ -7,13 +7,22 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from conftest import IMG_H, IMG_W, N_T, N_TRACKS, N_Z
 from iohub.ngff import Position, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data.cell_index import build_timelapse_cell_index
 from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+IMG_H = 64
+IMG_W = 64
+N_T = 10
+N_Z = 1
+N_TRACKS = 5
 
 # ---------------------------------------------------------------------------
 # Helpers

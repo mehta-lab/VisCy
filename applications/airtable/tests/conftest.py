@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Sample Airtable API response records
 # ---------------------------------------------------------------------------
@@ -90,6 +89,18 @@ DATASET_NAMES_RECORDS = [
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def sample_airtable_records():
+    """Return sample Airtable API response records."""
+    return SAMPLE_AIRTABLE_RECORDS
+
+
+@pytest.fixture()
+def dataset_names_records():
+    """Return sample dataset-names-only records."""
+    return DATASET_NAMES_RECORDS
 
 
 @pytest.fixture()

@@ -5,9 +5,14 @@ from pathlib import Path
 
 import pytest
 import torch
-from conftest import FCMAE_H, FCMAE_W, SYNTH_B, SYNTH_C, SYNTH_D
 
 from cytoland.engine import AugmentedPredictionVSUNet, FcmaeUNet, VSUNet
+
+SYNTH_B = 2
+SYNTH_C = 1
+SYNTH_D = 5
+FCMAE_H = 128
+FCMAE_W = 128
 
 
 def test_imports():

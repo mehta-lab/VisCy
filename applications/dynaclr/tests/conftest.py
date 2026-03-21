@@ -326,3 +326,40 @@ def simple_encoder():
 @pytest.fixture
 def synthetic_datamodule():
     return SyntheticTripletDataModule()
+
+
+# ---------------------------------------------------------------------------
+# Factory fixtures — expose helper functions/classes to test files without
+# requiring ``from .conftest import …`` (which breaks ``pytest --co`` when
+# conftest is collected as a regular module).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _create_experiment():
+    return create_experiment
+
+
+@pytest.fixture
+def _write_collection_yaml():
+    return write_collection_yaml
+
+
+@pytest.fixture
+def _make_tracks_csv():
+    return make_tracks_csv
+
+
+@pytest.fixture
+def _SimpleEncoder():
+    return SimpleEncoder
+
+
+@pytest.fixture
+def _SyntheticTripletDataset():
+    return SyntheticTripletDataset
+
+
+@pytest.fixture
+def _SyntheticTripletDataModule():
+    return SyntheticTripletDataModule

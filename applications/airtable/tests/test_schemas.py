@@ -15,9 +15,6 @@ from airtable_utils.schemas import (
     parse_position_name,
 )
 
-from .conftest import SAMPLE_AIRTABLE_RECORDS
-
-
 # ============================================================================
 # parse_channel_name
 # ============================================================================
@@ -146,9 +143,9 @@ class TestParsePositionName:
 class TestDatasetRecordFromAirtable:
     """Test DatasetRecord.from_airtable_record with various response shapes."""
 
-    def test_full_record_with_select_dicts(self):
+    def test_full_record_with_select_dicts(self, sample_airtable_records):
         """Record where select fields are dicts with 'name' key."""
-        rec = DatasetRecord.from_airtable_record(SAMPLE_AIRTABLE_RECORDS[0])
+        rec = DatasetRecord.from_airtable_record(sample_airtable_records[0])
         assert rec.dataset == "dataset_alpha"
         assert rec.well_id == "A/1"
         assert rec.fov == "000000"
@@ -174,9 +171,9 @@ class TestDatasetRecordFromAirtable:
         assert rec.x_shape == 2048
         assert rec.record_id == "rec001"
 
-    def test_record_with_plain_string_fields(self):
+    def test_record_with_plain_string_fields(self, sample_airtable_records):
         """Record where select fields are plain strings (no dict wrapper)."""
-        rec = DatasetRecord.from_airtable_record(SAMPLE_AIRTABLE_RECORDS[1])
+        rec = DatasetRecord.from_airtable_record(sample_airtable_records[1])
         assert rec.dataset == "dataset_beta"
         assert rec.cell_type == "A549"
         assert rec.cell_state == "infected"

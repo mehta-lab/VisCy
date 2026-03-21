@@ -20,22 +20,18 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from cytoland.engine import FcmaeUNet, MaskedMSELoss, VSUNet
 from viscy_utils.losses import MixedLoss
 
-from .conftest import (
-    MIXED_LOSS_H,
-    MIXED_LOSS_W,
-    SYNTH_D,
-    SYNTH_H,
-    SYNTH_W,
-    SyntheticHCSDataModule,
-    make_synthetic_combined_datamodule,
-)
+SYNTH_D = 5
+SYNTH_H = 64
+SYNTH_W = 64
+MIXED_LOSS_H = 192
+MIXED_LOSS_W = 192
 
 # ---------------------------------------------------------------------------
 # Synthetic tests (CPU, always run)
 # ---------------------------------------------------------------------------
 
 
-def test_vsunet_fast_dev_run(tmp_path):
+def test_vsunet_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
     """VSUNet + UNeXt2 + MSELoss trains for 1 batch."""
     seed_everything(42)
     module = VSUNet(
@@ -50,12 +46,12 @@ def test_vsunet_fast_dev_run(tmp_path):
         enable_checkpointing=False,
         enable_progress_bar=False,
     )
-    trainer.fit(module, datamodule=SyntheticHCSDataModule())
+    trainer.fit(module, datamodule=_SyntheticHCSDataModule())
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
 
-def test_vsunet_mixed_loss_fast_dev_run(tmp_path):
+def test_vsunet_mixed_loss_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
     """VSUNet + UNeXt2 + MixedLoss (L1 + MS-DSSIM) trains for 1 batch."""
     seed_everything(42)
     module = VSUNet(
@@ -74,13 +70,13 @@ def test_vsunet_mixed_loss_fast_dev_run(tmp_path):
     # 192x192 spatial needed: MS-SSIM kernel 11x11, 5 scales → spatial/16 >= 11.
     trainer.fit(
         module,
-        datamodule=SyntheticHCSDataModule(height=MIXED_LOSS_H, width=MIXED_LOSS_W),
+        datamodule=_SyntheticHCSDataModule(height=MIXED_LOSS_H, width=MIXED_LOSS_W),
     )
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
 
-def test_fcmae_pretrain_fast_dev_run(tmp_path):
+def test_fcmae_pretrain_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule):
     """FcmaeUNet FCMAE pretraining (MaskedMSELoss) trains for 1 batch."""
     seed_everything(42)
     module = FcmaeUNet(
@@ -96,12 +92,12 @@ def test_fcmae_pretrain_fast_dev_run(tmp_path):
         enable_checkpointing=False,
         enable_progress_bar=False,
     )
-    trainer.fit(module, datamodule=make_synthetic_combined_datamodule())
+    trainer.fit(module, datamodule=_make_synthetic_combined_datamodule())
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
 
-def test_fcmae_finetune_fast_dev_run(tmp_path):
+def test_fcmae_finetune_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule):
     """FcmaeUNet supervised fine-tuning (MSELoss) trains for 1 batch."""
     seed_everything(42)
     module = FcmaeUNet(
@@ -120,7 +116,7 @@ def test_fcmae_finetune_fast_dev_run(tmp_path):
         enable_checkpointing=False,
         enable_progress_bar=False,
     )
-    trainer.fit(module, datamodule=make_synthetic_combined_datamodule())
+    trainer.fit(module, datamodule=_make_synthetic_combined_datamodule())
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
