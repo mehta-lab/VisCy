@@ -7,6 +7,7 @@ Includes spatial heads (2D→3D projection) and embedding-space heads
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 from typing import Literal
 
 import torch
@@ -16,14 +17,257 @@ from monai.networks.utils import normal_init
 from torch import Tensor, nn
 
 from viscy_models.components.blocks import icnr_init
+from viscy_models.schedule import cosine_anneal
 
 __all__ = [
+    "BaseHead",
+    "ClassificationHead",
     "CosineClassifier",
     "MLP",
     "PixelToVoxelHead",
     "PixelToVoxelShuffleHead",
     "UnsqueezeHead",
 ]
+
+
+class BaseHead(ABC, nn.Module):
+    """Abstract base class for pluggable task heads in multi-task models.
+
+    Each head is self-contained: it knows its batch key, computes its own
+    loss, and can be registered in an ``nn.ModuleDict`` for generic iteration
+    in the training loop.
+
+    Call :meth:`get_weight` with the current epoch to get the (possibly scheduled)
+    loss weight. Call :meth:`step` at the start of each epoch to advance the schedule.
+
+    Parameters
+    ----------
+    head_name : str
+        Name used for logging (e.g. ``"gene_ko"`` → ``loss/aux/gene_ko/train``).
+    batch_key : str
+        Key used to look up targets in the batch dict (``batch[batch_key]``).
+        Decoupled from ``head_name`` so the logging name stays stable while
+        the dataset key can vary across experiments.
+    loss_weight : float
+        Final (or constant) scalar weight applied to this head's loss.
+    weight_schedule : {"cosine", "constant"}
+        Schedule for loss weight. ``"cosine"`` ramps from ``weight_start``
+        up to ``loss_weight`` over ``weight_warmup_epochs``. Default: ``"constant"``.
+    weight_start : float
+        Initial weight when using ``"cosine"`` schedule. Default: 0.0.
+    weight_warmup_epochs : int
+        Epochs over which to ramp up the weight. Default: 50.
+
+    Notes
+    -----
+    Subclasses must implement :meth:`forward`, :meth:`compute_loss`, and
+    :meth:`log_metrics`.
+    """
+
+    def __init__(
+        self,
+        head_name: str,
+        batch_key: str,
+        loss_weight: float = 1.0,
+        weight_schedule: Literal["cosine", "constant"] = "constant",
+        weight_start: float = 0.0,
+        weight_warmup_epochs: int = 50,
+    ) -> None:
+        super().__init__()
+        self.head_name = head_name
+        self.batch_key = batch_key
+        self.loss_weight = loss_weight
+        self.weight_schedule = weight_schedule
+        self.weight_start = weight_start
+        self.weight_warmup_epochs = weight_warmup_epochs
+        self._current_weight = weight_start if weight_schedule == "cosine" else loss_weight
+
+    def step(self, epoch: int) -> None:
+        """Update the loss weight for the given epoch.
+
+        Parameters
+        ----------
+        epoch : int
+            Current training epoch (0-indexed).
+        """
+        if self.weight_schedule == "cosine":
+            self._current_weight = cosine_anneal(
+                self.weight_start,
+                self.loss_weight,
+                epoch,
+                self.weight_warmup_epochs,
+            )
+
+    def get_weight(self) -> float:
+        """Return the current loss weight.
+
+        Returns
+        -------
+        float
+            Loss weight for the current epoch.
+        """
+        return self._current_weight
+
+    @abstractmethod
+    def forward(self, x: Tensor) -> Tensor:
+        """Map backbone features to head output (logits, embeddings, etc.).
+
+        Parameters
+        ----------
+        x : Tensor
+            Backbone feature tensor of shape ``(B, embedding_dim)``.
+
+        Returns
+        -------
+        Tensor
+            Head output tensor.
+        """
+
+    @abstractmethod
+    def compute_loss(self, y_hat: Tensor, y: Tensor) -> Tensor:
+        """Compute the head-specific loss.
+
+        Parameters
+        ----------
+        y_hat : Tensor
+            Head output from :meth:`forward`.
+        y : Tensor
+            Target tensor from the batch.
+
+        Returns
+        -------
+        Tensor
+            Scalar loss tensor.
+        """
+
+    @abstractmethod
+    def log_metrics(self, out: dict, log_fn: callable, stage: str) -> None:
+        """Log head-specific metrics via the Lightning module's log function.
+
+        Parameters
+        ----------
+        out : dict
+            Output dict containing at minimum ``"loss"``, ``"logits"``, and ``"y"``.
+        log_fn : callable
+            The Lightning module's ``self.log`` or ``self.log_dict``.
+        stage : str
+            One of ``"train"`` or ``"val"``.
+        """
+
+
+class ClassificationHead(BaseHead):
+    """Classification head built on :class:`MLP` with top-k accuracy logging.
+
+    Parameters
+    ----------
+    head_name : str
+        Name used for logging (e.g. ``"gene_ko"``).
+    batch_key : str
+        Key to look up integer class labels in the batch dict (e.g. ``"gene_label"``).
+    in_dims : int
+        Input feature dimension (backbone embedding size).
+    hidden_dims : int | list[int]
+        Hidden layer width(s) passed to :class:`MLP`.
+    num_classes : int
+        Number of output classes.
+    cosine_classifier : bool
+        Use :class:`CosineClassifier` instead of a plain linear head.
+    loss_weight : float
+        Weight applied to this head's loss in the combined loss.
+    top_k : int
+        Compute top-k accuracy in addition to top-1. Default 5.
+    weight_schedule : {"cosine", "constant"}
+        Schedule for loss weight. ``"cosine"`` ramps from ``weight_start``
+        up to ``loss_weight`` over ``weight_warmup_epochs``.
+    weight_start : float
+        Initial weight when using ``"cosine"`` schedule. Default: 0.0.
+    weight_warmup_epochs : int
+        Epochs over which to ramp up the weight. Default: 50.
+    """
+
+    def __init__(
+        self,
+        head_name: str,
+        batch_key: str,
+        in_dims: int,
+        hidden_dims: int | list[int],
+        num_classes: int,
+        cosine_classifier: bool = True,
+        loss_weight: float = 1.0,
+        top_k: int = 5,
+        weight_schedule: Literal["cosine", "constant"] = "constant",
+        weight_start: float = 0.0,
+        weight_warmup_epochs: int = 50,
+    ) -> None:
+        super().__init__(
+            head_name=head_name,
+            batch_key=batch_key,
+            loss_weight=loss_weight,
+            weight_schedule=weight_schedule,
+            weight_start=weight_start,
+            weight_warmup_epochs=weight_warmup_epochs,
+        )
+        self.mlp = MLP(
+            in_dims=in_dims,
+            hidden_dims=hidden_dims,
+            num_classes=num_classes,
+            cosine_classifier=cosine_classifier,
+        )
+        self.top_k = top_k
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Map backbone features to class logits.
+
+        Parameters
+        ----------
+        x : Tensor
+            Shape ``(B, in_dims)``.
+
+        Returns
+        -------
+        Tensor
+            Logits of shape ``(B, num_classes)``.
+        """
+        return self.mlp(x)
+
+    def compute_loss(self, y_hat: Tensor, y: Tensor) -> Tensor:
+        """Cross-entropy loss.
+
+        Parameters
+        ----------
+        y_hat : Tensor
+            Logits of shape ``(B, num_classes)``.
+        y : Tensor
+            Integer class labels of shape ``(B,)``.
+
+        Returns
+        -------
+        Tensor
+            Scalar cross-entropy loss.
+        """
+        return F.cross_entropy(y_hat, y)
+
+    def log_metrics(self, out: dict, log_fn: callable, stage: str) -> None:
+        """Log loss, top-1, and top-k accuracy.
+
+        Parameters
+        ----------
+        out : dict
+            Must contain ``"loss"``, ``"logits"`` ``(B, num_classes)``, and ``"y"`` ``(B,)``.
+        log_fn : callable
+            Lightning module's ``self.log``.
+        stage : str
+            ``"train"`` or ``"val"``.
+        """
+        logits = out["logits"]
+        y = out["y"]
+
+        top1 = (logits.argmax(dim=1) == y).float().mean()
+        topk = (logits.topk(self.top_k, dim=1).indices == y.unsqueeze(1)).any(dim=1).float().mean()
+
+        log_fn(f"loss/aux/{self.head_name}/{stage}", out["loss"])
+        log_fn(f"metrics/acc_top1/{self.head_name}/{stage}", top1)
+        log_fn(f"metrics/acc_top{self.top_k}/{self.head_name}/{stage}", topk)
 
 
 class CosineClassifier(nn.Module):

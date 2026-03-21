@@ -7,11 +7,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
 
 from viscy_data._typing import CellIndex, TripletSample
+from viscy_models.components.heads import BaseHead
 from viscy_models.contrastive import ContrastiveEncoder
+from viscy_models.contrastive.loss import NTXentLoss
+from viscy_models.schedule import cosine_anneal
 from viscy_models.vae import BetaVae25D, BetaVaeMonai
 from viscy_utils.log_embeddings import pca_pairplot
 from viscy_utils.log_images import detach_sample, log_chw_tensor, log_histogram, log_image_grid
@@ -47,6 +49,7 @@ class ContrastiveModule(LightningModule):
         ckpt_path: str | None = None,
         freeze_backbone: bool = False,
         projection: nn.Module | None = None,
+        auxiliary_heads: dict[str, BaseHead] | None = None,
     ) -> None:
         super().__init__()
         self.model = encoder
@@ -67,9 +70,19 @@ class ContrastiveModule(LightningModule):
         self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
         self._embedding_outputs: list[tuple[Tensor, list]] = []
         self.freeze_backbone = freeze_backbone
+        self.auxiliary_heads = nn.ModuleDict(auxiliary_heads or {})
 
         if ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])
+
+    def on_train_epoch_start(self) -> None:  # noqa: D102
+        if hasattr(self.loss_function, "step"):
+            self.loss_function.step(self.current_epoch)
+        if hasattr(self.loss_function, "temperature"):
+            self.log("hparams/temperature", self.loss_function.temperature)
+        for head in self.auxiliary_heads.values():
+            head.step(self.current_epoch)
+            self.log(f"hparams/loss_weight/{head.head_name}", head.get_weight())
 
     def on_fit_start(self) -> None:  # noqa: D102
         if self.freeze_backbone:
@@ -201,10 +214,38 @@ class ContrastiveModule(LightningModule):
         self.logger.experiment.log({f"{tag}_pca": wandb.Image(fig), "epoch": self.current_epoch})
         plt.close(fig)
 
+    def _get_labels(self, batch: TripletSample, batch_key: str) -> Tensor | None:
+        """Extract integer labels for a head from the batch.
+
+        Checks top-level batch keys first, then falls back to
+        ``anchor_meta[i]["labels"][batch_key]`` for metadata-carried labels.
+        Returns ``None`` if the key is not found in either location.
+        """
+        if batch_key in batch:
+            return batch[batch_key]
+        meta = batch.get("anchor_meta")
+        if meta and "labels" in meta[0] and batch_key in meta[0]["labels"]:
+            vals = [m["labels"][batch_key] for m in meta]
+            ints = [v.item() if isinstance(v, torch.Tensor) else int(v) for v in vals]
+            return torch.tensor(ints, dtype=torch.long, device=self.device)
+        return None
+
+    def _run_auxiliary_heads(self, anchor_features: Tensor, batch: TripletSample, stage: str) -> Tensor:
+        aux_loss = torch.tensor(0.0, device=self.device)
+        for head in self.auxiliary_heads.values():
+            y = self._get_labels(batch, head.batch_key)
+            if y is None:
+                continue
+            logits = head(anchor_features)
+            head_loss = head.compute_loss(logits, y)
+            aux_loss = aux_loss + head.get_weight() * head_loss
+            head.log_metrics({"loss": head_loss, "logits": logits, "y": y}, self.log, stage)
+        return aux_loss
+
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
-        _, anchor_projection = self(anchor_img)
+        anchor_features, anchor_projection = self(anchor_img)
         _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
@@ -225,6 +266,7 @@ class ContrastiveModule(LightningModule):
             negative=negative_projection,
             stage="train",
         )
+        loss = loss + self._run_auxiliary_heads(anchor_features, batch, "train")
         return loss
 
     def on_train_epoch_end(self) -> None:  # noqa: D102
@@ -256,6 +298,7 @@ class ContrastiveModule(LightningModule):
             negative=negative_projection,
             stage="val",
         )
+        loss = loss + self._run_auxiliary_heads(anchor_features, batch, "val")
         n = self.log_embeddings_every_n_epochs
         if n is not None and self.current_epoch % n == 0 and not self.trainer.sanity_checking:
             self._embedding_outputs.append((anchor_features.detach().cpu(), batch.get("anchor_meta", [])))
@@ -348,14 +391,7 @@ class BetaVaeModule(LightningModule):
                 return max(self.beta, self._min_beta)
 
         elif self.beta_schedule == "cosine":
-            if epoch < self.beta_warmup_epochs:
-                import math
-
-                progress = epoch / self.beta_warmup_epochs
-                beta_val = self.beta_min + (self.beta - self.beta_min) * 0.5 * (1 + math.cos(math.pi * (1 - progress)))
-                return max(beta_val, self._min_beta)
-            else:
-                return max(self.beta, self._min_beta)
+            return max(cosine_anneal(self.beta_min, self.beta, epoch, self.beta_warmup_epochs), self._min_beta)
 
         elif self.beta_schedule == "warmup":
             beta_val = self.beta_min if epoch < self.beta_warmup_epochs else self.beta

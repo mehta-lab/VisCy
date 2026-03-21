@@ -71,9 +71,12 @@ model:
             norm: ln
             activation: relu
     loss_function:
-      class_path: pytorch_metric_learning.losses.NTXentLoss
+      class_path: viscy_models.contrastive.loss.NTXentLoss
       init_args:
-        temperature: 0.5
+        temperature: 0.5        # final temperature (after annealing)
+        # temperature_schedule: cosine
+        # temperature_start: 0.1
+        # temperature_warmup_epochs: 50
     lr: 0.0001  # higher LR — only MLP trains, backbone frozen
     log_batches_per_epoch: 3
     log_samples_per_batch: 3

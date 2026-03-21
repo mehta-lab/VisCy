@@ -50,9 +50,12 @@ model:
         stem_kernel_size: [3, 4, 4]
         projection_dim: 256
     loss_function:
-      class_path: pytorch_metric_learning.losses.NTXentLoss
+      class_path: viscy_models.contrastive.loss.NTXentLoss
       init_args:
-        temperature: 0.1
+        temperature: 0.1        # final temperature (after annealing)
+        # temperature_schedule: cosine
+        # temperature_start: 0.1
+        # temperature_warmup_epochs: 50
     lr: 1.0e-5
     freeze_backbone: true
     ckpt_path: <path/to/pretrained_checkpoint.ckpt>

@@ -78,9 +78,27 @@ model:
     loss_function:
       class_path: viscy_models.contrastive.loss.NTXentHCL
       init_args:
-        temperature: 0.07
+        temperature: 0.07       # final temperature (after annealing)
         beta: 0.5
+        # Temperature schedule: cosine anneal from temperature_start → temperature
+        # temperature_schedule: cosine
+        # temperature_start: 0.1
+        # temperature_warmup_epochs: 50
     lr: 0.00002
+    # Optional auxiliary classification heads (loss weight cosine ramp-up example):
+    # auxiliary_heads:
+    #   condition:
+    #     class_path: viscy_models.components.heads.ClassificationHead
+    #     init_args:
+    #       head_name: condition
+    #       batch_key: condition_label
+    #       in_dims: 768
+    #       hidden_dims: 256
+    #       num_classes: 4
+    #       loss_weight: 1.0
+    #       weight_schedule: cosine   # ramp from weight_start → loss_weight
+    #       weight_start: 0.0
+    #       weight_warmup_epochs: 50
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     # PCA pairplot logged to WandB every N val epochs (null = disabled, WandB logger only)
