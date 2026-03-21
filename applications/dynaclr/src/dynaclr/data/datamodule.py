@@ -101,10 +101,6 @@ class MultiExperimentDataModule(LightningDataModule):
         Normalization transforms. Default: [].
     augmentations : list[MapTransform]
         Augmentation transforms. Default: [].
-    hcl_beta : float
-        Hard-negative concentration beta. Default: 0.5.
-        NOTE: Stored for YAML discoverability but the actual
-        NTXentHCL instance is configured on ContrastiveModule, not here.
     cache_pool_bytes : int
         Tensorstore cache pool size. Default: 0.
     seed : int
@@ -174,8 +170,6 @@ class MultiExperimentDataModule(LightningDataModule):
         channel_dropout_prob: float = 0.0,
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
-        # Loss hyperparameters (informational for CLI discoverability)
-        hcl_beta: float = 0.5,
         # Other
         cache_pool_bytes: int = 0,
         seed: int = 0,
@@ -225,8 +219,6 @@ class MultiExperimentDataModule(LightningDataModule):
         self.augmentations = augmentations if augmentations is not None else []
 
         # Loss hyperparameters (informational)
-        self.hcl_beta = hcl_beta
-
         # Other
         self.cache_pool_bytes = cache_pool_bytes
         self.seed = seed

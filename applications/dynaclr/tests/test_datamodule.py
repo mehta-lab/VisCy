@@ -134,7 +134,6 @@ class TestInitExposesAllHyperparameters:
             temporal_enrichment=True,
             temporal_window_hours=3.0,
             temporal_global_fraction=0.5,
-            hcl_beta=0.7,
             channel_dropout_channels=[0, 1],
             channel_dropout_prob=0.8,
             cache_pool_bytes=1024,
@@ -152,7 +151,6 @@ class TestInitExposesAllHyperparameters:
         assert dm.temporal_enrichment is True
         assert dm.temporal_window_hours == 3.0
         assert dm.temporal_global_fraction == 0.5
-        assert dm.hcl_beta == 0.7
         assert dm.channel_dropout_channels == [0, 1]
         assert dm.channel_dropout_prob == 0.8
         assert dm.cache_pool_bytes == 1024

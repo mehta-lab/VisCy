@@ -146,6 +146,5 @@ data:
           prob: 0.5
           mean: 0.0
           std: 0.2
-    hcl_beta: 0.5
     cache_pool_bytes: 0
     seed: 0

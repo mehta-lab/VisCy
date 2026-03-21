@@ -195,6 +195,5 @@ data:
           mean: 0.0
           std: 0.2
     # Loss reference (informational -- actual loss is on model.loss_function)
-    hcl_beta: 0.5
     cache_pool_bytes: 0
     seed: 0
