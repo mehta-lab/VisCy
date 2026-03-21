@@ -45,6 +45,14 @@ _UNET_ARCHITECTURE = {
 _logger = logging.getLogger("lightning.pytorch")
 
 
+def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
+    """Build a DivisiblePad that matches the model's downsampling axes."""
+    down_factor = 2**model.num_blocks
+    if getattr(model, "downsamples_z", False):
+        return DivisiblePad((0, down_factor, down_factor, down_factor))
+    return DivisiblePad((0, 0, down_factor, down_factor))
+
+
 def _identity(x: Tensor) -> Tensor:
     """Identity transform (no-op)."""
     return x
@@ -455,11 +463,7 @@ class VSUNet(LightningModule):
 
         The inverse of this transform crops the prediction to original shape.
         """
-        down_factor = 2**self.model.num_blocks
-        if getattr(self.model, "downsamples_z", False):
-            self._predict_pad = DivisiblePad((0, down_factor, down_factor, down_factor))
-        else:
-            self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        self._predict_pad = _make_divisible_pad(self.model)
 
     def configure_optimizers(self):
         """Configure optimizer and learning rate scheduler."""
@@ -552,11 +556,7 @@ class AugmentedPredictionVSUNet(LightningModule):
         reduction: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
-        down_factor = 2**model.num_blocks
-        if getattr(model, "downsamples_z", False):
-            self._predict_pad = DivisiblePad((0, down_factor, down_factor, down_factor))
-        else:
-            self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        self._predict_pad = _make_divisible_pad(model)
         self.model = model
         self._forward_transforms = forward_transforms or [_identity]
         self._inverse_transforms = inverse_transforms or [_identity]

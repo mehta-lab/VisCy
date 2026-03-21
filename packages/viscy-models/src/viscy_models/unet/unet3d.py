@@ -45,7 +45,6 @@ class _DoubleConv3d(nn.Module):
         self.relu2 = nn.ReLU(inplace=True)
 
     def forward(self, x: Tensor) -> Tensor:
-        """Forward pass through double convolution."""
         x = self.relu1(self.bn1(self.conv1(x)))
         x = self.relu2(self.bn2(self.conv2(x)))
         return x
@@ -127,6 +126,8 @@ class Unet3d(nn.Module):
         by ``2**depth``.
     """
 
+    downsamples_z: bool = True
+
     def __init__(
         self,
         in_channels: int = 1,
@@ -139,6 +140,7 @@ class Unet3d(nn.Module):
         self.in_stack_depth = in_stack_depth
         self.num_blocks = depth
         self.out_stack_depth = in_stack_depth
+        self._divisor = 2**depth
 
         self.net_recurse = _FNetRecurse(
             n_in_channels=in_channels,
@@ -148,11 +150,6 @@ class Unet3d(nn.Module):
         )
         self.conv_out = nn.Conv3d(mult_chan, out_channels, kernel_size=3, padding=1)
         self.apply(_fnet_weights_init)
-
-    @property
-    def downsamples_z(self) -> bool:
-        """Whether this model downsamples the Z dimension."""
-        return True
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass.
@@ -172,11 +169,10 @@ class Unet3d(nn.Module):
         ValueError
             If any spatial dimension is not divisible by ``2**depth``.
         """
-        divisor = 2**self.num_blocks
         for dim, name in zip(x.shape[2:], ("Z", "Y", "X")):
-            if dim % divisor != 0:
+            if dim % self._divisor != 0:
                 raise ValueError(
-                    f"{name} dimension {dim} is not divisible by 2**depth={divisor}. "
-                    f"All spatial dimensions must be divisible by {divisor}."
+                    f"{name} dimension {dim} is not divisible by 2**depth={self._divisor}. "
+                    f"All spatial dimensions must be divisible by {self._divisor}."
                 )
         return self.conv_out(self.net_recurse(x))
