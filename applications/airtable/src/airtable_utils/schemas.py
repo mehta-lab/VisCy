@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field, model_validator
 from viscy_data.channel_utils import parse_channel_name
 from viscy_data.schemas import FOVRecord
 
+MAX_CHANNELS = 8
+
 
 def parse_position_name(name: str) -> tuple[str, str]:
     """Split an OME-Zarr position name into well path and FOV.
@@ -117,14 +119,22 @@ class DatasetRecord(FOVRecord):
     channel_2_biology: str | None = None
     channel_3_name: str | None = None
     channel_3_biology: str | None = None
+    channel_4_name: str | None = None
+    channel_4_biology: str | None = None
+    channel_5_name: str | None = None
+    channel_5_biology: str | None = None
+    channel_6_name: str | None = None
+    channel_6_biology: str | None = None
+    channel_7_name: str | None = None
+    channel_7_biology: str | None = None
     record_id: str | None = None
 
     @model_validator(mode="after")
     def _derive_channel_names(self) -> DatasetRecord:
-        """Populate ``channel_names`` from ``channel_0..3_name`` fields."""
+        """Populate ``channel_names`` from ``channel_0..7_name`` fields."""
         if not self.channel_names:
             names = []
-            for i in range(4):
+            for i in range(MAX_CHANNELS):
                 name = getattr(self, f"channel_{i}_name")
                 if name is not None:
                     names.append(name)
@@ -169,14 +179,15 @@ class DatasetRecord(FOVRecord):
             time_interval_min=fields.get("time_interval_min"),
             seeding_density=fields.get("seeding_density"),
             treatment_concentration_nm=fields.get("treatment_concentration_nm"),
-            channel_0_name=fields.get("channel_0_name"),
-            channel_0_biology=_select_val(fields.get("channel_0_biology")),
-            channel_1_name=fields.get("channel_1_name"),
-            channel_1_biology=_select_val(fields.get("channel_1_biology")),
-            channel_2_name=fields.get("channel_2_name"),
-            channel_2_biology=_select_val(fields.get("channel_2_biology")),
-            channel_3_name=fields.get("channel_3_name"),
-            channel_3_biology=_select_val(fields.get("channel_3_biology")),
+            **{
+                f"channel_{i}_{attr}": (
+                    fields.get(f"channel_{i}_{attr}")
+                    if attr == "name"
+                    else _select_val(fields.get(f"channel_{i}_{attr}"))
+                )
+                for i in range(MAX_CHANNELS)
+                for attr in ("name", "biology")
+            },
             data_path=fields.get("data_path"),
             tracks_path=fields.get("tracks_path"),
             fluorescence_modality=_select_val(fields.get("fluorescence_modality")),
@@ -196,7 +207,7 @@ class DatasetRecord(FOVRecord):
         ``biological_annotation`` (from the Airtable biology field).
         """
         annotation: dict[str, dict] = {}
-        for i in range(4):
+        for i in range(MAX_CHANNELS):
             name = getattr(self, f"channel_{i}_name")
             if name is None:
                 continue
