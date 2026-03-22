@@ -47,10 +47,11 @@ class MultiExperimentDataModule(LightningDataModule):
 
     Parameters
     ----------
-    collection_path : str
+    collection_path : str or None
         Path to collection YAML for ExperimentRegistry.from_collection().
-        Required for temporal mode. Optional (can be ``None``) when
-        ``positive_cell_source`` does not require lineage lookup.
+        Optional when ``cell_index_path`` is provided — the registry is
+        built directly from parquet + zarr metadata via
+        ExperimentRegistry.from_cell_index().
     z_window : int
         Number of Z slices the model consumes.  Per-experiment Z
         centering is resolved from ``focus_slice`` zattrs or explicit
@@ -266,15 +267,24 @@ class MultiExperimentDataModule(LightningDataModule):
             Lightning stage: ``"fit"``, ``"predict"``, etc.
         """
         if stage == "fit" or stage is None:
-            if self.collection_path is None:
-                raise ValueError("collection_path is required for setup(). Provide a collection YAML path.")
-            registry = ExperimentRegistry.from_collection(
-                self.collection_path,
-                z_window=self.z_window,
-                focus_channel=getattr(self, "focus_channel", None),
-                reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
-                reference_pixel_size_z_um=self.reference_pixel_size_z_um,
-            )
+            if self.collection_path is not None:
+                registry = ExperimentRegistry.from_collection(
+                    self.collection_path,
+                    z_window=self.z_window,
+                    focus_channel=getattr(self, "focus_channel", None),
+                    reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+                    reference_pixel_size_z_um=self.reference_pixel_size_z_um,
+                )
+            elif self.cell_index_path is not None:
+                registry = ExperimentRegistry.from_cell_index(
+                    self.cell_index_path,
+                    z_window=self.z_window,
+                    focus_channel=getattr(self, "focus_channel", None),
+                    reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+                    reference_pixel_size_z_um=self.reference_pixel_size_z_um,
+                )
+            else:
+                raise ValueError("Either collection_path or cell_index_path must be provided.")
 
             if self.val_experiments:
                 self._setup_experiment_split(registry)

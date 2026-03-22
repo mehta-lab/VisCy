@@ -40,7 +40,7 @@ records = db.get_dataset_records("2024_10_16_A549_SEC61_ZIKV_DENV")
 
 # Build zattrs dicts from a record (see Unified .zattrs Schema below)
 rec = records[0]
-pos.zattrs["channel_annotation"] = rec.to_channel_annotation()
+pos.zattrs["channels_metadata"] = rec.to_channels_metadata()
 pos.zattrs["experiment_metadata"] = rec.to_experiment_metadata()
 
 # All records as a DataFrame
@@ -135,7 +135,7 @@ This will:
 
 #### Step 2: `write` — Airtable → zarr
 
-After reviewing/correcting channel biology in Airtable, write `channel_annotation` and `experiment_metadata` to each FOV's `.zattrs`.
+After reviewing/correcting channel biology in Airtable, write `channels_metadata` and `experiment_metadata` to each FOV's `.zattrs`.
 
 ```bash
 # Dry run — see what metadata would be written
@@ -151,8 +151,8 @@ uv run --package airtable-utils \
 
 This will:
 - Read per-FOV records from Airtable (must have `fov` set — run `register` first)
-- Write `channel_annotation` and `experiment_metadata` to each position's `.zattrs`
-- Write `channel_annotation` at plate level
+- Write `channels_metadata` and `experiment_metadata` to each position's `.zattrs`
+- Write `channels_metadata` at plate level
 - Update `data_path` to FOV-level if it was plate-level
 - Track processed datasets in `experiment_metadata_tracking.csv`
 
@@ -160,7 +160,7 @@ This will:
 
 Both the Airtable `write` command and the QC annotation module produce the same schema:
 
-**`channel_annotation`** — keyed by channel name:
+**`channels_metadata`** — keyed by channel name:
 ```json
 {
     "Phase3D": {"channel_type": "labelfree", "biological_annotation": null},
@@ -193,6 +193,6 @@ from iohub import open_ome_zarr
 
 plate = open_ome_zarr("/path/to/dataset.zarr", mode="r")
 for name, pos in plate.positions():
-    print(name, pos.zattrs.get("channel_annotation"))
+    print(name, pos.zattrs.get("channels_metadata"))
     print(name, pos.zattrs.get("experiment_metadata"))
 ```

@@ -23,6 +23,7 @@ from iohub.ngff import open_ome_zarr
 from tqdm import tqdm
 
 from viscy_data._typing import (
+    CELL_INDEX_BIOLOGY_COLUMNS,
     CELL_INDEX_CORE_COLUMNS,
     CELL_INDEX_GROUPING_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
@@ -69,12 +70,18 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("reporter", pa.string()),
         ("sgRNA", pa.string()),
         ("microscope", pa.string()),
+        ("marker", pa.string()),
+        ("organelle", pa.string()),
     ]
 )
 
 _REQUIRED_COLUMNS = set(CELL_INDEX_CORE_COLUMNS + CELL_INDEX_GROUPING_COLUMNS)
 _ALL_COLUMNS = set(
-    CELL_INDEX_CORE_COLUMNS + CELL_INDEX_GROUPING_COLUMNS + CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS
+    CELL_INDEX_CORE_COLUMNS
+    + CELL_INDEX_GROUPING_COLUMNS
+    + CELL_INDEX_BIOLOGY_COLUMNS
+    + CELL_INDEX_TIMELAPSE_COLUMNS
+    + CELL_INDEX_OPS_COLUMNS
 )
 
 # ---------------------------------------------------------------------------
@@ -312,6 +319,8 @@ def _build_experiment_tracks(
         tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
         tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
         tracks_df["microscope"] = exp.microscope
+        tracks_df["marker"] = exp.marker
+        tracks_df["organelle"] = exp.organelle
 
         if "z" not in tracks_df.columns:
             tracks_df["z"] = 0
@@ -577,12 +586,14 @@ def build_ops_cell_index(
 def convert_ops_parquet(
     ops_parquet_path: str | Path,
     output_path: str | Path,
-    experiment_name: str,
     store_root: str = "/hpc/projects/icd.fast.ops",
     store_suffix: str = "3-assembly/phenotyping_v3.zarr",
-    source_channels: list[str] | None = None,
 ) -> pd.DataFrame:
     """Convert an OPS merged parquet to the canonical cell index schema.
+
+    Supports multi-experiment parquets: each unique ``store_key`` in the
+    input becomes a separate experiment in the output. Channel names are
+    read from each zarr store to populate ``source_channels``.
 
     Parameters
     ----------
@@ -590,16 +601,11 @@ def convert_ops_parquet(
         Path to the OPS merged parquet file (e.g. ``373genes_filtered.parquet``).
     output_path : str | Path
         Destination parquet path.
-    experiment_name : str
-        Name for this experiment (used for ``experiment`` and ``cell_id`` columns).
     store_root : str
         Root directory for OPS zarr stores. Default: ``"/hpc/projects/icd.fast.ops"``.
     store_suffix : str
         Suffix appended after ``store_key`` to form ``store_path``.
         Default: ``"3-assembly/phenotyping_v3.zarr"``.
-    source_channels : list[str] | None
-        Channel names for ``source_channels`` JSON field.
-        None derives from ``channel`` column (one channel per row).
 
     Returns
     -------
@@ -610,12 +616,14 @@ def convert_ops_parquet(
 
     out = pd.DataFrame()
 
+    # Use store_key as experiment name (supports multi-experiment parquets)
+    out["experiment"] = df["store_key"]
+
     # store_path from store_key
     out["store_path"] = df["store_key"].apply(lambda k: f"{store_root}/{k}/{store_suffix}")
 
     # OPS 'well' column is the position path (our fov), e.g. "A/1/0"
     out["fov"] = df["well"]
-    # Our well = parent of fov, e.g. "A/1"
     out["well"] = df["well"].apply(lambda w: w.rsplit("/", 1)[0])
 
     # Centroid from bbox
@@ -624,19 +632,34 @@ def convert_ops_parquet(
     out["x"] = centroids.apply(lambda c: c[1]).astype("float32")
     out["z"] = pd.array([0] * len(df), dtype="int16")
 
-    # source_channels JSON
-    if source_channels is not None:
-        out["source_channels"] = json.dumps(source_channels)
-    elif "channel" in df.columns:
-        out["source_channels"] = df["channel"].apply(lambda c: json.dumps([c]))
-    else:
-        out["source_channels"] = json.dumps([])
+    # Read channel names per experiment from zarr stores
+    store_channels: dict[str, list[str]] = {}
+    for store_key in df["store_key"].unique():
+        store_path = f"{store_root}/{store_key}/{store_suffix}"
+        try:
+            with open_ome_zarr(store_path, mode="r") as plate:
+                first_pos = next(iter(plate.positions()))[1]
+                store_channels[store_key] = list(first_pos.channel_names)
+        except Exception:
+            _logger.warning("Could not read channels from %s, using per-row channel", store_path)
+            store_channels[store_key] = []
+
+    # source_channels: full experiment channel list per row
+    out["source_channels"] = df["store_key"].apply(
+        lambda k: json.dumps(store_channels[k]) if store_channels[k] else json.dumps([])
+    )
+
+    # Per-row channel name (the zarr channel this cell was imaged in)
+    out["channel_name"] = df["channel"] if "channel" in df.columns else ""
+
+    # marker = reporter (the protein being imaged)
+    out["marker"] = df["reporter"] if "reporter" in df.columns else None
+    out["organelle"] = None
 
     # OPS-specific columns
     out["gene_name"] = df["gene_name"].fillna("NTC") if "gene_name" in df.columns else None
     out["reporter"] = df["reporter"] if "reporter" in df.columns else None
     out["sgRNA"] = df["sgRNA"] if "sgRNA" in df.columns else None
-    out["channel_name"] = df["channel"] if "channel" in df.columns else ""
 
     # condition = gene_name for perturbation mode
     out["condition"] = out["gene_name"] if "gene_name" in df.columns else "unknown"
@@ -648,18 +671,18 @@ def convert_ops_parquet(
         df["total_index"].astype("Int32") if "total_index" in df.columns else pd.array(range(len(df)), dtype="Int32")
     )
     # cell_id, global_track_id, lineage_id: each cell is its own lineage
-    out["cell_id"] = experiment_name + "_" + id_series
-    out["global_track_id"] = experiment_name + "_" + id_series
-    out["lineage_id"] = experiment_name + "_" + id_series
+    out["cell_id"] = df["store_key"].astype(str) + "_" + id_series
+    out["global_track_id"] = df["store_key"].astype(str) + "_" + id_series
+    out["lineage_id"] = df["store_key"].astype(str) + "_" + id_series
     out["parent_track_id"] = pd.array([-1] * len(df), dtype="Int32")
     out["hours_post_perturbation"] = pd.array([0.0] * len(df), dtype="float32")
 
-    out["experiment"] = experiment_name
     out["tracks_path"] = ""
     out["microscope"] = ""
 
     write_cell_index(out, output_path)
-    _logger.info("Converted %d OPS cells to %s", len(out), output_path)
+    n_experiments = df["store_key"].nunique()
+    _logger.info("Converted %d OPS cells (%d experiments) to %s", len(out), n_experiments, output_path)
     return out
 
 

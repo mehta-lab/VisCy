@@ -7,12 +7,15 @@ resolution, tau-range conversion, and Z-range auto-resolution, backed by
 
 from __future__ import annotations
 
+import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from iohub.ngff import open_ome_zarr
 
+from viscy_data.cell_index import read_cell_index
 from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, load_collection
 
 _logger = logging.getLogger(__name__)
@@ -70,7 +73,7 @@ class ExperimentRegistry:
     # internal lookup
     _name_map: dict[str, ExperimentEntry] = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # noqa: D105
         experiments = self.collection.experiments
 
         # 1. Empty check
@@ -286,6 +289,152 @@ class ExperimentRegistry:
             Validated registry of experiments.
         """
         collection = load_collection(path)
+        return cls(
+            collection=collection,
+            z_window=z_window,
+            focus_channel=focus_channel,
+            reference_pixel_size_xy_um=reference_pixel_size_xy_um,
+            reference_pixel_size_z_um=reference_pixel_size_z_um,
+        )
+
+    @classmethod
+    def from_cell_index(
+        cls,
+        cell_index_path: str | Path,
+        z_window: int | None = None,
+        focus_channel: str | None = None,
+        reference_pixel_size_xy_um: float | None = None,
+        reference_pixel_size_z_um: float | None = None,
+    ) -> ExperimentRegistry:
+        """Build a registry from a cell index parquet and zarr metadata.
+
+        Reads zarr channel names per well and derives source channels from
+        the parquet's ``source_channels`` JSON column. No collection YAML
+        needed — the parquet is the universal entry point.
+
+        Parameters
+        ----------
+        cell_index_path : str | Path
+            Path to the cell index parquet.
+        z_window : int or None
+            Number of Z slices the model consumes.
+        focus_channel : str or None
+            Channel name for ``focus_slice`` lookup.
+        reference_pixel_size_xy_um : float or None
+            Reference pixel size in XY (micrometers). None = no rescaling.
+        reference_pixel_size_z_um : float or None
+            Reference voxel size in Z (micrometers). None = no rescaling.
+
+        Returns
+        -------
+        ExperimentRegistry
+            Validated registry of experiments.
+        """
+        df = read_cell_index(cell_index_path)
+        if df.empty:
+            raise ValueError(f"Cell index is empty: {cell_index_path}")
+
+        # Step 1: Read channel names per (store_path, well) from zarr.
+        channel_names_cache: dict[tuple[str, str], list[str]] = {}
+        store_cache: dict[str, object] = {}
+
+        for store_path, group in df.groupby("store_path"):
+            plate = open_ome_zarr(str(store_path), mode="r")
+            store_cache[str(store_path)] = plate
+            for well in group["well"].unique():
+                # Find one position in this well
+                well_str = str(well)
+                for pos_path, pos in plate.positions():
+                    if pos_path.startswith(well_str + "/"):
+                        channel_names_cache[(str(store_path), well_str)] = list(pos.channel_names)
+                        break
+
+        # Close all opened stores
+        for plate in store_cache.values():
+            if hasattr(plate, "close"):
+                plate.close()
+
+        # Step 2: Derive source channels from parquet source_channels JSON.
+        # Parse the first non-empty source_channels list per experiment.
+        exp_source_channels: dict[str, list[str]] = {}
+        for exp_name, exp_group in df.groupby("experiment"):
+            for sc_json in exp_group["source_channels"].dropna().unique():
+                parsed = json.loads(sc_json)
+                if parsed:
+                    exp_source_channels[str(exp_name)] = parsed
+                    break
+            if str(exp_name) not in exp_source_channels:
+                raise ValueError(f"Experiment '{exp_name}' has no valid source_channels in parquet.")
+
+        # Build unified source channel labels (union across experiments).
+        # Use zarr channel names as source labels directly.
+        all_labels: list[str] = []
+        seen_labels: set[str] = set()
+        for channels in exp_source_channels.values():
+            for ch in channels:
+                if ch not in seen_labels:
+                    all_labels.append(ch)
+                    seen_labels.add(ch)
+
+        source_channels = [
+            SourceChannel(
+                label=label,
+                per_experiment={exp: label for exp, channels in exp_source_channels.items() if label in channels},
+            )
+            for label in all_labels
+        ]
+
+        # Step 3: Build ExperimentEntry per experiment.
+        experiments: list[ExperimentEntry] = []
+        for exp_name, exp_group in df.groupby("experiment"):
+            exp_name = str(exp_name)
+            store_path = str(exp_group["store_path"].iloc[0])
+            first_well = str(exp_group["well"].iloc[0])
+
+            channel_names = channel_names_cache.get((store_path, first_well), exp_source_channels[exp_name])
+
+            # Derive condition_wells from parquet
+            condition_wells: dict[str, list[str]] = defaultdict(list)
+            seen_pairs: set[tuple[str, str]] = set()
+            for _, row in exp_group[["condition", "well"]].drop_duplicates().iterrows():
+                cond = str(row["condition"])
+                well = str(row["well"])
+                if (cond, well) not in seen_pairs:
+                    condition_wells[cond].append(well)
+                    seen_pairs.add((cond, well))
+
+            marker = ""
+            if "marker" in exp_group.columns:
+                first_marker = exp_group["marker"].dropna()
+                if not first_marker.empty:
+                    marker = str(first_marker.iloc[0])
+
+            organelle = ""
+            if "organelle" in exp_group.columns:
+                first_organelle = exp_group["organelle"].dropna()
+                if not first_organelle.empty:
+                    organelle = str(first_organelle.iloc[0])
+
+            experiments.append(
+                ExperimentEntry(
+                    name=exp_name,
+                    data_path=store_path,
+                    tracks_path="",
+                    channel_names=channel_names,
+                    condition_wells=dict(condition_wells),
+                    interval_minutes=1.0,
+                    marker=marker,
+                    organelle=organelle,
+                )
+            )
+
+        collection = Collection(
+            name=Path(cell_index_path).stem,
+            description=f"Auto-generated from cell index: {cell_index_path}",
+            source_channels=source_channels,
+            experiments=experiments,
+        )
+
         return cls(
             collection=collection,
             z_window=z_window,

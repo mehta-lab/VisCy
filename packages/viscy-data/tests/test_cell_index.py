@@ -12,6 +12,7 @@ import yaml
 from iohub import open_ome_zarr
 
 from viscy_data._typing import (
+    CELL_INDEX_BIOLOGY_COLUMNS,
     CELL_INDEX_CORE_COLUMNS,
     CELL_INDEX_GROUPING_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
@@ -113,7 +114,7 @@ class TestValidation:
     def test_strict_passes_with_all_columns(self):
         """4b. strict=True passes when all columns are present."""
         df = _make_valid_df()
-        for col in CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS:
+        for col in CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS:
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         assert isinstance(warnings, list)
@@ -121,7 +122,7 @@ class TestValidation:
     def test_all_null_column_warns(self):
         """Nullable columns that are entirely null produce warnings."""
         df = _make_valid_df()
-        for col in CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS:
+        for col in CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS:
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         assert any("all null" in w for w in warnings)
@@ -317,7 +318,7 @@ class TestCrossParadigm:
     def test_timelapse_has_null_ops_columns(self):
         """15. Time-lapse parquet has OPS columns as null."""
         df = _make_timelapse_df()
-        for col in CELL_INDEX_OPS_COLUMNS:
+        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS:
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         ops_warnings = [w for w in warnings if any(c in w for c in CELL_INDEX_OPS_COLUMNS)]
@@ -326,7 +327,7 @@ class TestCrossParadigm:
     def test_ops_has_null_timelapse_columns(self):
         """16. OPS parquet has time-lapse columns as null."""
         df = _make_ops_df()
-        for col in CELL_INDEX_TIMELAPSE_COLUMNS:
+        for col in CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS:
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         tl_warnings = [w for w in warnings if any(c in w for c in CELL_INDEX_TIMELAPSE_COLUMNS)]
@@ -335,7 +336,7 @@ class TestCrossParadigm:
     def test_concat_schema_compatible(self, tmp_path):
         """17. Both can be pd.concat'd (schema-compatible)."""
         tl = _make_timelapse_df()
-        for col in CELL_INDEX_OPS_COLUMNS:
+        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS:
             tl[col] = None
 
         ops = _make_ops_df()
@@ -391,7 +392,7 @@ class TestConvertOpsParquet:
         """18. Converted parquet passes validate_cell_index."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
-        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         warnings = validate_cell_index(df)
         assert isinstance(warnings, list)
 
@@ -399,7 +400,7 @@ class TestConvertOpsParquet:
         """19. OPS 'well' maps to fov; parent path maps to well."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
-        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         # fov should be the original OPS well path (e.g. "A/0/0")
         assert df["fov"].iloc[0] == "A/0/0"
         # well should be the parent (e.g. "A/0")
@@ -409,14 +410,14 @@ class TestConvertOpsParquet:
         """20. cell_id is unique across all rows."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
-        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         assert not df["cell_id"].duplicated().any()
 
     def test_gene_name_and_condition(self, tmp_path):
         """OPS gene_name populates condition column."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
-        df = convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         assert df["gene_name"].iloc[0] == "RPL35"
         assert df["condition"].iloc[0] == "RPL35"
 
@@ -424,7 +425,7 @@ class TestConvertOpsParquet:
         """Written parquet can be read back with correct schema."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
-        convert_ops_parquet(ops_path, output, experiment_name="test_ops")
+        convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         result = read_cell_index(output)
         for field in CELL_INDEX_SCHEMA:
             assert field.name in result.columns

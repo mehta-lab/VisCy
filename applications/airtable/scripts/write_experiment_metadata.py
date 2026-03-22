@@ -319,7 +319,7 @@ def write(zarr_path: Path, dry_run: bool = False) -> None:
             if i <= 3:
                 setattr(rec, f"channel_{i}_name", ch_name)
 
-        channel_annotation = rec.to_channel_annotation()
+        channels_metadata = rec.to_channels_metadata()
         experiment_metadata = rec.to_experiment_metadata()
 
         # Build Airtable update: channel names, shapes, data_path
@@ -336,27 +336,27 @@ def write(zarr_path: Path, dry_run: bool = False) -> None:
 
         if dry_run:
             logger.info(
-                "[DRY RUN] %s\n  channel_annotation: %s\n  experiment_metadata: %s\n  airtable: %s",
+                "[DRY RUN] %s\n  channels_metadata: %s\n  experiment_metadata: %s\n  airtable: %s",
                 pos_name,
-                channel_annotation,
+                channels_metadata,
                 experiment_metadata,
                 airtable_fields,
             )
         else:
-            pos.zattrs["channel_annotation"] = channel_annotation
+            pos.zattrs["channels_metadata"] = channels_metadata
             pos.zattrs["experiment_metadata"] = experiment_metadata
             fov_count += 1
 
         if airtable_fields and rec.record_id:
             airtable_updates.append({"id": rec.record_id, "fields": airtable_fields})
 
-    # Write plate-level channel_annotation (use first record's annotation)
+    # Write plate-level channels_metadata (use first record's annotation)
     if not dry_run and fov_records:
         first_rec = fov_records[0]
         for i, ch_name in enumerate(channel_names):
             if i <= 3:
                 setattr(first_rec, f"channel_{i}_name", ch_name)
-        plate.zattrs["channel_annotation"] = first_rec.to_channel_annotation()
+        plate.zattrs["channels_metadata"] = first_rec.to_channels_metadata()
 
     plate.close()
 
@@ -393,7 +393,7 @@ def write(zarr_path: Path, dry_run: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main():  # noqa: D103
     parser = argparse.ArgumentParser(description="Manage experiment metadata between Airtable and OME-Zarr")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

@@ -72,9 +72,9 @@ def _make_annotation_config(
     well_paths: list[str],
 ) -> AnnotationConfig:
     """Build an AnnotationConfig matching the given channels and wells."""
-    channel_annotation = {}
+    channels_metadata = {}
     for ch in channel_names:
-        channel_annotation[ch] = ChannelAnnotationEntry(channel_type="labelfree")
+        channels_metadata[ch] = ChannelAnnotationEntry(channel_type="labelfree")
 
     experiment_metadata = {}
     for i, wp in enumerate(well_paths):
@@ -84,12 +84,12 @@ def _make_annotation_config(
         )
 
     return AnnotationConfig(
-        channel_annotation=channel_annotation,
+        channels_metadata=channels_metadata,
         experiment_metadata=experiment_metadata,
     )
 
 
-def test_write_channel_annotation_to_all_fovs(multi_well_hcs_dataset):
+def test_write_channels_metadata_to_all_fovs(multi_well_hcs_dataset):
     annotation = _make_annotation_config(
         channel_names=["Phase", "Fluorescence_405"],
         well_paths=["A/1", "A/2"],
@@ -98,15 +98,15 @@ def test_write_channel_annotation_to_all_fovs(multi_well_hcs_dataset):
 
     with open_ome_zarr(multi_well_hcs_dataset, mode="r") as plate:
         # Plate-level
-        assert "channel_annotation" in plate.zattrs
-        assert "Phase" in plate.zattrs["channel_annotation"]
-        assert "Fluorescence_405" in plate.zattrs["channel_annotation"]
+        assert "channels_metadata" in plate.zattrs
+        assert "Phase" in plate.zattrs["channels_metadata"]
+        assert "Fluorescence_405" in plate.zattrs["channels_metadata"]
 
         # Every FOV
         for _, pos in plate.positions():
-            assert "channel_annotation" in pos.zattrs
-            assert "Phase" in pos.zattrs["channel_annotation"]
-            assert "Fluorescence_405" in pos.zattrs["channel_annotation"]
+            assert "channels_metadata" in pos.zattrs
+            assert "Phase" in pos.zattrs["channels_metadata"]
+            assert "Fluorescence_405" in pos.zattrs["channels_metadata"]
 
 
 def test_write_experiment_metadata_per_well(multi_well_hcs_dataset):
@@ -130,7 +130,7 @@ def test_write_experiment_metadata_per_well(multi_well_hcs_dataset):
 
 def test_unknown_channel_raises(multi_well_hcs_dataset):
     annotation = AnnotationConfig(
-        channel_annotation={
+        channels_metadata={
             "NonexistentChannel": ChannelAnnotationEntry(channel_type="labelfree"),
         },
         experiment_metadata={
@@ -143,7 +143,7 @@ def test_unknown_channel_raises(multi_well_hcs_dataset):
 
 def test_unknown_well_raises(multi_well_hcs_dataset):
     annotation = AnnotationConfig(
-        channel_annotation={
+        channels_metadata={
             "Phase": ChannelAnnotationEntry(channel_type="labelfree"),
         },
         experiment_metadata={

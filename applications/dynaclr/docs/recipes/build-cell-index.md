@@ -61,9 +61,10 @@ data:
     # ... rest of config unchanged
 ```
 
-> **Note:** `collection_path` is still required even with a parquet — the
-> registry computes `channel_maps` (cross-experiment channel remapping) and
-> per-experiment tau conversions which are not stored in the parquet.
+> **Note:** When `cell_index_path` is provided, `collection_path` is optional.
+> The registry can be built directly from the parquet + zarr metadata via
+> `ExperimentRegistry.from_cell_index()`. If `collection_path` is also
+> provided, it takes precedence.
 
 ## How it works
 
