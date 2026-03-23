@@ -110,9 +110,11 @@ class SpotlightLoss(nn.Module):
     thresholding. The prediction is soft-thresholded with a normalized
     tunable sigmoid before computing Dice loss.
 
-    After z-score normalization (mean ~0), Otsu separates the bimodal
-    FG/BG distribution around 0, which is correct for the tunable
-    sigmoid operating around that point.
+    The paper normalizes targets by subtracting the Otsu threshold
+    (centering the FG/BG boundary at exactly 0). This implementation
+    works with standard z-score normalization instead — Otsu is
+    recomputed inside ``forward()`` on whatever distribution it
+    receives, so the mask is correct regardless of centering.
 
     Parameters
     ----------
