@@ -63,9 +63,9 @@ def test_masked_mse_ignores_background():
     pred = target.clone()
     pred[:, :, :, :4, :] = 99.0  # large BG error
 
-    # lambda=0.99 so masked MSE dominates (Dice weight ~0)
-    loss_fn_mse = SpotlightLoss(lambda_mse=0.99, sigmoid_k=-0.95)
-    loss = loss_fn_mse(pred, target)
+    # With fg_threshold=0.5, mask captures FG correctly
+    loss_fn = SpotlightLoss(lambda_mse=0.99, sigmoid_k=-0.95, fg_threshold=0.5)
+    loss = loss_fn(pred, target)
     # Loss should be near 0 since FG prediction matches target
     assert loss.item() < 0.5, f"loss={loss.item()}, expected near 0 (FG matches)"
 
@@ -76,7 +76,7 @@ def test_dice_loss_good_match():
     target[:, :, :, 4:, :] = 1.0
 
     pred = target.clone()  # perfect match
-    loss_fn = SpotlightLoss(lambda_mse=0.01, sigmoid_k=-0.95)
+    loss_fn = SpotlightLoss(lambda_mse=0.01, sigmoid_k=-0.95, fg_threshold=0.5)
     loss = loss_fn(pred, target)
     assert loss.item() < 0.5
 
@@ -102,7 +102,7 @@ def test_spotlight_loss_4d():
 
 def test_spotlight_loss_all_background():
     """Handles all-background target gracefully (no NaN/Inf)."""
-    loss_fn = SpotlightLoss()
+    loss_fn = SpotlightLoss(fg_threshold=0.5)
     pred = torch.randn(1, 1, 4, 8, 8)
     target = torch.zeros(1, 1, 4, 8, 8)  # all background
     loss = loss_fn(pred, target)
@@ -120,40 +120,25 @@ def test_spotlight_loss_backward():
     assert torch.isfinite(pred.grad).all()
 
 
-def test_foreground_filtering_skips_low_fg_samples():
-    """Per-sample filtering zeros out loss from low-FG samples."""
-    loss_fn = SpotlightLoss(min_foreground_fraction=0.5)
-    # Sample 0: all zeros (background), sample 1: half foreground
-    target = torch.zeros(2, 1, 4, 8, 8)
-    target[1, :, :, 4:, :] = 1.0  # 50% FG in sample 1
-    pred = target.clone()
-    loss = loss_fn(pred, target)
-    assert torch.isfinite(loss)
-    assert loss.item() >= 0
-
-
-def test_foreground_filtering_all_below_threshold():
-    """All samples below threshold returns zero-gradient loss."""
-    loss_fn = SpotlightLoss(min_foreground_fraction=0.99)
+def test_fg_threshold_none_uses_otsu():
+    """fg_threshold=None falls back to per-sample Otsu."""
+    loss_fn = SpotlightLoss(fg_threshold=None)
     pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
-    target = torch.zeros(2, 1, 4, 8, 8)
-    target[:, :, :, 7:, :] = 1.0  # ~12.5% FG, below 99% threshold
+    target = torch.randn(2, 1, 4, 8, 8).abs()
     loss = loss_fn(pred, target)
-    assert loss.item() == 0.0
+    assert loss.ndim == 0
     loss.backward()
     assert pred.grad is not None
 
 
-def test_foreground_filtering_per_sample_not_batch():
-    """FG fraction is checked per-sample, not averaged across batch."""
-    loss_fn = SpotlightLoss(min_foreground_fraction=0.01)
-    # Sample 0: all background, sample 1: has foreground
-    target = torch.zeros(2, 1, 4, 8, 8)
-    target[1] = 1.0  # 100% FG in sample 1
+def test_fg_threshold_float_uses_fixed():
+    """fg_threshold=0.0 uses a fixed threshold, no Otsu."""
+    loss_fn = SpotlightLoss(fg_threshold=0.0)
     pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
+    # Target centered at 0 (like Otsu-normalized data)
+    target = torch.randn(2, 1, 4, 8, 8)
     loss = loss_fn(pred, target)
-    # Loss should be non-zero (sample 1 contributes)
-    assert loss.item() > 0
+    assert loss.ndim == 0
     loss.backward()
     assert pred.grad is not None
 
@@ -168,9 +153,3 @@ def test_spotlight_loss_invalid_params():
         SpotlightLoss(lambda_mse=1.0)
     with pytest.raises(ValueError, match="eps"):
         SpotlightLoss(eps=0)
-    with pytest.raises(ValueError, match="n_bins"):
-        SpotlightLoss(n_bins=1)
-    with pytest.raises(ValueError, match="min_foreground_fraction"):
-        SpotlightLoss(min_foreground_fraction=1.0)
-    with pytest.raises(ValueError, match="min_foreground_fraction"):
-        SpotlightLoss(min_foreground_fraction=-0.1)

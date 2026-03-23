@@ -5,13 +5,15 @@
 # Spotlight is a loss function, not an architecture. It works with any model.
 # This config uses FNet3D (same as the paper), but UNeXt2 or 2.5D also work.
 #
+# Prerequisites:
+#   viscy preprocess --data_path <zarr> --compute_otsu
+# This stores per-FOV Otsu thresholds in normalization metadata, needed for
+# both the otsu_threshold normalization subtrahend and patch filtering.
+#
 # Remaining deviations from the paper (Appendix A.3-A.4):
 # - Optimizer: paper uses Adam with betas=(0.5, 0.999); this uses AdamW with
 #   default betas=(0.9, 0.999). Intentional: same optimizer across all
 #   architectures isolates architectural differences in comparisons.
-# - Normalization subtrahend: paper replaces mean with Otsu threshold; this
-#   uses mean/std. The loss recomputes Otsu at forward time on the normalized
-#   target, so FG/BG separation still works.
 # - Isotropic voxels: paper resizes z-stacks to 0.29x0.29x0.29 um^3 before
 #   training. The data must be pre-resampled or a resizing transform added.
 
@@ -59,7 +61,7 @@ model:
       init_args:
         lambda_mse: 0.5
         sigmoid_k: -0.95
-        min_foreground_fraction: 0.001
+        fg_threshold: 0.0  # correct after Otsu-based normalization
     lr: 0.001
     schedule: Constant
 data:
@@ -71,6 +73,7 @@ data:
     z_window_size: 32
     batch_size: 24
     num_workers: 8
+    min_foreground_fraction: 0.001  # paper: ≥0.1% FG voxels per patch
     yx_patch_size:
       - 64
       - 64
@@ -79,5 +82,5 @@ data:
         init_args:
           keys: [Phase3D, Fluorescence]
           level: fov_statistics
-          subtrahend: mean
+          subtrahend: otsu_threshold  # paper: center at FG/BG boundary
           divisor: std

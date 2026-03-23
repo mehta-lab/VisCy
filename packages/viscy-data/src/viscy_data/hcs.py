@@ -3,6 +3,7 @@
 import logging
 import math
 import os
+import random
 import shutil
 import tempfile
 from pathlib import Path
@@ -56,6 +57,11 @@ class SlidingWindowDataset(Dataset):
         A callable that transforms data, defaults to None.
     load_normalization_metadata : bool
         Whether to load normalization metadata, defaults to True.
+    min_foreground_fraction : float
+        Minimum fraction of foreground voxels for a patch to be used.
+        Requires precomputed ``otsu_threshold`` in normalization metadata.
+        Patches below this threshold are skipped (retried up to 10 times).
+        Default 0.0 disables filtering.
     """
 
     def __init__(
@@ -66,6 +72,7 @@ class SlidingWindowDataset(Dataset):
         array_key: str = "0",
         transform: DictTransform | None = None,
         load_normalization_metadata: bool = True,
+        min_foreground_fraction: float = 0.0,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -79,6 +86,7 @@ class SlidingWindowDataset(Dataset):
         self.array_key = array_key
         self._get_windows()
         self.load_normalization_metadata = load_normalization_metadata
+        self.min_foreground_fraction = min_foreground_fraction
 
     def _get_windows(self) -> None:
         """Count the sliding windows along T and Z, and build an index-to-window LUT."""
@@ -157,14 +165,34 @@ class SlidingWindowDataset(Dataset):
 
     def __getitem__(self, index: int) -> Sample:
         """Return a sample for the given index."""
-        img, tz, norm_meta = self._find_window(index)
-        ch_names = self.channels["source"].copy()
-        ch_idx = self.source_ch_idx.copy()
-        if self.target_ch_idx is not None:
-            ch_names.extend(self.channels["target"])
-            ch_idx.extend(self.target_ch_idx)
-        images, sample_index = self._read_img_window(img, ch_idx, tz)
-        sample_images = {k: v for k, v in zip(ch_names, images)}
+        max_retries = 10
+        idx = index
+        for attempt in range(max_retries + 1):
+            img, tz, norm_meta = self._find_window(idx)
+            ch_names = self.channels["source"].copy()
+            ch_idx = self.source_ch_idx.copy()
+            if self.target_ch_idx is not None:
+                ch_names.extend(self.channels["target"])
+                ch_idx.extend(self.target_ch_idx)
+            images, sample_index = self._read_img_window(img, ch_idx, tz)
+            sample_images = {k: v for k, v in zip(ch_names, images)}
+            # Foreground filtering: skip patches with too few FG voxels
+            if (
+                attempt < max_retries
+                and self.min_foreground_fraction > 0
+                and self.target_ch_idx is not None
+                and norm_meta is not None
+            ):
+                target_key = self.channels["target"][0]
+                fov_stats = norm_meta.get(target_key, {}).get("fov_statistics", {})
+                otsu_t = fov_stats.get("otsu_threshold")
+                if otsu_t is not None:
+                    patch = sample_images[target_key]
+                    fg_frac = (patch >= otsu_t).sum().item() / patch.numel()
+                    if fg_frac < self.min_foreground_fraction:
+                        idx = random.randint(0, len(self) - 1)
+                        continue
+            break
         if self.target_ch_idx is not None:
             # FIXME: this uses the first target channel as weight for performance
             # since adding a reference to a tensor does not copy
@@ -298,6 +326,10 @@ class HCSDataModule(LightningDataModule):
         defaults to None (2 per PyTorch default).
     array_key : str, optional
         Name of the image arrays (multiscales level), by default "0".
+    min_foreground_fraction : float, optional
+        Minimum fraction of foreground voxels for training patches.
+        Requires precomputed ``otsu_threshold`` in normalization metadata
+        (run ``viscy preprocess --compute_otsu``). Default 0.0 disables.
     """
 
     def __init__(
@@ -319,6 +351,7 @@ class HCSDataModule(LightningDataModule):
         prefetch_factor=None,
         array_key: str = "0",
         pin_memory=False,
+        min_foreground_fraction: float = 0.0,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -339,6 +372,7 @@ class HCSDataModule(LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self.array_key = array_key
         self.pin_memory = pin_memory
+        self.min_foreground_fraction = min_foreground_fraction
 
     @property
     def cache_path(self):
@@ -385,13 +419,16 @@ class HCSDataModule(LightningDataModule):
         logger.info("Cached dataset.")
 
     @property
-    def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
+    def _base_dataset_settings(self) -> dict:
         """Return base dataset settings."""
-        return {
+        settings: dict = {
             "channels": {"source": self.source_channel},
             "z_window_size": self.z_window_size,
             "array_key": self.array_key,
         }
+        if self.min_foreground_fraction > 0:
+            settings["min_foreground_fraction"] = self.min_foreground_fraction
+        return settings
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         """Set up datasets for the given stage."""

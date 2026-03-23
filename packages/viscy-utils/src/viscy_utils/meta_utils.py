@@ -57,7 +57,7 @@ def _grid_sample(position, grid_spacing, channel_index, num_workers):
     )
 
 
-def generate_normalization_metadata(zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32):
+def generate_normalization_metadata(zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32, compute_otsu=False):
     """Generate pixel intensity metadata for normalization.
 
     Normalization values are recorded in the image-level metadata in the
@@ -73,6 +73,9 @@ def generate_normalization_metadata(zarr_dir, num_workers=4, channel_ids=-1, gri
         Indices of channels to process, by default -1 (all).
     grid_spacing : int, optional
         Distance between points in sampling grid, by default 32.
+    compute_otsu : bool, optional
+        Whether to compute Otsu thresholds for foreground estimation,
+        by default False. Required for Spotlight loss.
     """
     plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
     position_map = list(plate.positions())
@@ -96,7 +99,12 @@ def generate_normalization_metadata(zarr_dir, num_workers=4, channel_ids=-1, gri
         for _, pos in tqdm(position_map, desc="Positions"):
             samples = _grid_sample(pos, grid_spacing, channel_index, num_workers)
             dataset_sample_values.append(samples)
-            fov_statistics = {"fov_statistics": get_val_stats(samples)}
+            fov_stats = get_val_stats(samples)
+            if compute_otsu:
+                from skimage.filters import threshold_otsu
+
+                fov_stats["otsu_threshold"] = float(threshold_otsu(samples.ravel()))
+            fov_statistics = {"fov_statistics": fov_stats}
             fov_timepoint_statistics = {}
             for t in range(num_timepoints):
                 fov_timepoint_statistics[str(t)] = get_val_stats(samples[t])

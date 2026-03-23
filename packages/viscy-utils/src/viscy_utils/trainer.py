@@ -25,6 +25,7 @@ class VisCyTrainer(Trainer):
         channel_names: list[str] | Literal[-1] = -1,
         num_workers: int = 1,
         block_size: int = 32,
+        compute_otsu: bool = False,
         model: LightningModule | None = None,
     ):
         """Compute dataset statistics for normalization.
@@ -39,6 +40,9 @@ class VisCyTrainer(Trainer):
             Number of CPU workers, by default 1.
         block_size : int, optional
             Block size to subsample images, by default 32.
+        compute_otsu : bool, optional
+            Whether to compute Otsu thresholds for Spotlight loss,
+            by default False.
         model : LightningModule, optional
             Ignored placeholder, by default None.
         """
@@ -46,15 +50,14 @@ class VisCyTrainer(Trainer):
             _logger.warning("Ignoring model configuration during preprocessing.")
         with open_ome_zarr(data_path, layout="hcs", mode="r") as dataset:
             channel_indices = (
-                [dataset.channel_names.index(c) for c in channel_names]
-                if channel_names != -1
-                else channel_names
+                [dataset.channel_names.index(c) for c in channel_names] if channel_names != -1 else channel_names
             )
         generate_normalization_metadata(
             zarr_dir=data_path,
             num_workers=num_workers,
             channel_ids=channel_indices,
             grid_spacing=block_size,
+            compute_otsu=compute_otsu,
         )
 
     def export(
@@ -177,9 +180,7 @@ class VisCyTrainer(Trainer):
         from viscy_utils.evaluation.annotation import convert
 
         if model is not None:
-            _logger.warning(
-                "Ignoring model configuration during conversion to AnnData."
-            )
+            _logger.warning("Ignoring model configuration during conversion to AnnData.")
 
         convert(
             embeddings_ds=embeddings_path,

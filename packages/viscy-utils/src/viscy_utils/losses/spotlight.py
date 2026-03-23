@@ -106,15 +106,12 @@ class SpotlightLoss(nn.Module):
     Combines masked MSE (supervision restricted to foreground) with
     Dice loss on soft-thresholded predictions for shape preservation.
 
-    The foreground mask is estimated from the target using Otsu
-    thresholding. The prediction is soft-thresholded with a normalized
-    tunable sigmoid before computing Dice loss.
-
-    The paper normalizes targets by subtracting the Otsu threshold
-    (centering the FG/BG boundary at exactly 0). This implementation
-    works with standard z-score normalization instead — Otsu is
-    recomputed inside ``forward()`` on whatever distribution it
-    receives, so the mask is correct regardless of centering.
+    When ``fg_threshold`` is ``None`` (default), the foreground mask is
+    estimated per-sample using Otsu thresholding at runtime. When set to
+    a float (e.g., ``0.0``), a fixed threshold is used instead — this is
+    correct when the target is normalized with the Otsu threshold as
+    subtrahend (paper's approach: ``NormalizeSampled(subtrahend="otsu_threshold")``),
+    which centers the FG/BG boundary at exactly 0.
 
     Parameters
     ----------
@@ -125,12 +122,10 @@ class SpotlightLoss(nn.Module):
         more negative = sharper threshold. Paper default: -0.95.
     eps : float
         Epsilon for Dice denominator stability.
-    n_bins : int
-        Number of histogram bins for Otsu thresholding.
-    min_foreground_fraction : float
-        Minimum fraction of foreground voxels per sample. Samples below
-        this threshold contribute zero loss (effectively skipped).
-        Paper uses 0.001 (0.1%). Default 0.0 disables filtering.
+    fg_threshold : float or None
+        Fixed foreground threshold. When ``None``, Otsu thresholding is
+        computed per-sample at runtime (backward compatible). When a float
+        (e.g., ``0.0``), used directly as the FG/BG boundary.
     """
 
     def __init__(
@@ -138,8 +133,7 @@ class SpotlightLoss(nn.Module):
         lambda_mse: float = 0.5,
         sigmoid_k: float = -0.95,
         eps: float = 1e-6,
-        n_bins: int = 256,
-        min_foreground_fraction: float = 0.0,
+        fg_threshold: float | None = None,
     ) -> None:
         super().__init__()
         if not -1 < sigmoid_k < 0:
@@ -148,15 +142,10 @@ class SpotlightLoss(nn.Module):
             raise ValueError(f"lambda_mse must be in (0, 1), got {lambda_mse}")
         if eps <= 0:
             raise ValueError(f"eps must be > 0, got {eps}")
-        if n_bins < 2:
-            raise ValueError(f"n_bins must be >= 2, got {n_bins}")
-        if not 0 <= min_foreground_fraction < 1:
-            raise ValueError(f"min_foreground_fraction must be in [0, 1), got {min_foreground_fraction}")
         self.lambda_mse = lambda_mse
         self.sigmoid_k = sigmoid_k
         self.eps = eps
-        self.n_bins = n_bins
-        self.min_foreground_fraction = min_foreground_fraction
+        self.fg_threshold = fg_threshold
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, pred: Tensor, target: Tensor) -> Tensor:
@@ -174,20 +163,12 @@ class SpotlightLoss(nn.Module):
         Tensor
             Scalar loss value.
         """
-        # Foreground mask from Otsu thresholding on target
-        threshold = _otsu_threshold_batch(target, self.n_bins)
-        mask = (target >= threshold).float()
-
-        # Per-sample foreground filtering (paper: ≥0.1% FG voxels)
-        if self.min_foreground_fraction > 0:
-            B = target.shape[0]
-            fg_fractions = mask.view(B, -1).mean(dim=1)
-            keep = fg_fractions >= self.min_foreground_fraction
-            if not keep.any():
-                return (pred * 0).sum()
-            # Zero out below-threshold samples in both mask and soft predictions
-            sample_weight = keep.float().view(B, *([1] * (pred.ndim - 1)))
-            mask = mask * sample_weight
+        # Foreground mask: fixed threshold or per-sample Otsu
+        if self.fg_threshold is not None:
+            mask = (target >= self.fg_threshold).float()
+        else:
+            threshold = _otsu_threshold_batch(target)
+            mask = (target >= threshold).float()
 
         # Masked MSE: only foreground voxels contribute
         sq_err = (pred - target) ** 2
@@ -199,9 +180,6 @@ class SpotlightLoss(nn.Module):
 
         # Dice loss on soft-thresholded prediction vs binary mask
         soft_pred = _tunable_sigmoid(pred, self.sigmoid_k)
-        if self.min_foreground_fraction > 0:
-            # Exclude filtered samples from Dice denominator
-            soft_pred = soft_pred * sample_weight
         intersection = (soft_pred * mask).sum()
         dice = 1 - (2 * intersection) / (soft_pred.sum() + mask.sum() + self.eps)
 
