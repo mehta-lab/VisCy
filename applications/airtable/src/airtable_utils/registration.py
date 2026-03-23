@@ -146,6 +146,18 @@ def derive_channel_biology(
     """
     result: dict[str, str] = {}
     for i, ch_name in enumerate(channel_names[:MAX_CHANNELS]):
+        parsed = parse_channel_name(ch_name)
+        ch_type = parsed.get("channel_type", "")
+
+        if ch_type == "labelfree":
+            result[f"channel_{i}_biology"] = "labelfree"
+            continue
+
+        if ch_type == "virtual_stain":
+            target = ch_name.replace("_prediction", "").replace("_segmentation", "")
+            result[f"channel_{i}_biology"] = f"virtual-stain-{target}"
+            continue
+
         for entry in cell_line_entries:
             if any(alias in ch_name for alias in entry.channel_name_aliases):
                 result[f"channel_{i}_biology"] = _normalize_biology(entry.biology)
