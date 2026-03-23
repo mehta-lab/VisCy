@@ -1,0 +1,72 @@
+# Spotlight (Kalinin et al. 2025) foreground-aware virtual staining configuration
+# Usage: python -m cytoland fit --config fit_spotlight.yml
+# See: https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
+#
+# Spotlight is a loss function, not an architecture. It works with any model.
+# This config uses FNet3D (same as the paper), but UNeXt2 or 2.5D also work.
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  precision: 32-true
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: #TODO point to the path to save the logs
+      version: #TODO point to the version name
+      log_graph: True
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+  fast_dev_run: false
+  max_epochs: 100
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  use_distributed_sampler: true
+model:
+  class_path: cytoland.engine.VSUNet
+  init_args:
+    architecture: FNet3D
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      depth: 4
+      mult_chan: 32
+      in_stack_depth: 32
+    loss_function:
+      class_path: viscy_utils.losses.SpotlightLoss
+      init_args:
+        lambda_mse: 0.5
+        sigmoid_k: -0.95
+    lr: 0.001
+    schedule: Constant
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: #TODO point to the path to the data
+    source_channel: Phase3D
+    target_channel: Fluorescence
+    z_window_size: 32
+    batch_size: 24
+    num_workers: 8
+    yx_patch_size:
+      - 64
+      - 64
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
