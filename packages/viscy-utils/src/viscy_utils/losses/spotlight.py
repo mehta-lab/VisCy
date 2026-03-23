@@ -125,6 +125,10 @@ class SpotlightLoss(nn.Module):
         Epsilon for Dice denominator stability.
     n_bins : int
         Number of histogram bins for Otsu thresholding.
+    min_foreground_fraction : float
+        Minimum fraction of foreground voxels per sample. Samples below
+        this threshold contribute zero loss (effectively skipped).
+        Paper uses 0.001 (0.1%). Default 0.0 disables filtering.
     """
 
     def __init__(
@@ -133,6 +137,7 @@ class SpotlightLoss(nn.Module):
         sigmoid_k: float = -0.95,
         eps: float = 1e-6,
         n_bins: int = 256,
+        min_foreground_fraction: float = 0.0,
     ) -> None:
         super().__init__()
         if not -1 < sigmoid_k < 0:
@@ -143,6 +148,7 @@ class SpotlightLoss(nn.Module):
         self.sigmoid_k = sigmoid_k
         self.eps = eps
         self.n_bins = n_bins
+        self.min_foreground_fraction = min_foreground_fraction
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, pred: Tensor, target: Tensor) -> Tensor:
@@ -164,19 +170,32 @@ class SpotlightLoss(nn.Module):
         threshold = _otsu_threshold_batch(target, self.n_bins)
         mask = (target >= threshold).float()
 
+        # Per-sample foreground filtering (paper: ≥0.1% FG voxels)
+        if self.min_foreground_fraction > 0:
+            B = target.shape[0]
+            fg_fractions = mask.view(B, -1).mean(dim=1)
+            keep = fg_fractions >= self.min_foreground_fraction
+            if not keep.any():
+                return pred.sum() * 0  # all samples below threshold
+            # Weight to zero out below-threshold samples
+            sample_weight = keep.float().view(B, *([1] * (pred.ndim - 1)))
+            mask = mask * sample_weight
+
         # Masked MSE: only foreground voxels contribute
         sq_err = (pred - target) ** 2
         fg_count = mask.sum()
         if fg_count > 0:
             masked_mse = (sq_err * mask).sum() / fg_count
         else:
-            # All-background patch: fall back to unmasked MSE so that
-            # the loss is not zero and gradients still flow. The paper's
-            # patch selection (≥0.1% FG) avoids this case at the data level.
+            # All-background batch: fall back to unmasked MSE so that
+            # gradients still flow. The paper's patch selection avoids
+            # this case at the data level.
             masked_mse = sq_err.mean()
 
         # Dice loss on soft-thresholded prediction vs binary mask
         soft_pred = _tunable_sigmoid(pred, self.sigmoid_k)
+        if self.min_foreground_fraction > 0 and sample_weight is not None:
+            soft_pred = soft_pred * sample_weight
         intersection = (soft_pred * mask).sum()
         dice = 1 - (2 * intersection) / (soft_pred.sum() + mask.sum() + self.eps)
 

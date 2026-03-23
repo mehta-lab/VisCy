@@ -120,6 +120,44 @@ def test_spotlight_loss_backward():
     assert torch.isfinite(pred.grad).all()
 
 
+def test_foreground_filtering_skips_low_fg_samples():
+    """Per-sample filtering zeros out loss from low-FG samples."""
+    loss_fn = SpotlightLoss(min_foreground_fraction=0.5)
+    # Sample 0: all zeros (background), sample 1: half foreground
+    target = torch.zeros(2, 1, 4, 8, 8)
+    target[1, :, :, 4:, :] = 1.0  # 50% FG in sample 1
+    pred = target.clone()
+    loss = loss_fn(pred, target)
+    assert torch.isfinite(loss)
+    assert loss.item() >= 0
+
+
+def test_foreground_filtering_all_below_threshold():
+    """All samples below threshold returns zero-gradient loss."""
+    loss_fn = SpotlightLoss(min_foreground_fraction=0.99)
+    pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
+    target = torch.zeros(2, 1, 4, 8, 8)
+    target[:, :, :, 7:, :] = 1.0  # ~12.5% FG, below 99% threshold
+    loss = loss_fn(pred, target)
+    assert loss.item() == 0.0
+    loss.backward()
+    assert pred.grad is not None
+
+
+def test_foreground_filtering_per_sample_not_batch():
+    """FG fraction is checked per-sample, not averaged across batch."""
+    loss_fn = SpotlightLoss(min_foreground_fraction=0.01)
+    # Sample 0: all background, sample 1: has foreground
+    target = torch.zeros(2, 1, 4, 8, 8)
+    target[1] = 1.0  # 100% FG in sample 1
+    pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
+    loss = loss_fn(pred, target)
+    # Loss should be non-zero (sample 1 contributes)
+    assert loss.item() > 0
+    loss.backward()
+    assert pred.grad is not None
+
+
 def test_spotlight_loss_invalid_params():
     """Invalid parameters raise ValueError."""
     with pytest.raises(ValueError, match="sigmoid_k"):
