@@ -57,11 +57,16 @@ class SlidingWindowDataset(Dataset):
         A callable that transforms data, defaults to None.
     load_normalization_metadata : bool
         Whether to load normalization metadata, defaults to True.
-    min_foreground_fraction : float
-        Minimum fraction of foreground voxels for a patch to be used.
-        Requires precomputed ``otsu_threshold`` in normalization metadata.
-        Patches below this threshold are skipped (retried up to 10 times).
-        Default 0.0 disables filtering.
+    min_nonzero_fraction : float
+        Minimum fraction of voxels above ``nonzero_threshold`` for a patch
+        to be used. Patches below this fraction are skipped (retried up to
+        10 times with random re-sampling). Default 0.0 disables filtering.
+    nonzero_threshold : float
+        Intensity threshold for the nonzero fraction check.
+        Default 0.0 means any nonzero voxel counts.
+    nonzero_channel : str or None
+        Channel name to check for nonzero fraction. ``None`` defaults
+        to the first target channel.
     """
 
     def __init__(
@@ -72,7 +77,9 @@ class SlidingWindowDataset(Dataset):
         array_key: str = "0",
         transform: DictTransform | None = None,
         load_normalization_metadata: bool = True,
-        min_foreground_fraction: float = 0.0,
+        min_nonzero_fraction: float = 0.0,
+        nonzero_threshold: float = 0.0,
+        nonzero_channel: str | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -84,9 +91,15 @@ class SlidingWindowDataset(Dataset):
         self.z_window_size = z_window_size
         self.transform = transform
         self.array_key = array_key
-        self._get_windows()
         self.load_normalization_metadata = load_normalization_metadata
-        self.min_foreground_fraction = min_foreground_fraction
+        self.min_nonzero_fraction = min_nonzero_fraction
+        self.nonzero_threshold = nonzero_threshold
+        self.nonzero_channel = nonzero_channel
+        self._get_windows()
+        if nonzero_channel is not None:
+            all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
+            if nonzero_channel not in all_channels:
+                raise ValueError(f"nonzero_channel '{nonzero_channel}' not found in channels: {all_channels}")
 
     def _get_windows(self) -> None:
         """Count the sliding windows along T and Z, and build an index-to-window LUT."""
@@ -166,6 +179,9 @@ class SlidingWindowDataset(Dataset):
     def __getitem__(self, index: int) -> Sample:
         """Return a sample for the given index."""
         max_retries = 10
+        check_key = (
+            self.nonzero_channel or self.channels.get("target", [None])[0] if self.min_nonzero_fraction > 0 else None
+        )
         idx = index
         for attempt in range(max_retries + 1):
             img, tz, norm_meta = self._find_window(idx)
@@ -176,20 +192,11 @@ class SlidingWindowDataset(Dataset):
                 ch_idx.extend(self.target_ch_idx)
             images, sample_index = self._read_img_window(img, ch_idx, tz)
             sample_images = {k: v for k, v in zip(ch_names, images)}
-            # Foreground filtering: skip patches with too few FG voxels
-            if (
-                attempt < max_retries
-                and self.min_foreground_fraction > 0
-                and self.target_ch_idx is not None
-                and norm_meta is not None
-            ):
-                target_key = self.channels["target"][0]
-                fov_stats = norm_meta.get(target_key, {}).get("fov_statistics", {})
-                otsu_t = fov_stats.get("otsu_threshold")
-                if otsu_t is not None:
-                    patch = sample_images[target_key]
-                    fg_frac = (patch >= otsu_t).sum().item() / patch.numel()
-                    if fg_frac < self.min_foreground_fraction:
+            if attempt < max_retries and check_key is not None:
+                if check_key in sample_images:
+                    patch = sample_images[check_key]
+                    frac = (patch >= self.nonzero_threshold).sum().item() / patch.numel()
+                    if frac < self.min_nonzero_fraction:
                         idx = random.randint(0, len(self) - 1)
                         continue
             break
@@ -251,8 +258,9 @@ class MaskTestDataset(SlidingWindowDataset):
         transform: DictTransform | None = None,
         ground_truth_masks: str | None = None,
         array_key: str = "0",
+        **kwargs,
     ) -> None:
-        super().__init__(positions, channels, z_window_size, array_key=array_key, transform=transform)
+        super().__init__(positions, channels, z_window_size, array_key=array_key, transform=transform, **kwargs)
         self.masks = {}
         if ground_truth_masks is None:
             return
@@ -326,10 +334,13 @@ class HCSDataModule(LightningDataModule):
         defaults to None (2 per PyTorch default).
     array_key : str, optional
         Name of the image arrays (multiscales level), by default "0".
-    min_foreground_fraction : float, optional
-        Minimum fraction of foreground voxels for training patches.
-        Requires precomputed ``otsu_threshold`` in normalization metadata
-        (run ``viscy preprocess --compute_otsu``). Default 0.0 disables.
+    min_nonzero_fraction : float, optional
+        Minimum fraction of voxels above ``nonzero_threshold`` for training.
+        Default 0.0 disables filtering.
+    nonzero_threshold : float, optional
+        Intensity threshold for the nonzero fraction check, by default 0.0.
+    nonzero_channel : str or None, optional
+        Channel to check. ``None`` defaults to the first target channel.
     """
 
     def __init__(
@@ -351,7 +362,9 @@ class HCSDataModule(LightningDataModule):
         prefetch_factor=None,
         array_key: str = "0",
         pin_memory=False,
-        min_foreground_fraction: float = 0.0,
+        min_nonzero_fraction: float = 0.0,
+        nonzero_threshold: float = 0.0,
+        nonzero_channel: str | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -372,7 +385,9 @@ class HCSDataModule(LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self.array_key = array_key
         self.pin_memory = pin_memory
-        self.min_foreground_fraction = min_foreground_fraction
+        self.min_nonzero_fraction = min_nonzero_fraction
+        self.nonzero_threshold = nonzero_threshold
+        self.nonzero_channel = nonzero_channel
 
     @property
     def cache_path(self):
@@ -426,8 +441,11 @@ class HCSDataModule(LightningDataModule):
             "z_window_size": self.z_window_size,
             "array_key": self.array_key,
         }
-        if self.min_foreground_fraction > 0:
-            settings["min_foreground_fraction"] = self.min_foreground_fraction
+        if self.min_nonzero_fraction > 0:
+            settings["min_nonzero_fraction"] = self.min_nonzero_fraction
+            settings["nonzero_threshold"] = self.nonzero_threshold
+            if self.nonzero_channel is not None:
+                settings["nonzero_channel"] = self.nonzero_channel
         return settings
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):

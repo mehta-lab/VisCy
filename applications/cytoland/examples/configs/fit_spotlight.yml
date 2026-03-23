@@ -73,7 +73,8 @@ data:
     z_window_size: 32
     batch_size: 24
     num_workers: 8
-    min_foreground_fraction: 0.001  # paper: ≥0.1% FG voxels per patch
+    min_nonzero_fraction: 0.001  # paper: ≥0.1% FG voxels per patch
+    nonzero_threshold: 0.0       # FG/BG boundary after Otsu normalization
     yx_patch_size:
       - 64
       - 64
