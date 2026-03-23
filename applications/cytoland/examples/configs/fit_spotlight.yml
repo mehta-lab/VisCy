@@ -4,6 +4,24 @@
 #
 # Spotlight is a loss function, not an architecture. It works with any model.
 # This config uses FNet3D (same as the paper), but UNeXt2 or 2.5D also work.
+#
+# Deviations from the paper (Appendix A.3-A.4):
+# - Optimizer: paper uses Adam with betas=(0.5, 0.999); this uses AdamW with
+#   default betas=(0.9, 0.999). To reproduce paper results exactly, override
+#   the optimizer in a custom engine or subclass.
+# - Normalization: paper replaces mean with Otsu threshold as subtrahend;
+#   this uses standard z-score (mean/std). The loss recomputes Otsu at forward
+#   time, so this works but changes the operating point of the tunable sigmoid.
+# - Patch selection: paper filters patches to ≥0.1% foreground voxels;
+#   this samples all patches uniformly. All-background patches receive a
+#   fallback MSE loss instead of being skipped.
+# - Target normalization: paper normalizes both source and target; this config
+#   only normalizes the source (Phase3D). Add the target channel to the
+#   normalizations keys list to match the paper.
+# - Training length: paper trains for 50k mini-batch iterations; max_epochs
+#   must be calibrated based on dataset size to match.
+# - Isotropic voxels: paper resizes z-stacks to 0.29x0.29x0.29 um^3 before
+#   training. The data must be pre-resampled or a resizing transform added.
 
 seed_everything: 42
 trainer:

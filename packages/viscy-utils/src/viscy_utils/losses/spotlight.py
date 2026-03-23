@@ -36,6 +36,10 @@ def _tunable_sigmoid(x: Tensor, k: float) -> Tensor:
         Soft-thresholded output clamped to [0, 1].
     """
     raw = (x - k * x) / (k - 2 * k * x.abs() + 1)
+    # Clamp to [0, 1] for Dice stability — raw maps to [-1, 1] on [-1, 1]
+    # inputs and can exceed that range outside. The paper does not specify
+    # clamping; this prevents negative values from destabilizing the Dice
+    # denominator (sum of soft predictions must be non-negative).
     return raw.clamp(0, 1)
 
 
@@ -89,7 +93,7 @@ def _otsu_threshold_batch(target: Tensor, n_bins: int = 256) -> Tensor:
     Returns
     -------
     Tensor
-        Thresholds of shape ``(B, 1, 1, 1, 1)`` for broadcasting.
+        Thresholds of shape ``(B, 1, ...)`` for broadcasting against ``target``.
     """
     # torch.histc has no dim parameter — must loop over batch
     thresholds = torch.stack([_otsu_threshold(sample.flatten(), n_bins) for sample in target.unbind(0)])
@@ -166,6 +170,9 @@ class SpotlightLoss(nn.Module):
         if fg_count > 0:
             masked_mse = (sq_err * mask).sum() / fg_count
         else:
+            # All-background patch: fall back to unmasked MSE so that
+            # the loss is not zero and gradients still flow. The paper's
+            # patch selection (≥0.1% FG) avoids this case at the data level.
             masked_mse = sq_err.mean()
 
         # Dice loss on soft-thresholded prediction vs binary mask
