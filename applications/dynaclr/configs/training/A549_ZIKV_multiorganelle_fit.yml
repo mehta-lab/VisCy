@@ -76,7 +76,7 @@ data:
     batch_size: 64
     num_workers: 12
     # Sampling axes
-    experiment_aware: true
+    batch_group_by: experiment
     stratify_by: condition
     leaky: 0.0
     temporal_enrichment: true

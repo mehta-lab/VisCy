@@ -185,6 +185,7 @@ class MultiExperimentIndex:
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
+        expand_source_channels: bool = False,
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
@@ -236,6 +237,9 @@ class MultiExperimentIndex:
             positive_cell_source=positive_cell_source,
             positive_match_columns=positive_match_columns,
         )
+
+        if expand_source_channels:
+            self.valid_anchors = self._expand_by_source_channel(self.valid_anchors)
 
     # ------- internal methods -------
 
@@ -579,6 +583,33 @@ class MultiExperimentIndex:
 
         return self.tracks[valid_mask].reset_index(drop=True)
 
+    def _expand_by_source_channel(self, valid_anchors: pd.DataFrame) -> pd.DataFrame:
+        """Expand valid_anchors: one row per (cell, source_channel).
+
+        Adds ``source_channel`` (int, source index) and
+        ``source_channel_label`` (str) columns. Each original row is
+        replicated once per available source channel in the experiment's
+        channel map.
+        """
+        channel_maps = self.registry.channel_maps
+        source_labels = self.registry.source_channel_labels
+        parts: list[pd.DataFrame] = []
+        for exp_name, exp_group in valid_anchors.groupby("experiment"):
+            for src_idx in sorted(channel_maps[exp_name].keys()):
+                expanded = exp_group.copy()
+                expanded["source_channel"] = src_idx
+                expanded["source_channel_label"] = source_labels[src_idx]
+                parts.append(expanded)
+        result = pd.concat(parts, ignore_index=True)
+        n_channels = len(source_labels)
+        _logger.info(
+            "Expanded valid_anchors by %d source channels: %d → %d rows",
+            n_channels,
+            len(valid_anchors),
+            len(result),
+        )
+        return result
+
     # ------- public properties / methods -------
 
     @property
@@ -609,6 +640,7 @@ class MultiExperimentIndex:
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
+        expand_source_channels: bool = False,
     ) -> "MultiExperimentIndex":
         """Create a shallow copy with a different tracks DataFrame.
 
@@ -638,6 +670,8 @@ class MultiExperimentIndex:
             positive_cell_source=positive_cell_source,
             positive_match_columns=positive_match_columns,
         )
+        if expand_source_channels:
+            clone.valid_anchors = clone._expand_by_source_channel(clone.valid_anchors)
         return clone
 
     def summary(self) -> str:

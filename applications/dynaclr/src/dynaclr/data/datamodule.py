@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import pandas as pd
 from lightning.pytorch import LightningDataModule
 from monai.data.thread_buffer import ThreadDataLoader
 from monai.transforms import Compose, MapTransform
@@ -75,8 +76,8 @@ class MultiExperimentDataModule(LightningDataModule):
         Batch size. Default: 128.
     num_workers : int
         Thread workers for ThreadDataLoader. Default: 1.
-    experiment_aware : bool
-        Restrict each batch to a single experiment. Default: True.
+    batch_group_by : str or list[str] or None
+        Column(s) to group batches by (e.g. ``"experiment"``). Default: None.
     stratify_by : str | list[str] | None
         Column name(s) to stratify batches by (e.g. ``"condition"``,
         ``["condition", "marker"]``, ``["condition", "organelle"]``). Default: ``"condition"``.
@@ -88,12 +89,13 @@ class MultiExperimentDataModule(LightningDataModule):
         Half-width of focal window. Default: 2.0.
     temporal_global_fraction : float
         Global fraction for temporal enrichment. Default: 0.3.
-    experiment_weights : dict[str, float] | None
-        Per-experiment sampling weights. Default: None (proportional).
-    bag_of_channels : bool
-        If ``True``, randomly select one source channel per sample.
-        Output shape becomes ``(B, 1, Z, Y, X)``. Pair with
-        ``in_channels: 1`` on the encoder. Default: False.
+    group_weights : dict[str, float] | None
+        Per-group sampling weights. Default: None (proportional).
+    channels_per_sample : int | list[str] | None
+        Controls how many source channels to read per sample.
+        ``None`` (default) — read all source channels.
+        ``1`` — randomly select one channel per sample.
+        List of labels — read those specific channels.
     channel_dropout_channels : list[int]
         Channel indices to dropout. Default: [1] (fluorescence).
     channel_dropout_prob : float
@@ -137,6 +139,10 @@ class MultiExperimentDataModule(LightningDataModule):
     positive_channel_source : str
         ``"same"`` (default) — anchor and positive share channel index.
         ``"any"`` — positive draws independently. Only affects bag-of-channels mode.
+    label_columns : dict[str, str] | None
+        Mapping from ``batch_key`` (used by classification heads) to
+        dataframe column name.  E.g. ``{"gene_label": "condition"}``.
+        Default: ``None``.
     cross_scope_fraction : float
         Deprecated. Use ``positive_match_columns=["condition"]`` instead.
         Fraction of positives sampled as cross-microscope positives. Default: 0.0.
@@ -157,15 +163,15 @@ class MultiExperimentDataModule(LightningDataModule):
         batch_size: int = 128,
         num_workers: int = 1,
         # Sampling hyperparameters (passed to FlexibleBatchSampler)
-        experiment_aware: bool = True,
+        batch_group_by: str | list[str] | None = None,
         stratify_by: str | list[str] | None = "condition",
         leaky: float = 0.0,
         temporal_enrichment: bool = False,
         temporal_window_hours: float = 2.0,
         temporal_global_fraction: float = 0.3,
-        experiment_weights: dict[str, float] | None = None,
+        group_weights: dict[str, float] | None = None,
         # Bag of channels
-        bag_of_channels: bool = False,
+        channels_per_sample: int | list[str] | None = None,
         # Augmentation hyperparameters
         channel_dropout_channels: list[int] | None = None,
         channel_dropout_prob: float = 0.0,
@@ -184,8 +190,10 @@ class MultiExperimentDataModule(LightningDataModule):
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
+        label_columns: dict[str, str] | None = None,
         cross_scope_fraction: float = 0.0,
         hpi_window: float = 1.0,
+        max_border_shift: int = -1,
     ) -> None:
         super().__init__()
 
@@ -202,16 +210,18 @@ class MultiExperimentDataModule(LightningDataModule):
         self.num_workers = num_workers
 
         # Sampling hyperparameters
-        self.experiment_aware = experiment_aware
+        if isinstance(batch_group_by, str):
+            batch_group_by = [batch_group_by]
+        self.batch_group_by = batch_group_by
         self.stratify_by = stratify_by
         self.leaky = leaky
         self.temporal_enrichment = temporal_enrichment
         self.temporal_window_hours = temporal_window_hours
         self.temporal_global_fraction = temporal_global_fraction
-        self.experiment_weights = experiment_weights
+        self.group_weights = group_weights
 
-        # Bag of channels
-        self.bag_of_channels = bag_of_channels
+        # Channel selection
+        self.channels_per_sample = channels_per_sample
 
         # Augmentation hyperparameters
         self.channel_dropout_channels = channel_dropout_channels if channel_dropout_channels is not None else [1]
@@ -233,8 +243,10 @@ class MultiExperimentDataModule(LightningDataModule):
         self.positive_cell_source = positive_cell_source
         self.positive_match_columns = positive_match_columns
         self.positive_channel_source = positive_channel_source
+        self.label_columns = label_columns
         self.cross_scope_fraction = cross_scope_fraction
         self.hpi_window = hpi_window
+        self.max_border_shift = max_border_shift
 
         # Create ChannelDropout module
         self.channel_dropout = ChannelDropout(
@@ -286,15 +298,28 @@ class MultiExperimentDataModule(LightningDataModule):
             else:
                 raise ValueError("Either collection_path or cell_index_path must be provided.")
 
+            # Expand valid_anchors by source channel when batch_group_by
+            # references source_channel_label and channels_per_sample=1.
+            bgb = (
+                self.batch_group_by
+                if isinstance(self.batch_group_by, list)
+                else [self.batch_group_by]
+                if self.batch_group_by
+                else []
+            )
+            self._expand_source_channels = self.channels_per_sample == 1 and "source_channel_label" in bgb
+
             if self.val_experiments:
                 self._setup_experiment_split(registry)
             else:
                 self._setup_fov_split(registry)
 
-            if self.bag_of_channels:
-                self._channel_names = ["channel"]
-            else:
+            if self.channels_per_sample is None:
                 self._channel_names = registry.source_channel_labels
+            elif isinstance(self.channels_per_sample, int):
+                self._channel_names = [f"channel_{i}" for i in range(self.channels_per_sample)]
+            else:
+                self._channel_names = list(self.channels_per_sample)
 
             # Build transform pipelines
             self._augmentation_transform = Compose(self.normalizations + self.augmentations + [self._final_crop()])
@@ -333,6 +358,8 @@ class MultiExperimentDataModule(LightningDataModule):
             num_workers=self.num_workers_index,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
+            max_border_shift=self.max_border_shift,
+            expand_source_channels=self._expand_source_channels,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
@@ -340,10 +367,11 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             tau_decay_rate=self.tau_decay_rate,
             cache_pool_bytes=self.cache_pool_bytes,
-            bag_of_channels=self.bag_of_channels,
+            channels_per_sample=self.channels_per_sample,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
+            label_columns=self.label_columns,
             cross_scope_fraction=self.cross_scope_fraction,
             hpi_window=self.hpi_window,
         )
@@ -360,6 +388,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 num_workers=self.num_workers_index,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
+                max_border_shift=self.max_border_shift,
             )
             self.val_dataset = MultiExperimentTripletDataset(
                 index=val_index,
@@ -367,17 +396,22 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_range_hours=self.tau_range,
                 tau_decay_rate=self.tau_decay_rate,
                 cache_pool_bytes=self.cache_pool_bytes,
-                bag_of_channels=self.bag_of_channels,
+                channels_per_sample=self.channels_per_sample,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
+                label_columns=self.label_columns,
                 cross_scope_fraction=self.cross_scope_fraction,
                 hpi_window=self.hpi_window,
             )
 
     def _setup_fov_split(self, registry: ExperimentRegistry) -> None:
-        """Split FOVs within each experiment by split_ratio."""
-        # Build a full index first, then split its tracks by FOV
+        """Split FOVs within each experiment by split_ratio.
+
+        Uses experiment-qualified keys ``(experiment, fov_name)`` so that
+        experiments sharing the same tile names (e.g. OPS ``A/1/0``) are
+        split independently.
+        """
         full_index = MultiExperimentIndex(
             registry=registry,
             yx_patch_size=self.yx_patch_size,
@@ -390,37 +424,38 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
         )
 
-        # Split FOVs per experiment to maintain proportional representation
         rng = np.random.default_rng(self.seed)
-        train_fovs: list[str] = []
-        val_fovs: list[str] = []
+        train_keys: set[tuple[str, str]] = set()
+        val_keys: set[tuple[str, str]] = set()
 
         for exp_name, group in full_index.tracks.groupby("experiment"):
             fovs = sorted(group["fov_name"].unique())
             n_train = max(1, int(len(fovs) * self.split_ratio))
             rng.shuffle(fovs)
-            train_fovs.extend(fovs[:n_train])
-            val_fovs.extend(fovs[n_train:])
+            for f in fovs[:n_train]:
+                train_keys.add((exp_name, f))
+            for f in fovs[n_train:]:
+                val_keys.add((exp_name, f))
 
         _logger.info(
             "FOV split (ratio=%.2f): %d train FOVs, %d val FOVs",
             self.split_ratio,
-            len(train_fovs),
-            len(val_fovs),
+            len(train_keys),
+            len(val_keys),
         )
 
-        # Build train index by excluding val FOVs
-        train_exclude = (self.exclude_fovs or []) + val_fovs
-        train_index = MultiExperimentIndex(
-            registry=registry,
-            yx_patch_size=self.yx_patch_size,
-            tau_range_hours=self.tau_range,
-            include_wells=self.include_wells,
-            exclude_fovs=train_exclude,
-            cell_index_path=self.cell_index_path,
-            num_workers=self.num_workers_index,
+        full_qual = list(zip(full_index.tracks["experiment"], full_index.tracks["fov_name"]))
+        train_mask = pd.Series([k in train_keys for k in full_qual], index=full_index.tracks.index)
+
+        train_tracks = full_index.tracks[train_mask].reset_index(drop=True)
+        val_tracks = full_index.tracks[~train_mask].reset_index(drop=True)
+
+        train_index = full_index.clone_with_subset(
+            train_tracks,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
+            max_border_shift=self.max_border_shift,
+            expand_source_channels=self._expand_source_channels,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
@@ -428,24 +463,18 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             tau_decay_rate=self.tau_decay_rate,
             cache_pool_bytes=self.cache_pool_bytes,
-            bag_of_channels=self.bag_of_channels,
+            channels_per_sample=self.channels_per_sample,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
+            label_columns=self.label_columns,
             cross_scope_fraction=self.cross_scope_fraction,
             hpi_window=self.hpi_window,
         )
 
-        if val_fovs:
-            val_exclude = (self.exclude_fovs or []) + train_fovs
-            val_index = MultiExperimentIndex(
-                registry=registry,
-                yx_patch_size=self.yx_patch_size,
-                tau_range_hours=self.tau_range,
-                include_wells=self.include_wells,
-                exclude_fovs=val_exclude,
-                cell_index_path=self.cell_index_path,
-                num_workers=self.num_workers_index,
+        if val_keys:
+            val_index = full_index.clone_with_subset(
+                val_tracks,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
             )
@@ -455,10 +484,11 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_range_hours=self.tau_range,
                 tau_decay_rate=self.tau_decay_rate,
                 cache_pool_bytes=self.cache_pool_bytes,
-                bag_of_channels=self.bag_of_channels,
+                channels_per_sample=self.channels_per_sample,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
+                label_columns=self.label_columns,
                 cross_scope_fraction=self.cross_scope_fraction,
                 hpi_window=self.hpi_window,
             )
@@ -472,9 +502,9 @@ class MultiExperimentDataModule(LightningDataModule):
         sampler = FlexibleBatchSampler(
             valid_anchors=self.train_dataset.index.valid_anchors,
             batch_size=self.batch_size,
-            experiment_aware=self.experiment_aware,
+            batch_group_by=self.batch_group_by,
             leaky=self.leaky,
-            experiment_weights=self.experiment_weights,
+            group_weights=self.group_weights,
             stratify_by=self.stratify_by,
             temporal_enrichment=self.temporal_enrichment,
             temporal_window_hours=self.temporal_window_hours,

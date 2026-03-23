@@ -85,25 +85,25 @@ data:
     cross_scope_fraction: 0.5
     hpi_window: 1.0
     # Sampling
-    experiment_aware: false
+    batch_group_by: null
     stratify_by: ["condition", "microscope"]
     # Training
     batch_size: 64
     num_workers: 4
     tau_range: [0.5, 2.0]
     tau_decay_rate: 2.0
-    bag_of_channels: true
+    channels_per_sample: 1
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
-          keys: ["channel"]
+          keys: ["channel_0"]
           level: fov_statistics
           subtrahend: median
           divisor: iqr
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
-          keys: ["channel"]
+          keys: ["channel_0"]
           prob: 0.8
           rotate_range: [0.2, 0.2, 0.2]
           scale_range: [0.1, 0.1, 0.1]

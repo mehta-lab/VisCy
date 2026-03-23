@@ -9,7 +9,7 @@
 # 2. loss_function uses NTXentHCL (not TripletMarginLoss)
 # 3. use_distributed_sampler: false (FlexibleBatchSampler handles DDP)
 # 4. Normalizations/augmentations use source channel labels (labelfree/reporter)
-# 5. All sampling axes configured: experiment_aware, stratify_by,
+# 5. All sampling axes configured: batch_group_by, stratify_by,
 #    temporal_enrichment
 #
 # Run-specific paths — set these before launching:
@@ -112,25 +112,30 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: null  # Optional: path to pre-built cell_index.parquet (faster startup)
+    # ── Data source ───────────────────────────────────────────────────────────
     collection_path: #TODO path to collection.yml
+    cell_index_path: null  # Optional: path to pre-built cell_index.parquet (faster startup)
+    # ── Patch extraction ──────────────────────────────────────────────────────
     z_window: 30
     yx_patch_size: [384, 384]
     final_yx_patch_size: [160, 160]
+    # ── Train / val split ─────────────────────────────────────────────────────
     val_experiments:
       - #TODO experiment name(s) for validation
+    # ── Positive pair sampling ────────────────────────────────────────────────
     tau_range: [0.5, 2.0]
     tau_decay_rate: 2.0
+    # ── Batch sampling ────────────────────────────────────────────────────────
     batch_size: 64
     num_workers: 12
-    # Sampling axes
-    experiment_aware: true
+    batch_group_by: experiment
     stratify_by: condition
     leaky: 0.0
     temporal_enrichment: true
     temporal_window_hours: 2.0
     temporal_global_fraction: 0.3
-    # Augmentation
+    seed: 0
+    # ── Augmentation pipeline ─────────────────────────────────────────────────
     channel_dropout_channels: [1]  # Drop fluorescence channel
     channel_dropout_prob: 0.5
     normalizations:
@@ -196,4 +201,3 @@ data:
           std: 0.2
     # Loss reference (informational -- actual loss is on model.loss_function)
     cache_pool_bytes: 0
-    seed: 0

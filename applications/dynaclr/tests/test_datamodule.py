@@ -128,7 +128,7 @@ class TestInitExposesAllHyperparameters:
             tau_decay_rate=3.0,
             batch_size=64,
             num_workers=2,
-            experiment_aware=False,
+            batch_group_by=None,
             stratify_by=None,
             leaky=0.1,
             temporal_enrichment=True,
@@ -145,7 +145,7 @@ class TestInitExposesAllHyperparameters:
         assert dm.tau_decay_rate == 3.0
         assert dm.batch_size == 64
         assert dm.num_workers == 2
-        assert dm.experiment_aware is False
+        assert dm.batch_group_by is None
         assert dm.stratify_by is None
         assert dm.leaky == 0.1
         assert dm.temporal_enrichment is True
@@ -208,7 +208,7 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
             val_experiments=["exp_b"],
             tau_range=(0.5, 2.0),
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by="condition",
             temporal_enrichment=False,
         )
@@ -226,7 +226,7 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         )
         # Verify sampler settings match
         sampler = train_dl.batch_sampler
-        assert sampler.experiment_aware is True
+        assert sampler.batch_group_by == ["experiment"]
         assert sampler.stratify_by == ["condition"]
         assert sampler.temporal_enrichment is False
 

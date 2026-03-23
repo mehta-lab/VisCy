@@ -179,7 +179,10 @@ class MultiExperimentTripletDataset(Dataset):
                     f"channels_per_sample as int must be 1, got {channels_per_sample}. "
                     "Use a list of labels for multiple specific channels."
                 )
-            self._channel_mode = "random"
+            if "source_channel" in index.valid_anchors.columns:
+                self._channel_mode = "from_index"
+            else:
+                self._channel_mode = "random"
         elif isinstance(channels_per_sample, list):
             self._channel_mode = "fixed"
             labels = index.registry.source_channel_labels
@@ -305,7 +308,9 @@ class MultiExperimentTripletDataset(Dataset):
 
         # Pre-compute per-sample channel indices based on channel_mode.
         channel_maps = self.index.registry.channel_maps
-        if self._channel_mode == "random":
+        if self._channel_mode == "from_index":
+            forced_channel_indices = [[int(row["source_channel"])] for _, row in anchor_rows.iterrows()]
+        elif self._channel_mode == "random":
             forced_channel_indices = [
                 [int(self._rng.choice(sorted(channel_maps[row["experiment"]].keys())))]
                 for _, row in anchor_rows.iterrows()
@@ -659,7 +664,7 @@ class MultiExperimentTripletDataset(Dataset):
                 if "timepoint_statistics" in ch_meta:
                     tp_stats = ch_meta["timepoint_statistics"].get(str(t))
                     ch_meta["timepoint_statistics"] = tp_stats
-            if forced_source_indices is not None and self._channel_mode == "random":
+            if forced_source_indices is not None and self._channel_mode in ("random", "from_index"):
                 selected_label = source_labels[source_indices[0]]
                 if selected_label in remapped:
                     raw_norm_meta = {"channel_0": remapped[selected_label]}

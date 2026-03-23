@@ -8,7 +8,7 @@ and dataset structure.
 
 | Axis | Parameter | What it controls |
 |------|-----------|------------------|
-| Experiment selection | `experiment_aware` | Whether batches are restricted to one experiment |
+| Experiment selection | `batch_group_by` | Whether batches are restricted to one experiment |
 | Leaky mixing | `leaky` | Fraction of cross-experiment samples injected into experiment-pure batches |
 | Stratification | `stratify_by` | Balance batches by column(s) (e.g. condition, organelle) |
 | Temporal enrichment | `temporal_enrichment` | Concentrate batches around a focal hours-post-perturbation (HPP) window |
@@ -27,7 +27,7 @@ anchor.
 while distinguishing infected from uninfected cells at the same disease stage.
 
 ```yaml
-experiment_aware: true
+batch_group_by: experiment
 stratify_by: condition
 temporal_enrichment: true
 temporal_window_hours: 2.0
@@ -61,7 +61,7 @@ perturbation-aware temporal representations.
 Useful as a baseline or when tracking data is unreliable.
 
 ```yaml
-experiment_aware: true
+batch_group_by: experiment
 stratify_by: condition
 temporal_enrichment: true
 temporal_window_hours: 2.0
@@ -95,7 +95,7 @@ positives would be unreliable.
 imaging conditions (staining intensity, illumination, microscope).
 
 ```yaml
-experiment_aware: true
+batch_group_by: experiment
 leaky: 0.3                 # 30% from other experiments
 stratify_by: condition
 temporal_enrichment: true
@@ -138,7 +138,7 @@ that transfer across experiments.
 **Goal:** Balance batches by multiple metadata columns simultaneously.
 
 ```yaml
-experiment_aware: true
+batch_group_by: experiment
 stratify_by: [condition, organelle]   # balance by both
 temporal_enrichment: false
 tau_range: [0.5, 2.0]
@@ -166,7 +166,7 @@ timepoint category).
 **Goal:** Maximize batch diversity by mixing all experiments freely.
 
 ```yaml
-experiment_aware: false
+batch_group_by: null
 stratify_by: condition
 temporal_enrichment: false
 tau_range: [0.5, 2.0]
@@ -202,7 +202,7 @@ semantics and you want to maximize the effective dataset size per batch.
 lower-bound baseline.
 
 ```yaml
-experiment_aware: false
+batch_group_by: null
 stratify_by: null
 temporal_enrichment: false
 tau_range: [0.5, 2.0]
@@ -223,8 +223,8 @@ linear probe accuracy or temporal smoothness metrics.
 
 ```
 Do experiments have different fluorescence reporters?
-  YES -> experiment_aware: true
-  NO  -> experiment_aware: false is fine
+  YES -> batch_group_by: experiment
+  NO  -> batch_group_by: null is fine
 
 Do you have multiple conditions (infected/uninfected/mock)?
   YES -> stratify_by: condition
@@ -245,9 +245,9 @@ Do you want cross-experiment generalization?
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `experiment_aware` | bool | `true` | Restrict each batch to one experiment |
+| `batch_group_by` | str, list, or null | `"experiment"` | Column(s) to group batches by (e.g. `experiment`) |
 | `stratify_by` | str, list, or null | `"condition"` | Column(s) to balance within batches |
-| `leaky` | float | `0.0` | Fraction of batch from other experiments (only with `experiment_aware`) |
+| `leaky` | float | `0.0` | Fraction of batch from other experiments (only with `batch_group_by`) |
 | `temporal_enrichment` | bool | `false` | Concentrate batch around focal HPP |
 | `temporal_window_hours` | float | `2.0` | Half-width of focal window in hours |
 | `temporal_global_fraction` | float | `0.3` | Fraction of batch drawn from all timepoints |

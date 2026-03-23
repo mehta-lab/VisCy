@@ -1,5 +1,4 @@
-"""Composable batch sampler with experiment-aware, stratified,
-temporal enrichment, and leaky mixing axes.
+"""Composable batch sampler with batch grouping, stratification, and temporal enrichment.
 
 Yields lists of integer indices into a ``valid_anchors`` DataFrame
 produced by :class:`~dynaclr.index.MultiExperimentIndex`.
@@ -23,15 +22,14 @@ _logger = logging.getLogger(__name__)
 
 
 class FlexibleBatchSampler(Sampler[list[int]]):
-    """Composable batch sampler with experiment-aware, stratified,
-    temporal enrichment, and leaky experiment mixing axes.
+    """Composable batch sampler with batch grouping and stratification.
 
     Each batch is constructed by a cascade:
 
-    1. **Experiment selection** (``experiment_aware``): pick a single
-       experiment to draw from, or draw from all experiments.
+    1. **Group selection** (``batch_group_by``): pick a single group
+       to draw from, or draw from all samples.
     2. **Leaky mixing** (``leaky``): optionally inject a fraction of
-       cross-experiment samples into experiment-restricted batches.
+       cross-group samples into group-restricted batches.
     3. **Stratified sampling** (``stratify_by``): within the selected
        pool, balance representation across groups defined by one or
        more DataFrame columns.
@@ -42,25 +40,27 @@ class FlexibleBatchSampler(Sampler[list[int]]):
     Parameters
     ----------
     valid_anchors : pd.DataFrame
-        DataFrame with at least ``"experiment"`` column.
-        Must have a clean integer index (0..N-1).
-        When ``temporal_enrichment=True``, must also have
-        ``"hours_post_perturbation"`` column.
+        DataFrame with a clean integer index (0..N-1).
+        Must contain any columns referenced by ``batch_group_by``,
+        ``stratify_by``, or ``temporal_enrichment``.
     batch_size : int
         Number of indices per batch.
-    experiment_aware : bool
-        If ``True``, every batch draws from a single experiment.
-        Requires ``"experiment"`` column in *valid_anchors*.
+    batch_group_by : str | list[str] | None
+        Column(s) in *valid_anchors* that define batch-level groups.
+        Each batch draws from a single group.
+        ``"experiment"`` — one experiment per batch (old ``experiment_aware=True``).
+        ``"marker"`` — one marker per batch.
+        ``["marker", "source_channel"]`` — one (marker, channel) per batch.
+        ``None`` — no grouping, draw from all samples.
     leaky : float
-        Fraction of the batch drawn from *other* experiments when
-        ``experiment_aware`` is ``True``.  Ignored otherwise.
-    experiment_weights : dict[str, float] | None
-        Per-experiment sampling weight.  Defaults to proportional to
-        group size.
+        Fraction of the batch drawn from *other* groups when
+        ``batch_group_by`` is not ``None``. Ignored otherwise.
+    group_weights : dict[str, float] | None
+        Per-group sampling weight (keyed by group string key).
+        Defaults to proportional to group size.
     stratify_by : str | list[str] | None
         Column name(s) in *valid_anchors* to stratify batches by.
         Groups are balanced equally within each batch.
-        Examples: ``"condition"``, ``["condition", "marker"]``, ``["condition", "organelle"]``.
         ``None`` disables stratification.
     temporal_enrichment : bool
         If ``True``, concentrate batch indices around a randomly chosen
@@ -68,12 +68,8 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         Requires ``"hours_post_perturbation"`` column in *valid_anchors*.
     temporal_window_hours : float
         Half-width of the focal window around the chosen HPI.
-        Indices with ``|hpi - focal| <= temporal_window_hours`` are
-        considered focal.
     temporal_global_fraction : float
         Fraction of the batch drawn from all timepoints (global).
-        The remaining ``1 - temporal_global_fraction`` fraction is drawn
-        from the focal window.
     num_replicas : int
         Number of DDP processes (1 for single-process).
     rank : int
@@ -88,9 +84,9 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         self,
         valid_anchors: pd.DataFrame,
         batch_size: int = 128,
-        experiment_aware: bool = True,
+        batch_group_by: str | list[str] | None = None,
         leaky: float = 0.0,
-        experiment_weights: dict[str, float] | None = None,
+        group_weights: dict[str, float] | None = None,
         stratify_by: str | list[str] | None = "condition",
         temporal_enrichment: bool = False,
         temporal_window_hours: float = 2.0,
@@ -100,19 +96,23 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         seed: int = 0,
         drop_last: bool = True,
     ) -> None:
-        # Normalize stratify_by to list or None
+        # Normalize to list or None
+        if isinstance(batch_group_by, str):
+            batch_group_by = [batch_group_by]
         if isinstance(stratify_by, str):
             stratify_by = [stratify_by]
 
         # ------------------------------------------------------------------
         # Validate required columns for enabled features
         # ------------------------------------------------------------------
-        if experiment_aware and "experiment" not in valid_anchors.columns:
-            raise ValueError(
-                "experiment_aware=True requires 'experiment' column in "
-                "valid_anchors, but columns are: "
-                f"{list(valid_anchors.columns)}"
-            )
+        if batch_group_by is not None:
+            missing = [c for c in batch_group_by if c not in valid_anchors.columns]
+            if missing:
+                raise ValueError(
+                    f"batch_group_by={batch_group_by} requires columns {missing} "
+                    f"in valid_anchors, but columns are: "
+                    f"{list(valid_anchors.columns)}"
+                )
         if stratify_by is not None:
             missing = [c for c in stratify_by if c not in valid_anchors.columns]
             if missing:
@@ -130,9 +130,9 @@ class FlexibleBatchSampler(Sampler[list[int]]):
 
         self.valid_anchors = valid_anchors
         self.batch_size = batch_size
-        self.experiment_aware = experiment_aware
+        self.batch_group_by = batch_group_by
         self.leaky = leaky
-        self.experiment_weights = experiment_weights
+        self.group_weights = group_weights
         self.stratify_by = stratify_by
         self.temporal_enrichment = temporal_enrichment
         self.temporal_window_hours = temporal_window_hours
@@ -155,23 +155,23 @@ class FlexibleBatchSampler(Sampler[list[int]]):
 
     def _precompute_groups(self) -> None:
         """Build index lookup tables from valid_anchors columns."""
-        # Per-experiment indices
-        if self.experiment_aware:
-            self._experiment_indices: dict[str, np.ndarray] = {
-                str(name): group.index.to_numpy() for name, group in self.valid_anchors.groupby("experiment")
+        # Per-group indices
+        if self.batch_group_by is not None:
+            group_keys = self._compute_strat_keys(self.valid_anchors, self.batch_group_by)
+            self._group_indices: dict[str, np.ndarray] = {
+                str(name): group.index.to_numpy() for name, group in self.valid_anchors.groupby(group_keys)
             }
-            self._experiment_names: list[str] = list(self._experiment_indices.keys())
+            self._group_names: list[str] = list(self._group_indices.keys())
         else:
-            self._experiment_indices = {}
-            self._experiment_names = []
+            self._group_indices = {}
+            self._group_names = []
 
         # Stratification indices
         self._strat_indices: dict[str, np.ndarray] = {}
-        self._exp_strat_indices: dict[tuple[str, str], np.ndarray] = {}
+        self._group_strat_indices: dict[tuple[str, str], np.ndarray] = {}
         self._strat_names: list[str] = []
 
         if self.stratify_by is not None:
-            # Build a single string key per group for uniform handling
             strat_keys = self._compute_strat_keys(self.valid_anchors, self.stratify_by)
 
             # Global stratification indices
@@ -179,29 +179,30 @@ class FlexibleBatchSampler(Sampler[list[int]]):
                 self._strat_indices[key] = self.valid_anchors.index[strat_keys == key].to_numpy()
             self._strat_names = list(self._strat_indices.keys())
 
-            # Per-experiment stratification indices
-            if self.experiment_aware:
-                for (exp_name, strat_key), group in self.valid_anchors.groupby(["experiment", strat_keys]):
-                    self._exp_strat_indices[(str(exp_name), str(strat_key))] = group.index.to_numpy()
+            # Per-group stratification indices
+            if self.batch_group_by is not None:
+                group_keys = self._compute_strat_keys(self.valid_anchors, self.batch_group_by)
+                for (grp, strat_key), group in self.valid_anchors.groupby([group_keys, strat_keys]):
+                    self._group_strat_indices[(str(grp), str(strat_key))] = group.index.to_numpy()
 
         # All indices
         self._all_indices = np.arange(len(self.valid_anchors))
 
-        # Compute experiment selection weights
-        if self.experiment_aware:
+        # Compute group selection weights
+        if self.batch_group_by is not None:
             total = len(self.valid_anchors)
-            if self.experiment_weights is not None:
-                raw = np.array([self.experiment_weights.get(n, 0.0) for n in self._experiment_names])
-                self._exp_probs = raw / raw.sum()
+            if self.group_weights is not None:
+                raw = np.array([self.group_weights.get(n, 0.0) for n in self._group_names])
+                self._group_probs = raw / raw.sum()
             else:
                 # Default: proportional to group size
-                self._exp_probs = np.array([len(self._experiment_indices[n]) / total for n in self._experiment_names])
+                self._group_probs = np.array([len(self._group_indices[n]) / total for n in self._group_names])
 
             # Warn about small groups
-            for name, indices in self._experiment_indices.items():
+            for name, indices in self._group_indices.items():
                 if len(indices) < self.batch_size:
                     _logger.warning(
-                        "Experiment '%s' has %d samples, fewer than "
+                        "Group '%s' has %d samples, fewer than "
                         "batch_size=%d. Will use replacement sampling "
                         "for this group.",
                         name,
@@ -211,7 +212,7 @@ class FlexibleBatchSampler(Sampler[list[int]]):
 
     @staticmethod
     def _compute_strat_keys(df: pd.DataFrame, columns: list[str]) -> pd.Series:
-        """Compute a single string key per row for stratification grouping.
+        """Compute a single string key per row for grouping.
 
         Parameters
         ----------
@@ -264,27 +265,27 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         """Construct a single batch by cascading sampling axes.
 
         Cascade order:
-        1. Experiment selection (if experiment_aware)
+        1. Group selection (if batch_group_by is set)
         2. Leaky mixing (if leaky > 0)
         3. Temporal enrichment OR stratified sampling OR plain sampling
         4. Combine primary + leak
         """
-        chosen_exp: str | None = None
+        chosen_group: str | None = None
 
-        # Step 1: Experiment selection
-        if self.experiment_aware:
-            chosen_exp = rng.choice(self._experiment_names, p=self._exp_probs)
-            pool = self._experiment_indices[chosen_exp]
+        # Step 1: Group selection
+        if self.batch_group_by is not None:
+            chosen_group = rng.choice(self._group_names, p=self._group_probs)
+            pool = self._group_indices[chosen_group]
         else:
             pool = self._all_indices
 
         # Step 2: Leaky mixing
         leak_samples: np.ndarray | None = None
-        if self.experiment_aware and self.leaky > 0.0 and chosen_exp is not None:
+        if self.batch_group_by is not None and self.leaky > 0.0 and chosen_group is not None:
             n_leak = int(self.batch_size * self.leaky)
             n_primary = self.batch_size - n_leak
             if n_leak > 0:
-                other_indices = np.concatenate([v for k, v in self._experiment_indices.items() if k != chosen_exp])
+                other_indices = np.concatenate([v for k, v in self._group_indices.items() if k != chosen_group])
                 if len(other_indices) > 0:
                     leak_samples = rng.choice(
                         other_indices,
@@ -296,9 +297,9 @@ class FlexibleBatchSampler(Sampler[list[int]]):
 
         # Step 3: Sample primary indices
         if self.temporal_enrichment:
-            primary = self._enrich_temporal(pool, n_primary, rng, chosen_exp)
+            primary = self._enrich_temporal(pool, n_primary, rng, chosen_group)
         elif self.stratify_by is not None:
-            primary = self._sample_stratified(pool, n_primary, chosen_exp, rng)
+            primary = self._sample_stratified(pool, n_primary, chosen_group, rng)
         else:
             replace = len(pool) < n_primary
             primary = rng.choice(pool, size=n_primary, replace=replace)
@@ -320,7 +321,7 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         pool: np.ndarray,
         n_target: int,
         rng: np.random.Generator,
-        chosen_exp: str | None,
+        chosen_group: str | None,
     ) -> np.ndarray:
         """Sample *n_target* indices from *pool* with focal HPI concentration.
 
@@ -331,13 +332,13 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         Parameters
         ----------
         pool : np.ndarray
-            Experiment-filtered (or global) index array to sample from.
+            Group-filtered (or global) index array to sample from.
         n_target : int
             Number of indices to produce.
         rng : np.random.Generator
             Shared RNG for deterministic sampling.
-        chosen_exp : str | None
-            If experiment-aware, the chosen experiment name.
+        chosen_group : str | None
+            If batch_group_by is set, the chosen group name.
 
         Returns
         -------
@@ -365,7 +366,6 @@ class FlexibleBatchSampler(Sampler[list[int]]):
             focal_replace = len(focal_pool) < n_focal
             focal_samples = rng.choice(focal_pool, size=n_focal, replace=focal_replace)
         elif n_focal > 0:
-            # No focal indices available -- fall back to pool
             focal_replace = len(pool) < n_focal
             focal_samples = rng.choice(pool, size=n_focal, replace=focal_replace)
         else:
@@ -376,7 +376,6 @@ class FlexibleBatchSampler(Sampler[list[int]]):
             global_replace = len(global_pool) < n_global
             global_samples = rng.choice(global_pool, size=n_global, replace=global_replace)
         elif n_global > 0:
-            # No non-focal indices -- draw from full pool
             global_replace = len(pool) < n_global
             global_samples = rng.choice(pool, size=n_global, replace=global_replace)
         else:
@@ -392,22 +391,22 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         self,
         pool: np.ndarray,
         n_samples: int,
-        chosen_exp: str | None,
+        chosen_group: str | None,
         rng: np.random.Generator,
     ) -> np.ndarray:
         """Sample indices with balanced representation across strata.
 
-        If ``chosen_exp`` is not None, balances strata within that
-        experiment.  Otherwise, balances strata globally.
+        If ``chosen_group`` is not None, balances strata within that
+        group. Otherwise, balances strata globally.
 
         Parameters
         ----------
         pool : np.ndarray
-            Candidate index pool (experiment-filtered or global).
+            Candidate index pool (group-filtered or global).
         n_samples : int
             Number of indices to produce.
-        chosen_exp : str | None
-            If experiment-aware, the chosen experiment name.
+        chosen_group : str | None
+            If batch_group_by is set, the chosen group name.
         rng : np.random.Generator
             Shared RNG.
 
@@ -416,20 +415,19 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         np.ndarray
             Sampled indices of length *n_samples*.
         """
-        if chosen_exp is not None:
-            # Strata available in this experiment
-            strata = [key for (exp, key) in self._exp_strat_indices if exp == chosen_exp]
+        if chosen_group is not None:
+            # Strata available in this group
+            strata = [key for (grp, key) in self._group_strat_indices if grp == chosen_group]
             if not strata:
                 replace = len(pool) < n_samples
                 return rng.choice(pool, size=n_samples, replace=replace)
 
-            # Determine per-stratum ratios
             ratios = self._compute_ratios(strata)
 
             indices_parts: list[np.ndarray] = []
             remaining = n_samples
             for i, key in enumerate(strata):
-                strat_pool = self._exp_strat_indices.get((chosen_exp, key), np.array([], dtype=int))
+                strat_pool = self._group_strat_indices.get((chosen_group, key), np.array([], dtype=int))
                 if len(strat_pool) == 0:
                     continue
                 if i == len(strata) - 1:
@@ -448,7 +446,7 @@ class FlexibleBatchSampler(Sampler[list[int]]):
             return rng.choice(pool, size=n_samples, replace=replace)
 
         else:
-            # experiment_aware=False: balance strata globally
+            # No batch grouping: balance strata globally
             strata = self._strat_names
             if not strata:
                 replace = len(pool) < n_samples

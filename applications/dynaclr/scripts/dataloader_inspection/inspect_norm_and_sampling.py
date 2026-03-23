@@ -56,8 +56,25 @@ N_BATCHES = 4
 
 
 # %%
-def build_base_dm():
-    """Build the base DataModule once (expensive index construction)."""
+def build_dm(
+    channels_per_sample=1,
+    normalizations=None,
+    stratify_by=None,
+    batch_group_by=None,
+    val_experiments=None,
+):
+    """Build a DataModule with the given config (exercises the real setup path)."""
+    if normalizations is None:
+        normalizations = [
+            NormalizeSampled(
+                keys=["channel_0"],
+                level="fov_statistics",
+                subtrahend="mean",
+                divisor="std",
+            ),
+        ]
+    if stratify_by is None:
+        stratify_by = ["condition", "marker"]
     dm = MultiExperimentDataModule(
         collection_path=None,
         cell_index_path=CELL_INDEX_PATH,
@@ -71,17 +88,11 @@ def build_base_dm():
         positive_match_columns=["lineage_id"],
         tau_range=(0.5, 2.0),
         tau_decay_rate=2.0,
-        channels_per_sample=1,
-        experiment_aware=False,
-        stratify_by=["condition", "marker"],
-        normalizations=[
-            NormalizeSampled(
-                keys=["channel_0"],
-                level="fov_statistics",
-                subtrahend="mean",
-                divisor="std",
-            ),
-        ],
+        channels_per_sample=channels_per_sample,
+        batch_group_by=batch_group_by,
+        stratify_by=stratify_by,
+        val_experiments=val_experiments if val_experiments is not None else [],
+        normalizations=normalizations,
         seed=42,
     )
     dm.setup("fit")
@@ -283,7 +294,7 @@ def inspect_batches(dm, title):
 print("\n" + "#" * 80)
 print("# MODE 1: channels_per_sample=1 (random single channel)")
 print("#" * 80)
-dm = build_base_dm()
+dm = build_dm()
 print_index_summary(dm)
 inspect_batches(dm, "Mode 1: random (1 channel)")
 
@@ -303,11 +314,33 @@ reconfigure_dm(
     dm,
     channels_per_sample=1,
     normalizations=[
-        NormalizeSampled(keys=["channel_0"], level="timepoint_statistics", subtrahend="mean", divisor="std"),
+        NormalizeSampled(
+            keys=["channel_0"],
+            level="timepoint_statistics",
+            subtrahend="mean",
+            divisor="std",
+        ),
     ],
 )
 print_index_summary(dm)
 inspect_batches(dm, "Mode 1.1: random (1 ch, timepoint norm)")
+
+# %% [markdown]
+# ---
+# ## Mode 1.2: Same marker + channel per batch
+#
+# `batch_group_by=["marker", "source_channel_label"]` groups by both
+# marker and channel. Each batch is homogeneous: e.g., all TOMM20 GFP,
+# or all SEC61B labelfree. `stratify_by=["condition"]` balances
+# infected/uninfected within each (marker, channel) group.
+
+# %%
+print("\n" + "#" * 80)
+print("# MODE 1.2: batch_group_by=[marker, source_channel_label]")
+print("#" * 80)
+dm = build_dm(batch_group_by=["marker", "source_channel_label"], stratify_by=["condition"])
+print_index_summary(dm)
+inspect_batches(dm, "Mode 1.2: same marker + channel per batch")
 
 # %% [markdown]
 # ---

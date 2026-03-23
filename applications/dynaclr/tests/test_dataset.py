@@ -329,17 +329,17 @@ class TestPredictMode:
             assert "id" in idx_entry
 
 
-class TestBagOfChannels:
-    """Test bag_of_channels mode reads a single random channel per sample."""
+class TestChannelSelection:
+    """Test channels_per_sample controls how many channels are read."""
 
-    def test_bag_of_channels_shape(self, single_experiment_index):
-        """bag_of_channels=True produces (B, 1, Z, Y, X) output."""
+    def test_single_random_channel_shape(self, single_experiment_index):
+        """channels_per_sample=1 produces (B, 1, Z, Y, X) output."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
             fit=True,
-            bag_of_channels=True,
+            channels_per_sample=1,
         )
         batch = ds.__getitems__([0, 1])
         expected_shape = (2, 1, 1, 32, 32)
@@ -348,34 +348,67 @@ class TestBagOfChannels:
             f"Positive shape {batch['positive'].shape} != {expected_shape}"
         )
 
-    def test_bag_of_channels_varies_channel(self, single_experiment_index):
-        """Over many calls, bag_of_channels selects different channels."""
+    def test_random_channel_varies(self, single_experiment_index):
+        """Over many calls, channels_per_sample=1 selects different channels."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
             fit=True,
-            bag_of_channels=True,
+            channels_per_sample=1,
         )
-        # Collect anchor patches over many calls — values should vary
-        # because different channels have different data
         values = set()
         for _ in range(20):
             batch = ds.__getitems__([0])
             values.add(float(batch["anchor"][0, 0, 0, 0, 0]))
-        assert len(values) > 1, "bag_of_channels should produce varying channel selections"
+        assert len(values) > 1, "channels_per_sample=1 should produce varying channel selections"
 
-    def test_bag_of_channels_false_gives_all_channels(self, single_experiment_index):
-        """bag_of_channels=False (default) reads all source channels."""
+    def test_all_channels_default(self, single_experiment_index):
+        """channels_per_sample=None (default) reads all source channels."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
             fit=True,
-            bag_of_channels=False,
+            channels_per_sample=None,
         )
         batch = ds.__getitems__([0])
         assert batch["anchor"].shape[1] == 2, "Default should read all 2 source channels"
+
+    def test_fixed_channels_by_label(self, single_experiment_index):
+        """channels_per_sample=['labelfree'] reads only that channel."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        labels = single_experiment_index.registry.source_channel_labels
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=[labels[0]],
+        )
+        batch = ds.__getitems__([0, 1])
+        assert batch["anchor"].shape[1] == 1, f"Expected 1 channel, got {batch['anchor'].shape[1]}"
+
+    def test_invalid_channel_label_raises(self, single_experiment_index):
+        """channels_per_sample with invalid label raises ValueError."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        with pytest.raises(ValueError, match="not in source_channel_labels"):
+            MultiExperimentTripletDataset(
+                index=single_experiment_index,
+                fit=True,
+                channels_per_sample=["nonexistent_channel"],
+            )
+
+    def test_int_gt1_raises(self, single_experiment_index):
+        """channels_per_sample > 1 as int raises ValueError."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        with pytest.raises(ValueError, match="must be 1"):
+            MultiExperimentTripletDataset(
+                index=single_experiment_index,
+                fit=True,
+                channels_per_sample=2,
+            )
 
 
 class TestDatasetLength:

@@ -264,7 +264,7 @@ packages from overriding the conda/uv environment.
 | Parameter | What it does |
 |-----------|-------------|
 | `bag_of_channels` | Randomly select one source channel per sample — model learns all channels |
-| `experiment_aware` | Each batch comes from one experiment — prevents mixing channel semantics |
+| `batch_group_by` | Each batch comes from one experiment — prevents mixing channel semantics |
 | `stratify_by` | Columns to balance within batches, e.g. `[condition, organelle]` |
 | `temporal_enrichment` | Over-sample cells near a focal HPI window |
 | `channel_dropout_prob` | Probability of zeroing fluorescence — forces label-free learning |

@@ -94,27 +94,27 @@ data:
     split_ratio: 0.8  # 80% train / 20% val FOV split
     tau_range: [0.5, 2.0]
     tau_decay_rate: 0.0
-    bag_of_channels: true  # one channel per sample, key is "channel"
+    channels_per_sample: 1
     batch_size: 256  # larger batch OK — no backbone gradients
     num_workers: 1
     # Sampling axes
-    experiment_aware: false
+    batch_group_by: null
     stratify_by: [condition]
     leaky: 0.0
     temporal_enrichment: false
     # temporal_window_hours: 2.0
     # temporal_global_fraction: 0.3
-    # Augmentation — bag-of-channels uses "channel" key
+    # Augmentation — channels_per_sample=1 uses "channel_0" key
     normalizations:
       # - class_path: viscy_transforms.NormalizeSampled
       #   init_args:
-      #     keys: [channel]
+      #     keys: [channel_0]
       #     level: timepoint_statistics
       #     subtrahend: mean
       #     divisor: std
       - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           lower: 50
           upper: 99
           b_min: 0.0
@@ -123,31 +123,31 @@ data:
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.8
           scale_range: [[0.8, 1.2], [0.8, 1.2], [0.8, 1.2]]
           rotate_range: [3.14, 0.0, 0.0]
           shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
       - class_path: viscy_transforms.BatchedRandAdjustContrastd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           gamma: [0.8, 1.2]
       - class_path: viscy_transforms.BatchedRandScaleIntensityd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           factors: 0.5
       - class_path: viscy_transforms.BatchedRandGaussianSmoothd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           sigma_x: [0.25, 0.75]
           sigma_y: [0.25, 0.75]
           sigma_z: [0.0, 0.0]
       - class_path: viscy_transforms.BatchedRandGaussianNoised
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           mean: 0.0
           std: 0.2

@@ -38,7 +38,7 @@ In multi-channel mode, use `allow_missing_keys: true` if a transform should only
 
 The old approach combined multiple `TripletDataModule` instances with `ConcatDataModule`, which gave no control over cross-experiment sampling balance. `MultiExperimentDataModule` uses `FlexibleBatchSampler` with explicit axes:
 
-- `experiment_aware` — ensures each batch has representation from multiple experiments
+- `batch_group_by` — ensures each batch has representation from multiple experiments
 - `stratify_by` — balances by condition, organelle, or other metadata columns
 - `temporal_enrichment` — oversamples cells near biological events
 

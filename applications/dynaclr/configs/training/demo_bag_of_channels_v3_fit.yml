@@ -64,8 +64,8 @@ data:
     tau_decay_rate: 2.0
     batch_size: 8
     num_workers: 1
-    bag_of_channels: true
-    experiment_aware: true
+    channels_per_sample: 1
+    batch_group_by: experiment
     stratify_by: [condition, organelle]
     leaky: 0.0
     temporal_enrichment: false
@@ -74,47 +74,47 @@ data:
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           level: timepoint_statistics
           subtrahend: mean
           divisor: std
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.8
           scale_range: [[0.8, 1.2], [0.8, 1.2], [0.8, 1.2]]
           rotate_range: [3.14, 0.0, 0.0]
           shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
       - class_path: viscy_transforms.BatchedRandSpatialCropd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           roi_size: [35, 240, 240]
       - class_path: viscy_transforms.BatchedRandFlipd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           spatial_axes: [1, 2]
       - class_path: viscy_transforms.BatchedRandAdjustContrastd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           gamma: [0.6, 1.6]
       - class_path: viscy_transforms.BatchedRandScaleIntensityd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           factors: 0.5
       - class_path: viscy_transforms.BatchedRandGaussianSmoothd
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           sigma_x: [0.25, 0.50]
           sigma_y: [0.25, 0.50]
           sigma_z: [0.0, 0.0]
       - class_path: viscy_transforms.BatchedRandGaussianNoised
         init_args:
-          keys: [channel]
+          keys: [channel_0]
           prob: 0.5
           mean: 0.0
           std: 0.1

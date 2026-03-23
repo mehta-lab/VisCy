@@ -125,14 +125,14 @@ def small_group_anchors() -> pd.DataFrame:
 
 
 class TestExperimentAware:
-    """experiment_aware=True restricts every batch to one experiment."""
+    """batch_group_by="experiment" restricts every batch to one experiment."""
 
     def test_batch_indices_from_single_experiment(self, two_experiment_anchors: pd.DataFrame):
         """Every batch should contain indices from exactly one experiment."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -148,7 +148,7 @@ class TestExperimentAware:
         sampler = FlexibleBatchSampler(
             valid_anchors=three_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -161,12 +161,12 @@ class TestExperimentAware:
         expected = {"exp_X", "exp_Y", "exp_Z"}
         assert seen_experiments == expected, f"Not all experiments seen: {seen_experiments} vs {expected}"
 
-    def test_experiment_aware_false_allows_mixing(self, two_experiment_anchors: pd.DataFrame):
-        """experiment_aware=False should allow multiple experiments per batch."""
+    def test_batch_group_by_none_allows_mixing(self, two_experiment_anchors: pd.DataFrame):
+        """batch_group_by=None should allow multiple experiments per batch."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=False,
+            batch_group_by=None,
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -178,7 +178,7 @@ class TestExperimentAware:
             if len(experiments) > 1:
                 any_mixed = True
                 break
-        assert any_mixed, "With experiment_aware=False, at least one batch should mix experiments"
+        assert any_mixed, "With batch_group_by=None, at least one batch should mix experiments"
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ class TestStratifyBy:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=16,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by="condition",
             leaky=0.0,
             seed=42,
@@ -216,7 +216,7 @@ class TestStratifyBy:
         sampler = FlexibleBatchSampler(
             valid_anchors=three_condition_anchors,
             batch_size=18,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by="condition",
             leaky=0.0,
             seed=42,
@@ -239,7 +239,7 @@ class TestStratifyBy:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -258,11 +258,11 @@ class TestLeakyMixing:
     """leaky > 0.0 injects cross-experiment samples into experiment-aware batches."""
 
     def test_leaky_zero_no_cross_experiment(self, two_experiment_anchors: pd.DataFrame):
-        """leaky=0.0 with experiment_aware should have 0 cross-experiment indices."""
+        """leaky=0.0 with batch_group_by should have 0 cross-experiment indices."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -276,7 +276,7 @@ class TestLeakyMixing:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.2,
             seed=42,
@@ -295,12 +295,12 @@ class TestLeakyMixing:
                 assert minority_count <= 4, f"Too many leaked samples: {minority_count} (expected ~2)"
         assert any_leaked, "leaky=0.2 should inject cross-experiment samples"
 
-    def test_leaky_ignored_when_not_experiment_aware(self, two_experiment_anchors: pd.DataFrame):
-        """leaky has no effect when experiment_aware=False."""
+    def test_leaky_ignored_when_batch_group_by_none(self, two_experiment_anchors: pd.DataFrame):
+        """leaky has no effect when batch_group_by=None."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
-            experiment_aware=False,
+            batch_group_by=None,
             stratify_by=None,
             leaky=0.5,
             seed=42,
@@ -323,7 +323,7 @@ class TestSmallGroupFallback:
         sampler = FlexibleBatchSampler(
             valid_anchors=small_group_anchors,
             batch_size=32,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -345,7 +345,7 @@ class TestDeterminism:
         kwargs = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by="condition",
             leaky=0.0,
             seed=123,
@@ -363,7 +363,7 @@ class TestDeterminism:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -380,7 +380,7 @@ class TestDeterminism:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -405,7 +405,7 @@ class TestSamplerProtocol:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -421,7 +421,7 @@ class TestSamplerProtocol:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -435,7 +435,7 @@ class TestSamplerProtocol:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -460,7 +460,7 @@ class TestDDPPartitioning:
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -486,7 +486,7 @@ class TestDDPPartitioning:
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -549,7 +549,7 @@ class TestTemporalEnrichment:
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             temporal_enrichment=True,
@@ -583,7 +583,7 @@ class TestTemporalEnrichment:
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             temporal_enrichment=True,
@@ -600,7 +600,7 @@ class TestTemporalEnrichment:
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             temporal_enrichment=True,
@@ -626,7 +626,7 @@ class TestTemporalEnrichment:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             temporal_enrichment=False,
@@ -647,7 +647,7 @@ class TestTemporalEnrichment:
             FlexibleBatchSampler(
                 valid_anchors=df,
                 batch_size=5,
-                experiment_aware=True,
+                batch_group_by="experiment",
                 stratify_by=None,
                 temporal_enrichment=True,
                 seed=0,
@@ -658,7 +658,7 @@ class TestTemporalEnrichment:
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by="condition",
             leaky=0.0,
             temporal_enrichment=True,
@@ -685,7 +685,7 @@ class TestDDPDisjointCoverage:
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -710,7 +710,7 @@ class TestDDPDisjointCoverage:
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -738,7 +738,7 @@ class TestDDPDisjointCoverage:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -756,7 +756,7 @@ class TestDDPDisjointCoverage:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -774,7 +774,7 @@ class TestDDPDisjointCoverage:
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
-            experiment_aware=True,
+            batch_group_by="experiment",
             stratify_by=None,
             leaky=0.0,
             seed=42,
@@ -794,8 +794,8 @@ class TestDDPDisjointCoverage:
 class TestValidationGuards:
     """Column validation: required columns checked only when feature enabled."""
 
-    def test_experiment_aware_requires_experiment_column(self):
-        """experiment_aware=True without 'experiment' column -> ValueError."""
+    def test_batch_group_by_requires_experiment_column(self):
+        """batch_group_by="experiment" without 'experiment' column -> ValueError."""
         df = pd.DataFrame(
             {
                 "condition": ["ctrl"] * 20,
@@ -806,7 +806,7 @@ class TestValidationGuards:
             FlexibleBatchSampler(
                 valid_anchors=df,
                 batch_size=5,
-                experiment_aware=True,
+                batch_group_by="experiment",
                 stratify_by=None,
                 seed=0,
             )
@@ -823,7 +823,7 @@ class TestValidationGuards:
             FlexibleBatchSampler(
                 valid_anchors=df,
                 batch_size=5,
-                experiment_aware=False,
+                batch_group_by=None,
                 stratify_by="condition",
                 seed=0,
             )
@@ -840,7 +840,7 @@ class TestValidationGuards:
             FlexibleBatchSampler(
                 valid_anchors=df,
                 batch_size=5,
-                experiment_aware=True,
+                batch_group_by="experiment",
                 stratify_by=None,
                 temporal_enrichment=True,
                 seed=0,
