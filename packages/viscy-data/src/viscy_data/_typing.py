@@ -225,6 +225,7 @@ CELL_INDEX_TIMELAPSE_COLUMNS = [
     "lineage_id",
     "parent_track_id",
     "hours_post_perturbation",
+    "interval_minutes",
 ]
 
 CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]

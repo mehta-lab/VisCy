@@ -355,31 +355,34 @@ class ExperimentRegistry:
                 plate.close()
 
         # Step 2: Derive source channels from parquet source_channels JSON.
-        # Parse the first non-empty source_channels list per experiment.
-        exp_source_channels: dict[str, list[str]] = {}
+        # Supports dict format {label: zarr_name} (new) and list format [zarr_name, ...] (old).
+        exp_source_channels: dict[str, dict[str, str]] = {}
         for exp_name, exp_group in df.groupby("experiment"):
             for sc_json in exp_group["source_channels"].dropna().unique():
                 parsed = json.loads(sc_json)
                 if parsed:
+                    if isinstance(parsed, list):
+                        parsed = {name: name for name in parsed}
                     exp_source_channels[str(exp_name)] = parsed
                     break
             if str(exp_name) not in exp_source_channels:
                 raise ValueError(f"Experiment '{exp_name}' has no valid source_channels in parquet.")
 
         # Build unified source channel labels (union across experiments).
-        # Use zarr channel names as source labels directly.
         all_labels: list[str] = []
         seen_labels: set[str] = set()
-        for channels in exp_source_channels.values():
-            for ch in channels:
-                if ch not in seen_labels:
-                    all_labels.append(ch)
-                    seen_labels.add(ch)
+        for channel_map in exp_source_channels.values():
+            for label in channel_map:
+                if label not in seen_labels:
+                    all_labels.append(label)
+                    seen_labels.add(label)
 
         source_channels = [
             SourceChannel(
                 label=label,
-                per_experiment={exp: label for exp, channels in exp_source_channels.items() if label in channels},
+                per_experiment={
+                    exp: channel_map[label] for exp, channel_map in exp_source_channels.items() if label in channel_map
+                },
             )
             for label in all_labels
         ]
@@ -415,6 +418,13 @@ class ExperimentRegistry:
                 if not first_organelle.empty:
                     organelle = str(first_organelle.iloc[0])
 
+            if "interval_minutes" not in exp_group.columns or exp_group["interval_minutes"].dropna().empty:
+                raise ValueError(
+                    f"Experiment '{exp_name}': cell index parquet missing 'interval_minutes'. "
+                    "Rebuild the parquet with `build-cell-index`."
+                )
+            interval_minutes = float(exp_group["interval_minutes"].dropna().iloc[0])
+
             experiments.append(
                 ExperimentEntry(
                     name=exp_name,
@@ -422,7 +432,7 @@ class ExperimentRegistry:
                     tracks_path="",
                     channel_names=channel_names,
                     condition_wells=dict(condition_wells),
-                    interval_minutes=1.0,
+                    interval_minutes=interval_minutes,
                     marker=marker,
                     organelle=organelle,
                 )

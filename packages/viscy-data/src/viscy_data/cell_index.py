@@ -57,7 +57,7 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("y", pa.float32()),
         ("x", pa.float32()),
         ("z", pa.int16()),
-        ("source_channels", pa.string()),
+        ("source_channels", pa.large_string()),
         ("condition", pa.string()),
         ("channel_name", pa.string()),
         ("t", pa.int32()),
@@ -66,6 +66,7 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("lineage_id", pa.string()),
         ("parent_track_id", pa.int32()),
         ("hours_post_perturbation", pa.float32()),
+        ("interval_minutes", pa.float32()),
         ("gene_name", pa.string()),
         ("reporter", pa.string()),
         ("sgRNA", pa.string()),
@@ -273,10 +274,10 @@ def _build_experiment_tracks(
     if exclude_fovs is not None:
         all_exclude.update(exclude_fovs)
 
-    source_channel_names = [
-        sc.per_experiment[exp.name] for sc in collection_source_channels if exp.name in sc.per_experiment
-    ]
-    fluorescence_ch = source_channel_names[1] if len(source_channel_names) > 1 else ""
+    source_channel_map = {
+        sc.label: sc.per_experiment[exp.name] for sc in collection_source_channels if exp.name in sc.per_experiment
+    }
+    fluorescence_ch = list(source_channel_map.values())[1] if len(source_channel_map) > 1 else ""
 
     exp_tracks: list[pd.DataFrame] = []
 
@@ -315,9 +316,10 @@ def _build_experiment_tracks(
         tracks_df["well"] = well_name
         tracks_df["condition"] = condition
         tracks_df["channel_name"] = fluorescence_ch
-        tracks_df["source_channels"] = json.dumps(source_channel_names)
+        tracks_df["source_channels"] = json.dumps(source_channel_map)
         tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
         tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
+        tracks_df["interval_minutes"] = exp.interval_minutes
         tracks_df["microscope"] = exp.microscope
         tracks_df["marker"] = exp.marker
         tracks_df["organelle"] = exp.organelle
@@ -428,7 +430,7 @@ def build_ops_cell_index(
     bbox_column: str = "bbox",
     segmentation_id_column: str = "segmentation_id",
     min_bbox_size: int = 5,
-    source_channels: list[str] | None = None,
+    source_channels: dict[str, str] | list[str] | None = None,
     condition_map: dict[str, list[str]] | None = None,
 ) -> pd.DataFrame:
     """Build a cell index parquet from OPS data.
@@ -460,8 +462,11 @@ def build_ops_cell_index(
         Column name for segmentation ID.
     min_bbox_size : int
         Minimum bbox side length; smaller cells are dropped.
-    source_channels : list[str] | None
-        Channel names for ``source_channels`` field. None uses zarr metadata.
+    source_channels : dict[str, str] | list[str] | None
+        Channel label-to-name mapping for ``source_channels`` field.
+        If a dict, keys are labels and values are zarr channel names.
+        If a list, channel names are used as labels.
+        None reads channel names from zarr metadata.
     condition_map : dict[str, list[str]] | None
         ``{condition: [well, ...]}`` mapping. None defaults to ``"unknown"``.
 
@@ -484,10 +489,12 @@ def build_ops_cell_index(
 
     target_wells = wells if wells is not None else sorted(discovered_wells)
 
-    # Resolve source channel names from zarr if not provided
+    # Resolve source channels from zarr if not provided
     if source_channels is None:
         first_pos = next(iter(plate.positions()))[1]
-        source_channels = list(first_pos.channel_names)
+        source_channels = {name: name for name in first_pos.channel_names}
+    elif isinstance(source_channels, list):
+        source_channels = {name: name for name in source_channels}
 
     for well in target_wells:
         well_flat = well.replace("/", "")
@@ -644,9 +651,9 @@ def convert_ops_parquet(
             _logger.warning("Could not read channels from %s, using per-row channel", store_path)
             store_channels[store_key] = []
 
-    # source_channels: full experiment channel list per row
+    # source_channels: {label: zarr_name} dict per row (label = zarr name for OPS)
     out["source_channels"] = df["store_key"].apply(
-        lambda k: json.dumps(store_channels[k]) if store_channels[k] else json.dumps([])
+        lambda k: json.dumps({name: name for name in store_channels[k]}) if store_channels[k] else json.dumps({})
     )
 
     # Per-row channel name (the zarr channel this cell was imaged in)

@@ -165,6 +165,12 @@ class MultiExperimentIndex:
         Number of parallel processes for loading experiments. Default 1
         (sequential). When > 1, dispatches one process per experiment via
         ``ProcessPoolExecutor``. Ignored when *cell_index_path* is provided.
+    max_border_shift : int
+        Maximum pixels to shift a patch center inward for border cells.
+        ``-1`` (default) uses half the patch size — border cells get
+        a slightly off-center patch but are not excluded.
+        ``0`` excludes any cell whose patch would extend beyond the FOV.
+        Tiled datasets (OPS) rarely need this; untiled infectomics data does.
     """
 
     def __init__(
@@ -178,9 +184,15 @@ class MultiExperimentIndex:
         num_workers: int = 1,
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
+        max_border_shift: int = -1,
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
+        # max_border_shift: max pixels to shift patch center for border cells.
+        # -1 (default) = half the patch size. 0 = no clamping, exclude border cells.
+        if max_border_shift < 0:
+            max_border_shift = max(yx_patch_size[0] // 4, yx_patch_size[1] // 4)
+        self.max_border_shift = max_border_shift
         self._store_cache: dict[str, Plate] = {}
 
         # Merge collection-level exclude_fovs with runtime exclude_fovs
@@ -206,6 +218,7 @@ class MultiExperimentIndex:
             positions, tracks = self._resolve_positions_and_dims(tracks)
             self.positions = positions
             # lineage_id already present from build step — skip _reconstruct_lineage
+            # Skip _filter_empty_frames: parquet is curated upstream.
         else:
             all_tracks = self._load_all_experiments(
                 include_wells=include_wells, exclude_fovs=all_exclude_fovs, num_workers=num_workers
@@ -214,6 +227,7 @@ class MultiExperimentIndex:
             tracks = self._reconstruct_lineage(tracks)
             positions, tracks = self._resolve_positions_and_dims(tracks)
             self.positions = positions
+            tracks = self._filter_empty_frames(tracks)
 
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
@@ -344,6 +358,43 @@ class MultiExperimentIndex:
         return all_positions, tracks
 
     @staticmethod
+    def _filter_empty_frames(tracks: pd.DataFrame) -> pd.DataFrame:
+        """Remove rows whose image frame is all zeros (missing acquisition).
+
+        For each unique (store_path, fov_name, t) combination, reads a small
+        center crop of channel 0 to detect empty frames. Rows with an all-zero
+        frame are dropped.
+        """
+        if tracks.empty or "t" not in tracks.columns:
+            return tracks
+
+        valid_mask = pd.Series(True, index=tracks.index)
+
+        for (store_path, fov_name), group in tracks.groupby(["store_path", "fov_name"]):
+            pos = group["position"].iloc[0]
+            image = pos["0"]
+            h, w = image.shape[-2], image.shape[-1]
+            cy, cx = h // 2, w // 2
+            crop = 16  # 32x32 center crop is enough to detect empty frames
+
+            for t in group["t"].unique():
+                try:
+                    patch = np.asarray(image[int(t), 0, :, cy - crop : cy + crop, cx - crop : cx + crop])
+                    if patch.max() == 0:
+                        row_mask = (
+                            (tracks["store_path"] == store_path) & (tracks["fov_name"] == fov_name) & (tracks["t"] == t)
+                        )
+                        valid_mask[row_mask] = False
+                except Exception:
+                    pass  # if we can't read, keep the row
+
+        n_dropped = (~valid_mask).sum()
+        if n_dropped > 0:
+            _logger.info("Excluded %d observations from empty frames", n_dropped)
+
+        return tracks[valid_mask].copy()
+
+    @staticmethod
     def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
         """Add lineage_id column linking daughters to root ancestor.
 
@@ -390,19 +441,23 @@ class MultiExperimentIndex:
         return tracks
 
     def _clamp_borders(self, tracks: pd.DataFrame) -> pd.DataFrame:
-        """Clamp centroids inward instead of excluding border cells.
+        """Handle cells near the image edge for patch extraction.
 
-        Cells whose centroids are completely outside the image boundary
-        (``y < 0``, ``y >= height``, ``x < 0``, ``x >= width``) are excluded.
-        All other cells have their centroids clamped to ensure valid patch
-        extraction: ``y_clamp`` and ``x_clamp`` are at least ``half_patch``
-        from the edges.
+        Behavior controlled by ``self.max_border_shift``:
+
+        - When > 0 (default ``half_patch``): cells near the edge have their
+          patch center shifted inward so the patch is fully within the FOV.
+          Cells requiring a shift larger than ``max_border_shift`` are dropped.
+          This keeps most border cells with a slightly off-center patch.
+        - When 0: any cell whose patch would extend beyond the FOV is excluded.
+          No clamping — all patches are perfectly centered on their cell.
         """
         if tracks.empty:
             return tracks
 
         y_half = self.yx_patch_size[0] // 2
         x_half = self.yx_patch_size[1] // 2
+        max_shift = self.max_border_shift
 
         # Exclude cells completely outside image
         valid = (
@@ -411,21 +466,43 @@ class MultiExperimentIndex:
             & (tracks["x"] >= 0)
             & (tracks["x"] < tracks["_img_width"])
         )
+        n_before = len(tracks)
         tracks = tracks[valid].copy()
 
-        # Clamp inward
-        tracks["y_clamp"] = np.clip(
-            tracks["y"].values,
-            y_half,
-            (tracks["_img_height"] - y_half).values,
-        )
-        tracks["x_clamp"] = np.clip(
-            tracks["x"].values,
-            x_half,
-            (tracks["_img_width"] - x_half).values,
-        )
+        if max_shift > 0:
+            # Clamp patch center inward so patch is fully within FOV
+            tracks["y_clamp"] = np.clip(
+                tracks["y"].to_numpy(),
+                y_half,
+                (tracks["_img_height"] - y_half).to_numpy(),
+            )
+            tracks["x_clamp"] = np.clip(
+                tracks["x"].to_numpy(),
+                x_half,
+                (tracks["_img_width"] - x_half).to_numpy(),
+            )
 
-        # Drop internal columns
+            # Drop cells where the shift exceeds max_border_shift
+            y_shift = np.abs(tracks["y_clamp"].to_numpy() - tracks["y"].to_numpy())
+            x_shift = np.abs(tracks["x_clamp"].to_numpy() - tracks["x"].to_numpy())
+            keep = (y_shift <= max_shift) & (x_shift <= max_shift)
+            tracks = tracks[keep].copy()
+        else:
+            # No clamping — exclude any cell whose patch would go out of bounds
+            in_bounds = (
+                (tracks["y"] >= y_half)
+                & (tracks["y"] <= tracks["_img_height"] - y_half)
+                & (tracks["x"] >= x_half)
+                & (tracks["x"] <= tracks["_img_width"] - x_half)
+            )
+            tracks = tracks[in_bounds].copy()
+            tracks["y_clamp"] = tracks["y"]
+            tracks["x_clamp"] = tracks["x"]
+
+        n_dropped = n_before - len(tracks)
+        if n_dropped > 0:
+            _logger.info("Excluded %d border cells (%.1f%%)", n_dropped, 100 * n_dropped / n_before)
+
         tracks = tracks.drop(columns=["_img_height", "_img_width"])
 
         return tracks
@@ -470,24 +547,35 @@ class MultiExperimentIndex:
         if positive_match_columns is not None and "lineage_id" not in positive_match_columns:
             return self.tracks.reset_index(drop=True)
 
-        # Temporal mode: filter to tracks that have a positive at t+tau
-        valid_mask = pd.Series(False, index=self.tracks.index)
+        # Temporal mode: keep only anchors that have a positive at t+tau.
+        # For each experiment, check whether (lineage_id, t+tau) exists
+        # for any tau in [min_f, max_f] (excluding 0).
+        valid_mask = np.zeros(len(self.tracks), dtype=bool)
 
         for exp in self.registry.experiments:
             min_f, max_f = self.registry.tau_range_frames(exp.name, tau_range_hours)
-            exp_mask = self.tracks["experiment"] == exp.name
-            exp_tracks = self.tracks[exp_mask]
+            exp_mask = self.tracks["experiment"].to_numpy() == exp.name
+            exp_indices = np.where(exp_mask)[0]
+            if len(exp_indices) == 0:
+                continue
 
-            # Build set of (lineage_id, t) pairs for O(1) lookup
-            lineage_timepoints: set[tuple[str, int]] = set(zip(exp_tracks["lineage_id"], exp_tracks["t"]))
+            lineage_ids = self.tracks["lineage_id"].to_numpy()[exp_indices]
+            t_values = self.tracks["t"].to_numpy()[exp_indices]
+            existing_pairs: set[tuple] = set(zip(lineage_ids, t_values))
 
-            for idx, row in exp_tracks.iterrows():
-                for tau in range(min_f, max_f + 1):
-                    if tau == 0:
-                        continue  # anchor cannot be its own positive
-                    if (row["lineage_id"], row["t"] + tau) in lineage_timepoints:
-                        valid_mask[idx] = True
-                        break
+            # Collect all anchor (lineage_id, t) that have any valid positive
+            valid_anchors: set[tuple] = set()
+            for tau in range(min_f, max_f + 1):
+                if tau == 0:
+                    continue
+                for lid, t in existing_pairs:
+                    if (lid, t + tau) in existing_pairs:
+                        valid_anchors.add((lid, t))
+
+            # Mark matching rows
+            for i, idx in enumerate(exp_indices):
+                if (lineage_ids[i], t_values[i]) in valid_anchors:
+                    valid_mask[idx] = True
 
         return self.tracks[valid_mask].reset_index(drop=True)
 
@@ -514,6 +602,43 @@ class MultiExperimentIndex:
             ``{condition_label: array_of_row_indices}``.
         """
         return {name: group.index.to_numpy() for name, group in self.tracks.groupby("condition")}
+
+    def clone_with_subset(
+        self,
+        tracks_subset: pd.DataFrame,
+        positive_cell_source: str = "lookup",
+        positive_match_columns: list[str] | None = None,
+        max_border_shift: int = -1,
+    ) -> "MultiExperimentIndex":
+        """Create a shallow copy with a different tracks DataFrame.
+
+        Reuses the parent's registry, positions, and store cache so no
+        zarr stores are re-opened.  Recomputes ``valid_anchors``.
+
+        Parameters
+        ----------
+        tracks_subset : pd.DataFrame
+            Subset of ``self.tracks`` (will be reset-indexed).
+        positive_cell_source : str
+            Forwarded to ``_compute_valid_anchors``.
+        positive_match_columns : list[str] | None
+            Forwarded to ``_compute_valid_anchors``.
+        max_border_shift : int
+            Forwarded to ``self.max_border_shift``. -1 inherits from parent.
+        """
+        clone = object.__new__(MultiExperimentIndex)
+        clone.registry = self.registry
+        clone.yx_patch_size = self.yx_patch_size
+        clone._store_cache = self._store_cache
+        clone.positions = self.positions
+        clone.max_border_shift = self.max_border_shift if max_border_shift < 0 else max_border_shift
+        clone.tracks = tracks_subset.reset_index(drop=True)
+        clone.valid_anchors = clone._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source=positive_cell_source,
+            positive_match_columns=positive_match_columns,
+        )
+        return clone
 
     def summary(self) -> str:
         """Return a human-readable overview of the index.

@@ -181,11 +181,6 @@ def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
             if level_stats is None:
                 result[ch][level] = None
                 continue
-            if level == "timepoint_statistics":
-                # timepoint_statistics is {tp_idx: {stat: tensor}} — resolved per-sample
-                # upstream in NormalizeSampled, not collatable across samples here
-                result[ch][level] = level_stats
-                continue
             result[ch][level] = {stat: torch.stack([m[ch][level][stat] for m in norm_metas]) for stat in level_stats}
     return result
 

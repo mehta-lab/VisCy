@@ -113,10 +113,12 @@ class MultiExperimentTripletDataset(Dataset):
         in-batch negatives).
     cache_pool_bytes : int
         Tensorstore cache pool size in bytes.
-    bag_of_channels : bool
-        If ``True``, randomly select one source channel per sample instead
-        of reading all source channels.  Output shape is ``(B, 1, Z, Y, X)``
-        instead of ``(B, C, Z, Y, X)``.
+    channels_per_sample : int | list[str] | None
+        Controls how many source channels to read per sample.
+        ``None`` (default) — read all source channels, output ``(B, C, Z, Y, X)``.
+        ``1`` — randomly select one channel per sample, output ``(B, 1, Z, Y, X)``.
+        ``["labelfree", "reporter_gfp"]`` — read those specific channels by label.
+        Integer values > 1 are not supported (use list form).
     positive_cell_source : str
         ``"self"`` — SimCLR: positive is the same crop as anchor (augmentation
         creates two views).  ``"lookup"`` (default) — find a different cell
@@ -127,10 +129,15 @@ class MultiExperimentTripletDataset(Dataset):
         ``["gene_name", "reporter"]``.  When ``"lineage_id"`` is in the list,
         tau constraint is applied.
     positive_channel_source : str
-        ``"same"`` (default) — anchor and positive use the same channel index
-        (bag-of-channels mode).  ``"any"`` — positive draws its channel
-        independently from anchor.  Only meaningful when
-        ``bag_of_channels=True``.
+        ``"same"`` (default) — anchor and positive use the same channel index.
+        ``"any"`` — positive draws its channel independently from anchor.
+        Only meaningful when ``channels_per_sample=1``.
+    label_columns : dict[str, str] | None
+        Mapping from ``batch_key`` (used by classification heads) to
+        dataframe column name.  E.g. ``{"gene_label": "condition"}`` builds
+        a label encoder from unique values in the ``condition`` column and
+        populates ``anchor_meta[i]["labels"]["gene_label"]`` with integer
+        class IDs.  Default: ``None`` (no labels).
     cross_scope_fraction : float
         Deprecated. Use ``positive_match_columns=["condition"]`` instead.
         Fraction of positives sampled as cross-microscope positives. Default: 0.0.
@@ -146,10 +153,11 @@ class MultiExperimentTripletDataset(Dataset):
         tau_decay_rate: float = 2.0,
         return_negative: bool = False,
         cache_pool_bytes: int = 0,
-        bag_of_channels: bool = False,
+        channels_per_sample: int | list[str] | None = None,
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
+        label_columns: dict[str, str] | None = None,
         cross_scope_fraction: float = 0.0,
         hpi_window: float = 1.0,
     ) -> None:
@@ -162,7 +170,26 @@ class MultiExperimentTripletDataset(Dataset):
         self.tau_range_hours = tau_range_hours
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
-        self.bag_of_channels = bag_of_channels
+        # Resolve channel selection mode
+        if channels_per_sample is None:
+            self._channel_mode = "all"
+        elif isinstance(channels_per_sample, int):
+            if channels_per_sample != 1:
+                raise ValueError(
+                    f"channels_per_sample as int must be 1, got {channels_per_sample}. "
+                    "Use a list of labels for multiple specific channels."
+                )
+            self._channel_mode = "random"
+        elif isinstance(channels_per_sample, list):
+            self._channel_mode = "fixed"
+            labels = index.registry.source_channel_labels
+            for label in channels_per_sample:
+                if label not in labels:
+                    raise ValueError(f"Channel label '{label}' not in source_channel_labels: {labels}")
+            self._fixed_source_indices = [labels.index(label) for label in channels_per_sample]
+        else:
+            raise TypeError(f"channels_per_sample must be int, list[str], or None, got {type(channels_per_sample)}")
+        self.channels_per_sample = channels_per_sample
         self.positive_cell_source = positive_cell_source
         self.positive_match_columns = positive_match_columns if positive_match_columns is not None else ["lineage_id"]
         self.positive_channel_source = positive_channel_source
@@ -182,6 +209,14 @@ class MultiExperimentTripletDataset(Dataset):
                 raise ValueError(
                     f"cross_scope_fraction > 0 but experiments are missing microscope field: {missing_microscope}"
                 )
+
+        self._label_encoders: dict[str, tuple[str, dict[str, int]]] = {}
+        if label_columns:
+            for batch_key, col in label_columns.items():
+                unique_vals = sorted(index.valid_anchors[col].dropna().unique())
+                encoder = {v: i for i, v in enumerate(unique_vals)}
+                self._label_encoders[batch_key] = (col, encoder)
+                _logger.info("Label encoder '%s' (%s): %d classes", batch_key, col, len(encoder))
 
         self._rng = np.random.default_rng()
         self._setup_tensorstore_context(cache_pool_bytes)
@@ -218,18 +253,22 @@ class MultiExperimentTripletDataset(Dataset):
         if self.positive_cell_source == "self":
             return
 
+        tracks = self.index.tracks
         if "lineage_id" in self.positive_match_columns:
             self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(
                 lambda: defaultdict(list)
             )
-            for idx, row in self.index.tracks.iterrows():
-                key = (row["experiment"], row["lineage_id"])
-                self._lineage_timepoints[key][row["t"]].append(idx)
+            experiments = tracks["experiment"].to_numpy()
+            lineage_ids = tracks["lineage_id"].to_numpy()
+            t_values = tracks["t"].to_numpy()
+            for idx in range(len(tracks)):
+                self._lineage_timepoints[(experiments[idx], lineage_ids[idx])][t_values[idx]].append(idx)
         else:
             cols = self.positive_match_columns
             self._match_lookup: dict[tuple, list[int]] = defaultdict(list)
-            for idx, row in self.index.tracks.iterrows():
-                key = tuple(row[c] for c in cols)
+            col_arrays = [tracks[c].to_numpy() for c in cols]
+            for idx in range(len(tracks)):
+                key = tuple(arr[idx] for arr in col_arrays)
                 self._match_lookup[key].append(idx)
 
     # ------------------------------------------------------------------
@@ -264,11 +303,15 @@ class MultiExperimentTripletDataset(Dataset):
         """
         anchor_rows = self.index.valid_anchors.iloc[indices]
 
-        # In bag-of-channels mode, pre-sample one channel index per item so that
-        # anchor and positive use the same channel (when positive_channel_source="same").
-        if self.bag_of_channels:
-            n_channels = len(self.index.registry.source_channel_labels)
-            forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
+        # Pre-compute per-sample channel indices based on channel_mode.
+        channel_maps = self.index.registry.channel_maps
+        if self._channel_mode == "random":
+            forced_channel_indices = [
+                [int(self._rng.choice(sorted(channel_maps[row["experiment"]].keys())))]
+                for _, row in anchor_rows.iterrows()
+            ]
+        elif self._channel_mode == "fixed":
+            forced_channel_indices = [self._fixed_source_indices] * len(indices)
         else:
             forced_channel_indices = None
 
@@ -282,9 +325,11 @@ class MultiExperimentTripletDataset(Dataset):
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
             # positive_channel_source="any": positive draws its channel independently
-            if self.bag_of_channels and self.positive_channel_source == "any":
-                n_channels = len(self.index.registry.source_channel_labels)
-                pos_forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
+            if self._channel_mode == "random" and self.positive_channel_source == "any":
+                pos_forced_channel_indices = [
+                    [int(self._rng.choice(sorted(channel_maps[row["experiment"]].keys())))]
+                    for _, row in positive_rows.iterrows()
+                ]
             else:
                 pos_forced_channel_indices = forced_channel_indices
             positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_indices)
@@ -306,8 +351,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         return sample
 
-    @staticmethod
-    def _extract_meta(rows: pd.DataFrame) -> list[SampleMeta]:
+    def _extract_meta(self, rows: pd.DataFrame) -> list[SampleMeta]:
         """Extract lightweight metadata dicts from track rows.
 
         Parameters
@@ -319,9 +363,20 @@ class MultiExperimentTripletDataset(Dataset):
         -------
         list[dict]
             One dict per row with keys from ``_META_COLUMNS``.
+            If ``label_columns`` was set, each dict also contains a
+            ``"labels"`` sub-dict with integer class IDs.
         """
         cols = [c for c in _META_COLUMNS if c in rows.columns]
-        return rows[cols].to_dict(orient="records")
+        records = rows[cols].to_dict(orient="records")
+        if self._label_encoders:
+            for i, (_, row) in enumerate(rows.iterrows()):
+                labels = {}
+                for batch_key, (col, encoder) in self._label_encoders.items():
+                    val = row.get(col)
+                    if val is not None and val in encoder:
+                        labels[batch_key] = encoder[val]
+                records[i]["labels"] = labels
+        return records
 
     # ------------------------------------------------------------------
     # Positive sampling
@@ -520,7 +575,7 @@ class MultiExperimentTripletDataset(Dataset):
         return self._tensorstores[fov_name]
 
     def _slice_patch(
-        self, track_row: pd.Series, forced_source_idx: int | None = None
+        self, track_row: pd.Series, forced_source_indices: list[int] | None = None
     ) -> tuple[
         "ts.TensorStore",
         NormMeta | None,
@@ -537,6 +592,9 @@ class MultiExperimentTripletDataset(Dataset):
         ----------
         track_row : pd.Series
             A single row from ``tracks`` or ``valid_anchors``.
+        forced_source_indices : list[int] or None
+            Source channel indices to read. When provided, only these channels
+            are sliced from the zarr. None reads all channels.
 
         Returns
         -------
@@ -563,14 +621,18 @@ class MultiExperimentTripletDataset(Dataset):
         # Per-experiment channel remapping
         channel_map = self.index.registry.channel_maps[exp_name]
         source_labels = self.index.registry.source_channel_labels
-        if self.bag_of_channels:
-            source_idx = int(
-                forced_source_idx if forced_source_idx is not None else self._rng.integers(len(channel_map))
-            )
-            channel_indices = [channel_map[source_idx]]
-            selected_label = source_labels[source_idx]
+        if forced_source_indices is not None:
+            for idx in forced_source_indices:
+                if idx not in channel_map:
+                    raise ValueError(
+                        f"Source index {idx} not in channel_map for experiment "
+                        f"'{exp_name}' (available: {sorted(channel_map.keys())}). "
+                        "Channel indices must be valid for the experiment."
+                    )
+            source_indices = forced_source_indices
         else:
-            channel_indices = [channel_map[i] for i in sorted(channel_map.keys())]
+            source_indices = sorted(channel_map.keys())
+        channel_indices = [channel_map[i] for i in source_indices]
 
         # Per-experiment z_range (scale-adjusted window size centered on z_range center)
         z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
@@ -597,10 +659,19 @@ class MultiExperimentTripletDataset(Dataset):
                 if "timepoint_statistics" in ch_meta:
                     tp_stats = ch_meta["timepoint_statistics"].get(str(t))
                     ch_meta["timepoint_statistics"] = tp_stats
-            if self.bag_of_channels:
+            if forced_source_indices is not None and self._channel_mode == "random":
+                selected_label = source_labels[source_indices[0]]
                 if selected_label in remapped:
-                    raw_norm_meta = {"channel": remapped[selected_label]}
+                    raw_norm_meta = {"channel_0": remapped[selected_label]}
                 else:
+                    raw_norm_meta = None
+            elif forced_source_indices is not None and self._channel_mode == "fixed":
+                raw_norm_meta = {
+                    source_labels[idx]: remapped[source_labels[idx]]
+                    for idx in source_indices
+                    if source_labels[idx] in remapped
+                }
+                if not raw_norm_meta:
                     raw_norm_meta = None
             else:
                 raw_norm_meta = remapped
@@ -615,7 +686,7 @@ class MultiExperimentTripletDataset(Dataset):
     def _slice_patches(
         self,
         track_rows: pd.DataFrame,
-        forced_channel_indices: list[int] | None = None,
+        forced_channel_indices: list[list[int]] | None = None,
     ) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
@@ -623,9 +694,10 @@ class MultiExperimentTripletDataset(Dataset):
         ----------
         track_rows : pd.DataFrame
             Multiple rows from ``tracks`` / ``valid_anchors``.
-        forced_channel_indices : list[int] or None
-            Per-sample source channel indices to use (bag-of-channels mode).
-            When provided, overrides the random draw in ``_slice_patch``.
+        forced_channel_indices : list[list[int]] or None
+            Per-sample source channel indices to read. Each inner list
+            contains the source indices for that sample.
+            None reads all channels for every sample.
 
         Returns
         -------
@@ -638,7 +710,7 @@ class MultiExperimentTripletDataset(Dataset):
         targets = []
         for i, (_, row) in enumerate(track_rows.iterrows()):
             forced = forced_channel_indices[i] if forced_channel_indices is not None else None
-            patch, norm, scale, target = self._slice_patch(row, forced_source_idx=forced)
+            patch, norm, scale, target = self._slice_patch(row, forced_source_indices=forced)
             patches.append(patch)
             norms.append(norm)
             scales.append(scale)
