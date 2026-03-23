@@ -59,14 +59,17 @@ class SlidingWindowDataset(Dataset):
         Whether to load normalization metadata, defaults to True.
     min_nonzero_fraction : float
         Minimum fraction of voxels above ``nonzero_threshold`` for a patch
-        to be used. Patches below this fraction are skipped (retried up to
-        10 times with random re-sampling). Default 0.0 disables filtering.
+        to be used. Patches below this fraction are retried up to
+        ``max_nonzero_retries`` times. Default 0.0 disables filtering.
     nonzero_threshold : float
         Intensity threshold for the nonzero fraction check.
         Default 0.0 means any nonzero voxel counts.
     nonzero_channel : str or None
         Channel name to check for nonzero fraction. ``None`` defaults
         to the first target channel.
+    max_nonzero_retries : int
+        Maximum number of random re-samples when a patch fails the
+        nonzero fraction check. Default 100.
     """
 
     def __init__(
@@ -80,6 +83,7 @@ class SlidingWindowDataset(Dataset):
         min_nonzero_fraction: float = 0.0,
         nonzero_threshold: float = 0.0,
         nonzero_channel: str | None = None,
+        max_nonzero_retries: int = 100,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -95,6 +99,7 @@ class SlidingWindowDataset(Dataset):
         self.min_nonzero_fraction = min_nonzero_fraction
         self.nonzero_threshold = nonzero_threshold
         self.nonzero_channel = nonzero_channel
+        self.max_nonzero_retries = max_nonzero_retries
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -178,12 +183,11 @@ class SlidingWindowDataset(Dataset):
 
     def __getitem__(self, index: int) -> Sample:
         """Return a sample for the given index."""
-        max_retries = 10
         check_key = (
             self.nonzero_channel or self.channels.get("target", [None])[0] if self.min_nonzero_fraction > 0 else None
         )
         idx = index
-        for attempt in range(max_retries + 1):
+        for attempt in range(self.max_nonzero_retries + 1):
             img, tz, norm_meta = self._find_window(idx)
             ch_names = self.channels["source"].copy()
             ch_idx = self.source_ch_idx.copy()
@@ -192,7 +196,7 @@ class SlidingWindowDataset(Dataset):
                 ch_idx.extend(self.target_ch_idx)
             images, sample_index = self._read_img_window(img, ch_idx, tz)
             sample_images = {k: v for k, v in zip(ch_names, images)}
-            if attempt < max_retries and check_key is not None:
+            if attempt < self.max_nonzero_retries and check_key is not None:
                 if check_key in sample_images:
                     patch = sample_images[check_key]
                     frac = (patch >= self.nonzero_threshold).sum().item() / patch.numel()
@@ -200,6 +204,12 @@ class SlidingWindowDataset(Dataset):
                         idx = random.randint(0, len(self) - 1)
                         continue
             break
+        if check_key is not None and attempt == self.max_nonzero_retries:
+            _logger.warning(
+                f"Exhausted {self.max_nonzero_retries} retries for nonzero fraction "
+                f">= {self.min_nonzero_fraction} on channel '{check_key}' "
+                f"(index {index}). Returning last sample."
+            )
         if self.target_ch_idx is not None:
             # FIXME: this uses the first target channel as weight for performance
             # since adding a reference to a tensor does not copy
@@ -341,6 +351,8 @@ class HCSDataModule(LightningDataModule):
         Intensity threshold for the nonzero fraction check, by default 0.0.
     nonzero_channel : str or None, optional
         Channel to check. ``None`` defaults to the first target channel.
+    max_nonzero_retries : int, optional
+        Maximum retries when a patch fails the nonzero check, by default 100.
     """
 
     def __init__(
@@ -365,6 +377,7 @@ class HCSDataModule(LightningDataModule):
         min_nonzero_fraction: float = 0.0,
         nonzero_threshold: float = 0.0,
         nonzero_channel: str | None = None,
+        max_nonzero_retries: int = 100,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -388,6 +401,7 @@ class HCSDataModule(LightningDataModule):
         self.min_nonzero_fraction = min_nonzero_fraction
         self.nonzero_threshold = nonzero_threshold
         self.nonzero_channel = nonzero_channel
+        self.max_nonzero_retries = max_nonzero_retries
 
     @property
     def cache_path(self):
@@ -444,6 +458,7 @@ class HCSDataModule(LightningDataModule):
         if self.min_nonzero_fraction > 0:
             settings["min_nonzero_fraction"] = self.min_nonzero_fraction
             settings["nonzero_threshold"] = self.nonzero_threshold
+            settings["max_nonzero_retries"] = self.max_nonzero_retries
             if self.nonzero_channel is not None:
                 settings["nonzero_channel"] = self.nonzero_channel
         return settings
