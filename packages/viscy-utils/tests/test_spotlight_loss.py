@@ -166,3 +166,11 @@ def test_spotlight_loss_invalid_params():
         SpotlightLoss(lambda_mse=0.0)
     with pytest.raises(ValueError, match="lambda_mse"):
         SpotlightLoss(lambda_mse=1.0)
+    with pytest.raises(ValueError, match="eps"):
+        SpotlightLoss(eps=0)
+    with pytest.raises(ValueError, match="n_bins"):
+        SpotlightLoss(n_bins=1)
+    with pytest.raises(ValueError, match="min_foreground_fraction"):
+        SpotlightLoss(min_foreground_fraction=1.0)
+    with pytest.raises(ValueError, match="min_foreground_fraction"):
+        SpotlightLoss(min_foreground_fraction=-0.1)

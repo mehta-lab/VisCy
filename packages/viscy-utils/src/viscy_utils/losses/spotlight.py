@@ -144,6 +144,12 @@ class SpotlightLoss(nn.Module):
             raise ValueError(f"sigmoid_k must be in (-1, 0), got {sigmoid_k}")
         if not 0 < lambda_mse < 1:
             raise ValueError(f"lambda_mse must be in (0, 1), got {lambda_mse}")
+        if eps <= 0:
+            raise ValueError(f"eps must be > 0, got {eps}")
+        if n_bins < 2:
+            raise ValueError(f"n_bins must be >= 2, got {n_bins}")
+        if not 0 <= min_foreground_fraction < 1:
+            raise ValueError(f"min_foreground_fraction must be in [0, 1), got {min_foreground_fraction}")
         self.lambda_mse = lambda_mse
         self.sigmoid_k = sigmoid_k
         self.eps = eps
