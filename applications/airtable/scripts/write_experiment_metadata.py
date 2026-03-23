@@ -48,10 +48,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def register(position_paths: list[Path], dry_run: bool = False) -> None:
+def register(position_paths: list[Path], dry_run: bool = False, dataset: str | None = None) -> None:
     """Register zarr positions as per-FOV records in Airtable."""
     db = AirtableDatasets()
-    result = register_fovs(position_paths, db=db)
+    result = register_fovs(position_paths, db=db, dataset_name=dataset)
 
     logger.info(
         "FOVs to create: %d | existing to update: %d | unmatched: %d",
@@ -186,6 +186,12 @@ def main():  # noqa: D103
         help="Position path(s), e.g. /data/ds.zarr/A/1/000000 or /data/ds.zarr/*/*/*",
     )
     reg_parser.add_argument("--dry-run", action="store_true", help="Log what would happen without writing")
+    reg_parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Airtable dataset name override (default: zarr stem). Use when zarr stem doesn't match.",
+    )
 
     write_parser = subparsers.add_parser(
         "write",
@@ -202,7 +208,7 @@ def main():  # noqa: D103
     args = parser.parse_args()
 
     if args.command == "register":
-        register(args.positions, dry_run=args.dry_run)
+        register(args.positions, dry_run=args.dry_run, dataset=args.dataset)
     elif args.command == "write":
         write(args.positions, dry_run=args.dry_run)
 

@@ -273,6 +273,7 @@ def format_register_summary(result: RegisterResult, dry_run: bool = False) -> st
 def register_fovs(
     position_paths: list[Path],
     db: AirtableDatasets | None = None,
+    dataset_name: str | None = None,
 ) -> RegisterResult:
     """Compute per-FOV records to create/update for the given positions.
 
@@ -284,6 +285,10 @@ def register_fovs(
         All must belong to the same zarr store.
     db : AirtableDatasets or None
         Airtable interface. Created from env vars if None.
+    dataset_name : str or None
+        Airtable dataset name to look up. Defaults to the zarr
+        store's stem (e.g. ``"my_dataset"`` from
+        ``my_dataset.zarr``).
 
     Returns
     -------
@@ -303,7 +308,8 @@ def register_fovs(
         raise ValueError("No position paths provided.")
 
     zarr_root, first_pos = parse_position_path(position_paths[0])
-    dataset_name = zarr_root.stem
+    if dataset_name is None:
+        dataset_name = zarr_root.stem
 
     # Validate all paths belong to the same zarr
     pos_names: list[str] = [first_pos]
