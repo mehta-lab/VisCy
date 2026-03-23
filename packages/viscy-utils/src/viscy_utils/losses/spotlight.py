@@ -176,8 +176,8 @@ class SpotlightLoss(nn.Module):
             fg_fractions = mask.view(B, -1).mean(dim=1)
             keep = fg_fractions >= self.min_foreground_fraction
             if not keep.any():
-                return pred.sum() * 0  # all samples below threshold
-            # Weight to zero out below-threshold samples
+                return (pred * 0).sum()
+            # Zero out below-threshold samples in both mask and soft predictions
             sample_weight = keep.float().view(B, *([1] * (pred.ndim - 1)))
             mask = mask * sample_weight
 
@@ -187,14 +187,12 @@ class SpotlightLoss(nn.Module):
         if fg_count > 0:
             masked_mse = (sq_err * mask).sum() / fg_count
         else:
-            # All-background batch: fall back to unmasked MSE so that
-            # gradients still flow. The paper's patch selection avoids
-            # this case at the data level.
             masked_mse = sq_err.mean()
 
         # Dice loss on soft-thresholded prediction vs binary mask
         soft_pred = _tunable_sigmoid(pred, self.sigmoid_k)
-        if self.min_foreground_fraction > 0 and sample_weight is not None:
+        if self.min_foreground_fraction > 0:
+            # Exclude filtered samples from Dice denominator
             soft_pred = soft_pred * sample_weight
         intersection = (soft_pred * mask).sum()
         dice = 1 - (2 * intersection) / (soft_pred.sum() + mask.sum() + self.eps)
