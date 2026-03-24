@@ -185,21 +185,27 @@ def generate_fg_masks(
             t_total, c_total = img_arr.shape[0], img_arr.shape[1]
             zyx_shape = img_arr.shape[2:]
 
-            # All-ones default: channels without explicit masks get full supervision
-            mask_all = np.ones((t_total, c_total, *zyx_shape), dtype=np.uint8)
+            # Allocate zarr array on disk (no in-memory copy of the full FOV)
+            mask_arr = pos.create_zeros(
+                fg_mask_key,
+                shape=(t_total, c_total, *zyx_shape),
+                dtype=np.uint8,
+                chunks=(1, 1, *zyx_shape),
+            )
 
+            # Fill non-target channels with 1s (full supervision default)
+            ones_slice = np.ones((1, *zyx_shape), dtype=np.uint8)
+            non_target = set(range(c_total)) - set(channel_indices)
+            for c in non_target:
+                for t in range(t_total):
+                    mask_arr[t, c] = ones_slice
+
+            # Compute and write target channel masks per timepoint
             for ch_name, ch_idx in zip(channel_names, channel_indices):
                 norm = pos.zattrs["normalization"][ch_name]["fov_statistics"]
                 otsu_threshold = norm["otsu_threshold"]
 
                 for t in range(t_total):
-                    # Read one timepoint, one channel: (Z, Y, X)
                     data = img_arr[t, ch_idx].astype(np.float32)
                     smoothed = median_filter(data, size=(1, 3, 3))
-                    mask_all[t, ch_idx] = (smoothed >= otsu_threshold).astype(np.uint8)
-
-            pos.create_image(
-                fg_mask_key,
-                mask_all,
-                chunks=(1, 1, *zyx_shape),
-            )
+                    mask_arr[t, ch_idx] = (smoothed >= otsu_threshold).astype(np.uint8)
