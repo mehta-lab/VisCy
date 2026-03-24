@@ -415,12 +415,12 @@ class TestConvertOpsParquet:
         assert isinstance(warnings, list)
 
     def test_fov_and_well_mapping(self, tmp_path):
-        """19. OPS 'well' maps to fov; parent path maps to well."""
+        """19. OPS 'well' splits into fov (last part) and well (parent)."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
         df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
-        # fov should be the original OPS well path (e.g. "A/0/0")
-        assert df["fov"].iloc[0] == "A/0/0"
+        # fov should be just the FOV part (e.g. "0")
+        assert df["fov"].iloc[0] == "0"
         # well should be the parent (e.g. "A/0")
         assert df["well"].iloc[0] == "A/0"
 

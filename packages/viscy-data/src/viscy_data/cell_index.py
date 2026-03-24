@@ -10,7 +10,6 @@ Provides:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -434,7 +433,6 @@ def build_ops_cell_index(
     bbox_column: str = "bbox",
     segmentation_id_column: str = "segmentation_id",
     min_bbox_size: int = 5,
-    source_channels: dict[str, str] | list[str] | None = None,
     condition_map: dict[str, list[str]] | None = None,
 ) -> pd.DataFrame:
     """Build a cell index parquet from OPS data.
@@ -466,13 +464,8 @@ def build_ops_cell_index(
         Column name for segmentation ID.
     min_bbox_size : int
         Minimum bbox side length; smaller cells are dropped.
-    source_channels : dict[str, str] | list[str] | None
-        Channel label-to-name mapping for ``source_channels`` field.
-        If a dict, keys are labels and values are zarr channel names.
-        If a list, channel names are used as labels.
-        None reads channel names from zarr metadata.
     condition_map : dict[str, list[str]] | None
-        ``{condition: [well, ...]}`` mapping. None defaults to ``"unknown"``.
+        ``{perturbation: [well, ...]}`` mapping. None defaults to ``"unknown"``.
 
     Returns
     -------
@@ -493,12 +486,11 @@ def build_ops_cell_index(
 
     target_wells = wells if wells is not None else sorted(discovered_wells)
 
-    # Resolve source channels from zarr if not provided
-    if source_channels is None:
-        first_pos = next(iter(plate.positions()))[1]
-        source_channels = {name: name for name in first_pos.channel_names}
-    elif isinstance(source_channels, list):
-        source_channels = {name: name for name in source_channels}
+    # Read pixel sizes from zarr
+    first_pos = next(iter(plate.positions()))[1]
+    scale = first_pos.scale  # [T, C, Z, Y, X]
+    pixel_size_xy_um = scale[3] if len(scale) > 3 else None
+    pixel_size_z_um = scale[2] if len(scale) > 2 else None
 
     for well in target_wells:
         well_flat = well.replace("/", "")
@@ -542,20 +534,23 @@ def build_ops_cell_index(
             if pos_path.startswith(well + "/"):
                 well_fovs.append(pos_path)
 
-        fov = well_fovs[0] if well_fovs else well + "/0"
+        fov_path = well_fovs[0] if well_fovs else well + "/0"
+        fov_name = fov_path.split("/")[-1]
 
         # Build cell index rows
         labels_df["cell_id"] = (
-            experiment_name + "_" + fov + "_" + labels_df[segmentation_id_column].astype(int).astype(str)
+            experiment_name + "_" + fov_path + "_" + labels_df[segmentation_id_column].astype(int).astype(str)
         )
         labels_df["experiment"] = experiment_name
         labels_df["store_path"] = str(store_path)
         labels_df["tracks_path"] = ""
-        labels_df["fov"] = fov
+        labels_df["fov"] = fov_name
         labels_df["well"] = well
         labels_df["z"] = 0
-        labels_df["source_channels"] = json.dumps(source_channels)
         labels_df["channel_name"] = labels_df[channel_column] if channel_column in labels_df.columns else ""
+        labels_df["marker"] = labels_df[channel_column] if channel_column in labels_df.columns else ""
+        labels_df["pixel_size_xy_um"] = pixel_size_xy_um
+        labels_df["pixel_size_z_um"] = pixel_size_z_um
 
         # Condition from map
         if condition_map is not None:
@@ -600,11 +595,10 @@ def convert_ops_parquet(
     store_root: str = "/hpc/projects/icd.fast.ops",
     store_suffix: str = "3-assembly/phenotyping_v3.zarr",
 ) -> pd.DataFrame:
-    """Convert an OPS merged parquet to the canonical cell index schema.
+    """Convert an OPS merged parquet to the canonical flat cell index schema.
 
     Supports multi-experiment parquets: each unique ``store_key`` in the
-    input becomes a separate experiment in the output. Channel names are
-    read from each zarr store to populate ``source_channels``.
+    input becomes a separate experiment in the output.
 
     Parameters
     ----------
@@ -633,8 +627,9 @@ def convert_ops_parquet(
     # store_path from store_key
     out["store_path"] = df["store_key"].apply(lambda k: f"{store_root}/{k}/{store_suffix}")
 
-    # OPS 'well' column is the position path (our fov), e.g. "A/1/0"
-    out["fov"] = df["well"]
+    # OPS 'well' column is the position path (e.g. "A/1/0")
+    # Split into well (A/1) and fov (0)
+    out["fov"] = df["well"].apply(lambda w: w.rsplit("/", 1)[1] if "/" in w else w)
     out["well"] = df["well"].apply(lambda w: w.rsplit("/", 1)[0])
 
     # Centroid from bbox
@@ -643,28 +638,9 @@ def convert_ops_parquet(
     out["x"] = centroids.apply(lambda c: c[1]).astype("float32")
     out["z"] = pd.array([0] * len(df), dtype="int16")
 
-    # Read channel names per experiment from zarr stores
-    store_channels: dict[str, list[str]] = {}
-    for store_key in df["store_key"].unique():
-        store_path = f"{store_root}/{store_key}/{store_suffix}"
-        try:
-            with open_ome_zarr(store_path, mode="r") as plate:
-                first_pos = next(iter(plate.positions()))[1]
-                store_channels[store_key] = list(first_pos.channel_names)
-        except Exception:
-            _logger.warning("Could not read channels from %s, using per-row channel", store_path)
-            store_channels[store_key] = []
-
-    # source_channels: {label: zarr_name} dict per row (label = zarr name for OPS)
-    out["source_channels"] = df["store_key"].apply(
-        lambda k: json.dumps({name: name for name in store_channels[k]}) if store_channels[k] else json.dumps({})
-    )
-
-    # Per-row channel name (the zarr channel this cell was imaged in)
+    # Per-row channel name and marker (the zarr channel this cell was imaged in)
     out["channel_name"] = df["channel"] if "channel" in df.columns else ""
-
-    # marker = reporter (the protein being imaged)
-    out["marker"] = df["reporter"] if "reporter" in df.columns else None
+    out["marker"] = df["reporter"] if "reporter" in df.columns else out["channel_name"]
     out["organelle"] = None
 
     # OPS-specific columns
@@ -689,7 +665,10 @@ def convert_ops_parquet(
     out["hours_post_perturbation"] = pd.array([0.0] * len(df), dtype="float32")
 
     out["tracks_path"] = ""
+    out["interval_minutes"] = pd.array([0.0] * len(df), dtype="float32")
     out["microscope"] = ""
+    out["pixel_size_xy_um"] = None
+    out["pixel_size_z_um"] = None
 
     write_cell_index(out, output_path)
     n_experiments = df["store_key"].nunique()
