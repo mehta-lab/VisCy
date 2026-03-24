@@ -3,6 +3,8 @@
 import iohub.ngff as ngff
 import numpy as np
 import tensorstore
+from scipy.ndimage import median_filter
+from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
 from viscy_utils.mp_utils import get_val_stats
@@ -95,10 +97,6 @@ def generate_normalization_metadata(
     num_timepoints = first_position["0"].shape[0]
     print(f"Detected {num_timepoints} timepoints in dataset")
 
-    if compute_otsu:
-        from scipy.ndimage import median_filter
-        from skimage.filters import threshold_otsu
-
     for i, channel_index in enumerate(channel_ids):
         print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
@@ -176,8 +174,6 @@ def generate_fg_masks(
     num_workers : int, optional
         Number of CPU workers for reading, by default 4.
     """
-    from scipy.ndimage import median_filter
-
     with ngff.open_ome_zarr(zarr_dir, mode="r+") as plate:
         all_channel_names = plate.channel_names
         channel_indices = [all_channel_names.index(name) for name in channel_names]
