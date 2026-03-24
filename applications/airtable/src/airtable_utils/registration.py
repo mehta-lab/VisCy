@@ -17,7 +17,7 @@ from pathlib import Path
 
 from iohub import open_ome_zarr
 
-from airtable_utils.database import AirtableDatasets, CellLineEntry
+from airtable_utils.database import AirtableDatasets, MarkerRegistryEntry
 from airtable_utils.schemas import MAX_CHANNELS, DatasetRecord, parse_channel_name, parse_position_name
 
 logger = logging.getLogger(__name__)
@@ -115,33 +115,26 @@ def zarr_fields_for_position(
     return fields
 
 
-def _normalize_biology(biology: str) -> str:
-    """Normalize biology label to canonical form."""
-    if biology.lower() in ("sensor", "viral sensor"):
-        return "viral_sensor"
-    return biology
-
-
-def derive_channel_biology(
+def derive_channel_marker(
     channel_names: list[str],
-    cell_line_entries: list[CellLineEntry],
+    marker_entries: list[MarkerRegistryEntry],
 ) -> dict[str, str]:
-    """Derive channel biology annotations from Cell Line Registry entries.
+    """Derive channel marker annotations from Marker Registry entries.
 
     For each channel name, finds the first registry entry whose aliases
-    contain a substring match, and returns the biology label.
+    contain a substring match, and returns the protein marker name.
 
     Parameters
     ----------
     channel_names : list[str]
         Ordered channel names from the zarr store.
-    cell_line_entries : list[CellLineEntry]
+    marker_entries : list[MarkerRegistryEntry]
         Registry entries linked to the well record.
 
     Returns
     -------
     dict[str, str]
-        Mapping of ``"channel_{i}_biology"`` -> biology label
+        Mapping of ``"channel_{i}_marker"`` -> marker label
         for channels that matched a registry entry.
     """
     result: dict[str, str] = {}
@@ -150,17 +143,17 @@ def derive_channel_biology(
         ch_type = parsed.get("channel_type", "")
 
         if ch_type == "labelfree":
-            result[f"channel_{i}_biology"] = "labelfree"
+            result[f"channel_{i}_marker"] = "labelfree"
             continue
 
         if ch_type == "virtual_stain":
             target = ch_name.replace("_prediction", "").replace("_segmentation", "")
-            result[f"channel_{i}_biology"] = f"virtual-stain-{target}"
+            result[f"channel_{i}_marker"] = f"virtual-stain-{target}"
             continue
 
-        for entry in cell_line_entries:
+        for entry in marker_entries:
             if any(alias in ch_name for alias in entry.channel_name_aliases):
-                result[f"channel_{i}_biology"] = _normalize_biology(entry.biology)
+                result[f"channel_{i}_marker"] = entry.marker
                 break
     return result
 
@@ -171,7 +164,7 @@ def copy_well_template_fields(template: DatasetRecord) -> dict:
     Parameters
     ----------
     template : DatasetRecord
-        Well-level record with biology metadata.
+        Well-level record with marker metadata.
 
     Returns
     -------
@@ -184,9 +177,9 @@ def copy_well_template_fields(template: DatasetRecord) -> dict:
         if val is not None:
             fields[key] = val
     for i in range(MAX_CHANNELS):
-        bio_val = getattr(template, f"channel_{i}_biology", None)
-        if bio_val is not None:
-            fields[f"channel_{i}_biology"] = bio_val
+        marker_val = getattr(template, f"channel_{i}_marker", None)
+        if marker_val is not None:
+            fields[f"channel_{i}_marker"] = marker_val
     return fields
 
 
@@ -195,7 +188,7 @@ def build_validation_table(
     channel_names: list[str],
     records: list[DatasetRecord],
 ) -> str:
-    """Build markdown validation table for channel / biology pairing.
+    """Build markdown validation table for channel / marker pairing.
 
     Parameters
     ----------
@@ -204,7 +197,7 @@ def build_validation_table(
     channel_names : list[str]
         Ordered channel names from the zarr.
     records : list[DatasetRecord]
-        Airtable records (first record used for biology lookup).
+        Airtable records (first record used for marker lookup).
 
     Returns
     -------
@@ -212,7 +205,7 @@ def build_validation_table(
         Markdown table string.
     """
     lines = [
-        "| dataset | idx | channel_name | type | filter_cube | biology (scientist) |",
+        "| dataset | idx | channel_name | type | filter_cube | marker (scientist) |",
         "|---------|-----|--------------|------|-------------|---------------------|",
     ]
 
@@ -222,12 +215,12 @@ def build_validation_table(
         parsed = parse_channel_name(ch_name)
         ch_type = parsed.get("channel_type", "—")
         filter_cube = parsed.get("filter_cube", "—")
-        biology = "—"
+        marker = "—"
         if rec and i < MAX_CHANNELS:
-            bio_val = getattr(rec, f"channel_{i}_biology", None)
-            if bio_val:
-                biology = bio_val
-        lines.append(f"| {dataset_name} | {i} | {ch_name} | {ch_type} | {filter_cube} | {biology} |")
+            marker_val = getattr(rec, f"channel_{i}_marker", None)
+            if marker_val:
+                marker = marker_val
+        lines.append(f"| {dataset_name} | {i} | {ch_name} | {ch_type} | {filter_cube} | {marker} |")
 
     return "\n".join(lines)
 
@@ -325,9 +318,9 @@ def register_fovs(
             f"No Airtable records for dataset '{dataset_name}'. Ensure the platemap has been filled first."
         )
 
-    # Fetch Cell Line Registry once — keyed by Airtable record ID
-    registry = db.get_cell_line_registry()
-    logger.info("Loaded %d Cell Line Registry entries", len(registry))
+    # Fetch Marker Registry once — keyed by Airtable record ID
+    registry = db.get_marker_registry()
+    logger.info("Loaded %d Marker Registry entries", len(registry))
 
     well_templates: dict[str, DatasetRecord] = {}
     fov_records: dict[tuple[str, str], DatasetRecord] = {}
@@ -367,12 +360,12 @@ def register_fovs(
 
             zarr_fields = zarr_fields_for_position(zarr_root, pos_name, result.channel_names, shape)
 
-            # Resolve cell_line linked records -> registry entries -> biology
-            rec_for_biology = fov_records.get((well_id, fov)) or well_templates.get(well_id)
-            if rec_for_biology is not None and rec_for_biology.cell_line:
-                cell_line_entries = [registry[rid] for rid in rec_for_biology.cell_line if rid in registry]
-                biology_fields = derive_channel_biology(result.channel_names, cell_line_entries)
-                zarr_fields.update(biology_fields)
+            # Resolve cell_line linked records -> registry entries -> marker
+            rec_for_marker = fov_records.get((well_id, fov)) or well_templates.get(well_id)
+            if rec_for_marker is not None and rec_for_marker.cell_line:
+                marker_entries = [registry[rid] for rid in rec_for_marker.cell_line if rid in registry]
+                marker_fields = derive_channel_marker(result.channel_names, marker_entries)
+                zarr_fields.update(marker_fields)
 
             existing = fov_records.get((well_id, fov))
             if existing is not None:

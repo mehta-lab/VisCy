@@ -381,8 +381,8 @@ class ExperimentRegistry:
             # Derive condition_wells from parquet
             condition_wells: dict[str, list[str]] = defaultdict(list)
             seen_pairs: set[tuple[str, str]] = set()
-            for _, row in exp_group[["condition", "well"]].drop_duplicates().iterrows():
-                cond = str(row["condition"])
+            for _, row in exp_group[["perturbation", "well"]].drop_duplicates().iterrows():
+                cond = str(row["perturbation"])
                 well = str(row["well"])
                 if (cond, well) not in seen_pairs:
                     condition_wells[cond].append(well)

@@ -118,7 +118,7 @@ def _load_experiment_fovs(
             # Enrich columns
             tracks_df["store_path"] = data_path
             tracks_df["experiment"] = exp_name
-            tracks_df["condition"] = condition
+            tracks_df["perturbation"] = condition
             tracks_df["marker"] = marker
             tracks_df["organelle"] = organelle
             tracks_df["microscope"] = microscope
@@ -610,7 +610,7 @@ class MultiExperimentIndex:
         dict[str, np.ndarray]
             ``{condition_label: array_of_row_indices}``.
         """
-        return {name: group.index.to_numpy() for name, group in self.tracks.groupby("condition")}
+        return {name: group.index.to_numpy() for name, group in self.tracks.groupby("perturbation")}
 
     def clone_with_subset(
         self,
@@ -666,7 +666,7 @@ class MultiExperimentIndex:
         for exp in self.registry.experiments:
             exp_tracks = self.tracks[self.tracks["experiment"] == exp.name]
             exp_anchors = self.valid_anchors[self.valid_anchors["experiment"] == exp.name]
-            cond_counts = exp_tracks.groupby("condition").size()
+            cond_counts = exp_tracks.groupby("perturbation").size()
             cond_str = ", ".join(f"{c}({n})" for c, n in cond_counts.items())
             lines.append(
                 f"  {exp.name}: {len(exp_tracks)} observations, {len(exp_anchors)} anchors, conditions: {cond_str}"

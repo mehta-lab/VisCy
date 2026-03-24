@@ -39,7 +39,7 @@ from viscy_data._utils import _read_norm_meta
 
 _META_COLUMNS = [
     "experiment",
-    "condition",
+    "perturbation",
     "microscope",
     "fov_name",
     "global_track_id",
@@ -542,7 +542,7 @@ class MultiExperimentTripletDataset(Dataset):
         tracks = self.index.tracks
         candidates = tracks[
             (tracks["microscope"] != anchor_row["microscope"])
-            & (tracks["condition"] == anchor_row["condition"])
+            & (tracks["perturbation"] == anchor_row["perturbation"])
             & ((tracks["hours_post_perturbation"] - anchor_row["hours_post_perturbation"]).abs() <= self.hpi_window)
         ]
         if candidates.empty:

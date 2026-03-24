@@ -47,7 +47,7 @@ def _make_valid_df(n: int = 5) -> pd.DataFrame:
             "y": np.random.default_rng(0).random(n).astype(np.float32) * 256,
             "x": np.random.default_rng(1).random(n).astype(np.float32) * 256,
             "z": np.zeros(n, dtype=np.int16),
-            "condition": "uninfected",
+            "perturbation": "uninfected",
             "channel_name": "GFP",
             "microscope": "",
         }
@@ -319,8 +319,8 @@ class TestOPSHelpers:
         assert _parse_bbox_min_size("(10, 20, 12, 40)") == 2.0  # height=2, width=20
         assert _parse_bbox_min_size("(10, 20, 30, 40)") == 20.0  # both sides ≥ 5
 
-    def test_condition_map_populates_condition(self):
-        """14. condition_map populates condition column."""
+    def test_condition_map_populates_perturbation(self):
+        """14. condition_map populates perturbation column."""
         from viscy_data.cell_index import _resolve_condition
 
         condition_map = {"treated": ["A/1"], "control": ["B/1"]}
@@ -434,13 +434,13 @@ class TestConvertOpsParquet:
         df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         assert not df["cell_id"].duplicated().any()
 
-    def test_gene_name_and_condition(self, tmp_path):
-        """OPS gene_name populates condition column."""
+    def test_gene_name_and_perturbation(self, tmp_path):
+        """OPS gene_name populates perturbation column."""
         ops_path = _make_ops_merged_parquet(tmp_path)
         output = tmp_path / "ops_cell_index.parquet"
         df = convert_ops_parquet(ops_path, output, store_root="/nonexistent", store_suffix="fake.zarr")
         assert df["gene_name"].iloc[0] == "RPL35"
-        assert df["condition"].iloc[0] == "RPL35"
+        assert df["perturbation"].iloc[0] == "RPL35"
 
     def test_round_trip_parquet(self, tmp_path):
         """Written parquet can be read back with correct schema."""

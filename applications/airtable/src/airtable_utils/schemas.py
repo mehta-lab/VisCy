@@ -46,9 +46,9 @@ class BiologicalAnnotation(BaseModel):
         Fluorophore name if applicable (e.g. "eGFP", "mCherry").
     """
 
-    organelle: str
+    organelle: str | None = None
     marker: str
-    marker_type: Literal["protein_tag", "direct_label", "nuclear_dye", "virtual_stain"]
+    marker_type: Literal["protein_tag", "direct_label", "nuclear_dye", "virtual_stain"] = "protein_tag"
     fluorophore: str | None = None
 
 
@@ -112,21 +112,21 @@ class DatasetRecord(FOVRecord):
     """
 
     channel_0_name: str | None = None
-    channel_0_biology: str | None = None
+    channel_0_marker: str | None = None
     channel_1_name: str | None = None
-    channel_1_biology: str | None = None
+    channel_1_marker: str | None = None
     channel_2_name: str | None = None
-    channel_2_biology: str | None = None
+    channel_2_marker: str | None = None
     channel_3_name: str | None = None
-    channel_3_biology: str | None = None
+    channel_3_marker: str | None = None
     channel_4_name: str | None = None
-    channel_4_biology: str | None = None
+    channel_4_marker: str | None = None
     channel_5_name: str | None = None
-    channel_5_biology: str | None = None
+    channel_5_marker: str | None = None
     channel_6_name: str | None = None
-    channel_6_biology: str | None = None
+    channel_6_marker: str | None = None
     channel_7_name: str | None = None
-    channel_7_biology: str | None = None
+    channel_7_marker: str | None = None
     record_id: str | None = None
 
     @model_validator(mode="after")
@@ -186,7 +186,7 @@ class DatasetRecord(FOVRecord):
                     else _select_val(fields.get(f"channel_{i}_{attr}"))
                 )
                 for i in range(MAX_CHANNELS)
-                for attr in ("name", "biology")
+                for attr in ("name", "marker")
             },
             data_path=fields.get("data_path"),
             tracks_path=fields.get("tracks_path"),
@@ -204,7 +204,11 @@ class DatasetRecord(FOVRecord):
 
         Maps each channel name to a ``ChannelAnnotationEntry``-compatible dict
         with ``channel_type`` (derived from channel name parsing) and
-        ``biological_annotation`` (from the Airtable biology field).
+        ``biological_annotation`` with the marker from Airtable.
+
+        For labelfree channels, ``marker`` defaults to the channel name
+        (e.g., Phase3D). For fluorescence channels, ``marker`` comes from
+        the ``channel_N_marker`` Airtable field (e.g., TOMM20, SEC61).
         """
         annotation: dict[str, dict] = {}
         for i in range(MAX_CHANNELS):
@@ -213,16 +217,16 @@ class DatasetRecord(FOVRecord):
                 continue
             parsed = parse_channel_name(name)
             ch_type = parsed.get("channel_type", "unknown")
-            # Map "unknown" to a valid literal for the schema
             if ch_type not in ("fluorescence", "labelfree", "virtual_stain"):
                 ch_type = "labelfree"
 
-            biology = getattr(self, f"channel_{i}_biology")
+            marker_value = getattr(self, f"channel_{i}_marker")
             bio_dict = None
-            if biology is not None:
+            if ch_type == "labelfree":
+                bio_dict = {"marker": name}
+            elif marker_value is not None:
                 bio_dict = {
-                    "organelle": biology.lower().replace(" ", "_"),
-                    "marker": "unknown",
+                    "marker": marker_value,
                     "marker_type": "protein_tag",
                     "fluorophore": None,
                 }

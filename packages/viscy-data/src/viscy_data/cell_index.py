@@ -58,7 +58,7 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("y", pa.float32()),
         ("x", pa.float32()),
         ("z", pa.int16()),
-        ("condition", pa.string()),
+        ("perturbation", pa.string()),
         ("channel_name", pa.string()),
         ("t", pa.int32()),
         ("track_id", pa.int32()),
@@ -253,7 +253,7 @@ def _build_experiment_tracks(
     include_wells: list[str] | None,
     exclude_fovs: list[str] | None,
 ) -> pd.DataFrame:
-    """Build track rows for a single experiment.
+    """Build flat track rows for a single experiment (one row per cell x timepoint x channel).
 
     Parameters
     ----------
@@ -269,7 +269,7 @@ def _build_experiment_tracks(
     Returns
     -------
     pd.DataFrame
-        Track rows for this experiment.
+        Track rows for this experiment, one per (cell, timepoint, channel).
     """
     condition_wells = exp.condition_wells
     declared_wells = {w for wells in condition_wells.values() for w in wells}
@@ -278,10 +278,12 @@ def _build_experiment_tracks(
     if exclude_fovs is not None:
         all_exclude.update(exclude_fovs)
 
-    source_channel_map = {
-        sc.label: sc.per_experiment[exp.name] for sc in collection_source_channels if exp.name in sc.per_experiment
-    }
-    fluorescence_ch = list(source_channel_map.values())[1] if len(source_channel_map) > 1 else ""
+    # Build (zarr_channel_name, marker) pairs for channels this experiment has
+    channel_marker_pairs: list[tuple[str, str]] = []
+    for sc in collection_source_channels:
+        if exp.name in sc.per_experiment:
+            zarr_name = sc.per_experiment[exp.name]
+            channel_marker_pairs.append((zarr_name, sc.label))
 
     exp_tracks: list[pd.DataFrame] = []
 
@@ -289,20 +291,21 @@ def _build_experiment_tracks(
         fovs = list(plate.positions())
 
     for _pos_path, position in tqdm(fovs, desc=exp.name, leave=False, unit="fov"):
-        fov_name = position.zgroup.name.strip("/")
-        parts = fov_name.split("/")
+        fov_path = position.zgroup.name.strip("/")
+        parts = fov_path.split("/")
         well_name = "/".join(parts[:2])
+        fov_name = parts[2]
 
         if declared_wells and well_name not in declared_wells:
             continue
         if include_wells is not None and well_name not in include_wells:
             continue
-        if all_exclude and fov_name in all_exclude:
+        if all_exclude and fov_path in all_exclude:
             continue
 
         condition = _resolve_condition(condition_wells, well_name)
 
-        tracks_dir = Path(exp.tracks_path) / fov_name
+        tracks_dir = Path(exp.tracks_path) / fov_path
         csv_files = list(tracks_dir.glob("*.csv"))
         if not csv_files:
             raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
@@ -310,28 +313,33 @@ def _build_experiment_tracks(
             raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
         tracks_df = pd.read_csv(csv_files[0])
 
+        # Base columns (shared across channel rows)
         tracks_df["cell_id"] = (
-            exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
+            exp.name + "_" + fov_path + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
         )
         tracks_df["experiment"] = exp.name
         tracks_df["store_path"] = str(exp.data_path)
         tracks_df["tracks_path"] = str(exp.tracks_path)
         tracks_df["fov"] = fov_name
         tracks_df["well"] = well_name
-        tracks_df["condition"] = condition
-        tracks_df["channel_name"] = fluorescence_ch
-        tracks_df["source_channels"] = json.dumps(source_channel_map)
-        tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+        tracks_df["perturbation"] = condition
+        tracks_df["global_track_id"] = exp.name + "_" + fov_path + "_" + tracks_df["track_id"].astype(str)
         tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
         tracks_df["interval_minutes"] = exp.interval_minutes
         tracks_df["microscope"] = exp.microscope
-        tracks_df["marker"] = exp.marker
         tracks_df["organelle"] = exp.organelle
+        tracks_df["pixel_size_xy_um"] = exp.pixel_size_xy_um
+        tracks_df["pixel_size_z_um"] = exp.pixel_size_z_um
 
         if "z" not in tracks_df.columns:
             tracks_df["z"] = 0
 
-        exp_tracks.append(tracks_df)
+        # Explode: one row per channel
+        for zarr_ch, marker in channel_marker_pairs:
+            ch_df = tracks_df.copy()
+            ch_df["channel_name"] = zarr_ch
+            ch_df["marker"] = marker
+            exp_tracks.append(ch_df)
 
     return pd.concat(exp_tracks, ignore_index=True) if exp_tracks else pd.DataFrame()
 
@@ -559,9 +567,9 @@ def build_ops_cell_index(
 
         # Condition from map
         if condition_map is not None:
-            labels_df["condition"] = _resolve_condition(condition_map, well)
+            labels_df["perturbation"] = _resolve_condition(condition_map, well)
         else:
-            labels_df["condition"] = "unknown"
+            labels_df["perturbation"] = "unknown"
 
         # OPS-specific columns
         labels_df["gene_name"] = labels_df[gene_column] if gene_column in labels_df.columns else None
@@ -673,7 +681,7 @@ def convert_ops_parquet(
     out["sgRNA"] = df["sgRNA"] if "sgRNA" in df.columns else None
 
     # condition = gene_name for perturbation mode
-    out["condition"] = out["gene_name"] if "gene_name" in df.columns else "unknown"
+    out["perturbation"] = out["gene_name"] if "gene_name" in df.columns else "unknown"
 
     # OPS is single-timepoint
     out["t"] = pd.array([0] * len(df), dtype="Int32")

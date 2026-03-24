@@ -513,7 +513,7 @@ class TestCrossScopePositive:
         pos = ds._find_cross_scope_positive(anchor_row, rng)
         assert pos is not None, "Should find cross-scope positive"
         assert pos["microscope"] != anchor_row["microscope"]
-        assert pos["condition"] == anchor_row["condition"]
+        assert pos["perturbation"] == anchor_row["perturbation"]
 
     def test_find_cross_scope_positive_returns_none_when_no_candidates(self, single_experiment_index):
         """_find_cross_scope_positive returns None when all tracks share one microscope."""

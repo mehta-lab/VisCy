@@ -36,8 +36,8 @@ def _make_well_template(well_id: str, record_id: str | None = None, **overrides)
         "moi": 5.0,
         "time_interval_min": 30.0,
         "fluorescence_modality": "Light-sheet",
-        "channel_0_biology": "brightfield",
-        "channel_1_biology": "mitochondria",
+        "channel_0_marker": "brightfield",
+        "channel_1_marker": "mitochondria",
         "record_id": record_id,
     }
     defaults.update(overrides)
@@ -159,8 +159,8 @@ class TestRegisterFovs:
         assert rec0["organelle"] == "mitochondria"
         assert rec0["perturbation"] == "ZIKV"
         assert rec0["moi"] == 5.0
-        assert rec0["channel_0_biology"] == "brightfield"
-        assert rec0["channel_1_biology"] == "mitochondria"
+        assert rec0["channel_0_marker"] == "brightfield"
+        assert rec0["channel_1_marker"] == "mitochondria"
 
     def test_updates_existing_fov_records(self):
         """Existing per-FOV records get updated with zarr-derived fields only."""
@@ -310,12 +310,13 @@ class TestZarrFieldsForPosition:
         assert fields["x_shape"] == 256
 
     def test_truncates_at_max_channels(self):
-        channels = [f"ch_{i}" for i in range(6)]
+        num_channels = MAX_CHANNELS + 2
+        channels = [f"ch_{i}" for i in range(num_channels)]
         fields = zarr_fields_for_position(
             zarr_path=Path("/data/ds.zarr"),
             pos_name="A/1/000000",
             channel_names=channels,
-            shape=(1, 6, 1, 64, 64),
+            shape=(1, num_channels, 1, 64, 64),
         )
         for i in range(MAX_CHANNELS):
             assert fields[f"channel_{i}_name"] == f"ch_{i}"
@@ -340,8 +341,8 @@ class TestCopyWellTemplateFields:
         assert fields["perturbation"] == "ZIKV"
         assert fields["moi"] == 5.0
         assert fields["time_interval_min"] == 30.0
-        assert fields["channel_0_biology"] == "brightfield"
-        assert fields["channel_1_biology"] == "mitochondria"
+        assert fields["channel_0_marker"] == "brightfield"
+        assert fields["channel_1_marker"] == "mitochondria"
 
     def test_skips_none_fields(self):
         template = _make_well_template("A/1", seeding_density=None, treatment_concentration_nm=None)

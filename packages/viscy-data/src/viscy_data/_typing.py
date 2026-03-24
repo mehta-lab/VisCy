@@ -145,7 +145,7 @@ class SampleMeta(TypedDict, total=False):
     """
 
     experiment: OneOrSeq[str]
-    condition: OneOrSeq[str]
+    perturbation: OneOrSeq[str]
     microscope: OneOrSeq[str]
     fov_name: OneOrSeq[str]
     global_track_id: OneOrSeq[str]
@@ -214,7 +214,7 @@ CELL_INDEX_CORE_COLUMNS = [
     "z",
 ]
 
-CELL_INDEX_GROUPING_COLUMNS = ["condition", "channel_name", "microscope"]
+CELL_INDEX_GROUPING_COLUMNS = ["perturbation", "channel_name", "microscope"]
 
 CELL_INDEX_BIOLOGY_COLUMNS = ["marker", "organelle"]
 

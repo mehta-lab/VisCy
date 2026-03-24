@@ -1,7 +1,7 @@
 """Backfill cell_line_2 from cell_line in the Datasets table.
 
 Reads all Datasets records that have cell_line set, matches each value
-against the Cell Line Registry by name, and sets cell_line_2 to the
+against the Marker Registry by name, and sets cell_line_2 to the
 linked record IDs.
 
 Usage
@@ -33,12 +33,12 @@ def main(dry_run: bool = False) -> None:  # noqa: D103
     registry_table = api.table(base_id, REGISTRY_TABLE_ID)
     datasets_table = api.table(base_id, DATASETS_TABLE_ID)
 
-    # Build lookup: cell_line name -> registry record ID
-    logger.info("Fetching Cell Line Registry...")
-    registry_records = registry_table.all(fields=["cell_line"])
+    # Build lookup: marker-fluorophore name -> registry record ID
+    logger.info("Fetching Marker Registry...")
+    registry_records = registry_table.all(fields=["marker-fluorophore"])
     registry_lut: dict[str, str] = {}
     for rec in registry_records:
-        name = rec["fields"].get("cell_line", "")
+        name = rec["fields"].get("marker-fluorophore", "")
         if name:
             registry_lut[name] = rec["id"]
     logger.info("Registry has %d entries", len(registry_lut))
@@ -96,7 +96,7 @@ def main(dry_run: bool = False) -> None:  # noqa: D103
 
     if unmatched:
         logger.warning(
-            "No registry entry found for: %s\nAdd these to the Cell Line Registry table before re-running.",
+            "No registry entry found for: %s\nAdd these to the Marker Registry table before re-running.",
             sorted(unmatched),
         )
 

@@ -232,20 +232,20 @@ class TestSamplerGroupings:
             assert rows["marker"].nunique() == 1
             break
 
-    def test_no_grouping_with_stratify_condition(self, flat_parquet_setup):
-        """batch_group_by=None, stratify_by=['condition'] → balanced conditions."""
+    def test_no_grouping_with_stratify_perturbation(self, flat_parquet_setup):
+        """batch_group_by=None, stratify_by=['perturbation'] → balanced perturbations."""
         index, _, _ = flat_parquet_setup
         sampler = FlexibleBatchSampler(
             valid_anchors=index.valid_anchors,
             batch_size=8,
             batch_group_by=None,
-            stratify_by=["condition"],
+            stratify_by=["perturbation"],
             seed=42,
         )
         for batch_indices in sampler:
             rows = index.valid_anchors.iloc[batch_indices]
-            # With stratification, conditions should be more balanced than random
-            assert rows["condition"].nunique() >= 1
+            # With stratification, perturbations should be more balanced than random
+            assert rows["perturbation"].nunique() >= 1
             break
 
     def test_marker_groups_cover_all_markers(self, flat_parquet_setup):
@@ -378,6 +378,6 @@ class TestAnchorPositiveComposition:
         batch = ds.__getitems__([0])
         meta = batch["anchor_meta"]
         assert len(meta) == 1
-        # Meta should contain experiment and condition at minimum
+        # Meta should contain experiment and perturbation at minimum
         assert "experiment" in meta[0]
-        assert "condition" in meta[0]
+        assert "perturbation" in meta[0]

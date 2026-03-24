@@ -289,16 +289,16 @@ class TestUnifiedTracksDataFrame:
         assert len(exp_a_rows) == 200
         assert len(exp_b_rows) == 200
 
-    def test_condition_column(self, two_experiment_setup):
-        """'condition' column correctly maps wells to conditions."""
+    def test_perturbation_column(self, two_experiment_setup):
+        """'perturbation' column correctly maps wells to perturbations."""
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # exp_a: A/1 -> uninfected, B/1 -> infected
         exp_a_well_a = index.tracks[(index.tracks["experiment"] == "exp_a") & (index.tracks["well_name"] == "A/1")]
-        assert (exp_a_well_a["condition"] == "uninfected").all()
+        assert (exp_a_well_a["perturbation"] == "uninfected").all()
 
         exp_a_well_b = index.tracks[(index.tracks["experiment"] == "exp_a") & (index.tracks["well_name"] == "B/1")]
-        assert (exp_a_well_b["condition"] == "infected").all()
+        assert (exp_a_well_b["perturbation"] == "infected").all()
 
     def test_global_track_id_format(self, two_experiment_setup):
         """global_track_id is '{exp_name}_{fov_name}_{track_id}'."""
@@ -355,7 +355,7 @@ class TestUnifiedTracksDataFrame:
             "fov_name",
             "well_name",
             "experiment",
-            "condition",
+            "perturbation",
             "global_track_id",
             "hours_post_perturbation",
             "fluorescence_channel",
@@ -978,7 +978,7 @@ class TestMultiExperimentIndexProperties:
         for cond, indices in groups.items():
             assert isinstance(indices, np.ndarray)
             for idx in indices:
-                assert index.tracks.loc[idx, "condition"] == cond
+                assert index.tracks.loc[idx, "perturbation"] == cond
 
     def test_summary_returns_string(self, two_experiment_setup):
         """summary() returns a non-empty string."""

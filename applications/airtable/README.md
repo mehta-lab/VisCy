@@ -31,19 +31,19 @@ Add to your `.bashrc` or a `.env` file (gitignored).
 | Table | ID | Purpose |
 |---|---|---|
 | **Datasets** | `tblaFzrDMlVZHPZIj` | One record per FOV. Biologists fill well-level metadata; the registration script expands to per-FOV. |
-| **Cell Line Registry** | `tblmP8l2GmpCeERyD` | LUT mapping each construct to its fluorescent channel aliases and biology. Used to auto-derive `channel_*_biology` at registration time. |
+| **Marker Registry** | `tblmP8l2GmpCeERyD` | LUT mapping each construct to its fluorescent channel aliases and biology. Used to auto-derive `channel_*_biology` at registration time. |
 
-### Cell Line Registry
+### Marker Registry
 
 Each row maps one construct (one fluorophore) to a biology label:
 
 | Field | Example | Notes |
 |---|---|---|
-| `cell_line` | `TOMM20-GFP` | `PROTEIN-FLUOROPHORE` or `PLASMID-FLUOROPHORE`, dashes only |
+| `marker-fluorophore` | `TOMM20-GFP` | `PROTEIN-FLUOROPHORE` or `PLASMID-FLUOROPHORE`, dashes only |
 | `channel_name_aliases` | `GFP, FITC` | Comma-separated substrings to substring-match against zarr channel names |
 | `biology` | `mitochondria` | snake_case biological annotation |
 
-One row per construct. Compound cell lines (e.g. `TOMM20-GFP pAL40`) are represented as two linked entries: `TOMM20-GFP` (GFP→mitochondria) + `pAL40-mCherry` (mCherry→viral_sensor).
+One row per construct. Compound lines (e.g. `TOMM20-GFP pAL40`) are represented as two linked entries: `TOMM20-GFP` (GFP→mitochondria) + `pAL40-mCherry` (mCherry→viral_sensor).
 
 ### Datasets Schema
 
@@ -55,12 +55,12 @@ Key fields (snake_case):
 | `well_id` | text | e.g. `B/1` |
 | `fov` | text | e.g. `000000` — set by `register` |
 | `cell_type` | select | e.g. `A549` |
-| `cell_line` | linked records | Links to Cell Line Registry |
+| `cell_line` | linked records | Links to Marker Registry |
 | `marker` | select | Primary protein marker |
 | `organelle` | select | Target organelle |
 | `perturbation` | select | e.g. `ZIKV`, `DENV` |
 | `channel_N_name` | text | Zarr channel label — set by `register` (N = 0–7) |
-| `channel_N_biology` | text | Biology annotation — derived from Cell Line Registry (N = 0–7) |
+| `channel_N_biology` | text | Biology annotation — derived from Marker Registry (N = 0–7) |
 | `data_path` | text | Path to zarr position — set by `register` |
 | `t/c/z/y/x_shape` | number | Array dimensions — set by `register` |
 
@@ -71,11 +71,11 @@ Key fields (snake_case):
 ### Step 1 — Biologist: fill well-level platemap in Airtable
 
 Before the zarr exists, create one Datasets record per well with:
-- `dataset`, `well_id`, `cell_type`, `cell_line` (linked to Cell Line Registry), `marker`, `organelle`, `perturbation`, `moi`, `time_interval_min`, `fluorescence_modality`
+- `dataset`, `well_id`, `cell_type`, `cell_line` (linked to Marker Registry), `marker`, `organelle`, `perturbation`, `moi`, `time_interval_min`, `fluorescence_modality`
 
 Leave all zarr-derived fields empty — they are filled by `register`.
 
-> **New cell line?** Add it to the Cell Line Registry first (with aliases + biology), then link it in the Datasets record.
+> **New construct?** Add it to the Marker Registry first (with aliases + biology), then link it in the Datasets record.
 
 ### Step 2 — Engineer: register zarr positions after QC
 
@@ -101,7 +101,7 @@ uv run --package airtable-utils \
 
 What `register` does per position:
 - Reads channel names (up to 8) and array shape from the zarr
-- Fetches Cell Line Registry once per run
+- Fetches Marker Registry once per run
 - Resolves `cell_line` linked records → aliases → derives `channel_*_biology` via substring match
 - Creates new per-FOV record or updates existing one
 
@@ -148,7 +148,7 @@ register 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
 re-register all datasets in Airtable
 ```
 ```
-add LAMP2-GFP to the Cell Line Registry with biology lysosome
+add LAMP2-GFP to the Marker Registry with biology lysosome
 ```
 ```
 check which positions are missing channel biology
@@ -180,8 +180,8 @@ db = AirtableDatasets()
 # Get all FOV records for a dataset
 records = db.get_dataset_records("2024_10_16_A549_SEC61_ZIKV_DENV")
 
-# Get Cell Line Registry (keyed by record ID)
-registry = db.get_cell_line_registry()
+# Get Marker Registry (keyed by record ID)
+registry = db.get_marker_registry()
 
 # Register positions programmatically
 from pathlib import Path

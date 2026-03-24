@@ -87,7 +87,7 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         batch_group_by: str | list[str] | None = None,
         leaky: float = 0.0,
         group_weights: dict[str, float] | None = None,
-        stratify_by: str | list[str] | None = "condition",
+        stratify_by: str | list[str] | None = "perturbation",
         temporal_enrichment: bool = False,
         temporal_window_hours: float = 2.0,
         temporal_global_fraction: float = 0.3,

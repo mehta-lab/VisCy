@@ -164,7 +164,7 @@ class MultiExperimentDataModule(LightningDataModule):
         num_workers: int = 1,
         # Sampling hyperparameters (passed to FlexibleBatchSampler)
         batch_group_by: str | list[str] | None = None,
-        stratify_by: str | list[str] | None = "condition",
+        stratify_by: str | list[str] | None = "perturbation",
         leaky: float = 0.0,
         temporal_enrichment: bool = False,
         temporal_window_hours: float = 2.0,

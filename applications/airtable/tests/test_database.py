@@ -9,7 +9,6 @@ import pytest
 
 from .conftest import DATASET_NAMES_RECORDS, SAMPLE_AIRTABLE_RECORDS
 
-
 # ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
@@ -20,15 +19,15 @@ class TestAirtableDatasetsInit:
 
     def test_init_with_env_vars(self, mock_env, mock_api):
         """Constructor succeeds when both env vars are set."""
-        from airtable_utils.database import AirtableDatasets
+        from airtable_utils.database import MARKER_REGISTRY_TABLE_ID, AirtableDatasets
 
-        ds = AirtableDatasets()
+        AirtableDatasets()
         # Api was called with the fake key
         mock_api.assert_called_once_with("patFAKEKEY123")
-        # .table() was called with the fake base id and TABLE_NAME
-        mock_api.return_value.table.assert_called_once_with(
-            "appFAKEBASE456", "Datasets"
-        )
+        # .table() was called for both the Datasets table and Marker Registry
+        assert mock_api.return_value.table.call_count == 2
+        mock_api.return_value.table.assert_any_call("appFAKEBASE456", "Datasets")
+        mock_api.return_value.table.assert_any_call("appFAKEBASE456", MARKER_REGISTRY_TABLE_ID)
 
     def test_init_raises_when_api_key_missing(self, monkeypatch):
         """ValueError is raised when AIRTABLE_API_KEY is not set."""
@@ -76,16 +75,15 @@ class TestAirtableDatasetsInit:
 
     def test_no_constructor_params_accepted(self):
         """Constructor does not accept api_key or base_id parameters."""
-        from airtable_utils.database import AirtableDatasets
-
         import inspect
+
+        from airtable_utils.database import AirtableDatasets
 
         sig = inspect.signature(AirtableDatasets.__init__)
         params = list(sig.parameters.keys())
         # Only 'self' should be a parameter
         assert params == ["self"], (
-            f"Expected only 'self', got {params}. "
-            "api_key/base_id must not be constructor parameters."
+            f"Expected only 'self', got {params}. api_key/base_id must not be constructor parameters."
         )
 
 
@@ -129,9 +127,7 @@ class TestGetDatasetRecords:
     def test_returns_dataset_records(self, airtable_datasets, mock_table):
         mock_table.all.return_value = [SAMPLE_AIRTABLE_RECORDS[0]]
         result = airtable_datasets.get_dataset_records("dataset_alpha")
-        mock_table.all.assert_called_once_with(
-            formula="{dataset} = 'dataset_alpha'"
-        )
+        mock_table.all.assert_called_once_with(formula="{dataset} = 'dataset_alpha'")
         assert len(result) == 1
         assert result[0].dataset == "dataset_alpha"
         assert result[0].well_id == "A/1"
@@ -182,6 +178,7 @@ class TestListRecords:
             "cell_type",
             "cell_state",
             "cell_line",
+            "marker",
             "organelle",
             "perturbation",
             "hours_post_perturbation",
@@ -189,15 +186,10 @@ class TestListRecords:
             "time_interval_min",
             "seeding_density",
             "treatment_concentration_nm",
-            "channel_0_name",
-            "channel_0_biology",
-            "channel_1_name",
-            "channel_1_biology",
-            "channel_2_name",
-            "channel_2_biology",
-            "channel_3_name",
-            "channel_3_biology",
+            "channel_names",
+            *(f"channel_{i}_{attr}" for i in range(8) for attr in ("name", "marker")),
             "data_path",
+            "tracks_path",
             "fluorescence_modality",
             "t_shape",
             "c_shape",

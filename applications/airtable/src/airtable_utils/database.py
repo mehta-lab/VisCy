@@ -11,29 +11,29 @@ from pyairtable import Api
 from airtable_utils.schemas import DatasetRecord
 
 TABLE_NAME = "Datasets"
-CELL_LINE_REGISTRY_TABLE_ID = "tblmP8l2GmpCeERyD"
+MARKER_REGISTRY_TABLE_ID = "tblmP8l2GmpCeERyD"
 
 
 @dataclass
-class CellLineEntry:
-    """A single entry from the Cell Line Registry.
+class MarkerRegistryEntry:
+    """A single entry from the Marker Registry.
 
     Parameters
     ----------
     record_id : str
         Airtable record ID.
-    cell_line : str
+    marker_fluorophore : str
         Construct name, e.g. ``"TOMM20-GFP"`` or ``"pAL40-mCherry"``.
     channel_name_aliases : list[str]
         Substring tokens to match against zarr channel names.
-    biology : str
-        Biological annotation label, e.g. ``"mitochondria"``.
+    marker : str
+        Protein marker name, e.g. ``"TOMM20"``, ``"SEC61B"``.
     """
 
     record_id: str
-    cell_line: str
+    marker_fluorophore: str
     channel_name_aliases: list[str]
-    biology: str
+    marker: str
 
 
 class AirtableDatasets:
@@ -59,7 +59,7 @@ class AirtableDatasets:
             raise ValueError("AIRTABLE_BASE_ID environment variable is required but not set.")
         api = Api(api_key)
         self._table = api.table(base_id, TABLE_NAME)
-        self._registry_table = api.table(base_id, CELL_LINE_REGISTRY_TABLE_ID)
+        self._registry_table = api.table(base_id, MARKER_REGISTRY_TABLE_ID)
 
     def list_records(self, filter_formula: str | None = None) -> pd.DataFrame:
         """Return all FOV records as a DataFrame.
@@ -104,28 +104,28 @@ class AirtableDatasets:
         """
         self._table.batch_update(updates)
 
-    def get_cell_line_registry(self) -> dict[str, CellLineEntry]:
-        """Return the Cell Line Registry as a lookup by record ID.
+    def get_marker_registry(self) -> dict[str, MarkerRegistryEntry]:
+        """Return the Marker Registry as a lookup by record ID.
 
         Returns
         -------
-        dict[str, CellLineEntry]
-            Mapping of Airtable record ID -> :class:`CellLineEntry`.
+        dict[str, MarkerRegistryEntry]
+            Mapping of Airtable record ID -> :class:`MarkerRegistryEntry`.
         """
-        raw = self._registry_table.all(fields=["cell_line", "channel_name_aliases", "biology"])
-        registry: dict[str, CellLineEntry] = {}
+        raw = self._registry_table.all(fields=["marker-fluorophore", "channel_name_aliases", "marker"])
+        registry: dict[str, MarkerRegistryEntry] = {}
         for rec in raw:
             fields = rec.get("fields", {})
-            cell_line = fields.get("cell_line", "")
+            marker_fluorophore = fields.get("marker-fluorophore", "")
             aliases_raw = fields.get("channel_name_aliases", "")
             aliases = [a.strip() for a in aliases_raw.split(",") if a.strip()]
-            biology = fields.get("biology", "")
-            if cell_line and aliases and biology:
-                registry[rec["id"]] = CellLineEntry(
+            marker = fields.get("marker", "")
+            if marker_fluorophore and aliases and marker:
+                registry[rec["id"]] = MarkerRegistryEntry(
                     record_id=rec["id"],
-                    cell_line=cell_line,
+                    marker_fluorophore=marker_fluorophore,
                     channel_name_aliases=aliases,
-                    biology=biology,
+                    marker=marker,
                 )
         return registry
 

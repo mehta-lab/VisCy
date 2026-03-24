@@ -248,7 +248,7 @@ def build_flat_cell_index(
                         "y": float(track_row["y"]),
                         "x": float(track_row["x"]),
                         "z": int(track_row.get("z", 0)),
-                        "condition": condition,
+                        "perturbation": condition,
                         "t": int(track_row["t"]),
                         "track_id": int(track_row["track_id"]),
                         "global_track_id": f"{entry.name}_{fov_path}_{int(track_row['track_id'])}",
@@ -310,7 +310,7 @@ class SyntheticTripletDataset(Dataset):
             "anchor_meta": [
                 {
                     "experiment": "exp_a",
-                    "condition": "control" if idx % 2 == 0 else "treated",
+                    "perturbation": "control" if idx % 2 == 0 else "treated",
                     "hours_post_perturbation": float(idx),
                     "t": idx,
                 }
@@ -359,7 +359,12 @@ class SyntheticLabeledTripletDataset(Dataset):
             "negative": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
             "index": {"fov_name": f"fov_{idx}", "id": idx, "track_id": idx % 3, "t": idx},
             "anchor_meta": [
-                {"experiment": "exp_a", "condition": "control", "t": idx, "labels": {"gene_ko": idx % self.n_classes}}
+                {
+                    "experiment": "exp_a",
+                    "perturbation": "control",
+                    "t": idx,
+                    "labels": {"gene_ko": idx % self.n_classes},
+                }
             ],
         }
         return sample
