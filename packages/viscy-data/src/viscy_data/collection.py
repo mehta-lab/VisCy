@@ -82,8 +82,6 @@ class ExperimentEntry(BaseModel):
         If empty, derived from ``channels`` at validation time.
     perturbation_wells : dict[str, list[str]]
         Mapping of perturbation label to well names.
-    condition_wells : dict[str, list[str]]
-        Deprecated alias for ``perturbation_wells``.
     interval_minutes : float
         Time between frames in minutes.
     start_hpi : float
@@ -112,7 +110,6 @@ class ExperimentEntry(BaseModel):
     channels: list[ChannelEntry] = []
     channel_names: list[str] = []
     perturbation_wells: dict[str, list[str]] = {}
-    condition_wells: dict[str, list[str]] = {}
     interval_minutes: float = 30.0
     start_hpi: float = 0.0
     marker: str = ""
@@ -126,10 +123,6 @@ class ExperimentEntry(BaseModel):
 
     @model_validator(mode="after")
     def _normalize(self) -> ExperimentEntry:
-        # Merge condition_wells into perturbation_wells (backwards compat)
-        if self.condition_wells and not self.perturbation_wells:
-            self.perturbation_wells = self.condition_wells
-            self.condition_wells = {}
         # Derive channel_names from channels if not set
         if not self.channel_names and self.channels:
             self.channel_names = [ch.name for ch in self.channels]
@@ -182,7 +175,7 @@ class Collection(BaseModel):
                 raise ValueError(
                     f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
                 )
-            wells = exp.perturbation_wells or exp.condition_wells
+            wells = exp.perturbation_wells
             if not wells:
                 raise ValueError(f"Experiment '{exp.name}': perturbation_wells must not be empty.")
 

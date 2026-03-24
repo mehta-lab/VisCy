@@ -92,8 +92,8 @@ class ExperimentRegistry:
                     f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
                 )
 
-            # 5. Empty perturbation_wells (or legacy condition_wells)
-            if not exp.perturbation_wells and not exp.condition_wells:
+            # 5. Empty perturbation_wells
+            if not exp.perturbation_wells:
                 raise ValueError(f"Experiment '{exp.name}': perturbation_wells must not be empty.")
 
             # 6. data_path existence
@@ -284,11 +284,11 @@ class ExperimentRegistry:
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
     ) -> ExperimentRegistry:
-        """Build a registry from a cell index parquet and zarr metadata.
+        """Build a registry from a flat cell index parquet and zarr metadata.
 
-        Reads zarr channel names per well and derives source channels from
-        the parquet's ``source_channels`` JSON column. No collection YAML
-        needed — the parquet is the universal entry point.
+        Derives per-experiment channels from the parquet's ``marker`` and
+        ``channel_name`` columns. No collection YAML needed — the parquet
+        is the universal entry point.
 
         Parameters
         ----------

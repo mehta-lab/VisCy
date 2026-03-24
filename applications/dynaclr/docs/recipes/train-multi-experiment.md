@@ -29,51 +29,42 @@ provenance:
   created_at: "2026-01-01"
   created_by: your.name
 
-source_channels:
-  - label: phase          # canonical label used by transforms
-    per_experiment:
-      exp_alpha: Phase3D  # zarr channel name for this experiment
-      exp_beta: Phase3D
-      exp_gamma: Phase3D
-  - label: gfp
-    per_experiment:
-      exp_alpha: raw GFP EX488 EM525-45
-      exp_beta: GFP EX488 EM525-45
-      # exp_gamma omitted — phase-only experiment, no fluorescence channel
-
 experiments:
   - name: exp_alpha
     data_path: /hpc/projects/.../exp_alpha.zarr
     tracks_path: /hpc/projects/.../exp_alpha/tracking.zarr
-    channel_names:
-      - Phase3D
-      - raw GFP EX488 EM525-45
-    condition_wells:
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+    perturbation_wells:
       uninfected: [A/1, A/2]
-      infected: [B/1, B/2]
+      ZIKV: [B/1, B/2]
     interval_minutes: 30.0
     start_hpi: 4.0
-    marker: SEC61B
-    organelle: endoplasmic_reticulum
-    date: "2025-01-01"
-    moi: 5.0
-    exclude_fovs: []
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
   - name: exp_gamma
     data_path: /hpc/projects/.../exp_gamma.zarr
     tracks_path: /hpc/projects/.../exp_gamma/tracking.zarr
-    channel_names:
-      - Phase3D        # phase only — no fluorescence channel
-    condition_wells:
+    channels:
+      - name: Phase3D
+        marker: Phase3D     # phase-only experiment
+    perturbation_wells:
       uninfected: [A/1]
-      infected: [B/1]
+      ZIKV: [B/1]
     interval_minutes: 20.0
     start_hpi: 0.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
 ```
 
 **Rules enforced at startup:**
-- Each `per_experiment` entry must name a channel that exists in that experiment's `channel_names`
-- `data_path` must exist and zarr channel names must match `channel_names`
-- Experiments may be omitted from a source channel's `per_experiment` — not every experiment needs every channel (e.g. a phase-only experiment can be mixed with GFP experiments in bag-of-channels mode)
+- `data_path` must exist and zarr channel names must include the names listed in `channels`
+- Experiments can have different channel counts (e.g. a phase-only experiment can be mixed with multi-channel experiments in bag-of-channels mode)
+- `perturbation_wells` must not be empty
 
 ---
 
@@ -159,9 +150,8 @@ Transforms run on GPU in `on_after_batch_transfer` on `(B, C, Z, Y, X)` tensors.
 Always use the `Batched*` transforms — standard MONAI dict transforms are
 single-sample only and will fail on batched input.
 
-Transform keys use the **source channel labels** from the collection YAML
-(`phase`, `gfp`, etc.), not zarr channel names or `ch_N` indices. In
-bag-of-channels mode the key is always `channel`.
+Transform keys use the **marker labels** from the collection YAML channels.
+In bag-of-channels mode the key is `channel_0`.
 
 ```yaml
     normalizations:

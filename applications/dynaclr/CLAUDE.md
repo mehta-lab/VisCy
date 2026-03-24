@@ -18,19 +18,26 @@ All augmentations must use the GPU-native `Batched*` transforms from `viscy_tran
 
 Instead use our defined `Batched*` versions in `viscy-transforms`.
 
+### Flat Parquet Schema
+
+The cell index parquet has **one row per (cell, timepoint, channel)**. Each row carries:
+- `channel_name` — zarr channel name (e.g., `"Phase3D"`, `"raw GFP EX488 EM525-45"`)
+- `marker` — protein marker (e.g., `"Phase3D"`, `"TOMM20"`, `"SEC61B"`)
+- `perturbation` — perturbation label (e.g., `"uninfected"`, `"ZIKV"`)
+
+The dataset resolves zarr channel indices directly from `channel_name` via `exp.channel_names.index(name)`.
 
 ### Channel Naming in Transforms
 
-Transforms reference channels by their **source label** from the collection YAML (`source_channels[].label`), not by zarr channel names or generic `ch_N` indices.
-
-- **Bag-of-channels mode** (`bag_of_channels: true`): one channel per sample, key is always `"channel"`
-- **Multi-channel mode**: keys are the source labels, e.g. `"labelfree"`, `"reporter"`
+- **Bag-of-channels mode** (`channels_per_sample: 1`): one channel per sample, key is `"channel_0"`
+- **All-channels mode** (`channels_per_sample: null`): keys are the marker labels from the collection
+- **Fixed mode** (`channels_per_sample: ["Phase3D", "GFP"]`): keys are the specified zarr channel names
 
 In multi-channel mode, use `allow_missing_keys: true` if a transform should only apply to a subset of channels.
 
 ### Normalization Metadata (`norm_meta`)
 
-- `norm_meta` is read per-FOV from zarr zattrs and remapped from zarr channel names → source labels in `_slice_patch`
+- `norm_meta` is read per-FOV from zarr zattrs and looked up by zarr channel name directly in `_slice_patch`
 - `timepoint_statistics` is pre-resolved to the sample's timepoint `t` in the dataset — `NormalizeSampled` does not need to look up timepoints at transform time
 - `_collate_norm_meta` stacks per-sample scalar stats into `(B,)` tensors so normalization is correct when a batch mixes samples from different FOVs
 
@@ -38,14 +45,27 @@ In multi-channel mode, use `allow_missing_keys: true` if a transform should only
 
 The old approach combined multiple `TripletDataModule` instances with `ConcatDataModule`, which gave no control over cross-experiment sampling balance. `MultiExperimentDataModule` uses `FlexibleBatchSampler` with explicit axes:
 
-- `batch_group_by` — ensures each batch has representation from multiple experiments
-- `stratify_by` — balances by condition, organelle, or other metadata columns
+- `batch_group_by` — groups batches by column(s) (e.g., `["marker"]` for bag-of-channels, `["experiment"]`)
+- `stratify_by` — balances by perturbation, organelle, or other metadata columns
 - `temporal_enrichment` — oversamples cells near biological events
 
 All experiments share one `MultiExperimentTripletDataset` instance and one tensorstore context — no concat overhead.
 
 ### Collection YAML
 
-- `source_channels[].label` defines the canonical channel names used throughout the pipeline
-- `source_channels[].per_experiment` maps labels to actual zarr channel names per experiment (different experiments can have different zarr names for the same biological channel)
-- The `ExperimentRegistry` computes `channel_maps` and `norm_meta_key_maps` once at setup time for O(1) lookup during data loading
+The YAML is the complete reproducible recipe for building a flat parquet. Channels are defined per-experiment with `name` + `marker`:
+
+```yaml
+experiments:
+  - name: "2025_07_22_SEC61"
+    channels:
+      - name: "Phase3D"
+        marker: "Phase3D"
+      - name: "raw GFP EX488 EM525-45"
+        marker: "SEC61B"
+    perturbation_wells:
+      uninfected: ["C/1"]
+      ZIKV: ["C/2"]
+```
+
+No `SourceChannel` indirection. The builder reads `exp.channels` directly and explodes each cell observation into one row per channel.

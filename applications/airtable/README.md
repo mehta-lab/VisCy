@@ -60,7 +60,7 @@ Key fields (snake_case):
 | `organelle` | select | Target organelle |
 | `perturbation` | select | e.g. `ZIKV`, `DENV` |
 | `channel_N_name` | text | Zarr channel label — set by `register` (N = 0–7) |
-| `channel_N_biology` | text | Biology annotation — derived from Marker Registry (N = 0–7) |
+| `channel_N_marker` | text | Protein marker per channel — derived from Marker Registry (N = 0–7) |
 | `data_path` | text | Path to zarr position — set by `register` |
 | `t/c/z/y/x_shape` | number | Array dimensions — set by `register` |
 

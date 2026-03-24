@@ -140,7 +140,7 @@ experiments:
     tracks_path: "/path/to/tracks"
     channel_names: ["Phase3D", "GFP"]
     source_channel: ["Phase3D", "GFP"]
-    condition_wells:
+    perturbation_wells:
       control: ["A/1"]
       treated: ["B/1"]
     interval_minutes: 30.0
@@ -154,16 +154,18 @@ Quick sanity check that everything loads:
 ```python
 from dynaclr.data.experiment import ExperimentRegistry
 
-registry = ExperimentRegistry.from_yaml("experiments.yml")
+registry = ExperimentRegistry.from_collection("experiments.yml")
 print(f"{len(registry.experiments)} experiments validated")
-print(f"Channel maps: {registry.channel_maps}")
+for exp in registry.experiments:
+    print(f"  {exp.name}: {[ch.marker for ch in exp.channels]}")
 ```
 
 `ExperimentRegistry` will raise clear errors if:
-- Zarr channel names don't match `channel_names`
-- `source_channel` entries aren't found in `channel_names`
 - `data_path` doesn't exist
-- `condition_wells` is empty
+- `perturbation_wells` is empty
+- `interval_minutes` is not positive
+- `data_path` doesn't exist
+- `perturbation_wells` is empty
 
 ## Step 5: (Optional) Build cell index parquet
 
