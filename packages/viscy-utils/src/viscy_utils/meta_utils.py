@@ -57,29 +57,8 @@ def _grid_sample(position, grid_spacing, channel_index, num_workers):
     )
 
 
-def _downsample_local_mean(position, downsample_factor, channel_index, num_workers):
-    """Downsample a position with local averaging for robust thresholding.
-
-    Unlike grid sampling (which picks individual pixels), this reads at
-    a finer stride and applies block averaging so that local spatial
-    structure is preserved in the downsampled image.
-    """
-    from skimage.transform import downscale_local_mean
-
-    raw = (
-        position["0"]
-        .tensorstore(context=tensorstore.Context({"data_copy_concurrency": {"limit": num_workers}}))[
-            :, channel_index, :, :, :
-        ]
-        .read()
-        .result()
-    )
-    # raw shape: (T, Z, Y, X) — downsample Y and X only
-    return downscale_local_mean(raw, (1, 1, downsample_factor, downsample_factor))
-
-
 def generate_normalization_metadata(
-    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32, compute_otsu=False, otsu_downsample_factor=4
+    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32, compute_otsu=False, otsu_grid_spacing=8
 ):
     """Generate pixel intensity metadata for normalization.
 
@@ -99,10 +78,10 @@ def generate_normalization_metadata(
     compute_otsu : bool, optional
         Whether to compute Otsu thresholds for foreground estimation,
         by default False. Required for Spotlight loss.
-    otsu_downsample_factor : int, optional
-        Downsample factor for Otsu threshold computation, by default 4.
-        Uses local-mean averaging (not point sampling) to preserve the
-        bimodal FG/BG histogram structure.
+    otsu_grid_spacing : int, optional
+        Grid spacing for Otsu sampling, by default 8. Denser than the
+        default ``grid_spacing=32`` to capture inter-cell gaps. A median
+        filter is applied before thresholding to smooth noise.
     """
     plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
     position_map = list(plate.positions())
@@ -128,10 +107,12 @@ def generate_normalization_metadata(
             dataset_sample_values.append(samples)
             fov_stats = get_val_stats(samples)
             if compute_otsu:
+                from scipy.ndimage import median_filter
                 from skimage.filters import threshold_otsu
 
-                downsampled = _downsample_local_mean(pos, otsu_downsample_factor, channel_index, num_workers)
-                fov_stats["otsu_threshold"] = float(threshold_otsu(downsampled.ravel()))
+                otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index, num_workers)
+                smoothed = median_filter(otsu_samples, size=3)
+                fov_stats["otsu_threshold"] = float(threshold_otsu(smoothed.ravel()))
             fov_statistics = {"fov_statistics": fov_stats}
             fov_timepoint_statistics = {}
             for t in range(num_timepoints):
