@@ -348,8 +348,8 @@ class TestChannelSelection:
             f"Positive shape {batch['positive'].shape} != {expected_shape}"
         )
 
-    def test_random_channel_varies(self, single_experiment_index):
-        """Over many calls, channels_per_sample=1 selects different channels."""
+    def test_from_index_channel_deterministic(self, single_experiment_index):
+        """channels_per_sample=1 reads the row's fluorescence_channel (from_index mode)."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
@@ -357,11 +357,9 @@ class TestChannelSelection:
             fit=True,
             channels_per_sample=1,
         )
-        values = set()
-        for _ in range(20):
-            batch = ds.__getitems__([0])
-            values.add(float(batch["anchor"][0, 0, 0, 0, 0]))
-        assert len(values) > 1, "channels_per_sample=1 should produce varying channel selections"
+        assert ds._channel_mode == "from_index"
+        batch = ds.__getitems__([0])
+        assert batch["anchor"].shape[1] == 1, "from_index mode should read exactly 1 channel"
 
     def test_all_channels_default(self, single_experiment_index):
         """channels_per_sample=None (default) reads all source channels."""
@@ -375,29 +373,29 @@ class TestChannelSelection:
         batch = ds.__getitems__([0])
         assert batch["anchor"].shape[1] == 2, "Default should read all 2 source channels"
 
-    def test_fixed_channels_by_label(self, single_experiment_index):
-        """channels_per_sample=['labelfree'] reads only that channel."""
+    def test_fixed_channels_by_name(self, single_experiment_index):
+        """channels_per_sample=['Phase'] reads only that zarr channel."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
-        labels = single_experiment_index.registry.source_channel_labels
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
             fit=True,
-            channels_per_sample=[labels[0]],
+            channels_per_sample=["Phase"],
         )
         batch = ds.__getitems__([0, 1])
         assert batch["anchor"].shape[1] == 1, f"Expected 1 channel, got {batch['anchor'].shape[1]}"
 
-    def test_invalid_channel_label_raises(self, single_experiment_index):
-        """channels_per_sample with invalid label raises ValueError."""
+    def test_invalid_channel_name_raises_at_read(self, single_experiment_index):
+        """channels_per_sample with invalid zarr name raises ValueError at read time."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
-        with pytest.raises(ValueError, match="not in source_channel_labels"):
-            MultiExperimentTripletDataset(
-                index=single_experiment_index,
-                fit=True,
-                channels_per_sample=["nonexistent_channel"],
-            )
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=["nonexistent_channel"],
+        )
+        with pytest.raises(ValueError, match="is not in list"):
+            ds.__getitems__([0])
 
     def test_int_gt1_raises(self, single_experiment_index):
         """channels_per_sample > 1 as int raises ValueError."""

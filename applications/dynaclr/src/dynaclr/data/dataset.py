@@ -170,26 +170,31 @@ class MultiExperimentTripletDataset(Dataset):
         self.tau_range_hours = tau_range_hours
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
-        # Resolve channel selection mode
+        # Resolve channel selection mode.
+        # In all-channels mode with a flat parquet (one row per cell×channel),
+        # deduplicate valid_anchors to one row per cell to avoid redundant
+        # batches — each row reads all channels anyway.
         if channels_per_sample is None:
             self._channel_mode = "all"
+            va = index.valid_anchors
+            if va["cell_id"].duplicated().any():
+                before = len(va)
+                index.valid_anchors = va.drop_duplicates(subset="cell_id").reset_index(drop=True)
+                _logger.info(
+                    "All-channels dedup: %d → %d valid_anchors (flat parquet)",
+                    before,
+                    len(index.valid_anchors),
+                )
         elif isinstance(channels_per_sample, int):
             if channels_per_sample != 1:
                 raise ValueError(
                     f"channels_per_sample as int must be 1, got {channels_per_sample}. "
                     "Use a list of labels for multiple specific channels."
                 )
-            if "source_channel" in index.valid_anchors.columns:
-                self._channel_mode = "from_index"
-            else:
-                self._channel_mode = "random"
+            self._channel_mode = "from_index"
         elif isinstance(channels_per_sample, list):
             self._channel_mode = "fixed"
-            labels = index.registry.source_channel_labels
-            for label in channels_per_sample:
-                if label not in labels:
-                    raise ValueError(f"Channel label '{label}' not in source_channel_labels: {labels}")
-            self._fixed_source_indices = [labels.index(label) for label in channels_per_sample]
+            self._fixed_channel_names = channels_per_sample
         else:
             raise TypeError(f"channels_per_sample must be int, list[str], or None, got {type(channels_per_sample)}")
         self.channels_per_sample = channels_per_sample
@@ -306,21 +311,15 @@ class MultiExperimentTripletDataset(Dataset):
         """
         anchor_rows = self.index.valid_anchors.iloc[indices]
 
-        # Pre-compute per-sample channel indices based on channel_mode.
-        channel_maps = self.index.registry.channel_maps
+        # Pre-compute per-sample channel names based on channel_mode.
         if self._channel_mode == "from_index":
-            forced_channel_indices = [[int(row["source_channel"])] for _, row in anchor_rows.iterrows()]
-        elif self._channel_mode == "random":
-            forced_channel_indices = [
-                [int(self._rng.choice(sorted(channel_maps[row["experiment"]].keys())))]
-                for _, row in anchor_rows.iterrows()
-            ]
+            forced_channel_names = [[row["fluorescence_channel"]] for _, row in anchor_rows.iterrows()]
         elif self._channel_mode == "fixed":
-            forced_channel_indices = [self._fixed_source_indices] * len(indices)
+            forced_channel_names = [self._fixed_channel_names] * len(indices)
         else:
-            forced_channel_indices = None
+            forced_channel_names = None
 
-        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_indices)
+        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_names)
         sample: dict = {
             "anchor": anchor_patches,
             "anchor_norm_meta": anchor_norms,
@@ -329,15 +328,11 @@ class MultiExperimentTripletDataset(Dataset):
 
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
-            # positive_channel_source="any": positive draws its channel independently
-            if self._channel_mode == "random" and self.positive_channel_source == "any":
-                pos_forced_channel_indices = [
-                    [int(self._rng.choice(sorted(channel_maps[row["experiment"]].keys())))]
-                    for _, row in positive_rows.iterrows()
-                ]
+            if self._channel_mode == "from_index":
+                pos_forced_channel_names = [[row["fluorescence_channel"]] for _, row in positive_rows.iterrows()]
             else:
-                pos_forced_channel_indices = forced_channel_indices
-            positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_indices)
+                pos_forced_channel_names = forced_channel_names
+            positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_names)
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
             sample["positive_meta"] = self._extract_meta(positive_rows)
@@ -580,7 +575,7 @@ class MultiExperimentTripletDataset(Dataset):
         return self._tensorstores[fov_name]
 
     def _slice_patch(
-        self, track_row: pd.Series, forced_source_indices: list[int] | None = None
+        self, track_row: pd.Series, forced_channel_names: list[str] | None = None
     ) -> tuple[
         "ts.TensorStore",
         NormMeta | None,
@@ -589,7 +584,7 @@ class MultiExperimentTripletDataset(Dataset):
     ]:
         """Slice a patch from the image store for a given track row.
 
-        Uses per-experiment ``channel_maps`` for channel index remapping,
+        Resolves zarr channel indices directly from channel names. Uses
         ``y_clamp`` / ``x_clamp`` for border-safe centering, and scale factors
         from the registry for physical-space normalization.
 
@@ -597,8 +592,8 @@ class MultiExperimentTripletDataset(Dataset):
         ----------
         track_row : pd.Series
             A single row from ``tracks`` or ``valid_anchors``.
-        forced_source_indices : list[int] or None
-            Source channel indices to read. When provided, only these channels
+        forced_channel_names : list[str] or None
+            Zarr channel names to read. When provided, only these channels
             are sliced from the zarr. None reads all channels.
 
         Returns
@@ -623,21 +618,13 @@ class MultiExperimentTripletDataset(Dataset):
         y_half = round((self.index.yx_patch_size[0] // 2) * scale_y)
         x_half = round((self.index.yx_patch_size[1] // 2) * scale_x)
 
-        # Per-experiment channel remapping
-        channel_map = self.index.registry.channel_maps[exp_name]
-        source_labels = self.index.registry.source_channel_labels
-        if forced_source_indices is not None:
-            for idx in forced_source_indices:
-                if idx not in channel_map:
-                    raise ValueError(
-                        f"Source index {idx} not in channel_map for experiment "
-                        f"'{exp_name}' (available: {sorted(channel_map.keys())}). "
-                        "Channel indices must be valid for the experiment."
-                    )
-            source_indices = forced_source_indices
+        # Resolve zarr channel indices from channel names
+        exp = self.index.registry._name_map[exp_name]
+        if forced_channel_names is not None:
+            channel_names_to_read = forced_channel_names
         else:
-            source_indices = sorted(channel_map.keys())
-        channel_indices = [channel_map[i] for i in source_indices]
+            channel_names_to_read = exp.channel_names
+        channel_indices = [exp.channel_names.index(name) for name in channel_names_to_read]
 
         # Per-experiment z_range (scale-adjusted window size centered on z_range center)
         z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
@@ -654,32 +641,27 @@ class MultiExperimentTripletDataset(Dataset):
             slice(x_center - x_half, x_center + x_half),
         ]
 
-        # Remap norm_meta keys from zarr channel names to source labels
+        # Look up norm_meta by zarr channel name directly
         # and pre-resolve timepoint_statistics for this sample's timepoint
         raw_norm_meta = _read_norm_meta(position)
         if raw_norm_meta is not None:
-            key_map = self.index.registry.norm_meta_key_maps[exp_name]
-            remapped = {key_map[k]: v for k, v in raw_norm_meta.items() if k in key_map}
-            for label, ch_meta in remapped.items():
+            # Pre-resolve timepoint_statistics for all channels
+            for ch_name, ch_meta in raw_norm_meta.items():
                 if "timepoint_statistics" in ch_meta:
                     tp_stats = ch_meta["timepoint_statistics"].get(str(t))
                     ch_meta["timepoint_statistics"] = tp_stats
-            if forced_source_indices is not None and self._channel_mode in ("random", "from_index"):
-                selected_label = source_labels[source_indices[0]]
-                if selected_label in remapped:
-                    raw_norm_meta = {"channel_0": remapped[selected_label]}
+            # Filter to requested channels
+            if forced_channel_names is not None and self._channel_mode == "from_index":
+                ch = forced_channel_names[0]
+                if ch in raw_norm_meta:
+                    raw_norm_meta = {"channel_0": raw_norm_meta[ch]}
                 else:
                     raw_norm_meta = None
-            elif forced_source_indices is not None and self._channel_mode == "fixed":
-                raw_norm_meta = {
-                    source_labels[idx]: remapped[source_labels[idx]]
-                    for idx in source_indices
-                    if source_labels[idx] in remapped
-                }
+            elif forced_channel_names is not None and self._channel_mode == "fixed":
+                raw_norm_meta = {name: raw_norm_meta[name] for name in forced_channel_names if name in raw_norm_meta}
                 if not raw_norm_meta:
                     raw_norm_meta = None
-            else:
-                raw_norm_meta = remapped
+            # else: "all" mode — keep full raw_norm_meta
 
         target_size = (
             z_window_size,
@@ -691,7 +673,7 @@ class MultiExperimentTripletDataset(Dataset):
     def _slice_patches(
         self,
         track_rows: pd.DataFrame,
-        forced_channel_indices: list[list[int]] | None = None,
+        forced_channel_names: list[list[str]] | None = None,
     ) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
@@ -699,9 +681,9 @@ class MultiExperimentTripletDataset(Dataset):
         ----------
         track_rows : pd.DataFrame
             Multiple rows from ``tracks`` / ``valid_anchors``.
-        forced_channel_indices : list[list[int]] or None
-            Per-sample source channel indices to read. Each inner list
-            contains the source indices for that sample.
+        forced_channel_names : list[list[str]] or None
+            Per-sample zarr channel names to read. Each inner list
+            contains the channel names for that sample.
             None reads all channels for every sample.
 
         Returns
@@ -714,8 +696,8 @@ class MultiExperimentTripletDataset(Dataset):
         scales = []
         targets = []
         for i, (_, row) in enumerate(track_rows.iterrows()):
-            forced = forced_channel_indices[i] if forced_channel_indices is not None else None
-            patch, norm, scale, target = self._slice_patch(row, forced_source_indices=forced)
+            forced = forced_channel_names[i] if forced_channel_names is not None else None
+            patch, norm, scale, target = self._slice_patch(row, forced_channel_names=forced)
             patches.append(patch)
             norms.append(norm)
             scales.append(scale)

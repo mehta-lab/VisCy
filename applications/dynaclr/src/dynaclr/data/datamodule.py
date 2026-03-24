@@ -298,17 +298,6 @@ class MultiExperimentDataModule(LightningDataModule):
             else:
                 raise ValueError("Either collection_path or cell_index_path must be provided.")
 
-            # Expand valid_anchors by source channel when batch_group_by
-            # references source_channel_label and channels_per_sample=1.
-            bgb = (
-                self.batch_group_by
-                if isinstance(self.batch_group_by, list)
-                else [self.batch_group_by]
-                if self.batch_group_by
-                else []
-            )
-            self._expand_source_channels = self.channels_per_sample == 1 and "source_channel_label" in bgb
-
             if self.val_experiments:
                 self._setup_experiment_split(registry)
             else:
@@ -359,7 +348,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
-            expand_source_channels=self._expand_source_channels,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
@@ -455,7 +443,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
-            expand_source_channels=self._expand_source_channels,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,

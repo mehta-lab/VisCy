@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +14,7 @@ from viscy_data._typing import (
     CELL_INDEX_BIOLOGY_COLUMNS,
     CELL_INDEX_CORE_COLUMNS,
     CELL_INDEX_GROUPING_COLUMNS,
+    CELL_INDEX_IMAGING_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
 )
@@ -47,7 +47,6 @@ def _make_valid_df(n: int = 5) -> pd.DataFrame:
             "y": np.random.default_rng(0).random(n).astype(np.float32) * 256,
             "x": np.random.default_rng(1).random(n).astype(np.float32) * 256,
             "z": np.zeros(n, dtype=np.int16),
-            "source_channels": json.dumps(["Phase", "GFP"]),
             "condition": "uninfected",
             "channel_name": "GFP",
             "microscope": "",
@@ -64,6 +63,7 @@ def _make_timelapse_df() -> pd.DataFrame:
     df["lineage_id"] = df["global_track_id"]
     df["parent_track_id"] = pd.array([-1, -1, -1, -1], dtype="Int32")
     df["hours_post_perturbation"] = [0.0, 0.5, 0.0, 0.5]
+    df["interval_minutes"] = 30.0
     return df
 
 
@@ -97,12 +97,23 @@ class TestValidation:
         with pytest.raises(ValueError, match="Missing required columns"):
             validate_cell_index(df)
 
-    def test_duplicate_cell_id_raises(self):
-        """3. Duplicate cell_id raises ValueError."""
+    def test_duplicate_cell_id_channel_name_raises(self):
+        """3. Duplicate (cell_id, channel_name) raises ValueError."""
         df = _make_valid_df()
         df.loc[1, "cell_id"] = df.loc[0, "cell_id"]
-        with pytest.raises(ValueError, match="cell_id must be unique"):
+        df.loc[1, "channel_name"] = df.loc[0, "channel_name"]
+        with pytest.raises(ValueError, match="cell_id, channel_name.*must be unique"):
             validate_cell_index(df)
+
+    def test_same_cell_id_different_channel_passes(self):
+        """3b. Same cell_id with different channel_name is valid (flat parquet)."""
+        df = _make_valid_df(2)
+        df.loc[0, "cell_id"] = "shared_cell"
+        df.loc[1, "cell_id"] = "shared_cell"
+        df.loc[0, "channel_name"] = "Phase3D"
+        df.loc[1, "channel_name"] = "GFP"
+        warnings = validate_cell_index(df)
+        assert isinstance(warnings, list)
 
     def test_strict_requires_all_columns(self):
         """4. strict=True requires all schema columns."""
@@ -114,7 +125,12 @@ class TestValidation:
     def test_strict_passes_with_all_columns(self):
         """4b. strict=True passes when all columns are present."""
         df = _make_valid_df()
-        for col in CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS:
+        for col in (
+            CELL_INDEX_BIOLOGY_COLUMNS
+            + CELL_INDEX_TIMELAPSE_COLUMNS
+            + CELL_INDEX_OPS_COLUMNS
+            + CELL_INDEX_IMAGING_COLUMNS
+        ):
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         assert isinstance(warnings, list)
@@ -122,7 +138,12 @@ class TestValidation:
     def test_all_null_column_warns(self):
         """Nullable columns that are entirely null produce warnings."""
         df = _make_valid_df()
-        for col in CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_OPS_COLUMNS:
+        for col in (
+            CELL_INDEX_BIOLOGY_COLUMNS
+            + CELL_INDEX_TIMELAPSE_COLUMNS
+            + CELL_INDEX_OPS_COLUMNS
+            + CELL_INDEX_IMAGING_COLUMNS
+        ):
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         assert any("all null" in w for w in warnings)
@@ -318,7 +339,7 @@ class TestCrossParadigm:
     def test_timelapse_has_null_ops_columns(self):
         """15. Time-lapse parquet has OPS columns as null."""
         df = _make_timelapse_df()
-        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS:
+        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_IMAGING_COLUMNS:
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         ops_warnings = [w for w in warnings if any(c in w for c in CELL_INDEX_OPS_COLUMNS)]
@@ -327,7 +348,7 @@ class TestCrossParadigm:
     def test_ops_has_null_timelapse_columns(self):
         """16. OPS parquet has time-lapse columns as null."""
         df = _make_ops_df()
-        for col in CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS:
+        for col in CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_IMAGING_COLUMNS:
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
         tl_warnings = [w for w in warnings if any(c in w for c in CELL_INDEX_TIMELAPSE_COLUMNS)]
@@ -336,7 +357,7 @@ class TestCrossParadigm:
     def test_concat_schema_compatible(self, tmp_path):
         """17. Both can be pd.concat'd (schema-compatible)."""
         tl = _make_timelapse_df()
-        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS:
+        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_IMAGING_COLUMNS:
             tl[col] = None
 
         ops = _make_ops_df()

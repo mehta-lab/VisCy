@@ -115,6 +115,8 @@ def create_experiment(
     n_t: int = N_T,
     interval_minutes: float = 30.0,
     start_hpi: float = 0.0,
+    pixel_size_xy_um: float | None = None,
+    pixel_size_z_um: float | None = None,
 ) -> ExperimentEntry:
     """Create a mini HCS OME-Zarr store, tracking CSVs, and return an ExperimentEntry."""
     from iohub.ngff import open_ome_zarr
@@ -146,6 +148,8 @@ def create_experiment(
         condition_wells=condition_wells,
         interval_minutes=interval_minutes,
         start_hpi=start_hpi,
+        pixel_size_xy_um=pixel_size_xy_um,
+        pixel_size_z_um=pixel_size_z_um,
     )
 
 
@@ -177,6 +181,95 @@ def write_collection_yaml(
     yaml_path = tmp_path / "collection.yml"
     save_collection(collection, yaml_path)
     return yaml_path
+
+
+def build_flat_cell_index(
+    output_path: Path,
+    entries: list[ExperimentEntry],
+    channel_markers: dict[str, list[tuple[str, str]]],
+) -> pd.DataFrame:
+    """Build a flat cell index parquet (one row per cell x timepoint x channel).
+
+    Parameters
+    ----------
+    output_path : Path
+        Where to write the parquet.
+    entries : list[ExperimentEntry]
+        Experiment entries (must have data_path pointing to a valid zarr).
+    channel_markers : dict[str, list[tuple[str, str]]]
+        ``{experiment_name: [(zarr_channel_name, marker), ...]}``
+        defining which channels to expand and their marker labels.
+
+    Returns
+    -------
+    pd.DataFrame
+        The flat cell index.
+    """
+    from viscy_data.cell_index import write_cell_index
+
+    rows: list[dict] = []
+    for entry in entries:
+        channels = channel_markers[entry.name]
+        zarr_path = Path(entry.data_path)
+        tracks_root = Path(entry.tracks_path)
+
+        from iohub.ngff import open_ome_zarr
+
+        with open_ome_zarr(str(zarr_path), mode="r") as plate:
+            for _pos_path, position in plate.positions():
+                fov_path = position.zgroup.name.strip("/")
+                parts = fov_path.split("/")
+                well_name = "/".join(parts[:2])
+                fov_name = parts[2]
+
+                if well_name not in {w for ws in entry.condition_wells.values() for w in ws}:
+                    continue
+
+                condition = next(
+                    (c for c, ws in entry.condition_wells.items() if well_name in ws),
+                    "unknown",
+                )
+
+                csv_dir = tracks_root / fov_path
+                csv_files = list(csv_dir.glob("*.csv"))
+                if not csv_files:
+                    continue
+                tracks_df = pd.read_csv(csv_files[0])
+
+                for _, track_row in tracks_df.iterrows():
+                    cell_id = f"{entry.name}_{fov_path}_{int(track_row['track_id'])}_{int(track_row['t'])}"
+                    base = {
+                        "cell_id": cell_id,
+                        "experiment": entry.name,
+                        "store_path": str(zarr_path),
+                        "tracks_path": str(tracks_root),
+                        "fov": fov_name,
+                        "well": well_name,
+                        "y": float(track_row["y"]),
+                        "x": float(track_row["x"]),
+                        "z": int(track_row.get("z", 0)),
+                        "condition": condition,
+                        "t": int(track_row["t"]),
+                        "track_id": int(track_row["track_id"]),
+                        "global_track_id": f"{entry.name}_{fov_path}_{int(track_row['track_id'])}",
+                        "lineage_id": f"{entry.name}_{fov_path}_{int(track_row['track_id'])}",
+                        "parent_track_id": int(track_row["parent_track_id"])
+                        if pd.notna(track_row.get("parent_track_id"))
+                        else -1,
+                        "hours_post_perturbation": entry.start_hpi + track_row["t"] * entry.interval_minutes / 60.0,
+                        "interval_minutes": entry.interval_minutes,
+                        "microscope": entry.microscope,
+                        "organelle": entry.organelle,
+                        "pixel_size_xy_um": entry.pixel_size_xy_um,
+                        "pixel_size_z_um": entry.pixel_size_z_um,
+                    }
+                    for ch_name, marker in channels:
+                        row = {**base, "channel_name": ch_name, "marker": marker}
+                        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    write_cell_index(df, output_path)
+    return df
 
 
 class SimpleEncoder(nn.Module):

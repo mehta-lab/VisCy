@@ -26,6 +26,7 @@ from viscy_data._typing import (
     CELL_INDEX_BIOLOGY_COLUMNS,
     CELL_INDEX_CORE_COLUMNS,
     CELL_INDEX_GROUPING_COLUMNS,
+    CELL_INDEX_IMAGING_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
 )
@@ -57,7 +58,6 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("y", pa.float32()),
         ("x", pa.float32()),
         ("z", pa.int16()),
-        ("source_channels", pa.large_string()),
         ("condition", pa.string()),
         ("channel_name", pa.string()),
         ("t", pa.int32()),
@@ -73,6 +73,8 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("microscope", pa.string()),
         ("marker", pa.string()),
         ("organelle", pa.string()),
+        ("pixel_size_xy_um", pa.float32()),
+        ("pixel_size_z_um", pa.float32()),
     ]
 )
 
@@ -83,6 +85,7 @@ _ALL_COLUMNS = set(
     + CELL_INDEX_BIOLOGY_COLUMNS
     + CELL_INDEX_TIMELAPSE_COLUMNS
     + CELL_INDEX_OPS_COLUMNS
+    + CELL_INDEX_IMAGING_COLUMNS
 )
 
 # ---------------------------------------------------------------------------
@@ -108,16 +111,17 @@ def validate_cell_index(df: pd.DataFrame, *, strict: bool = False) -> list[str]:
     Raises
     ------
     ValueError
-        If required columns are missing or ``cell_id`` is not unique.
+        If required columns are missing or ``(cell_id, channel_name)`` is not unique.
     """
     required = _ALL_COLUMNS if strict else _REQUIRED_COLUMNS
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-    if df["cell_id"].duplicated().any():
-        n_dup = df["cell_id"].duplicated().sum()
-        raise ValueError(f"cell_id must be unique, found {n_dup} duplicates")
+    dup_key = ["cell_id", "channel_name"]
+    if df.duplicated(subset=dup_key).any():
+        n_dup = df.duplicated(subset=dup_key).sum()
+        raise ValueError(f"(cell_id, channel_name) must be unique, found {n_dup} duplicates")
 
     warnings: list[str] = []
     for col in _ALL_COLUMNS & set(df.columns):

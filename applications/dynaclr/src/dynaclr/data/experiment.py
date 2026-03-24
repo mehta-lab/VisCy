@@ -7,7 +7,6 @@ resolution, tau-range conversion, and Z-range auto-resolution, backed by
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -42,8 +41,10 @@ class ExperimentRegistry:
 
     * ``num_source_channels`` -- common count of source channels.
     * ``channel_maps`` -- per-experiment mapping of source position to zarr
-      channel index.
+      channel index (used by collection YAML path).
     * ``z_ranges`` -- per-experiment ``(z_start, z_end)`` ranges.
+    * ``scale_factors`` -- per-experiment ``(scale_z, scale_y, scale_x)``
+      for physical-space normalization across microscopes.
 
     Parameters
     ----------
@@ -66,7 +67,6 @@ class ExperimentRegistry:
     reference_pixel_size_z_um: float | None = None
     num_source_channels: int = field(init=False)
     channel_maps: dict[str, dict[int, int]] = field(init=False)
-    norm_meta_key_maps: dict[str, dict[str, str]] = field(init=False)
     z_ranges: dict[str, tuple[int, int]] = field(init=False)
     scale_factors: dict[str, tuple[float, float, float]] = field(init=False)
 
@@ -127,13 +127,6 @@ class ExperimentRegistry:
                 i: exp.channel_names.index(sc.per_experiment[exp.name])
                 for i, sc in enumerate(source_channels)
                 if exp.name in sc.per_experiment
-            }
-
-        # Build norm_meta key maps: zarr channel name -> source label
-        self.norm_meta_key_maps = {}
-        for exp in experiments:
-            self.norm_meta_key_maps[exp.name] = {
-                sc.per_experiment[exp.name]: sc.label for sc in source_channels if exp.name in sc.per_experiment
             }
 
         # Validate consistent source channel count
@@ -354,38 +347,22 @@ class ExperimentRegistry:
             if hasattr(plate, "close"):
                 plate.close()
 
-        # Step 2: Derive source channels from parquet source_channels JSON.
-        # Supports dict format {label: zarr_name} (new) and list format [zarr_name, ...] (old).
-        exp_source_channels: dict[str, dict[str, str]] = {}
-        for exp_name, exp_group in df.groupby("experiment"):
-            for sc_json in exp_group["source_channels"].dropna().unique():
-                parsed = json.loads(sc_json)
-                if parsed:
-                    if isinstance(parsed, list):
-                        parsed = {name: name for name in parsed}
-                    exp_source_channels[str(exp_name)] = parsed
-                    break
-            if str(exp_name) not in exp_source_channels:
-                raise ValueError(f"Experiment '{exp_name}' has no valid source_channels in parquet.")
+        # Step 2: Derive source channels from flat (marker, channel_name) columns.
+        # Each unique marker across experiments becomes a SourceChannel.
+        # per_experiment maps experiment → zarr channel name for that marker.
+        marker_per_exp: dict[str, dict[str, str]] = {}
+        all_markers: list[str] = []
+        seen_markers: set[str] = set()
+        for (exp_name, marker, ch_name), _ in df.groupby(["experiment", "marker", "channel_name"]):
+            exp_name, marker, ch_name = str(exp_name), str(marker), str(ch_name)
+            if marker not in marker_per_exp:
+                marker_per_exp[marker] = {}
+            marker_per_exp[marker][exp_name] = ch_name
+            if marker not in seen_markers:
+                all_markers.append(marker)
+                seen_markers.add(marker)
 
-        # Build unified source channel labels (union across experiments).
-        all_labels: list[str] = []
-        seen_labels: set[str] = set()
-        for channel_map in exp_source_channels.values():
-            for label in channel_map:
-                if label not in seen_labels:
-                    all_labels.append(label)
-                    seen_labels.add(label)
-
-        source_channels = [
-            SourceChannel(
-                label=label,
-                per_experiment={
-                    exp: channel_map[label] for exp, channel_map in exp_source_channels.items() if label in channel_map
-                },
-            )
-            for label in all_labels
-        ]
+        source_channels = [SourceChannel(label=marker, per_experiment=marker_per_exp[marker]) for marker in all_markers]
 
         # Step 3: Build ExperimentEntry per experiment.
         experiments: list[ExperimentEntry] = []
@@ -394,7 +371,12 @@ class ExperimentRegistry:
             store_path = str(exp_group["store_path"].iloc[0])
             first_well = str(exp_group["well"].iloc[0])
 
-            channel_names = channel_names_cache.get((store_path, first_well), exp_source_channels[exp_name])
+            channel_names = channel_names_cache.get((store_path, first_well))
+            if channel_names is None:
+                raise ValueError(
+                    f"Experiment '{exp_name}': could not read channel names from zarr "
+                    f"(store_path={store_path}, well={first_well})."
+                )
 
             # Derive condition_wells from parquet
             condition_wells: dict[str, list[str]] = defaultdict(list)
@@ -425,6 +407,18 @@ class ExperimentRegistry:
                 )
             interval_minutes = float(exp_group["interval_minutes"].dropna().iloc[0])
 
+            pixel_size_xy_um = None
+            if "pixel_size_xy_um" in exp_group.columns:
+                ps = exp_group["pixel_size_xy_um"].dropna()
+                if not ps.empty:
+                    pixel_size_xy_um = float(ps.iloc[0])
+
+            pixel_size_z_um = None
+            if "pixel_size_z_um" in exp_group.columns:
+                ps = exp_group["pixel_size_z_um"].dropna()
+                if not ps.empty:
+                    pixel_size_z_um = float(ps.iloc[0])
+
             experiments.append(
                 ExperimentEntry(
                     name=exp_name,
@@ -435,6 +429,8 @@ class ExperimentRegistry:
                     interval_minutes=interval_minutes,
                     marker=marker,
                     organelle=organelle,
+                    pixel_size_xy_um=pixel_size_xy_um,
+                    pixel_size_z_um=pixel_size_z_um,
                 )
             )
 

@@ -125,6 +125,9 @@ def _load_experiment_fovs(
             tracks_df["well_name"] = well_name
             tracks_df["fov_name"] = fov_name
             tracks_df["global_track_id"] = exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+            tracks_df["cell_id"] = (
+                exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
+            )
             tracks_df["hours_post_perturbation"] = start_hpi + tracks_df["t"] * interval_minutes / 60.0
             tracks_df["fluorescence_channel"] = fluorescence_channel
 
@@ -185,7 +188,6 @@ class MultiExperimentIndex:
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
-        expand_source_channels: bool = False,
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
@@ -237,9 +239,6 @@ class MultiExperimentIndex:
             positive_cell_source=positive_cell_source,
             positive_match_columns=positive_match_columns,
         )
-
-        if expand_source_channels:
-            self.valid_anchors = self._expand_by_source_channel(self.valid_anchors)
 
     # ------- internal methods -------
 
@@ -345,11 +344,17 @@ class MultiExperimentIndex:
             tracks["_img_width"] = pd.Series(dtype=int)
             return all_positions, tracks
 
-        for (store_path, fov_name), _group in tracks.groupby(["store_path", "fov_name"]):
+        for (store_path, well_name, fov_name), _group in tracks.groupby(["store_path", "well_name", "fov_name"]):
             if store_path not in self._store_cache:
                 self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
             plate = self._store_cache[store_path]
-            position = plate[fov_name]
+            # fov_name may be just the FOV id (e.g. "000000") or the full
+            # position path (e.g. "C/1/000000"). Prepend well_name when needed.
+            if "/" in fov_name:
+                position_path = fov_name
+            else:
+                position_path = f"{well_name}/{fov_name}"
+            position = plate[position_path]
             pos_lookup[(store_path, fov_name)] = position
             image = position["0"]
             dim_lookup[(store_path, fov_name)] = (image.height, image.width)
@@ -583,33 +588,6 @@ class MultiExperimentIndex:
 
         return self.tracks[valid_mask].reset_index(drop=True)
 
-    def _expand_by_source_channel(self, valid_anchors: pd.DataFrame) -> pd.DataFrame:
-        """Expand valid_anchors: one row per (cell, source_channel).
-
-        Adds ``source_channel`` (int, source index) and
-        ``source_channel_label`` (str) columns. Each original row is
-        replicated once per available source channel in the experiment's
-        channel map.
-        """
-        channel_maps = self.registry.channel_maps
-        source_labels = self.registry.source_channel_labels
-        parts: list[pd.DataFrame] = []
-        for exp_name, exp_group in valid_anchors.groupby("experiment"):
-            for src_idx in sorted(channel_maps[exp_name].keys()):
-                expanded = exp_group.copy()
-                expanded["source_channel"] = src_idx
-                expanded["source_channel_label"] = source_labels[src_idx]
-                parts.append(expanded)
-        result = pd.concat(parts, ignore_index=True)
-        n_channels = len(source_labels)
-        _logger.info(
-            "Expanded valid_anchors by %d source channels: %d → %d rows",
-            n_channels,
-            len(valid_anchors),
-            len(result),
-        )
-        return result
-
     # ------- public properties / methods -------
 
     @property
@@ -640,7 +618,6 @@ class MultiExperimentIndex:
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
-        expand_source_channels: bool = False,
     ) -> "MultiExperimentIndex":
         """Create a shallow copy with a different tracks DataFrame.
 
@@ -670,8 +647,6 @@ class MultiExperimentIndex:
             positive_cell_source=positive_cell_source,
             positive_match_columns=positive_match_columns,
         )
-        if expand_source_channels:
-            clone.valid_anchors = clone._expand_by_source_channel(clone.valid_anchors)
         return clone
 
     def summary(self) -> str:
