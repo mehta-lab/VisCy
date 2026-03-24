@@ -90,6 +90,8 @@ class Sample(TypedDict, total=False):
     source: OneOrSeq[Tensor]
     target: OneOrSeq[Tensor]
     weight: OneOrSeq[Tensor]
+    # Precomputed foreground mask
+    fg_mask: OneOrSeq[Tensor]
     # Instance segmentation masks
     labels: OneOrSeq[Tensor]
     # None: not available

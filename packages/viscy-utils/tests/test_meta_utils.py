@@ -1,9 +1,32 @@
 import numpy as np
+import pytest
 from iohub import open_ome_zarr
 
-from viscy_utils.meta_utils import generate_normalization_metadata
+from viscy_utils.meta_utils import generate_fg_masks, generate_normalization_metadata
 
 GRID_SPACING = 8
+
+
+@pytest.fixture(scope="function")
+def bimodal_hcs_dataset(tmp_path_factory):
+    """HCS dataset with bimodal intensity for Otsu testing."""
+    dataset_path = tmp_path_factory.mktemp("bimodal.zarr")
+    channel_names = ["Phase", "Fluorescence"]
+    zyx_shape = (2, 64, 64)
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=channel_names, version="0.5") as plate:
+        rng = np.random.default_rng(42)
+        for fov_id in ("0", "1"):
+            pos = plate.create_position("A", "1", fov_id)
+            # Bimodal: background ~0, foreground ~5
+            data = np.zeros((1, len(channel_names), *zyx_shape), dtype=np.float32)
+            # Phase: uniform noise
+            data[:, 0] = rng.random((1, *zyx_shape)).astype(np.float32)
+            # Fluorescence: bimodal (BG near 0, FG near 5)
+            fluor = rng.random((1, *zyx_shape)).astype(np.float32) * 0.5
+            fluor[:, :, 32:, :] += 5.0  # right half is bright
+            data[:, 1] = fluor
+            pos.create_image("0", data, chunks=(1, 1, *zyx_shape))
+    return dataset_path
 
 
 def test_fov_timepoint_statistics_differ_between_fovs(small_hcs_dataset):
@@ -76,3 +99,92 @@ def test_normalization_metadata_keys(small_hcs_dataset):
                 assert "fov_statistics" in norm
                 assert "timepoint_statistics" in norm
                 assert "dataset_statistics" in norm
+
+
+def test_compute_otsu_stores_threshold(bimodal_hcs_dataset):
+    """compute_otsu=True stores otsu_threshold in fov_statistics."""
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+
+    with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
+        for _, fov in plate.positions():
+            for channel in plate.channel_names:
+                fov_stats = fov.zattrs["normalization"][channel]["fov_statistics"]
+                assert "otsu_threshold" in fov_stats
+                assert isinstance(fov_stats["otsu_threshold"], float)
+
+
+def test_compute_otsu_threshold_separates_bimodal(bimodal_hcs_dataset):
+    """Otsu threshold on bimodal fluorescence falls between the two modes."""
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+
+    with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
+        for _, fov in plate.positions():
+            # Fluorescence has BG ~0.25 and FG ~5.25; threshold should separate them
+            threshold = fov.zattrs["normalization"]["Fluorescence"]["fov_statistics"]["otsu_threshold"]
+            assert 0.3 < threshold < 5.0, f"Otsu threshold {threshold} not between modes"
+
+
+def test_compute_otsu_false_omits_threshold(small_hcs_dataset):
+    """compute_otsu=False (default) does not store otsu_threshold."""
+    generate_normalization_metadata(small_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING)
+
+    with open_ome_zarr(small_hcs_dataset, mode="r") as plate:
+        for _, fov in plate.positions():
+            for channel in plate.channel_names:
+                fov_stats = fov.zattrs["normalization"][channel]["fov_statistics"]
+                assert "otsu_threshold" not in fov_stats
+
+
+def test_generate_fg_masks_stores_mask(bimodal_hcs_dataset):
+    """generate_fg_masks stores a uint8 binary mask array per position."""
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
+
+    with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
+        for _, fov in plate.positions():
+            assert "fg_mask" in fov
+            mask_arr = fov["fg_mask"]
+            assert mask_arr.shape == fov["0"].shape
+            mask_data = mask_arr[:]
+            assert mask_data.dtype == np.uint8
+            assert set(np.unique(mask_data)).issubset({0, 1})
+
+
+def test_generate_fg_masks_separates_bimodal(bimodal_hcs_dataset):
+    """Fluorescence mask marks the bright half as foreground."""
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
+
+    with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
+        ch_idx = plate.channel_names.index("Fluorescence")
+        for _, fov in plate.positions():
+            mask = fov["fg_mask"][:, ch_idx]
+            assert mask.sum() > 0, "Mask should have foreground voxels"
+            # Phase channel should be all-ones (no explicit mask = full supervision)
+            phase_idx = plate.channel_names.index("Phase")
+            assert (fov["fg_mask"][:, phase_idx] == 1).all()
+
+
+def test_generate_fg_masks_requires_otsu(bimodal_hcs_dataset):
+    """generate_fg_masks raises KeyError without prior Otsu computation."""
+    with pytest.raises(KeyError):
+        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
+
+
+def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
+    """generate_fg_masks raises FileExistsError on re-run."""
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
+
+    with pytest.raises(FileExistsError):
+        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])

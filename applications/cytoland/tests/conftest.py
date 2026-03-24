@@ -236,7 +236,7 @@ def tiny_hcs_zarr(tmp_path):
                 )
     dataset.close()
     # Write per-FOV normalization metadata.
-    norm_meta = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29}} for ch in channel_names}
+    norm_meta = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29, "otsu_threshold": 0.5}} for ch in channel_names}
     with open_ome_zarr(zarr_path, mode="r+") as ds:
         for _, fov in ds.positions():
             fov.zattrs["normalization"] = norm_meta

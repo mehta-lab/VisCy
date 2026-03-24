@@ -192,6 +192,12 @@ class VSUNet(LightningModule):
         """
         return self.model(x)
 
+    def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> Tensor:
+        """Compute loss, passing precomputed fg_mask to the loss if present."""
+        if "fg_mask" in batch:
+            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
+        return self.loss_function(pred, target)
+
     def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
         """Execute a single training step.
 
@@ -215,7 +221,7 @@ class VSUNet(LightningModule):
             source = b["source"]
             target = b["target"]
             pred = self.forward(source)
-            loss = self.loss_function(pred, target)
+            loss = self._compute_loss(pred, target, b)
             losses.append(loss)
             batch_size += source.shape[0]
             if batch_idx < self.log_batches_per_epoch:
@@ -248,7 +254,7 @@ class VSUNet(LightningModule):
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         pred = self.forward(source)
-        loss = self.loss_function(pred, target)
+        loss = self._compute_loss(pred, target, batch)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
         self.validation_losses[dataloader_idx].append(loss.detach())
@@ -782,7 +788,7 @@ class FcmaeUNet(VSUNet):
         x = batch["source"]
         target = batch["target"]
         pred = self.forward(x)
-        loss = self.loss_function(pred, target)
+        loss = self._compute_loss(pred, target, batch)
         return pred, target, loss
 
     def forward_fit_task(self, batch: Sample, batch_idx: int) -> tuple[Tensor, Tensor | None, Tensor]:
