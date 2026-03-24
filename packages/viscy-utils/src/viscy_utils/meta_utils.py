@@ -188,8 +188,8 @@ def generate_fg_masks(
             t_total, c_total = img_arr.shape[0], img_arr.shape[1]
             zyx_shape = img_arr.shape[2:]
 
-            # Build full mask array: (T, C_all, Z, Y, X), zeros for non-target channels
-            mask_all = np.zeros((t_total, c_total, *zyx_shape), dtype=np.uint8)
+            # All-ones default: channels without explicit masks get full supervision
+            mask_all = np.ones((t_total, c_total, *zyx_shape), dtype=np.uint8)
 
             for ch_name, ch_idx in zip(channel_names, channel_indices):
                 norm = pos.zattrs["normalization"][ch_name]["fov_statistics"]

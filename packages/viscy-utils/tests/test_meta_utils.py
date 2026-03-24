@@ -168,9 +168,9 @@ def test_generate_fg_masks_separates_bimodal(bimodal_hcs_dataset):
         for _, fov in plate.positions():
             mask = fov["fg_mask"][:, ch_idx]
             assert mask.sum() > 0, "Mask should have foreground voxels"
-            # Phase channel should be all zeros (not in channel_names)
+            # Phase channel should be all-ones (no explicit mask = full supervision)
             phase_idx = plate.channel_names.index("Phase")
-            assert fov["fg_mask"][:, phase_idx].sum() == 0
+            assert (fov["fg_mask"][:, phase_idx] == 1).all()
 
 
 def test_generate_fg_masks_requires_otsu(bimodal_hcs_dataset):
