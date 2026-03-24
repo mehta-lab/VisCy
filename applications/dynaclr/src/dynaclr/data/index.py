@@ -264,17 +264,15 @@ class MultiExperimentIndex:
         list[pd.DataFrame]
             All per-FOV DataFrames (no Position objects; resolved later).
         """
-        source_channels = self.registry.collection.source_channels
-
         job_args = []
         for exp in self.registry.experiments:
-            fluorescence_ch = source_channels[1].per_experiment.get(exp.name, "") if len(source_channels) > 1 else ""
+            fluorescence_ch = exp.channels[1].name if len(exp.channels) > 1 else ""
             job_args.append(
                 (
                     exp.name,
                     str(exp.data_path),
                     str(exp.tracks_path),
-                    dict(exp.condition_wells),
+                    dict(exp.perturbation_wells),
                     exp.marker,
                     exp.organelle,
                     exp.microscope,

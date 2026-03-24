@@ -13,7 +13,7 @@ from iohub.ngff import Position, open_ome_zarr
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data.cell_index import build_timelapse_cell_index
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+from viscy_data.collection import Collection, ExperimentEntry, save_collection
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,7 +26,6 @@ _YX_PATCH = (32, 32)
 
 def _make_collection(
     experiments: list[ExperimentEntry],
-    source_channels: list[SourceChannel] | None = None,
 ) -> Collection:
     """Build a minimal Collection from test experiments.
 
@@ -34,28 +33,14 @@ def _make_collection(
     ----------
     experiments : list[ExperimentEntry]
         Experiment entries to include.
-    source_channels : list[SourceChannel] | None
-        If None, derives defaults: first channel is labelfree, second is reporter.
 
     Returns
     -------
     Collection
         Validated collection wrapping the given experiments.
     """
-    if source_channels is None:
-        lf: dict[str, str] = {}
-        rp: dict[str, str] = {}
-        for exp in experiments:
-            lf[exp.name] = exp.channel_names[0]
-            if len(exp.channel_names) > 1:
-                rp[exp.name] = exp.channel_names[1]
-        sc: list[SourceChannel] = [SourceChannel(label="labelfree", per_experiment=lf)]
-        if rp:
-            sc.append(SourceChannel(label="reporter", per_experiment=rp))
-        source_channels = sc
     return Collection(
         name="test_collection",
-        source_channels=source_channels,
         experiments=experiments,
     )
 

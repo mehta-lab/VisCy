@@ -12,7 +12,7 @@ from helpers import IMG_H, IMG_W, N_T, N_TRACKS, N_Z, make_tracks_csv
 
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel
+from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -91,15 +91,15 @@ def _build_index(
         name="exp_a",
         data_path=str(zarr_a),
         tracks_path=str(tracks_a),
+        channels=[
+            ChannelEntry(name="Phase", marker="Phase"),
+            ChannelEntry(name="GFP", marker="GFP"),
+        ],
         channel_names=_CHANNEL_NAMES_A,
         condition_wells={"control": ["A/1"]},
         interval_minutes=30.0,
     )
     experiments = [exp_a]
-    source_channels = [
-        SourceChannel(label="labelfree", per_experiment={"exp_a": "Phase"}),
-        SourceChannel(label="reporter", per_experiment={"exp_a": "GFP"}),
-    ]
 
     if two_experiments:
         zarr_b, tracks_b = _create_zarr_and_tracks(
@@ -113,17 +113,18 @@ def _build_index(
             name="exp_b",
             data_path=str(zarr_b),
             tracks_path=str(tracks_b),
+            channels=[
+                ChannelEntry(name="Phase", marker="Phase"),
+                ChannelEntry(name="Mito", marker="Mito"),
+            ],
             channel_names=_CHANNEL_NAMES_B,
             condition_wells={"treated": ["A/1"]},
             interval_minutes=15.0,
         )
         experiments.append(exp_b)
-        for sc in source_channels:
-            sc.per_experiment["exp_b"] = "Phase" if sc.label == "labelfree" else "Mito"
 
     collection = Collection(
         name="test",
-        source_channels=source_channels,
         experiments=experiments,
     )
     registry = ExperimentRegistry(collection=collection, z_window=1)
@@ -282,13 +283,11 @@ class TestChannelRemapping:
             fit=True,
         )
 
-        # Verify channel_maps are different between experiments
-        maps = ds.index.registry.channel_maps
-        assert "exp_a" in maps
-        assert "exp_b" in maps
-        # Both map 2 source channels (Phase+GFP vs Phase+Mito)
-        assert len(maps["exp_a"]) == 2
-        assert len(maps["exp_b"]) == 2
+        # Verify both experiments have channels defined
+        exp_a_entry = ds.index.registry.get_experiment("exp_a")
+        exp_b_entry = ds.index.registry.get_experiment("exp_b")
+        assert len(exp_a_entry.channels) == 2
+        assert len(exp_b_entry.channels) == 2
 
         # Get anchors from each experiment
         exp_a_anchors = ds.index.valid_anchors[ds.index.valid_anchors["experiment"] == "exp_a"]
@@ -474,6 +473,7 @@ def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
             name=name,
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
+            channels=[ChannelEntry(name="Phase", marker="Phase")],
             channel_names=channel_names,
             condition_wells={condition: ["A/1"]},
             interval_minutes=30.0,
@@ -483,11 +483,10 @@ def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
     exp_a = _make("scope_a", "scope1", "control")
     exp_b = _make("scope_b", "scope2", "control")  # same condition, different microscope
 
-    from viscy_data.collection import Collection, SourceChannel
+    from viscy_data.collection import Collection
 
     collection = Collection(
         name="two_scope_test",
-        source_channels=[SourceChannel(label="labelfree", per_experiment={"scope_a": "Phase", "scope_b": "Phase"})],
         experiments=[exp_a, exp_b],
     )
     registry = ExperimentRegistry(collection=collection, z_window=1)
@@ -583,7 +582,7 @@ class TestSelfPositive:
         from iohub.ngff import open_ome_zarr
 
         from dynaclr.data.experiment import ExperimentRegistry
-        from viscy_data.collection import Collection, ExperimentEntry, SourceChannel
+        from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
 
         zarr_path = tmp_path / "self_test.zarr"
         tracks_root = tmp_path / "tracks_self"
@@ -597,13 +596,13 @@ class TestSelfPositive:
             name="self_exp",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
+            channels=[ChannelEntry(name="Phase", marker="Phase")],
             channel_names=["Phase"],
             condition_wells={"control": ["A/1"]},
             interval_minutes=30.0,
         )
         collection = Collection(
             name="self_test",
-            source_channels=[SourceChannel(label="labelfree", per_experiment={"self_exp": "Phase"})],
             experiments=[exp],
         )
         registry = ExperimentRegistry(collection=collection, z_window=1)

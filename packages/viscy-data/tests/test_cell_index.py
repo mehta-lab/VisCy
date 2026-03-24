@@ -206,16 +206,13 @@ def _create_collection_yaml(
     yaml_path = tmp_path / "collection.yml"
     config = {
         "name": "test_collection",
-        "source_channels": [
-            {"label": "labelfree", "per_experiment": {"test_exp": channel_names[0]}},
-        ],
         "experiments": [
             {
                 "name": "test_exp",
                 "data_path": str(dataset_path),
                 "tracks_path": str(tracks_path),
-                "channel_names": channel_names,
-                "condition_wells": {"uninfected": ["A/1", "A/2"], "infected": ["B/1", "B/2"]},
+                "channels": [{"name": ch, "marker": ch} for ch in channel_names],
+                "perturbation_wells": {"uninfected": ["A/1", "A/2"], "infected": ["B/1", "B/2"]},
                 "interval_minutes": 30.0,
                 "start_hpi": 0.0,
             }

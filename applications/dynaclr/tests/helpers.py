@@ -16,7 +16,7 @@ from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import TripletSample
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry, save_collection
 
 # ---------------------------------------------------------------------------
 # HPC / GPU skip markers
@@ -144,6 +144,7 @@ def create_experiment(
         name=name,
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
+        channels=[ChannelEntry(name=ch, marker=ch) for ch in channel_names],
         channel_names=channel_names,
         condition_wells=condition_wells,
         interval_minutes=interval_minutes,
@@ -156,26 +157,10 @@ def create_experiment(
 def write_collection_yaml(
     tmp_path: Path,
     entries: list[ExperimentEntry],
-    source_channels: list[SourceChannel] | None = None,
 ) -> Path:
-    """Write a collection YAML from ExperimentEntry objects.
-
-    If source_channels is None, derives defaults: first channel per experiment
-    is labelfree, second (if present) is reporter.
-    """
-    if source_channels is None:
-        lf: dict[str, str] = {}
-        rp: dict[str, str] = {}
-        for e in entries:
-            lf[e.name] = e.channel_names[0]
-            if len(e.channel_names) > 1:
-                rp[e.name] = e.channel_names[1]
-        source_channels = [SourceChannel(label="labelfree", per_experiment=lf)]
-        if rp:
-            source_channels.append(SourceChannel(label="reporter", per_experiment=rp))
+    """Write a collection YAML from ExperimentEntry objects."""
     collection = Collection(
         name="test_collection",
-        source_channels=source_channels,
         experiments=entries,
     )
     yaml_path = tmp_path / "collection.yml"
@@ -222,11 +207,11 @@ def build_flat_cell_index(
                 well_name = "/".join(parts[:2])
                 fov_name = parts[2]
 
-                if well_name not in {w for ws in entry.condition_wells.values() for w in ws}:
+                if well_name not in {w for ws in entry.perturbation_wells.values() for w in ws}:
                     continue
 
                 condition = next(
-                    (c for c, ws in entry.condition_wells.items() if well_name in ws),
+                    (c for c, ws in entry.perturbation_wells.items() if well_name in ws),
                     "unknown",
                 )
 

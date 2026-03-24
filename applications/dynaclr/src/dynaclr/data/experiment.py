@@ -15,7 +15,7 @@ from pathlib import Path
 from iohub.ngff import open_ome_zarr
 
 from viscy_data.cell_index import read_cell_index
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, load_collection
+from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry, load_collection
 
 _logger = logging.getLogger(__name__)
 
@@ -30,18 +30,13 @@ class ExperimentRegistry:
 
     1. Experiments list must not be empty.
     2. Experiment names must be unique.
-    3. Source channel mappings must reference valid channel names (experiments
-       may omit a source channel — not every experiment needs every channel).
-    4. ``interval_minutes`` must be positive for each experiment.
-    5. ``condition_wells`` must not be empty for each experiment.
-    6. ``data_path`` must point to an existing directory.
-    7. Zarr metadata channel names must match ``channel_names``.
+    3. ``interval_minutes`` must be positive for each experiment.
+    4. ``perturbation_wells`` must not be empty for each experiment.
+    5. ``data_path`` must point to an existing directory.
+    6. Zarr metadata channel names must match ``channel_names``.
 
     After validation the registry computes:
 
-    * ``num_source_channels`` -- common count of source channels.
-    * ``channel_maps`` -- per-experiment mapping of source position to zarr
-      channel index (used by collection YAML path).
     * ``z_ranges`` -- per-experiment ``(z_start, z_end)`` ranges.
     * ``scale_factors`` -- per-experiment ``(scale_z, scale_y, scale_x)``
       for physical-space normalization across microscopes.
@@ -65,8 +60,6 @@ class ExperimentRegistry:
     focus_channel: str | None = None
     reference_pixel_size_xy_um: float | None = None
     reference_pixel_size_z_um: float | None = None
-    num_source_channels: int = field(init=False)
-    channel_maps: dict[str, dict[int, int]] = field(init=False)
     z_ranges: dict[str, tuple[int, int]] = field(init=False)
     scale_factors: dict[str, tuple[float, float, float]] = field(init=False)
 
@@ -99,9 +92,9 @@ class ExperimentRegistry:
                     f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
                 )
 
-            # 5. Empty condition_wells
-            if not exp.condition_wells:
-                raise ValueError(f"Experiment '{exp.name}': condition_wells must not be empty.")
+            # 5. Empty perturbation_wells (or legacy condition_wells)
+            if not exp.perturbation_wells and not exp.condition_wells:
+                raise ValueError(f"Experiment '{exp.name}': perturbation_wells must not be empty.")
 
             # 6. data_path existence
             if not Path(exp.data_path).exists():
@@ -117,20 +110,6 @@ class ExperimentRegistry:
                     f"Expected (from config): {exp.channel_names}, "
                     f"got (from zarr): {zarr_channels}."
                 )
-
-        # Compute channel_maps from source_channels
-        # Experiments may not have all source channels — skip missing ones.
-        source_channels = self.collection.source_channels
-        self.channel_maps = {}
-        for exp in experiments:
-            self.channel_maps[exp.name] = {
-                i: exp.channel_names.index(sc.per_experiment[exp.name])
-                for i, sc in enumerate(source_channels)
-                if exp.name in sc.per_experiment
-            }
-
-        # Validate consistent source channel count
-        self.num_source_channels = len(source_channels)
 
         # Resolve per-experiment z_ranges
         self.z_ranges = self._resolve_z_ranges()
@@ -151,8 +130,15 @@ class ExperimentRegistry:
 
     @property
     def source_channel_labels(self) -> list[str]:
-        """Return the list of source channel labels."""
-        return [sc.label for sc in self.collection.source_channels]
+        """Return unique marker labels across all experiments' channels."""
+        seen: set[str] = set()
+        labels: list[str] = []
+        for exp in self.collection.experiments:
+            for ch in exp.channels:
+                if ch.marker not in seen:
+                    labels.append(ch.marker)
+                    seen.add(ch.marker)
+        return labels
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -170,8 +156,7 @@ class ExperimentRegistry:
 
         for exp in experiments:
             # Auto-resolve from focus_slice zattrs
-            first_sc = self.collection.source_channels[0] if self.collection.source_channels else None
-            focus_ch = self.focus_channel or (first_sc.per_experiment.get(exp.name) if first_sc else None)
+            focus_ch = self.focus_channel or (exp.channels[0].name if exp.channels else None)
 
             with open_ome_zarr(exp.data_path, mode="r") as plate:
                 first_pos = next(iter(plate.positions()))[1]
@@ -347,22 +332,15 @@ class ExperimentRegistry:
             if hasattr(plate, "close"):
                 plate.close()
 
-        # Step 2: Derive source channels from flat (marker, channel_name) columns.
-        # Each unique marker across experiments becomes a SourceChannel.
-        # per_experiment maps experiment → zarr channel name for that marker.
-        marker_per_exp: dict[str, dict[str, str]] = {}
-        all_markers: list[str] = []
-        seen_markers: set[str] = set()
+        # Step 2: Derive per-experiment channels from flat (marker, channel_name) columns.
+        exp_channels: dict[str, list[ChannelEntry]] = defaultdict(list)
+        exp_seen: dict[str, set[str]] = defaultdict(set)
         for (exp_name, marker, ch_name), _ in df.groupby(["experiment", "marker", "channel_name"]):
             exp_name, marker, ch_name = str(exp_name), str(marker), str(ch_name)
-            if marker not in marker_per_exp:
-                marker_per_exp[marker] = {}
-            marker_per_exp[marker][exp_name] = ch_name
-            if marker not in seen_markers:
-                all_markers.append(marker)
-                seen_markers.add(marker)
-
-        source_channels = [SourceChannel(label=marker, per_experiment=marker_per_exp[marker]) for marker in all_markers]
+            key = (ch_name, marker)
+            if key not in exp_seen[exp_name]:
+                exp_channels[exp_name].append(ChannelEntry(name=ch_name, marker=marker))
+                exp_seen[exp_name].add(key)
 
         # Step 3: Build ExperimentEntry per experiment.
         experiments: list[ExperimentEntry] = []
@@ -378,14 +356,14 @@ class ExperimentRegistry:
                     f"(store_path={store_path}, well={first_well})."
                 )
 
-            # Derive condition_wells from parquet
-            condition_wells: dict[str, list[str]] = defaultdict(list)
+            # Derive perturbation_wells from parquet
+            perturbation_wells: dict[str, list[str]] = defaultdict(list)
             seen_pairs: set[tuple[str, str]] = set()
             for _, row in exp_group[["perturbation", "well"]].drop_duplicates().iterrows():
                 cond = str(row["perturbation"])
                 well = str(row["well"])
                 if (cond, well) not in seen_pairs:
-                    condition_wells[cond].append(well)
+                    perturbation_wells[cond].append(well)
                     seen_pairs.add((cond, well))
 
             marker = ""
@@ -424,8 +402,9 @@ class ExperimentRegistry:
                     name=exp_name,
                     data_path=store_path,
                     tracks_path="",
+                    channels=exp_channels.get(exp_name, []),
                     channel_names=channel_names,
-                    condition_wells=dict(condition_wells),
+                    perturbation_wells=dict(perturbation_wells),
                     interval_minutes=interval_minutes,
                     marker=marker,
                     organelle=organelle,
@@ -437,7 +416,6 @@ class ExperimentRegistry:
         collection = Collection(
             name=Path(cell_index_path).stem,
             description=f"Auto-generated from cell index: {cell_index_path}",
-            source_channels=source_channels,
             experiments=experiments,
         )
 
@@ -463,19 +441,10 @@ class ExperimentRegistry:
             New registry with only the specified experiments.
         """
         subset_experiments = [e for e in self.collection.experiments if e.name in experiment_names]
-        name_set = set(experiment_names)
-        subset_source_channels = [
-            SourceChannel(
-                label=sc.label,
-                per_experiment={k: v for k, v in sc.per_experiment.items() if k in name_set},
-            )
-            for sc in self.collection.source_channels
-        ]
         subset_collection = Collection(
             name=self.collection.name,
             description=self.collection.description,
             provenance=self.collection.provenance,
-            source_channels=subset_source_channels,
             experiments=subset_experiments,
             fov_records=self.collection.fov_records,
         )

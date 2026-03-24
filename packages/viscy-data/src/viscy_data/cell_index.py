@@ -249,7 +249,6 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
 
 def _build_experiment_tracks(
     exp: object,
-    collection_source_channels: list,
     include_wells: list[str] | None,
     exclude_fovs: list[str] | None,
 ) -> pd.DataFrame:
@@ -258,9 +257,7 @@ def _build_experiment_tracks(
     Parameters
     ----------
     exp :
-        Experiment object from collection.
-    collection_source_channels :
-        Source channel list from collection.
+        Experiment entry with ``channels`` list and ``perturbation_wells``.
     include_wells : list[str] | None
         Well filter passed from caller.
     exclude_fovs : list[str] | None
@@ -271,19 +268,15 @@ def _build_experiment_tracks(
     pd.DataFrame
         Track rows for this experiment, one per (cell, timepoint, channel).
     """
-    condition_wells = exp.condition_wells
-    declared_wells = {w for wells in condition_wells.values() for w in wells}
+    perturbation_wells = exp.perturbation_wells
+    declared_wells = {w for wells in perturbation_wells.values() for w in wells}
 
     all_exclude = set(exp.exclude_fovs)
     if exclude_fovs is not None:
         all_exclude.update(exclude_fovs)
 
-    # Build (zarr_channel_name, marker) pairs for channels this experiment has
-    channel_marker_pairs: list[tuple[str, str]] = []
-    for sc in collection_source_channels:
-        if exp.name in sc.per_experiment:
-            zarr_name = sc.per_experiment[exp.name]
-            channel_marker_pairs.append((zarr_name, sc.label))
+    # Channel-marker pairs from per-experiment channels list
+    channel_marker_pairs = [(ch.name, ch.marker) for ch in exp.channels]
 
     exp_tracks: list[pd.DataFrame] = []
 
@@ -303,7 +296,7 @@ def _build_experiment_tracks(
         if all_exclude and fov_path in all_exclude:
             continue
 
-        condition = _resolve_condition(condition_wells, well_name)
+        perturbation = _resolve_condition(perturbation_wells, well_name)
 
         tracks_dir = Path(exp.tracks_path) / fov_path
         csv_files = list(tracks_dir.glob("*.csv"))
@@ -322,7 +315,7 @@ def _build_experiment_tracks(
         tracks_df["tracks_path"] = str(exp.tracks_path)
         tracks_df["fov"] = fov_name
         tracks_df["well"] = well_name
-        tracks_df["perturbation"] = condition
+        tracks_df["perturbation"] = perturbation
         tracks_df["global_track_id"] = exp.name + "_" + fov_path + "_" + tracks_df["track_id"].astype(str)
         tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
         tracks_df["interval_minutes"] = exp.interval_minutes
@@ -384,7 +377,7 @@ def build_timelapse_cell_index(
 
     if n_workers == 1:
         for exp in tqdm(experiments, desc="Experiments", unit="exp"):
-            df = _build_experiment_tracks(exp, collection.source_channels, include_wells, exclude_fovs)
+            df = _build_experiment_tracks(exp, include_wells, exclude_fovs)
             if not df.empty:
                 all_tracks.append(df)
                 print(f"  {exp.name}: {len(df):,} rows")
@@ -395,7 +388,6 @@ def build_timelapse_cell_index(
                 future = executor.submit(
                     _build_experiment_tracks,
                     exp,
-                    collection.source_channels,
                     include_wells,
                     exclude_fovs,
                 )

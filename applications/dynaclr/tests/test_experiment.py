@@ -7,7 +7,7 @@ import pytest
 from iohub.ngff import open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry, save_collection
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -41,6 +41,11 @@ def exp_entry_a(mini_zarr, tmp_path):
         name="exp_a",
         data_path=str(mini_zarr),
         tracks_path=str(tmp_path / "tracks_a"),
+        channels=[
+            ChannelEntry(name="Phase", marker="Phase"),
+            ChannelEntry(name="GFP", marker="GFP"),
+            ChannelEntry(name="RFP", marker="RFP"),
+        ],
         channel_names=["Phase", "GFP", "RFP"],
         condition_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
         interval_minutes=30.0,
@@ -54,6 +59,10 @@ def exp_entry_b(mini_zarr_mito, tmp_path):
         name="exp_b",
         data_path=str(mini_zarr_mito),
         tracks_path=str(tmp_path / "tracks_b"),
+        channels=[
+            ChannelEntry(name="Phase", marker="Phase"),
+            ChannelEntry(name="Mito", marker="Mito"),
+        ],
         channel_names=["Phase", "Mito"],
         condition_wells={"control": ["A/1"]},
         interval_minutes=15.0,
@@ -61,26 +70,17 @@ def exp_entry_b(mini_zarr_mito, tmp_path):
 
 
 def _make_collection_ab(exp_entry_a, exp_entry_b):
-    """Create a Collection with two experiments and two source channels."""
-    source_channels = [
-        SourceChannel(label="labelfree", per_experiment={"exp_a": "Phase", "exp_b": "Phase"}),
-        SourceChannel(label="reporter", per_experiment={"exp_a": "RFP", "exp_b": "Mito"}),
-    ]
+    """Create a Collection with two experiments."""
     return Collection(
         name="test",
-        source_channels=source_channels,
         experiments=[exp_entry_a, exp_entry_b],
     )
 
 
-def _make_collection_single(exp_entry, source_channel_names):
+def _make_collection_single(exp_entry):
     """Create a Collection with a single experiment."""
-    source_channels = [
-        SourceChannel(label=f"ch{i}", per_experiment={exp_entry.name: ch}) for i, ch in enumerate(source_channel_names)
-    ]
     return Collection(
         name="test",
-        source_channels=source_channels,
         experiments=[exp_entry],
     )
 
@@ -91,42 +91,14 @@ def _make_collection_single(exp_entry, source_channel_names):
 
 
 class TestExperimentRegistry:
-    def test_registry_channel_maps(self, exp_entry_a):
-        """channel_maps correctly maps source_channel position -> zarr index."""
-        collection = _make_collection_single(exp_entry_a, ["Phase", "RFP"])
-        registry = ExperimentRegistry(collection=collection, z_window=1)
-        # source_channels: ch0->Phase(idx0), ch1->RFP(idx2) in ["Phase", "GFP", "RFP"]
-        assert registry.channel_maps["exp_a"] == {0: 0, 1: 2}
-
-    def test_registry_channel_maps_different_names(self, exp_entry_a, exp_entry_b):
-        """Positional alignment: different channel names, same position count."""
+    def test_registry_source_channel_labels(self, exp_entry_a, exp_entry_b):
+        """source_channel_labels returns unique markers from all experiments."""
         collection = _make_collection_ab(exp_entry_a, exp_entry_b)
         registry = ExperimentRegistry(collection=collection, z_window=1)
-        # exp_a: labelfree->Phase(0), reporter->RFP(2) in ["Phase", "GFP", "RFP"]
-        assert registry.channel_maps["exp_a"] == {0: 0, 1: 2}
-        # exp_b: labelfree->Phase(0), reporter->Mito(1) in ["Phase", "Mito"]
-        assert registry.channel_maps["exp_b"] == {0: 0, 1: 1}
-
-    def test_registry_source_channel_not_in_channel_names(self, mini_zarr, tmp_path):
-        """ValueError when source_channel references a channel not in channel_names."""
-        exp = ExperimentEntry(
-            name="bad_source",
-            data_path=str(mini_zarr),
-            tracks_path=str(tmp_path / "tracks"),
-            channel_names=["Phase", "GFP", "RFP"],
-            condition_wells={"ctrl": ["A/1"]},
-            interval_minutes=30.0,
-        )
-        source_channels = [
-            SourceChannel(label="labelfree", per_experiment={"bad_source": "Phase"}),
-            SourceChannel(label="reporter", per_experiment={"bad_source": "DAPI"}),
-        ]
-        with pytest.raises(ValueError, match="DAPI"):
-            Collection(
-                name="test",
-                source_channels=source_channels,
-                experiments=[exp],
-            )
+        labels = registry.source_channel_labels
+        assert "Phase" in labels
+        assert "RFP" in labels
+        assert "Mito" in labels
 
     def test_registry_duplicate_names(self, exp_entry_a):
         """ValueError when two experiments share the same name."""
@@ -138,13 +110,9 @@ class TestExperimentRegistry:
             condition_wells=exp_entry_a.condition_wells,
             interval_minutes=exp_entry_a.interval_minutes,
         )
-        source_channels = [
-            SourceChannel(label="labelfree", per_experiment={"exp_a": "Phase"}),
-        ]
         with pytest.raises(ValueError, match="[Dd]uplicate"):
             Collection(
                 name="test",
-                source_channels=source_channels,
                 experiments=[exp_entry_a, dup],
             )
 
@@ -152,15 +120,15 @@ class TestExperimentRegistry:
         """ValueError when experiments list is empty."""
         with pytest.raises(ValueError, match="[Ee]mpty"):
             ExperimentRegistry(
-                collection=Collection(name="test", source_channels=[], experiments=[]),
+                collection=Collection(name="test", experiments=[]),
                 z_window=1,
             )
 
     def test_registry_zarr_validation(self, exp_entry_a):
         """Opens zarr and validates channel_names match metadata."""
-        collection = _make_collection_single(exp_entry_a, ["Phase", "RFP"])
+        collection = _make_collection_single(exp_entry_a)
         registry = ExperimentRegistry(collection=collection, z_window=1)
-        assert registry.num_source_channels == 2
+        assert len(registry.source_channel_labels) == 3
 
     def test_registry_zarr_channel_mismatch(self, mini_zarr, tmp_path):
         """ValueError when channel_names don't match zarr metadata."""
@@ -172,7 +140,7 @@ class TestExperimentRegistry:
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        collection = _make_collection_single(exp, ["Phase"])
+        collection = _make_collection_single(exp)
         with pytest.raises(ValueError, match="channel"):
             ExperimentRegistry(collection=collection, z_window=1)
 
@@ -186,7 +154,7 @@ class TestExperimentRegistry:
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        collection = _make_collection_single(exp, ["Phase"])
+        collection = _make_collection_single(exp)
         with pytest.raises(ValueError, match="data_path"):
             ExperimentRegistry(collection=collection, z_window=1)
 
@@ -196,6 +164,11 @@ class TestExperimentRegistry:
             name="yaml_exp",
             data_path=str(mini_zarr),
             tracks_path=str(tmp_path / "tracks"),
+            channels=[
+                ChannelEntry(name="Phase", marker="Phase"),
+                ChannelEntry(name="GFP", marker="GFP"),
+                ChannelEntry(name="RFP", marker="RFP"),
+            ],
             channel_names=["Phase", "GFP", "RFP"],
             condition_wells={
                 "uninfected": ["A/1"],
@@ -204,13 +177,8 @@ class TestExperimentRegistry:
             interval_minutes=30.0,
             start_hpi=3.0,
         )
-        source_channels = [
-            SourceChannel(label="labelfree", per_experiment={"yaml_exp": "Phase"}),
-            SourceChannel(label="reporter", per_experiment={"yaml_exp": "GFP"}),
-        ]
         collection = Collection(
             name="test",
-            source_channels=source_channels,
             experiments=[exp],
         )
         collection_path = tmp_path / "collection.yml"
@@ -220,25 +188,24 @@ class TestExperimentRegistry:
         assert len(registry.experiments) == 1
         assert registry.experiments[0].name == "yaml_exp"
         assert registry.experiments[0].start_hpi == 3.0
-        assert registry.channel_maps["yaml_exp"] == {0: 0, 1: 1}
 
     def test_tau_range_frames_30min(self, exp_entry_a):
         """tau_range_hours=(0.5, 2.0) at 30min -> (1, 4)."""
-        collection = _make_collection_single(exp_entry_a, ["Phase", "RFP"])
+        collection = _make_collection_single(exp_entry_a)
         registry = ExperimentRegistry(collection=collection, z_window=1)
         result = registry.tau_range_frames("exp_a", (0.5, 2.0))
         assert result == (1, 4)
 
     def test_tau_range_frames_15min(self, exp_entry_b):
         """tau_range_hours=(0.5, 2.0) at 15min -> (2, 8)."""
-        collection = _make_collection_single(exp_entry_b, ["Phase", "Mito"])
+        collection = _make_collection_single(exp_entry_b)
         registry = ExperimentRegistry(collection=collection, z_window=1)
         result = registry.tau_range_frames("exp_b", (0.5, 2.0))
         assert result == (2, 8)
 
     def test_tau_range_frames_warns_few_frames(self, exp_entry_a, caplog):
         """Warns when min_frames >= max_frames."""
-        collection = _make_collection_single(exp_entry_a, ["Phase", "RFP"])
+        collection = _make_collection_single(exp_entry_a)
         registry = ExperimentRegistry(collection=collection, z_window=1)
         with caplog.at_level(logging.WARNING):
             # (0.0, 0.0) at 30min -> (0, 0), min >= max
@@ -247,7 +214,7 @@ class TestExperimentRegistry:
 
     def test_get_experiment(self, exp_entry_a):
         """Lookup by name returns the correct config."""
-        collection = _make_collection_single(exp_entry_a, ["Phase", "RFP"])
+        collection = _make_collection_single(exp_entry_a)
         registry = ExperimentRegistry(collection=collection, z_window=1)
         result = registry.get_experiment("exp_a")
         assert result.name == "exp_a"
@@ -255,7 +222,7 @@ class TestExperimentRegistry:
 
     def test_get_experiment_not_found(self, exp_entry_a):
         """KeyError when experiment name not found."""
-        collection = _make_collection_single(exp_entry_a, ["Phase", "RFP"])
+        collection = _make_collection_single(exp_entry_a)
         registry = ExperimentRegistry(collection=collection, z_window=1)
         with pytest.raises(KeyError, match="nonexistent"):
             registry.get_experiment("nonexistent")
@@ -270,13 +237,9 @@ class TestExperimentRegistry:
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=-5.0,
         )
-        source_channels = [
-            SourceChannel(label="labelfree", per_experiment={"neg_interval": "Phase"}),
-        ]
         with pytest.raises(ValueError, match="interval_minutes"):
             Collection(
                 name="test",
-                source_channels=source_channels,
                 experiments=[exp],
             )
 
@@ -290,12 +253,8 @@ class TestExperimentRegistry:
             condition_wells={},
             interval_minutes=30.0,
         )
-        source_channels = [
-            SourceChannel(label="labelfree", per_experiment={"empty_wells": "Phase"}),
-        ]
-        with pytest.raises(ValueError, match="condition_wells"):
+        with pytest.raises(ValueError, match="perturbation_wells"):
             Collection(
                 name="test",
-                source_channels=source_channels,
                 experiments=[exp],
             )
