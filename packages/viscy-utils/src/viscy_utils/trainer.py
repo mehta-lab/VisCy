@@ -28,6 +28,7 @@ class VisCyTrainer(Trainer):
         compute_otsu: bool = False,
         otsu_grid_spacing: int = 8,
         compute_fg_masks: bool = False,
+        fg_mask_channels: list[str] | None = None,
         fg_mask_key: str = "fg_mask",
         model: LightningModule | None = None,
     ):
@@ -51,6 +52,9 @@ class VisCyTrainer(Trainer):
         compute_fg_masks : bool, optional
             Whether to precompute binary foreground masks from Otsu
             thresholds, by default False. Requires ``compute_otsu=True``.
+        fg_mask_channels : list[str] or None, optional
+            Channel names to compute FG masks for. Defaults to all channels
+            that had Otsu thresholds computed (``channel_names``).
         fg_mask_key : str, optional
             Zarr array key for the mask, by default ``"fg_mask"``.
         model : LightningModule, optional
@@ -76,9 +80,10 @@ class VisCyTrainer(Trainer):
         if compute_fg_masks:
             if not compute_otsu:
                 raise ValueError("compute_fg_masks requires compute_otsu=True")
+            mask_channels = fg_mask_channels if fg_mask_channels is not None else resolved_channel_names
             generate_fg_masks(
                 zarr_dir=data_path,
-                channel_names=resolved_channel_names,
+                channel_names=mask_channels,
                 fg_mask_key=fg_mask_key,
                 num_workers=num_workers,
             )
