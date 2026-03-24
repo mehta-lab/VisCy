@@ -17,15 +17,51 @@ while rejecting any functional divergence.
 Requirements: INFER-01, INFER-02, INFER-03, TEST-01, TEST-02
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
-from conftest import requires_hpc_and_gpu
 from lightning.pytorch import Trainer, seed_everything
 
 from dynaclr.engine import ContrastiveModule
 from viscy_models.contrastive import ContrastiveEncoder
 from viscy_transforms import NormalizeSampled
+
+_CHECKPOINT_PATH = Path(
+    "/hpc/projects/organelle_phenotyping/models/"
+    "SEC61_TOMM20_G3BP1_Sensor/time_interval/"
+    "dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/"
+    "saved_checkpoints/epoch=104-step=53760.ckpt"
+)
+_REFERENCE_ZARR_PATH = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/"
+    "4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/"
+    "v3/timeaware_phase_160patch_104ckpt.zarr"
+)
+_DATA_ZARR_PATH = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/"
+    "4-phenotyping/train-test/"
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr"
+)
+_TRACKS_ZARR_PATH = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/"
+    "1-preprocess/label-free/3-track/"
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr"
+)
+
+_HPC_PATHS_AVAILABLE = all(
+    p.exists() for p in [_CHECKPOINT_PATH, _REFERENCE_ZARR_PATH, _DATA_ZARR_PATH, _TRACKS_ZARR_PATH]
+)
+_GPU_AVAILABLE = torch.cuda.is_available()
+
+requires_hpc_and_gpu = pytest.mark.skipif(
+    not (_HPC_PATHS_AVAILABLE and _GPU_AVAILABLE),
+    reason="Requires HPC data paths and CUDA GPU",
+)
 
 ENCODER_KWARGS = {
     "backbone": "convnext_tiny",

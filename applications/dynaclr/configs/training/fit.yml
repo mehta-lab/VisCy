@@ -1,9 +1,22 @@
 # See help here on how to configure hyper-parameters with config files:
 # https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
-
-# TODO: point to the path to save the embeddings
+#
+# Run-specific paths — set these before launching:
+#   RUN_DIR:  root output directory for this run, e.g. /hpc/projects/.../runs/my_run_v1
+#             checkpoints, snapshots, and WandB local cache all live here.
+#   RUN_NAME: short label that appears in WandB and directory names.
+#
+# Override at launch:
+#   dynaclr fit --config fit.yml \
+#     --trainer.logger.init_args.name=my_run_v1 \
+#     --trainer.logger.init_args.save_dir=/hpc/projects/.../runs/my_run_v1 \
+#     --trainer.callbacks[1].init_args.dirpath=/hpc/projects/.../runs/my_run_v1/checkpoints \
+#     --trainer.callbacks[2].init_args.output_dir=/hpc/projects/.../runs/my_run_v1/snapshots
+#
 # TODO: point to the path to the data
 # TODO: point to the path to the tracks
+
+_run_dir: &run_dir /hpc/projects/TODO/runs/TODO_run_name  # set this
 
 seed_everything: 42
 trainer:
@@ -13,11 +26,12 @@ trainer:
   num_nodes: 1
   precision: 32-true
   logger:
-    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      save_dir: #TODO point to the path to save the logs
-      version: #TODO point to the version name
-      log_graph: True
+      entity: computational_imaging
+      project: dynaclr
+      name: TODO_run_name  # matches run_dir suffix
+      save_dir: *run_dir
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -28,9 +42,10 @@ trainer:
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
+        dirpath: *run_dir
     - class_path: viscy_utils.callbacks.EmbeddingSnapshotCallback
       init_args:
-        output_dir: #TODO point to the path to save embedding snapshots
+        output_dir: *run_dir
         every_n_epochs: 10
         store_images: true
         pca_kwargs:
@@ -62,6 +77,10 @@ model:
     lr: 0.00002
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
+    # PCA pairplot logged to WandB every N val epochs (null = disabled, WandB logger only)
+    # Colors points by this SampleMeta key (condition/experiment/hours_post_perturbation)
+    log_embeddings_every_n_epochs: 10
+    pca_color_key: condition
     example_input_array_shape: [1, 2, 30, 256, 256]
 data:
   class_path: viscy_data.triplet.TripletDataModule

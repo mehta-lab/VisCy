@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder, SyntheticTripletDataModule
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_metric_learning.losses import NTXentLoss
@@ -14,13 +13,13 @@ from torch import nn
 from dynaclr.engine import ContrastiveModule
 
 
-def test_contrastive_fast_dev_run(tmp_path):
+def test_contrastive_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
     seed_everything(42)
     module = ContrastiveModule(
-        encoder=SimpleEncoder(),
+        encoder=_SimpleEncoder(),
         loss_function=nn.TripletMarginLoss(margin=0.5),
         lr=1e-3,
-        example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+        example_input_array_shape=(1, synth_dims["c"], synth_dims["d"], synth_dims["h"], synth_dims["w"]),
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -29,18 +28,18 @@ def test_contrastive_fast_dev_run(tmp_path):
         enable_checkpointing=False,
         enable_progress_bar=False,
     )
-    trainer.fit(module, datamodule=SyntheticTripletDataModule())
+    trainer.fit(module, datamodule=_SyntheticTripletDataModule())
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
 
-def test_contrastive_ntxent_fast_dev_run(tmp_path):
+def test_contrastive_ntxent_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
     seed_everything(42)
     module = ContrastiveModule(
-        encoder=SimpleEncoder(),
+        encoder=_SimpleEncoder(),
         loss_function=NTXentLoss(),
         lr=1e-3,
-        example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+        example_input_array_shape=(1, synth_dims["c"], synth_dims["d"], synth_dims["h"], synth_dims["w"]),
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -49,7 +48,7 @@ def test_contrastive_ntxent_fast_dev_run(tmp_path):
         enable_checkpointing=False,
         enable_progress_bar=False,
     )
-    trainer.fit(module, datamodule=SyntheticTripletDataModule())
+    trainer.fit(module, datamodule=_SyntheticTripletDataModule())
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 

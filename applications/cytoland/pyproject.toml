@@ -61,9 +61,6 @@ source = "uv-dynamic-versioning"
 [tool.hatch.build.targets.wheel]
 packages = [ "src/cytoland" ]
 
-[tool.pytest.ini_options]
-pythonpath = [ "tests" ]
-
 [tool.uv-dynamic-versioning]
 vcs = "git"
 style = "pep440"
