@@ -231,15 +231,15 @@ def test_multi_channel_partial_mask():
     assert torch.isfinite(pred.grad).all()
 
 
-def test_partial_mask_ignores_zero_channel_in_dice():
-    """Dice excludes channels with all-zero mask."""
+def test_partial_mask_ignores_placeholder_channel_in_dice():
+    """Dice excludes all-ones placeholder channels, includes real FG/BG channels."""
     pred = torch.randn(1, 2, 4, 8, 8)
     target = torch.randn(1, 2, 4, 8, 8)
-    # Only channel 0 has a mask
-    fg_mask = torch.zeros(1, 2, 4, 8, 8)
-    fg_mask[:, 0] = 1.0
+    # Channel 0: real mask (has both 0s and 1s) — Dice should include
+    # Channel 1: all-ones placeholder — Dice should exclude
+    fg_mask = torch.ones(1, 2, 4, 8, 8)
+    fg_mask[:, 0, :, :4, :] = 0.0  # channel 0 has BG in left half
 
-    # Use high Dice weight to make Dice dominate
     loss_fn = SpotlightLoss(lambda_mse=0.01, sigmoid_k=-0.95)
     loss = loss_fn(pred, target, fg_mask=fg_mask)
     assert torch.isfinite(loss)

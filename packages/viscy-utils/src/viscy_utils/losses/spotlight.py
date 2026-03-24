@@ -11,12 +11,10 @@ Kalinin, A.A. et al. Foreground-aware Virtual Staining for Accurate
 arXiv:2507.05383
 """
 
-import logging
+import warnings
 
 import torch
 from torch import Tensor, nn
-
-_logger = logging.getLogger(__name__)
 
 __all__ = ["SpotlightLoss"]
 
@@ -192,7 +190,6 @@ class SpotlightLoss(nn.Module):
         spatial_dims = tuple(range(2, pred.ndim))
         n_spatial = pred[0, 0].numel()
 
-        # Per-(B, C) foreground counts
         fg_per_ch = mask.sum(dim=spatial_dims)  # (B, C)
         # A "real" mask has both FG and BG (not all-ones placeholder)
         has_real_mask = (fg_per_ch > 0) & (fg_per_ch < n_spatial)  # (B, C)
@@ -214,7 +211,7 @@ class SpotlightLoss(nn.Module):
         if n_real > 0:
             dice = (channel_dice * has_real_mask.float()).sum() / n_real
         else:
-            _logger.warning("No channel has a real FG/BG mask — Dice term is zero, using MSE only.")
+            warnings.warn("No channel has a real FG/BG mask — Dice term is zero, using MSE only.", stacklevel=2)
             dice = pred.new_tensor(0.0)
 
         return self.lambda_mse * masked_mse + (1 - self.lambda_mse) * dice
