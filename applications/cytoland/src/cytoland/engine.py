@@ -195,7 +195,7 @@ class VSUNet(LightningModule):
     def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> Tensor:
         """Compute loss, passing precomputed fg_mask to the loss if present."""
         if "fg_mask" in batch:
-            return self.loss_function(pred, target, batch["fg_mask"])
+            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
         return self.loss_function(pred, target)
 
     def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):

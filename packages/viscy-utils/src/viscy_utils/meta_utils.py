@@ -151,7 +151,6 @@ def generate_fg_masks(
     zarr_dir,
     channel_names,
     fg_mask_key="fg_mask",
-    num_workers=4,
 ):
     """Precompute binary foreground masks from Otsu thresholds.
 
@@ -171,8 +170,6 @@ def generate_fg_masks(
         Channel names to compute masks for (typically the target channels).
     fg_mask_key : str, optional
         Zarr array key for the mask, by default ``"fg_mask"``.
-    num_workers : int, optional
-        Number of CPU workers for reading, by default 4.
     """
     with ngff.open_ome_zarr(zarr_dir, mode="r+") as plate:
         all_channel_names = plate.channel_names

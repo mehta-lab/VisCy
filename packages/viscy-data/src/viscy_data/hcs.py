@@ -206,7 +206,7 @@ class SlidingWindowDataset(Dataset):
     def __getitem__(self, index: int) -> Sample:
         """Return a sample for the given index."""
         check_key = (
-            self.nonzero_channel or self.channels.get("target", [None])[0] if self.min_nonzero_fraction > 0 else None
+            (self.nonzero_channel or self.channels.get("target", [None])[0]) if self.min_nonzero_fraction > 0 else None
         )
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
@@ -223,7 +223,7 @@ class SlidingWindowDataset(Dataset):
             if fg_mask_arr is not None and self.target_ch_idx is not None:
                 mask_images, _ = self._read_img_window(fg_mask_arr, self.target_ch_idx, tz)
             if check_key is not None:
-                if mask_images is not None:
+                if mask_images is not None and check_key in self.channels.get("target", []):
                     check_ch = self.channels["target"].index(check_key)
                     frac = mask_images[check_ch].sum().item() / mask_images[check_ch].numel()
                 elif check_key in sample_images:

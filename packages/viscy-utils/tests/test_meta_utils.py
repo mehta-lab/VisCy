@@ -144,7 +144,7 @@ def test_generate_fg_masks_stores_mask(bimodal_hcs_dataset):
     generate_normalization_metadata(
         bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
     )
-    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
     with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
         for _, fov in plate.positions():
@@ -161,7 +161,7 @@ def test_generate_fg_masks_separates_bimodal(bimodal_hcs_dataset):
     generate_normalization_metadata(
         bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
     )
-    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
     with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
         ch_idx = plate.channel_names.index("Fluorescence")
@@ -176,7 +176,7 @@ def test_generate_fg_masks_separates_bimodal(bimodal_hcs_dataset):
 def test_generate_fg_masks_requires_otsu(bimodal_hcs_dataset):
     """generate_fg_masks raises KeyError without prior Otsu computation."""
     with pytest.raises(KeyError):
-        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
 
 def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
@@ -184,7 +184,7 @@ def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
     generate_normalization_metadata(
         bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
     )
-    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
     with pytest.raises(FileExistsError):
-        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])

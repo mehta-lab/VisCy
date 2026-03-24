@@ -197,10 +197,12 @@ class SpotlightLoss(nn.Module):
         # A "real" mask has both FG and BG (not all-ones placeholder)
         has_real_mask = (fg_per_ch > 0) & (fg_per_ch < n_spatial)  # (B, C)
 
-        # Masked MSE per (B, C) — all-ones channels get regular MSE (mask * sq_err = sq_err)
+        # Masked MSE per (B, C) — channels with no FG fall back to unmasked MSE
         sq_err = (pred - target) ** 2
         masked_sum = (sq_err * mask).sum(dim=spatial_dims)  # (B, C)
-        channel_mse = masked_sum / (fg_per_ch + self.eps)
+        unmasked_mse = sq_err.mean(dim=spatial_dims)  # (B, C)
+        has_fg = fg_per_ch > 0
+        channel_mse = torch.where(has_fg, masked_sum / (fg_per_ch + self.eps), unmasked_mse)
         masked_mse = channel_mse.mean()
 
         # Dice per (B, C) — only channels with real FG/BG masks contribute.

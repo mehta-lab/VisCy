@@ -114,7 +114,7 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
     from viscy_utils.meta_utils import generate_fg_masks
 
     # Fixture already has otsu_threshold in norm_meta; just generate masks
-    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"], num_workers=1)
+    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
 
     seed_everything(42)
     module = VSUNet(

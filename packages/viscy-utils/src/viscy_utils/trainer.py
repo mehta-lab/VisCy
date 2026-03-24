@@ -85,7 +85,6 @@ class VisCyTrainer(Trainer):
                 zarr_dir=data_path,
                 channel_names=mask_channels,
                 fg_mask_key=fg_mask_key,
-                num_workers=num_workers,
             )
 
     def export(
