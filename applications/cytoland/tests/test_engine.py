@@ -61,54 +61,36 @@ def test_vsunet_state_dict_keys(synth_dims):
     assert len(key_names) > 0, "Empty state dict"
 
 
-def test_fnet3d_init(synth_dims):
+def test_fnet3d_init():
     """Verify VSUNet instantiates with FNet3D architecture."""
     model = VSUNet(
         architecture="FNet3D",
-        model_config={
-            "in_channels": synth_dims["c"],
-            "out_channels": 1,
-            "depth": 1,
-            "mult_chan": 8,
-            "in_stack_depth": synth_dims["d"],
-        },
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
     )
     assert model.model is not None
 
 
-def test_fnet3d_forward(synthetic_batch, synth_dims):
+def test_fnet3d_forward():
     """Verify FNet3D forward pass produces correct output shape."""
     model = VSUNet(
         architecture="FNet3D",
-        model_config={
-            "in_channels": synth_dims["c"],
-            "out_channels": 1,
-            "depth": 1,
-            "mult_chan": 8,
-            "in_stack_depth": synth_dims["d"],
-        },
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
     )
     model.eval()
+    x = torch.randn(2, 1, 4, 16, 16)
     with torch.no_grad():
-        output = model(synthetic_batch["source"])
-    assert output.shape[0] == synth_dims["b"]
-    assert output.shape[1] == 1
+        y = model(x)
+    assert y.shape == (2, 1, 4, 16, 16)
 
 
-def test_fnet3d_predict_start(synth_dims):
-    """Verify FNet3D on_predict_start sets up DivisiblePad."""
+def test_fnet3d_predict_start():
+    """Verify on_predict_start works with FNet3D (requires num_blocks)."""
     model = VSUNet(
         architecture="FNet3D",
-        model_config={
-            "in_channels": synth_dims["c"],
-            "out_channels": 1,
-            "depth": 1,
-            "mult_chan": 8,
-            "in_stack_depth": synth_dims["d"],
-        },
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
     )
     model.on_predict_start()
-    assert model.predict_pad is not None
+    assert model._predict_pad is not None
 
 
 def test_mixed_loss_integration(synthetic_batch, synth_dims):

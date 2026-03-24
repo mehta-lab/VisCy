@@ -251,7 +251,7 @@ def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims
     assert trainer.state.status == "finished"
 
 
-def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims):
+def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     """VSUNet + FNet3D + real HCSDataModule end-to-end training for 1 batch."""
     from viscy_data.hcs import HCSDataModule
 
@@ -263,7 +263,7 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims
             "out_channels": 1,
             "depth": 1,
             "mult_chan": 8,
-            "in_stack_depth": synth_dims["d"],
+            "in_stack_depth": 4,
         },
         log_batches_per_epoch=1,
     )
@@ -271,10 +271,10 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims
         data_path=str(tiny_hcs_zarr),
         source_channel="Phase3D",
         target_channel="Fluorescence",
-        z_window_size=synth_dims["d"],
+        z_window_size=4,
         batch_size=2,
         num_workers=0,
-        yx_patch_size=(synth_dims["h"], synth_dims["w"]),
+        yx_patch_size=(32, 32),
     )
     trainer = Trainer(
         fast_dev_run=True,
