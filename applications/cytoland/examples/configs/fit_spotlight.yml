@@ -25,11 +25,11 @@ trainer:
   num_nodes: 1
   precision: 32-true
   logger:
-    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
+      project: cytoland
+      name: #TODO run name
       save_dir: #TODO point to the path to save the logs
-      version: #TODO point to the version name
-      log_graph: True
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:

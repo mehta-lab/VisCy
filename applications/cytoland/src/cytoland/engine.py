@@ -31,7 +31,7 @@ from viscy_data import CombinedDataModule, GPUTransformDataModule, Sample
 from viscy_models import FullyConvolutionalMAE, Unet2d, Unet3d, Unet25d, UNeXt2
 from viscy_utils.callbacks.prediction_writer import _blend_in
 from viscy_utils.evaluation.metrics import mean_average_precision
-from viscy_utils.log_images import detach_sample, render_images
+from viscy_utils.log_images import detach_sample, log_image_grid
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
@@ -489,9 +489,10 @@ class VSUNet(LightningModule):
         return [optimizer], [scheduler]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        """Log image samples to TensorBoard."""
-        grid = render_images(imgs)
-        self.logger.experiment.add_image(key, grid, self.current_epoch, dataformats="HWC")
+        """Log image sample grid to the active logger (TensorBoard or W&B)."""
+        if not self.trainer.is_global_zero or self.logger is None:
+            return
+        log_image_grid(self.logger, key, imgs, self.current_epoch)
 
     def _rotate_volume(self, tensor: Tensor, k: int, spatial_axes: tuple) -> Tensor:
         """Rotate a volume tensor by k*90 degrees."""
