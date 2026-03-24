@@ -137,3 +137,62 @@ def test_compute_otsu_false_omits_threshold(small_hcs_dataset):
             for channel in plate.channel_names:
                 fov_stats = fov.zattrs["normalization"][channel]["fov_statistics"]
                 assert "otsu_threshold" not in fov_stats
+
+
+def test_generate_fg_masks_stores_mask(bimodal_hcs_dataset):
+    """generate_fg_masks stores a uint8 binary mask array per position."""
+    from viscy_utils.meta_utils import generate_fg_masks
+
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+
+    with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
+        for _, fov in plate.positions():
+            assert "fg_mask" in fov
+            mask_arr = fov["fg_mask"]
+            assert mask_arr.shape == fov["0"].shape
+            mask_data = mask_arr[:]
+            assert mask_data.dtype == np.uint8
+            assert set(np.unique(mask_data)).issubset({0, 1})
+
+
+def test_generate_fg_masks_separates_bimodal(bimodal_hcs_dataset):
+    """Fluorescence mask marks the bright half as foreground."""
+    from viscy_utils.meta_utils import generate_fg_masks
+
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+
+    with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
+        ch_idx = plate.channel_names.index("Fluorescence")
+        for _, fov in plate.positions():
+            mask = fov["fg_mask"][:, ch_idx]
+            assert mask.sum() > 0, "Mask should have foreground voxels"
+            # Phase channel should be all zeros (not in channel_names)
+            phase_idx = plate.channel_names.index("Phase")
+            assert fov["fg_mask"][:, phase_idx].sum() == 0
+
+
+def test_generate_fg_masks_requires_otsu(bimodal_hcs_dataset):
+    """generate_fg_masks raises KeyError without prior Otsu computation."""
+    from viscy_utils.meta_utils import generate_fg_masks
+
+    with pytest.raises(KeyError):
+        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+
+
+def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
+    """generate_fg_masks raises FileExistsError on re-run."""
+    from viscy_utils.meta_utils import generate_fg_masks
+
+    generate_normalization_metadata(
+        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
+    )
+    generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)
+
+    with pytest.raises(FileExistsError):
+        generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"], num_workers=1)

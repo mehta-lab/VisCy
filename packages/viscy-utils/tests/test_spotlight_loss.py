@@ -143,6 +143,39 @@ def test_fg_threshold_float_uses_fixed():
     assert pred.grad is not None
 
 
+def test_spotlight_with_precomputed_mask():
+    """Loss accepts and uses precomputed fg_mask."""
+    loss_fn = SpotlightLoss()
+    pred = torch.randn(2, 1, 4, 8, 8, requires_grad=True)
+    target = torch.randn(2, 1, 4, 8, 8).abs()
+    fg_mask = (target > target.median()).float()
+    loss = loss_fn(pred, target, fg_mask=fg_mask)
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert pred.grad is not None
+
+
+def test_precomputed_mask_overrides_threshold():
+    """Precomputed mask takes priority over fg_threshold."""
+    target = torch.zeros(1, 1, 4, 8, 8)
+    target[:, :, :, 4:, :] = 1.0  # right half is FG
+
+    pred = target.clone()
+    pred[:, :, :, :4, :] = 99.0  # large BG error
+
+    # fg_threshold=0.5 would create the same mask as the target FG
+    # But we provide an all-ones mask — should include BG errors
+    all_ones_mask = torch.ones_like(target)
+    loss_fn = SpotlightLoss(lambda_mse=0.99, sigmoid_k=-0.95, fg_threshold=0.5)
+
+    loss_with_mask = loss_fn(pred, target, fg_mask=all_ones_mask)
+    loss_without_mask = loss_fn(pred, target)
+
+    # With all-ones mask, BG errors contribute → loss should be much higher
+    assert loss_with_mask.item() > loss_without_mask.item() * 2
+
+
 def test_spotlight_loss_invalid_params():
     """Invalid parameters raise ValueError."""
     with pytest.raises(ValueError, match="sigmoid_k"):

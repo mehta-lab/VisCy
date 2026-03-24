@@ -194,3 +194,87 @@ def test_datamodule_setup_test_with_masks(preprocessed_hcs_dataset, mask_dir):
             found_labels = True
             break
     assert found_labels, "No sample had 'labels' key from ground truth masks"
+
+
+@fixture(scope="function")
+def hcs_with_fg_mask(tmp_path):
+    """HCS dataset with precomputed fg_mask array."""
+    dataset_path = tmp_path / "fg_mask.zarr"
+    ch_names = ["Phase", "Fluorescence"]
+    dataset = open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names)
+    rng = np.random.default_rng(42)
+    for row in ("A",):
+        for col in ("1",):
+            for fov in ("0", "1"):
+                pos = dataset.create_position(row, col, fov)
+                img = rng.random((1, len(ch_names), 8, 32, 32)).astype(np.float32)
+                pos.create_image("0", img, chunks=(1, 1, 1, 32, 32))
+                # Binary mask: 1 where Fluorescence > 0.5, 0 elsewhere
+                mask = np.zeros_like(img, dtype=np.uint8)
+                mask[:, 1] = (img[:, 1] > 0.5).astype(np.uint8)
+                pos.create_image("fg_mask", mask, chunks=(1, 1, 1, 32, 32))
+    norm = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29}} for ch in ch_names}
+    for _, fov in dataset.positions():
+        fov.zattrs["normalization"] = norm
+    dataset.close()
+    return dataset_path
+
+
+def test_sliding_window_with_fg_mask(hcs_with_fg_mask):
+    """fg_mask is present in samples when fg_mask_key is set."""
+    from viscy_data.hcs import SlidingWindowDataset
+
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        dataset = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluorescence"]},
+            z_window_size=4,
+            fg_mask_key="fg_mask",
+        )
+        sample = dataset[0]
+    assert "fg_mask" in sample
+    fg_mask = sample["fg_mask"]
+    assert fg_mask.shape[0] == 1  # C_target = 1 (Fluorescence)
+    assert fg_mask.shape[1] == 4  # Z = z_window_size
+    assert set(fg_mask.unique().tolist()).issubset({0.0, 1.0})
+
+
+def test_sliding_window_without_fg_mask(hcs_with_fg_mask):
+    """fg_mask is NOT in samples when fg_mask_key is None (default)."""
+    from viscy_data.hcs import SlidingWindowDataset
+
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        dataset = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluorescence"]},
+            z_window_size=4,
+        )
+        sample = dataset[0]
+    assert "fg_mask" not in sample
+
+
+def test_fg_mask_key_missing_errors(tmp_path):
+    """FileNotFoundError when fg_mask_key is set but array is absent."""
+    from viscy_data.hcs import SlidingWindowDataset
+
+    dataset_path = tmp_path / "no_mask.zarr"
+    ch_names = ["Phase", "Fluorescence"]
+    ds = open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names)
+    pos = ds.create_position("A", "1", "0")
+    rng = np.random.default_rng(0)
+    pos.create_image("0", rng.random((1, 2, 8, 32, 32)).astype(np.float32), chunks=(1, 1, 1, 32, 32))
+    ds.close()
+
+    import pytest
+
+    with open_ome_zarr(dataset_path, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        with pytest.raises(FileNotFoundError, match="fg_mask"):
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                fg_mask_key="fg_mask",
+            )

@@ -148,7 +148,7 @@ class SpotlightLoss(nn.Module):
         self.fg_threshold = fg_threshold
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
-    def forward(self, pred: Tensor, target: Tensor) -> Tensor:
+    def forward(self, pred: Tensor, target: Tensor, fg_mask: Tensor | None = None) -> Tensor:
         """Compute the Spotlight loss.
 
         Parameters
@@ -157,14 +157,21 @@ class SpotlightLoss(nn.Module):
             Predicted tensor of shape ``(B, C, Z, Y, X)`` or ``(B, C, Y, X)``.
         target : Tensor
             Ground truth tensor of the same shape.
+        fg_mask : Tensor or None
+            Precomputed binary foreground mask of the same shape as target.
+            When provided, used directly instead of computing from target.
+            When None (default), mask is computed at runtime using
+            ``fg_threshold`` or Otsu thresholding.
 
         Returns
         -------
         Tensor
             Scalar loss value.
         """
-        # Foreground mask: fixed threshold or per-sample Otsu
-        if self.fg_threshold is not None:
+        # Foreground mask: precomputed > fixed threshold > per-sample Otsu
+        if fg_mask is not None:
+            mask = fg_mask.float()
+        elif self.fg_threshold is not None:
             mask = (target >= self.fg_threshold).float()
         else:
             threshold = _otsu_threshold_batch(target)

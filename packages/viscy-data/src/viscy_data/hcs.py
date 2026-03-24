@@ -70,6 +70,10 @@ class SlidingWindowDataset(Dataset):
     max_nonzero_retries : int
         Maximum number of random re-samples when a patch fails the
         nonzero fraction check. Default 100.
+    fg_mask_key : str or None
+        Zarr array key for precomputed foreground masks. When set,
+        masks are loaded alongside images and included in the sample
+        as ``"fg_mask"``. Default None disables mask loading.
     """
 
     def __init__(
@@ -84,6 +88,7 @@ class SlidingWindowDataset(Dataset):
         nonzero_threshold: float = 0.0,
         nonzero_channel: str | None = None,
         max_nonzero_retries: int = 100,
+        fg_mask_key: str | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -100,6 +105,7 @@ class SlidingWindowDataset(Dataset):
         self.nonzero_threshold = nonzero_threshold
         self.nonzero_channel = nonzero_channel
         self.max_nonzero_retries = max_nonzero_retries
+        self.fg_mask_key = fg_mask_key
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -112,6 +118,7 @@ class SlidingWindowDataset(Dataset):
         self.window_keys = []
         self.window_arrays = []
         self.window_norm_meta: list[NormMeta | None] = []
+        self.window_fg_mask_arrays: list[ImageArray | None] = []
         for fov in self.positions:
             img_arr: ImageArray = fov[str(self.array_key)]
             ts = img_arr.frames
@@ -126,15 +133,26 @@ class SlidingWindowDataset(Dataset):
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
             self.window_norm_meta.append(_read_norm_meta(fov))
+            if self.fg_mask_key is not None:
+                if self.fg_mask_key not in fov:
+                    raise FileNotFoundError(
+                        f"Mask array '{self.fg_mask_key}' not found in position. "
+                        "Run preprocessing with --compute_fg_masks first."
+                    )
+                self.window_fg_mask_arrays.append(fov[self.fg_mask_key])
+            else:
+                self.window_fg_mask_arrays.append(None)
         self._max_window = w
 
-    def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None]:
+    def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, ImageArray | None]:
         """Look up window given index."""
         window_idx = sorted(self.window_keys + [index + 1]).index(index + 1)
         w = self.window_keys[window_idx]
         tz = index - self.window_keys[window_idx - 1] if window_idx > 0 else index
-        norm_meta = self.window_norm_meta[self.window_keys.index(w)]
-        return (self.window_arrays[self.window_keys.index(w)], tz, norm_meta)
+        arr_idx = self.window_keys.index(w)
+        norm_meta = self.window_norm_meta[arr_idx]
+        fg_mask_arr = self.window_fg_mask_arrays[arr_idx]
+        return (self.window_arrays[arr_idx], tz, norm_meta, fg_mask_arr)
 
     def _read_img_window(self, img: ImageArray, ch_idx: list[int], tz: int) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
@@ -169,17 +187,17 @@ class SlidingWindowDataset(Dataset):
         """Return total number of windows."""
         return self._max_window
 
-    # TODO: refactor to a top level function
     def _stack_channels(
         self,
         sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
-        key: str,
+        key: str | None = None,
+        keys: list[str] | None = None,
     ) -> Tensor | list[Tensor]:
         """Stack single-channel images into a multi-channel tensor."""
+        ch_keys = keys if keys is not None else self.channels[key]
         if not isinstance(sample_images, list):
-            return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
-        # training time
-        return [torch.stack([im[ch][0] for ch in self.channels[key]]) for im in sample_images]
+            return torch.stack([sample_images[ch][0] for ch in ch_keys])
+        return [torch.stack([im[ch][0] for ch in ch_keys]) for im in sample_images]
 
     def __getitem__(self, index: int) -> Sample:
         """Return a sample for the given index."""
@@ -188,7 +206,7 @@ class SlidingWindowDataset(Dataset):
         )
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
-            img, tz, norm_meta = self._find_window(idx)
+            img, tz, norm_meta, fg_mask_arr = self._find_window(idx)
             ch_names = self.channels["source"].copy()
             ch_idx = self.source_ch_idx.copy()
             if self.target_ch_idx is not None:
@@ -196,13 +214,22 @@ class SlidingWindowDataset(Dataset):
                 ch_idx.extend(self.target_ch_idx)
             images, sample_index = self._read_img_window(img, ch_idx, tz)
             sample_images = {k: v for k, v in zip(ch_names, images)}
+            # Read mask once — reused for both nonzero check and sample output
+            mask_images = None
+            if fg_mask_arr is not None and self.target_ch_idx is not None:
+                mask_images, _ = self._read_img_window(fg_mask_arr, self.target_ch_idx, tz)
             if attempt < self.max_nonzero_retries and check_key is not None:
-                if check_key in sample_images:
+                if mask_images is not None:
+                    check_ch = self.channels["target"].index(check_key)
+                    frac = mask_images[check_ch].sum().item() / mask_images[check_ch].numel()
+                elif check_key in sample_images:
                     patch = sample_images[check_key]
                     frac = (patch >= self.nonzero_threshold).sum().item() / patch.numel()
-                    if frac < self.min_nonzero_fraction:
-                        idx = random.randint(0, len(self) - 1)
-                        continue
+                else:
+                    break
+                if frac < self.min_nonzero_fraction:
+                    idx = random.randint(0, len(self) - 1)
+                    continue
             break
         if check_key is not None and attempt == self.max_nonzero_retries:
             _logger.warning(
@@ -210,10 +237,14 @@ class SlidingWindowDataset(Dataset):
                 f">= {self.min_nonzero_fraction} on channel '{check_key}' "
                 f"(index {index}). Returning last sample."
             )
+        # Inject mask as temp keys so MONAI spatial transforms (e.g. _final_crop) co-align them
+        fg_mask_keys = []
+        if mask_images is not None:
+            for ch_name, mask_tensor in zip(self.channels["target"], mask_images):
+                key = f"__fg_mask_{ch_name}"
+                sample_images[key] = mask_tensor
+                fg_mask_keys.append(key)
         if self.target_ch_idx is not None:
-            # FIXME: this uses the first target channel as weight for performance
-            # since adding a reference to a tensor does not copy
-            # maybe write a weight map in preprocessing to use more information?
             sample_images["weight"] = sample_images[self.channels["target"][0]]
         if norm_meta is not None:
             sample_images["norm_meta"] = norm_meta
@@ -227,6 +258,8 @@ class SlidingWindowDataset(Dataset):
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
+        if fg_mask_keys:
+            sample["fg_mask"] = self._stack_channels(sample_images, keys=fg_mask_keys)
         if self.load_normalization_metadata and norm_meta is not None:
             sample["norm_meta"] = norm_meta
         return sample
@@ -353,6 +386,8 @@ class HCSDataModule(LightningDataModule):
         Channel to check. ``None`` defaults to the first target channel.
     max_nonzero_retries : int, optional
         Maximum retries when a patch fails the nonzero check, by default 100.
+    fg_mask_key : str or None, optional
+        Zarr array key for precomputed foreground masks, by default None.
     """
 
     def __init__(
@@ -378,6 +413,7 @@ class HCSDataModule(LightningDataModule):
         nonzero_threshold: float = 0.0,
         nonzero_channel: str | None = None,
         max_nonzero_retries: int = 100,
+        fg_mask_key: str | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -402,6 +438,7 @@ class HCSDataModule(LightningDataModule):
         self.nonzero_threshold = nonzero_threshold
         self.nonzero_channel = nonzero_channel
         self.max_nonzero_retries = max_nonzero_retries
+        self.fg_mask_key = fg_mask_key
 
     @property
     def cache_path(self):
@@ -461,6 +498,8 @@ class HCSDataModule(LightningDataModule):
             settings["max_nonzero_retries"] = self.max_nonzero_retries
             if self.nonzero_channel is not None:
                 settings["nonzero_channel"] = self.nonzero_channel
+        if self.fg_mask_key is not None:
+            settings["fg_mask_key"] = self.fg_mask_key
         return settings
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
@@ -583,6 +622,8 @@ class HCSDataModule(LightningDataModule):
             # slice the center during training or testing
             z_index = self.z_window_size // 2
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
+            if "fg_mask" in batch:
+                batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
         return batch
 
     def train_dataloader(self):
@@ -642,13 +683,17 @@ class HCSDataModule(LightningDataModule):
 
     def _final_crop(self) -> CenterSpatialCropd:
         """Set up final cropping: center crop to the target size."""
+        keys = self.source_channel + self.target_channel
+        if self.fg_mask_key is not None:
+            keys = keys + [f"__fg_mask_{ch}" for ch in self.target_channel]
         return CenterSpatialCropd(
-            keys=self.source_channel + self.target_channel,
+            keys=keys,
             roi_size=(
                 self.z_window_size,
                 self.yx_patch_size[0],
                 self.yx_patch_size[1],
             ),
+            allow_missing_keys=True,
         )
 
     def _train_transform(self) -> list[Callable]:

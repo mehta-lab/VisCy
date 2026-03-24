@@ -147,3 +147,66 @@ def generate_normalization_metadata(
             )
 
     plate.close()
+
+
+def generate_fg_masks(
+    zarr_dir,
+    channel_names,
+    fg_mask_key="fg_mask",
+    num_workers=4,
+):
+    """Precompute binary foreground masks from Otsu thresholds.
+
+    For each FOV and specified channel, loads the full-resolution image one
+    timepoint at a time, smooths with the same median filter used for Otsu
+    thresholding, and writes the binary mask as a zarr array alongside the
+    image data.
+
+    Requires ``generate_normalization_metadata`` with ``compute_otsu=True``
+    to have been run first (Otsu thresholds must be stored in zattrs).
+
+    Parameters
+    ----------
+    zarr_dir : str or Path
+        Path to the HCS OME-Zarr dataset.
+    channel_names : list[str]
+        Channel names to compute masks for (typically the target channels).
+    fg_mask_key : str, optional
+        Zarr array key for the mask, by default ``"fg_mask"``.
+    num_workers : int, optional
+        Number of CPU workers for reading, by default 4.
+    """
+    from scipy.ndimage import median_filter
+
+    with ngff.open_ome_zarr(zarr_dir, mode="r+") as plate:
+        all_channel_names = plate.channel_names
+        channel_indices = [all_channel_names.index(name) for name in channel_names]
+
+        for pos_name, pos in tqdm(plate.positions(), desc="Generating FG masks"):
+            if fg_mask_key in pos:
+                raise FileExistsError(
+                    f"Mask array '{fg_mask_key}' already exists at {pos_name}. Delete it first to regenerate."
+                )
+
+            img_arr = pos["0"]
+            t_total, c_total = img_arr.shape[0], img_arr.shape[1]
+            zyx_shape = img_arr.shape[2:]
+
+            # Build full mask array: (T, C_all, Z, Y, X), zeros for non-target channels
+            mask_all = np.zeros((t_total, c_total, *zyx_shape), dtype=np.uint8)
+
+            for ch_name, ch_idx in zip(channel_names, channel_indices):
+                norm = pos.zattrs["normalization"][ch_name]["fov_statistics"]
+                otsu_threshold = norm["otsu_threshold"]
+
+                for t in range(t_total):
+                    # Read one timepoint, one channel: (Z, Y, X)
+                    data = img_arr[t, ch_idx].astype(np.float32)
+                    smoothed = median_filter(data, size=(1, 3, 3))
+                    mask_all[t, ch_idx] = (smoothed >= otsu_threshold).astype(np.uint8)
+
+            pos.create_image(
+                fg_mask_key,
+                mask_all,
+                chunks=(1, 1, *zyx_shape),
+            )

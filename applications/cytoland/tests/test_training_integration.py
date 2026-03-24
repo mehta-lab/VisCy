@@ -107,6 +107,51 @@ def test_fnet3d_fast_dev_run(tmp_path):
     assert trainer.state.status == "finished"
 
 
+def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
+    """VSUNet + FNet3D + SpotlightLoss with precomputed fg_mask trains for 1 batch."""
+    from viscy_data.hcs import HCSDataModule
+    from viscy_utils.losses import SpotlightLoss
+    from viscy_utils.meta_utils import generate_fg_masks
+
+    # Fixture already has otsu_threshold in norm_meta; just generate masks
+    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"], num_workers=1)
+
+    seed_everything(42)
+    module = VSUNet(
+        architecture="FNet3D",
+        model_config={
+            "in_channels": 1,
+            "out_channels": 1,
+            "depth": 1,
+            "mult_chan": 8,
+            "in_stack_depth": 4,
+        },
+        loss_function=SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95),
+        log_batches_per_epoch=1,
+    )
+    datamodule = HCSDataModule(
+        data_path=tiny_hcs_zarr,
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=(32, 32),
+        fg_mask_key="fg_mask",
+        split_ratio=0.5,
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=datamodule)
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
 def test_spotlight_fast_dev_run(tmp_path):
     """VSUNet + FNet3D + SpotlightLoss trains for 1 batch."""
     from viscy_utils.losses import SpotlightLoss
