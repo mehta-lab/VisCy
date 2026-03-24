@@ -176,6 +176,89 @@ def test_precomputed_mask_overrides_threshold():
     assert loss_with_mask.item() > loss_without_mask.item() * 2
 
 
+def test_single_channel_backward_compat():
+    """C=1, B=1 with fixed threshold is numerically identical to global reduction."""
+    torch.manual_seed(0)
+    pred = torch.randn(1, 1, 4, 8, 8)
+    target = torch.randn(1, 1, 4, 8, 8)
+    fg_mask = (target > 0).float()
+
+    loss_fn = SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95, fg_threshold=0.0)
+    loss = loss_fn(pred, target, fg_mask=fg_mask)
+
+    # Manually compute the old global-reduction formula for B=1, C=1
+    mask = fg_mask.float()
+    sq_err = (pred - target) ** 2
+    fg_count = mask.sum()
+    old_mse = (sq_err * mask).sum() / fg_count
+    soft_pred = _tunable_sigmoid(pred, -0.95)
+    intersection = (soft_pred * mask).sum()
+    old_dice = 1 - (2 * intersection) / (soft_pred.sum() + mask.sum() + 1e-6)
+    old_loss = 0.5 * old_mse + 0.5 * old_dice
+
+    assert torch.allclose(loss, old_loss, atol=1e-5), f"loss={loss.item()}, old={old_loss.item()}"
+
+
+def test_multi_channel_all_masked():
+    """Multi-channel with all channels masked computes per-channel loss."""
+    pred = torch.randn(2, 2, 4, 8, 8, requires_grad=True)
+    target = torch.randn(2, 2, 4, 8, 8)
+    fg_mask = torch.zeros_like(target)
+    fg_mask[:, :, :, 4:, :] = 1.0  # half FG in both channels
+
+    loss_fn = SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95, fg_threshold=0.0)
+    loss = loss_fn(pred, target, fg_mask=fg_mask)
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert pred.grad is not None
+
+
+def test_multi_channel_partial_mask():
+    """Channels with all-zero mask use regular MSE and skip Dice."""
+    pred = torch.randn(2, 2, 4, 8, 8, requires_grad=True)
+    target = torch.randn(2, 2, 4, 8, 8)
+    # Channel 0 has mask, channel 1 is all-zero
+    fg_mask = torch.zeros(2, 2, 4, 8, 8)
+    fg_mask[:, 0, :, 4:, :] = 1.0
+
+    loss_fn = SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95, fg_threshold=0.0)
+    loss = loss_fn(pred, target, fg_mask=fg_mask)
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_partial_mask_ignores_zero_channel_in_dice():
+    """Dice excludes channels with all-zero mask."""
+    pred = torch.randn(1, 2, 4, 8, 8)
+    target = torch.randn(1, 2, 4, 8, 8)
+    # Only channel 0 has a mask
+    fg_mask = torch.zeros(1, 2, 4, 8, 8)
+    fg_mask[:, 0] = 1.0
+
+    # Use high Dice weight to make Dice dominate
+    loss_fn = SpotlightLoss(lambda_mse=0.01, sigmoid_k=-0.95)
+    loss = loss_fn(pred, target, fg_mask=fg_mask)
+    assert torch.isfinite(loss)
+    assert loss.item() > 0
+
+
+def test_otsu_per_channel():
+    """Otsu computes per-(sample, channel) thresholds."""
+    from viscy_utils.losses.spotlight import _otsu_threshold_batch
+
+    target = torch.zeros(1, 2, 4, 8, 8)
+    target[:, 0] = torch.randn(1, 4, 8, 8).abs() + 1.0  # high values
+    target[:, 1] = torch.randn(1, 4, 8, 8).abs() * 0.1  # low values
+
+    thresholds = _otsu_threshold_batch(target)
+    assert thresholds.shape == (1, 2, 1, 1, 1)
+    assert thresholds[0, 0] != thresholds[0, 1], "Per-channel thresholds should differ"
+
+
 def test_spotlight_loss_invalid_params():
     """Invalid parameters raise ValueError."""
     with pytest.raises(ValueError, match="sigmoid_k"):

@@ -81,23 +81,27 @@ def _otsu_threshold(x: Tensor, n_bins: int = 256) -> Tensor:
 
 
 def _otsu_threshold_batch(target: Tensor, n_bins: int = 256) -> Tensor:
-    """Compute per-sample Otsu threshold for a batch.
+    """Compute per-(sample, channel) Otsu threshold for a batch.
 
     Parameters
     ----------
     target : Tensor
-        Batch tensor of shape ``(B, ...)``.
+        Batch tensor of shape ``(B, C, ...)``.
     n_bins : int
-        Number of histogram bins per sample.
+        Number of histogram bins per element.
 
     Returns
     -------
     Tensor
-        Thresholds of shape ``(B, 1, ...)`` for broadcasting against ``target``.
+        Thresholds of shape ``(B, C, 1, ...)`` for broadcasting against
+        spatial dimensions of ``target``.
     """
-    # torch.histc has no dim parameter — must loop over batch
-    thresholds = torch.stack([_otsu_threshold(sample.flatten(), n_bins) for sample in target.unbind(0)])
-    return thresholds.view(-1, *([1] * (target.ndim - 1)))
+    B, C = target.shape[:2]
+    spatial_ndim = target.ndim - 2
+    # torch.histc has no dim parameter — must loop over (B, C) elements
+    flat = target.reshape(B * C, -1)
+    thresholds = torch.stack([_otsu_threshold(sample, n_bins) for sample in flat.unbind(0)])
+    return thresholds.reshape(B, C, *([1] * spatial_ndim))
 
 
 class SpotlightLoss(nn.Module):
@@ -151,6 +155,10 @@ class SpotlightLoss(nn.Module):
     def forward(self, pred: Tensor, target: Tensor, fg_mask: Tensor | None = None) -> Tensor:
         """Compute the Spotlight loss.
 
+        Loss is computed per (batch, channel) pair and averaged. Channels
+        with foreground mask data use masked MSE + Dice; channels without
+        (all-zero mask) fall back to regular MSE and are excluded from Dice.
+
         Parameters
         ----------
         pred : Tensor
@@ -168,7 +176,7 @@ class SpotlightLoss(nn.Module):
         Tensor
             Scalar loss value.
         """
-        # Foreground mask: precomputed > fixed threshold > per-sample Otsu
+        # Foreground mask: precomputed > fixed threshold > per-(sample, channel) Otsu
         if fg_mask is not None:
             mask = fg_mask.float()
         elif self.fg_threshold is not None:
@@ -177,17 +185,28 @@ class SpotlightLoss(nn.Module):
             threshold = _otsu_threshold_batch(target)
             mask = (target >= threshold).float()
 
-        # Masked MSE: only foreground voxels contribute
-        sq_err = (pred - target) ** 2
-        fg_count = mask.sum()
-        if fg_count > 0:
-            masked_mse = (sq_err * mask).sum() / fg_count
-        else:
-            masked_mse = sq_err.mean()
+        spatial_dims = tuple(range(2, pred.ndim))
 
-        # Dice loss on soft-thresholded prediction vs binary mask
+        # Per-(B, C) foreground counts
+        fg_per_ch = mask.sum(dim=spatial_dims)  # (B, C)
+        has_fg = fg_per_ch > 0  # (B, C)
+
+        # Masked MSE per (B, C) — channels without mask fall back to regular MSE
+        sq_err = (pred - target) ** 2
+        masked_sum = (sq_err * mask).sum(dim=spatial_dims)  # (B, C)
+        regular_mse = sq_err.mean(dim=spatial_dims)  # (B, C)
+        channel_mse = torch.where(has_fg, masked_sum / (fg_per_ch + self.eps), regular_mse)
+        masked_mse = channel_mse.mean()
+
+        # Dice per (B, C) — only channels with masks contribute
         soft_pred = _tunable_sigmoid(pred, self.sigmoid_k)
-        intersection = (soft_pred * mask).sum()
-        dice = 1 - (2 * intersection) / (soft_pred.sum() + mask.sum() + self.eps)
+        intersection = (soft_pred * mask).sum(dim=spatial_dims)  # (B, C)
+        soft_sum = soft_pred.sum(dim=spatial_dims)  # (B, C)
+        channel_dice = 1 - (2 * intersection) / (soft_sum + fg_per_ch + self.eps)
+        n_masked = has_fg.sum()
+        if n_masked > 0:
+            dice = (channel_dice * has_fg.float()).sum() / n_masked
+        else:
+            dice = pred.new_tensor(0.0)
 
         return self.lambda_mse * masked_mse + (1 - self.lambda_mse) * dice
