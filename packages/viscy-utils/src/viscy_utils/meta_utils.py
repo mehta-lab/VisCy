@@ -95,6 +95,10 @@ def generate_normalization_metadata(
     num_timepoints = first_position["0"].shape[0]
     print(f"Detected {num_timepoints} timepoints in dataset")
 
+    if compute_otsu:
+        from scipy.ndimage import median_filter
+        from skimage.filters import threshold_otsu
+
     for i, channel_index in enumerate(channel_ids):
         print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
@@ -107,11 +111,8 @@ def generate_normalization_metadata(
             dataset_sample_values.append(samples)
             fov_stats = get_val_stats(samples)
             if compute_otsu:
-                from scipy.ndimage import median_filter
-                from skimage.filters import threshold_otsu
-
                 otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index, num_workers)
-                smoothed = median_filter(otsu_samples, size=3)
+                smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
                 fov_stats["otsu_threshold"] = float(threshold_otsu(smoothed.ravel()))
             fov_statistics = {"fov_statistics": fov_stats}
             fov_timepoint_statistics = {}
