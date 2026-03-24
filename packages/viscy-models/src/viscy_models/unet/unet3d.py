@@ -169,6 +169,8 @@ class Unet3d(nn.Module):
         ValueError
             If any spatial dimension is not divisible by ``2**depth``.
         """
+        if x.ndim != 5:
+            raise ValueError(f"Expected 5D input (B, C, Z, Y, X), got {x.ndim}D.")
         for dim, name in zip(x.shape[2:], ("Z", "Y", "X")):
             if dim % self._divisor != 0:
                 raise ValueError(
