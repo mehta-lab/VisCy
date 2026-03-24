@@ -91,6 +91,10 @@ class SlidingWindowDataset(Dataset):
         fg_mask_key: str | None = None,
     ) -> None:
         super().__init__()
+        if not 0.0 <= min_nonzero_fraction <= 1.0:
+            raise ValueError(f"min_nonzero_fraction must be in [0, 1], got {min_nonzero_fraction}")
+        if max_nonzero_retries < 0:
+            raise ValueError(f"max_nonzero_retries must be >= 0, got {max_nonzero_retries}")
         self.positions = positions
         self.channels = {k: _ensure_channel_list(v) for k, v in channels.items()}
         self.source_ch_idx = [positions[0].get_channel_index(c) for c in channels["source"]]
@@ -218,7 +222,7 @@ class SlidingWindowDataset(Dataset):
             mask_images = None
             if fg_mask_arr is not None and self.target_ch_idx is not None:
                 mask_images, _ = self._read_img_window(fg_mask_arr, self.target_ch_idx, tz)
-            if attempt < self.max_nonzero_retries and check_key is not None:
+            if check_key is not None:
                 if mask_images is not None:
                     check_ch = self.channels["target"].index(check_key)
                     frac = mask_images[check_ch].sum().item() / mask_images[check_ch].numel()
@@ -228,15 +232,15 @@ class SlidingWindowDataset(Dataset):
                 else:
                     break
                 if frac < self.min_nonzero_fraction:
-                    idx = random.randint(0, len(self) - 1)
-                    continue
+                    if attempt < self.max_nonzero_retries:
+                        idx = random.randint(0, len(self) - 1)
+                        continue
+                    _logger.warning(
+                        f"Exhausted {self.max_nonzero_retries} retries for nonzero fraction "
+                        f">= {self.min_nonzero_fraction} on channel '{check_key}' "
+                        f"(index {index}). Returning last sample."
+                    )
             break
-        if check_key is not None and attempt == self.max_nonzero_retries:
-            _logger.warning(
-                f"Exhausted {self.max_nonzero_retries} retries for nonzero fraction "
-                f">= {self.min_nonzero_fraction} on channel '{check_key}' "
-                f"(index {index}). Returning last sample."
-            )
         # Inject mask as temp keys so MONAI spatial transforms (e.g. _final_crop) co-align them
         fg_mask_keys = []
         if mask_images is not None:
@@ -492,14 +496,20 @@ class HCSDataModule(LightningDataModule):
             "z_window_size": self.z_window_size,
             "array_key": self.array_key,
         }
+        if self.fg_mask_key is not None:
+            settings["fg_mask_key"] = self.fg_mask_key
+        return settings
+
+    @property
+    def _train_filter_settings(self) -> dict:
+        """Return nonzero fraction filtering settings (training only)."""
+        settings: dict = {}
         if self.min_nonzero_fraction > 0:
             settings["min_nonzero_fraction"] = self.min_nonzero_fraction
             settings["nonzero_threshold"] = self.nonzero_threshold
             settings["max_nonzero_retries"] = self.max_nonzero_retries
             if self.nonzero_channel is not None:
                 settings["nonzero_channel"] = self.nonzero_channel
-        if self.fg_mask_key is not None:
-            settings["fg_mask_key"] = self.fg_mask_key
         return settings
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
@@ -541,6 +551,7 @@ class HCSDataModule(LightningDataModule):
             expanded_z = math.ceil(self.z_window_size * (1 + z_scale_high))
             expanded_z -= expanded_z % 2
         train_dataset_settings["z_window_size"] = expanded_z
+        train_dataset_settings.update(self._train_filter_settings)
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
