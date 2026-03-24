@@ -11,10 +11,12 @@ Kalinin, A.A. et al. Foreground-aware Virtual Staining for Accurate
 arXiv:2507.05383
 """
 
-import warnings
+import logging
 
 import torch
 from torch import Tensor, nn
+
+_logger = logging.getLogger(__name__)
 
 __all__ = ["SpotlightLoss"]
 
@@ -152,6 +154,7 @@ class SpotlightLoss(nn.Module):
         self.sigmoid_k = sigmoid_k
         self.eps = eps
         self.fg_threshold = fg_threshold
+        self._warned_no_real_mask = False
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, pred: Tensor, target: Tensor, fg_mask: Tensor | None = None) -> Tensor:
@@ -211,7 +214,9 @@ class SpotlightLoss(nn.Module):
         if n_real > 0:
             dice = (channel_dice * has_real_mask.float()).sum() / n_real
         else:
-            warnings.warn("No channel has a real FG/BG mask — Dice term is zero, using MSE only.", stacklevel=2)
+            if not self._warned_no_real_mask:
+                _logger.warning("No channel has a real FG/BG mask — Dice term is zero, using MSE only.")
+                self._warned_no_real_mask = True
             dice = pred.new_tensor(0.0)
 
         return self.lambda_mse * masked_mse + (1 - self.lambda_mse) * dice
