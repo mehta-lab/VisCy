@@ -26,6 +26,7 @@ class VisCyTrainer(Trainer):
         num_workers: int = 1,
         block_size: int = 32,
         compute_otsu: bool = False,
+        otsu_downsample_factor: int = 4,
         model: LightningModule | None = None,
     ):
         """Compute dataset statistics for normalization.
@@ -43,6 +44,8 @@ class VisCyTrainer(Trainer):
         compute_otsu : bool, optional
             Whether to compute Otsu thresholds for Spotlight loss,
             by default False.
+        otsu_downsample_factor : int, optional
+            Downsample factor for Otsu (local-mean averaging), by default 4.
         model : LightningModule, optional
             Ignored placeholder, by default None.
         """
@@ -58,6 +61,7 @@ class VisCyTrainer(Trainer):
             channel_ids=channel_indices,
             grid_spacing=block_size,
             compute_otsu=compute_otsu,
+            otsu_downsample_factor=otsu_downsample_factor,
         )
 
     def export(
