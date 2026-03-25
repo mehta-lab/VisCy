@@ -78,9 +78,9 @@ model:
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     # PCA pairplot logged to WandB every N val epochs (null = disabled, WandB logger only)
-    # Colors points by this SampleMeta key (condition/experiment/hours_post_perturbation)
+    # Colors points by this SampleMeta key (perturbation/experiment/hours_post_perturbation)
     log_embeddings_every_n_epochs: 10
-    pca_color_key: condition
+    pca_color_key: perturbation
     example_input_array_shape: [1, 2, 30, 256, 256]
 data:
   class_path: viscy_data.triplet.TripletDataModule

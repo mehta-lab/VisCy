@@ -35,7 +35,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw Mito EX561 EM600-50
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - A/1
         - A/2
@@ -57,7 +57,7 @@ experiments:
       - Phase3D
       - raw RFP EX561 EM600-50
       - raw StressGranules EX488 EM525-45
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - A/1
       infected:

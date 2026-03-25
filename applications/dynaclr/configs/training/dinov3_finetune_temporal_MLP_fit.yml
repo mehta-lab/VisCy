@@ -36,7 +36,7 @@ trainer:
     init_args:
       entity: computational_imaging
       project: DINOv3-temporal-MLP-2D-BagOfChannels-v1
-      name: stratify-by-condition-and-organelle
+      name: stratify-by-perturbation
       save_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
@@ -81,7 +81,7 @@ model:
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     log_embeddings_every_n_epochs: 10
-    pca_color_keys: [condition, hours_post_perturbation]
+    pca_color_keys: [perturbation, hours_post_perturbation]
     example_input_array_shape: [1, 1, 1, 160, 160]
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
@@ -99,7 +99,7 @@ data:
     num_workers: 1
     # Sampling axes
     batch_group_by: null
-    stratify_by: [condition]
+    stratify_by: [perturbation]
     leaky: 0.0
     temporal_enrichment: false
     # temporal_window_hours: 2.0

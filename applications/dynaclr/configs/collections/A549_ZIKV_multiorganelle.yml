@@ -33,7 +33,7 @@ experiments:
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
       - BF
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - C/1
       infected:
@@ -58,7 +58,7 @@ experiments:
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
       - BF
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - A/1
       infected:
@@ -83,7 +83,7 @@ experiments:
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
       - BF
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - B/1
       infected:

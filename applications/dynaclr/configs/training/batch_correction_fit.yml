@@ -86,7 +86,7 @@ data:
     hpi_window: 1.0
     # Sampling
     batch_group_by: null
-    stratify_by: ["condition", "microscope"]
+    stratify_by: ["perturbation", "microscope"]
     # Training
     batch_size: 64
     num_workers: 4

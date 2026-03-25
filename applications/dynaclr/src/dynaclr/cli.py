@@ -135,6 +135,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="inspect-batches",
+        import_path="dynaclr.data.inspect_batches.main",
+        short_help="Inspect batch composition from a training config YAML",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="train-mlp-embedder",
         import_path="dynaclr.evaluation.mlp_embedder.train_mlp_embedder.main",
         short_help="Train an MLP embedder on cell embeddings",

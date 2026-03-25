@@ -48,7 +48,7 @@ scontrol show job $SLURM_JOB_ID
 cat "$CONFIG"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
-uv run --project "$WORKSPACE_DIR" --package dynaclr dynaclr fit \
+srun uv run --project "$WORKSPACE_DIR" viscy fit \
   --config "$CONFIG" \
   --trainer.logger.init_args.name="${RUN_NAME}" \
   --trainer.logger.init_args.save_dir="${RUN_DIR}" \

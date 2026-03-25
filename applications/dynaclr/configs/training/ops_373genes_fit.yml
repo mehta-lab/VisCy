@@ -88,7 +88,7 @@ model:
     log_batches_per_epoch: 8
     log_samples_per_batch: 1
     log_embeddings_every_n_epochs: 10
-    pca_color_keys: [condition]
+    pca_color_keys: [perturbation]
     example_input_array_shape: [1, 1, 1, 128, 128]
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
@@ -107,9 +107,9 @@ data:
     # ── Positive pair sampling ────────────────────────────────────────────────
     # Positive pairs: same gene + same reporter
     positive_cell_source: lookup
-    positive_match_columns: [condition, marker]
+    positive_match_columns: [perturbation, marker]
     # tau_range/tau_decay_rate unused: OPS is single-timepoint, positives
-    # matched by condition+marker (not lineage_id), so tau is never sampled.
+    # matched by perturbation+marker (not lineage_id), so tau is never sampled.
     # tau_range: [0.5, 2.0]
     # tau_decay_rate: 2.0
     # ── Batch sampling ────────────────────────────────────────────────────────
@@ -122,7 +122,7 @@ data:
     temporal_enrichment: false
     # Label columns for classification head
     label_columns:
-      gene_label: condition
+      gene_label: perturbation
     seed: 0
     # ── Augmentation pipeline ─────────────────────────────────────────────────
     # No channel dropout (single channel input)

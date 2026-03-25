@@ -5,7 +5,7 @@
 # multi-organelle — all with ZIKV/DENV infection.
 #
 # Positive pairs: temporal (same cell lineage at t+tau) — time-lapse data.
-# Stratification: condition (infected/uninfected) × organelle.
+# Stratification: perturbation (infected/uninfected) × marker.
 # Each sample: 1 randomly selected channel (Phase3D, GFP, or mCherry).
 #
 # Usage:
@@ -68,7 +68,7 @@ model:
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     log_embeddings_every_n_epochs: 10
-    pca_color_keys: [condition, hours_post_perturbation]
+    pca_color_keys: [perturbation, hours_post_perturbation]
     example_input_array_shape: [1, 1, 1, 160, 160]
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
@@ -93,7 +93,7 @@ data:
     batch_size: 256
     num_workers: 1
     batch_group_by: null
-    stratify_by: [condition, marker]
+    stratify_by: [perturbation, marker]
     leaky: 0.0
     temporal_enrichment: false
     seed: 42

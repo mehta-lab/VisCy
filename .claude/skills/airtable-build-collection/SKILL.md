@@ -55,7 +55,7 @@ Use `mcp__airtable__search_records` for fuzzy text matching.
 
 ### Step 2: Group and Summarize
 
-Group records by `dataset`. **If a single dataset contains multiple markers/organelles** (different `marker` values across wells), split it into one experiment entry per marker. The experiment name gets a `_{MARKER}` suffix (e.g. `2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_TOMM20`). All split entries share the same `data_path` and `tracks_path` but have different `condition_wells`, `marker`, and `organelle`.
+Group records by `dataset`. **If a single dataset contains multiple markers/organelles** (different `marker` values across wells), split it into one experiment entry per marker. The experiment name gets a `_{MARKER}` suffix (e.g. `2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_TOMM20`). All split entries share the same `data_path` and `tracks_path` but have different `perturbation_wells`, `marker`, and `organelle`.
 
 This is handled automatically by `build_collection()` in `packages/viscy-data/src/viscy_data/collection.py` via the `_group_records()` helper, which groups by `(dataset, marker)` when multiple markers are present.
 
@@ -137,7 +137,7 @@ experiments:
     data_path: <from airtable>
     tracks_path: <from airtable or convention>
     channel_names: [<all zarr channel names>]
-    condition_wells:
+    perturbation_wells:
       <cell_state>:
         - <well_id>
         - ...
@@ -147,7 +147,7 @@ experiments:
     moi: <moi or 0.0>
 ```
 
-Derive `condition_wells` by grouping unique `(cell_state, well_id)` pairs per dataset.
+Derive `perturbation_wells` by grouping unique `(cell_state, well_id)` pairs per dataset.
 Derive `channel_names` from `channel_0_name` through `channel_3_name` (skip None).
 
 ### Step 7: Save and Validate
@@ -161,5 +161,5 @@ Derive `channel_names` from `channel_0_name` through `channel_3_name` (skip None
 - Each experiment in the collection must have the **same number of source channels** (the Collection validator enforces this)
 - Every experiment must appear in every source channel's `per_experiment` mapping
 - `interval_minutes` must be > 0
-- `condition_wells` must not be empty
+- `perturbation_wells` must not be empty
 - The zarr channel names in `source_channels.per_experiment` must exist in that experiment's `channel_names`

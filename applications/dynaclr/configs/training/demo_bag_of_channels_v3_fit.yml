@@ -66,7 +66,7 @@ data:
     num_workers: 1
     channels_per_sample: 1
     batch_group_by: experiment
-    stratify_by: [condition, organelle]
+    stratify_by: [perturbation, organelle]
     leaky: 0.0
     temporal_enrichment: false
     channel_dropout_channels: []

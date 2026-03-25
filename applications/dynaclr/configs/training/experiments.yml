@@ -26,7 +26,7 @@ experiments:
     tracks_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/tracks"
     channel_names: ["Phase3D", "GFP", "Mito"]
     source_channel: ["Phase3D", "GFP"]
-    condition_wells:
+    perturbation_wells:
       uninfected: ["A/1", "A/2", "A/3"]
       infected: ["B/1", "B/2", "B/3"]
     interval_minutes: 30.0
@@ -46,7 +46,7 @@ experiments:
     tracks_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/tracks"
     channel_names: ["Phase3D", "RFP", "StressGranules"]
     source_channel: ["Phase3D", "RFP"]
-    condition_wells:
+    perturbation_wells:
       uninfected: ["A/1", "A/2"]
       infected: ["B/1", "B/2"]
       mock: ["C/1"]

@@ -91,11 +91,11 @@ model:
     # Multiple heads can be added — each runs independently and its loss is
     # added to the contrastive loss weighted by loss_weight.
     # auxiliary_heads:
-    #   condition:
+    #   perturbation:
     #     class_path: viscy_models.components.heads.ClassificationHead
     #     init_args:
-    #       head_name: condition
-    #       batch_key: condition       # must match a key in anchor_meta["labels"]
+    #       head_name: perturbation
+    #       batch_key: perturbation    # must match a key in anchor_meta["labels"]
     #       in_dims: 768               # must match encoder embedding_dim
     #       hidden_dims: 256
     #       num_classes: 4
@@ -105,9 +105,9 @@ model:
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     # PCA pairplot logged to WandB every N val epochs (null = disabled, WandB logger only)
-    # Colors points by this SampleMeta key (condition/experiment/hours_post_perturbation)
+    # Colors points by this SampleMeta key (perturbation/experiment/hours_post_perturbation)
     log_embeddings_every_n_epochs: 10
-    pca_color_key: condition
+    pca_color_key: perturbation
     example_input_array_shape: [1, 2, 30, 256, 256]
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
@@ -129,7 +129,7 @@ data:
     batch_size: 64
     num_workers: 12
     batch_group_by: experiment
-    stratify_by: condition
+    stratify_by: perturbation
     leaky: 0.0
     temporal_enrichment: true
     temporal_window_hours: 2.0

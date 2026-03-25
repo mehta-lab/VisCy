@@ -48,7 +48,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - B/4
       uninfected:
@@ -66,7 +66,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - C/4
       uninfected:
@@ -84,7 +84,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - C/4
       uninfected:
@@ -102,7 +102,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - C/4
       uninfected:
@@ -120,7 +120,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - B/2
         - C/4
@@ -139,7 +139,7 @@ experiments:
       - Phase3D
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - A/2
       uninfected:
@@ -157,7 +157,7 @@ experiments:
       - Phase3D
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - B/2
       uninfected:
@@ -175,7 +175,7 @@ experiments:
       - Phase3D
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       infected:
         - C/2
       uninfected:

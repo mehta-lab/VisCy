@@ -77,7 +77,7 @@ data:
     num_workers: 12
     # Sampling axes
     batch_group_by: experiment
-    stratify_by: condition
+    stratify_by: perturbation
     leaky: 0.0
     temporal_enrichment: true
     temporal_window_hours: 2.0

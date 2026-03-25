@@ -73,7 +73,16 @@ class ContrastiveModule(LightningModule):
         self.auxiliary_heads = nn.ModuleDict(auxiliary_heads or {})
 
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])
+            try:
+                state = torch.load(ckpt_path, weights_only=True)["state_dict"]
+            except Exception:
+                _logger.warning("weights_only=True failed; loading with weights_only=False")
+                state = torch.load(ckpt_path, weights_only=False, map_location="cpu")["state_dict"]
+            missing, unexpected = self.load_state_dict(state, strict=False)
+            if missing:
+                _logger.info("Checkpoint missing keys (new heads): %s", missing)
+            if unexpected:
+                _logger.warning("Checkpoint unexpected keys: %s", unexpected)
 
     def on_train_epoch_start(self) -> None:  # noqa: D102
         if hasattr(self.loss_function, "step"):
@@ -224,12 +233,10 @@ class ContrastiveModule(LightningModule):
         if batch_key in batch:
             return batch[batch_key]
         meta = batch.get("anchor_meta")
-        if meta and "labels" in meta[0] and batch_key in meta[0]["labels"]:
-            val = meta[0]["labels"][batch_key]
-            if isinstance(val, torch.Tensor):
-                return val.long().to(self.device)
-            return torch.tensor(val, dtype=torch.long, device=self.device)
-        return None
+        if not meta or "labels" not in meta[0] or batch_key not in meta[0]["labels"]:
+            return None
+        vals = [m["labels"][batch_key] for m in meta]
+        return torch.tensor(vals, dtype=torch.long, device=self.device)
 
     def _run_auxiliary_heads(self, anchor_features: Tensor, batch: TripletSample, stage: str) -> Tensor:
         aux_loss = torch.tensor(0.0, device=self.device)

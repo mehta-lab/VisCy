@@ -33,7 +33,7 @@ experiments:
       - Phase3D
       - raw GFP EX488 EM525-45
       - raw mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - B/1
         - B/4
@@ -58,7 +58,7 @@ experiments:
       - raw mCherry EX561 EM600-37
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - B/1
       infected:
@@ -80,7 +80,7 @@ experiments:
       - raw mCherry EX561 EM600-37
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - A/1
       infected:
@@ -102,7 +102,7 @@ experiments:
       - raw mCherry EX561 EM600-37
       - GFP EX488 EM525-45
       - mCherry EX561 EM600-37
-    condition_wells:
+    perturbation_wells:
       uninfected:
         - C/1
       infected:

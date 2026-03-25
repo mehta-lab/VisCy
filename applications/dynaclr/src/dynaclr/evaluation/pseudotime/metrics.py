@@ -442,7 +442,7 @@ def run_statistical_tests(
 
             stat_rows.append(
                 {
-                    "Test": f"Remodeling vs infection ({org})",
+                    "Test": f"Remodeling vs sensor translocation ({org})",
                     "Method": "Fisher's exact (one-sided)",
                     "Statistic": f"OR={odds_ratio:.1f}",
                     "p_value": p_val,
@@ -521,7 +521,7 @@ def run_statistical_tests(
 
         stat_rows.append(
             {
-                "Test": f"Pre vs post infection ({org})",
+                "Test": f"Pre vs post sensor translocation ({org})",
                 "Method": "Fisher's exact (one-sided)",
                 "Statistic": f"OR={odds_ratio:.1f}",
                 "p_value": p_val,
