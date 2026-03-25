@@ -185,13 +185,21 @@ def generate_fg_masks(
             t_total, c_total = img_arr.shape[0], img_arr.shape[1]
             zyx_shape = img_arr.shape[2:]
 
-            # Allocate zarr array on disk (no in-memory copy of the full FOV)
-            z, y, x = zyx_shape
+            # Inherit source image's spatial chunking for aligned I/O;
+            # cap at 512 per axis in case source data is unchunked.
+            src_chunks = img_arr.chunks
+            mask_chunks = (
+                1,
+                1,
+                min(src_chunks[2], zyx_shape[0]),
+                min(src_chunks[3], 512),
+                min(src_chunks[4], 512),
+            )
             mask_arr = pos.create_zeros(
                 fg_mask_key,
                 shape=(t_total, c_total, *zyx_shape),
                 dtype=np.uint8,
-                chunks=(1, 1, z, min(y, 256), min(x, 256)),
+                chunks=mask_chunks,
             )
 
             # Fill non-target channels with 1s (full supervision default)
