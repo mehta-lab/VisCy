@@ -16,6 +16,8 @@ models. We use the same tolerances as DynaCLR:
   - Pearson correlation > 0.999 per channel
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -25,7 +27,28 @@ from scipy import stats
 
 from cytoland.engine import FcmaeUNet
 
-from .conftest import requires_hpc_and_gpu
+# HPC path constants
+CHECKPOINT_PATH = Path(
+    "/hpc/projects/comp.micro/virtual_staining/models/fcmae-cyto3d-sensor/"
+    "vscyto3d-logs/hek-a549-ipsc-finetune/checkpoints/"
+    "epoch=83-step=14532-loss=0.492.ckpt"
+)
+
+DATA_ZARR_PATH = Path(
+    "/hpc/projects/virtual_staining/datasets/mehta-lab/VS_datasets/VSCyto3D/test/vscyto3d_test_fixture.zarr"
+)
+
+REFERENCE_ZARR_PATH = Path(
+    "/hpc/projects/virtual_staining/datasets/mehta-lab/VS_datasets/VSCyto3D/test/vscyto3d_test_reference.zarr"
+)
+
+HPC_PATHS_AVAILABLE = all(p.exists() for p in [CHECKPOINT_PATH, DATA_ZARR_PATH, REFERENCE_ZARR_PATH])
+GPU_AVAILABLE = torch.cuda.is_available()
+
+requires_hpc_and_gpu = pytest.mark.skipif(
+    not (HPC_PATHS_AVAILABLE and GPU_AVAILABLE),
+    reason="Requires HPC data paths and CUDA GPU",
+)
 
 # Model configuration — matches the fine-tuned vscyto3d checkpoint
 # (from finetune_vscyto3d.py:163-174).

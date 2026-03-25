@@ -15,6 +15,7 @@ from xarray import Dataset, open_zarr
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS
 
 __all__ = [
+    "collect_data_provenance",
     "read_embedding_dataset",
     "EmbeddingWriter",
     "write_embedding_dataset",
@@ -67,6 +68,31 @@ def read_embedding_dataset(path: Path) -> Dataset:
     dataset = open_zarr(path)
     available_cols = get_available_index_columns(dataset, str(path))
     return dataset.set_index(sample=available_cols)
+
+
+def collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
+    """Extract data and tracks paths from the trainer's datamodule.
+
+    Parameters
+    ----------
+    trainer : Trainer
+        Lightning trainer instance whose datamodule may contain
+        ``data_path`` and ``tracks_path`` attributes.
+
+    Returns
+    -------
+    dict[str, Any]
+        Metadata dict with ``"data_path"`` and/or ``"tracks_path"`` keys
+        when the datamodule exposes them; empty dict otherwise.
+    """
+    metadata: Dict[str, Any] = {}
+    datamodule = getattr(trainer, "datamodule", None)
+    if datamodule is not None:
+        if hasattr(datamodule, "data_path"):
+            metadata["data_path"] = str(datamodule.data_path)
+        if hasattr(datamodule, "tracks_path"):
+            metadata["tracks_path"] = str(datamodule.tracks_path)
+    return metadata
 
 
 def _move_and_stack_embeddings(predictions: Sequence, key: str) -> NDArray:
@@ -208,18 +234,6 @@ class EmbeddingWriter(BasePredictionWriter):
             raise FileExistsError(f"Output path {self.output_path} already exists.")
         _logger.debug(f"Writing embeddings to {self.output_path}")
 
-    @staticmethod
-    def _collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
-        """Extract data and tracks paths from the datamodule if available."""
-        metadata: Dict[str, Any] = {}
-        datamodule = getattr(trainer, "datamodule", None)
-        if datamodule is not None:
-            if hasattr(datamodule, "data_path"):
-                metadata["data_path"] = str(datamodule.data_path)
-            if hasattr(datamodule, "tracks_path"):
-                metadata["tracks_path"] = str(datamodule.tracks_path)
-        return metadata
-
     def write_on_epoch_end(
         self,
         trainer: Trainer,
@@ -241,5 +255,5 @@ class EmbeddingWriter(BasePredictionWriter):
             phate_kwargs=self.phate_kwargs,
             pca_kwargs=self.pca_kwargs,
             overwrite=self.overwrite,
-            uns_metadata=self._collect_data_provenance(trainer),
+            uns_metadata=collect_data_provenance(trainer),
         )

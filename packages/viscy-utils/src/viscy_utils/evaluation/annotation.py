@@ -1,12 +1,16 @@
-from pathlib import Path
+from __future__ import annotations
 
-import anndata as ad
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pandas as pd
 import xarray as xr
-from natsort import natsorted
 
 from viscy_utils.callbacks.embedding_writer import get_available_index_columns
+
+if TYPE_CHECKING:
+    import anndata as ad
 
 
 def convert(
@@ -38,6 +42,8 @@ def convert(
     ------
     FileExistsError
         If output_path exists and overwrite is False.
+    ImportError
+        If anndata or natsort are not installed.
 
     Examples
     --------
@@ -48,6 +54,15 @@ def convert(
         obs: 'id', 'fov_name', 'track_id', 'parent_track_id', 'parent_id', 't', 'y', 'x'
         obsm: 'X_projections', 'X_pca', 'X_umap', 'X_phate'
     """
+    try:
+        import anndata as ad
+        from natsort import natsorted
+    except ImportError as e:
+        raise ImportError(
+            "anndata and natsort are required for embedding conversion. "
+            "Install with: pip install 'viscy-utils[anndata]'"
+        ) from e
+
     # Check if output_path exists
     if output_path.exists() and not overwrite:
         raise FileExistsError(f"Output path {output_path} already exists.")
@@ -78,7 +93,7 @@ def convert(
         embedding_coords = natsorted([coord for coord in embeddings_ds.coords if embedding in coord])
         if embedding_coords:
             obsm[f"X_{embedding.lower()}"] = np.column_stack(
-                [embeddings_ds.coords[coord] for coord in embedding_coords]
+                [embeddings_ds.coords[coord].data for coord in embedding_coords]
             )
 
     # X, "expression" matrix (NN embedding features)

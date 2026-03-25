@@ -31,7 +31,6 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "anndata",
   "iohub>=0.3a2",
   "jsonargparse[signatures]>=4.26",
   "lightning>=2.3",
@@ -42,15 +41,17 @@ dependencies = [
   "tensorboard",
   "tensorstore",
   "torch>=2.10",
-  "wandb",
+  "viscy-data",
   "xarray",
 ]
 
-optional-dependencies.all = [ "viscy-utils[eval]" ]
+optional-dependencies.all = [ "viscy-utils[anndata,eval]" ]
+optional-dependencies.anndata = [ "anndata", "natsort" ]
 optional-dependencies.eval = [
   "phate",
   "scikit-learn",
   "umap-learn",
+  "wandb",
 ]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
@@ -59,7 +60,14 @@ scripts.viscy = "viscy_utils.cli:main"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
-test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
+test = [
+  "anndata",
+  "natsort",
+  "pytest>=9.0.2",
+  "pytest-cov>=7",
+  "scikit-learn",
+  "wandb",
+]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

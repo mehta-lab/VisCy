@@ -1,15 +1,15 @@
 """Core functions for training and applying linear classifiers on embeddings."""
 
+from __future__ import annotations
+
 import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-import anndata as ad
 import joblib
 import numpy as np
-import wandb
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, roc_auc_score
@@ -17,6 +17,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from viscy_utils.evaluation.annotation import load_annotation_anndata
+
+if TYPE_CHECKING:
+    import anndata as ad
 
 _logger = logging.getLogger(__name__)
 
@@ -127,6 +130,11 @@ def load_and_combine_datasets(datasets: list[dict], task: str) -> ad.AnnData:
     ValueError
         If no valid training data is loaded after processing all datasets.
     """
+    try:
+        import anndata as ad
+    except ImportError:
+        raise ImportError("anndata is required: install viscy-utils[anndata]") from None
+
     train_data_list = []
 
     for i, dataset in enumerate(datasets):
@@ -470,6 +478,11 @@ def save_pipeline_to_wandb(
     print("SAVING MODEL AND LOGGING TO WANDB")
     print("=" * 60)
 
+    try:
+        import wandb
+    except ImportError:
+        raise ImportError("wandb is required: install viscy-utils[eval]") from None
+
     task = config["task"]
     input_channel = config["input_channel"]
     marker = config.get("marker")
@@ -569,6 +582,11 @@ def load_pipeline_from_wandb(
     print("\n" + "=" * 60)
     print("LOADING MODEL FROM WANDB")
     print("=" * 60)
+
+    try:
+        import wandb
+    except ImportError:
+        raise ImportError("wandb is required: install viscy-utils[eval]") from None
 
     run = wandb.init(
         project=wandb_project,
