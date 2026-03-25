@@ -3,7 +3,6 @@
 import logging
 import math
 import os
-import random
 import shutil
 import tempfile
 from pathlib import Path
@@ -233,7 +232,7 @@ class SlidingWindowDataset(Dataset):
                     break
                 if frac < self.min_nonzero_fraction:
                     if attempt < self.max_nonzero_retries:
-                        idx = random.randint(0, len(self) - 1)
+                        idx = torch.randint(len(self), (1,)).item()
                         continue
                     _logger.warning(
                         f"Exhausted {self.max_nonzero_retries} retries for nonzero fraction "

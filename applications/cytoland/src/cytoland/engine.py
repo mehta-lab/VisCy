@@ -193,9 +193,21 @@ class VSUNet(LightningModule):
         return self.model(x)
 
     def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> Tensor:
-        """Compute loss, passing precomputed fg_mask to the loss if present."""
+        """Compute loss, passing precomputed fg_mask to the loss if present.
+
+        When ``fg_mask_key`` is set in the data config, ``batch["fg_mask"]``
+        is forwarded as a keyword argument.  The loss function must accept
+        ``fg_mask`` (e.g. :class:`~viscy_utils.losses.SpotlightLoss`);
+        standard losses like ``nn.MSELoss`` will raise ``TypeError``.
+        """
         if "fg_mask" in batch:
-            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
+            try:
+                return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
+            except TypeError as e:
+                raise TypeError(
+                    f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
+                    f"Use SpotlightLoss or remove fg_mask_key from the data config."
+                ) from e
         return self.loss_function(pred, target)
 
     def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):

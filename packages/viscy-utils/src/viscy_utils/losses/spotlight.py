@@ -74,7 +74,9 @@ def _otsu_threshold(x: Tensor, n_bins: int = 256) -> Tensor:
     cum_mean = (hist * bin_centers).cumsum(0)
     global_mean = cum_mean[-1]
 
-    # Inter-class variance for each possible threshold
+    # Inter-class variance: σ²_B = w0 * w1 * (μ0 - μ1)²
+    # Expanded: mu0_minus_mu = cum_mean*total - global_mean*cum_sum = w0*w1*(μ0 - μ1)
+    # so mu0_minus_mu² / (w0*w1) = w0*w1*(μ0 - μ1)² = σ²_B
     w0 = cum_sum
     w1 = total - cum_sum
     mu0_minus_mu = cum_mean * total - global_mean * cum_sum
