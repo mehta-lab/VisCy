@@ -209,6 +209,48 @@ print()
 
 # %% [markdown]
 # ---
+# ## Marker distribution
+#
+# Check if markers are balanced. If Phase3D dominates, set
+# ``group_weights`` to flatten sampling:
+#
+# ```python
+# dm.group_weights = {"Phase3D": 1, "SEC61B": 1, "G3BP1": 1, "pAL17": 1}
+# ```
+#
+# ### batch_group_by / stratify_by
+#
+# Any column in ``valid_anchors`` (i.e. the flat parquet) can be used.
+# Common choices:
+#
+# ### batch_group_by examples
+#
+# | batch_group_by              | Effect                          |
+# |-----------------------------|--------------------------------------|
+# | ``["marker"]``              | One marker per batch (bag-of-channels) |
+# | ``["experiment"]``          | One experiment per batch             |
+# | ``["experiment", "marker"]``| One (experiment, marker) per batch   |
+# | ``None``                    | No grouping, draw from all           |
+#
+# ### stratify_by examples
+#
+# | stratify_by                     | Effect                           |
+# |---------------------------------|---------------------------------------|
+# | ``"perturbation"``              | Balance infected/uninfected (default) |
+# | ``["perturbation", "marker"]``  | Balance both within batch             |
+# | ``"experiment"``                | Balance experiments within batch      |
+# | ``None``                        | No balancing, pure random             |
+
+# %%
+marker_counts = va["marker"].value_counts()
+print("Marker distribution in valid_anchors:")
+for marker, count in marker_counts.items():
+    pct = 100 * count / len(va)
+    print(f"  {marker}: {count:,} ({pct:.1f}%)")
+print()
+
+# %% [markdown]
+# ---
 # ## 1. Bag-of-Channels: Marker-Grouped + Perturbation-Balanced
 #
 # **The primary bag-of-channels configuration.**
