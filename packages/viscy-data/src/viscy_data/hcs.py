@@ -15,7 +15,6 @@ from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.transforms import (
-    CenterSpatialCropd,
     Compose,
     MapTransform,
     MultiSampleTrait,
@@ -26,6 +25,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
 from viscy_data._utils import (
+    BatchedCenterSpatialCropd,
     _collate_samples,
     _ensure_channel_list,
     _read_norm_meta,
@@ -137,7 +137,9 @@ class SlidingWindowDataset(Dataset):
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
         ].astype(np.float32)
-        return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
+        data_tensor = torch.from_numpy(data)
+        images = [data_tensor[:, c : c + 1] for c in range(data_tensor.shape[1])]
+        return images, (img.name, t, z)
 
     def __len__(self) -> int:
         """Return total number of windows."""
@@ -149,11 +151,15 @@ class SlidingWindowDataset(Dataset):
         sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
         key: str,
     ) -> Tensor | list[Tensor]:
-        """Stack single-channel images into a multi-channel tensor."""
+        """Stack single-channel images into a multi-channel tensor.
+
+        Each channel tensor has shape (1, 1, Z, Y, X): batch=1, channel=1, spatial.
+        Concatenating along dim=1 gives (1, n_ch, Z, Y, X), then [0] gives (n_ch, Z, Y, X).
+        """
         if not isinstance(sample_images, list):
-            return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
-        # training time
-        return [torch.stack([im[ch][0] for ch in self.channels[key]]) for im in sample_images]
+            return torch.cat([sample_images[ch] for ch in self.channels[key]], dim=1)[0]
+        # training time with multi-sample transforms
+        return [torch.cat([im[ch] for ch in self.channels[key]], dim=1)[0] for im in sample_images]
 
     def __getitem__(self, index: int) -> Sample:
         """Return a sample for the given index."""
@@ -570,9 +576,9 @@ class HCSDataModule(LightningDataModule):
         val_transform = Compose(self.normalizations + final_crop)
         return train_transform, val_transform
 
-    def _final_crop(self) -> CenterSpatialCropd:
+    def _final_crop(self) -> BatchedCenterSpatialCropd:
         """Set up final cropping: center crop to the target size."""
-        return CenterSpatialCropd(
+        return BatchedCenterSpatialCropd(
             keys=self.source_channel + self.target_channel,
             roi_size=(
                 self.z_window_size,

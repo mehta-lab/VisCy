@@ -1,0 +1,46 @@
+# UNetViT3D end-to-end 3D virtual staining — prediction
+# Usage: python -m celldiff_e2e predict --config predict_unetvit3d.yml
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  precision: 32-true
+  callbacks:
+    - class_path: viscy_utils.callbacks.HCSPredictionWriter
+      init_args:
+        output_store: /TODO/path/to/output.zarr
+model:
+  class_path: celldiff_e2e.CellDiffE2E
+  init_args:
+    model_config:
+      input_spatial_size: [8, 512, 512]
+      in_channels: 1
+      out_channels: 1
+      dims: [64, 128, 256, 256]
+      num_res_block: [2, 2, 2]
+      hidden_size: 512
+      num_heads: 8
+      dim_head: 64
+      dropout: 0.0
+      final_dropout: 0.0
+      num_hidden_layers: 8
+      patch_size: 4
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /TODO/path/to/data.zarr
+    source_channel: Phase3D
+    target_channel: Structure
+    z_window_size: 8
+    batch_size: 1
+    num_workers: 8
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+return_predictions: false
+ckpt_path: /TODO/path/to/checkpoint.ckpt

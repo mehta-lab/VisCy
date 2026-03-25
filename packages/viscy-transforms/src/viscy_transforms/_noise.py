@@ -221,8 +221,6 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
         Mean of the Gaussian distribution. Default: 0.0.
     std : float
         Standard deviation (or max std if sample_std=True). Default: 0.1.
-    dtype : DTypeLike
-        Output data type. Default: np.float32.
     allow_missing_keys : bool
         Whether to allow missing keys in data dictionary. Default: False.
     sample_std : bool
@@ -245,12 +243,11 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
         prob: float = 0.1,
         mean: float = 0.0,
         std: float = 0.1,
-        dtype: DTypeLike = np.float32,
         allow_missing_keys: bool = False,
         sample_std: bool = True,
     ) -> None:
         MapTransform.__init__(self, keys, allow_missing_keys)
         RandomizableTransform.__init__(self, prob)
         self.rand_gaussian_noise = BatchedRandGaussianNoise(
-            mean=mean, std=std, prob=1.0, dtype=dtype, sample_std=sample_std
+            mean=mean, std=std, prob=1.0, dtype=np.float32, sample_std=sample_std
         )

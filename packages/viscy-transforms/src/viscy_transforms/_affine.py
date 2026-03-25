@@ -77,7 +77,7 @@ class BatchedRandAffined(MapTransform):
             rotate_range = (0.0, 0.0, 0.0)
         shear_range = self._radians_to_degrees(self._maybe_invert_sequence(shear_range))
         translate_range = self._maybe_invert_sequence(translate_range)
-        scale_range = self._maybe_invert_sequence(scale_range)
+        scale_range = self._scale_range_to_kornia(self._maybe_invert_sequence(scale_range))
         self.random_affine = RandomAffine3D(
             degrees=rotate_range,
             translate=translate_range,
@@ -99,11 +99,31 @@ class BatchedRandAffined(MapTransform):
         return value
 
     @staticmethod
+    def _scale_range_to_kornia(
+        scale_range: Sequence[tuple[float, float] | float] | float | None,
+    ) -> tuple[tuple[float, float], ...] | tuple[float, float] | None:
+        """Convert scale deviation range to Kornia's (min, max) format."""
+        if scale_range is None:
+            return None
+        if isinstance(scale_range, (int, float)):
+            return (1 - scale_range, 1 + scale_range)
+        result = []
+        for v in scale_range:
+            if isinstance(v, (tuple, list)):
+                result.append((float(v[0]), float(v[1])))
+            else:
+                result.append((1 - float(v), 1 + float(v)))
+        return tuple(result)
+
+    @staticmethod
     def _radians_to_degrees(
         rotate_range: Sequence[tuple[float, float] | float] | float | None,
-    ) -> tuple[tuple[float, float], ...] | None:
+    ) -> tuple[tuple[float, float], ...] | tuple[float, float] | None:
         if rotate_range is None:
             return None
+        if isinstance(rotate_range, (int, float)):
+            deg = float(np.rad2deg(rotate_range))
+            return (-deg, deg)
         result = []
         for v in rotate_range:
             if isinstance(v, (tuple, list)):

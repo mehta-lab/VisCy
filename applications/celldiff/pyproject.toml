@@ -3,15 +3,11 @@ build-backend = "hatchling.build"
 requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
-name = "viscy-models"
-description = "Neural network architectures primarily for AI x Imaging"
-readme = "README.md"
+name = "celldiff"
+description = "CELL-Diff: Diffusion based virtual staining for label free imaging"
 keywords = [
-  "deep learning",
+  "Diffusion model",
   "microscopy",
-  "neural networks",
-  "pytorch",
-  "representation learning",
   "virtual staining",
 ]
 license = "BSD-3-Clause"
@@ -32,33 +28,52 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "diffusers",
-  "monai>=1.5.2",
-  "numpy>=2.4.1",
+  "click",
+  "iohub>=0.3a2",
+  "lightning>=2.3",
   "pytorch-metric-learning",
-  "timm>=1.0.15",
-  "torch>=2.10",
-  "torchdiffeq",
-  "einops",
-  "transformers>=4.40",
+  "pyyaml",
+  "torchvision",
+  "viscy-data[triplet]",
+  "viscy-models",
+  "viscy-transforms",
+  "viscy-utils",
 ]
 
+optional-dependencies.eval = [
+  "anndata",
+  "natsort",
+  "phate",
+  "scikit-learn",
+  "seaborn",
+  "statsmodels",
+  "umap-learn",
+  "wandb",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
-test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
+test = [
+  "anndata",
+  "pandas",
+  "pytest>=9.0.2",
+  "pytest-cov>=7",
+  "statsmodels",
+  "tensorboard",
+  "tensorstore",
+]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/viscy_models" ]
+packages = [ "src/celldiff_e2e" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"
 style = "pep440"
-pattern-prefix = "viscy-models-"
+pattern-prefix = "celldiff-"
 fallback-version = "0.0.0"

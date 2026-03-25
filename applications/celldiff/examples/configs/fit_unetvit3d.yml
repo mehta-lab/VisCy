@@ -1,0 +1,105 @@
+# UNetViT3D end-to-end 3D virtual staining — training
+# Usage: python -m celldiff_e2e fit --config fit_unetvit3d.yml
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  max_epochs: 10
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      entity: computational_imaging
+      project: dynacell
+      name: PT_UNet_iPSC_Nucl
+      save_dir: pretrain/ipsc/PT_UNet_iPSC_Nucl
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+model:
+  class_path: celldiff_e2e.CellDiffE2E
+  init_args:
+    model_config:
+      input_spatial_size: [8, 512, 512]
+      in_channels: 1
+      out_channels: 1
+      dims: [64, 128, 256, 256]
+      num_res_block: [2, 2, 2]
+      hidden_size: 512
+      num_heads: 8
+      dim_head: 64
+      dropout: 0.0
+      final_dropout: 0.0
+      num_hidden_layers: 8
+      patch_size: 4
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 1.0
+        l2_alpha: 1.0
+        ms_dssim_alpha: 1.0
+    lr: 0.0001
+    schedule: WarmupCosine
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+    source_channel: &s Phase3D
+    target_channel: &t Nuclei
+    z_window_size: 8
+    batch_size: 4
+    num_workers: 8
+    yx_patch_size: [512, 512]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [*s, *t]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [*s, *t]
+          prob: 0.5
+          rotate_range: [3.14, 0, 0]
+          shear_range: 0.05
+          scale_range: [0.5, 0.5, 0.5]
+      - class_path: viscy_transforms.BatchedRandSpatialCropd
+        init_args:
+          keys: [*s, *t]
+          roi_size: [8, 512, 512]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [*s]
+          prob: 0.3
+          gamma: [0.75, 1.5]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [*s]
+          factors: 0.5
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [*s]
+          prob: 0.5
+          mean: 0.0
+          std: 5.0
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [*s]
+          prob: 0.5
+          sigma_x: [0.25, 1.5]
+          sigma_y: [0.25, 1.5]
+          sigma_z: [0.25, 1.5]
+    caching: false

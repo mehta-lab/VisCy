@@ -84,6 +84,7 @@ def main() -> None:
         subclass_mode_model=require_model,
         subclass_mode_data=require_data,
         parser_kwargs={"description": "Computer vision models for single-cell phenotyping."},
+        save_config_kwargs={"overwrite": True},
     )
 
 

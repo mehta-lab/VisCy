@@ -23,6 +23,7 @@ resolution-markers = [
 [manifest]
 members = [
     "airtable-utils",
+    "celldiff",
     "cytoland",
     "dynaclr",
     "qc",
@@ -422,6 +423,97 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/75/f99a11d78980a80a2a5cc16e57c31d46d879b8e0fd6f532ac8b5e6ad1d1a/blosc2-4.1.0-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d4859563bdcfdc59243823ac9d50afe6686922117ccb101d4cb4f443b92e2b10", size = 6293105, upload-time = "2026-02-28T07:08:47.696Z" },
     { url = "https://files.pythonhosted.org/packages/b9/81/334ef9d58c4ae0c82a194bcb72a86073d9907420857b0d0f305a49289a7b/blosc2-4.1.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:150b0ff3ea4f55037e3d6da989080df3cd4b49ec4ff0b624cea9d3f05ca96d42", size = 6427419, upload-time = "2026-02-28T07:08:49.346Z" },
     { url = "https://files.pythonhosted.org/packages/44/3d/3f0096bcaf9ba9c9c298b2928b27665122c85e75a4bfe8be6731d4f9dcfa/blosc2-4.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:4317a21850711180bd7cd86897ae1e881fea742ac1cef70b8822a39dc3954866", size = 4486459, upload-time = "2026-02-28T07:08:51.596Z" },
+]
+
+[[package]]
+name = "celldiff"
+source = { editable = "applications/celldiff" }
+dependencies = [
+    { name = "click" },
+    { name = "iohub" },
+    { name = "lightning" },
+    { name = "pytorch-metric-learning" },
+    { name = "pyyaml" },
+    { name = "torchvision" },
+    { name = "viscy-data", extra = ["triplet"] },
+    { name = "viscy-models" },
+    { name = "viscy-transforms" },
+    { name = "viscy-utils" },
+]
+
+[package.optional-dependencies]
+eval = [
+    { name = "anndata" },
+    { name = "natsort" },
+    { name = "phate" },
+    { name = "scikit-learn" },
+    { name = "seaborn" },
+    { name = "statsmodels" },
+    { name = "umap-learn" },
+    { name = "wandb" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "anndata" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "statsmodels" },
+    { name = "tensorboard" },
+    { name = "tensorstore" },
+]
+test = [
+    { name = "anndata" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "statsmodels" },
+    { name = "tensorboard" },
+    { name = "tensorstore" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anndata", marker = "extra == 'eval'" },
+    { name = "click" },
+    { name = "iohub", specifier = ">=0.3a2" },
+    { name = "lightning", specifier = ">=2.3" },
+    { name = "natsort", marker = "extra == 'eval'" },
+    { name = "phate", marker = "extra == 'eval'" },
+    { name = "pytorch-metric-learning" },
+    { name = "pyyaml" },
+    { name = "scikit-learn", marker = "extra == 'eval'" },
+    { name = "seaborn", marker = "extra == 'eval'" },
+    { name = "statsmodels", marker = "extra == 'eval'" },
+    { name = "torchvision" },
+    { name = "umap-learn", marker = "extra == 'eval'" },
+    { name = "viscy-data", extras = ["triplet"], editable = "packages/viscy-data" },
+    { name = "viscy-models", editable = "packages/viscy-models" },
+    { name = "viscy-transforms", editable = "packages/viscy-transforms" },
+    { name = "viscy-utils", editable = "packages/viscy-utils" },
+    { name = "wandb", marker = "extra == 'eval'" },
+]
+provides-extras = ["eval"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "anndata" },
+    { name = "pandas" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7" },
+    { name = "statsmodels" },
+    { name = "tensorboard" },
+    { name = "tensorstore" },
+]
+test = [
+    { name = "anndata" },
+    { name = "pandas" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7" },
+    { name = "statsmodels" },
+    { name = "tensorboard" },
+    { name = "tensorstore" },
 ]
 
 [[package]]
@@ -1019,6 +1111,26 @@ wheels = [
 ]
 
 [[package]]
+name = "diffusers"
+version = "0.37.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "importlib-metadata" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "regex" },
+    { name = "requests" },
+    { name = "safetensors" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/3b/01d0ff800b811c5ad8bba682f4c6abf1d7071cd81464c01724333fefb7ba/diffusers-0.37.0.tar.gz", hash = "sha256:408789af73898585f525afd07ca72b3955affea4216a669558e9f59b5b1fe704", size = 4141136, upload-time = "2026-03-05T14:58:39.704Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/55/586a3a2b9c95f371c9c3cb048c3cac15aedcce8d6d53ebd6bbc46860722d/diffusers-0.37.0-py3-none-any.whl", hash = "sha256:7eab74bf896974250b5e1027cae813aba1004f02d97c9b44891b83713386aa08", size = 5000449, upload-time = "2026-03-05T14:58:37.361Z" },
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1126,6 +1238,15 @@ test = [
     { name = "statsmodels" },
     { name = "tensorboard" },
     { name = "tensorstore" },
+]
+
+[[package]]
+name = "einops"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
 ]
 
 [[package]]
@@ -5477,6 +5598,19 @@ wheels = [
 ]
 
 [[package]]
+name = "torchdiffeq"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "scipy" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/87/ec/a40aa124660f0ee65e6760cb53df6a82ad91a1a3ef1da5e747f1336644dd/torchdiffeq-0.2.5.tar.gz", hash = "sha256:b50d3760d13fd138dcceac651f4b80396f44fefcebd037a033fecfeaa9cc12e7", size = 31197, upload-time = "2024-11-21T20:20:11.552Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/35/537f64f2d0b3cfebaae0f903b4e3a3b239abcc99d0f73cb15b9cee9b8212/torchdiffeq-0.2.5-py3-none-any.whl", hash = "sha256:aa1db4bed13bd04952f28a53cdf4336d1ab60417c1d9698d7a239fec1cf2bcf8", size = 32902, upload-time = "2024-11-21T20:20:09.938Z" },
+]
+
+[[package]]
 name = "torchmetrics"
 version = "1.8.2"
 source = { registry = "https://pypi.org/simple" }
@@ -5844,11 +5978,14 @@ test = [
 name = "viscy-models"
 source = { editable = "packages/viscy-models" }
 dependencies = [
+    { name = "diffusers" },
+    { name = "einops" },
     { name = "monai" },
     { name = "numpy" },
     { name = "pytorch-metric-learning" },
     { name = "timm" },
     { name = "torch" },
+    { name = "torchdiffeq" },
     { name = "transformers" },
 ]
 
@@ -5864,11 +6001,14 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "diffusers" },
+    { name = "einops" },
     { name = "monai", specifier = ">=1.5.2" },
     { name = "numpy", specifier = ">=2.4.1" },
     { name = "pytorch-metric-learning" },
     { name = "timm", specifier = ">=1.0.15" },
     { name = "torch", specifier = ">=2.10" },
+    { name = "torchdiffeq" },
     { name = "transformers", specifier = ">=4.40" },
 ]
 
