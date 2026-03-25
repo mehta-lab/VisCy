@@ -100,15 +100,17 @@ class ExperimentRegistry:
             if not Path(exp.data_path).exists():
                 raise ValueError(f"Experiment '{exp.name}': data_path does not exist: {exp.data_path}")
 
-            # 7. Zarr channel validation
+            # 7. Zarr channel validation — selected channels must exist in zarr
             with open_ome_zarr(exp.data_path, mode="r") as plate:
                 first_position = next(iter(plate.positions()))[1]
                 zarr_channels = list(first_position.channel_names)
-            if zarr_channels != exp.channel_names:
+            # Store the full zarr channel list for index resolution
+            exp.channel_names = zarr_channels
+            missing_channels = [ch.name for ch in exp.channels if ch.name not in zarr_channels]
+            if missing_channels:
                 raise ValueError(
-                    f"Experiment '{exp.name}': channel_names mismatch. "
-                    f"Expected (from config): {exp.channel_names}, "
-                    f"got (from zarr): {zarr_channels}."
+                    f"Experiment '{exp.name}': channels {missing_channels} "
+                    f"not found in zarr. Available: {zarr_channels}."
                 )
 
         # Resolve per-experiment z_ranges

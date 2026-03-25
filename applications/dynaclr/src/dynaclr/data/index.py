@@ -28,13 +28,13 @@ def _load_experiment_fovs(
     exp_name: str,
     data_path: str,
     tracks_path: str,
-    condition_wells: dict[str, list[str]],
+    perturbation_wells: dict[str, list[str]],
     marker: str,
     organelle: str,
     microscope: str,
     start_hpi: float,
     interval_minutes: float,
-    fluorescence_channel: str,
+    channel_name: str,
     include_wells: list[str] | None,
     exclude_fovs: list[str] | None,
 ) -> list[pd.DataFrame]:
@@ -50,8 +50,8 @@ def _load_experiment_fovs(
         Path to the OME-Zarr plate store.
     tracks_path : str
         Root directory of tracking CSVs.
-    condition_wells : dict[str, list[str]]
-        Mapping of condition label to list of well names.
+    perturbation_wells : dict[str, list[str]]
+        Mapping of perturbation label to list of well names.
     marker : str
         Marker name.
     organelle : str
@@ -62,7 +62,7 @@ def _load_experiment_fovs(
         Hours post perturbation at t=0.
     interval_minutes : float
         Minutes per frame.
-    fluorescence_channel : str
+    channel_name : str
         Fluorescence channel name for this experiment.
     include_wells : list[str] | None
         If provided, only include these wells.
@@ -76,7 +76,7 @@ def _load_experiment_fovs(
         (resolved later by _resolve_positions_and_dims).
     """
     registered_wells: set[str] = set()
-    for wells in condition_wells.values():
+    for wells in perturbation_wells.values():
         registered_wells.update(wells)
 
     fov_dfs: list[pd.DataFrame] = []
@@ -94,16 +94,16 @@ def _load_experiment_fovs(
             if exclude_fovs is not None and fov_name in exclude_fovs:
                 continue
 
-            # Resolve condition from condition_wells
-            condition = None
-            for condition_label, wells in condition_wells.items():
+            # Resolve perturbation from perturbation_wells
+            perturbation = None
+            for perturbation_label, wells in perturbation_wells.items():
                 if well_name in wells:
-                    condition = condition_label
+                    perturbation = perturbation_label
                     break
-            if condition is None:
+            if perturbation is None:
                 raise ValueError(
-                    f"Well '{well_name}' not found in condition_wells mapping "
-                    f"for experiment '{exp_name}'. Available wells: {dict(condition_wells)}"
+                    f"Well '{well_name}' not found in perturbation_wells mapping "
+                    f"for experiment '{exp_name}'. Available wells: {dict(perturbation_wells)}"
                 )
 
             # Read tracking CSV
@@ -118,7 +118,7 @@ def _load_experiment_fovs(
             # Enrich columns
             tracks_df["store_path"] = data_path
             tracks_df["experiment"] = exp_name
-            tracks_df["perturbation"] = condition
+            tracks_df["perturbation"] = perturbation
             tracks_df["marker"] = marker
             tracks_df["organelle"] = organelle
             tracks_df["microscope"] = microscope
@@ -129,7 +129,7 @@ def _load_experiment_fovs(
                 exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
             )
             tracks_df["hours_post_perturbation"] = start_hpi + tracks_df["t"] * interval_minutes / 60.0
-            tracks_df["fluorescence_channel"] = fluorescence_channel
+            tracks_df["channel_name"] = channel_name
 
             fov_dfs.append(tracks_df)
 
@@ -314,9 +314,9 @@ class MultiExperimentIndex:
 
         The cell index parquet uses ``fov``, ``well``, ``channel_name``
         while the runtime code expects ``fov_name``, ``well_name``,
-        ``fluorescence_channel``.
+        ``channel_name``.
         """
-        tracks = tracks.rename(columns={"fov": "fov_name", "well": "well_name", "channel_name": "fluorescence_channel"})
+        tracks = tracks.rename(columns={"fov": "fov_name", "well": "well_name"})
         if "microscope" not in tracks.columns:
             tracks["microscope"] = ""
         return tracks

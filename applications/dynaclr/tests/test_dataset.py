@@ -96,7 +96,7 @@ def _build_index(
             ChannelEntry(name="GFP", marker="GFP"),
         ],
         channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"control": ["A/1"]},
+        perturbation_wells={"control": ["A/1"]},
         interval_minutes=30.0,
     )
     experiments = [exp_a]
@@ -118,7 +118,7 @@ def _build_index(
                 ChannelEntry(name="Mito", marker="Mito"),
             ],
             channel_names=_CHANNEL_NAMES_B,
-            condition_wells={"treated": ["A/1"]},
+            perturbation_wells={"treated": ["A/1"]},
             interval_minutes=15.0,
         )
         experiments.append(exp_b)
@@ -348,7 +348,7 @@ class TestChannelSelection:
         )
 
     def test_from_index_channel_deterministic(self, single_experiment_index):
-        """channels_per_sample=1 reads the row's fluorescence_channel (from_index mode)."""
+        """channels_per_sample=1 reads the row's channel_name (from_index mode)."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
@@ -475,7 +475,7 @@ def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
             tracks_path=str(tracks_root),
             channels=[ChannelEntry(name="Phase", marker="Phase")],
             channel_names=channel_names,
-            condition_wells={condition: ["A/1"]},
+            perturbation_wells={condition: ["A/1"]},
             interval_minutes=30.0,
             microscope=microscope,
         )
@@ -598,7 +598,7 @@ class TestSelfPositive:
             tracks_path=str(tracks_root),
             channels=[ChannelEntry(name="Phase", marker="Phase")],
             channel_names=["Phase"],
-            condition_wells={"control": ["A/1"]},
+            perturbation_wells={"control": ["A/1"]},
             interval_minutes=30.0,
         )
         collection = Collection(

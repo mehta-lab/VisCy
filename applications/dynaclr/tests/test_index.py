@@ -169,7 +169,7 @@ def two_experiment_setup(tmp_path):
         data_path=str(zarr_a),
         tracks_path=str(tracks_a),
         channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
+        perturbation_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
         interval_minutes=30.0,
         start_hpi=0.0,
     )
@@ -178,7 +178,7 @@ def two_experiment_setup(tmp_path):
         data_path=str(zarr_b),
         tracks_path=str(tracks_b),
         channel_names=_CHANNEL_NAMES_B,
-        condition_wells={"control": ["A/1"], "treated": ["B/1"]},
+        perturbation_wells={"control": ["A/1"], "treated": ["B/1"]},
         interval_minutes=15.0,
         start_hpi=2.0,
     )
@@ -210,7 +210,7 @@ def lineage_setup(tmp_path):
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
         channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"ctrl": ["A/1"]},
+        perturbation_wells={"ctrl": ["A/1"]},
         interval_minutes=30.0,
     )
 
@@ -240,7 +240,7 @@ def border_setup(tmp_path):
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
         channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"ctrl": ["A/1"]},
+        perturbation_wells={"ctrl": ["A/1"]},
         interval_minutes=30.0,
     )
 
@@ -316,15 +316,15 @@ class TestUnifiedTracksDataFrame:
         expected_b = 2.0 + 4 * 15.0 / 60.0  # = 3.0
         assert row_b["hours_post_perturbation"] == pytest.approx(expected_b)
 
-    def test_fluorescence_channel(self, two_experiment_setup):
-        """fluorescence_channel is source_channel[1] when len > 1."""
+    def test_channel_name(self, two_experiment_setup):
+        """channel_name is source_channel[1] when len > 1."""
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         exp_a_rows = index.tracks[index.tracks["experiment"] == "exp_a"]
-        assert (exp_a_rows["fluorescence_channel"] == "GFP").all()
+        assert (exp_a_rows["channel_name"] == "GFP").all()
 
         exp_b_rows = index.tracks[index.tracks["experiment"] == "exp_b"]
-        assert (exp_b_rows["fluorescence_channel"] == "Mito").all()
+        assert (exp_b_rows["channel_name"] == "Mito").all()
 
     def test_required_columns_present(self, two_experiment_setup):
         """All required columns exist in the final DataFrame."""
@@ -343,7 +343,7 @@ class TestUnifiedTracksDataFrame:
             "perturbation",
             "global_track_id",
             "hours_post_perturbation",
-            "fluorescence_channel",
+            "channel_name",
             "lineage_id",
             "y_clamp",
             "x_clamp",
@@ -536,7 +536,7 @@ class TestBorderClamping:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -663,7 +663,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -716,7 +716,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -753,7 +753,7 @@ class TestValidAnchors:
             data_path=str(zarr_fast),
             tracks_path=str(tracks_fast),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=15.0,
         )
 
@@ -771,7 +771,7 @@ class TestValidAnchors:
             data_path=str(zarr_slow),
             tracks_path=str(tracks_slow),
             channel_names=_CHANNEL_NAMES_B,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
 
@@ -810,7 +810,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -841,7 +841,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -875,7 +875,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -1053,7 +1053,7 @@ class TestParquetPath:
         assert len(index.tracks) == 400
 
     def test_parquet_column_alignment(self, two_experiment_setup, tmp_path):
-        """Parquet columns are renamed: fov_name, well_name, fluorescence_channel."""
+        """Parquet columns are renamed: fov_name, well_name, channel_name."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -1064,7 +1064,7 @@ class TestParquetPath:
         )
         assert "fov_name" in index.tracks.columns
         assert "well_name" in index.tracks.columns
-        assert "fluorescence_channel" in index.tracks.columns
+        assert "channel_name" in index.tracks.columns
         # Original parquet names should be gone
         assert "fov" not in index.tracks.columns
         assert "well" not in index.tracks.columns
@@ -1170,7 +1170,7 @@ class TestParquetPath:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -1206,7 +1206,7 @@ class TestParquetPath:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))

@@ -46,6 +46,7 @@ _META_COLUMNS = [
     "t",
     "hours_post_perturbation",
     "lineage_id",
+    "marker",
 ]
 
 _logger = logging.getLogger(__name__)
@@ -313,7 +314,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         # Pre-compute per-sample channel names based on channel_mode.
         if self._channel_mode == "from_index":
-            forced_channel_names = [[row["fluorescence_channel"]] for _, row in anchor_rows.iterrows()]
+            forced_channel_names = [[row["channel_name"]] for _, row in anchor_rows.iterrows()]
         elif self._channel_mode == "fixed":
             forced_channel_names = [self._fixed_channel_names] * len(indices)
         else:
@@ -329,7 +330,7 @@ class MultiExperimentTripletDataset(Dataset):
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
             if self._channel_mode == "from_index":
-                pos_forced_channel_names = [[row["fluorescence_channel"]] for _, row in positive_rows.iterrows()]
+                pos_forced_channel_names = [[row["channel_name"]] for _, row in positive_rows.iterrows()]
             else:
                 pos_forced_channel_names = forced_channel_names
             positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_names)
@@ -471,21 +472,34 @@ class MultiExperimentTripletDataset(Dataset):
         if lt_map is None:
             return None
 
+        # In from_index mode (flat parquet), filter candidates to same marker
+        anchor_marker = anchor_row.get("marker") if self._channel_mode == "from_index" else None
+
+        def _pick(candidate_indices: list[int]) -> pd.Series | None:
+            if not candidate_indices:
+                return None
+            if anchor_marker is not None:
+                filtered = [
+                    idx for idx in candidate_indices if self.index.tracks.iloc[idx].get("marker") == anchor_marker
+                ]
+                if filtered:
+                    candidate_indices = filtered
+            chosen_idx = candidate_indices[rng.integers(len(candidate_indices))]
+            return self.index.tracks.iloc[chosen_idx]
+
         # Try sampled tau first, then scan full range as fallback
         sampled_tau = sample_tau(tau_min, tau_max, rng, self.tau_decay_rate)
         target_t = anchor_t + sampled_tau
-        candidates = lt_map.get(target_t, [])
-        if candidates:
-            chosen_idx = candidates[rng.integers(len(candidates))]
-            return self.index.tracks.iloc[chosen_idx]
+        result = _pick(lt_map.get(target_t, []))
+        if result is not None:
+            return result
 
         for tau in range(tau_min, tau_max + 1):
             if tau == 0:
                 continue
-            candidates_fb = lt_map.get(anchor_t + tau, [])
-            if candidates_fb:
-                chosen_idx = candidates_fb[rng.integers(len(candidates_fb))]
-                return self.index.tracks.iloc[chosen_idx]
+            result = _pick(lt_map.get(anchor_t + tau, []))
+            if result is not None:
+                return result
 
         return None
 

@@ -49,7 +49,7 @@ def flat_parquet_setup(tmp_path):
         "exp_a",
         channel_names=["Phase3D", "GFP"],
         wells=[("A", "1"), ("B", "1")],
-        condition_wells={"ctrl": ["A/1"], "treated": ["B/1"]},
+        perturbation_wells={"ctrl": ["A/1"], "treated": ["B/1"]},
         fovs_per_well=1,
         n_tracks=5,
         n_t=10,
@@ -63,7 +63,7 @@ def flat_parquet_setup(tmp_path):
         "exp_b",
         channel_names=["Phase3D", "GFP", "mCherry"],
         wells=[("A", "1")],
-        condition_wells={"ctrl": ["A/1"]},
+        perturbation_wells={"ctrl": ["A/1"]},
         fovs_per_well=1,
         n_tracks=3,
         n_t=8,
@@ -125,10 +125,10 @@ class TestFlatParquetRegistry:
             assert exp.pixel_size_z_um is not None
             assert abs(exp.pixel_size_z_um - 0.3) < 1e-3
 
-    def test_valid_anchors_have_fluorescence_channel(self, flat_parquet_setup):
+    def test_valid_anchors_have_channel_name(self, flat_parquet_setup):
         index, _, _ = flat_parquet_setup
-        assert "fluorescence_channel" in index.valid_anchors.columns
-        channels = set(index.valid_anchors["fluorescence_channel"].unique())
+        assert "channel_name" in index.valid_anchors.columns
+        channels = set(index.valid_anchors["channel_name"].unique())
         assert "Phase3D" in channels
         assert "GFP" in channels
 

@@ -7,9 +7,9 @@ figure per batch showing anchor/positive pairs side by side with metadata
 annotations. Checkmarks verify that the sampling contract holds:
 
 - Same-lineage positives (temporal mode)
-- Same-condition batches (stratified)
+- Same-marker batches (bag-of-channels)
 - Same-experiment batches (experiment-aware)
-- Single-channel output (bag-of-channels)
+- Perturbation-balanced batches (stratified)
 
 Usage::
 
@@ -21,8 +21,9 @@ Usage::
 # %% [markdown]
 # # Batch Composition Checker
 #
-# Visual QC for contrastive batch sampling. Each figure = one batch.
-# Columns = anchor/positive pairs. Annotations show metadata + pass/fail.
+# Visual QC for contrastive batch sampling with flat parquet.
+# Each figure = one batch. Columns = anchor/positive pairs.
+# Annotations show metadata + pass/fail checks.
 
 # %%
 from __future__ import annotations
@@ -39,18 +40,17 @@ from dynaclr.data.datamodule import MultiExperimentDataModule
 # ## Configuration
 
 # %%
-COLLECTION_PATH = (
-    "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/collections/DynaCLR-2D-BagOfChannels-v3.yml"
-)
-CELL_INDEX_PATH = None
+# --- EDIT THESE ---
+CELL_INDEX_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/example_flat.parquet"
+COLLECTION_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/example_cell_index.yaml"
 
 Z_WINDOW = 1
 YX_PATCH_SIZE = (256, 256)
 FINAL_YX_PATCH_SIZE = (160, 160)
-BATCH_SIZE = 10
-NUM_WORKERS = 1
+BATCH_SIZE = 8
+NUM_WORKERS = 4
 N_BATCHES = 3
-OUTPUT_DIR = None  # set to a Path to save figures, e.g. Path("/tmp/dynaclr_batch_check")
+OUTPUT_DIR = Path("applications/dynaclr/scripts/dataloader_inspection/results/batch_composition")
 
 
 # %% [markdown]
@@ -75,22 +75,7 @@ def plot_batch_pairs(
     checks: dict[str, callable] | None = None,
     save_path: Path | None = None,
 ) -> None:
-    """One figure per batch: 2 rows (anchor/positive) x N samples.
-
-    Parameters
-    ----------
-    batch : dict
-        Batch dict with anchor, positive, anchor_meta, positive_meta.
-    batch_idx : int
-        Batch number (for figure title).
-    title : str
-        Figure title prefix.
-    checks : dict[str, callable] or None
-        Named checks: {label: fn(anchor_meta, positive_meta) -> bool}.
-        Each check is annotated per sample.
-    save_path : Path or None
-        If set, save the figure to this path.
-    """
+    """One figure per batch: 2 rows (anchor/positive) x N samples."""
     anchor = batch["anchor"].numpy()
     positive = batch.get("positive")
     positive = positive.numpy() if positive is not None else None
@@ -102,21 +87,16 @@ def plot_batch_pairs(
     n_rows = 2 if has_positive else 1
     fig, axes = plt.subplots(n_rows, n, figsize=(n * 2.2, n_rows * 2.8), squeeze=False)
 
-    # Batch-level summary in title
     experiments = Counter(m.get("experiment", "?") for m in anchor_meta)
-    conditions = Counter(m.get("condition", "?") for m in anchor_meta)
+    perturbations = Counter(m.get("perturbation", "?") for m in anchor_meta)
     exp_str = ", ".join(f"{k[:20]}={v}" for k, v in experiments.most_common(3))
-    cond_str = ", ".join(f"{k}={v}" for k, v in conditions.most_common(5))
-    fig.suptitle(
-        f"{title} — Batch {batch_idx}\nexp: {exp_str}  |  cond: {cond_str}",
-        fontsize=9,
-    )
+    pert_str = ", ".join(f"{k}={v}" for k, v in perturbations.most_common(5))
+    fig.suptitle(f"{title} — Batch {batch_idx}\nexp: {exp_str}  |  pert: {pert_str}", fontsize=9)
 
     for i in range(n):
         am = anchor_meta[i]
         pm = positive_meta[i] if i < len(positive_meta) else {}
 
-        # Anchor image
         img_a = _img_2d(anchor, i)
         vmin, vmax = np.percentile(img_a, [1, 99])
         ax = axes[0, i]
@@ -124,21 +104,14 @@ def plot_batch_pairs(
         ax.set_xticks([])
         ax.set_yticks([])
 
-        # Build annotation lines
-        lines = [f"{am.get('condition', '?')}", f"t={am.get('t', '?')}"]
-        if am.get("marker"):
-            lines.append(f"{am['marker']}")
-
-        # Run checks
+        lines = [f"{am.get('perturbation', '?')}", f"t={am.get('t', '?')}"]
         if checks:
             for label, fn in checks.items():
                 passed = fn(am, pm)
                 mark = "\u2713" if passed else "\u2717"
                 lines.append(f"{label}{mark}")
-
         ax.set_title("\n".join(lines), fontsize=6, linespacing=1.2)
 
-        # Positive image
         if has_positive:
             img_p = _img_2d(positive, i)
             vmin_p, vmax_p = np.percentile(img_p, [1, 99])
@@ -146,10 +119,7 @@ def plot_batch_pairs(
             ax.imshow(img_p, cmap="gray", vmin=vmin_p, vmax=vmax_p)
             ax.set_xticks([])
             ax.set_yticks([])
-
-            pos_lines = [f"{pm.get('condition', '?')}", f"t={pm.get('t', '?')}"]
-            if pm.get("marker"):
-                pos_lines.append(f"{pm['marker']}")
+            pos_lines = [f"{pm.get('perturbation', '?')}", f"t={pm.get('t', '?')}"]
             ax.set_title("\n".join(pos_lines), fontsize=6, linespacing=1.2)
 
     axes[0, 0].set_ylabel("anchor", fontsize=8)
@@ -173,14 +143,18 @@ def run_scenario(
     print(f"{'=' * 60}")
 
     dl = dm.train_dataloader()
-    batches = [batch for i, batch in enumerate(dl) if i < N_BATCHES]
+    batches = []
+    for i, batch in enumerate(dl):
+        if i >= N_BATCHES:
+            break
+        batches.append(batch)
 
     for bi, batch in enumerate(batches):
         meta = batch["anchor_meta"]
         n = len(meta)
         exps = Counter(m.get("experiment", "?") for m in meta)
-        conds = Counter(m.get("condition", "?") for m in meta)
-        print(f"  Batch {bi}: {n} samples, experiments={dict(exps)}, conditions={dict(conds)}")
+        perts = Counter(m.get("perturbation", "?") for m in meta)
+        print(f"  Batch {bi}: {n} samples, experiments={dict(exps)}, perturbations={dict(perts)}")
 
         plot_batch_pairs(
             batch,
@@ -195,9 +169,15 @@ def run_scenario(
 
 # %% [markdown]
 # ---
-# ## Build DataModule (one-time)
+# ## Build DataModule
+#
+# Uses a flat parquet (one row per cell x timepoint x channel).
+# The parquet has per-row `channel_name`, `marker`, `perturbation`.
 
 # %%
+if OUTPUT_DIR:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 print("Building DataModule...")
 dm = MultiExperimentDataModule(
     collection_path=COLLECTION_PATH,
@@ -213,6 +193,8 @@ dm = MultiExperimentDataModule(
     tau_range=(0.5, 2.0),
     tau_decay_rate=2.0,
     channels_per_sample=1,
+    batch_group_by=["marker"],
+    stratify_by="perturbation",
 )
 dm.setup("fit")
 print("Done.\n")
@@ -220,26 +202,28 @@ print("Done.\n")
 va = dm.train_dataset.index.valid_anchors
 print(f"Anchors: {len(va):,}  |  Experiments: {va['experiment'].nunique()}  |  FOVs: {va['fov_name'].nunique()}")
 for exp, g in va.groupby("experiment"):
-    conds = g["condition"].value_counts().to_dict()
-    print(f"  {exp}: {len(g):,} anchors, {conds}")
+    markers = g["marker"].value_counts().to_dict() if "marker" in g.columns else {}
+    perts = g["perturbation"].value_counts().to_dict()
+    print(f"  {exp}: {len(g):,} anchors, markers={markers}, perturbations={perts}")
 print()
 
 # %% [markdown]
 # ---
-# ## 1. Temporal + Experiment-Aware + Condition-Balanced
+# ## 1. Bag-of-Channels: Marker-Grouped + Perturbation-Balanced
 #
-# **Checks**: each batch from one experiment, balanced conditions,
-# positive is same lineage at different t.
+# **The primary bag-of-channels configuration.**
+# Each batch has one marker (Phase3D, SEC61B, G3BP1, or pAL17).
+# Perturbation balanced within. Positive is same lineage at different t.
 
 # %%
-dm.batch_group_by = "experiment"
-dm.stratify_by = "condition"
+dm.batch_group_by = ["marker"]
+dm.stratify_by = "perturbation"
 dm.leaky = 0.0
 dm.temporal_enrichment = False
 
 run_scenario(
     dm,
-    "1 Temporal experiment-aware",
+    "1 Bag-of-channels marker-grouped",
     checks={
         "lineage": lambda am, pm: am.get("lineage_id") == pm.get("lineage_id"),
         "diff_t": lambda am, pm: am.get("t") != pm.get("t"),
@@ -248,30 +232,46 @@ run_scenario(
 
 # %% [markdown]
 # ---
-# ## 2. Temporal + Cross-Organelle
-#
-# **Checks**: batch mixes organelles, balanced (condition, organelle).
+# ## 2. Experiment-Grouped + Perturbation-Balanced
 
 # %%
-dm.batch_group_by = None
-dm.stratify_by = ["condition", "organelle"]
+dm.batch_group_by = ["experiment"]
+dm.stratify_by = "perturbation"
 
 run_scenario(
     dm,
-    "2 Cross-organelle",
+    "2 Experiment-grouped",
     checks={
         "lineage": lambda am, pm: am.get("lineage_id") == pm.get("lineage_id"),
+        "diff_t": lambda am, pm: am.get("t") != pm.get("t"),
     },
 )
 
 # %% [markdown]
 # ---
-# ## 3. Temporal Enrichment
+# ## 3. (Experiment, Marker)-Grouped
 #
-# **Checks**: HPI concentrated around a focal point per batch.
+# Most fine-grained: one (experiment, marker) combo per batch.
 
 # %%
-dm.batch_group_by = "experiment"
+dm.batch_group_by = ["experiment", "marker"]
+dm.stratify_by = "perturbation"
+
+run_scenario(
+    dm,
+    "3 Experiment+marker grouped",
+    checks={
+        "lineage": lambda am, pm: am.get("lineage_id") == pm.get("lineage_id"),
+        "diff_t": lambda am, pm: am.get("t") != pm.get("t"),
+    },
+)
+
+# %% [markdown]
+# ---
+# ## 4. Temporal Enrichment
+
+# %%
+dm.batch_group_by = ["marker"]
 dm.stratify_by = None
 dm.temporal_enrichment = True
 dm.temporal_window_hours = 2.0
@@ -279,13 +279,12 @@ dm.temporal_global_fraction = 0.3
 
 batches_enriched = run_scenario(
     dm,
-    "3 Temporal enrichment",
+    "4 Temporal enrichment",
     checks={
         "lineage": lambda am, pm: am.get("lineage_id") == pm.get("lineage_id"),
     },
 )
 
-# HPI histogram
 fig, axes = plt.subplots(1, len(batches_enriched), figsize=(4 * len(batches_enriched), 3), squeeze=False)
 fig.suptitle("Temporal enrichment: HPI per batch", fontsize=11)
 for bi, batch in enumerate(batches_enriched):
@@ -301,19 +300,17 @@ plt.show()
 
 # %% [markdown]
 # ---
-# ## 4. Leaky Experiment Mixing
-#
-# **Checks**: batch dominated by one experiment (~70%), rest from others.
+# ## 5. Leaky Marker Mixing (30%)
 
 # %%
-dm.batch_group_by = "experiment"
-dm.stratify_by = "condition"
+dm.batch_group_by = ["marker"]
+dm.stratify_by = "perturbation"
 dm.temporal_enrichment = False
 dm.leaky = 0.3
 
 run_scenario(
     dm,
-    "4 Leaky 30pct",
+    "5 Leaky 30pct",
     checks={
         "lineage": lambda am, pm: am.get("lineage_id") == pm.get("lineage_id"),
     },
@@ -321,9 +318,7 @@ run_scenario(
 
 # %% [markdown]
 # ---
-# ## 5. Self-Positive (SimCLR)
-#
-# **Checks**: anchor and positive are identical patches.
+# ## 6. Self-Positive (SimCLR)
 
 # %%
 dm_simclr = MultiExperimentDataModule(
@@ -336,15 +331,15 @@ dm_simclr = MultiExperimentDataModule(
     num_workers=NUM_WORKERS,
     channel_dropout_prob=0.0,
     positive_cell_source="self",
-    batch_group_by=None,
-    stratify_by="condition",
+    batch_group_by=["marker"],
+    stratify_by="perturbation",
     channels_per_sample=1,
 )
 dm_simclr.setup("fit")
 
 run_scenario(
     dm_simclr,
-    "5 SimCLR self-positive",
+    "6 SimCLR self-positive",
     checks={
         "same_patch": lambda am, pm: am.get("global_track_id") == pm.get("global_track_id"),
     },
@@ -353,8 +348,6 @@ run_scenario(
 # %% [markdown]
 # ---
 # ## Summary
-#
-# All figures saved to:
 
 # %%
 plt.show()
