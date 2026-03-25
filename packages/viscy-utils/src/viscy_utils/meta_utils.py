@@ -186,19 +186,18 @@ def generate_fg_masks(
             zyx_shape = img_arr.shape[2:]
 
             # Allocate zarr array on disk (no in-memory copy of the full FOV)
+            z, y, x = zyx_shape
             mask_arr = pos.create_zeros(
                 fg_mask_key,
                 shape=(t_total, c_total, *zyx_shape),
                 dtype=np.uint8,
-                chunks=(1, 1, *zyx_shape),
+                chunks=(1, 1, z, min(y, 256), min(x, 256)),
             )
 
             # Fill non-target channels with 1s (full supervision default)
-            ones_slice = np.ones((1, *zyx_shape), dtype=np.uint8)
-            non_target = set(range(c_total)) - set(channel_indices)
+            non_target = sorted(set(range(c_total)) - set(channel_indices))
             for c in non_target:
-                for t in range(t_total):
-                    mask_arr[t, c] = ones_slice
+                mask_arr[:, c] = 1
 
             # Compute and write target channel masks per timepoint
             for ch_name, ch_idx in zip(channel_names, channel_indices):

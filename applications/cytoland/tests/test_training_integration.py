@@ -19,7 +19,12 @@ from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from cytoland.engine import FcmaeUNet, MaskedMSELoss, VSUNet
-from viscy_utils.losses import MixedLoss
+from viscy_data.combined import CombinedDataModule
+from viscy_data.gpu_aug import CachedOmeZarrDataModule
+from viscy_data.hcs import HCSDataModule
+from viscy_transforms import BatchedStackChannelsd
+from viscy_utils.losses import MixedLoss, SpotlightLoss
+from viscy_utils.meta_utils import generate_fg_masks
 
 # ---------------------------------------------------------------------------
 # Synthetic tests (CPU, always run)
@@ -99,9 +104,6 @@ def test_fnet3d_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
 
 def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
     """VSUNet + FNet3D + SpotlightLoss with precomputed fg_mask trains for 1 batch."""
-    from viscy_data.hcs import HCSDataModule
-    from viscy_utils.losses import SpotlightLoss
-    from viscy_utils.meta_utils import generate_fg_masks
 
     # Fixture already has otsu_threshold in norm_meta; just generate masks
     generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
@@ -144,7 +146,6 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
 
 def test_spotlight_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
     """VSUNet + FNet3D + SpotlightLoss trains for 1 batch."""
-    from viscy_utils.losses import SpotlightLoss
 
     seed_everything(42)
     module = VSUNet(
@@ -301,7 +302,6 @@ def test_fcmae_finetune_encoder_only_fast_dev_run(tmp_path, _make_synthetic_comb
 
 def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims):
     """VSUNet + real HCSDataModule end-to-end training for 1 batch."""
-    from viscy_data.hcs import HCSDataModule
 
     seed_everything(42)
     module = VSUNet(
@@ -332,7 +332,6 @@ def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims
 
 def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     """VSUNet + FNet3D + real HCSDataModule end-to-end training for 1 batch."""
-    from viscy_data.hcs import HCSDataModule
 
     seed_everything(42)
     module = VSUNet(
@@ -369,9 +368,6 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
 
 def test_fcmae_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims):
     """FcmaeUNet + real CachedOmeZarrDataModule + CombinedDataModule for 1 batch."""
-    from viscy_data.combined import CombinedDataModule
-    from viscy_data.gpu_aug import CachedOmeZarrDataModule
-    from viscy_transforms import BatchedStackChannelsd
 
     seed_everything(42)
     stack = BatchedStackChannelsd({"source": ["Phase3D"], "target": ["Fluorescence"]})

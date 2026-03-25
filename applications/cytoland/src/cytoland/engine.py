@@ -1,5 +1,6 @@
 """Cytoland LightningModules for virtual staining."""
 
+import inspect
 import logging
 import os
 from typing import Callable, Literal, Sequence
@@ -195,17 +196,20 @@ class VSUNet(LightningModule):
 
         When ``fg_mask_key`` is set in the data config, ``batch["fg_mask"]``
         is forwarded as a keyword argument.  The loss function must accept
-        ``fg_mask`` (e.g. :class:`~viscy_utils.losses.SpotlightLoss`);
-        standard losses like ``nn.MSELoss`` will raise ``TypeError``.
+        ``fg_mask`` explicitly or via ``**kwargs``; standard losses like
+        ``nn.MSELoss`` will raise ``TypeError`` at configuration time.
         """
         if "fg_mask" in batch:
-            try:
-                return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
-            except TypeError as e:
+            sig = inspect.signature(self.loss_function.forward)
+            accepts_fg_mask = "fg_mask" in sig.parameters or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            if not accepts_fg_mask:
                 raise TypeError(
                     f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
                     f"Use SpotlightLoss or remove fg_mask_key from the data config."
-                ) from e
+                )
+            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
         return self.loss_function(pred, target)
 
     def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
@@ -731,6 +735,9 @@ class FcmaeUNet(VSUNet):
         When True and ``ckpt_path`` is set, load only encoder weights
         from the checkpoint (ignoring decoder/head).  Useful for
         fine-tuning with a different number of output channels.
+        Defaults to False.
+    freeze_encoder : bool
+        Freeze encoder weights during fine-tuning (passed to VSUNet).
         Defaults to False.
     **kwargs
         Additional keyword arguments passed to VSUNet.

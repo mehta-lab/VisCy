@@ -1,5 +1,6 @@
 """Lightning data module for a preprocessed HCS NGFF Store."""
 
+import bisect
 import logging
 import math
 import os
@@ -149,13 +150,9 @@ class SlidingWindowDataset(Dataset):
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, ImageArray | None]:
         """Look up window given index."""
-        window_idx = sorted(self.window_keys + [index + 1]).index(index + 1)
-        w = self.window_keys[window_idx]
-        tz = index - self.window_keys[window_idx - 1] if window_idx > 0 else index
-        arr_idx = self.window_keys.index(w)
-        norm_meta = self.window_norm_meta[arr_idx]
-        fg_mask_arr = self.window_fg_mask_arrays[arr_idx]
-        return (self.window_arrays[arr_idx], tz, norm_meta, fg_mask_arr)
+        arr_idx = bisect.bisect_right(self.window_keys, index)
+        tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
+        return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], self.window_fg_mask_arrays[arr_idx])
 
     def _read_img_window(self, img: ImageArray, ch_idx: list[int], tz: int) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
@@ -248,6 +245,8 @@ class SlidingWindowDataset(Dataset):
                 sample_images[key] = mask_tensor
                 fg_mask_keys.append(key)
         if self.target_ch_idx is not None:
+            # NOTE: uses only the first target channel as weight for MONAI
+            # spatial transform co-alignment. This does not copy the tensor.
             sample_images["weight"] = sample_images[self.channels["target"][0]]
         if norm_meta is not None:
             sample_images["norm_meta"] = norm_meta
