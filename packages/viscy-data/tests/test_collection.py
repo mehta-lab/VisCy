@@ -23,7 +23,7 @@ def _make_experiment(name="exp1", channel_names=None, interval_minutes=15.0, **k
         tracks_path=f"/tracks/{name}",
         channels=[ChannelEntry(name=ch, marker=ch) for ch in ch_names],
         channel_names=ch_names,
-        condition_wells={"mock": ["A/1"], "infected": ["B/1"]},
+        perturbation_wells={"mock": ["A/1"], "infected": ["B/1"]},
         interval_minutes=interval_minutes,
     )
     defaults.update(kwargs)
@@ -67,9 +67,9 @@ class TestCollectionValidation:
         with pytest.raises(ValueError, match="interval_minutes must be positive"):
             _make_collection(experiments=[exp])
 
-    def test_condition_wells_empty(self):
+    def test_perturbation_wells_empty(self):
         """Raise ValueError when perturbation_wells is empty."""
-        exp = _make_experiment(name="exp1", condition_wells={})
+        exp = _make_experiment(name="exp1", perturbation_wells={})
         with pytest.raises(ValueError, match="perturbation_wells must not be empty"):
             _make_collection(experiments=[exp])
 
@@ -88,7 +88,7 @@ class TestCollectionIO:
         assert len(loaded.experiments) == len(original.experiments)
         assert loaded.experiments[0].name == original.experiments[0].name
         assert loaded.experiments[0].channel_names == original.experiments[0].channel_names
-        assert loaded.experiments[0].condition_wells == original.experiments[0].condition_wells
+        assert loaded.experiments[0].perturbation_wells == original.experiments[0].perturbation_wells
         assert loaded.experiments[0].interval_minutes == original.experiments[0].interval_minutes
         assert len(loaded.experiments[0].channels) == len(original.experiments[0].channels)
         for orig_ch, load_ch in zip(original.experiments[0].channels, loaded.experiments[0].channels):

@@ -316,13 +316,13 @@ class TestOPSHelpers:
         assert _parse_bbox_min_size("(10, 20, 12, 40)") == 2.0  # height=2, width=20
         assert _parse_bbox_min_size("(10, 20, 30, 40)") == 20.0  # both sides ≥ 5
 
-    def test_condition_map_populates_perturbation(self):
-        """14. condition_map populates perturbation column."""
-        from viscy_data.cell_index import _resolve_condition
+    def test_perturbation_map_populates_perturbation(self):
+        """14. perturbation_map populates perturbation column."""
+        from viscy_data.cell_index import _resolve_perturbation
 
-        condition_map = {"treated": ["A/1"], "control": ["B/1"]}
-        assert _resolve_condition(condition_map, "A/1") == "treated"
-        assert _resolve_condition(condition_map, "C/1") == "unknown"
+        perturbation_map = {"treated": ["A/1"], "control": ["B/1"]}
+        assert _resolve_perturbation(perturbation_map, "A/1") == "treated"
+        assert _resolve_perturbation(perturbation_map, "C/1") == "unknown"
 
 
 # ---------------------------------------------------------------------------

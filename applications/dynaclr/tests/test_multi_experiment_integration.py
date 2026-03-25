@@ -70,14 +70,14 @@ def test_multi_experiment_fast_dev_run(tmp_path):
         name="exp_alpha",
         channel_names=["Phase3D", "GFP", "Mito"],
         wells=[("A", "1")],
-        condition_wells={"control": ["A/1"]},
+        perturbation_wells={"control": ["A/1"]},
     )
     exp_beta = create_experiment(
         tmp_path,
         name="exp_beta",
         channel_names=["Phase3D", "RFP", "StressGranules"],
         wells=[("B", "1")],
-        condition_wells={"control": ["B/1"]},
+        perturbation_wells={"control": ["B/1"]},
     )
     yaml_path = write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
 
@@ -132,14 +132,14 @@ def test_multi_experiment_fast_dev_run_with_parquet(tmp_path):
         name="exp_alpha",
         channel_names=["Phase3D", "GFP", "Mito"],
         wells=[("A", "1")],
-        condition_wells={"control": ["A/1"]},
+        perturbation_wells={"control": ["A/1"]},
     )
     exp_beta = create_experiment(
         tmp_path,
         name="exp_beta",
         channel_names=["Phase3D", "RFP", "StressGranules"],
         wells=[("B", "1")],
-        condition_wells={"control": ["B/1"]},
+        perturbation_wells={"control": ["B/1"]},
     )
     yaml_path = write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
 
@@ -195,7 +195,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
         name="exp_alpha",
         channel_names=["Phase3D", "GFP", "Mito"],
         wells=[("A", "1"), ("A", "2")],
-        condition_wells={"uninfected": ["A/1"], "infected": ["A/2"]},
+        perturbation_wells={"uninfected": ["A/1"], "infected": ["A/2"]},
         start_hpi=0.0,
     )
     exp_beta = create_experiment(
@@ -203,7 +203,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
         name="exp_beta",
         channel_names=["Phase3D", "RFP", "StressGranules"],
         wells=[("B", "1"), ("B", "2")],
-        condition_wells={"uninfected": ["B/1"], "infected": ["B/2"]},
+        perturbation_wells={"uninfected": ["B/1"], "infected": ["B/2"]},
         start_hpi=0.0,
     )
     yaml_path = write_collection_yaml(tmp_path, [exp_alpha, exp_beta])

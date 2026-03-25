@@ -295,7 +295,7 @@ def _build_experiment_tracks(
         if all_exclude and fov_path in all_exclude:
             continue
 
-        perturbation = _resolve_condition(perturbation_wells, well_name)
+        perturbation = _resolve_perturbation(perturbation_wells, well_name)
 
         tracks_dir = Path(exp.tracks_path) / fov_path
         csv_files = list(tracks_dir.glob("*.csv"))
@@ -433,7 +433,7 @@ def build_ops_cell_index(
     bbox_column: str = "bbox",
     segmentation_id_column: str = "segmentation_id",
     min_bbox_size: int = 5,
-    condition_map: dict[str, list[str]] | None = None,
+    perturbation_map: dict[str, list[str]] | None = None,
 ) -> pd.DataFrame:
     """Build a cell index parquet from OPS data.
 
@@ -464,7 +464,7 @@ def build_ops_cell_index(
         Column name for segmentation ID.
     min_bbox_size : int
         Minimum bbox side length; smaller cells are dropped.
-    condition_map : dict[str, list[str]] | None
+    perturbation_map : dict[str, list[str]] | None
         ``{perturbation: [well, ...]}`` mapping. None defaults to ``"unknown"``.
 
     Returns
@@ -552,9 +552,9 @@ def build_ops_cell_index(
         labels_df["pixel_size_xy_um"] = pixel_size_xy_um
         labels_df["pixel_size_z_um"] = pixel_size_z_um
 
-        # Condition from map
-        if condition_map is not None:
-            labels_df["perturbation"] = _resolve_condition(condition_map, well)
+        # Perturbation from map
+        if perturbation_map is not None:
+            labels_df["perturbation"] = _resolve_perturbation(perturbation_map, well)
         else:
             labels_df["perturbation"] = "unknown"
 
@@ -681,11 +681,11 @@ def convert_ops_parquet(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_condition(condition_wells: dict[str, list[str]], well_name: str) -> str:
-    """Map well_name to condition label from a condition→wells dict."""
-    for condition_label, wells_list in condition_wells.items():
+def _resolve_perturbation(perturbation_wells: dict[str, list[str]], well_name: str) -> str:
+    """Map well_name to perturbation label from a perturbation→wells dict."""
+    for perturbation_label, wells_list in perturbation_wells.items():
         if well_name in wells_list:
-            return condition_label
+            return perturbation_label
     return "unknown"
 
 

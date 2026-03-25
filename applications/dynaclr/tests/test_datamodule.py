@@ -37,7 +37,7 @@ def _create_four_experiments(tmp_path: Path) -> list[ExperimentEntry]:
                 name=name,
                 channel_names=_CHANNEL_NAMES,
                 wells=[(row_letter, "1")],
-                condition_wells={"control": [f"{row_letter}/1"]},
+                perturbation_wells={"control": [f"{row_letter}/1"]},
             )
         )
     return entries
@@ -65,14 +65,14 @@ def two_experiments(tmp_path):
             name="exp_a",
             channel_names=_CHANNEL_NAMES,
             wells=[("A", "1")],
-            condition_wells={"control": ["A/1"]},
+            perturbation_wells={"control": ["A/1"]},
         ),
         create_experiment(
             tmp_path,
             name="exp_b",
             channel_names=_CHANNEL_NAMES,
             wells=[("B", "1")],
-            condition_wells={"treated": ["B/1"]},
+            perturbation_wells={"treated": ["B/1"]},
         ),
     ]
     collection_path = write_collection_yaml(tmp_path, entries)
@@ -88,7 +88,7 @@ def multi_fov_experiments(tmp_path):
             name="exp_a",
             channel_names=_CHANNEL_NAMES,
             wells=[("A", "1")],
-            condition_wells={"control": ["A/1"]},
+            perturbation_wells={"control": ["A/1"]},
             fovs_per_well=5,
         ),
         create_experiment(
@@ -96,7 +96,7 @@ def multi_fov_experiments(tmp_path):
             name="exp_b",
             channel_names=_CHANNEL_NAMES,
             wells=[("B", "1")],
-            condition_wells={"treated": ["B/1"]},
+            perturbation_wells={"treated": ["B/1"]},
             fovs_per_well=5,
         ),
     ]

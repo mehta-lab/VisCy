@@ -47,7 +47,7 @@ def exp_entry_a(mini_zarr, tmp_path):
             ChannelEntry(name="RFP", marker="RFP"),
         ],
         channel_names=["Phase", "GFP", "RFP"],
-        condition_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
+        perturbation_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
         interval_minutes=30.0,
     )
 
@@ -64,7 +64,7 @@ def exp_entry_b(mini_zarr_mito, tmp_path):
             ChannelEntry(name="Mito", marker="Mito"),
         ],
         channel_names=["Phase", "Mito"],
-        condition_wells={"control": ["A/1"]},
+        perturbation_wells={"control": ["A/1"]},
         interval_minutes=15.0,
     )
 
@@ -107,7 +107,7 @@ class TestExperimentRegistry:
             data_path=exp_entry_a.data_path,
             tracks_path=exp_entry_a.tracks_path,
             channel_names=exp_entry_a.channel_names,
-            condition_wells=exp_entry_a.condition_wells,
+            perturbation_wells=exp_entry_a.perturbation_wells,
             interval_minutes=exp_entry_a.interval_minutes,
         )
         with pytest.raises(ValueError, match="[Dd]uplicate"):
@@ -137,7 +137,7 @@ class TestExperimentRegistry:
             data_path=str(mini_zarr),
             tracks_path=str(tmp_path / "tracks"),
             channel_names=["Phase", "GFP", "Mito"],
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         collection = _make_collection_single(exp)
@@ -151,7 +151,7 @@ class TestExperimentRegistry:
             data_path=str(tmp_path / "nonexistent.zarr"),
             tracks_path=str(tmp_path / "tracks"),
             channel_names=["Phase"],
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         collection = _make_collection_single(exp)
@@ -170,7 +170,7 @@ class TestExperimentRegistry:
                 ChannelEntry(name="RFP", marker="RFP"),
             ],
             channel_names=["Phase", "GFP", "RFP"],
-            condition_wells={
+            perturbation_wells={
                 "uninfected": ["A/1"],
                 "infected": ["B/1"],
             },
@@ -234,7 +234,7 @@ class TestExperimentRegistry:
             data_path=str(mini_zarr),
             tracks_path=str(tmp_path / "tracks"),
             channel_names=["Phase", "GFP", "RFP"],
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=-5.0,
         )
         with pytest.raises(ValueError, match="interval_minutes"):
@@ -243,14 +243,14 @@ class TestExperimentRegistry:
                 experiments=[exp],
             )
 
-    def test_empty_condition_wells(self, mini_zarr, tmp_path):
-        """ValueError when condition_wells is empty."""
+    def test_empty_perturbation_wells(self, mini_zarr, tmp_path):
+        """ValueError when perturbation_wells is empty."""
         exp = ExperimentEntry(
             name="empty_wells",
             data_path=str(mini_zarr),
             tracks_path=str(tmp_path / "tracks"),
             channel_names=["Phase", "GFP", "RFP"],
-            condition_wells={},
+            perturbation_wells={},
             interval_minutes=30.0,
         )
         with pytest.raises(ValueError, match="perturbation_wells"):
