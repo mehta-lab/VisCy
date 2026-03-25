@@ -154,7 +154,10 @@ def run_scenario(
         n = len(meta)
         exps = Counter(m.get("experiment", "?") for m in meta)
         perts = Counter(m.get("perturbation", "?") for m in meta)
-        print(f"  Batch {bi}: {n} samples, experiments={dict(exps)}, perturbations={dict(perts)}")
+        markers = Counter(m.get("marker", "?") for m in meta)
+        print(
+            f"  Batch {bi}: {n} samples, markers={dict(markers)}, experiments={dict(exps)}, perturbations={dict(perts)}"
+        )
 
         plot_batch_pairs(
             batch,
@@ -386,6 +389,111 @@ run_scenario(
         "same_patch": lambda am, pm: am.get("global_track_id") == pm.get("global_track_id"),
     },
 )
+
+# %% [markdown]
+# ---
+# ## 7. Multi-Column Stratification: Perturbation + Marker
+#
+# ``stratify_by=["perturbation", "marker"]`` creates composite strata
+# (e.g. ``"ZIKV|Phase3D"``, ``"uninfected|SEC61B"``). Each stratum gets
+# an equal share of the batch, balancing both perturbation and marker
+# within each batch.
+
+# %%
+dm.batch_group_by = None
+dm.stratify_by = ["perturbation", "marker"]
+dm.leaky = 0.0
+dm.temporal_enrichment = False
+
+batches_multi = run_scenario(
+    dm,
+    "7 Stratify perturbation+marker",
+    checks={
+        "lineage": lambda am, pm: am.get("lineage_id") == pm.get("lineage_id"),
+        "diff_t": lambda am, pm: am.get("t") != pm.get("t"),
+    },
+)
+
+# Print strata distribution per batch
+for bi, batch in enumerate(batches_multi):
+    meta = batch["anchor_meta"]
+    strata = Counter(f"{m.get('perturbation', '?')}|{m.get('marker', '?')}" for m in meta)
+    print(f"  Batch {bi} strata: {dict(strata)}")
+
+# %% [markdown]
+# ---
+# ## 8 & 9. Normalization Comparison
+#
+# Compare ``fov_statistics`` (per-FOV mean/std, same stats for all
+# timepoints) vs ``timepoint_statistics`` (per-FOV *per-timepoint*
+# mean/std, adapts to intensity drift over time).
+
+# %%
+from viscy_transforms import NormalizeSampled
+
+
+def run_normalization_scenario(name: str, level: str) -> None:
+    dm_n = MultiExperimentDataModule(
+        collection_path=COLLECTION_PATH,
+        cell_index_path=CELL_INDEX_PATH,
+        z_window=Z_WINDOW,
+        yx_patch_size=YX_PATCH_SIZE,
+        final_yx_patch_size=FINAL_YX_PATCH_SIZE,
+        batch_size=BATCH_SIZE,
+        num_workers=NUM_WORKERS,
+        channel_dropout_prob=0.0,
+        positive_cell_source="lookup",
+        positive_match_columns=["lineage_id"],
+        tau_range=(0.5, 2.0),
+        tau_decay_rate=2.0,
+        channels_per_sample=1,
+        batch_group_by=["marker"],
+        stratify_by="perturbation",
+        normalizations=[
+            NormalizeSampled(
+                keys=["channel_0"],
+                level=level,
+                subtrahend="mean",
+                divisor="std",
+            ),
+        ],
+    )
+    dm_n.setup("fit")
+
+    dl_n = dm_n.train_dataloader()
+    print(f"\n{'=' * 60}")
+    print(f"{name} (level={level})")
+    print(f"{'=' * 60}")
+
+    for i, batch in enumerate(dl_n):
+        if i >= N_BATCHES:
+            break
+
+        meta = batch["anchor_meta"]
+        markers = Counter(m.get("marker", "?") for m in meta)
+        perts = Counter(m.get("perturbation", "?") for m in meta)
+
+        raw_anchor = batch["anchor"].numpy()
+        raw_mean = raw_anchor.mean()
+        raw_std = raw_anchor.std()
+
+        batch_norm = dm_n.on_after_batch_transfer(batch, dataloader_idx=0)
+        norm_anchor = batch_norm["anchor"].numpy()
+        norm_mean = norm_anchor.mean()
+        norm_std = norm_anchor.std()
+
+        print(
+            f"  Batch {i}: markers={dict(markers)}, perturbations={dict(perts)}"
+            f"\n    raw:  mean={raw_mean:.2f}  std={raw_std:.2f}"
+            f"\n    norm: mean={norm_mean:.4f}  std={norm_std:.4f}"
+        )
+
+
+# %%
+run_normalization_scenario("8 fov_statistics normalization", "fov_statistics")
+
+# %%
+run_normalization_scenario("9 timepoint_statistics normalization", "timepoint_statistics")
 
 # %% [markdown]
 # ---
