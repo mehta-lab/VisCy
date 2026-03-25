@@ -13,6 +13,7 @@ import importlib
 from pathlib import Path
 
 import pytest
+import torch
 import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -215,6 +216,84 @@ def test_fcmae_finetune_fast_dev_run(tmp_path, _make_synthetic_combined_datamodu
     assert trainer.state.status == "finished"
 
 
+def test_fcmae_encoder_only_load(tmp_path, synth_dims):
+    """FcmaeUNet encoder_only=True loads only encoder weights from a checkpoint."""
+    seed_everything(42)
+    pretrain_model = FcmaeUNet(
+        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": synth_dims["d"]},
+        loss_function=MaskedMSELoss(),
+        fit_mask_ratio=0.5,
+    )
+    ckpt_path = str(tmp_path / "pretrained.ckpt")
+    torch.save({"state_dict": pretrain_model.state_dict()}, ckpt_path)
+
+    # Load encoder-only into a model with different out_channels
+    finetune_model = FcmaeUNet(
+        model_config={
+            "in_channels": 1,
+            "out_channels": 2,
+            "in_stack_depth": synth_dims["d"],
+            "pretraining": False,
+        },
+        encoder_only=True,
+        ckpt_path=ckpt_path,
+    )
+
+    # Verify encoder weights match
+    for key in pretrain_model.model.encoder.state_dict():
+        assert torch.equal(
+            pretrain_model.model.encoder.state_dict()[key],
+            finetune_model.model.encoder.state_dict()[key],
+        ), f"Encoder weight mismatch for key: {key}"
+
+    # Verify forward pass with new out_channels
+    x = torch.randn(2, 1, synth_dims["d"], synth_dims["fcmae_h"], synth_dims["fcmae_w"])
+    finetune_model.eval()
+    with torch.no_grad():
+        out = finetune_model(x)
+    assert out.shape[1] == 2, f"Expected out_channels=2, got {out.shape[1]}"
+
+
+def test_fcmae_encoder_only_requires_ckpt():
+    """FcmaeUNet encoder_only=True without ckpt_path raises ValueError."""
+    with pytest.raises(ValueError, match="encoder_only=True requires ckpt_path"):
+        FcmaeUNet(encoder_only=True)
+
+
+def test_fcmae_finetune_encoder_only_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule, synth_dims):
+    """FcmaeUNet fine-tuning with encoder_only=True trains for 1 batch."""
+    seed_everything(42)
+    pretrain_model = FcmaeUNet(
+        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": synth_dims["d"]},
+        loss_function=MaskedMSELoss(),
+        fit_mask_ratio=0.5,
+    )
+    ckpt_path = str(tmp_path / "pretrained.ckpt")
+    torch.save({"state_dict": pretrain_model.state_dict()}, ckpt_path)
+
+    finetune_model = FcmaeUNet(
+        model_config={
+            "in_channels": 1,
+            "out_channels": 1,
+            "in_stack_depth": synth_dims["d"],
+            "pretraining": False,
+        },
+        encoder_only=True,
+        ckpt_path=ckpt_path,
+        log_batches_per_epoch=1,
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(finetune_model, datamodule=_make_synthetic_combined_datamodule())
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
 # ---------------------------------------------------------------------------
 # Real integration tests (CPU, tiny HCS OME-Zarr)
 # ---------------------------------------------------------------------------
@@ -360,7 +439,17 @@ def _resolve_class_path(class_path: str):
     return getattr(mod, class_name)
 
 
-@pytest.mark.parametrize("config_name", ["fit.yml", "fit_fnet.yml", "fit_spotlight.yml", "predict.yml"])
+@pytest.mark.parametrize(
+    "config_name",
+    [
+        "fit.yml",
+        "fit_fnet.yml",
+        "fit_spotlight.yml",
+        "predict.yml",
+        "pretrain_fcmae.yml",
+        "finetune_fcmae.yml",
+    ],
+)
 def test_config_class_paths_resolve(config_name):
     """All class_path entries in example configs resolve to importable classes."""
     configs_dir = Path(__file__).parents[1] / "examples" / "configs"

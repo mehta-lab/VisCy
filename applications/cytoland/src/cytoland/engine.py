@@ -703,10 +703,25 @@ class AugmentedPredictionVSUNet(LightningModule):
 class FcmaeUNet(VSUNet):
     """FCMAE-based U-Net for self-supervised pre-training and fine-tuning.
 
+    Workflow
+    --------
+    1. **Pretrain** with ``fit_mask_ratio > 0`` and ``MaskedMSELoss``.
+       Set ``model_config["pretraining"] = True`` (the default).
+    2. **Fine-tune** by loading the pretrained checkpoint with
+       ``encoder_only=True`` and ``ckpt_path=<path>``.  Set
+       ``model_config["pretraining"] = False`` and change
+       ``out_channels`` / loss as needed.  Optionally set
+       ``freeze_encoder=True`` to freeze the encoder.
+
     Parameters
     ----------
     fit_mask_ratio : float
         Mask ratio for FCMAE pre-training, defaults to 0.0.
+    encoder_only : bool
+        When True and ``ckpt_path`` is set, load only encoder weights
+        from the checkpoint (ignoring decoder/head).  Useful for
+        fine-tuning with a different number of output channels.
+        Defaults to False.
     **kwargs
         Additional keyword arguments passed to VSUNet.
     """
@@ -714,11 +729,34 @@ class FcmaeUNet(VSUNet):
     def __init__(
         self,
         fit_mask_ratio: float = 0.0,
+        encoder_only: bool = False,
         **kwargs,
     ):
+        if encoder_only:
+            if "ckpt_path" not in kwargs or kwargs["ckpt_path"] is None:
+                raise ValueError("encoder_only=True requires ckpt_path")
+            ckpt_path = kwargs.pop("ckpt_path")
+        else:
+            ckpt_path = None
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
+        if ckpt_path is not None:
+            self._load_encoder_weights(ckpt_path)
         self.save_hyperparameters(ignore=["loss_function"])
+
+    def _load_encoder_weights(self, ckpt_path: str) -> None:
+        """Load only encoder weights from a pretrained checkpoint.
+
+        Parameters
+        ----------
+        ckpt_path : str
+            Path to the pretrained checkpoint file.
+        """
+        state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+        prefix = "model.encoder."
+        encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
+        self.model.encoder.load_state_dict(encoder_weights, strict=True)
+        _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
 
     def on_fit_start(self):
         """Validate datamodule configuration for FCMAE training."""

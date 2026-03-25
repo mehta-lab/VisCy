@@ -1,0 +1,173 @@
+# FCMAE supervised fine-tuning configuration
+# Usage: python -m cytoland fit --config finetune_fcmae.yml
+# See: https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
+#
+# Fine-tune an FCMAE model pretrained with pretrain_fcmae.yml.
+# Set ckpt_path to the pretrained checkpoint and encoder_only to true
+# to load only encoder weights (decoder/head are re-initialized for the
+# new output channel count).
+#
+# This config requires CombinedDataModule wrapping CachedOmeZarrDataModule(s).
+# GPU transforms are applied inside FcmaeUNet.train_transform_and_collate().
+#
+# Key differences from pretrain config:
+# - pretraining: false (inside model_config)
+# - out_channels: 2 (nuclei + membrane)
+# - decoder_conv_blocks: 2 (richer decoder for supervised task)
+# - encoder_drop_path_rate: 0.1 (regularization during fine-tuning)
+# - MixedLoss (L1 + MS-DSSIM) instead of MaskedMSELoss
+# - Asymmetric normalization: mean/std for source, median/iqr for target
+# - Intensity augmentations applied to source only (not target)
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp_find_unused_parameters_true
+  devices: 4
+  num_nodes: 1
+  precision: 16-mixed
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: cytoland
+      name: #TODO run name
+      save_dir: #TODO point to the path to save the logs
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+  fast_dev_run: false
+  max_epochs: 200
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  # CachedOmeZarrDataModule handles its own ShardedDistributedSampler
+  use_distributed_sampler: false
+model:
+  class_path: cytoland.engine.FcmaeUNet
+  init_args:
+    encoder_only: true
+    ckpt_path: #TODO point to pretrained FCMAE checkpoint
+    freeze_encoder: false  # set true to freeze encoder (linear probing)
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      encoder_drop_path_rate: 0.1
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0002
+    schedule: WarmupCosine
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 1
+data:
+  class_path: viscy_data.combined.CombinedDataModule
+  init_args:
+    data_modules:
+      - class_path: viscy_data.gpu_aug.CachedOmeZarrDataModule
+        init_args:
+          data_path: #TODO point to HCS OME-Zarr data
+          channels:
+            - Phase3D
+            - Nuclei
+            - Membrane
+          batch_size: 4
+          num_workers: 4
+          split_ratio: 0.8
+          skip_cache: true  # set false for smaller datasets that fit in RAM
+          train_cpu_transforms:
+            # Asymmetric normalization: mean/std for source, median/iqr for target
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: fov_statistics
+                subtrahend: mean
+                divisor: std
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Nuclei, Membrane]
+                level: dataset_statistics
+                subtrahend: median
+                divisor: iqr
+                remove_meta: true
+          val_cpu_transforms:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: fov_statistics
+                subtrahend: mean
+                divisor: std
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Nuclei, Membrane]
+                level: dataset_statistics
+                subtrahend: median
+                divisor: iqr
+                remove_meta: true
+          train_gpu_transforms:
+            - class_path: viscy_transforms.Decollated
+              init_args:
+                keys: [Phase3D, Nuclei, Membrane]
+            # Geometric augmentations: applied to source + target jointly
+            - class_path: viscy_transforms.RandAffined
+              init_args:
+                keys: [Phase3D, Nuclei, Membrane]
+                prob: 0.8
+                rotate_range: [3.14159, 0, 0]
+                scale_range: [0.3, 0.5, 0.5]
+                shear_range: [0.0, 0.05, 0.05]
+                padding_mode: zeros
+                lazy: true
+            # Intensity augmentations: source only (preserve target labels)
+            - class_path: viscy_transforms.RandAdjustContrastd
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                gamma: [0.8, 1.2]
+            - class_path: viscy_transforms.RandScaleIntensityd
+              init_args:
+                keys: [Phase3D]
+                factors: 0.5
+                prob: 0.5
+            - class_path: viscy_transforms.RandGaussianNoised
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                mean: 0.0
+                std: 0.3
+            - class_path: viscy_transforms.RandGaussianSmoothd
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                sigma_x: [0.25, 0.75]
+                sigma_y: [0.25, 0.75]
+                sigma_z: [0.25, 0.75]
+            - class_path: viscy_transforms.StackChannelsd
+              init_args:
+                channel_map:
+                  source: [Phase3D]
+                  target: [Nuclei, Membrane]
+          val_gpu_transforms:
+            - class_path: viscy_transforms.Decollated
+              init_args:
+                keys: [Phase3D, Nuclei, Membrane]
+            - class_path: viscy_transforms.StackChannelsd
+              init_args:
+                channel_map:
+                  source: [Phase3D]
+                  target: [Nuclei, Membrane]
