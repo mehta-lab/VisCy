@@ -103,6 +103,30 @@ class GPUTransformDataModule(ABC, LightningDataModule):
         """Return validation GPU transforms."""
         ...
 
+    @torch.no_grad()
+    def on_after_batch_transfer(self, batch: dict, dataloader_idx: int) -> dict:
+        """Apply GPU transforms after batch transfer to device.
+
+        Parameters
+        ----------
+        batch : dict
+            Batch dict with channel-name keys mapped to ``(B, 1, Z, Y, X)``
+            tensors from ``list_data_collate``.
+        dataloader_idx : int
+            Dataloader index (unused).
+
+        Returns
+        -------
+        dict
+            Transformed batch (e.g., with ``source`` and ``target`` keys
+            after ``BatchedStackChannelsd``).
+        """
+        if isinstance(batch, Tensor):
+            return batch
+        if self.trainer and not self.trainer.training:
+            return self.val_gpu_transforms(batch)
+        return self.train_gpu_transforms(batch)
+
 
 class CachedOmeZarrDataset(Dataset):
     """Dataset for cached OME-Zarr arrays.

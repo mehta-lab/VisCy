@@ -8,7 +8,7 @@
 # using finetune_fcmae.yml with encoder_only: true.
 #
 # This config requires CombinedDataModule wrapping CachedOmeZarrDataModule(s).
-# GPU transforms are applied inside FcmaeUNet.train_transform_and_collate().
+# Batched GPU transforms are applied via on_after_batch_transfer().
 
 seed_everything: 42
 trainer:
@@ -89,54 +89,45 @@ data:
                 divisor: std
                 remove_meta: true
           train_gpu_transforms:
-            - class_path: viscy_transforms.Decollated
-              init_args:
-                keys: [Phase3D]
-            - class_path: viscy_transforms.RandAffined
+            - class_path: viscy_transforms.BatchedRandAffined
               init_args:
                 keys: [Phase3D]
                 prob: 0.8
                 rotate_range: [3.14159, 0, 0]
-                shear_range: [0.0, 0.0, 0.0]
                 scale_range: [0.2, 0.3, 0.3]
-                padding_mode: zeros
-                lazy: true
-            - class_path: viscy_transforms.RandInvertIntensityd
+            - class_path: viscy_transforms.BatchedRandInvertIntensityd
               init_args:
                 keys: [Phase3D]
                 prob: 0.5
-            - class_path: viscy_transforms.RandAdjustContrastd
+            - class_path: viscy_transforms.BatchedRandAdjustContrastd
               init_args:
                 keys: [Phase3D]
                 prob: 0.5
                 gamma: [0.8, 1.2]
-            - class_path: viscy_transforms.RandScaleIntensityd
+            - class_path: viscy_transforms.BatchedRandScaleIntensityd
               init_args:
                 keys: [Phase3D]
-                factors: 0.5
                 prob: 0.5
-            - class_path: viscy_transforms.RandGaussianNoised
+                factors: 0.5
+            - class_path: viscy_transforms.BatchedRandGaussianNoised
               init_args:
                 keys: [Phase3D]
                 prob: 0.5
                 mean: 0.0
                 std: 0.3
-            - class_path: viscy_transforms.RandGaussianSmoothd
+            - class_path: viscy_transforms.BatchedRandGaussianSmoothd
               init_args:
                 keys: [Phase3D]
                 prob: 0.5
                 sigma_x: [0.25, 0.75]
                 sigma_y: [0.25, 0.75]
                 sigma_z: [0.25, 0.75]
-            - class_path: viscy_transforms.StackChannelsd
+            - class_path: viscy_transforms.BatchedStackChannelsd
               init_args:
                 channel_map:
                   source: [Phase3D]
           val_gpu_transforms:
-            - class_path: viscy_transforms.Decollated
-              init_args:
-                keys: [Phase3D]
-            - class_path: viscy_transforms.StackChannelsd
+            - class_path: viscy_transforms.BatchedStackChannelsd
               init_args:
                 channel_map:
                   source: [Phase3D]

@@ -7,13 +7,12 @@ import pytest
 import torch
 from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningDataModule
-from monai.transforms import Decollated
 from monai.transforms.compose import Compose
 from torch.utils.data import DataLoader, Dataset
 
 from viscy_data.combined import CombinedDataModule
 from viscy_data.gpu_aug import GPUTransformDataModule
-from viscy_transforms import StackChannelsd
+from viscy_transforms import BatchedStackChannelsd
 
 # Synthetic data dimensions
 SYNTH_B = 2  # batch size
@@ -182,11 +181,11 @@ class SyntheticGPUTransformDataset(Dataset):
 
 
 class SyntheticGPUTransformDataModule(GPUTransformDataModule):
-    """Synthetic GPUTransformDataModule with StackChannelsd for FCMAE tests.
+    """Synthetic GPUTransformDataModule with BatchedStackChannelsd for FCMAE tests.
 
-    GPU transforms include Decollated (to split collated batch back into
-    per-sample dicts) followed by StackChannelsd (to map channel-name keys
-    to source/target), matching the production CachedOmeZarrDataModule pattern.
+    GPU transforms use BatchedStackChannelsd to map channel-name keys
+    to source/target on batched ``(B, 1, Z, Y, X)`` tensors, matching the
+    production CachedOmeZarrDataModule pattern with batched GPU transforms.
     """
 
     def __init__(self, batch_size=2, num_samples=8, depth=SYNTH_D, height=FCMAE_H, width=FCMAE_W):
@@ -199,10 +198,9 @@ class SyntheticGPUTransformDataModule(GPUTransformDataModule):
         self._height = height
         self._width = width
         self._num_samples = num_samples
-        channels = ["Phase3D", "Fluorescence"]
-        stack = StackChannelsd({"source": ["Phase3D"], "target": ["Fluorescence"]})
-        self._train_gpu = Compose([Decollated(keys=channels), stack])
-        self._val_gpu = Compose([Decollated(keys=channels), stack])
+        stack = BatchedStackChannelsd({"source": ["Phase3D"], "target": ["Fluorescence"]})
+        self._train_gpu = Compose([stack])
+        self._val_gpu = Compose([stack])
 
     def setup(self, stage):
         self.train_dataset = SyntheticGPUTransformDataset(self._num_samples, self._depth, self._height, self._width)

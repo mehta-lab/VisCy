@@ -369,25 +369,22 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
 
 def test_fcmae_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims):
     """FcmaeUNet + real CachedOmeZarrDataModule + CombinedDataModule for 1 batch."""
-    from monai.transforms import Decollated
-
     from viscy_data.combined import CombinedDataModule
     from viscy_data.gpu_aug import CachedOmeZarrDataModule
-    from viscy_transforms import StackChannelsd
+    from viscy_transforms import BatchedStackChannelsd
 
     seed_everything(42)
-    channels = ["Phase3D", "Fluorescence"]
-    stack = StackChannelsd({"source": ["Phase3D"], "target": ["Fluorescence"]})
+    stack = BatchedStackChannelsd({"source": ["Phase3D"], "target": ["Fluorescence"]})
     dm = CachedOmeZarrDataModule(
         data_path=tiny_hcs_zarr,
-        channels=channels,
+        channels=["Phase3D", "Fluorescence"],
         batch_size=2,
         num_workers=0,
         split_ratio=0.5,
         train_cpu_transforms=[],
         val_cpu_transforms=[],
-        train_gpu_transforms=[Decollated(keys=channels), stack],
-        val_gpu_transforms=[Decollated(keys=channels), stack],
+        train_gpu_transforms=[stack],
+        val_gpu_transforms=[stack],
         pin_memory=False,
     )
     combined = CombinedDataModule([dm])

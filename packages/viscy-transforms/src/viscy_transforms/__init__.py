@@ -33,7 +33,7 @@ from viscy_transforms._gaussian_smooth import (
     BatchedRandGaussianSmoothd,
 )
 from viscy_transforms._histogram_shift import BatchedRandHistogramShiftd
-from viscy_transforms._invert_intensity import RandInvertIntensityd
+from viscy_transforms._invert_intensity import BatchedRandInvertIntensityd, RandInvertIntensityd
 from viscy_transforms._monai_wrappers import (
     CenterSpatialCropd,
     Decollated,
@@ -66,7 +66,7 @@ from viscy_transforms._scale_intensity import (
     BatchedRandScaleIntensityd,
 )
 from viscy_transforms._sharpen import BatchedRandSharpend
-from viscy_transforms._stack_channels import StackChannelsd
+from viscy_transforms._stack_channels import BatchedStackChannelsd, StackChannelsd
 from viscy_transforms._tiled_crop import TiledSpatialCropSamplesd
 from viscy_transforms._zoom import BatchedZoom, BatchedZoomd
 from viscy_transforms._zstack_shift import BatchedRandZStackShiftd
@@ -87,6 +87,7 @@ __all__ = [
     "BatchedRandGaussianNoise",
     "BatchedRandGaussianNoised",
     "BatchedRandHistogramShiftd",
+    "BatchedRandInvertIntensityd",
     "BatchedRandLocalPixelShufflingd",
     "BatchedRandScaleIntensity",
     "BatchedRandScaleIntensityd",
@@ -115,6 +116,7 @@ __all__ = [
     "RandSpatialCropd",
     "RandWeightedCropd",
     "ScaleIntensityRangePercentilesd",
+    "BatchedStackChannelsd",
     "StackChannelsd",
     "TiledSpatialCropSamplesd",
     "ToDeviced",

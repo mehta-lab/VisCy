@@ -417,6 +417,7 @@ class HCSDataModule(LightningDataModule):
         nonzero_channel: str | None = None,
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
+        gpu_augmentations: list[MapTransform] | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -442,6 +443,7 @@ class HCSDataModule(LightningDataModule):
         self.nonzero_channel = nonzero_channel
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
+        self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
 
     @property
     def cache_path(self):
@@ -635,6 +637,29 @@ class HCSDataModule(LightningDataModule):
             if "fg_mask" in batch:
                 batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
         return batch
+
+    @torch.no_grad()
+    def on_after_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
+        """Apply GPU augmentations after batch transfer to device.
+
+        Parameters
+        ----------
+        batch : Sample
+            Batch dict with ``source``, ``target`` keys as
+            ``(B, C, Z, Y, X)`` tensors.
+        dataloader_idx : int
+            Dataloader index (unused).
+
+        Returns
+        -------
+        Sample
+            Augmented batch (training only; validation/test pass through).
+        """
+        if isinstance(batch, Tensor) or self._gpu_augmentations is None:
+            return batch
+        if self.trainer and not self.trainer.training:
+            return batch
+        return self._gpu_augmentations(batch)
 
     def train_dataloader(self):
         """Return training data loader."""

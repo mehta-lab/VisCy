@@ -71,7 +71,40 @@ class CombinedDataModule(LightningDataModule):
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         """Set up all constituent data modules."""
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.setup(stage)
+
+    @torch.no_grad()
+    def on_after_batch_transfer(self, batch, dataloader_idx: int):
+        """Dispatch GPU transforms to child data modules.
+
+        ``CombinedLoader`` yields different batch formats:
+
+        - **Training** (``max_size_cycle``): list of sub-batches, one per
+          child data module.
+        - **Validation** (``sequential``): single batch from one child at
+          a time, identified by ``dataloader_idx``.
+
+        Parameters
+        ----------
+        batch : list | dict | Tensor
+            Batch from ``CombinedLoader``.
+        dataloader_idx : int
+            Index of the active dataloader (meaningful in sequential mode).
+
+        Returns
+        -------
+        list | dict | Tensor
+            Transformed batch(es).
+        """
+        if isinstance(batch, torch.Tensor):
+            return batch
+        if isinstance(batch, (list, tuple)):
+            return [
+                dm.on_after_batch_transfer(sub_batch, dataloader_idx) for dm, sub_batch in zip(self.data_modules, batch)
+            ]
+        # Sequential mode: single batch from one DM
+        return self.data_modules[dataloader_idx].on_after_batch_transfer(batch, dataloader_idx)
 
     def train_dataloader(self):
         """Return combined training data loader."""

@@ -2,7 +2,6 @@
 
 import logging
 import os
-import random
 from typing import Callable, Literal, Sequence
 
 import numpy as np
@@ -10,7 +9,6 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from monai.data.utils import collate_meta_tensor
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from torch import Tensor, nn
@@ -778,7 +776,6 @@ class FcmaeUNet(VSUNet):
         for subdm in dm.data_modules:
             if not isinstance(subdm, GPUTransformDataModule):
                 raise ValueError(f"Member data module type {type(subdm)} is not supported for FCMAE training")
-        self.datamodules = dm.data_modules
         if self.model.pretraining and not isinstance(self.loss_function, MaskedMSELoss):
             raise ValueError(f"MaskedMSELoss is required for FCMAE pre-training, got {type(self.loss_function)}")
 
@@ -866,54 +863,40 @@ class FcmaeUNet(VSUNet):
             pred, target, loss = self.forward_fit_supervised(batch)
         return pred, target, loss
 
-    @torch.no_grad()
-    def train_transform_and_collate(self, batch: list[dict[str, Tensor]]) -> Sample:
-        """Apply GPU transforms and collate training batch.
+    @staticmethod
+    def _merge_batches(batch: list[Sample] | Sample) -> Sample:
+        """Merge per-dataset batches from CombinedLoader into one batch.
 
         Parameters
         ----------
-        batch : list[dict[str, Tensor]]
-            List of dataset batches.
+        batch : list[Sample] | Sample
+            List of per-dataset batches (training) or a single batch
+            (validation).
 
         Returns
         -------
         Sample
-            Collated and transformed batch.
+            Merged batch with concatenated tensors.
         """
-        transformed = []
-        for dataset_batch, dm in zip(batch, self.datamodules):
-            dataset_batch = dm.train_gpu_transforms(dataset_batch)
-            transformed.extend(dataset_batch)
-        # shuffle references in place for better logging
-        random.shuffle(transformed)
-        return collate_meta_tensor(transformed)
+        if not isinstance(batch, list):
+            return batch
+        combined: dict[str, Tensor] = {}
+        for key in batch[0]:
+            vals = [b[key] for b in batch if key in b]
+            if isinstance(vals[0], Tensor):
+                combined[key] = torch.cat(vals, dim=0)
+            else:
+                combined[key] = vals[0]
+        return combined
 
-    @torch.no_grad()
-    def val_transform_and_collate(self, batch: list[Sample], dataloader_idx: int) -> Tensor:
-        """Apply GPU transforms and collate validation batch.
-
-        Parameters
-        ----------
-        batch : list[Sample]
-            List of validation samples.
-        dataloader_idx : int
-            Dataloader index.
-
-        Returns
-        -------
-        Tensor
-            Collated and transformed batch.
-        """
-        batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
-        return collate_meta_tensor(batch)
-
-    def training_step(self, batch: list[list[Sample]], batch_idx: int) -> Tensor:
+    def training_step(self, batch: list[Sample] | Sample, batch_idx: int) -> Tensor:
         """Execute a single FCMAE training step.
 
         Parameters
         ----------
-        batch : list[list[Sample]]
-            Input batch from combined datamodule.
+        batch : list[Sample] | Sample
+            Per-dataset batches from CombinedLoader (already transformed
+            by ``CombinedDataModule.on_after_batch_transfer``).
         batch_idx : int
             Batch index.
 
@@ -922,7 +905,7 @@ class FcmaeUNet(VSUNet):
         Tensor
             Training loss.
         """
-        batch = self.train_transform_and_collate(batch)
+        batch = self._merge_batches(batch)
         pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
@@ -940,19 +923,19 @@ class FcmaeUNet(VSUNet):
         )
         return loss
 
-    def validation_step(self, batch: list[Sample], batch_idx: int, dataloader_idx: int = 0) -> None:
+    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Execute a single FCMAE validation step.
 
         Parameters
         ----------
-        batch : list[Sample]
-            Input batch.
+        batch : Sample
+            Input batch (already transformed by
+            ``CombinedDataModule.on_after_batch_transfer``).
         batch_idx : int
             Batch index.
         dataloader_idx : int
             Dataloader index, defaults to 0.
         """
-        batch = self.val_transform_and_collate(batch, dataloader_idx)
         pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
