@@ -64,7 +64,8 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    collection_path: applications/dynaclr/configs/collections/A549_ZIKV_multiorganelle.yml
+    collection_path: #TODO point to collection YAML
+    channels_per_sample: 1    # bag-of-channels: one random channel per sample, key="channel_0"
     cell_index_path: null  # Optional: pre-built parquet for faster startup
     z_window: 30
     yx_patch_size: [384, 384]
@@ -88,13 +89,13 @@ data:
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           level: fov_statistics
           subtrahend: mean
           divisor: std
       - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
         init_args:
-          keys: [reporter]
+          keys: [channel_0]
           lower: 50
           upper: 99
           b_min: 0.0
@@ -102,47 +103,31 @@ data:
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
-          keys: [labelfree, reporter]
+          keys: [channel_0]
           prob: 0.8
           scale_range: [[0.8, 1.2], [0.8, 1.2], [0.8, 1.2]]
           rotate_range: [3.14, 0.0, 0.0]
           shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
       - class_path: viscy_transforms.BatchedRandAdjustContrastd
         init_args:
-          keys: [reporter]
-          prob: 0.5
-          gamma: [0.8, 1.2]
-      - class_path: viscy_transforms.BatchedRandAdjustContrastd
-        init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           prob: 0.5
           gamma: [0.8, 1.2]
       - class_path: viscy_transforms.BatchedRandScaleIntensityd
         init_args:
-          keys: [reporter]
-          prob: 0.5
-          factors: 0.5
-      - class_path: viscy_transforms.BatchedRandScaleIntensityd
-        init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           prob: 0.5
           factors: 0.5
       - class_path: viscy_transforms.BatchedRandGaussianSmoothd
         init_args:
-          keys: [labelfree, reporter]
+          keys: [channel_0]
           prob: 0.5
           sigma_x: [0.25, 0.75]
           sigma_y: [0.25, 0.75]
           sigma_z: [0.0, 0.0]
       - class_path: viscy_transforms.BatchedRandGaussianNoised
         init_args:
-          keys: [reporter]
-          prob: 0.5
-          mean: 0.0
-          std: 0.2
-      - class_path: viscy_transforms.BatchedRandGaussianNoised
-        init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           prob: 0.5
           mean: 0.0
           std: 0.2

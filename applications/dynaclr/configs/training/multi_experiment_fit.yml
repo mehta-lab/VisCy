@@ -8,7 +8,7 @@
 # 1. data.class_path uses MultiExperimentDataModule (not TripletDataModule)
 # 2. loss_function uses NTXentHCL (not TripletMarginLoss)
 # 3. use_distributed_sampler: false (FlexibleBatchSampler handles DDP)
-# 4. Normalizations/augmentations use source channel labels (labelfree/reporter)
+# 4. Normalizations/augmentations use channel_0 for bag-of-channels mode
 # 5. All sampling axes configured: batch_group_by, stratify_by,
 #    temporal_enrichment
 #
@@ -114,6 +114,7 @@ data:
   init_args:
     # ── Data source ───────────────────────────────────────────────────────────
     collection_path: #TODO path to collection.yml
+    channels_per_sample: 1    # bag-of-channels: one random channel per sample, key="channel_0"
     cell_index_path: null  # Optional: path to pre-built cell_index.parquet (faster startup)
     # ── Patch extraction ──────────────────────────────────────────────────────
     z_window: 30
@@ -141,13 +142,13 @@ data:
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           level: fov_statistics
           subtrahend: mean
           divisor: std
       - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
         init_args:
-          keys: [reporter]
+          keys: [channel_0]
           lower: 50
           upper: 99
           b_min: 0.0
@@ -155,47 +156,31 @@ data:
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
-          keys: [labelfree, reporter]
+          keys: [channel_0]
           prob: 0.8
           scale_range: [[0.8, 1.2], [0.8, 1.2], [0.8, 1.2]]
           rotate_range: [3.14, 0.0, 0.0]
           shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
       - class_path: viscy_transforms.BatchedRandAdjustContrastd
         init_args:
-          keys: [reporter]
-          prob: 0.5
-          gamma: [0.8, 1.2]
-      - class_path: viscy_transforms.BatchedRandAdjustContrastd
-        init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           prob: 0.5
           gamma: [0.8, 1.2]
       - class_path: viscy_transforms.BatchedRandScaleIntensityd
         init_args:
-          keys: [reporter]
-          prob: 0.5
-          factors: 0.5
-      - class_path: viscy_transforms.BatchedRandScaleIntensityd
-        init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           prob: 0.5
           factors: 0.5
       - class_path: viscy_transforms.BatchedRandGaussianSmoothd
         init_args:
-          keys: [labelfree, reporter]
+          keys: [channel_0]
           prob: 0.5
           sigma_x: [0.25, 0.75]
           sigma_y: [0.25, 0.75]
           sigma_z: [0.0, 0.0]
       - class_path: viscy_transforms.BatchedRandGaussianNoised
         init_args:
-          keys: [reporter]
-          prob: 0.5
-          mean: 0.0
-          std: 0.2
-      - class_path: viscy_transforms.BatchedRandGaussianNoised
-        init_args:
-          keys: [labelfree]
+          keys: [channel_0]
           prob: 0.5
           mean: 0.0
           std: 0.2

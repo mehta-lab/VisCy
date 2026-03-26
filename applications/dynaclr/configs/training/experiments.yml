@@ -7,16 +7,11 @@
 # or reference it in a DataModule config as:
 #   experiments_file: "experiments.yml"
 #
-# Positional channel alignment
-# ----------------------------
-# Source channels are aligned by *position*, not by name.
-# In this example both experiments use 2 source channels:
-#   position 0 = phase contrast channel (Phase3D in both)
-#   position 1 = fluorescence channel (GFP in exp 1, RFP in exp 2)
-#
-# The model receives a 2-channel input regardless of which experiment
-# the sample comes from. Channel dropout (Phase 22) can optionally
-# zero out position 1 to encourage label-free representation learning.
+# Channel schema
+# --------------
+# Each experiment lists its channels with `name` (zarr channel name)
+# and `marker` (protein/label). The dataset resolves zarr indices from
+# `name` and uses `marker` for semantic grouping across experiments.
 
 experiments:
   # Experiment 1: SEC61B-tagged endoplasmic reticulum
@@ -24,8 +19,11 @@ experiments:
   - name: "2025_07_22_SEC61"
     data_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/registered.zarr"
     tracks_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/tracks"
-    channel_names: ["Phase3D", "GFP", "Mito"]
-    source_channel: ["Phase3D", "GFP"]
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: GFP
+        marker: SEC61B
     perturbation_wells:
       uninfected: ["A/1", "A/2", "A/3"]
       infected: ["B/1", "B/2", "B/3"]
@@ -38,14 +36,16 @@ experiments:
   # Experiment 2: TOMM20-tagged mitochondria
   # 15-minute imaging interval, infection starting at 2 HPI
   # Includes a mock condition (virus-free control with vehicle)
-  # Note: source_channel uses "RFP" here (not "GFP") -- positional
-  #       alignment means position 1 maps to the fluorescence reporter
-  #       regardless of the specific channel name.
+  # Note: fluorescence channel is "RFP" here (not "GFP") -- the marker
+  #       field maps it to the same protein target (TOMM20) for grouping.
   - name: "2025_08_15_TOMM20"
     data_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/registered.zarr"
     tracks_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/tracks"
-    channel_names: ["Phase3D", "RFP", "StressGranules"]
-    source_channel: ["Phase3D", "RFP"]
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: RFP
+        marker: TOMM20
     perturbation_wells:
       uninfected: ["A/1", "A/2"]
       infected: ["B/1", "B/2"]

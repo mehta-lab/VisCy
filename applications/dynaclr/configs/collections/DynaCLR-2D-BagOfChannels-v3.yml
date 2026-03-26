@@ -8,46 +8,17 @@ provenance:
   created_at: "2026-03-19T00:00:00"
   created_by: "eduardo.hirata"
 
-source_channels:
-  - label: labelfree
-    per_experiment:
-      2024_10_09_A549_TOMM20_ZIKV_DENV: Phase3D
-      2024_11_05_A549_TOMM20_ZIKV_DENV: Phase3D
-      2024_10_16_A549_SEC61_ZIKV_DENV: Phase3D
-      2024_10_31_A549_SEC61_ZIKV_DENV: Phase3D
-      2025_01_28_A549_G3BP1_ZIKV_DENV: Phase3D
-      2025_07_24_A549_SEC61_ZIKV: Phase3D
-      2025_07_24_A549_TOMM20_ZIKV: Phase3D
-      2025_07_24_A549_G3BP1_ZIKV: Phase3D
-  - label: reporter_gfp
-    per_experiment:
-      2024_10_09_A549_TOMM20_ZIKV_DENV: raw GFP EX488 EM525-45
-      2024_11_05_A549_TOMM20_ZIKV_DENV: raw GFP EX488 EM525-45
-      2024_10_16_A549_SEC61_ZIKV_DENV: raw GFP EX488 EM525-45
-      2024_10_31_A549_SEC61_ZIKV_DENV: raw GFP EX488 EM525-45
-      2025_01_28_A549_G3BP1_ZIKV_DENV: raw GFP EX488 EM525-45
-      2025_07_24_A549_SEC61_ZIKV: GFP EX488 EM525-45
-      2025_07_24_A549_TOMM20_ZIKV: GFP EX488 EM525-45
-      2025_07_24_A549_G3BP1_ZIKV: GFP EX488 EM525-45
-  - label: reporter_mcherry
-    per_experiment:
-      2024_10_09_A549_TOMM20_ZIKV_DENV: raw mCherry EX561 EM600-37
-      2024_11_05_A549_TOMM20_ZIKV_DENV: raw mCherry EX561 EM600-37
-      2024_10_16_A549_SEC61_ZIKV_DENV: raw mCherry EX561 EM600-37
-      2024_10_31_A549_SEC61_ZIKV_DENV: raw mCherry EX561 EM600-37
-      2025_01_28_A549_G3BP1_ZIKV_DENV: raw mCherry EX561 EM600-37
-      2025_07_24_A549_SEC61_ZIKV: mCherry EX561 EM600-37
-      2025_07_24_A549_TOMM20_ZIKV: mCherry EX561 EM600-37
-      2025_07_24_A549_G3BP1_ZIKV: mCherry EX561 EM600-37
-
 experiments:
   - name: 2024_10_09_A549_TOMM20_ZIKV_DENV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_09_A549_TOMM20_ZIKV_DENV/4-phenotyping/train_data/2024_10_09_A549_TOMM20_ZIKV_DENV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_09_A549_TOMM20_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_09_A549_TOMM20_ZIKV_DENV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - raw GFP EX488 EM525-45
-      - raw mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+      - name: raw mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - B/4
@@ -62,10 +33,13 @@ experiments:
   - name: 2024_11_05_A549_TOMM20_ZIKV_DENV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_05_A549_TOMM20_ZIKV_DENV/4-phenotyping/1-train_data/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_05_A549_TOMM20_ZIKV_DENV/1-preprocess/label-free/3-track/2024_11_05_A549_TOMM20_ZIKV_DENV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - raw GFP EX488 EM525-45
-      - raw mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+      - name: raw mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - C/4
@@ -80,10 +54,13 @@ experiments:
   - name: 2024_10_16_A549_SEC61_ZIKV_DENV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_16_A549_SEC61_ZIKV_DENV/4-phenotyping/train_data/2024_10_16_A549_SEC61_ZIKV_DENV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - raw GFP EX488 EM525-45
-      - raw mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - C/4
@@ -98,10 +75,13 @@ experiments:
   - name: 2024_10_31_A549_SEC61_ZIKV_DENV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_31_A549_SEC61_ZIKV_DENV/4-phenotyping/train_data/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_31_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_31_A549_SEC61_ZIKV_DENV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - raw GFP EX488 EM525-45
-      - raw mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - C/4
@@ -116,10 +96,13 @@ experiments:
   - name: 2025_01_28_A549_G3BP1_ZIKV_DENV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_01_28_A549_G3BP1_ZIKV_DENV/4-phenotyping/train-test/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_01_28_A549_G3BP1_ZIKV_DENV/1-preprocess/label-free/3-track/2025_01_28_A549_G3BP1_ZIKV_DENV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - raw GFP EX488 EM525-45
-      - raw mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+      - name: raw mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - B/2
@@ -135,10 +118,13 @@ experiments:
   - name: 2025_07_24_A549_SEC61_ZIKV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - GFP EX488 EM525-45
-      - mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: GFP EX488 EM525-45
+        marker: SEC61B
+      - name: mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - A/2
@@ -153,10 +139,13 @@ experiments:
   - name: 2025_07_24_A549_TOMM20_ZIKV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - GFP EX488 EM525-45
-      - mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: GFP EX488 EM525-45
+        marker: TOMM20
+      - name: mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - B/2
@@ -171,10 +160,13 @@ experiments:
   - name: 2025_07_24_A549_G3BP1_ZIKV
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
     tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr
-    channel_names:
-      - Phase3D
-      - GFP EX488 EM525-45
-      - mCherry EX561 EM600-37
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: GFP EX488 EM525-45
+        marker: G3BP1
+      - name: mCherry EX561 EM600-37
+        marker: mCherry
     perturbation_wells:
       infected:
         - C/2
