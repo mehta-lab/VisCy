@@ -17,9 +17,29 @@ from torch.utils.data import Dataset
 from viscy.data.hcs import HCSDataModule, _read_norm_meta
 from viscy.data.select import _filter_fovs, _filter_wells
 from viscy.data.typing import DictTransform, NormMeta
-from viscy.transforms import BatchedCenterSpatialCropd
+from viscy.transforms import BatchedCenterSpatialCropd, BatchedRescaleYXd
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def _read_pixel_size(data_path: str | Path) -> float:
+    """Read the X pixel size (µm/pixel) from the first FOV in an OME-Zarr dataset.
+
+    Parameters
+    ----------
+    data_path : str | Path
+        Path to the OME-Zarr plate or position.
+
+    Returns
+    -------
+    float
+        X pixel size in micrometers per pixel.
+    """
+    with open_ome_zarr(data_path, mode="r") as store:
+        for _, pos in store.positions():
+            return float(pos.scale[-1])
+    raise ValueError(f"No positions found in {data_path}")
+
 
 INDEX_COLUMNS = [
     "fov_name",
@@ -349,6 +369,7 @@ class TripletDataModule(HCSDataModule):
         pin_memory: bool = False,
         z_window_size: int | None = None,
         cache_pool_bytes: int = 0,
+        reference_pixel_size: float | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -363,9 +384,20 @@ class TripletDataModule(HCSDataModule):
         z_range : tuple[int, int]
             Range of valid z-slices
         initial_yx_patch_size : tuple[int, int], optional
-            XY size of the initially sampled image patch, by default (512, 512)
+            YX size of the initially sampled image patch, by default (512, 512).
+            Ignored when ``reference_pixel_size`` is set — the patch size is then
+            computed automatically from the pixel-size ratio.
         final_yx_patch_size : tuple[int, int], optional
             Output patch size, by default (224, 224)
+        reference_pixel_size : float | None, optional
+            X pixel size (µm/pixel) of the dataset used to train the model.
+            When provided the data module reads the pixel size of the inference
+            dataset from its OME-Zarr metadata and computes
+            ``initial_yx_patch_size = round(final_yx_patch_size *
+            reference_pixel_size / inference_pixel_size)`` so that the same
+            physical area is covered.  The extracted patch is then rescaled to
+            ``final_yx_patch_size`` with bilinear interpolation before being
+            fed to the model.  By default ``None`` (no rescaling).
         split_ratio : float, optional
             Ratio of training samples, by default 0.8
         batch_size : int, optional
@@ -445,11 +477,28 @@ class TripletDataModule(HCSDataModule):
         self.return_negative = return_negative
         self.augment_validation = augment_validation
         self._cache_pool_bytes = cache_pool_bytes
+        if reference_pixel_size is not None:
+            inference_pixel_size = _read_pixel_size(data_path)
+            scale = reference_pixel_size / inference_pixel_size
+            self.initial_yx_patch_size = tuple(
+                round(s * scale) for s in final_yx_patch_size
+            )
+            _logger.info(
+                f"Pixel size rescaling enabled: "
+                f"reference={reference_pixel_size:.4f} µm/px, "
+                f"inference={inference_pixel_size:.4f} µm/px, "
+                f"scale={scale:.4f}. "
+                f"Extracting {self.initial_yx_patch_size} px patches "
+                f"and resizing to {final_yx_patch_size} px."
+            )
+            self._rescale_to_final = True
+        else:
+            self._rescale_to_final = False
         self._augmentation_transform = Compose(
-            self.normalizations + self.augmentations + [self._final_crop()]
+            self.normalizations + self.augmentations + [self._final_spatial_transform()]
         )
         self._no_augmentation_transform = Compose(
-            self.normalizations + [self._final_crop()]
+            self.normalizations + [self._final_spatial_transform()]
         )
 
     def _align_tracks_tables_with_positions(
@@ -585,6 +634,22 @@ class TripletDataModule(HCSDataModule):
                 self.yx_patch_size[1],
             ),
         )
+
+    def _final_spatial_transform(self) -> BatchedCenterSpatialCropd | BatchedRescaleYXd:
+        """Return the final spatial transform.
+
+        When ``reference_pixel_size`` was set at construction time, returns a
+        bilinear resize from the (larger) ``initial_yx_patch_size`` down to
+        ``final_yx_patch_size``.  Otherwise falls back to a centre crop.
+        """
+        if self._rescale_to_final:
+            return BatchedRescaleYXd(
+                keys=self.source_channel,
+                target_yx_size=self.yx_patch_size,
+                mode="bilinear",
+                antialias=True,
+            )
+        return self._final_crop()
 
     def _find_transform(self, key: str):
         if self.trainer:
