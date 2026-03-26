@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import torch
 from imageio import imwrite
 from iohub import open_ome_zarr
 from monai.transforms import RandSpatialCropSamplesd
@@ -268,3 +269,67 @@ def test_fg_mask_key_missing_errors(tmp_path):
                 z_window_size=4,
                 fg_mask_key="fg_mask",
             )
+
+
+# ---------------------------------------------------------------------------
+# fg_mask spatial co-alignment tests
+# ---------------------------------------------------------------------------
+
+
+def test_fg_mask_keys_injected_into_spatial_not_intensity():
+    """Spatial augmentations get mask keys; intensity augmentations do not."""
+    from monai.transforms import RandAdjustContrastd, RandAffined
+
+    spatial = RandAffined(keys=["Phase", "Fluorescence"], prob=0.5, rotate_range=[0.1])
+    intensity = RandAdjustContrastd(keys=["Phase", "Fluorescence"], prob=0.5)
+    HCSDataModule._inject_mask_keys(
+        [spatial, intensity],
+        ("Fluorescence",),
+        ("__fg_mask_Fluorescence",),
+    )
+    assert "__fg_mask_Fluorescence" in spatial.keys
+    assert "__fg_mask_Fluorescence" not in intensity.keys
+    assert spatial.allow_missing_keys is True
+    # Idempotent — calling again should not duplicate keys
+    HCSDataModule._inject_mask_keys(
+        [spatial],
+        ("Fluorescence",),
+        ("__fg_mask_Fluorescence",),
+    )
+    assert spatial.keys.count("__fg_mask_Fluorescence") == 1
+
+
+def test_fg_mask_aligned_after_cpu_spatial_augmentation():
+    """fg_mask stays pixel-aligned with target after RandFlipd(prob=1)."""
+    from monai.transforms import Compose, RandFlipd
+
+    H, W = 16, 16
+    target = torch.zeros(1, 1, H, W)
+    target[:, :, : H // 2, :] = 1.0
+    mask = (target > 0).float()
+
+    flip = RandFlipd(keys=["target"], prob=1.0, spatial_axis=-2)
+    HCSDataModule._inject_mask_keys([flip], ("target",), ("__fg_mask",))
+    result = Compose([flip])({"target": target, "__fg_mask": mask})
+
+    assert torch.equal((result["target"] > 0).float(), result["__fg_mask"]), (
+        "fg_mask is not spatially aligned with target after CPU augmentation"
+    )
+
+
+def test_fg_mask_aligned_after_gpu_spatial_augmentation():
+    """fg_mask stays pixel-aligned with target after BatchedRandFlipd(prob=1)."""
+    from viscy_transforms import BatchedRandFlipd
+
+    B, C, D, H, W = 2, 1, 4, 16, 16
+    target = torch.zeros(B, C, D, H, W)
+    target[:, :, :, : H // 2, :] = 1.0
+    mask = (target > 0).float()
+
+    flip = BatchedRandFlipd(keys=["target"], prob=1.0, spatial_axes=[1])
+    HCSDataModule._inject_mask_keys([flip], ("target",), ("fg_mask",))
+    result = flip({"target": target, "fg_mask": mask})
+
+    assert torch.equal((result["target"] > 0).float(), result["fg_mask"]), (
+        "fg_mask is not spatially aligned with target after GPU augmentation"
+    )

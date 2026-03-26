@@ -21,6 +21,8 @@ from monai.transforms import (
     MapTransform,
     MultiSampleTrait,
     RandAffined,
+    RandFlipd,
+    RandWeightedCropd,
 )
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
@@ -32,8 +34,23 @@ from viscy_data._utils import (
     _read_norm_meta,
     _search_int_in_str,
 )
+from viscy_transforms import BatchedCenterSpatialCropd, BatchedRandAffined, BatchedRandFlipd, BatchedRandSpatialCropd
 
 _logger = logging.getLogger("lightning.pytorch")
+
+# Spatial transforms that preserve pixel correspondence and must co-transform
+# fg_mask alongside source/target. Intensity transforms are excluded — applying
+# gamma correction or noise to a binary mask would corrupt it.
+_SPATIAL_TRANSFORMS: tuple[type, ...] = (
+    RandAffined,
+    RandFlipd,
+    CenterSpatialCropd,
+    RandWeightedCropd,
+    BatchedRandAffined,
+    BatchedRandFlipd,
+    BatchedCenterSpatialCropd,
+    BatchedRandSpatialCropd,
+)
 
 
 class SlidingWindowDataset(Dataset):
@@ -442,7 +459,41 @@ class HCSDataModule(LightningDataModule):
         self.nonzero_channel = nonzero_channel
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
+        if gpu_augmentations and self.fg_mask_key is not None:
+            self._inject_mask_keys(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
+
+    @staticmethod
+    def _inject_mask_keys(
+        transforms: list,
+        target_keys: tuple[str, ...],
+        mask_keys: tuple[str, ...],
+    ) -> None:
+        """Append mask keys to spatial transforms that operate on target keys.
+
+        Only modifies transforms in the ``_SPATIAL_TRANSFORMS`` allowlist.
+        Intensity transforms are never modified.  Idempotent — skips
+        transforms that already contain the mask keys.
+
+        Parameters
+        ----------
+        transforms : list
+            Mutable list of transform instances to patch in place.
+        target_keys : tuple[str, ...]
+            Keys that identify target channels (e.g. channel names or
+            ``"target"``).
+        mask_keys : tuple[str, ...]
+            Keys to append (e.g. ``("__fg_mask_Nuclei",)`` or
+            ``("fg_mask",)``).
+        """
+        for t in transforms:
+            if (
+                isinstance(t, _SPATIAL_TRANSFORMS)
+                and any(k in t.keys for k in target_keys)
+                and not any(k in t.keys for k in mask_keys)
+            ):
+                t.keys = t.keys + mask_keys
+                t.allow_missing_keys = True
 
     @property
     def cache_path(self):
@@ -708,10 +759,15 @@ class HCSDataModule(LightningDataModule):
         """Build training and validation transforms.
 
         Apply normalization, augmentation, then center crop as the last step.
+        When ``fg_mask_key`` is set, spatial augmentations are patched to
+        also transform the mask keys so they stay pixel-aligned with the target.
         """
-        # TODO: These have a fixed order for now... ()
         final_crop = [self._final_crop()]
-        train_transform = Compose(self.normalizations + self._train_transform() + final_crop)
+        augmentations = self._train_transform()
+        if self.fg_mask_key is not None:
+            mask_keys = tuple(f"__fg_mask_{ch}" for ch in self.target_channel)
+            self._inject_mask_keys(augmentations, tuple(self.target_channel), mask_keys)
+        train_transform = Compose(self.normalizations + augmentations + final_crop)
         val_transform = Compose(self.normalizations + final_crop)
         return train_transform, val_transform
 
