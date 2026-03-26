@@ -48,6 +48,18 @@ COMMANDS = [
         "help": "Apply a trained linear classifier to new embeddings",
         "short_help": "Apply linear classifier",
     },
+    {
+        "name": "fit-lot-correction",
+        "import_path": "applications.DynaCLR.evaluation.lot_correction.fit_lot_correction.main",
+        "help": "Fit a LOT batch-correction pipeline on source and target embedding zarrs",
+        "short_help": "Fit LOT batch correction",
+    },
+    {
+        "name": "apply-lot-correction",
+        "import_path": "applications.DynaCLR.evaluation.lot_correction.apply_lot_correction.main",
+        "help": "Apply a fitted LOT pipeline to correct batch effects in an embedding zarr",
+        "short_help": "Apply LOT batch correction",
+    },
 ]
 
 
