@@ -57,6 +57,19 @@ def _identity(x: Tensor) -> Tensor:
     return x
 
 
+def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Tensor:
+    """Center-crop trailing spatial dimensions to the requested shape."""
+    slices = [slice(None)] * tensor.ndim
+    start_dim = tensor.ndim - len(spatial_shape)
+    for dim, size in enumerate(spatial_shape, start=start_dim):
+        current = tensor.shape[dim]
+        if current < size:
+            raise ValueError(f"Cannot crop dimension {dim} from {current} to {size}")
+        start = (current - size) // 2
+        slices[dim] = slice(start, start + size)
+    return tensor[tuple(slices)]
+
+
 class MaskedMSELoss(nn.Module):
     """Masked MSE loss for FCMAE pre-training."""
 
@@ -641,7 +654,7 @@ class AugmentedPredictionVSUNet(LightningModule):
             aug_source = fwd_t(source)
             aug_source = self._predict_pad(aug_source)
             pred = self.forward(aug_source)
-            pred = self._predict_pad.inverse(pred)
+            pred = _center_crop_to_shape(pred, source.shape[2:])
             preds.append(inv_t(pred))
         if len(preds) == 1:
             return preds[0]

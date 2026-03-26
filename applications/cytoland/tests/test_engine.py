@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from monai.data import get_track_meta, set_track_meta
 
 from cytoland.engine import AugmentedPredictionVSUNet, FcmaeUNet, VSUNet
 
@@ -127,15 +128,20 @@ def test_no_old_imports():
 
 def test_augmented_prediction_optional_transforms(synth_dims):
     """Verify AugmentedPredictionVSUNet works without specifying transforms."""
-    model = VSUNet(
-        architecture="UNeXt2",
-        model_config={"in_channels": synth_dims["c"], "out_channels": 1, "in_stack_depth": synth_dims["d"]},
-    )
-    vs = AugmentedPredictionVSUNet(model=model.model)
-    vs.eval()
-    x = torch.randn(synth_dims["b"], synth_dims["c"], synth_dims["d"], 64, 64)
-    with torch.inference_mode():
-        output = vs._predict_with_tta(x)
+    previous_track_meta = get_track_meta()
+    set_track_meta(False)
+    try:
+        model = VSUNet(
+            architecture="UNeXt2",
+            model_config={"in_channels": synth_dims["c"], "out_channels": 1, "in_stack_depth": synth_dims["d"]},
+        )
+        vs = AugmentedPredictionVSUNet(model=model.model)
+        vs.eval()
+        x = torch.randn(synth_dims["b"], synth_dims["c"], synth_dims["d"], 64, 64)
+        with torch.inference_mode():
+            output = vs._predict_with_tta(x)
+    finally:
+        set_track_meta(previous_track_meta)
     assert output.shape[0] == synth_dims["b"]
     assert output.shape[1] == 1
 
