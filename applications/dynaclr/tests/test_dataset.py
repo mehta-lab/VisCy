@@ -701,3 +701,82 @@ class TestColumnMatchPositive:
             pos = ds._find_positive(anchor_row, rng)
             if pos is not None:
                 assert pos.name != anchor_row.name, "Positive must not be the anchor itself"
+
+
+class TestTimepointStatisticsResolution:
+    """Verify that timepoint_statistics norm_meta resolves the correct timepoint."""
+
+    def test_norm_meta_matches_sample_timepoint(self, tmp_path, hcs_dims, _make_tracks_csv):
+        """Each sample's norm_meta must carry the stats for its own timepoint t, not another."""
+        from iohub.ngff import open_ome_zarr
+
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        n_t = 5
+        channel_names = ["Phase", "GFP"]
+        zarr_path = tmp_path / "tp_stats.zarr"
+        tracks_root = tmp_path / "tracks_tp"
+
+        with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
+            pos = plate.create_position("A", "1", "0")
+            arr = pos.create_zeros(
+                "0",
+                shape=(n_t, len(channel_names), hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
+                dtype=np.float32,
+            )
+            arr[:] = np.random.default_rng(0).standard_normal(arr.shape).astype(np.float32)
+
+            # Write timepoint_statistics with distinct mean per timepoint.
+            # mean(t) = t * 100 so they're easy to distinguish.
+            norm = {}
+            for ch in channel_names:
+                norm[ch] = {
+                    "fov_statistics": {"mean": 0.0, "std": 1.0},
+                    "timepoint_statistics": {str(t): {"mean": float(t * 100), "std": 1.0} for t in range(n_t)},
+                }
+            pos.zattrs["normalization"] = norm
+
+        _make_tracks_csv(tracks_root / "A/1/0" / "tracks.csv", n_tracks=2, n_t=n_t)
+
+        exp = ExperimentEntry(
+            name="tp_test",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channels=[
+                ChannelEntry(name="Phase", marker="Phase"),
+                ChannelEntry(name="GFP", marker="GFP"),
+            ],
+            perturbation_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        collection = Collection(name="tp_test", experiments=[exp])
+        registry = ExperimentRegistry(collection=collection, z_window=1)
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 4.0),
+            positive_cell_source="self",
+        )
+        ds = MultiExperimentTripletDataset(
+            index=index,
+            fit=True,
+            positive_cell_source="self",
+            channels_per_sample=1,
+        )
+
+        # Sample from different timepoints and verify norm_meta
+        for t_expected in [0, 2, 4]:
+            rows_at_t = ds.index.valid_anchors[ds.index.valid_anchors["t"] == t_expected]
+            if rows_at_t.empty:
+                continue
+            idx = rows_at_t.index[0]
+            batch = ds.__getitems__([idx])
+            norm = batch["anchor_norm_meta"]
+            assert norm is not None, f"norm_meta should not be None at t={t_expected}"
+
+            # In bag-of-channels mode, the key is "channel_0"
+            tp_stats = norm[0]["channel_0"]["timepoint_statistics"]
+            assert tp_stats is not None, f"timepoint_statistics should be pre-resolved for t={t_expected}, got None"
+            resolved_mean = tp_stats["mean"].item()
+            expected_mean = float(t_expected * 100)
+            assert resolved_mean == expected_mean, f"t={t_expected}: expected mean={expected_mean}, got {resolved_mean}"
