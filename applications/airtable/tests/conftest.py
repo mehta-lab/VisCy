@@ -92,6 +92,18 @@ DATASET_NAMES_RECORDS = [
 
 
 @pytest.fixture()
+def sample_airtable_records():
+    """Return sample Airtable API response records."""
+    return SAMPLE_AIRTABLE_RECORDS
+
+
+@pytest.fixture()
+def dataset_names_records():
+    """Return sample dataset-names-only records."""
+    return DATASET_NAMES_RECORDS
+
+
+@pytest.fixture()
 def mock_env(monkeypatch):
     """Set required Airtable environment variables."""
     monkeypatch.setenv("AIRTABLE_API_KEY", "patFAKEKEY123")

@@ -91,10 +91,37 @@ jobs:
         run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
         working-directory: packages/viscy-data
 
+  test-applications:
+    name: Test (${{ matrix.application }}, Python 3.13, ubuntu-latest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        application: [dynaclr, cytoland, airtable, qc]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python 3.13
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ubuntu-latest-3.13
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: applications/${{ matrix.application }}
+
+      - name: Run tests
+        run: uv run --frozen pytest
+        working-directory: applications/${{ matrix.application }}
+
   check:
     name: All tests pass
     if: always()
-    needs: [test, test-data, test-data-extras]
+    needs: [test, test-data, test-data-extras, test-applications]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all test jobs succeeded

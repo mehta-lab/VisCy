@@ -4,13 +4,8 @@ exposure for Lightning CLI configurability."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import torch
-from helpers import create_experiment, write_collection_yaml
-
-from viscy_data.collection import ExperimentEntry
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -22,17 +17,18 @@ _FINAL_YX_PATCH = (24, 24)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
-def _create_four_experiments(tmp_path: Path) -> list[ExperimentEntry]:
-    """Create 4 experiments for train/val split testing."""
+@pytest.fixture()
+def four_experiments(tmp_path, _create_experiment, _write_collection_yaml):
+    """Four synthetic experiments with collection YAML."""
     entries = []
     for i, name in enumerate(["exp_a", "exp_b", "exp_c", "exp_d"]):
         row_letter = chr(ord("A") + i)
         entries.append(
-            create_experiment(
+            _create_experiment(
                 tmp_path,
                 name=name,
                 channel_names=_CHANNEL_NAMES,
@@ -40,34 +36,22 @@ def _create_four_experiments(tmp_path: Path) -> list[ExperimentEntry]:
                 perturbation_wells={"control": [f"{row_letter}/1"]},
             )
         )
-    return entries
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def four_experiments(tmp_path):
-    """Four synthetic experiments with collection YAML."""
-    entries = _create_four_experiments(tmp_path)
-    collection_path = write_collection_yaml(tmp_path, entries)
+    collection_path = _write_collection_yaml(tmp_path, entries)
     return collection_path, entries
 
 
 @pytest.fixture()
-def two_experiments(tmp_path):
+def two_experiments(tmp_path, _create_experiment, _write_collection_yaml):
     """Two synthetic experiments for simpler tests."""
     entries = [
-        create_experiment(
+        _create_experiment(
             tmp_path,
             name="exp_a",
             channel_names=_CHANNEL_NAMES,
             wells=[("A", "1")],
             perturbation_wells={"control": ["A/1"]},
         ),
-        create_experiment(
+        _create_experiment(
             tmp_path,
             name="exp_b",
             channel_names=_CHANNEL_NAMES,
@@ -75,15 +59,15 @@ def two_experiments(tmp_path):
             perturbation_wells={"treated": ["B/1"]},
         ),
     ]
-    collection_path = write_collection_yaml(tmp_path, entries)
+    collection_path = _write_collection_yaml(tmp_path, entries)
     return collection_path, entries
 
 
 @pytest.fixture()
-def multi_fov_experiments(tmp_path):
+def multi_fov_experiments(tmp_path, _create_experiment, _write_collection_yaml):
     """Two experiments with 5 FOVs each for FOV-level split testing."""
     entries = [
-        create_experiment(
+        _create_experiment(
             tmp_path,
             name="exp_a",
             channel_names=_CHANNEL_NAMES,
@@ -91,7 +75,7 @@ def multi_fov_experiments(tmp_path):
             perturbation_wells={"control": ["A/1"]},
             fovs_per_well=5,
         ),
-        create_experiment(
+        _create_experiment(
             tmp_path,
             name="exp_b",
             channel_names=_CHANNEL_NAMES,
@@ -100,7 +84,7 @@ def multi_fov_experiments(tmp_path):
             fovs_per_well=5,
         ),
     ]
-    collection_path = write_collection_yaml(tmp_path, entries)
+    collection_path = _write_collection_yaml(tmp_path, entries)
     return collection_path, entries
 
 

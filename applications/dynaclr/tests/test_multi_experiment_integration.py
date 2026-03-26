@@ -11,7 +11,6 @@ import importlib
 from pathlib import Path
 
 import yaml
-from helpers import create_experiment, write_collection_yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch import Tensor, nn
@@ -60,26 +59,26 @@ class SimpleEncoder(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-def test_multi_experiment_fast_dev_run(tmp_path):
+def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_collection_yaml):
     """End-to-end: 2 experiments with different channel sets, fast_dev_run."""
     seed_everything(42)
 
     # Create 2 experiments with DIFFERENT channel sets
-    exp_alpha = create_experiment(
+    exp_alpha = _create_experiment(
         tmp_path,
         name="exp_alpha",
         channel_names=["Phase3D", "GFP", "Mito"],
         wells=[("A", "1")],
         perturbation_wells={"control": ["A/1"]},
     )
-    exp_beta = create_experiment(
+    exp_beta = _create_experiment(
         tmp_path,
         name="exp_beta",
         channel_names=["Phase3D", "RFP", "StressGranules"],
         wells=[("B", "1")],
         perturbation_wells={"control": ["B/1"]},
     )
-    yaml_path = write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
+    yaml_path = _write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
 
     from dynaclr.data.datamodule import MultiExperimentDataModule
 
@@ -120,28 +119,28 @@ def test_multi_experiment_fast_dev_run(tmp_path):
     assert trainer.state.status == "finished"
 
 
-def test_multi_experiment_fast_dev_run_with_parquet(tmp_path):
+def test_multi_experiment_fast_dev_run_with_parquet(tmp_path, _create_experiment, _write_collection_yaml):
     """End-to-end: same as test_multi_experiment_fast_dev_run but loading from cell_index parquet."""
     seed_everything(42)
 
     from dynaclr.data.datamodule import MultiExperimentDataModule
     from viscy_data.cell_index import build_timelapse_cell_index
 
-    exp_alpha = create_experiment(
+    exp_alpha = _create_experiment(
         tmp_path,
         name="exp_alpha",
         channel_names=["Phase3D", "GFP", "Mito"],
         wells=[("A", "1")],
         perturbation_wells={"control": ["A/1"]},
     )
-    exp_beta = create_experiment(
+    exp_beta = _create_experiment(
         tmp_path,
         name="exp_beta",
         channel_names=["Phase3D", "RFP", "StressGranules"],
         wells=[("B", "1")],
         perturbation_wells={"control": ["B/1"]},
     )
-    yaml_path = write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
+    yaml_path = _write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
 
     # Build cell index parquet
     parquet_path = tmp_path / "cell_index.parquet"
@@ -185,12 +184,12 @@ def test_multi_experiment_fast_dev_run_with_parquet(tmp_path):
     assert trainer.state.status == "finished"
 
 
-def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
+def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path, _create_experiment, _write_collection_yaml):
     """End-to-end: 2 experiments with all sampling axes enabled."""
     seed_everything(42)
 
     # 2 conditions per experiment, 2 wells each
-    exp_alpha = create_experiment(
+    exp_alpha = _create_experiment(
         tmp_path,
         name="exp_alpha",
         channel_names=["Phase3D", "GFP", "Mito"],
@@ -198,7 +197,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
         perturbation_wells={"uninfected": ["A/1"], "infected": ["A/2"]},
         start_hpi=0.0,
     )
-    exp_beta = create_experiment(
+    exp_beta = _create_experiment(
         tmp_path,
         name="exp_beta",
         channel_names=["Phase3D", "RFP", "StressGranules"],
@@ -206,7 +205,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
         perturbation_wells={"uninfected": ["B/1"], "infected": ["B/2"]},
         start_hpi=0.0,
     )
-    yaml_path = write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
+    yaml_path = _write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
 
     from dynaclr.data.datamodule import MultiExperimentDataModule
 

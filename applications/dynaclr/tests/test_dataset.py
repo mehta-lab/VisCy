@@ -8,15 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from helpers import IMG_H, IMG_W, N_T, N_TRACKS, N_Z, make_tracks_csv
 
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 _CHANNEL_NAMES_A = ["Phase", "GFP"]
 _CHANNEL_NAMES_B = ["Phase", "Mito"]
@@ -33,14 +28,21 @@ def _create_zarr_and_tracks(
     name: str,
     channel_names: list[str],
     wells: list[tuple[str, str]],
+    hcs_dims: dict,
     fovs_per_well: int = 1,
     parent_map: dict[int, int] | None = None,
-    n_tracks: int = N_TRACKS,
-    n_t: int = N_T,
+    n_tracks: int | None = None,
+    n_t: int | None = None,
     start_t: int = 0,
+    _make_tracks_csv=None,
 ) -> tuple[Path, Path]:
     """Create a mini HCS OME-Zarr store and matching tracking CSVs."""
     from iohub.ngff import open_ome_zarr
+
+    if n_tracks is None:
+        n_tracks = hcs_dims["n_tracks"]
+    if n_t is None:
+        n_t = hcs_dims["n_t"]
 
     zarr_path = tmp_path / f"{name}.zarr"
     tracks_root = tmp_path / f"tracks_{name}"
@@ -53,14 +55,14 @@ def _create_zarr_and_tracks(
                 # Fill with random data so patches are nonzero
                 arr = pos.create_zeros(
                     "0",
-                    shape=(n_t + start_t, n_ch, N_Z, IMG_H, IMG_W),
+                    shape=(n_t + start_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
                     dtype=np.float32,
                 )
                 rng = np.random.default_rng(42)
                 arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
                 fov_name = f"{row}/{col}/{fov_idx}"
                 csv_path = tracks_root / fov_name / "tracks.csv"
-                make_tracks_csv(
+                _make_tracks_csv(
                     csv_path,
                     n_tracks=n_tracks,
                     n_t=n_t,
@@ -75,8 +77,10 @@ def _build_index(
     tmp_path: Path,
     *,
     parent_map: dict[int, int] | None = None,
-    n_tracks: int = N_TRACKS,
+    n_tracks: int | None = None,
     two_experiments: bool = False,
+    _make_tracks_csv=None,
+    hcs_dims: dict,
 ) -> MultiExperimentIndex:
     """Build a MultiExperimentIndex from synthetic data."""
     zarr_a, tracks_a = _create_zarr_and_tracks(
@@ -84,8 +88,10 @@ def _build_index(
         name="exp_a",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
+        hcs_dims=hcs_dims,
         parent_map=parent_map,
         n_tracks=n_tracks,
+        _make_tracks_csv=_make_tracks_csv,
     )
     exp_a = ExperimentEntry(
         name="exp_a",
@@ -107,7 +113,9 @@ def _build_index(
             name="exp_b",
             channel_names=_CHANNEL_NAMES_B,
             wells=[("A", "1")],
+            hcs_dims=hcs_dims,
             n_tracks=n_tracks,
+            _make_tracks_csv=_make_tracks_csv,
         )
         exp_b = ExperimentEntry(
             name="exp_b",
@@ -141,22 +149,24 @@ def _build_index(
 
 
 @pytest.fixture()
-def single_experiment_index(tmp_path):
+def single_experiment_index(tmp_path, _make_tracks_csv, hcs_dims):
     """Single experiment index with 5 tracks, 10 timepoints."""
-    return _build_index(tmp_path)
+    return _build_index(tmp_path, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
 
 
 @pytest.fixture()
-def two_experiment_index(tmp_path):
+def two_experiment_index(tmp_path, _make_tracks_csv, hcs_dims):
     """Two experiments (different channel orderings) with 5 tracks each."""
-    return _build_index(tmp_path, two_experiments=True)
+    return _build_index(tmp_path, two_experiments=True, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
 
 
 @pytest.fixture()
-def lineage_index(tmp_path):
+def lineage_index(tmp_path, _make_tracks_csv, hcs_dims):
     """Index with division events: track 0 is parent, track 1 and 2 are daughters."""
     parent_map = {1: 0, 2: 0}
-    return _build_index(tmp_path, parent_map=parent_map, n_tracks=3)
+    return _build_index(
+        tmp_path, parent_map=parent_map, n_tracks=3, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +463,7 @@ class TestRescalePatch:
         assert result.shape == (1, 16, 48, 48)
 
 
-def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
+def _build_two_scope_index(tmp_path: Path, _make_tracks_csv, hcs_dims: dict) -> MultiExperimentIndex:
     """Build a two-experiment index with different microscope fields."""
     from iohub.ngff import open_ome_zarr
 
@@ -464,11 +474,13 @@ def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
         tracks_root = tmp_path / f"tracks_{name}"
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
             pos = plate.create_position("A", "1", "0")
-            arr = pos.create_zeros("0", shape=(N_T, 1, N_Z, IMG_H, IMG_W), dtype=np.float32)
+            arr = pos.create_zeros(
+                "0", shape=(hcs_dims["n_t"], 1, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32
+            )
             arr[:] = np.random.default_rng(42).standard_normal(arr.shape).astype(np.float32)
             fov_name = "A/1/0"
             csv_path = tracks_root / fov_name / "tracks.csv"
-            make_tracks_csv(csv_path, n_tracks=N_TRACKS, n_t=N_T)
+            _make_tracks_csv(csv_path, n_tracks=hcs_dims["n_tracks"], n_t=hcs_dims["n_t"])
         return ExperimentEntry(
             name=name,
             data_path=str(zarr_path),
@@ -496,11 +508,11 @@ def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
 class TestCrossScopePositive:
     """Tests for cross-scope positive sampling."""
 
-    def test_find_cross_scope_positive_returns_different_microscope(self, tmp_path):
+    def test_find_cross_scope_positive_returns_different_microscope(self, tmp_path, _make_tracks_csv, hcs_dims):
         """_find_cross_scope_positive returns row with different microscope."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
-        index = _build_two_scope_index(tmp_path)
+        index = _build_two_scope_index(tmp_path, _make_tracks_csv, hcs_dims)
         ds = MultiExperimentTripletDataset(index=index, fit=True, cross_scope_fraction=0.5)
         rng = np.random.default_rng(0)
 
@@ -534,11 +546,11 @@ class TestCrossScopePositive:
         pos = ds._find_cross_scope_positive(anchor_row, rng)
         assert pos is None
 
-    def test_cross_scope_fraction_zero_gives_temporal_positives(self, tmp_path):
+    def test_cross_scope_fraction_zero_gives_temporal_positives(self, tmp_path, _make_tracks_csv, hcs_dims):
         """cross_scope_fraction=0.0 uses only temporal positives (regression guard)."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
-        index = _build_two_scope_index(tmp_path)
+        index = _build_two_scope_index(tmp_path, _make_tracks_csv, hcs_dims)
         ds = MultiExperimentTripletDataset(index=index, fit=True, cross_scope_fraction=0.0)
         batch = ds.__getitems__(list(range(min(4, len(ds)))))
         # Just verify it runs and returns expected keys
@@ -577,7 +589,7 @@ class TestSelfPositive:
         # (augmentation happens later in on_after_batch_transfer)
         assert batch["anchor"].shape == batch["positive"].shape
 
-    def test_self_positive_all_tracks_are_valid_anchors(self, tmp_path):
+    def test_self_positive_all_tracks_are_valid_anchors(self, tmp_path, hcs_dims, _make_tracks_csv):
         """positive_cell_source='self': when index built with self mode, all tracks are valid."""
         from iohub.ngff import open_ome_zarr
 
@@ -588,9 +600,13 @@ class TestSelfPositive:
         tracks_root = tmp_path / "tracks_self"
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=["Phase"]) as plate:
             pos = plate.create_position("A", "1", "0")
-            arr = pos.create_zeros("0", shape=(N_T, 1, N_Z, IMG_H, IMG_W), dtype=np.float32)
+            arr = pos.create_zeros(
+                "0",
+                shape=(hcs_dims["n_t"], 1, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
+                dtype=np.float32,
+            )
             arr[:] = np.random.default_rng(0).standard_normal(arr.shape).astype(np.float32)
-            make_tracks_csv(tracks_root / "A/1/0" / "tracks.csv", n_tracks=N_TRACKS, n_t=N_T)
+            _make_tracks_csv(tracks_root / "A/1/0" / "tracks.csv", n_tracks=hcs_dims["n_tracks"], n_t=hcs_dims["n_t"])
 
         exp = ExperimentEntry(
             name="self_exp",

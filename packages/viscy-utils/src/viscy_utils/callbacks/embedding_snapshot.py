@@ -12,7 +12,7 @@ from lightning.pytorch.callbacks import Callback
 
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, TripletSample
 from viscy_utils.callbacks.embedding_writer import (
-    EmbeddingWriter,
+    collect_data_provenance,
     write_embedding_dataset,
 )
 
@@ -136,7 +136,7 @@ class EmbeddingSnapshotCallback(Callback):
         else:
             index_df = pd.DataFrame({"fov_name": ["unknown"] * features_np.shape[0]})
 
-        uns_metadata = EmbeddingWriter._collect_data_provenance(trainer)
+        uns_metadata = collect_data_provenance(trainer)
         uns_metadata["epoch"] = epoch
 
         write_embedding_dataset(

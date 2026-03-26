@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from helpers import IMG_H, IMG_W, N_T, N_TRACKS, N_Z
 from iohub.ngff import Position, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
@@ -47,8 +46,8 @@ def _make_collection(
 
 def _make_tracks_csv(
     path: Path,
-    n_tracks: int = N_TRACKS,
-    n_t: int = N_T,
+    n_tracks: int = 5,
+    n_t: int = 10,
     *,
     parent_map: dict[int, int] | None = None,
     border_cell_track: int | None = None,
@@ -107,6 +106,7 @@ def _create_zarr_and_tracks(
     name: str,
     channel_names: list[str],
     wells: list[tuple[str, str]],
+    hcs_dims: dict,
     fovs_per_well: int = 2,
     parent_map: dict[int, int] | None = None,
     border_cell_track: int | None = None,
@@ -126,7 +126,7 @@ def _create_zarr_and_tracks(
                 pos = plate.create_position(row, col, str(fov_idx))
                 pos.create_zeros(
                     "0",
-                    shape=(N_T, n_ch, N_Z, IMG_H, IMG_W),
+                    shape=(hcs_dims["n_t"], n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
                     dtype=np.float32,
                 )
                 fov_name = f"{row}/{col}/{fov_idx}"
@@ -147,13 +147,14 @@ def _create_zarr_and_tracks(
 
 
 @pytest.fixture()
-def two_experiment_setup(tmp_path):
+def two_experiment_setup(tmp_path, hcs_dims):
     """Create 2 experiments, 2 wells each, 2 FOVs each, with tracking CSVs."""
     zarr_a, tracks_a = _create_zarr_and_tracks(
         tmp_path,
         name="exp_a",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1"), ("B", "1")],
+        hcs_dims=hcs_dims,
         fovs_per_well=2,
     )
     zarr_b, tracks_b = _create_zarr_and_tracks(
@@ -161,6 +162,7 @@ def two_experiment_setup(tmp_path):
         name="exp_b",
         channel_names=_CHANNEL_NAMES_B,
         wells=[("A", "1"), ("B", "1")],
+        hcs_dims=hcs_dims,
         fovs_per_well=2,
     )
 
@@ -188,7 +190,7 @@ def two_experiment_setup(tmp_path):
 
 
 @pytest.fixture()
-def lineage_setup(tmp_path):
+def lineage_setup(tmp_path, hcs_dims):
     """Create an experiment with lineage (parent_track_id) relationships.
 
     Track lineage: track 0 (root) -> track 1 (daughter) -> track 2 (granddaughter)
@@ -201,6 +203,7 @@ def lineage_setup(tmp_path):
         name="lineage_exp",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
+        hcs_dims=hcs_dims,
         fovs_per_well=1,
         parent_map=parent_map,
     )
@@ -219,7 +222,7 @@ def lineage_setup(tmp_path):
 
 
 @pytest.fixture()
-def border_setup(tmp_path):
+def border_setup(tmp_path, hcs_dims):
     """Create an experiment with border cells and one outside-image cell.
 
     Track 3: near border (y=2, x=2)
@@ -230,6 +233,7 @@ def border_setup(tmp_path):
         name="border_exp",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
+        hcs_dims=hcs_dims,
         fovs_per_well=1,
         border_cell_track=3,
         outside_cell_track=4,
@@ -502,7 +506,7 @@ class TestBorderClamping:
         index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         assert len(index.tracks) == 40
 
-    def test_edge_cell_clamped(self, tmp_path):
+    def test_edge_cell_clamped(self, tmp_path, hcs_dims):
         """Cell at exact edge (y=0, x=0) -> clamped to (y_half, x_half)."""
         # Create a special setup with cell at y=0, x=0
         zarr_path = tmp_path / "edge.zarr"
@@ -510,7 +514,7 @@ class TestBorderClamping:
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, IMG_H, IMG_W), dtype=np.float32)
+            pos.create_zeros("0", shape=(1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32)
 
         # Create CSV with cell at exact edge
         csv_path = tracks_root / "A" / "1" / "0" / "tracks.csv"
@@ -576,7 +580,8 @@ def _create_zarr_and_custom_tracks(
     channel_names: list[str],
     well: tuple[str, str],
     track_rows: list[dict],
-    n_t: int = N_T,
+    hcs_dims: dict,
+    n_t: int = 10,
 ) -> tuple[Path, Path]:
     """Create a mini HCS OME-Zarr with one FOV and custom tracking rows."""
     zarr_path = tmp_path / f"{name}.zarr"
@@ -587,7 +592,7 @@ def _create_zarr_and_custom_tracks(
         pos = plate.create_position(well[0], well[1], "0")
         pos.create_zeros(
             "0",
-            shape=(n_t, n_ch, N_Z, IMG_H, IMG_W),
+            shape=(n_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
             dtype=np.float32,
         )
 
@@ -642,7 +647,7 @@ class TestValidAnchors:
         track_keys = set(zip(index.tracks["global_track_id"], index.tracks["t"]))
         assert anchor_keys.issubset(track_keys)
 
-    def test_end_of_track_not_valid(self, tmp_path):
+    def test_end_of_track_not_valid(self, tmp_path, hcs_dims):
         """Observations near the end of a track with no future positives are excluded.
 
         Single track with t=0..9, tau_range_frames=(1,3).
@@ -657,6 +662,7 @@ class TestValidAnchors:
             channel_names=_CHANNEL_NAMES_A,
             well=("A", "1"),
             track_rows=track_rows,
+            hcs_dims=hcs_dims,
         )
         cfg = ExperimentEntry(
             name="end_test",
@@ -680,7 +686,7 @@ class TestValidAnchors:
         assert 7 in anchors_t
         assert 8 in anchors_t
 
-    def test_lineage_continuity_across_tracks(self, tmp_path):
+    def test_lineage_continuity_across_tracks(self, tmp_path, hcs_dims):
         """Parent anchor is valid because daughter track provides future positive.
 
         Parent track (tid=0): t=0..4
@@ -710,6 +716,7 @@ class TestValidAnchors:
             channel_names=_CHANNEL_NAMES_A,
             well=("A", "1"),
             track_rows=track_rows,
+            hcs_dims=hcs_dims,
         )
         cfg = ExperimentEntry(
             name="lineage_anchor",
@@ -733,7 +740,7 @@ class TestValidAnchors:
         assert 3 in parent_anchor_times
         assert 4 in parent_anchor_times
 
-    def test_different_tau_for_different_intervals(self, tmp_path):
+    def test_different_tau_for_different_intervals(self, tmp_path, hcs_dims):
         """Different experiments with different intervals yield different tau_range_frames.
 
         exp_fast: interval=15min, tau_range_hours=(0.5,1.5) -> tau_range_frames=(2,6)
@@ -747,6 +754,7 @@ class TestValidAnchors:
             channel_names=_CHANNEL_NAMES_A,
             well=("A", "1"),
             track_rows=fast_rows,
+            hcs_dims=hcs_dims,
         )
         cfg_fast = ExperimentEntry(
             name="fast_exp",
@@ -765,6 +773,7 @@ class TestValidAnchors:
             channel_names=_CHANNEL_NAMES_B,
             well=("A", "1"),
             track_rows=slow_rows,
+            hcs_dims=hcs_dims,
         )
         cfg_slow = ExperimentEntry(
             name="slow_exp",
@@ -796,14 +805,14 @@ class TestValidAnchors:
         assert 9 not in slow_anchor_times
         assert 7 in slow_anchor_times
 
-    def test_missing_tracking_csv_raises(self, tmp_path):
+    def test_missing_tracking_csv_raises(self, tmp_path, hcs_dims):
         """When a FOV has no tracking CSV, FileNotFoundError is raised immediately."""
         zarr_path = tmp_path / "empty.zarr"
         tracks_root = tmp_path / "tracks_empty"
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, IMG_H, IMG_W), dtype=np.float32)
+            pos.create_zeros("0", shape=(1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32)
 
         cfg = ExperimentEntry(
             name="empty_exp",
@@ -821,7 +830,7 @@ class TestValidAnchors:
                 tau_range_hours=(0.5, 1.5),
             )
 
-    def test_track_with_gap_still_valid(self, tmp_path):
+    def test_track_with_gap_still_valid(self, tmp_path, hcs_dims):
         """Track with missing timepoint -> anchor at t=2 still valid if t=4 exists.
 
         Track: t=0,1,2,4,5 (missing t=3).
@@ -834,6 +843,7 @@ class TestValidAnchors:
             channel_names=_CHANNEL_NAMES_A,
             well=("A", "1"),
             track_rows=track_rows,
+            hcs_dims=hcs_dims,
             n_t=6,
         )
         cfg = ExperimentEntry(
@@ -854,7 +864,7 @@ class TestValidAnchors:
         # t=2: check t=3(missing), t=4(exists!) -> valid
         assert 2 in anchor_times
 
-    def test_anchor_self_not_positive(self, tmp_path):
+    def test_anchor_self_not_positive(self, tmp_path, hcs_dims):
         """An anchor cannot be its own positive (tau=0 is skipped).
 
         Single observation at t=5 with tau_range including 0 frames:
@@ -868,6 +878,7 @@ class TestValidAnchors:
             channel_names=_CHANNEL_NAMES_A,
             well=("A", "1"),
             track_rows=track_rows,
+            hcs_dims=hcs_dims,
             n_t=10,
         )
         cfg = ExperimentEntry(
@@ -1154,13 +1165,14 @@ class TestParquetPath:
         sample_pos = index.tracks.iloc[0]["position"]
         assert isinstance(sample_pos, Position)
 
-    def test_parquet_border_clamping(self, tmp_path):
+    def test_parquet_border_clamping(self, tmp_path, hcs_dims):
         """y_clamp, x_clamp are computed correctly from parquet path."""
         zarr_path, tracks_root = _create_zarr_and_tracks(
             tmp_path,
             name="border_pq",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
+            hcs_dims=hcs_dims,
             fovs_per_well=1,
             border_cell_track=3,
             outside_cell_track=4,
@@ -1190,7 +1202,7 @@ class TestParquetPath:
         # 4 remaining tracks * 10 timepoints = 40
         assert len(index.tracks) == 40
 
-    def test_parquet_lineage_preserved(self, tmp_path):
+    def test_parquet_lineage_preserved(self, tmp_path, hcs_dims):
         """lineage_id from parquet matches legacy reconstruction."""
         parent_map = {1: 0, 2: 1, 3: 99}
         zarr_path, tracks_root = _create_zarr_and_tracks(
@@ -1198,6 +1210,7 @@ class TestParquetPath:
             name="lineage_pq",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
+            hcs_dims=hcs_dims,
             fovs_per_well=1,
             parent_map=parent_map,
         )
