@@ -12,7 +12,7 @@ from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import TripletSample
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+from viscy_data.collection import Collection, ExperimentEntry, save_collection
 
 # ---------------------------------------------------------------------------
 # HPC / GPU skip markers
@@ -111,7 +111,7 @@ def create_experiment(
     name: str,
     channel_names: list[str],
     wells: list[tuple[str, str]],
-    condition_wells: dict[str, list[str]],
+    perturbation_wells: dict[str, list[str]],
     fovs_per_well: int = 1,
     n_tracks: int = N_TRACKS,
     n_t: int = N_T,
@@ -145,7 +145,7 @@ def create_experiment(
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
         channel_names=channel_names,
-        condition_wells=condition_wells,
+        perturbation_wells=perturbation_wells,
         interval_minutes=interval_minutes,
         start_hpi=start_hpi,
     )
@@ -154,26 +154,10 @@ def create_experiment(
 def write_collection_yaml(
     tmp_path: Path,
     entries: list[ExperimentEntry],
-    source_channels: list[SourceChannel] | None = None,
 ) -> Path:
-    """Write a collection YAML from ExperimentEntry objects.
-
-    If source_channels is None, derives defaults: first channel per experiment
-    is labelfree, second (if present) is reporter.
-    """
-    if source_channels is None:
-        lf: dict[str, str] = {}
-        rp: dict[str, str] = {}
-        for e in entries:
-            lf[e.name] = e.channel_names[0]
-            if len(e.channel_names) > 1:
-                rp[e.name] = e.channel_names[1]
-        source_channels = [SourceChannel(label="labelfree", per_experiment=lf)]
-        if rp:
-            source_channels.append(SourceChannel(label="reporter", per_experiment=rp))
+    """Write a collection YAML from ExperimentEntry objects."""
     collection = Collection(
         name="test_collection",
-        source_channels=source_channels,
         experiments=entries,
     )
     yaml_path = tmp_path / "collection.yml"
@@ -254,7 +238,11 @@ class SyntheticTripletDataModule(LightningDataModule):
 
 
 class SyntheticLabeledTripletDataset(Dataset):
-    """Triplet dataset with integer class labels for auxiliary head testing."""
+    """Triplet dataset with integer class labels for auxiliary head testing.
+
+    Uses ``__getitems__`` to return a pre-batched dict matching the real
+    ``MultiExperimentTripletDataset`` contract (no default collation).
+    """
 
     def __init__(self, size: int = 8, n_classes: int = SYNTH_N_CLASSES):
         self.size = size
@@ -263,14 +251,26 @@ class SyntheticLabeledTripletDataset(Dataset):
     def __len__(self) -> int:
         return self.size
 
-    def __getitem__(self, idx: int) -> TripletSample:
+    def __getitems__(self, indices: list[int]) -> TripletSample:
+        b = len(indices)
         return {
-            "anchor": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
-            "positive": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
-            "negative": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
-            "index": {"fov_name": f"fov_{idx}", "id": idx, "track_id": idx % 3, "t": idx},
+            "anchor": torch.randn(b, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "positive": torch.randn(b, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "negative": torch.randn(b, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "index": {
+                "fov_name": [f"fov_{i}" for i in indices],
+                "id": list(indices),
+                "track_id": [i % 3 for i in indices],
+                "t": list(indices),
+            },
             "anchor_meta": [
-                {"experiment": "exp_a", "condition": "control", "t": idx, "labels": {"gene_ko": idx % self.n_classes}}
+                {
+                    "experiment": "exp_a",
+                    "condition": "control",
+                    "t": i,
+                    "labels": {"gene_ko": i % self.n_classes},
+                }
+                for i in indices
             ],
         }
 
@@ -284,10 +284,18 @@ class SyntheticLabeledTripletDataModule(LightningDataModule):
         self.num_samples = num_samples
 
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(SyntheticLabeledTripletDataset(self.num_samples), batch_size=self.batch_size)
+        return DataLoader(
+            SyntheticLabeledTripletDataset(self.num_samples),
+            batch_size=self.batch_size,
+            collate_fn=lambda x: x,
+        )
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(SyntheticLabeledTripletDataset(self.num_samples), batch_size=self.batch_size)
+        return DataLoader(
+            SyntheticLabeledTripletDataset(self.num_samples),
+            batch_size=self.batch_size,
+            collate_fn=lambda x: x,
+        )
 
 
 # ---------------------------------------------------------------------------

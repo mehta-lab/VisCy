@@ -25,6 +25,7 @@ def test_contrastive_module_init(_SimpleEncoder, synth_dims):
     )
     assert module.lr == 1e-3
     assert module.model is encoder
+    assert len(module.auxiliary_heads) == 0
 
 
 def test_contrastive_module_forward(_SimpleEncoder, synth_dims):
@@ -173,7 +174,12 @@ def test_auxiliary_heads_labels_from_anchor_meta(_SimpleEncoder, synth_dims, syn
             synth_dims["w"],
         ),
     )
-    anchor_meta = [{"labels": {"gene_ko": torch.tensor([0, 1, 2, 3])}}]
+    anchor_meta = [
+        {"labels": {"gene_ko": 0}},
+        {"labels": {"gene_ko": 1}},
+        {"labels": {"gene_ko": 2}},
+        {"labels": {"gene_ko": 3}},
+    ]
     features = torch.randn(4, 64)
 
     y = module._get_labels({"anchor_meta": anchor_meta}, "gene_ko")
@@ -183,32 +189,6 @@ def test_auxiliary_heads_labels_from_anchor_meta(_SimpleEncoder, synth_dims, syn
 
     aux_loss = module._run_auxiliary_heads(features, {"anchor_meta": anchor_meta}, "train")
     assert aux_loss.item() > 0
-
-
-def test_auxiliary_heads_none_no_extra_loss(_SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
-    """ContrastiveModule with no auxiliary heads trains identically to before."""
-    seed_everything(0)
-    module = ContrastiveModule(
-        encoder=_SimpleEncoder(),
-        loss_function=nn.TripletMarginLoss(margin=0.5),
-        auxiliary_heads=None,
-        example_input_array_shape=(
-            1,
-            synth_dims["c"],
-            synth_dims["d"],
-            synth_dims["h"],
-            synth_dims["w"],
-        ),
-    )
-    assert len(module.auxiliary_heads) == 0
-    trainer = Trainer(
-        max_epochs=1,
-        accelerator="cpu",
-        enable_checkpointing=False,
-        enable_progress_bar=False,
-        logger=False,
-    )
-    trainer.fit(module, datamodule=_SyntheticTripletDataModule())
 
 
 def test_embedding_accumulator_cleared_after_epoch(_SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
