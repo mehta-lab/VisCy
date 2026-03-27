@@ -48,11 +48,6 @@ _HPC_PATHS_AVAILABLE = all(
 )
 _GPU_AVAILABLE = torch.cuda.is_available()
 
-requires_hpc_and_gpu = pytest.mark.skipif(
-    not (_HPC_PATHS_AVAILABLE and _GPU_AVAILABLE),
-    reason="Requires HPC data paths and CUDA GPU",
-)
-
 # ---------------------------------------------------------------------------
 # Synthetic HCS data dimensions
 # ---------------------------------------------------------------------------
@@ -81,11 +76,18 @@ def make_tracks_csv(
     *,
     start_t: int = 0,
     parent_map: dict[int, int] | None = None,
+    border_cell_track: int | None = None,
+    outside_cell_track: int | None = None,
 ) -> None:
     """Write a tracking CSV with standard columns."""
     rows = []
     for tid in range(n_tracks):
         for t in range(start_t, start_t + n_t):
+            y, x = 32.0, 32.0
+            if border_cell_track is not None and tid == border_cell_track:
+                y, x = 2.0, 2.0
+            if outside_cell_track is not None and tid == outside_cell_track:
+                y, x = -1.0, -1.0
             ptid = float("nan")
             if parent_map and tid in parent_map:
                 ptid = parent_map[tid]
@@ -97,8 +99,8 @@ def make_tracks_csv(
                     "parent_track_id": ptid,
                     "parent_id": float("nan"),
                     "z": 0,
-                    "y": 32.0,
-                    "x": 32.0,
+                    "y": y,
+                    "x": x,
                 }
             )
     df = pd.DataFrame(rows)
@@ -117,6 +119,12 @@ def create_experiment(
     n_t: int = N_T,
     interval_minutes: float = 30.0,
     start_hpi: float = 0.0,
+    channels: list | None = None,
+    pixel_size_xy_um: float | None = None,
+    pixel_size_z_um: float | None = None,
+    parent_map: dict[int, int] | None = None,
+    border_cell_track: int | None = None,
+    outside_cell_track: int | None = None,
 ) -> ExperimentEntry:
     """Create a mini HCS OME-Zarr store, tracking CSVs, and return an ExperimentEntry."""
     from iohub.ngff import open_ome_zarr
@@ -138,16 +146,26 @@ def create_experiment(
                 arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
                 fov_name = f"{row}/{col}/{fov_idx}"
                 csv_path = tracks_root / fov_name / "tracks.csv"
-                make_tracks_csv(csv_path, n_tracks=n_tracks, n_t=n_t)
+                make_tracks_csv(
+                    csv_path,
+                    n_tracks=n_tracks,
+                    n_t=n_t,
+                    parent_map=parent_map,
+                    border_cell_track=border_cell_track,
+                    outside_cell_track=outside_cell_track,
+                )
 
     return ExperimentEntry(
         name=name,
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
         channel_names=channel_names,
+        channels=channels or [],
         perturbation_wells=perturbation_wells,
         interval_minutes=interval_minutes,
         start_hpi=start_hpi,
+        pixel_size_xy_um=pixel_size_xy_um,
+        pixel_size_z_um=pixel_size_z_um,
     )
 
 
@@ -208,7 +226,7 @@ class SyntheticTripletDataset(Dataset):
             "anchor_meta": [
                 {
                     "experiment": "exp_a",
-                    "condition": "control" if idx % 2 == 0 else "treated",
+                    "perturbation": "control" if idx % 2 == 0 else "treated",
                     "hours_post_perturbation": float(idx),
                     "t": idx,
                 }
@@ -266,7 +284,7 @@ class SyntheticLabeledTripletDataset(Dataset):
             "anchor_meta": [
                 {
                     "experiment": "exp_a",
-                    "condition": "control",
+                    "perturbation": "control",
                     "t": i,
                     "labels": {"gene_ko": i % self.n_classes},
                 }
@@ -313,14 +331,19 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "hpc_integration: requires HPC paths and GPU")
 
 
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests marked ``hpc_integration`` when HPC paths or GPU are unavailable."""
+    if _HPC_PATHS_AVAILABLE and _GPU_AVAILABLE:
+        return
+    skip = pytest.mark.skip(reason="Requires HPC data paths and CUDA GPU")
+    for item in items:
+        if "hpc_integration" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture
 def checkpoint_path():
     return _CHECKPOINT_PATH
-
-
-@pytest.fixture
-def reference_zarr_path():
-    return _REFERENCE_ZARR_PATH
 
 
 @pytest.fixture
@@ -376,16 +399,6 @@ def hcs_dims():
     return {"img_h": IMG_H, "img_w": IMG_W, "n_t": N_T, "n_z": N_Z, "n_tracks": N_TRACKS}
 
 
-@pytest.fixture
-def simple_encoder():
-    return SimpleEncoder()
-
-
-@pytest.fixture
-def synthetic_datamodule():
-    return SyntheticTripletDataModule()
-
-
 # ---------------------------------------------------------------------------
 # Factory fixtures — expose helper functions/classes to test files without
 # requiring ``from .conftest import …`` (which breaks ``pytest --co`` when
@@ -414,11 +427,6 @@ def _SimpleEncoder():
 
 
 @pytest.fixture
-def _SyntheticTripletDataset():
-    return SyntheticTripletDataset
-
-
-@pytest.fixture
 def _SyntheticTripletDataModule():
     return SyntheticTripletDataModule
 
@@ -431,3 +439,43 @@ def _SyntheticLabeledTripletDataModule():
 @pytest.fixture
 def synth_n_classes():
     return SYNTH_N_CLASSES
+
+
+# ---------------------------------------------------------------------------
+# YAML config validation helpers
+# ---------------------------------------------------------------------------
+
+
+def extract_class_paths(obj):
+    """Recursively extract all class_path values from a parsed YAML dict."""
+
+    paths = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "class_path" and isinstance(value, str):
+                paths.append(value)
+            else:
+                paths.extend(extract_class_paths(value))
+    elif isinstance(obj, list):
+        for item in obj:
+            paths.extend(extract_class_paths(item))
+    return paths
+
+
+def resolve_class_path(class_path: str):
+    """Resolve a dotted class_path to the actual class object."""
+    import importlib
+
+    module_path, class_name = class_path.rsplit(".", 1)
+    mod = importlib.import_module(module_path)
+    return getattr(mod, class_name)
+
+
+@pytest.fixture
+def _extract_class_paths():
+    return extract_class_paths
+
+
+@pytest.fixture
+def _resolve_class_path():
+    return resolve_class_path

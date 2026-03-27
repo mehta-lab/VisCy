@@ -14,11 +14,11 @@ Tests cover:
 from __future__ import annotations
 
 import pytest
-from helpers import build_flat_cell_index, create_experiment
 
 from dynaclr.data.dataset import MultiExperimentTripletDataset
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
+from viscy_data.collection import ChannelEntry
 from viscy_data.sampler import FlexibleBatchSampler
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ _TAU_RANGE = (0.5, 4.0)
 
 
 @pytest.fixture()
-def flat_parquet_setup(tmp_path):
+def flat_parquet_setup(tmp_path, _create_experiment, _write_collection_yaml):
     """Create 2 experiments with different channel counts and a flat parquet.
 
     exp_a: 2 channels (Phase3D, GFP) → markers (Phase3D, SEC61)
@@ -44,7 +44,9 @@ def flat_parquet_setup(tmp_path):
     exp_b: 3 channels (Phase3D, GFP, mCherry) → markers (Phase3D, G3BP1, pAL17)
            1 well (ctrl), 1 FOV, 3 tracks, 8 timepoints
     """
-    entry_a = create_experiment(
+    from viscy_data.cell_index import build_timelapse_cell_index
+
+    entry_a = _create_experiment(
         tmp_path,
         "exp_a",
         channel_names=["Phase3D", "GFP"],
@@ -55,10 +57,14 @@ def flat_parquet_setup(tmp_path):
         n_t=10,
         interval_minutes=30.0,
         start_hpi=0.0,
+        channels=[
+            ChannelEntry(name="Phase3D", marker="Phase3D"),
+            ChannelEntry(name="GFP", marker="SEC61"),
+        ],
         pixel_size_xy_um=0.108,
         pixel_size_z_um=0.3,
     )
-    entry_b = create_experiment(
+    entry_b = _create_experiment(
         tmp_path,
         "exp_b",
         channel_names=["Phase3D", "GFP", "mCherry"],
@@ -69,17 +75,19 @@ def flat_parquet_setup(tmp_path):
         n_t=8,
         interval_minutes=15.0,
         start_hpi=1.0,
+        channels=[
+            ChannelEntry(name="Phase3D", marker="Phase3D"),
+            ChannelEntry(name="GFP", marker="G3BP1"),
+            ChannelEntry(name="mCherry", marker="pAL17"),
+        ],
         pixel_size_xy_um=0.108,
         pixel_size_z_um=0.3,
     )
 
-    channel_markers = {
-        "exp_a": [("Phase3D", "Phase3D"), ("GFP", "SEC61")],
-        "exp_b": [("Phase3D", "Phase3D"), ("GFP", "G3BP1"), ("mCherry", "pAL17")],
-    }
+    yaml_path = _write_collection_yaml(tmp_path, [entry_a, entry_b])
 
     parquet_path = tmp_path / "flat.parquet"
-    df = build_flat_cell_index(parquet_path, [entry_a, entry_b], channel_markers)
+    df = build_timelapse_cell_index(yaml_path, parquet_path, num_workers=1)
 
     registry = ExperimentRegistry.from_cell_index(
         parquet_path,

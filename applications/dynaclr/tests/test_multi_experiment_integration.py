@@ -7,22 +7,19 @@ from 2 experiments having different channel sets (GFP vs RFP).
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
-from torch import Tensor, nn
 
 from dynaclr.engine import ContrastiveModule
 from viscy_models.contrastive.loss import NTXentHCL
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants — encoder input matches final_yx_patch_size=(24,24) with 2 channels
 # ---------------------------------------------------------------------------
 
-# SimpleEncoder input dimensions: C=2 source channels, Z=1, Y=24, X=24
 _C = 2
 _Z = 1
 _Y = 24
@@ -31,35 +28,11 @@ _FLAT_DIM = _C * _Z * _Y * _X
 
 
 # ---------------------------------------------------------------------------
-# SimpleEncoder
-# ---------------------------------------------------------------------------
-
-
-class SimpleEncoder(nn.Module):
-    """Minimal encoder for integration testing.
-
-    Input: (B, 2, 1, 24, 24) -> flatten -> fc(64) -> proj(32).
-    Output: (features, projections) tuple.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.fc = nn.Linear(_FLAT_DIM, 64)
-        self.proj = nn.Linear(64, 32)
-
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        x = x.flatten(1)
-        features = self.fc(x)
-        projections = self.proj(features)
-        return features, projections
-
-
-# ---------------------------------------------------------------------------
 # Integration Tests
 # ---------------------------------------------------------------------------
 
 
-def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_collection_yaml):
+def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_collection_yaml, _SimpleEncoder):
     """End-to-end: 2 experiments with different channel sets, fast_dev_run."""
     seed_everything(42)
 
@@ -98,7 +71,7 @@ def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_coll
         channel_dropout_prob=0.5,
     )
 
-    encoder = SimpleEncoder()
+    encoder = _SimpleEncoder(in_dim=_FLAT_DIM)
     module = ContrastiveModule(
         encoder=encoder,
         loss_function=NTXentHCL(temperature=0.07, beta=0.5),
@@ -119,7 +92,9 @@ def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_coll
     assert trainer.state.status == "finished"
 
 
-def test_multi_experiment_fast_dev_run_with_parquet(tmp_path, _create_experiment, _write_collection_yaml):
+def test_multi_experiment_fast_dev_run_with_parquet(
+    tmp_path, _create_experiment, _write_collection_yaml, _SimpleEncoder
+):
     """End-to-end: same as test_multi_experiment_fast_dev_run but loading from cell_index parquet."""
     seed_everything(42)
 
@@ -163,7 +138,7 @@ def test_multi_experiment_fast_dev_run_with_parquet(tmp_path, _create_experiment
         cell_index_path=str(parquet_path),
     )
 
-    encoder = SimpleEncoder()
+    encoder = _SimpleEncoder(in_dim=_FLAT_DIM)
     module = ContrastiveModule(
         encoder=encoder,
         loss_function=NTXentHCL(temperature=0.07, beta=0.5),
@@ -184,7 +159,9 @@ def test_multi_experiment_fast_dev_run_with_parquet(tmp_path, _create_experiment
     assert trainer.state.status == "finished"
 
 
-def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path, _create_experiment, _write_collection_yaml):
+def test_multi_experiment_fast_dev_run_with_all_sampling_axes(
+    tmp_path, _create_experiment, _write_collection_yaml, _SimpleEncoder
+):
     """End-to-end: 2 experiments with all sampling axes enabled."""
     seed_everything(42)
 
@@ -220,7 +197,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path, _create_
         num_workers=1,
         # All sampling axes enabled
         batch_group_by="experiment",
-        stratify_by="condition",
+        stratify_by="perturbation",
         temporal_enrichment=True,
         temporal_window_hours=2.0,
         temporal_global_fraction=0.3,
@@ -228,7 +205,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path, _create_
         channel_dropout_prob=0.5,
     )
 
-    encoder = SimpleEncoder()
+    encoder = _SimpleEncoder(in_dim=_FLAT_DIM)
     module = ContrastiveModule(
         encoder=encoder,
         loss_function=NTXentHCL(temperature=0.07, beta=0.5),
@@ -254,30 +231,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path, _create_
 # ---------------------------------------------------------------------------
 
 
-def _extract_class_paths(obj):
-    """Recursively extract all class_path values from a parsed YAML dict."""
-    paths = []
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if key == "class_path" and isinstance(value, str):
-                paths.append(value)
-            else:
-                paths.extend(_extract_class_paths(value))
-    elif isinstance(obj, list):
-        for item in obj:
-            paths.extend(_extract_class_paths(item))
-    return paths
-
-
-def _resolve_class_path(class_path: str):
-    """Resolve a dotted class_path to the actual class object."""
-    parts = class_path.rsplit(".", 1)
-    module_path, class_name = parts[0], parts[1]
-    mod = importlib.import_module(module_path)
-    return getattr(mod, class_name)
-
-
-def test_multi_experiment_config_class_paths_resolve():
+def test_multi_experiment_config_class_paths_resolve(_extract_class_paths, _resolve_class_path):
     """All class_paths in multi_experiment_fit.yml resolve to importable classes."""
     configs_dir = Path(__file__).parents[1] / "configs" / "training"
     config_path = configs_dir / "multi_experiment_fit.yml"

@@ -193,7 +193,7 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
             tau_range=(0.5, 2.0),
             batch_size=8,
             batch_group_by="experiment",
-            stratify_by="condition",
+            stratify_by="perturbation",
             temporal_enrichment=False,
         )
         dm.setup("fit")
@@ -211,7 +211,7 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         # Verify sampler settings match
         sampler = train_dl.batch_sampler
         assert sampler.batch_group_by == ["experiment"]
-        assert sampler.stratify_by == ["condition"]
+        assert sampler.stratify_by == ["perturbation"]
         assert sampler.temporal_enrichment is False
 
 
@@ -456,9 +456,9 @@ class TestNewPositiveParams:
             val_experiments=["exp_b"],
             tau_range=(0.5, 2.0),
             batch_size=8,
-            positive_match_columns=["condition"],
+            positive_match_columns=["perturbation"],
         )
-        assert dm.positive_match_columns == ["condition"]
+        assert dm.positive_match_columns == ["perturbation"]
 
     def test_positive_channel_source_any_stored(self, two_experiments):
         """positive_channel_source='any' is stored on datamodule and dataset."""

@@ -26,118 +26,7 @@ _YX_PATCH = (32, 32)
 def _make_collection(
     experiments: list[ExperimentEntry],
 ) -> Collection:
-    """Build a minimal Collection from test experiments.
-
-    Parameters
-    ----------
-    experiments : list[ExperimentEntry]
-        Experiment entries to include.
-
-    Returns
-    -------
-    Collection
-        Validated collection wrapping the given experiments.
-    """
-    return Collection(
-        name="test_collection",
-        experiments=experiments,
-    )
-
-
-def _make_tracks_csv(
-    path: Path,
-    n_tracks: int = 5,
-    n_t: int = 10,
-    *,
-    parent_map: dict[int, int] | None = None,
-    border_cell_track: int | None = None,
-    outside_cell_track: int | None = None,
-) -> None:
-    """Write a tracking CSV with standard columns.
-
-    Parameters
-    ----------
-    path : Path
-        Where to write the CSV file.
-    n_tracks : int
-        Number of tracks.
-    n_t : int
-        Number of timepoints per track.
-    parent_map : dict[int, int] | None
-        Mapping child_track_id -> parent_track_id for lineage testing.
-    border_cell_track : int | None
-        Track ID to place near the border (y=2, x=2).
-    outside_cell_track : int | None
-        Track ID to place outside the image boundary (y=-1).
-    """
-    rows = []
-    for tid in range(n_tracks):
-        for t in range(n_t):
-            y = 32.0  # center by default
-            x = 32.0
-            if border_cell_track is not None and tid == border_cell_track:
-                y = 2.0
-                x = 2.0
-            if outside_cell_track is not None and tid == outside_cell_track:
-                y = -1.0
-                x = -1.0
-            ptid = float("nan")
-            if parent_map and tid in parent_map:
-                ptid = parent_map[tid]
-            rows.append(
-                {
-                    "track_id": tid,
-                    "t": t,
-                    "id": tid * n_t + t,
-                    "parent_track_id": ptid,
-                    "parent_id": float("nan"),
-                    "z": 0,
-                    "y": y,
-                    "x": x,
-                }
-            )
-    df = pd.DataFrame(rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
-
-
-def _create_zarr_and_tracks(
-    tmp_path: Path,
-    name: str,
-    channel_names: list[str],
-    wells: list[tuple[str, str]],
-    hcs_dims: dict,
-    fovs_per_well: int = 2,
-    parent_map: dict[int, int] | None = None,
-    border_cell_track: int | None = None,
-    outside_cell_track: int | None = None,
-) -> tuple[Path, Path]:
-    """Create a mini HCS OME-Zarr store and matching tracking CSVs.
-
-    Returns (zarr_path, tracks_root_path).
-    """
-    zarr_path = tmp_path / f"{name}.zarr"
-    tracks_root = tmp_path / f"tracks_{name}"
-    n_ch = len(channel_names)
-
-    rng = np.random.default_rng(42)
-    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
-        for row, col in wells:
-            for fov_idx in range(fovs_per_well):
-                pos = plate.create_position(row, col, str(fov_idx))
-                shape = (hcs_dims["n_t"], n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"])
-                arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
-                arr[:] = rng.standard_normal(shape).astype(np.float32)
-                fov_name = f"{row}/{col}/{fov_idx}"
-                csv_path = tracks_root / fov_name / "tracks.csv"
-                _make_tracks_csv(
-                    csv_path,
-                    parent_map=parent_map,
-                    border_cell_track=border_cell_track,
-                    outside_cell_track=outside_cell_track,
-                )
-
-    return zarr_path, tracks_root
+    return Collection(name="test_collection", experiments=experiments)
 
 
 # ---------------------------------------------------------------------------
@@ -146,40 +35,25 @@ def _create_zarr_and_tracks(
 
 
 @pytest.fixture()
-def two_experiment_setup(tmp_path, hcs_dims):
+def two_experiment_setup(tmp_path, _create_experiment):
     """Create 2 experiments, 2 wells each, 2 FOVs each, with tracking CSVs."""
-    zarr_a, tracks_a = _create_zarr_and_tracks(
+    cfg_a = _create_experiment(
         tmp_path,
         name="exp_a",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1"), ("B", "1")],
-        hcs_dims=hcs_dims,
-        fovs_per_well=2,
-    )
-    zarr_b, tracks_b = _create_zarr_and_tracks(
-        tmp_path,
-        name="exp_b",
-        channel_names=_CHANNEL_NAMES_B,
-        wells=[("A", "1"), ("B", "1")],
-        hcs_dims=hcs_dims,
-        fovs_per_well=2,
-    )
-
-    cfg_a = ExperimentEntry(
-        name="exp_a",
-        data_path=str(zarr_a),
-        tracks_path=str(tracks_a),
-        channel_names=_CHANNEL_NAMES_A,
         perturbation_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
+        fovs_per_well=2,
         interval_minutes=30.0,
         start_hpi=0.0,
     )
-    cfg_b = ExperimentEntry(
+    cfg_b = _create_experiment(
+        tmp_path,
         name="exp_b",
-        data_path=str(zarr_b),
-        tracks_path=str(tracks_b),
         channel_names=_CHANNEL_NAMES_B,
+        wells=[("A", "1"), ("B", "1")],
         perturbation_wells={"control": ["A/1"], "treated": ["B/1"]},
+        fovs_per_well=2,
         interval_minutes=15.0,
         start_hpi=2.0,
     )
@@ -189,31 +63,22 @@ def two_experiment_setup(tmp_path, hcs_dims):
 
 
 @pytest.fixture()
-def lineage_setup(tmp_path, hcs_dims):
+def lineage_setup(tmp_path, _create_experiment):
     """Create an experiment with lineage (parent_track_id) relationships.
 
     Track lineage: track 0 (root) -> track 1 (daughter) -> track 2 (granddaughter)
     Track 3: has parent_track_id=99 (not in data, should fallback)
     Track 4: no parent (independent root)
     """
-    parent_map = {1: 0, 2: 1, 3: 99}
-    zarr_path, tracks_root = _create_zarr_and_tracks(
+    cfg = _create_experiment(
         tmp_path,
         name="lineage_exp",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
-        hcs_dims=hcs_dims,
-        fovs_per_well=1,
-        parent_map=parent_map,
-    )
-
-    cfg = ExperimentEntry(
-        name="lineage_exp",
-        data_path=str(zarr_path),
-        tracks_path=str(tracks_root),
-        channel_names=_CHANNEL_NAMES_A,
         perturbation_wells={"ctrl": ["A/1"]},
+        fovs_per_well=1,
         interval_minutes=30.0,
+        parent_map={1: 0, 2: 1, 3: 99},
     )
 
     registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -221,30 +86,22 @@ def lineage_setup(tmp_path, hcs_dims):
 
 
 @pytest.fixture()
-def border_setup(tmp_path, hcs_dims):
+def border_setup(tmp_path, _create_experiment):
     """Create an experiment with border cells and one outside-image cell.
 
     Track 3: near border (y=2, x=2)
     Track 4: outside image (y=-1)
     """
-    zarr_path, tracks_root = _create_zarr_and_tracks(
+    cfg = _create_experiment(
         tmp_path,
         name="border_exp",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
-        hcs_dims=hcs_dims,
+        perturbation_wells={"ctrl": ["A/1"]},
         fovs_per_well=1,
+        interval_minutes=30.0,
         border_cell_track=3,
         outside_cell_track=4,
-    )
-
-    cfg = ExperimentEntry(
-        name="border_exp",
-        data_path=str(zarr_path),
-        tracks_path=str(tracks_root),
-        channel_names=_CHANNEL_NAMES_A,
-        perturbation_wells={"ctrl": ["A/1"]},
-        interval_minutes=30.0,
     )
 
     registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -1164,25 +1021,18 @@ class TestParquetPath:
         sample_pos = index.tracks.iloc[0]["position"]
         assert isinstance(sample_pos, Position)
 
-    def test_parquet_border_clamping(self, tmp_path, hcs_dims):
+    def test_parquet_border_clamping(self, tmp_path, _create_experiment):
         """y_clamp, x_clamp are computed correctly from parquet path."""
-        zarr_path, tracks_root = _create_zarr_and_tracks(
+        cfg = _create_experiment(
             tmp_path,
             name="border_pq",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
-            hcs_dims=hcs_dims,
+            perturbation_wells={"ctrl": ["A/1"]},
             fovs_per_well=1,
+            interval_minutes=30.0,
             border_cell_track=3,
             outside_cell_track=4,
-        )
-        cfg = ExperimentEntry(
-            name="border_pq",
-            data_path=str(zarr_path),
-            tracks_path=str(tracks_root),
-            channel_names=_CHANNEL_NAMES_A,
-            perturbation_wells={"ctrl": ["A/1"]},
-            interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
@@ -1201,25 +1051,17 @@ class TestParquetPath:
         # 4 remaining tracks * 10 timepoints = 40
         assert len(index.tracks) == 40
 
-    def test_parquet_lineage_preserved(self, tmp_path, hcs_dims):
+    def test_parquet_lineage_preserved(self, tmp_path, _create_experiment):
         """lineage_id from parquet matches legacy reconstruction."""
-        parent_map = {1: 0, 2: 1, 3: 99}
-        zarr_path, tracks_root = _create_zarr_and_tracks(
+        cfg = _create_experiment(
             tmp_path,
             name="lineage_pq",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
-            hcs_dims=hcs_dims,
-            fovs_per_well=1,
-            parent_map=parent_map,
-        )
-        cfg = ExperimentEntry(
-            name="lineage_pq",
-            data_path=str(zarr_path),
-            tracks_path=str(tracks_root),
-            channel_names=_CHANNEL_NAMES_A,
             perturbation_wells={"ctrl": ["A/1"]},
+            fovs_per_well=1,
             interval_minutes=30.0,
+            parent_map={1: 0, 2: 1, 3: 99},
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
 
@@ -1312,23 +1154,16 @@ class TestColumnMatchValidAnchors:
 class TestEmptyValidAnchorsError:
     """Test that empty valid_anchors raises early."""
 
-    def test_single_timepoint_temporal_raises(self, tmp_path, hcs_dims):
+    def test_single_timepoint_temporal_raises(self, tmp_path, _create_experiment):
         """Temporal mode with single-timepoint data raises ValueError."""
-        hcs_dims_1t = {**hcs_dims, "n_t": 1}
-        zarr_path, tracks_root = _create_zarr_and_tracks(
+        cfg = _create_experiment(
             tmp_path,
             name="single_t",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
-            hcs_dims=hcs_dims_1t,
-            fovs_per_well=1,
-        )
-        cfg = ExperimentEntry(
-            name="single_t",
-            data_path=str(zarr_path),
-            tracks_path=str(tracks_root),
-            channel_names=_CHANNEL_NAMES_A,
             perturbation_wells={"ctrl": ["A/1"]},
+            fovs_per_well=1,
+            n_t=1,
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
