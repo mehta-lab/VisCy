@@ -60,6 +60,12 @@ COMMANDS = [
         "help": "Apply a fitted LOT pipeline to correct batch effects in an embedding zarr",
         "short_help": "Apply LOT batch correction",
     },
+    {
+        "name": "compute-mmd",
+        "import_path": "applications.DynaCLR.evaluation.mmd.compute_mmd.main",
+        "help": "Compute MMD² between two groups of cell embeddings from AnnData zarrs",
+        "short_help": "Compute MMD between two groups",
+    },
 ]
 
 
