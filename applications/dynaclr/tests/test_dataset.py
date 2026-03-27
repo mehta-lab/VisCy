@@ -652,23 +652,22 @@ class TestSelfPositive:
 class TestColumnMatchPositive:
     """Tests for positive_cell_source='lookup' with non-lineage columns."""
 
-    def _build_index_with_gene_name(self, tmp_path: Path) -> "MultiExperimentIndex":
+    @staticmethod
+    def _build_index_with_gene_name(tmp_path: Path, _make_tracks_csv, hcs_dims: dict) -> "MultiExperimentIndex":
         """Build an index where tracks have gene_name/reporter columns for matching."""
-        index = _build_index(tmp_path)
+        index = _build_index(tmp_path, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
         n = len(index.tracks)
-        # Alternate between two genes so there are always candidates for each key
         index.tracks["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(n)]
         index.tracks["reporter"] = "Phase"
-        # valid_anchors is a view/copy — keep it in sync
         index.valid_anchors["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(len(index.valid_anchors))]
         index.valid_anchors["reporter"] = "Phase"
         return index
 
-    def test_column_match_positive_different_cell(self, tmp_path):
+    def test_column_match_positive_different_cell(self, tmp_path, _make_tracks_csv, hcs_dims):
         """positive_match_columns=['gene_name','reporter'] finds different cell with same values."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
-        index = self._build_index_with_gene_name(tmp_path)
+        index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
         ds = MultiExperimentTripletDataset(
             index=index,
             fit=True,
@@ -676,20 +675,18 @@ class TestColumnMatchPositive:
             positive_match_columns=["gene_name", "reporter"],
         )
         rng = np.random.default_rng(0)
-        # Find an anchor and its positive — use valid_anchors which has the gene_name column
         anchor_row = ds.index.valid_anchors.iloc[0]
         pos = ds._find_positive(anchor_row, rng)
         assert pos is not None, "Should find a column-match positive"
         assert pos["gene_name"] == anchor_row["gene_name"], "Positive must share gene_name"
         assert pos["reporter"] == anchor_row["reporter"], "Positive must share reporter"
-        # Must be a different row (different integer index)
         assert pos.name != anchor_row.name, "Positive must be a different cell"
 
-    def test_column_match_no_self_as_positive(self, tmp_path):
+    def test_column_match_no_self_as_positive(self, tmp_path, _make_tracks_csv, hcs_dims):
         """Column-match lookup never returns the anchor itself."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
-        index = self._build_index_with_gene_name(tmp_path)
+        index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
         ds = MultiExperimentTripletDataset(
             index=index,
             fit=True,

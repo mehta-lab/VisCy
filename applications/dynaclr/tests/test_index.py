@@ -1255,36 +1255,32 @@ class TestParquetPath:
 class TestColumnMatchValidAnchors:
     """Tests for _compute_valid_anchors with non-lineage column matching."""
 
-    def test_singleton_match_key_excluded(self, two_experiment_setup):
-        """Rows whose match-key group has only 1 member are excluded from valid_anchors."""
+    def test_singleton_gene_excluded(self, two_experiment_setup):
+        """A gene with only 1 cell observation is excluded from valid_anchors."""
         registry, *_ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 2.0),
         )
-        # Assign gene_name so that row 0 is a singleton
         n = len(index.tracks)
-        index.tracks["gene_name"] = ["SINGLETON" if i == 0 else "COMMON" for i in range(n)]
+        index.tracks["gene_name"] = ["PCNA" if i == 0 else "RPL35" for i in range(n)]
         va = index._compute_valid_anchors(
             tau_range_hours=(0.5, 2.0),
             positive_cell_source="lookup",
             positive_match_columns=["gene_name"],
         )
-        assert "SINGLETON" not in va["gene_name"].to_numpy(), (
-            "Singleton match-key group should be excluded from valid_anchors"
-        )
-        assert (va["gene_name"] == "COMMON").all()
+        assert "PCNA" not in va["gene_name"].to_numpy(), "Singleton gene should be excluded from valid_anchors"
+        assert (va["gene_name"] == "RPL35").all()
 
-    def test_all_singletons_raises(self, two_experiment_setup):
-        """If every match-key group is a singleton, valid_anchors is empty and __init__ raises."""
+    def test_all_unique_genes_empty(self, two_experiment_setup):
+        """If every gene has only 1 observation, valid_anchors is empty."""
         registry, *_ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 2.0),
         )
-        # Make every row a unique gene_name
         n = len(index.tracks)
         index.tracks["gene_name"] = [f"GENE_{i}" for i in range(n)]
         va = index._compute_valid_anchors(
@@ -1292,10 +1288,10 @@ class TestColumnMatchValidAnchors:
             positive_cell_source="lookup",
             positive_match_columns=["gene_name"],
         )
-        assert va.empty, "All singletons should produce empty valid_anchors"
+        assert va.empty, "All unique genes should produce empty valid_anchors"
 
-    def test_pair_group_survives(self, two_experiment_setup):
-        """A match-key group with exactly 2 members is kept."""
+    def test_two_observations_per_gene_survives(self, two_experiment_setup):
+        """A gene with exactly 2 cell observations is kept as valid."""
         registry, *_ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
@@ -1303,15 +1299,14 @@ class TestColumnMatchValidAnchors:
             tau_range_hours=(0.5, 2.0),
         )
         n = len(index.tracks)
-        # First 2 rows share a gene_name, rest are singletons
-        index.tracks["gene_name"] = ["PAIR" if i < 2 else f"GENE_{i}" for i in range(n)]
+        index.tracks["gene_name"] = ["TP53" if i < 2 else f"GENE_{i}" for i in range(n)]
         va = index._compute_valid_anchors(
             tau_range_hours=(0.5, 2.0),
             positive_cell_source="lookup",
             positive_match_columns=["gene_name"],
         )
         assert len(va) == 2
-        assert (va["gene_name"] == "PAIR").all()
+        assert (va["gene_name"] == "TP53").all()
 
 
 class TestEmptyValidAnchorsError:
