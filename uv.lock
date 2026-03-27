@@ -1019,6 +1019,26 @@ wheels = [
 ]
 
 [[package]]
+name = "diffusers"
+version = "0.37.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "importlib-metadata" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "regex" },
+    { name = "requests" },
+    { name = "safetensors" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/5c/f4c2eb8d481fe8784a7e2331fbaab820079c06676185fa6d2177b386d590/diffusers-0.37.1.tar.gz", hash = "sha256:2346c21f77f835f273b7aacbaada1c34a596a3a2cc6ddc99d149efcd0ec298fa", size = 4135139, upload-time = "2026-03-25T08:04:04.515Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/dd/51c38785ce5e1c287b5ad17ba550edaaaffce0deb0da4857019c6700fbaf/diffusers-0.37.1-py3-none-any.whl", hash = "sha256:0537c0b28cb53cf39d6195489bcf8f833986df556c10f5e28ab7427b86fc8b90", size = 5001536, upload-time = "2026-03-25T08:04:02.385Z" },
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1126,6 +1146,15 @@ test = [
     { name = "statsmodels" },
     { name = "tensorboard" },
     { name = "tensorstore" },
+]
+
+[[package]]
+name = "einops"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
 ]
 
 [[package]]
@@ -5852,6 +5881,12 @@ dependencies = [
     { name = "transformers" },
 ]
 
+[package.optional-dependencies]
+celldiff = [
+    { name = "diffusers" },
+    { name = "einops" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -5864,6 +5899,8 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "diffusers", marker = "extra == 'celldiff'" },
+    { name = "einops", marker = "extra == 'celldiff'" },
     { name = "monai", specifier = ">=1.5.2" },
     { name = "numpy", specifier = ">=2.4.1" },
     { name = "pytorch-metric-learning" },
@@ -5871,6 +5908,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.10" },
     { name = "transformers", specifier = ">=4.40" },
 ]
+provides-extras = ["celldiff"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -5958,6 +5996,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pyyaml" },
     { name = "scikit-image" },
+    { name = "scipy" },
     { name = "tensorboard" },
     { name = "tensorstore" },
     { name = "torch" },
@@ -6020,6 +6059,7 @@ requires-dist = [
     { name = "scikit-image" },
     { name = "scikit-learn", marker = "extra == 'all'" },
     { name = "scikit-learn", marker = "extra == 'eval'" },
+    { name = "scipy" },
     { name = "tensorboard" },
     { name = "tensorstore" },
     { name = "torch", specifier = ">=2.10" },
