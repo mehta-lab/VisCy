@@ -4,7 +4,7 @@ Creates a temporary parquet with modified pixel sizes, feeds it through the
 real ``MultiExperimentDataModule`` dataloader, and plots the output patches.
 
 The Mantis experiment (0.1494 um/px) is the reference. The Dragonfly experiment
-natively has 0.3953 um/px — we test with both the real value and an artificial
+natively has 0.206 um/px — we test with both the real value and an artificial
 override to show the dataloader responds correctly.
 
 Usage::
@@ -48,7 +48,7 @@ MANTIS_EXP = "2025_07_24_A549_SEC61B_ZIKV"
 
 # Pixel sizes to test for Dragonfly (real + artificial overrides)
 DRAGONFLY_PIXEL_SIZES = {
-    "real (0.3953)": 0.3953,
+    "real (0.206)": 0.206,
     "override (0.1494)": 0.1494,  # same as reference — should be no-op
     "override (0.7)": 0.7,  # even coarser — should crop fewer pixels
 }
@@ -131,7 +131,7 @@ for label, px_size in DRAGONFLY_PIXEL_SIZES.items():
         patch = data["patch"]  # (C, Z, Y, X) at yx_patch_size
         final = center_crop(patch[None])[0]
         key = f"{exp_name}\n{label}" if exp_name == DRAGONFLY_EXP else exp_name
-        if exp_name == MANTIS_EXP and label != "real (0.3953)":
+        if exp_name == MANTIS_EXP and label != "real (0.206)":
             continue  # Mantis is unchanged, only show once
         print(f"  {exp_name}: scale_yx={scale[1]:.3f}, patch={tuple(patch.shape)}")
         all_results[key] = {
