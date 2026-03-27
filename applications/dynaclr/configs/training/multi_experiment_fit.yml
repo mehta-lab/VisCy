@@ -107,7 +107,7 @@ model:
     # PCA pairplot logged to WandB every N val epochs (null = disabled, WandB logger only)
     # Colors points by this SampleMeta key (perturbation/experiment/hours_post_perturbation)
     log_embeddings_every_n_epochs: 10
-    pca_color_key: perturbation
+    pca_color_keys: [perturbation]
     example_input_array_shape: [1, 2, 30, 256, 256]
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
