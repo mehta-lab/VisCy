@@ -23,6 +23,7 @@ from viscy_data.combined import CombinedDataModule
 from viscy_data.gpu_aug import CachedOmeZarrDataModule
 from viscy_data.hcs import HCSDataModule
 from viscy_transforms import BatchedStackChannelsd
+from viscy_utils.compose import load_composed_config
 from viscy_utils.losses import MixedLoss, SpotlightLoss
 from viscy_utils.meta_utils import generate_fg_masks
 
@@ -432,29 +433,118 @@ def _resolve_class_path(class_path: str):
     return getattr(mod, class_name)
 
 
-@pytest.mark.parametrize(
-    "config_name",
-    [
-        "fit.yml",
-        "fit_fnet.yml",
-        "fit_spotlight.yml",
-        "predict.yml",
-        "pretrain_fcmae.yml",
-        "finetune_fcmae.yml",
-    ],
-)
-def test_config_class_paths_resolve(config_name):
-    """All class_path entries in example configs resolve to importable classes."""
+def _discover_leaf_configs():
+    """Discover all leaf configs (skip recipes/ directory)."""
     configs_dir = Path(__file__).parents[1] / "examples" / "configs"
-    config_path = configs_dir / config_name
+    leaf_configs = []
+    for yml in sorted(configs_dir.rglob("*.yml")):
+        if "recipes" not in yml.parts:
+            leaf_configs.append(yml)
+    return leaf_configs
+
+
+@pytest.mark.parametrize("config_path", _discover_leaf_configs(), ids=lambda p: str(p.relative_to(p.parents[1])))
+def test_config_class_paths_resolve(config_path):
+    """All class_path entries in composed example configs resolve to importable classes."""
+
     assert config_path.exists(), f"Config file not found: {config_path}"
-
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-
-    class_paths = _extract_class_paths(config)
-    assert len(class_paths) > 0, f"No class_path entries found in {config_name}"
+    composed = load_composed_config(config_path)
+    class_paths = _extract_class_paths(composed)
+    assert len(class_paths) > 0, f"No class_path entries found in {config_path.name}"
 
     for cp in class_paths:
         cls = _resolve_class_path(cp)
         assert cls is not None, f"Failed to resolve class_path: {cp}"
+
+
+def test_compose_passthrough_without_base(tmp_path):
+    """Config without base: key is returned unchanged."""
+    config = {"model": {"class_path": "torch.nn.Identity"}, "data": {"batch_size": 4}}
+    config_path = tmp_path / "plain.yml"
+    config_path.write_text(yaml.dump(config))
+    result = load_composed_config(config_path)
+    assert result == config
+
+
+def test_compose_spotlight_overrides_normalizations():
+    """Spotlight mode replaces data recipe's default normalizations."""
+    configs_dir = Path(__file__).parents[1] / "examples" / "configs"
+    cfg = load_composed_config(configs_dir / "vscyto3d" / "train_spotlight.yml")
+    # Spotlight must set Otsu normalization
+    norm = cfg["data"]["init_args"]["normalizations"][0]
+    assert norm["init_args"]["subtrahend"] == "otsu_threshold"
+    # Spotlight must set fg_mask_key
+    assert cfg["data"]["init_args"]["fg_mask_key"] == "fg_mask"
+    # Spotlight must set loss
+    assert cfg["model"]["init_args"]["loss_function"]["class_path"] == "viscy_utils.losses.SpotlightLoss"
+
+
+def test_cli_compose_with_long_flag(tmp_path):
+    """CLI composes leaf config when --config is used."""
+    import sys
+
+    from viscy_utils.cli import _maybe_compose_config
+
+    # Create a minimal base recipe
+    base_dir = tmp_path / "recipes"
+    base_dir.mkdir()
+    base_path = base_dir / "base.yml"
+    base_path.write_text(yaml.dump({"trainer": {"accelerator": "cpu"}}))
+    # Create a leaf config referencing the base
+    leaf_path = tmp_path / "leaf.yml"
+    leaf_path.write_text(yaml.dump({"base": ["recipes/base.yml"], "seed_everything": 42}))
+    # Simulate CLI args
+    original_argv = sys.argv[:]
+    sys.argv = ["fit", "--config", str(leaf_path)]
+    try:
+        _maybe_compose_config()
+        # sys.argv should now point to a composed temp file
+        composed_path = sys.argv[2]
+        assert composed_path != str(leaf_path)
+        with open(composed_path) as f:
+            composed = yaml.safe_load(f)
+        assert composed["trainer"]["accelerator"] == "cpu"
+        assert composed["seed_everything"] == 42
+        assert "base" not in composed
+    finally:
+        sys.argv = original_argv
+
+
+def test_cli_compose_with_short_flag(tmp_path):
+    """CLI composes leaf config when -c is used."""
+    import sys
+
+    from viscy_utils.cli import _maybe_compose_config
+
+    base_path = tmp_path / "base.yml"
+    base_path.write_text(yaml.dump({"model": {"lr": 0.001}}))
+    leaf_path = tmp_path / "leaf.yml"
+    leaf_path.write_text(yaml.dump({"base": ["base.yml"], "model": {"name": "test"}}))
+    original_argv = sys.argv[:]
+    sys.argv = ["fit", "-c", str(leaf_path)]
+    try:
+        _maybe_compose_config()
+        with open(sys.argv[2]) as f:
+            composed = yaml.safe_load(f)
+        assert composed["model"]["lr"] == 0.001
+        assert composed["model"]["name"] == "test"
+    finally:
+        sys.argv = original_argv
+
+
+def test_cli_passthrough_without_base(tmp_path):
+    """CLI passes config unchanged when no base: key."""
+    import sys
+
+    from viscy_utils.cli import _maybe_compose_config
+
+    config_path = tmp_path / "plain.yml"
+    config_path.write_text(yaml.dump({"trainer": {"devices": 1}}))
+    original_argv = sys.argv[:]
+    sys.argv = ["fit", "--config", str(config_path)]
+    try:
+        _maybe_compose_config()
+        # sys.argv should be unchanged — no temp file created
+        assert sys.argv[2] == str(config_path)
+    finally:
+        sys.argv = original_argv

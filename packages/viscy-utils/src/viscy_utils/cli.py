@@ -1,17 +1,22 @@
 """VisCy Lightning CLI with custom defaults."""
 
+import atexit
 import logging
 import os
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 import torch
+import yaml
 from jsonargparse import lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
 from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
+from viscy_utils.compose import load_composed_config
 from viscy_utils.trainer import VisCyTrainer
 
 
@@ -58,13 +63,44 @@ def _setup_environment() -> None:
     torch.set_float32_matmul_precision("high")
 
 
-def main() -> None:
-    """Main Lightning CLI entry point.
+def _maybe_compose_config() -> None:
+    """Compose config from ``base:`` references if present.
 
-    Parse log level and set TF32 precision.
-    Set default random seed to 42.
+    Scans ``sys.argv`` for ``--config`` or ``-c``, loads the YAML file,
+    and if it contains a ``base:`` key, recursively merges the referenced
+    recipe fragments via :func:`viscy_utils.compose.load_composed_config`.
+    The composed config is written to a temp file and ``sys.argv`` is
+    updated in place.  Configs without ``base:`` pass through unchanged.
+    """
+    config_idx = next(
+        (i for i, a in enumerate(sys.argv) if a in ("--config", "-c")),
+        None,
+    )
+    if config_idx is None or config_idx + 1 >= len(sys.argv):
+        return
+    config_path = Path(sys.argv[config_idx + 1])
+    try:
+        with open(config_path) as f:
+            raw = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return  # let LightningCLI give its own diagnostic
+    if not isinstance(raw, dict) or "base" not in raw:
+        return
+    composed = load_composed_config(config_path)
+    with tempfile.NamedTemporaryFile(suffix=".yml", delete=False, mode="w") as tmp:
+        yaml.dump(composed, tmp, default_flow_style=False)
+    atexit.register(lambda p=tmp.name: Path(p).unlink(missing_ok=True))
+    sys.argv[config_idx + 1] = tmp.name
+
+
+def main() -> None:
+    """Run the Lightning CLI with VisCy defaults.
+
+    Set log level, TF32 precision, and default random seed to 42.
+    Compose config from ``base:`` references if present.
     """
     _setup_environment()
+    _maybe_compose_config()
     require_model = {
         "preprocess",
         "precompute",

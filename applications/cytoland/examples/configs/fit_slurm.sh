@@ -25,8 +25,8 @@ RUN_DIR="${PROJECT_DIR}/models/${RUN_NAME}"
 # TODO: point to your uv workspace
 WORKSPACE_DIR=/path/to/viscy
 
-# TODO: point to the config file (fit.yml, fit_fnet.yml, or fit_spotlight.yml)
-CONFIG="$(dirname "$0")/fit_spotlight.yml"
+# TODO: point to a model config (e.g., vscyto3d/finetune.yml, fnet3d/fit.yml)
+CONFIG="$(dirname "$0")/vscyto3d/finetune.yml"
 
 # ── Environment ───────────────────────────────────────────────────────────────
 export PYTHONNOUSERSITE=1   # prevent ~/.local from shadowing conda/uv env

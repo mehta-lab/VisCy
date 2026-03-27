@@ -1,0 +1,11 @@
+# FNet3D: inference.
+# Usage: python -m cytoland predict --config fnet3d/predict.yml
+base:
+  - ../recipes/trainer/predict_gpu.yml
+  - ../recipes/data/hcs_nuc_mem_3d.yml
+  - ../recipes/models/fnet3d.yml
+
+data:
+  init_args:
+    data_path: #TODO input OME-Zarr
+    z_window_size: 32
