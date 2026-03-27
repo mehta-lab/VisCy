@@ -728,10 +728,20 @@ class MultiExperimentTripletDataset(Dataset):
             norms.append(norm)
             scales.append(scale)
             targets.append(target)
-        results = ts.stack([p.translate_to[0] for p in patches]).read().result()  # noqa: PD013
-        tensor = torch.from_numpy(results)
-        # Rescale patches that have non-unity scale factors
+        # Group patches by shape so ts.stack works within each group,
+        # then read and rescale. This handles mixed-experiment batches
+        # where different pixel sizes produce different native crop sizes.
+        shape_groups: dict[tuple, list[int]] = defaultdict(list)
+        for i, p in enumerate(patches):
+            shape_groups[tuple(p.shape)].append(i)
+        read_tensors: list[Tensor | None] = [None] * len(patches)
+        for idxs in shape_groups.values():
+            group_patches = [patches[i] for i in idxs]
+            group_result = ts.stack([p.translate_to[0] for p in group_patches]).read().result()  # noqa: PD013
+            for j, idx in enumerate(idxs):
+                read_tensors[idx] = torch.from_numpy(group_result[j])
+        # Rescale each patch to the uniform target size
         rescaled = []
-        for i in range(tensor.shape[0]):
-            rescaled.append(_rescale_patch(tensor[i], scales[i], targets[i]))
+        for i in range(len(patches)):
+            rescaled.append(_rescale_patch(read_tensors[i], scales[i], targets[i]))
         return torch.stack(rescaled), norms
