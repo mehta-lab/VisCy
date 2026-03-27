@@ -214,8 +214,10 @@ class ExperimentRegistry:
         Returns
         -------
         dict[str, tuple[float, float, float]]
-            ``{exp_name: (scale_z, scale_y, scale_x)}`` where scale = experiment_um /
-            reference_um.  When reference pixel size is 0.0, scale = 1.0 (no rescaling).
+            ``{exp_name: (scale_z, scale_y, scale_x)}`` where scale = reference_um /
+            experiment_um.  Values < 1 mean the experiment has coarser pixels
+            (fewer native pixels cropped, then upsampled).  When reference pixel
+            size is None, scale = 1.0 (no rescaling).
         """
         scale_factors: dict[str, tuple[float, float, float]] = {}
         for exp in self.collection.experiments:
@@ -225,9 +227,9 @@ class ExperimentRegistry:
                 and exp.pixel_size_xy_um is not None
                 and exp.pixel_size_z_um is not None
             ):
-                scale_y = exp.pixel_size_xy_um / self.reference_pixel_size_xy_um
-                scale_x = exp.pixel_size_xy_um / self.reference_pixel_size_xy_um
-                scale_z = exp.pixel_size_z_um / self.reference_pixel_size_z_um
+                scale_y = self.reference_pixel_size_xy_um / exp.pixel_size_xy_um
+                scale_x = self.reference_pixel_size_xy_um / exp.pixel_size_xy_um
+                scale_z = self.reference_pixel_size_z_um / exp.pixel_size_z_um
             else:
                 scale_y = 1.0
                 scale_x = 1.0
