@@ -246,6 +246,7 @@ class MultiExperimentTripletDataset(Dataset):
             }
         )
         self._tensorstores: dict[str, ts.TensorStore] = {}
+        self._norm_meta_cache: dict[str, NormMeta | None] = {}
 
     def _build_match_lookup(self) -> None:
         """Build lookup structures for O(1) positive candidate lookup.
@@ -472,7 +473,9 @@ class MultiExperimentTripletDataset(Dataset):
         if lt_map is None:
             return None
 
-        # In from_index mode (flat parquet), filter candidates to same marker
+        # In from_index mode (flat parquet), filter candidates to same marker.
+        # NOTE:The parquet SHOULD guarantee one channel_name per marker per experiment,
+        # so marker filtering is equivalent to channel_name filtering.
         anchor_marker = anchor_row.get("marker") if self._channel_mode == "from_index" else None
 
         def _pick(candidate_indices: list[int]) -> pd.Series | None:
@@ -656,14 +659,23 @@ class MultiExperimentTripletDataset(Dataset):
         ]
 
         # Look up norm_meta by zarr channel name directly
-        # and pre-resolve timepoint_statistics for this sample's timepoint
-        raw_norm_meta = _read_norm_meta(position)
-        if raw_norm_meta is not None:
+        # and pre-resolve timepoint_statistics for this sample's timepoint.
+        # Cache the tensor-converted norm_meta per FOV to avoid repeated
+        # zattrs reads. Build a shallow per-sample copy (dict structure only,
+        # tensors shared) since we only replace dict entries, not tensor values.
+        if fov_name not in self._norm_meta_cache:
+            self._norm_meta_cache[fov_name] = _read_norm_meta(position)
+        cached = self._norm_meta_cache[fov_name]
+        if cached is not None:
+            raw_norm_meta = {ch: {level: stats for level, stats in ch_meta.items()} for ch, ch_meta in cached.items()}
             # Pre-resolve timepoint_statistics for all channels
             for ch_name, ch_meta in raw_norm_meta.items():
                 if "timepoint_statistics" in ch_meta:
                     tp_stats = ch_meta["timepoint_statistics"].get(str(t))
                     ch_meta["timepoint_statistics"] = tp_stats
+        else:
+            raw_norm_meta = None
+        if raw_norm_meta is not None:
             # Filter to requested channels
             if forced_channel_names is not None and self._channel_mode == "from_index":
                 ch = forced_channel_names[0]

@@ -191,6 +191,7 @@ class MultiExperimentIndex:
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
+        self.tau_range_hours = tau_range_hours
         # max_border_shift: max pixels to shift patch center for border cells.
         # -1 (default) = half the patch size. 0 = no clamping, exclude border cells.
         if max_border_shift < 0:
@@ -239,6 +240,14 @@ class MultiExperimentIndex:
             positive_cell_source=positive_cell_source,
             positive_match_columns=positive_match_columns,
         )
+        if self.valid_anchors.empty and not self.tracks.empty:
+            raise ValueError(
+                f"No valid anchors found from {len(self.tracks)} tracks. "
+                f"positive_cell_source={positive_cell_source!r}, "
+                f"positive_match_columns={positive_match_columns!r}, "
+                f"tau_range_hours={tau_range_hours}. "
+                "Check that tracks have matching positives under these settings."
+            )
 
     # ------- internal methods -------
 
@@ -548,11 +557,16 @@ class MultiExperimentIndex:
         if self.tracks.empty:
             return self.tracks.copy()
 
-        # Non-temporal modes: all tracks are valid anchors
+        # Self mode: all tracks are valid anchors (augmentation creates two views).
         if positive_cell_source == "self":
             return self.tracks.reset_index(drop=True)
+
+        # Non-temporal column-match mode: keep only rows whose match-key
+        # group has ≥2 members so _find_column_match_positive can exclude
+        # the anchor itself and still find a candidate.
         if positive_match_columns is not None and "lineage_id" not in positive_match_columns:
-            return self.tracks.reset_index(drop=True)
+            group_sizes = self.tracks.groupby(list(positive_match_columns)).transform("size")
+            return self.tracks[group_sizes >= 2].reset_index(drop=True)
 
         # Temporal mode: keep only anchors that have a positive at t+tau.
         # For each experiment, check whether (lineage_id, t+tau) exists
@@ -636,15 +650,23 @@ class MultiExperimentIndex:
         clone = object.__new__(MultiExperimentIndex)
         clone.registry = self.registry
         clone.yx_patch_size = self.yx_patch_size
+        clone.tau_range_hours = self.tau_range_hours
         clone._store_cache = self._store_cache
         clone.positions = self.positions
         clone.max_border_shift = self.max_border_shift if max_border_shift < 0 else max_border_shift
         clone.tracks = tracks_subset.reset_index(drop=True)
         clone.valid_anchors = clone._compute_valid_anchors(
-            tau_range_hours=(0.5, 2.0),
+            tau_range_hours=self.tau_range_hours,
             positive_cell_source=positive_cell_source,
             positive_match_columns=positive_match_columns,
         )
+        if clone.valid_anchors.empty and not clone.tracks.empty:
+            raise ValueError(
+                f"No valid anchors found from {len(clone.tracks)} tracks in subset. "
+                f"positive_cell_source={positive_cell_source!r}, "
+                f"positive_match_columns={positive_match_columns!r}. "
+                "Check that the subset has matching positives under these settings."
+            )
         return clone
 
     def summary(self) -> str:

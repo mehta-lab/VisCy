@@ -120,15 +120,14 @@ def _create_zarr_and_tracks(
     tracks_root = tmp_path / f"tracks_{name}"
     n_ch = len(channel_names)
 
+    rng = np.random.default_rng(42)
     with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
         for row, col in wells:
             for fov_idx in range(fovs_per_well):
                 pos = plate.create_position(row, col, str(fov_idx))
-                pos.create_zeros(
-                    "0",
-                    shape=(hcs_dims["n_t"], n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
-                    dtype=np.float32,
-                )
+                shape = (hcs_dims["n_t"], n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"])
+                arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+                arr[:] = rng.standard_normal(shape).astype(np.float32)
                 fov_name = f"{row}/{col}/{fov_idx}"
                 csv_path = tracks_root / fov_name / "tracks.csv"
                 _make_tracks_csv(
@@ -1251,3 +1250,96 @@ class TestParquetPath:
             .sort_index()
         )
         pd.testing.assert_series_equal(legacy_lineage, parquet_lineage, check_dtype=False, check_index_type=False)
+
+
+class TestColumnMatchValidAnchors:
+    """Tests for _compute_valid_anchors with non-lineage column matching."""
+
+    def test_singleton_match_key_excluded(self, two_experiment_setup):
+        """Rows whose match-key group has only 1 member are excluded from valid_anchors."""
+        registry, *_ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+        )
+        # Assign gene_name so that row 0 is a singleton
+        n = len(index.tracks)
+        index.tracks["gene_name"] = ["SINGLETON" if i == 0 else "COMMON" for i in range(n)]
+        va = index._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name"],
+        )
+        assert "SINGLETON" not in va["gene_name"].to_numpy(), (
+            "Singleton match-key group should be excluded from valid_anchors"
+        )
+        assert (va["gene_name"] == "COMMON").all()
+
+    def test_all_singletons_raises(self, two_experiment_setup):
+        """If every match-key group is a singleton, valid_anchors is empty and __init__ raises."""
+        registry, *_ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+        )
+        # Make every row a unique gene_name
+        n = len(index.tracks)
+        index.tracks["gene_name"] = [f"GENE_{i}" for i in range(n)]
+        va = index._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name"],
+        )
+        assert va.empty, "All singletons should produce empty valid_anchors"
+
+    def test_pair_group_survives(self, two_experiment_setup):
+        """A match-key group with exactly 2 members is kept."""
+        registry, *_ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+        )
+        n = len(index.tracks)
+        # First 2 rows share a gene_name, rest are singletons
+        index.tracks["gene_name"] = ["PAIR" if i < 2 else f"GENE_{i}" for i in range(n)]
+        va = index._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name"],
+        )
+        assert len(va) == 2
+        assert (va["gene_name"] == "PAIR").all()
+
+
+class TestEmptyValidAnchorsError:
+    """Test that empty valid_anchors raises early."""
+
+    def test_single_timepoint_temporal_raises(self, tmp_path, hcs_dims):
+        """Temporal mode with single-timepoint data raises ValueError."""
+        hcs_dims_1t = {**hcs_dims, "n_t": 1}
+        zarr_path, tracks_root = _create_zarr_and_tracks(
+            tmp_path,
+            name="single_t",
+            channel_names=_CHANNEL_NAMES_A,
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims_1t,
+            fovs_per_well=1,
+        )
+        cfg = ExperimentEntry(
+            name="single_t",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            perturbation_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
+        with pytest.raises(ValueError, match="No valid anchors found"):
+            MultiExperimentIndex(
+                registry=registry,
+                yx_patch_size=_YX_PATCH,
+                tau_range_hours=(0.5, 2.0),
+            )
