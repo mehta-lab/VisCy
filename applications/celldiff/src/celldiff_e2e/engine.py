@@ -9,7 +9,6 @@ import numpy as np
 import torch
 from lightning.pytorch import LightningModule
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 from torch.optim.lr_scheduler import ConstantLR
 
@@ -17,7 +16,7 @@ from viscy_models import UNetViT3D
 from viscy_utils.log_images import detach_sample, render_images
 
 
-class CellDiffE2E(LightningModule):
+class CELLDiffE2E(LightningModule):
     """End-to-end 3D virtual staining with UNetViT3D.
 
     Parameters
@@ -62,7 +61,6 @@ class CellDiffE2E(LightningModule):
         self._training_step_outputs: list = []
         self._validation_step_outputs: list = []
         self._validation_losses: list[list[Tensor]] = []
-        self._predict_pad: DivisiblePad | None = None
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass.
@@ -181,9 +179,14 @@ class CellDiffE2E(LightningModule):
         """
         source: Tensor = batch["source"]
         original_shape = source.shape[2:]
-        source = self._predict_pad(source)
-
         patch_size = self.model.input_spatial_size  # [D, H, W]
+
+        # Pad to at least patch_size using replicate padding if any dim is too small
+        pad = []
+        for s, p in zip(reversed(source.shape[2:]), reversed(patch_size)):
+            pad.extend([0, max(0, p - s)])
+        if any(p > 0 for p in pad):
+            source = torch.nn.functional.pad(source, pad, mode="replicate")
         overlap = self.predict_overlap
         padded_shape = list(source.shape[2:])
 
@@ -207,9 +210,6 @@ class CellDiffE2E(LightningModule):
 
         prediction = prediction_sum / prediction_count
         return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
-
-    def on_predict_start(self) -> None:
-        self._predict_pad = DivisiblePad(k=self.model.input_spatial_size)
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with WarmupCosine or Constant LR schedule."""

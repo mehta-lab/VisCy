@@ -70,7 +70,10 @@ test = [
 source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/celldiff_e2e" ]
+packages = [ 
+  "src/celldiff_e2e",
+  "src/celldiff", 
+]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

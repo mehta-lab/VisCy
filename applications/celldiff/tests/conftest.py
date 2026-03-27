@@ -28,6 +28,19 @@ tiny_model_config = {
     "patch_size": 4,
 }
 
+# Lightweight CellDiffNet config for fast CPU tests.
+tiny_celldiff_fm_net_config = {
+    "input_spatial_size": [SYNTH_D, SYNTH_H, SYNTH_W],
+    "in_channels": SYNTH_C,
+    "dims": [8, 16],
+    "num_res_block": [1],
+    "hidden_size": 32,
+    "num_heads": 2,
+    "dim_head": 16,
+    "num_hidden_layers": 1,
+    "patch_size": 4,
+}
+
 
 class SyntheticE2EDataset(Dataset):
     """Synthetic dataset returning source/target dict for CellDiffE2E."""

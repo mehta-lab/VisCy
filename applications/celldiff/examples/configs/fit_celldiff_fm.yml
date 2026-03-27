@@ -1,5 +1,5 @@
-# UNetViT3D end-to-end 3D virtual staining — training
-# Usage: python -m celldiff_e2e fit --config fit_unetvit3d.yml
+# CellDiff3DVS flow-matching virtual staining — training
+# Usage: python -m celldiff fit --config fit_celldiff_fm.yml
 seed_everything: 42
 trainer:
   accelerator: gpu
@@ -14,25 +14,23 @@ trainer:
     init_args:
       entity: computational_imaging
       project: dynacell
-      name: PT_UNet_iPSC_Nucl
-      save_dir: pretrain/ipsc/PT_UNet_iPSC_Nucl
+      name: CELLDiff_FM_iPSC_Nucl
+      save_dir: pretrain/ipsc/CELLDiff_FM_iPSC_Nucl
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        monitor: loss/validate
         every_n_epochs: 1
-        save_top_k: 4
+        save_top_k: -1
         save_last: true
 model:
-  class_path: celldiff_e2e.CELLDiffE2E
+  class_path: celldiff.CELLDiff
   init_args:
-    model_config:
+    net_config:
       input_spatial_size: [8, 512, 512]
       in_channels: 1
-      out_channels: 1
       dims: [64, 128, 256, 256]
       num_res_block: [2, 2, 2]
       hidden_size: 512
@@ -42,14 +40,15 @@ model:
       final_dropout: 0.0
       num_hidden_layers: 8
       patch_size: 4
-    loss_function:
-      class_path: viscy_utils.losses.MixedLoss
-      init_args:
-        l1_alpha: 1.0
-        l2_alpha: 1.0
-        ms_dssim_alpha: 1.0
+    transport_config:
+      path_type: Linear
+      prediction: velocity
     lr: 0.0001
     schedule: WarmupCosine
+    num_generate_steps: 100
+    num_log_steps: 10
+    predict_method: sliding_window
+    predict_overlap: [4, 256, 256]
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:

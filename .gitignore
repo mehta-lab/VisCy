@@ -61,12 +61,13 @@ coverage.xml
 # SLURM output files
 slurm-*
 slurm*.out
+slurm_log
+*.slurm
 
 # Lightning logs
 lightning_logs/
 
 # NOTE: uv.lock is NOT ignored - it should be tracked for reproducibility
 
-# slurm output files
-slurm_log
-*.slurm
+# output files
+pretrain/

@@ -37,7 +37,7 @@ def detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int) -> list[li
     for i in range(num_samples):
         row = []
         for img in imgs:
-            patch = img[i].detach().cpu().numpy()
+            patch = img[i].detach().float().cpu().numpy()
             mid_z = patch.shape[1] // 2
             for c in range(n_channels):
                 row.append(patch[c, mid_z])

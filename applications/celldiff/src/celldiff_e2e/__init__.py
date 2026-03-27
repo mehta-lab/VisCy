@@ -1,3 +1,3 @@
-from celldiff_e2e.engine import CellDiffE2E
+from celldiff_e2e.engine import CELLDiffE2E
 
-__all__ = ["CellDiffE2E"]
+__all__ = ["CELLDiffE2E"]

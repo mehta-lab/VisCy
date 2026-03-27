@@ -21,7 +21,7 @@ from viscy_models.cell_diff.modules.transformer import FinalLayer, TransformerBl
 from viscy_models.cell_diff.modules.transport import Sampler, create_transport
 
 
-class CellDiffNet(nn.Module):
+class CELLDiffNet(nn.Module):
     """3D U-Net with ViT bottleneck for flow-matching virtual staining.
 
     Takes a noisy target, a phase contrast conditioning image, and a diffusion
@@ -214,15 +214,15 @@ class CellDiffNet(nn.Module):
         return self.outconv(h)
 
 
-class CellDiff3DVS(nn.Module):
+class CELLDiff3DVS(nn.Module):
     """Flow-matching virtual staining model.
 
-    Wraps a :class:`CellDiffNet` backbone with a flow-matching transport to
+    Wraps a :class:`CELLDiffNet` backbone with a flow-matching transport to
     provide training loss computation and inference (generation) methods.
 
     Parameters
     ----------
-    net : CellDiffNet
+    net : CELLDiffNet
         Backbone network for velocity prediction.
     path_type : str
         Flow path type, e.g. ``"Linear"``.
@@ -238,7 +238,7 @@ class CellDiff3DVS(nn.Module):
 
     def __init__(
         self,
-        net: CellDiffNet,
+        net: CELLDiffNet,
         path_type: str = "Linear",
         prediction: str = "velocity",
         loss_weight: str | None = None,

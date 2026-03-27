@@ -14,9 +14,9 @@ import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from celldiff_e2e.engine import CellDiffE2E
+from celldiff_e2e.engine import CellDiffE2E, CellDiffFlowEngine
 
-from .conftest import SyntheticE2EDataModule, tiny_model_config
+from .conftest import SyntheticE2EDataModule, tiny_celldiff_fm_net_config, tiny_model_config
 
 
 def test_celldiff_e2e_mse_fast_dev_run(tmp_path):
@@ -51,6 +51,38 @@ def test_celldiff_e2e_constant_schedule_fast_dev_run(tmp_path):
     assert trainer.state.status == "finished"
 
 
+def test_celldiff_flow_engine_warmup_cosine_fast_dev_run(tmp_path):
+    """CellDiffFlowEngine + WarmupCosine schedule trains for 1 batch."""
+    seed_everything(42)
+    module = CellDiffFlowEngine(net_config=tiny_celldiff_fm_net_config, schedule="WarmupCosine")
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=SyntheticE2EDataModule())
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
+def test_celldiff_flow_engine_constant_schedule_fast_dev_run(tmp_path):
+    """CellDiffFlowEngine + Constant schedule trains for 1 batch."""
+    seed_everything(42)
+    module = CellDiffFlowEngine(net_config=tiny_celldiff_fm_net_config, schedule="Constant")
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=SyntheticE2EDataModule())
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
 def _extract_class_paths(obj):
     """Recursively extract all class_path values from a parsed YAML dict."""
     paths = []
@@ -73,7 +105,7 @@ def _resolve_class_path(class_path: str):
     return getattr(mod, class_name)
 
 
-@pytest.mark.parametrize("config_name", ["fit_unetvit3d.yml", "predict_unetvit3d.yml"])
+@pytest.mark.parametrize("config_name", ["fit_unetvit3d.yml", "predict_unetvit3d.yml", "fit_celldiff_fm.yml"])
 def test_config_class_paths_resolve(config_name):
     """All class_path entries in example configs resolve to importable classes."""
     configs_dir = Path(__file__).parents[1] / "examples" / "configs"
