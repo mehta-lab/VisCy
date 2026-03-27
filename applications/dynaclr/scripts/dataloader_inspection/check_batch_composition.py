@@ -42,7 +42,7 @@ from dynaclr.data.datamodule import MultiExperimentDataModule
 # %%
 # --- EDIT THESE ---
 CELL_INDEX_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/example_flat.parquet"
-COLLECTION_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/example_cell_index.yaml"
+COLLECTION_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/collections/example_cell_index.yaml"
 
 Z_WINDOW = 1
 YX_PATCH_SIZE = (256, 256)

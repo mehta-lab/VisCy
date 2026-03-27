@@ -84,4 +84,4 @@ With parquet (fast — seconds):
 - **One parquet per collection.** Train/val filtering happens at runtime based
   on `val_experiments`, so one parquet covers all splits.
 - **Store it with the collection.** Keep the parquet next to the collection YAML
-  in `configs/cell_index/` for reproducibility.
+  in `configs/cell_index/` for reproducibility. Collection YAMLs live in `configs/collections/`.
