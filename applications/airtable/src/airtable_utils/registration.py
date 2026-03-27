@@ -47,6 +47,8 @@ class RegisterResult:
     updated: list[dict] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
     channel_names: list[str] = field(default_factory=list)
+    pixel_size_xy_um: float | None = None
+    pixel_size_z_um: float | None = None
 
 
 def parse_position_path(position_path: Path) -> tuple[Path, str]:
@@ -88,6 +90,7 @@ def zarr_fields_for_position(
     pos_name: str,
     channel_names: list[str],
     shape: tuple[int, ...],
+    scale: tuple[float, ...] | None = None,
 ) -> dict:
     """Build Airtable field dict from zarr position data.
 
@@ -101,6 +104,9 @@ def zarr_fields_for_position(
         Channel names from the zarr store.
     shape : tuple[int, ...]
         Array shape ``(T, C, Z, Y, X)``.
+    scale : tuple[float, ...] or None
+        Physical scale ``(T, C, Z, Y, X)`` in micrometers from
+        the zarr coordinate transforms.
 
     Returns
     -------
@@ -112,6 +118,15 @@ def zarr_fields_for_position(
         fields[f"channel_{i}_name"] = ch_name
     for dim_name, dim_val in zip(DIM_NAMES, shape):
         fields[dim_name] = dim_val
+    if scale is not None and len(scale) >= 5:
+        z_um, y_um, x_um = scale[2], scale[3], scale[4]
+        if not (z_um == 1.0 and y_um == 1.0 and x_um == 1.0):
+            if abs(x_um - y_um) > 0.001:
+                logger.warning("X pixel size (%.4f) != Y (%.4f) for %s — using Y", x_um, y_um, pos_name)
+            fields["pixel_size_xy_um"] = y_um
+            fields["pixel_size_z_um"] = z_um
+        else:
+            logger.warning("Scale is (1,1,1) for %s — skipping pixel sizes (likely uncalibrated)", pos_name)
     return fields
 
 
@@ -143,12 +158,11 @@ def derive_channel_marker(
         ch_type = parsed.get("channel_type", "")
 
         if ch_type == "labelfree":
-            result[f"channel_{i}_marker"] = "labelfree"
+            result[f"channel_{i}_marker"] = ch_name
             continue
 
         if ch_type == "virtual_stain":
-            target = ch_name.replace("_prediction", "").replace("_segmentation", "")
-            result[f"channel_{i}_marker"] = f"virtual-stain-{target}"
+            result[f"channel_{i}_marker"] = ch_name
             continue
 
         for entry in marker_entries:
@@ -241,13 +255,17 @@ def format_register_summary(result: RegisterResult, dry_run: bool = False) -> st
         Markdown summary string.
     """
     status = "dry_run" if dry_run else "executed"
+    xy = f"{result.pixel_size_xy_um:.4f}" if result.pixel_size_xy_um is not None else "—"
+    z = f"{result.pixel_size_z_um:.4f}" if result.pixel_size_z_um is not None else "—"
     lines = [
         f"\n## Register Summary — {result.dataset}\n",
-        "| metric | count |",
+        "| metric | value |",
         "|--------|-------|",
         f"| created | {len(result.created)} |",
         f"| updated | {len(result.updated)} |",
         f"| unmatched | {len(result.unmatched)} |",
+        f"| pixel_size_xy_um | {xy} |",
+        f"| pixel_size_z_um | {z} |",
         f"| status | {status} |",
         "",
     ]
@@ -259,6 +277,70 @@ def format_register_summary(result: RegisterResult, dry_run: bool = False) -> st
         if len(result.unmatched) > 20:
             lines.append(f"- ... and {len(result.unmatched) - 20} more")
         lines.append("")
+
+    return "\n".join(lines)
+
+
+# Fields required for a complete flat parquet cell index.
+# "zarr" = written by register, "platemap" = biologist fills in Airtable.
+PARQUET_REQUIRED_FIELDS: list[tuple[str, str]] = [
+    ("data_path", "zarr"),
+    ("tracks_path", "platemap"),
+    ("channel_0_name", "zarr"),
+    ("channel_0_marker", "zarr"),
+    ("pixel_size_xy_um", "zarr"),
+    ("pixel_size_z_um", "zarr"),
+    ("perturbation", "platemap"),
+    ("time_interval_min", "platemap"),
+    ("hours_post_perturbation", "platemap"),
+    ("cell_type", "platemap"),
+]
+
+
+def build_completeness_report(
+    dataset_name: str,
+    records: list[DatasetRecord],
+) -> str:
+    """Check a representative record for missing fields needed by the parquet pipeline.
+
+    Parameters
+    ----------
+    dataset_name : str
+        Name of the dataset.
+    records : list[DatasetRecord]
+        Airtable FOV records for the dataset.
+
+    Returns
+    -------
+    str
+        Markdown report with missing fields and suggested actions.
+    """
+    if not records:
+        return ""
+
+    rec = records[0]
+    missing: list[tuple[str, str]] = []
+    for field_name, source in PARQUET_REQUIRED_FIELDS:
+        val = getattr(rec, field_name, None)
+        if val is None or val == "" or val == []:
+            missing.append((field_name, source))
+
+    if not missing:
+        return f"\n## Parquet Readiness — {dataset_name}\n\nAll required fields populated.\n"
+
+    lines = [
+        f"\n## Parquet Readiness — {dataset_name}\n",
+        f"**{len(missing)} field(s) still needed** before building a flat parquet:\n",
+        "| missing field | source | action |",
+        "|---------------|--------|--------|",
+    ]
+    for field_name, source in missing:
+        if source == "zarr":
+            action = "re-run `register` (should have been filled — check zarr metadata)"
+        else:
+            action = "fill in Airtable platemap or use MCP bulk update"
+        lines.append(f"| `{field_name}` | {source} | {action} |")
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -353,12 +435,21 @@ def register_fovs(
                 MAX_CHANNELS,
             )
 
+        # Read pixel scale from the first position (uniform across plate)
+        first_pos = plate[pos_names[0]]
+        scale = tuple(first_pos.scale) if hasattr(first_pos, "scale") else None
+        if scale is not None and len(scale) >= 5:
+            z_um, y_um = scale[2], scale[3]
+            if not (z_um == 1.0 and y_um == 1.0):
+                result.pixel_size_xy_um = y_um
+                result.pixel_size_z_um = z_um
+
         for pos_name in pos_names:
             well_id, fov = parse_position_name(pos_name)
             pos = plate[pos_name]
             shape = pos.data.shape
 
-            zarr_fields = zarr_fields_for_position(zarr_root, pos_name, result.channel_names, shape)
+            zarr_fields = zarr_fields_for_position(zarr_root, pos_name, result.channel_names, shape, scale=scale)
 
             # Resolve cell_line linked records -> registry entries -> marker
             rec_for_marker = fov_records.get((well_id, fov)) or well_templates.get(well_id)

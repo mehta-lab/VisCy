@@ -64,6 +64,10 @@ class FOVRecord(BaseModel):
         Image height in pixels.
     x_shape : int or None
         Image width in pixels.
+    pixel_size_xy_um : float or None
+        Physical pixel size in the XY plane (micrometers).
+    pixel_size_z_um : float or None
+        Physical pixel size in Z (micrometers).
     """
 
     dataset: str
@@ -89,3 +93,5 @@ class FOVRecord(BaseModel):
     z_shape: int | None = None
     y_shape: int | None = None
     x_shape: int | None = None
+    pixel_size_xy_um: float | None = None
+    pixel_size_z_um: float | None = None

@@ -196,6 +196,8 @@ class DatasetRecord(FOVRecord):
             z_shape=fields.get("z_shape"),
             y_shape=fields.get("y_shape"),
             x_shape=fields.get("x_shape"),
+            pixel_size_xy_um=fields.get("pixel_size_xy_um"),
+            pixel_size_z_um=fields.get("pixel_size_z_um"),
             record_id=record.get("id"),
         )
 

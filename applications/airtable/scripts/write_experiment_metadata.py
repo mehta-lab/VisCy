@@ -32,6 +32,7 @@ from iohub import open_ome_zarr
 
 from airtable_utils.database import AirtableDatasets
 from airtable_utils.registration import (
+    build_completeness_report,
     build_validation_table,
     format_register_summary,
     parse_position_path,
@@ -75,6 +76,10 @@ def register(position_paths: list[Path], dry_run: bool = False, dataset: str | N
     print(f"## Channel Validation — {result.dataset}\n")
     print(validation)
     print()
+
+    fov_records = [r for r in all_records if r.fov]
+    completeness = build_completeness_report(result.dataset, fov_records)
+    print(completeness)
 
 
 # ---------------------------------------------------------------------------
