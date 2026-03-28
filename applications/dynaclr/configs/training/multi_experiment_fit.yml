@@ -55,6 +55,13 @@ trainer:
         save_top_k: 4
         save_last: true
         dirpath: *run_dir
+    - class_path: viscy_utils.callbacks.OnlineEvalCallback
+      init_args:
+        every_n_epochs: 5
+        label_key: marker         # k-NN target (unambiguous across timepoints)
+        k: 20                     # DINO-standard k for k-NN
+        track_id_key: global_track_id
+        timepoint_key: t
   fast_dev_run: false
   max_epochs: 100
   log_every_n_steps: 10

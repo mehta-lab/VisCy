@@ -170,10 +170,12 @@ wheels = [
 name = "airtable-utils"
 source = { editable = "applications/airtable" }
 dependencies = [
+    { name = "click" },
     { name = "iohub" },
     { name = "pandas" },
     { name = "pyairtable" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "viscy-data" },
 ]
 
@@ -184,11 +186,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click" },
     { name = "iohub" },
     { name = "pandas" },
     { name = "pyairtable" },
     { name = "pydantic" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pyyaml" },
     { name = "viscy-data", editable = "packages/viscy-data" },
 ]
 provides-extras = ["dev"]

@@ -23,10 +23,12 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  "click",
   "iohub",
   "pandas",
   "pyairtable",
   "pydantic",
+  "pyyaml",
   "viscy-data",
 ]
 
@@ -34,6 +36,8 @@ optional-dependencies.dev = [ "pytest" ]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
+
+scripts.prepare = "airtable_utils.prepare_cli:main"
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

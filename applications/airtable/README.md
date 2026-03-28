@@ -117,6 +117,69 @@ Writes `channels_metadata` and `experiment_metadata` to each position's `.zattrs
 
 ---
 
+## Dataset Preparation (NFS -> VAST)
+
+The `prepare` CLI automates the full pipeline to rechunk and preprocess a dataset for model training on VAST storage:
+
+1. Validate dataset is registered in Airtable
+2. Discover positions and channels from the NFS zarr
+3. Generate `crop_concat.yml` for `biahub concatenate` (zarr v3 with sharding)
+4. Generate `qc_config.yml` for focus-slice QC
+5. Generate and submit SLURM jobs (concatenation + tracking copy, then QC + preprocessing)
+
+### Usage
+
+```bash
+# Check what exists on NFS/VAST for one or more datasets
+uv run --package airtable-utils \
+    prepare status 2025_01_22_A549_G3BP1_ZIKV_DENV -c applications/airtable/configs/prepare_config.yml
+
+# Run full pipeline (generate configs + submit SLURM jobs)
+uv run --package airtable-utils \
+    prepare run 2025_01_22_A549_G3BP1_ZIKV_DENV -c applications/airtable/configs/prepare_config.yml
+
+# Dry run (generate configs only, no SLURM submission)
+uv run --package airtable-utils \
+    prepare run 2025_01_22_A549_G3BP1_ZIKV_DENV -c applications/airtable/configs/prepare_config.yml --dry-run
+
+# Force overwrite an existing zarr v2 store
+uv run --package airtable-utils \
+    prepare run 2025_01_22_A549_G3BP1_ZIKV_DENV -c applications/airtable/configs/prepare_config.yml --force
+```
+
+### Output Layout
+
+```
+/hpc/projects/organelle_phenotyping/datasets/{dataset_name}/
+  {dataset_name}.zarr       # zarr v3 rechunked (OME-Zarr 0.5)
+  tracking.zarr              # copied from NFS
+  crop_concat.yml            # generated config for biahub
+  qc_config.yml              # generated config for QC
+  01_concatenate.sh          # bash: biahub concatenate (submits SLURM via submitit) + tracking copy
+  02_qc_preprocess.sh        # SLURM: QC + preprocess (parallel, GPU)
+```
+
+### Config File
+
+The reference config is at `configs/prepare_config.yml`. Key settings:
+
+| Section | Key fields | Defaults |
+|---|---|---|
+| `concatenate` | `chunks_czyx`, `shards_ratio`, `conda_env` | `[1,16,256,256]`, `[1,1,8,8,8]`, `biahub` |
+| `qc` | `channel_names`, `NA_det`, `pixel_size`, `device` | `[Phase3D]`, `1.35`, `0.1494`, `cuda` |
+| `preprocess` | `channel_names`, `num_workers`, `block_size` | `-1` (all), `48`, `32` |
+| `slurm.qc_preprocess` | `partition`, `gres`, `constraint` | `gpu`, `gpu:1`, `a100\|a40\|a6000` |
+
+> `biahub concatenate` manages its own SLURM jobs via submitit — no SLURM config needed for that stage.
+
+### Version Validation
+
+The `status` command reports zarr format version (v2 vs v3) and OME-Zarr version for existing VAST stores. The `run` command:
+- **Skips** if the VAST zarr already exists and is zarr v3 + OME 0.5 + preprocessed
+- **Requires `--force`** to overwrite an existing zarr v2 store
+
+---
+
 ## Using with Claude Code (AI-assisted workflows)
 
 This application ships with a **Claude Code skill** that lets you run registration tasks conversationally without flooding the context with large Airtable API responses.
