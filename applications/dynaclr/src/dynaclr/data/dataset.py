@@ -663,9 +663,10 @@ class MultiExperimentTripletDataset(Dataset):
         # Cache the tensor-converted norm_meta per FOV to avoid repeated
         # zattrs reads. Build a shallow per-sample copy (dict structure only,
         # tensors shared) since we only replace dict entries, not tensor values.
-        if fov_name not in self._norm_meta_cache:
-            self._norm_meta_cache[fov_name] = _read_norm_meta(position)
-        cached = self._norm_meta_cache[fov_name]
+        cache_key = (track_row["store_path"], fov_name)
+        if cache_key not in self._norm_meta_cache:
+            self._norm_meta_cache[cache_key] = _read_norm_meta(position)
+        cached = self._norm_meta_cache[cache_key]
         if cached is not None:
             raw_norm_meta = {ch: {level: stats for level, stats in ch_meta.items()} for ch, ch_meta in cached.items()}
             # Pre-resolve timepoint_statistics for all channels
@@ -689,8 +690,14 @@ class MultiExperimentTripletDataset(Dataset):
                     raw_norm_meta = None
             # else: "all" mode — keep full raw_norm_meta
 
+        # Use the configured extraction window as uniform target Z,
+        # not the per-experiment capped range. This ensures all patches
+        # in a mixed-experiment batch rescale to the same Z depth.
+        # The random/center crop in on_after_batch_transfer then crops
+        # to the final z_window.
+        z_target = self.index.registry.z_extraction_window or z_window_size
         target_size = (
-            z_window_size,
+            z_target,
             self.index.yx_patch_size[0],
             self.index.yx_patch_size[1],
         )
