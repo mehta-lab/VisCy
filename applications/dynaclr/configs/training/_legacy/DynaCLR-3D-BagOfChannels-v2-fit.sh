@@ -2,12 +2,12 @@
 
 #SBATCH --job-name=dynaclr_3d_v2
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=2
-#SBATCH --gres=gpu:2
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:h200:4
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=15
-#SBATCH --mem-per-cpu=14G
-#SBATCH --time=1-00:00:00
+#SBATCH --mem-per-cpu=8G
+#SBATCH --time=0-22:00:00
 
 WORKSPACE_DIR=/hpc/mydata/eduardo.hirata/repos/viscy
 CONFIG="${WORKSPACE_DIR}/applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2-fit.yml"

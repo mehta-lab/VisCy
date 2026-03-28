@@ -1,0 +1,10 @@
+# 2D architecture: in_stack_depth=1, stem=[1,4,4]
+model:
+  init_args:
+    encoder:
+      init_args:
+        in_channels: 1
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+    example_input_array_shape: [1, 1, 1, 160, 160]

@@ -22,7 +22,7 @@ seed_everything: 42
 trainer:
   accelerator: gpu
   strategy: ddp
-  devices: 2
+  devices: 4
   num_nodes: 1
   precision: bf16-mixed
   logger:
@@ -101,7 +101,7 @@ data:
     tau_range: [0.5, 2.0]
     tau_decay_rate: 2.0
     # ── Batch sampling ───────────────────────────────────────────────────────
-    batch_size: 128
+    batch_size: 512
     num_workers: 1
     batch_group_by: null
     stratify_by: [perturbation]

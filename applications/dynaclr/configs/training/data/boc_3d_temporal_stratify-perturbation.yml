@@ -1,0 +1,79 @@
+# 3D bag-of-channels | temporal positive pairs | stratify by perturbation
+# =========================================================================
+# One random channel per sample. Positives: same cell lineage at t+tau.
+# Batches balanced by perturbation (infected/uninfected).
+# Normalization: per-timepoint mean/std. Augmentations include Z-axis blur.
+
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    # Patch extraction
+    z_window: 16
+    z_extraction_window: 45
+    z_focus_offset: 0.3
+    yx_patch_size: [192, 192]
+    final_yx_patch_size: [160, 160]
+    # Sampling
+    channels_per_sample: 1
+    positive_cell_source: lookup
+    positive_match_columns: [lineage_id]
+    tau_range: [0.5, 2.0]
+    tau_decay_rate: 2.0
+    stratify_by: [perturbation]
+    batch_group_by: null
+    leaky: 0.0
+    temporal_enrichment: false
+    # Train / val split
+    split_ratio: 0.8
+    val_experiments: []
+    # Misc
+    num_workers: 1
+    channel_dropout_channels: []
+    channel_dropout_prob: 0.0
+    seed: 42
+    cache_pool_bytes: 0
+    # Normalization
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel_0]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+    # Augmentations (3D: sigma_z > 0)
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel_0]
+          prob: 0.8
+          scale_range: [[0.9, 1.1], [0.9, 1.1], [0.9, 1.1]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          gamma: [0.6, 1.6]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          sigma_x: [0.25, 0.50]
+          sigma_y: [0.25, 0.50]
+          sigma_z: [0.0, 0.2]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.1
