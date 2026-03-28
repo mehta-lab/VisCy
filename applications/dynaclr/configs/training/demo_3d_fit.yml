@@ -1,0 +1,219 @@
+# DynaCLR 3D bag-of-channels demo config
+# =======================================
+# 3D contrastive learning with random Z crop for focus-plane invariance.
+# Uses the v2 collection (mantis + dragonfly) on VAST with all raw channels.
+#
+# Usage:
+#   viscy fit -c applications/dynaclr/configs/training/demo_3d_fit.yml
+# Fast dev run:
+#   viscy fit -c applications/dynaclr/configs/training/demo_3d_fit.yml --trainer.fast_dev_run true
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: /hpc/mydata/eduardo.hirata/logs/dynaclr
+      version: demo_3d
+      log_graph: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+  fast_dev_run: true
+  max_epochs: 2
+  log_every_n_steps: 1
+  enable_checkpointing: false
+  enable_model_summary: false
+  inference_mode: true
+  use_distributed_sampler: false
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        in_stack_depth: 16
+        stem_kernel_size: [4, 4, 4]
+        stem_stride: [4, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentLoss
+      init_args:
+        temperature: 0.2
+    lr: 0.00002
+    log_batches_per_epoch: 1
+    log_samples_per_batch: 2
+    example_input_array_shape: [1, 1, 16, 160, 160]
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    # ── Data source ──────────────────────────────────────────────────────────
+    # Provide one of collection_path or cell_index_path.
+    # cell_index_path is faster (skips zarr enumeration at startup).
+    # For production: use the full v2 collection + parquet
+    # collection_path: applications/dynaclr/configs/collections/DynaCLR-3D-BagOfChannels-v2.yml
+    # cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-3D-BagOfChannels-v2.parquet
+    # For demo: single zarr, fast startup
+    collection_path: null
+    cell_index_path: applications/dynaclr/configs/cell_index/example_flat.parquet
+
+    # ── Patch extraction ─────────────────────────────────────────────────────
+    # z_window: model input Z depth (final crop size).
+    z_window: 16
+    # z_extraction_window: Z slices extracted from zarr before random crop.
+    #   null  = same as z_window (no random Z crop, current behavior).
+    #   > z_window = enables random Z crop centered on focus_slice.
+    #     The model sees different focal planes each epoch, learning
+    #     focus-invariant features. Capped per-experiment by z_total.
+    z_extraction_window: 50
+    # z_focus_offset: fraction of extraction window below focus.
+    #   0.5 = symmetric (default).
+    #   0.3 = 30% below, 70% above (cells on coverslip — more volume above focus).
+    z_focus_offset: 0.3
+    # yx_patch_size: YX extraction size from zarr (before crop).
+    yx_patch_size: [192, 192]
+    # final_yx_patch_size: model input YX (after random/center crop).
+    #   The margin (yx_patch_size - final_yx_patch_size) gives random
+    #   XY translation during training.
+    final_yx_patch_size: [160, 160]
+    # channels_per_sample:
+    #   1 = bag-of-channels: randomly pick one channel per sample.
+    #   null = all channels: read all source channels (multi-channel input).
+    #   ["Phase3D", "raw GFP ..."] = fixed: read specific channels by name.
+    channels_per_sample: 1
+
+    # ── Train / val split ────────────────────────────────────────────────────
+    # split_ratio: FOV-level train/val split (0.8 = 80% train).
+    #   Ignored when val_experiments is non-empty.
+    split_ratio: 0.8
+    # val_experiments: hold out entire experiments for validation.
+    #   Empty list = use FOV-level split instead.
+    val_experiments: []
+
+    # ── Positive pair sampling ───────────────────────────────────────────────
+    # positive_cell_source:
+    #   "lookup" = find positive from tracks (temporal or column-match).
+    #   "self"   = SimCLR-style (same crop, augmentation creates two views).
+    positive_cell_source: lookup
+    # positive_match_columns: columns defining "same identity" for lookup.
+    #   ["lineage_id"] = temporal: same cell at t+tau.
+    #   ["gene_name", "reporter"] = perturbation: same treatment, different cell.
+    positive_match_columns: [lineage_id]
+    # positive_channel_source:
+    #   "same" = anchor and positive share channel selection.
+    #   "any"  = positive draws channel independently (bag-of-channels only).
+    # positive_channel_source: same
+    # tau_range: (min_hours, max_hours) for temporal positive offset.
+    tau_range: [0.5, 2.0]
+    # tau_decay_rate: exponential decay rate — higher prefers shorter taus.
+    tau_decay_rate: 2.0
+
+    # ── Batch sampling ───────────────────────────────────────────────────────
+    batch_size: 8
+    num_workers: 1
+    # batch_group_by: group batches by column(s).
+    #   null = mixed batches (all experiments in one pool).
+    #   "experiment" = one experiment per batch.
+    #   ["marker", "source_channel"] = compound grouping.
+    batch_group_by: null
+    # stratify_by: balance representation within each batch.
+    #   ["perturbation", "marker"] = ensure both conditions and markers appear.
+    stratify_by: [perturbation, marker]
+    # leaky: fraction of cross-group samples when batch_group_by is set.
+    #   Only meaningful with batch_group_by. 0.0 = strict grouping.
+    leaky: 0.0
+    # temporal_enrichment: concentrate samples around a focal HPI.
+    #   Requires "hours_post_perturbation" column in the cell index.
+    temporal_enrichment: false
+    # temporal_window_hours: half-width of focal window (used with temporal_enrichment).
+    # temporal_window_hours: 2.0
+    # temporal_global_fraction: fraction sampled globally (used with temporal_enrichment).
+    # temporal_global_fraction: 0.3
+    # group_weights: per-group sampling weights (used with batch_group_by).
+    #   null = proportional to group size.
+    # group_weights: null
+    seed: 42
+
+    # ── Pixel size normalization ─────────────────────────────────────────────
+    # Required for multi-microscope training (different pixel sizes).
+    # Rescales patches to a common physical scale before the model sees them.
+    # Set to null for single-microscope training.
+    # reference_pixel_size_xy_um: 0.1494
+    # reference_pixel_size_z_um: 0.174
+
+    # ── Focus channel ────────────────────────────────────────────────────────
+    # Channel name for focus_slice QC lookup in zarr zattrs.
+    # null = use first channel in each experiment.
+    # focus_channel: Phase3D
+
+    # ── Label encoding (optional) ────────────────────────────────────────────
+    # label_columns: map batch key → dataframe column for classification heads.
+    #   e.g. {"gene_label": "condition"} encodes integer class IDs.
+    # label_columns: null
+
+    # ── Border clamping ──────────────────────────────────────────────────────
+    # max_border_shift: controls how cells near FOV edges are handled.
+    #   -1 = clamp inward by up to half patch size (keeps most border cells).
+    #    0 = exclude any cell whose patch extends beyond FOV.
+    #   >0 = clamp inward but drop cells requiring shift > threshold.
+    # max_border_shift: -1
+
+    # ── Augmentation pipeline ────────────────────────────────────────────────
+    # All transforms must be Batched* variants from viscy_transforms.
+    # Applied on GPU after batch transfer (on_after_batch_transfer).
+    channel_dropout_channels: []
+    channel_dropout_prob: 0.0
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel_0]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel_0]
+          prob: 0.8
+          scale_range: [[0.8, 1.3], [0.8, 1.3], [0.8, 1.3]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          gamma: [0.6, 1.6]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          sigma_x: [0.25, 0.50]
+          sigma_y: [0.25, 0.50]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.1
+    cache_pool_bytes: 0

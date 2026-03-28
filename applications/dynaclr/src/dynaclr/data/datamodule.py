@@ -26,6 +26,7 @@ from dynaclr.data.index import MultiExperimentIndex
 from viscy_data._utils import BatchedCenterSpatialCropd, _transform_channel_wise
 from viscy_data.channel_dropout import ChannelDropout
 from viscy_data.sampler import FlexibleBatchSampler
+from viscy_transforms import BatchedRandSpatialCropd
 
 _logger = logging.getLogger(__name__)
 
@@ -54,9 +55,16 @@ class MultiExperimentDataModule(LightningDataModule):
         built directly from parquet + zarr metadata via
         ExperimentRegistry.from_cell_index().
     z_window : int
-        Number of Z slices the model consumes.  Per-experiment Z
-        centering is resolved from ``focus_slice`` zattrs or explicit
-        ``z_range`` in the experiment config.
+        Number of Z slices the model consumes (final crop size).
+    z_extraction_window : int or None
+        Number of Z slices to extract from zarr before cropping.
+        Must be >= ``z_window``. When None (default), falls back to
+        ``z_window`` (deterministic Z, no random crop). When larger,
+        enables random Z cropping during training for focus-plane
+        invariance. Works for both 2D (``z_window=1``) and 3D.
+    z_focus_offset : float
+        Fraction of extraction window placed below focus plane.
+        0.5 = symmetric (default). 0.3 = 30% below, 70% above.
     yx_patch_size : tuple[int, int]
         Initial YX patch size for cell patch extraction.
     final_yx_patch_size : tuple[int, int]
@@ -154,8 +162,10 @@ class MultiExperimentDataModule(LightningDataModule):
         self,
         collection_path: str | None,
         z_window: int,
-        yx_patch_size: tuple[int, int],
-        final_yx_patch_size: tuple[int, int],
+        z_extraction_window: int | None = None,
+        z_focus_offset: float = 0.5,
+        yx_patch_size: tuple[int, int] = (192, 192),
+        final_yx_patch_size: tuple[int, int] = (160, 160),
         val_experiments: list[str] | None = None,
         split_ratio: float = 0.8,
         tau_range: tuple[float, float] = (0.5, 2.0),
@@ -200,6 +210,8 @@ class MultiExperimentDataModule(LightningDataModule):
         # Core parameters
         self.collection_path = collection_path
         self.z_window = z_window
+        self.z_extraction_window = z_extraction_window
+        self.z_focus_offset = z_focus_offset
         self.yx_patch_size = yx_patch_size
         self.final_yx_patch_size = final_yx_patch_size
         self.val_experiments = val_experiments if val_experiments is not None else []
@@ -283,6 +295,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 registry = ExperimentRegistry.from_collection(
                     self.collection_path,
                     z_window=self.z_window,
+                    z_extraction_window=self.z_extraction_window,
+                    z_focus_offset=self.z_focus_offset,
                     focus_channel=getattr(self, "focus_channel", None),
                     reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
                     reference_pixel_size_z_um=self.reference_pixel_size_z_um,
@@ -291,6 +305,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 registry = ExperimentRegistry.from_cell_index(
                     self.cell_index_path,
                     z_window=self.z_window,
+                    z_extraction_window=self.z_extraction_window,
+                    z_focus_offset=self.z_focus_offset,
                     focus_channel=getattr(self, "focus_channel", None),
                     reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
                     reference_pixel_size_z_um=self.reference_pixel_size_z_um,
@@ -311,8 +327,12 @@ class MultiExperimentDataModule(LightningDataModule):
                 self._channel_names = list(self.channels_per_sample)
 
             # Build transform pipelines
-            self._augmentation_transform = Compose(self.normalizations + self.augmentations + [self._final_crop()])
-            self._no_augmentation_transform = Compose(self.normalizations + [self._final_crop()])
+            # Training: random crop (enables Z-focus invariance when z_extraction_window > z_window)
+            # Validation: deterministic center crop
+            self._augmentation_transform = Compose(
+                self.normalizations + self.augmentations + [self._train_final_crop()]
+            )
+            self._no_augmentation_transform = Compose(self.normalizations + [self._val_final_crop()])
 
             _logger.info(
                 "MultiExperimentDataModule setup: %d train anchors, %d val anchors",
@@ -524,8 +544,15 @@ class MultiExperimentDataModule(LightningDataModule):
     # Transforms
     # ------------------------------------------------------------------
 
-    def _final_crop(self) -> BatchedCenterSpatialCropd:
-        """Create center crop from initial to final patch size."""
+    def _train_final_crop(self) -> BatchedRandSpatialCropd:
+        """Random crop from extraction size to model input size (training)."""
+        return BatchedRandSpatialCropd(
+            keys=self._channel_names,
+            roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),
+        )
+
+    def _val_final_crop(self) -> BatchedCenterSpatialCropd:
+        """Center crop from extraction size to model input size (validation)."""
         return BatchedCenterSpatialCropd(
             keys=self._channel_names,
             roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),

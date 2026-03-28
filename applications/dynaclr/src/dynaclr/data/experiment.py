@@ -46,7 +46,17 @@ class ExperimentRegistry:
     collection : Collection
         Validated collection of experiment configurations.
     z_window : int or None
-        Number of Z slices the model consumes.
+        Number of Z slices the model consumes (final crop size).
+    z_extraction_window : int or None
+        Number of Z slices to extract from zarr (before random crop).
+        Must be >= ``z_window``. When None, falls back to ``z_window``
+        (no random Z crop). When larger than ``z_window``, enables
+        random Z cropping during training for focus-plane invariance.
+    z_focus_offset : float
+        Fraction of the extraction window placed below the focus plane.
+        0.5 = symmetric (default). 0.3 = 30% below, 70% above focus
+        (useful for cells on coverslip where the interesting volume is
+        above the focal plane).
     focus_channel : str or None
         Channel name to look up ``focus_slice`` metadata in plate zattrs.
     reference_pixel_size_xy_um : float or None
@@ -57,6 +67,8 @@ class ExperimentRegistry:
 
     collection: Collection
     z_window: int | None = None
+    z_extraction_window: int | None = None
+    z_focus_offset: float = 0.5
     focus_channel: str | None = None
     reference_pixel_size_xy_um: float | None = None
     reference_pixel_size_z_um: float | None = None
@@ -147,25 +159,27 @@ class ExperimentRegistry:
     # ------------------------------------------------------------------
 
     def _resolve_z_ranges(self) -> dict[str, tuple[int, int]]:
-        """Resolve per-experiment Z ranges.
+        """Resolve per-experiment Z extraction ranges.
 
-        For experiments with explicit ``z_range`` in zattrs, use it directly.
-        Otherwise read ``focus_slice`` metadata from the plate-level zattrs
-        and center a window of ``self.z_window`` slices around ``z_focus_mean``.
+        When ``z_extraction_window`` is set, extracts a larger Z range
+        centered on ``z_focus_mean`` (capped by the available Z depth).
+        The random crop from extraction size to ``z_window`` happens later
+        in ``on_after_batch_transfer``.
+
+        Falls back to ``z_window`` when ``z_extraction_window`` is None.
         """
         experiments = self.collection.experiments
         z_ranges: dict[str, tuple[int, int]] = {}
+        z_extract = self.z_extraction_window or self.z_window
 
         for exp in experiments:
-            # Auto-resolve from focus_slice zattrs
             focus_ch = self.focus_channel or (exp.channels[0].name if exp.channels else None)
 
             with open_ome_zarr(exp.data_path, mode="r") as plate:
                 first_pos = next(iter(plate.positions()))[1]
                 z_total = first_pos["0"].shape[2]
 
-                if self.z_window is None:
-                    # Use full Z
+                if z_extract is None:
                     z_ranges[exp.name] = (0, z_total)
                     continue
 
@@ -175,36 +189,38 @@ class ExperimentRegistry:
                 z_focus_mean = ds_stats.get("z_focus_mean")
 
             if z_focus_mean is None:
-                # Default to center of Z stack
                 z_center = z_total // 2
             else:
                 z_center = int(round(z_focus_mean))
 
-            z_half = self.z_window // 2
-            z_start = max(0, z_center - z_half)
-            z_end = min(z_total, z_start + self.z_window)
-            z_start = max(0, z_end - self.z_window)
+            # Cap extraction window by available Z depth.
+            # z_focus_offset controls asymmetry: 0.5 = symmetric,
+            # 0.3 = 30% below focus, 70% above (cells on coverslip).
+            effective_extract = min(z_extract, z_total)
+            z_below = int(effective_extract * self.z_focus_offset)
+            z_start = max(0, z_center - z_below)
+            z_end = min(z_total, z_start + effective_extract)
+            z_start = max(0, z_end - effective_extract)
 
             z_ranges[exp.name] = (z_start, z_end)
             _logger.info(
-                "Experiment '%s': z_range=(%d, %d), z_total=%d, z_window=%d",
+                "Experiment '%s': z_range=(%d, %d), z_total=%d, z_extraction_window=%d",
                 exp.name,
                 z_start,
                 z_end,
                 z_total,
-                self.z_window,
+                effective_extract,
             )
 
-        # Validate all z windows have the same size
-        if z_ranges:
-            window_sizes = {name: r[1] - r[0] for name, r in z_ranges.items()}
-            unique_sizes = set(window_sizes.values())
-            if len(unique_sizes) > 1:
-                detail = ", ".join(f"'{n}': {s}" for n, s in window_sizes.items())
-                raise ValueError(
-                    f"All experiments must have the same z_window size, but found: {detail}. "
-                    f"Adjust z_range values or ensure consistent z_window."
-                )
+        # Validate: all extraction windows must be >= z_window
+        if self.z_window is not None and z_ranges:
+            for name, (z_s, z_e) in z_ranges.items():
+                if z_e - z_s < self.z_window:
+                    raise ValueError(
+                        f"Experiment '{name}': extraction range ({z_e - z_s}) "
+                        f"< z_window ({self.z_window}). Increase z_extraction_window "
+                        f"or reduce z_window."
+                    )
 
         return z_ranges
 
@@ -246,6 +262,8 @@ class ExperimentRegistry:
         cls,
         path: str | Path,
         z_window: int | None = None,
+        z_extraction_window: int | None = None,
+        z_focus_offset: float = 0.5,
         focus_channel: str | None = None,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
@@ -257,7 +275,11 @@ class ExperimentRegistry:
         path : str | Path
             Path to the collection YAML.
         z_window : int or None
-            Number of Z slices the model consumes.
+            Number of Z slices the model consumes (final crop size).
+        z_extraction_window : int or None
+            Z slices to extract from zarr before random crop.
+        z_focus_offset : float
+            Fraction of extraction window below focus. 0.5 = symmetric.
         focus_channel : str or None
             Channel name for ``focus_slice`` lookup.
         reference_pixel_size_xy_um : float or None
@@ -274,6 +296,8 @@ class ExperimentRegistry:
         return cls(
             collection=collection,
             z_window=z_window,
+            z_extraction_window=z_extraction_window,
+            z_focus_offset=z_focus_offset,
             focus_channel=focus_channel,
             reference_pixel_size_xy_um=reference_pixel_size_xy_um,
             reference_pixel_size_z_um=reference_pixel_size_z_um,
@@ -284,6 +308,8 @@ class ExperimentRegistry:
         cls,
         cell_index_path: str | Path,
         z_window: int | None = None,
+        z_extraction_window: int | None = None,
+        z_focus_offset: float = 0.5,
         focus_channel: str | None = None,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
@@ -299,7 +325,11 @@ class ExperimentRegistry:
         cell_index_path : str | Path
             Path to the cell index parquet.
         z_window : int or None
-            Number of Z slices the model consumes.
+            Number of Z slices the model consumes (final crop size).
+        z_extraction_window : int or None
+            Z slices to extract from zarr before random crop.
+        z_focus_offset : float
+            Fraction of extraction window below focus. 0.5 = symmetric.
         focus_channel : str or None
             Channel name for ``focus_slice`` lookup.
         reference_pixel_size_xy_um : float or None
@@ -426,6 +456,8 @@ class ExperimentRegistry:
         return cls(
             collection=collection,
             z_window=z_window,
+            z_extraction_window=z_extraction_window,
+            z_focus_offset=z_focus_offset,
             focus_channel=focus_channel,
             reference_pixel_size_xy_um=reference_pixel_size_xy_um,
             reference_pixel_size_z_um=reference_pixel_size_z_um,
@@ -455,6 +487,8 @@ class ExperimentRegistry:
         return ExperimentRegistry(
             collection=subset_collection,
             z_window=self.z_window,
+            z_extraction_window=self.z_extraction_window,
+            z_focus_offset=self.z_focus_offset,
             focus_channel=self.focus_channel,
             reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
             reference_pixel_size_z_um=self.reference_pixel_size_z_um,
