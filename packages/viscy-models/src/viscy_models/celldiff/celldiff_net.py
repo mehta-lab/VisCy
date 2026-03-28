@@ -9,8 +9,6 @@ The flow-matching training wrapper (``CELLDiff3DVS``) belongs in the
 application layer and is not part of this package.
 """
 
-import math
-
 import torch
 import torch.nn as nn
 
@@ -118,11 +116,23 @@ class CELLDiffNet(nn.Module):
 
         n_down = len(num_res_block)
         latent_size = input_spatial_size[:1] + [s // (2**n_down) for s in input_spatial_size[1:]]
+
+        dim_names = ["D", "H", "W"]
+        for dim_val, name, orig in zip(latent_size, dim_names, input_spatial_size):
+            if dim_val % patch_size != 0:
+                raise ValueError(
+                    f"Latent {name} dimension {dim_val} (from input {name}={orig}) "
+                    f"is not divisible by patch_size={patch_size}. "
+                    f"Each spatial dimension after {n_down} encoder downsamples "
+                    f"(stride (1,2,2)) must be divisible by patch_size."
+                )
+            if dim_val == 0:
+                raise ValueError(
+                    f"Latent {name} dimension is 0 (from input {name}={orig}). "
+                    f"input_spatial_size is too small for {n_down} downsamples."
+                )
+
         self.latent_grid_size = [s // patch_size for s in latent_size]
-        assert math.prod(self.latent_grid_size) > 0, (
-            f"latent_grid_size {self.latent_grid_size} contains a zero; "
-            "check that input_spatial_size is divisible by 2^n_down * patch_size"
-        )
 
         img_pos_embed = (
             torch.from_numpy(get_3d_sincos_pos_embed(hidden_size, self.latent_grid_size)).float().unsqueeze(0)
@@ -196,6 +206,8 @@ class CELLDiffNet(nn.Module):
             raise ValueError(
                 f"cond spatial size {list(cond.shape[2:])} does not match expected {self.input_spatial_size}"
             )
+        if cond.shape[1] != 1:
+            raise ValueError(f"cond must have 1 channel, got {cond.shape[1]}")
 
         time_embeds = self.t_embedding(t)
         h = self.inconv(x) + self.cond_inconv(cond)

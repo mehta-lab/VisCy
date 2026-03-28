@@ -12,7 +12,7 @@ def get_3d_sincos_pos_embed(
     grid_size: list[int],
     cls_token: bool = False,
     extra_tokens: int = 0,
-) -> NDArray[np.float32]:
+) -> NDArray[np.float64]:
     """Generate 3D sinusoidal positional embeddings.
 
     Parameters
@@ -28,7 +28,7 @@ def get_3d_sincos_pos_embed(
 
     Returns
     -------
-    NDArray[np.float32]
+    NDArray[np.float64]
         Positional embeddings of shape ``(D*H*W, embed_dim)``
         or ``(extra_tokens + D*H*W, embed_dim)`` if cls_token is True.
     """
@@ -45,7 +45,7 @@ def get_3d_sincos_pos_embed(
     return pos_embed
 
 
-def get_3d_sincos_pos_embed_from_grid(embed_dim: int, grid: NDArray[np.float32]) -> NDArray[np.float32]:
+def get_3d_sincos_pos_embed_from_grid(embed_dim: int, grid: NDArray[np.float32]) -> NDArray[np.float64]:
     """Generate 3D sinusoidal embeddings from a pre-built meshgrid.
 
     Parameters
@@ -57,7 +57,7 @@ def get_3d_sincos_pos_embed_from_grid(embed_dim: int, grid: NDArray[np.float32])
 
     Returns
     -------
-    NDArray[np.float32]
+    NDArray[np.float64]
         Embeddings of shape ``(D*H*W, embed_dim)``.
     """
     assert embed_dim % 8 == 0

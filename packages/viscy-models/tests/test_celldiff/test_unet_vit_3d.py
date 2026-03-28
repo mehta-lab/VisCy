@@ -40,3 +40,18 @@ def test_no_z_downsample(small_config):
         x = torch.randn(1, 1, z, 64, 64)
         y = model(x)
         assert y.shape[2] == z, f"Z mismatch: input {z}, output {y.shape[2]}"
+
+
+def test_wrong_spatial_raises(small_config):
+    """Forward rejects input with wrong spatial dimensions."""
+    model = UNetViT3D(in_channels=1, out_channels=1, **small_config)
+    x = torch.randn(1, 1, 8, 32, 32)  # expected 8,64,64
+    with pytest.raises(ValueError, match="does not match expected"):
+        model(x)
+
+
+def test_indivisible_patch_size_raises(small_config):
+    """Constructor rejects spatial sizes not divisible by patch_size after downsampling."""
+    # D=10: after 2 downsamples at stride (1,2,2), latent D=10, not divisible by patch_size=4
+    with pytest.raises(ValueError, match="not divisible by patch_size"):
+        UNetViT3D(**{**small_config, "input_spatial_size": [10, 64, 64]})
