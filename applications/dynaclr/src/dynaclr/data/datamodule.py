@@ -204,6 +204,7 @@ class MultiExperimentDataModule(LightningDataModule):
         cross_scope_fraction: float = 0.0,
         hpi_window: float = 1.0,
         max_border_shift: int = -1,
+        shuffle_val: bool = False,
     ) -> None:
         super().__init__()
 
@@ -259,6 +260,7 @@ class MultiExperimentDataModule(LightningDataModule):
         self.cross_scope_fraction = cross_scope_fraction
         self.hpi_window = hpi_window
         self.max_border_shift = max_border_shift
+        self.shuffle_val = shuffle_val
 
         # Create ChannelDropout module
         self.channel_dropout = ChannelDropout(
@@ -527,7 +529,7 @@ class MultiExperimentDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> ThreadDataLoader | None:
-        """Return validation data loader (deterministic, no FlexibleBatchSampler)."""
+        """Return validation data loader."""
         if self.val_dataset is None:
             return None
         return ThreadDataLoader(
@@ -535,7 +537,7 @@ class MultiExperimentDataModule(LightningDataModule):
             use_thread_workers=True,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False,
+            shuffle=self.shuffle_val,
             drop_last=False,
             collate_fn=lambda x: x,
         )

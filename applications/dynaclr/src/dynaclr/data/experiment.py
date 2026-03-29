@@ -99,9 +99,9 @@ class ExperimentRegistry:
         # Per-experiment validations
         for exp in experiments:
             # 4. Negative interval
-            if exp.interval_minutes <= 0:
+            if exp.interval_minutes < 0:
                 raise ValueError(
-                    f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
+                    f"Experiment '{exp.name}': interval_minutes must be non-negative, got {exp.interval_minutes}."
                 )
 
             # 5. Empty perturbation_wells

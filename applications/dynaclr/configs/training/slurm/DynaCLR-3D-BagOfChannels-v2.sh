@@ -17,7 +17,8 @@
 #SBATCH --job-name=dynaclr_3d_v2
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
-#SBATCH --gres=gpu:h200:4
+#SBATCH --gres=gpu:4
+#SBATCH --constraint="h100|h200"
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=15
 #SBATCH --mem-per-cpu=8G

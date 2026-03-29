@@ -30,6 +30,10 @@ data:
     channel_dropout_prob: 0.0
     seed: 42
     cache_pool_bytes: 0
+    # shuffle_val: randomize val order each epoch. Use with
+    # trainer.limit_val_batches for large datasets (e.g. OPS 14M cells)
+    # so each epoch evaluates a different random subset.
+    # shuffle_val: true
     # Normalization
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
