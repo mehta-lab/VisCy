@@ -17,8 +17,9 @@
 #SBATCH --time=0-22:00:00
 
 # ── Run identity ──────────────────────────────────────────────────────
-export PROJECT="dynaclr"
+export PROJECT="OPS"
 export RUN_NAME="OPS-1000genes-lite-CosineClassifier"
+export EXTRA_ARGS="--trainer.logger.init_args.project=OPS-1000genes-lite-CosineClassifier"
 export CONFIGS="applications/dynaclr/configs/training/OPS-1000genes-lite.yml"
 
 # ── Resume (uncomment to continue from checkpoint) ────────────────────

@@ -74,7 +74,6 @@ srun uv run --project "$WORKSPACE_DIR" viscy fit \
   --trainer.logger.init_args.project="${PROJECT}" \
   --trainer.logger.init_args.name="${RUN_NAME}" \
   --trainer.logger.init_args.save_dir="${RUN_DIR}" \
-  "--trainer.callbacks[1].init_args.dirpath=${RUN_DIR}/checkpoints" \
   ${CKPT_FLAG} \
   ${WANDB_ID_FLAG} \
   ${EXTRA_ARGS}

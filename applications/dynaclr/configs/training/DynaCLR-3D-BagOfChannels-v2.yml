@@ -24,6 +24,12 @@ trainer:
   enable_model_summary: false
   inference_mode: true
   use_distributed_sampler: false
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      entity: computational_imaging
+      project: DynaCLR-3D-BagOfChannels-v2
+      name: unnamed-run
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:

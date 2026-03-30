@@ -81,7 +81,7 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: /hpc/projects/organelle_phenotyping/datasets/ops/training_labels_1000genes_lite_valid.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/datasets/ops/training_labels_1000genes_lite_v2_valid.parquet
     z_window: 1
     yx_patch_size: [224, 224]
     final_yx_patch_size: [128, 128]
