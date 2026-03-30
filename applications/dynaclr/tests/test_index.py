@@ -370,7 +370,9 @@ class TestBorderClamping:
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32)
+            shape = (1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"])
+            arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+            arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
         # Create CSV with cell at exact edge
         csv_path = tracks_root / "A" / "1" / "0" / "tracks.csv"
@@ -446,11 +448,9 @@ def _create_zarr_and_custom_tracks(
 
     with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
         pos = plate.create_position(well[0], well[1], "0")
-        pos.create_zeros(
-            "0",
-            shape=(n_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
-            dtype=np.float32,
-        )
+        shape = (n_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"])
+        arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+        arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
     fov_name = f"{well[0]}/{well[1]}/0"
     csv_path = tracks_root / fov_name / "tracks.csv"
@@ -668,7 +668,9 @@ class TestValidAnchors:
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32)
+            shape = (1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"])
+            arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+            arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
         cfg = ExperimentEntry(
             name="empty_exp",

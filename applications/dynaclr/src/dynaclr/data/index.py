@@ -222,7 +222,7 @@ class MultiExperimentIndex:
             positions, tracks = self._resolve_positions_and_dims(tracks)
             self.positions = positions
             # lineage_id already present from build step — skip _reconstruct_lineage
-            # Skip _filter_empty_frames: parquet is curated upstream.
+            tracks = self._filter_empty_frames(tracks)
         else:
             all_tracks = self._load_all_experiments(
                 include_wells=include_wells, exclude_fovs=all_exclude_fovs, num_workers=num_workers
