@@ -326,6 +326,15 @@ class MultiExperimentIndex:
         ``channel_name``.
         """
         tracks = tracks.rename(columns={"fov": "fov_name", "well": "well_name"})
+        # Parquet stores fov as just the position index (e.g. "0");
+        # reconstruct the full position path (e.g. "A/1/0") to match
+        # the CSV path and exclude_fovs format.
+        if "fov_name" in tracks.columns and "well_name" in tracks.columns:
+            needs_prefix = ~tracks["fov_name"].str.contains("/")
+            if needs_prefix.any():
+                tracks.loc[needs_prefix, "fov_name"] = (
+                    tracks.loc[needs_prefix, "well_name"] + "/" + tracks.loc[needs_prefix, "fov_name"]
+                )
         if "microscope" not in tracks.columns:
             tracks["microscope"] = ""
         return tracks

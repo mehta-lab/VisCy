@@ -909,7 +909,7 @@ class TestParquetPath:
     """Tests for loading MultiExperimentIndex from a pre-built parquet."""
 
     def test_parquet_all_observations_present(self, two_experiment_setup, tmp_path):
-        """Parquet path yields same row count as legacy path."""
+        """Parquet path yields one row per (cell, timepoint, channel)."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -918,8 +918,8 @@ class TestParquetPath:
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
-        # 2 experiments * 2 wells * 2 FOVs * 5 tracks * 10 timepoints = 400
-        assert len(index.tracks) == 400
+        # 2 experiments * 2 wells * 2 FOVs * 5 tracks * 10 timepoints * 2 channels = 800
+        assert len(index.tracks) == 800
 
     def test_parquet_column_alignment(self, two_experiment_setup, tmp_path):
         """Parquet columns are renamed: fov_name, well_name, channel_name."""
@@ -937,7 +937,6 @@ class TestParquetPath:
         # Original parquet names should be gone
         assert "fov" not in index.tracks.columns
         assert "well" not in index.tracks.columns
-        assert "channel_name" not in index.tracks.columns
 
     def test_parquet_include_wells(self, two_experiment_setup, tmp_path):
         """include_wells filters correctly with parquet path."""
@@ -951,7 +950,8 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert set(index.tracks["well_name"].unique()) == {"A/1"}
-        assert len(index.tracks) == 200
+        # 2 experiments * 1 well * 2 FOVs * 5 tracks * 10 timepoints * 2 channels = 400
+        assert len(index.tracks) == 400
 
     def test_parquet_exclude_fovs(self, two_experiment_setup, tmp_path):
         """exclude_fovs removes specified FOVs with parquet path."""
@@ -965,7 +965,8 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert "A/1/0" not in index.tracks["fov_name"].to_numpy()
-        assert len(index.tracks) == 300
+        # (800 total - 2 experiments * 1 FOV * 5 tracks * 10 timepoints * 2 channels) = 600
+        assert len(index.tracks) == 600
 
     def test_parquet_train_val_split(self, two_experiment_setup, tmp_path):
         """Same parquet, two registries → correct experiment filtering."""
@@ -980,7 +981,8 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert set(train_index.tracks["experiment"].unique()) == {"exp_a"}
-        assert len(train_index.tracks) == 200
+        # 1 experiment * 2 wells * 2 FOVs * 5 tracks * 10 timepoints * 2 channels = 400
+        assert len(train_index.tracks) == 400
 
         # Val: only exp_b
         val_registry = ExperimentRegistry(collection=_make_collection([cfg_b]))
@@ -990,10 +992,10 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert set(val_index.tracks["experiment"].unique()) == {"exp_b"}
-        assert len(val_index.tracks) == 200
+        assert len(val_index.tracks) == 400
 
     def test_parquet_valid_anchors_count(self, two_experiment_setup, tmp_path):
-        """valid_anchors count matches legacy path."""
+        """Flat parquet valid_anchors = 2x legacy (one row per channel)."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -1008,7 +1010,8 @@ class TestParquetPath:
             tau_range_hours=(0.5, 1.5),
             cell_index_path=parquet_path,
         )
-        assert len(parquet_index.valid_anchors) == len(legacy_index.valid_anchors)
+        n_channels = 2  # _CHANNEL_NAMES_A / _CHANNEL_NAMES_B each have 2 channels
+        assert len(parquet_index.valid_anchors) == len(legacy_index.valid_anchors) * n_channels
 
     def test_parquet_positions_resolved(self, two_experiment_setup, tmp_path):
         """position column contains iohub Position objects."""
