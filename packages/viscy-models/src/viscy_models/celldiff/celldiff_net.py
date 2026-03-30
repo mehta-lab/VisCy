@@ -95,21 +95,21 @@ class CELLDiffNet(UNet3DBase):
         )
         self.input_spatial_size = input_spatial_size
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor, t: torch.Tensor) -> Tensor:
+    def forward(self, x: Tensor, cond: Tensor, t: Tensor) -> Tensor:
         """Predict velocity field for flow-matching.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Tensor
             Noisy target volume of shape ``(B, in_channels, D, H, W)``.
-        cond : torch.Tensor
+        cond : Tensor
             Phase contrast conditioning of shape ``(B, 1, D, H, W)``.
-        t : torch.Tensor
+        t : Tensor
             Diffusion timesteps of shape ``(B,)``.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Predicted velocity field of shape ``(B, in_channels, D, H, W)``.
         """
         if x.shape[2:] != torch.Size(self.input_spatial_size):

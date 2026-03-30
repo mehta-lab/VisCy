@@ -92,18 +92,18 @@ class UNetViT3D(UNet3DBase):
         )
         self.input_spatial_size = input_spatial_size
 
-    def forward(self, x: torch.Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         """Run end-to-end virtual staining prediction.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Tensor
             Input volume of shape ``(B, in_channels, D, H, W)``.
             Spatial dimensions must match ``input_spatial_size``.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Predicted staining of shape ``(B, out_channels, D, H, W)``.
         """
         if x.shape[2:] != torch.Size(self.input_spatial_size):
