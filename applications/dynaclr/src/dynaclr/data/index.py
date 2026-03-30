@@ -170,7 +170,7 @@ class MultiExperimentIndex:
         ``ProcessPoolExecutor``. Ignored when *cell_index_path* is provided.
     max_border_shift : int
         Maximum pixels to shift a patch center inward for border cells.
-        ``-1`` (default) uses half the patch size — border cells get
+        ``-1`` (default) uses quarter of the patch size — border cells get
         a slightly off-center patch but are not excluded.
         ``0`` excludes any cell whose patch would extend beyond the FOV.
         Tiled datasets (OPS) rarely need this; untiled infectomics data does.

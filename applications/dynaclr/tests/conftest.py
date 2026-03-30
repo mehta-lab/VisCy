@@ -85,7 +85,7 @@ def make_tracks_csv(
         for t in range(start_t, start_t + n_t):
             y, x = 32.0, 32.0
             if border_cell_track is not None and tid == border_cell_track:
-                y, x = 2.0, 2.0
+                y, x = 10.0, 10.0
             if outside_cell_track is not None and tid == outside_cell_track:
                 y, x = -1.0, -1.0
             ptid = float("nan")

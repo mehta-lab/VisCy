@@ -331,9 +331,9 @@ class TestBorderClamping:
         assert center_cell["x_clamp"] == 32.0
 
     def test_border_cell_clamped(self, border_setup):
-        """Cell near border (y=2, x=2) -> clamped to (16, 16) for 32x32 patch."""
+        """Cell near border (y=10, x=10) -> clamped to (16, 16) for 32x32 patch."""
         index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
-        # Track 3 is at y=2, x=2 (border)
+        # Track 3 is at y=10, x=10 (border)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         # y_half = 16, x_half = 16 -> clamp to (16, 16)
         assert border_cell["y_clamp"] == 16.0
@@ -343,8 +343,8 @@ class TestBorderClamping:
         """Original y, x are preserved even after clamping."""
         index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
-        assert border_cell["y"] == 2.0
-        assert border_cell["x"] == 2.0
+        assert border_cell["y"] == 10.0
+        assert border_cell["x"] == 10.0
 
     def test_outside_cell_excluded(self, border_setup):
         """Cell completely outside image (y=-1) is excluded."""
@@ -363,34 +363,34 @@ class TestBorderClamping:
         assert len(index.tracks) == 40
 
     def test_edge_cell_clamped(self, tmp_path, hcs_dims):
-        """Cell at exact edge (y=0, x=0) -> clamped to (y_half, x_half)."""
-        # Create a special setup with cell at y=0, x=0
+        """Cell near edge (y=10, x=10) -> clamped to (y_half, x_half)."""
         zarr_path = tmp_path / "edge.zarr"
         tracks_root = tmp_path / "tracks_edge"
 
+        n_t = 10
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            shape = (1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"])
+            shape = (n_t, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"])
             arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
             arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
-        # Create CSV with cell at exact edge
+        # Create CSV with cell near edge across multiple timepoints
         csv_path = tracks_root / "A" / "1" / "0" / "tracks.csv"
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-        df = pd.DataFrame(
-            [
-                {
-                    "track_id": 0,
-                    "t": 0,
-                    "id": 0,
-                    "parent_track_id": float("nan"),
-                    "parent_id": float("nan"),
-                    "z": 0,
-                    "y": 0.0,
-                    "x": 0.0,
-                }
-            ]
-        )
+        rows = [
+            {
+                "track_id": 0,
+                "t": t,
+                "id": t,
+                "parent_track_id": float("nan"),
+                "parent_id": float("nan"),
+                "z": 0,
+                "y": 10.0,
+                "x": 10.0,
+            }
+            for t in range(n_t)
+        ]
+        df = pd.DataFrame(rows)
         df.to_csv(csv_path, index=False)
 
         cfg = ExperimentEntry(
@@ -1047,14 +1047,14 @@ class TestParquetPath:
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
-        # Track 3 at y=2, x=2 -> clamped to (16, 16)
+        # Track 3 at y=10, x=10 -> clamped to (16, 16)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         assert border_cell["y_clamp"] == 16.0
         assert border_cell["x_clamp"] == 16.0
         # Track 4 at y=-1 -> excluded
         assert len(index.tracks[index.tracks["track_id"] == 4]) == 0
-        # 4 remaining tracks * 10 timepoints = 40
-        assert len(index.tracks) == 40
+        # 4 remaining tracks * 10 timepoints * 2 channels = 80
+        assert len(index.tracks) == 80
 
     def test_parquet_lineage_preserved(self, tmp_path, _create_experiment):
         """lineage_id from parquet matches legacy reconstruction."""
