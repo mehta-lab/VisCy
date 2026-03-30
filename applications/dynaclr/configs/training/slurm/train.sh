@@ -1,7 +1,8 @@
 #!/bin/bash
-# DynaCLR composable training launcher
-# =====================================
-# GPU type and count are passed via sbatch flags (not hardcoded here).
+# DynaCLR training launcher
+# ==========================
+# Handles run directory setup, config copying, and srun dispatch.
+# Each training run is defined by a single YAML + a thin SLURM shell script.
 #
 # Required env vars:
 #   PROJECT    WandB project name (also model output directory name)
@@ -12,21 +13,9 @@
 #   WORKSPACE_DIR  Repo root (default: /hpc/mydata/eduardo.hirata/repos/viscy)
 #   MODEL_ROOT     Model output root (default: /hpc/projects/organelle_phenotyping/models)
 #   EXTRA_ARGS     Extra CLI args passed to viscy fit
-#
-# Example:
-#   PROJECT=DynaCLR-3D-BagOfChannels-v2 \
-#   RUN_NAME=phase1-ntxent-4gpu \
-#   CONFIGS="applications/dynaclr/configs/training/_base/common.yml \
-#            applications/dynaclr/configs/training/arch/3d_z16.yml \
-#            applications/dynaclr/configs/training/_base/aug_boc_3d.yml \
-#            applications/dynaclr/configs/training/experiments/DynaCLR-3D-BagOfChannels-v2.yml" \
-#   sbatch --gres=gpu:h200:4 --ntasks-per-node=4 --cpus-per-task=15 --mem-per-cpu=8G \
-#     applications/dynaclr/configs/training/slurm/train.sh
-
-#SBATCH --job-name=dynaclr
-#SBATCH --nodes=1
-#SBATCH --partition=gpu
-#SBATCH --time=0-22:00:00
+#   CKPT_PATH      Path to checkpoint to resume from (appends --ckpt_path)
+#   WANDB_RUN_ID   W&B run ID to resume (continues metrics on same run)
+#   CALLER_SCRIPT  Set automatically by train.sh — the sbatch script that sourced us
 
 PROJECT="${PROJECT:?Set PROJECT (WandB project name)}"
 RUN_NAME="${RUN_NAME:?Set RUN_NAME (WandB run name)}"
@@ -46,24 +35,46 @@ function cleanup() {
 }
 trap cleanup EXIT
 
-# Create per-run directory and save config copies for reproducibility
 mkdir -p "${RUN_DIR}/checkpoints"
+
+# Rotate existing config.yaml before Lightning overwrites it
+if [ -f "${RUN_DIR}/config.yaml" ]; then
+  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+  cp "${RUN_DIR}/config.yaml" "${RUN_DIR}/config.${TIMESTAMP}.yaml"
+fi
+
 for cfg in $CONFIGS; do
   cp "${WORKSPACE_DIR}/${cfg}" "${RUN_DIR}/"
 done
+# Copy the calling SLURM script for reproducibility (sbatch from RUN_DIR to resume)
+if [ -n "${BASH_SOURCE[1]:-}" ] && [ -f "${BASH_SOURCE[1]}" ]; then
+  cp "${BASH_SOURCE[1]}" "${RUN_DIR}/"
+fi
 
 scontrol show job $SLURM_JOB_ID
 
-# Build --config flags from space-separated CONFIGS
 CONFIG_FLAGS=""
 for cfg in $CONFIGS; do
   CONFIG_FLAGS="${CONFIG_FLAGS} --config ${WORKSPACE_DIR}/${cfg}"
 done
 
+CKPT_FLAG=""
+if [ -n "${CKPT_PATH:-}" ]; then
+  CKPT_FLAG="--ckpt_path ${CKPT_PATH}"
+fi
+
+WANDB_ID_FLAG=""
+if [ -n "${WANDB_RUN_ID:-}" ]; then
+  WANDB_ID_FLAG="--trainer.logger.init_args.id=${WANDB_RUN_ID} --trainer.logger.init_args.resume=must"
+fi
+
 srun uv run --project "$WORKSPACE_DIR" viscy fit \
   ${CONFIG_FLAGS} \
+  --trainer.default_root_dir="${RUN_DIR}" \
   --trainer.logger.init_args.project="${PROJECT}" \
   --trainer.logger.init_args.name="${RUN_NAME}" \
   --trainer.logger.init_args.save_dir="${RUN_DIR}" \
-  --trainer.callbacks[1].init_args.dirpath="${RUN_DIR}/checkpoints" \
+  "--trainer.callbacks[1].init_args.dirpath=${RUN_DIR}/checkpoints" \
+  ${CKPT_FLAG} \
+  ${WANDB_ID_FLAG} \
   ${EXTRA_ARGS}

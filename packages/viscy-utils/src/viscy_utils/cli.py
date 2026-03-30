@@ -83,6 +83,7 @@ def main() -> None:
         seed_everything_default=42,
         subclass_mode_model=require_model,
         subclass_mode_data=require_data,
+        save_config_kwargs={"overwrite": True},
         parser_kwargs={"description": "Computer vision models for single-cell phenotyping."},
     )
 
