@@ -139,11 +139,6 @@ class MultiExperimentTripletDataset(Dataset):
         a label encoder from unique values in the ``condition`` column and
         populates ``anchor_meta[i]["labels"]["gene_label"]`` with integer
         class IDs.  Default: ``None`` (no labels).
-    cross_scope_fraction : float
-        Deprecated. Use ``positive_match_columns=["condition"]`` instead.
-        Fraction of positives sampled as cross-microscope positives. Default: 0.0.
-    hpi_window : float
-        Deprecated. Used only with ``cross_scope_fraction > 0``. Default: 1.0.
     """
 
     def __init__(
@@ -159,8 +154,6 @@ class MultiExperimentTripletDataset(Dataset):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
-        cross_scope_fraction: float = 0.0,
-        hpi_window: float = 1.0,
     ) -> None:
         if ts is None:
             raise ImportError(
@@ -202,22 +195,6 @@ class MultiExperimentTripletDataset(Dataset):
         self.positive_cell_source = positive_cell_source
         self.positive_match_columns = positive_match_columns if positive_match_columns is not None else ["lineage_id"]
         self.positive_channel_source = positive_channel_source
-        self.cross_scope_fraction = cross_scope_fraction
-        self.hpi_window = hpi_window
-
-        if cross_scope_fraction > 0:
-            import warnings
-
-            warnings.warn(
-                "cross_scope_fraction is deprecated. Use positive_match_columns=['condition'] instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            missing_microscope = [e.name for e in index.registry.experiments if not e.microscope]
-            if missing_microscope:
-                raise ValueError(
-                    f"cross_scope_fraction > 0 but experiments are missing microscope field: {missing_microscope}"
-                )
 
         self._label_encoders: dict[str, tuple[str, dict[str, int]]] = {}
         if label_columns:
@@ -534,37 +511,6 @@ class MultiExperimentTripletDataset(Dataset):
             return None
         chosen_idx = candidates[rng.integers(len(candidates))]
         return self.index.tracks.iloc[chosen_idx]
-
-    def _find_cross_scope_positive(
-        self,
-        anchor_row: pd.Series,
-        rng: np.random.Generator,
-    ) -> pd.Series | None:
-        """Find a cross-microscope positive for a given anchor.
-
-        Deprecated. Use ``positive_match_columns=["condition"]`` instead.
-
-        Parameters
-        ----------
-        anchor_row : pd.Series
-            A single row from ``valid_anchors``.
-        rng : numpy.random.Generator
-            Random number generator for tie-breaking.
-
-        Returns
-        -------
-        pd.Series or None
-            A track row for the cross-scope positive, or ``None`` if no candidate found.
-        """
-        tracks = self.index.tracks
-        candidates = tracks[
-            (tracks["microscope"] != anchor_row["microscope"])
-            & (tracks["perturbation"] == anchor_row["perturbation"])
-            & ((tracks["hours_post_perturbation"] - anchor_row["hours_post_perturbation"]).abs() <= self.hpi_window)
-        ]
-        if candidates.empty:
-            return None
-        return candidates.iloc[rng.integers(len(candidates))]
 
     # ------------------------------------------------------------------
     # Patch extraction (tensorstore I/O)

@@ -151,11 +151,6 @@ class MultiExperimentDataModule(LightningDataModule):
         Mapping from ``batch_key`` (used by classification heads) to
         dataframe column name.  E.g. ``{"gene_label": "condition"}``.
         Default: ``None``.
-    cross_scope_fraction : float
-        Deprecated. Use ``positive_match_columns=["condition"]`` instead.
-        Fraction of positives sampled as cross-microscope positives. Default: 0.0.
-    hpi_window : float
-        Deprecated. Half-width of HPI window for cross-scope matching. Default: 1.0.
     """
 
     def __init__(
@@ -201,8 +196,6 @@ class MultiExperimentDataModule(LightningDataModule):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
-        cross_scope_fraction: float = 0.0,
-        hpi_window: float = 1.0,
         max_border_shift: int = -1,
         shuffle_val: bool = False,
     ) -> None:
@@ -257,8 +250,6 @@ class MultiExperimentDataModule(LightningDataModule):
         self.positive_match_columns = positive_match_columns
         self.positive_channel_source = positive_channel_source
         self.label_columns = label_columns
-        self.cross_scope_fraction = cross_scope_fraction
-        self.hpi_window = hpi_window
         self.max_border_shift = max_border_shift
         self.shuffle_val = shuffle_val
 
@@ -382,8 +373,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
-            cross_scope_fraction=self.cross_scope_fraction,
-            hpi_window=self.hpi_window,
         )
 
         if val_names:
@@ -411,8 +400,6 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
-                cross_scope_fraction=self.cross_scope_fraction,
-                hpi_window=self.hpi_window,
             )
 
     def _setup_fov_split(self, registry: ExperimentRegistry) -> None:
@@ -477,8 +464,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
-            cross_scope_fraction=self.cross_scope_fraction,
-            hpi_window=self.hpi_window,
         )
 
         if val_keys:
@@ -498,8 +483,6 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
-                cross_scope_fraction=self.cross_scope_fraction,
-                hpi_window=self.hpi_window,
             )
 
     # ------------------------------------------------------------------
