@@ -33,7 +33,7 @@ def four_experiments(tmp_path, _create_experiment, _write_collection_yaml):
                 name=name,
                 channel_names=_CHANNEL_NAMES,
                 wells=[(row_letter, "1")],
-                condition_wells={"control": [f"{row_letter}/1"]},
+                perturbation_wells={"control": [f"{row_letter}/1"]},
             )
         )
     collection_path = _write_collection_yaml(tmp_path, entries)
@@ -49,14 +49,14 @@ def two_experiments(tmp_path, _create_experiment, _write_collection_yaml):
             name="exp_a",
             channel_names=_CHANNEL_NAMES,
             wells=[("A", "1")],
-            condition_wells={"control": ["A/1"]},
+            perturbation_wells={"control": ["A/1"]},
         ),
         _create_experiment(
             tmp_path,
             name="exp_b",
             channel_names=_CHANNEL_NAMES,
             wells=[("B", "1")],
-            condition_wells={"treated": ["B/1"]},
+            perturbation_wells={"treated": ["B/1"]},
         ),
     ]
     collection_path = _write_collection_yaml(tmp_path, entries)
@@ -72,7 +72,7 @@ def multi_fov_experiments(tmp_path, _create_experiment, _write_collection_yaml):
             name="exp_a",
             channel_names=_CHANNEL_NAMES,
             wells=[("A", "1")],
-            condition_wells={"control": ["A/1"]},
+            perturbation_wells={"control": ["A/1"]},
             fovs_per_well=5,
         ),
         _create_experiment(
@@ -80,7 +80,7 @@ def multi_fov_experiments(tmp_path, _create_experiment, _write_collection_yaml):
             name="exp_b",
             channel_names=_CHANNEL_NAMES,
             wells=[("B", "1")],
-            condition_wells={"treated": ["B/1"]},
+            perturbation_wells={"treated": ["B/1"]},
             fovs_per_well=5,
         ),
     ]
@@ -112,13 +112,12 @@ class TestInitExposesAllHyperparameters:
             tau_decay_rate=3.0,
             batch_size=64,
             num_workers=2,
-            experiment_aware=False,
+            batch_group_by=None,
             stratify_by=None,
             leaky=0.1,
             temporal_enrichment=True,
             temporal_window_hours=3.0,
             temporal_global_fraction=0.5,
-            hcl_beta=0.7,
             channel_dropout_channels=[0, 1],
             channel_dropout_prob=0.8,
             cache_pool_bytes=1024,
@@ -130,13 +129,12 @@ class TestInitExposesAllHyperparameters:
         assert dm.tau_decay_rate == 3.0
         assert dm.batch_size == 64
         assert dm.num_workers == 2
-        assert dm.experiment_aware is False
+        assert dm.batch_group_by is None
         assert dm.stratify_by is None
         assert dm.leaky == 0.1
         assert dm.temporal_enrichment is True
         assert dm.temporal_window_hours == 3.0
         assert dm.temporal_global_fraction == 0.5
-        assert dm.hcl_beta == 0.7
         assert dm.channel_dropout_channels == [0, 1]
         assert dm.channel_dropout_prob == 0.8
         assert dm.cache_pool_bytes == 1024
@@ -194,8 +192,8 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
             val_experiments=["exp_b"],
             tau_range=(0.5, 2.0),
             batch_size=8,
-            experiment_aware=True,
-            stratify_by="condition",
+            batch_group_by="experiment",
+            stratify_by="perturbation",
             temporal_enrichment=False,
         )
         dm.setup("fit")
@@ -212,8 +210,8 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         )
         # Verify sampler settings match
         sampler = train_dl.batch_sampler
-        assert sampler.experiment_aware is True
-        assert sampler.stratify_by == ["condition"]
+        assert sampler.batch_group_by == ["experiment"]
+        assert sampler.stratify_by == ["perturbation"]
         assert sampler.temporal_enrichment is False
 
 
@@ -421,3 +419,82 @@ class TestFovLevelSplit:
         train_fovs = set(dm.train_dataset.index.tracks["fov_name"].unique())
         val_fovs = set(dm.val_dataset.index.tracks["fov_name"].unique())
         assert train_fovs.isdisjoint(val_fovs)
+
+
+class TestNewPositiveParams:
+    """Test new positive_cell_source / positive_match_columns / positive_channel_source params."""
+
+    def test_positive_cell_source_self_stores_on_dm(self, two_experiments):
+        """positive_cell_source='self' is stored and passed to datasets."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_cell_source="self",
+        )
+        assert dm.positive_cell_source == "self"
+        dm.setup("fit")
+        assert dm.train_dataset.positive_cell_source == "self"
+
+    def test_positive_match_columns_stored_on_dm(self, two_experiments):
+        """positive_match_columns is stored on datamodule."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_match_columns=["perturbation"],
+        )
+        assert dm.positive_match_columns == ["perturbation"]
+
+    def test_positive_channel_source_any_stored(self, two_experiments):
+        """positive_channel_source='any' is stored on datamodule and dataset."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_channel_source="any",
+        )
+        assert dm.positive_channel_source == "any"
+        dm.setup("fit")
+        assert dm.train_dataset.positive_channel_source == "any"
+
+    def test_self_positive_all_tracks_are_valid_anchors(self, two_experiments):
+        """With positive_cell_source='self', all tracks become valid anchors."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            positive_cell_source="self",
+        )
+        dm.setup("fit")
+        n_tracks = len(dm.train_dataset.index.tracks)
+        n_anchors = len(dm.train_dataset.index.valid_anchors)
+        assert n_anchors == n_tracks

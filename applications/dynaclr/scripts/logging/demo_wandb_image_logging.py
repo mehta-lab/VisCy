@@ -117,6 +117,7 @@ def main() -> None:  # noqa: D103
         log_batches_per_epoch=args.log_batches,
         log_samples_per_batch=args.log_samples,
         log_embeddings_every_n_epochs=2,
+        pca_color_keys=["condition", "experiment", "hours_post_perturbation"],
         example_input_array_shape=(1, n_ch, Z, H, W),
     )
 

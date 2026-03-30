@@ -7,7 +7,7 @@ from viscy_models.unet.unet3d import Unet3d
 
 
 def test_forward_default_params():
-    """Default depth=4, mult_chan=32: (2, 1, 32, 64, 64) → same shape."""
+    """Default depth=4, mult_chan=32: (2, 1, 32, 64, 64) -> same shape."""
     model = Unet3d(in_channels=1, out_channels=1, depth=4, mult_chan=32)
     x = torch.randn(2, 1, 32, 64, 64)
     y = model(x)
@@ -15,7 +15,7 @@ def test_forward_default_params():
 
 
 def test_forward_custom_params():
-    """depth=2, mult_chan=16: (2, 1, 4, 16, 16) → same shape."""
+    """depth=2, mult_chan=16: (2, 1, 4, 16, 16) -> same shape."""
     model = Unet3d(in_channels=1, out_channels=1, depth=2, mult_chan=16)
     x = torch.randn(2, 1, 4, 16, 16)
     y = model(x)
@@ -68,23 +68,20 @@ def test_engine_attributes():
 
 
 def test_state_dict_keys():
-    """State dict key patterns for checkpoint compatibility."""
+    """State dict uses iterative encoder-decoder key structure."""
     model = Unet3d(in_channels=1, out_channels=1, depth=2, mult_chan=16)
     keys = set(model.state_dict().keys())
 
-    # Recursive structure: net_recurse contains nested sub_u levels
+    # Check for iterative structure key prefixes
     prefix_checks = [
-        "net_recurse.sub_2conv_more",
-        "net_recurse.conv_down",
-        "net_recurse.convt",
-        "net_recurse.sub_2conv_less",
-        "net_recurse.sub_u",
-        "conv_out",
+        "inconv",
+        "_encoder_blocks",
+        "_downsamples",
+        "bottleneck",
+        "_upsamples",
+        "_decoder_blocks",
+        "outconv",
     ]
     for prefix in prefix_checks:
         matching = [k for k in keys if k.startswith(prefix)]
         assert len(matching) > 0, f"No keys found with prefix '{prefix}'"
-
-    # All keys should start with net_recurse or conv_out
-    for key in keys:
-        assert key.startswith("net_recurse.") or key.startswith("conv_out."), f"Unexpected key prefix: {key}"

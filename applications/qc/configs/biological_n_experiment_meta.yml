@@ -2,7 +2,7 @@ data_path: /path/to/dataset.zarr
 num_workers: 4
 
 annotation:
-  channel_annotation:
+  channels_metadata:
     Phase3D:
       channel_type: labelfree
       biological_annotation: null

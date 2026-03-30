@@ -3,7 +3,6 @@
 import pytest
 import torch
 
-pytest.importorskip("einops")
 pytest.importorskip("diffusers")
 
 from viscy_models.celldiff import CELLDiffNet  # noqa: E402

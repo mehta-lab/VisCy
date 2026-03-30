@@ -7,9 +7,9 @@ from qc.config import AnnotationConfig
 
 
 def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> None:
-    """Write channel_annotation and experiment_metadata to .zattrs.
+    """Write channels_metadata and experiment_metadata to .zattrs.
 
-    channel_annotation is written to plate-level and every FOV position.
+    channels_metadata is written to plate-level and every FOV position.
     experiment_metadata is written per-position based on well-path matching.
 
     Parameters
@@ -28,7 +28,7 @@ def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> No
     with open_ome_zarr(zarr_dir, mode="r+") as plate:
         # Validate channel names
         plate_channels = set(plate.channel_names)
-        for ch_name in annotation.channel_annotation:
+        for ch_name in annotation.channels_metadata:
             if ch_name not in plate_channels:
                 raise ValueError(
                     f"Channel '{ch_name}' in annotation config not found in plate. "
@@ -49,22 +49,18 @@ def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> No
                     f"Available wells: {sorted(plate_well_paths)}"
                 )
 
-        # Serialize channel_annotation once
-        channel_annotation_dict = {
-            k: v.model_dump() for k, v in annotation.channel_annotation.items()
-        }
+        # Serialize channels_metadata once
+        channels_metadata_dict = {k: v.model_dump() for k, v in annotation.channels_metadata.items()}
 
-        # Write channel_annotation to plate-level zattrs
-        plate.zattrs["channel_annotation"] = channel_annotation_dict
+        # Write channels_metadata to plate-level zattrs
+        plate.zattrs["channels_metadata"] = channels_metadata_dict
 
         # Write per-position metadata
         for name, pos in position_list:
-            # channel_annotation at every FOV
-            pos.zattrs["channel_annotation"] = channel_annotation_dict
+            # channels_metadata at every FOV
+            pos.zattrs["channels_metadata"] = channels_metadata_dict
 
             # experiment_metadata per well
             well_path = parse_position_name(name)[0]
             if well_path in annotation.experiment_metadata:
-                pos.zattrs["experiment_metadata"] = (
-                    annotation.experiment_metadata[well_path].model_dump()
-                )
+                pos.zattrs["experiment_metadata"] = annotation.experiment_metadata[well_path].model_dump()

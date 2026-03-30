@@ -20,8 +20,10 @@ from torch import ShortTensor, Tensor
 
 __all__ = [
     "AnnotationColumns",
+    "CELL_INDEX_BIOLOGY_COLUMNS",
     "CELL_INDEX_CORE_COLUMNS",
     "CELL_INDEX_GROUPING_COLUMNS",
+    "CELL_INDEX_IMAGING_COLUMNS",
     "CELL_INDEX_OPS_COLUMNS",
     "CELL_INDEX_TIMELAPSE_COLUMNS",
     "CellIndex",
@@ -137,16 +139,22 @@ class SampleMeta(TypedDict, total=False):
     """Biological metadata carried in train-mode batches for sampler debugging.
 
     Joinable against valid_anchors on (global_track_id, t).
+
+    Core fields are defined here. Domain-specific fields should be added by
+    subclassing ``SampleMeta`` (e.g. ``OpsSampleMeta``). The ``labels`` field
+    is an open-ended dict of integer labels that auxiliary heads can consume
+    via ``batch_key`` without requiring a subclass.
     """
 
     experiment: OneOrSeq[str]
-    condition: OneOrSeq[str]
+    perturbation: OneOrSeq[str]
     microscope: OneOrSeq[str]
     fov_name: OneOrSeq[str]
     global_track_id: OneOrSeq[str]
     t: OneOrSeq[int]
     hours_post_perturbation: OneOrSeq[float]
     lineage_id: OneOrSeq[int]
+    labels: dict[str, int]
 
 
 class TripletSample(TypedDict):
@@ -206,10 +214,11 @@ CELL_INDEX_CORE_COLUMNS = [
     "y",
     "x",
     "z",
-    "source_channels",
 ]
 
-CELL_INDEX_GROUPING_COLUMNS = ["condition", "channel_name", "microscope"]
+CELL_INDEX_GROUPING_COLUMNS = ["perturbation", "channel_name", "microscope"]
+
+CELL_INDEX_BIOLOGY_COLUMNS = ["marker", "organelle"]
 
 CELL_INDEX_TIMELAPSE_COLUMNS = [
     "t",
@@ -218,9 +227,12 @@ CELL_INDEX_TIMELAPSE_COLUMNS = [
     "lineage_id",
     "parent_track_id",
     "hours_post_perturbation",
+    "interval_minutes",
 ]
 
 CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]
+
+CELL_INDEX_IMAGING_COLUMNS = ["pixel_size_xy_um", "pixel_size_z_um"]
 
 # Extracted from viscy/data/triplet.py for shared access
 ULTRACK_INDEX_COLUMNS = [

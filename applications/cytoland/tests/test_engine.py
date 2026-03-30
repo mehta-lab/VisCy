@@ -94,6 +94,20 @@ def test_fnet3d_predict_start():
     assert model._predict_pad is not None
 
 
+def test_fnet3d_predict_sliding_windows():
+    """Verify FNet wrapper exposes out_stack_depth for sliding window prediction."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    vs = AugmentedPredictionVSUNet(model=model.model)
+    vs.eval()
+    x = torch.randn(1, 1, 8, 16, 16)
+    with torch.inference_mode():
+        output = vs.predict_sliding_windows(x, out_channel=1, step=1)
+    assert output.shape == (1, 1, 8, 16, 16)
+
+
 def test_mixed_loss_integration(synthetic_batch, synth_dims):
     """Verify MixedLoss works as loss_function for VSUNet."""
     from viscy_utils.losses import MixedLoss
