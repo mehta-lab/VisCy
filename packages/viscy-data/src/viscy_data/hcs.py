@@ -774,8 +774,10 @@ class HCSDataModule(LightningDataModule):
     def _final_crop(self) -> CenterSpatialCropd:
         """Set up final cropping: center crop to the target size."""
         keys = self.source_channel + self.target_channel
+        allow_missing = False
         if self.fg_mask_key is not None:
             keys = keys + [f"__fg_mask_{ch}" for ch in self.target_channel]
+            allow_missing = True
         return CenterSpatialCropd(
             keys=keys,
             roi_size=(
@@ -783,7 +785,7 @@ class HCSDataModule(LightningDataModule):
                 self.yx_patch_size[0],
                 self.yx_patch_size[1],
             ),
-            allow_missing_keys=True,
+            allow_missing_keys=allow_missing,
         )
 
     def _train_transform(self) -> list[Callable]:
