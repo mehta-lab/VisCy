@@ -56,7 +56,9 @@ def load_composed_config(path: str | Path, _seen: frozenset[Path] | None = None)
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
     bases = cfg.pop("base", [])
-    if isinstance(bases, str):
+    if bases is None:
+        bases = []
+    elif isinstance(bases, str):
         bases = [bases]
     merged: dict = {}
     for rel in bases:

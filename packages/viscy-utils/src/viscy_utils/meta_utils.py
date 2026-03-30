@@ -111,7 +111,12 @@ def generate_normalization_metadata(
             if compute_otsu:
                 otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index, num_workers)
                 smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
-                fov_stats["otsu_threshold"] = float(threshold_otsu(smoothed.ravel()))
+                flat = smoothed.ravel()
+                # Otsu's method is undefined for constant-valued inputs.
+                if flat.min() == flat.max():
+                    fov_stats["otsu_threshold"] = 0.0
+                else:
+                    fov_stats["otsu_threshold"] = float(threshold_otsu(flat))
             fov_statistics = {"fov_statistics": fov_stats}
             fov_timepoint_statistics = {}
             for t in range(num_timepoints):
