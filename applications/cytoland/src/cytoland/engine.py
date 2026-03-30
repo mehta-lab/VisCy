@@ -182,6 +182,11 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        # Cache loss function fg_mask compatibility to avoid per-batch inspect.signature().
+        sig = inspect.signature(self.loss_function.forward)
+        self._loss_accepts_fg_mask = "fg_mask" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
         self.test_time_augmentations = test_time_augmentations
         self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
@@ -213,11 +218,7 @@ class VSUNet(LightningModule):
         ``nn.MSELoss`` will raise ``TypeError`` at configuration time.
         """
         if "fg_mask" in batch:
-            sig = inspect.signature(self.loss_function.forward)
-            accepts_fg_mask = "fg_mask" in sig.parameters or any(
-                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-            )
-            if not accepts_fg_mask:
+            if not self._loss_accepts_fg_mask:
                 raise TypeError(
                     f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
                     f"Use SpotlightLoss or remove fg_mask_key from the data config."
