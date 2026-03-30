@@ -748,13 +748,13 @@ class TestValidAnchors:
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
-        index = MultiExperimentIndex(
-            registry=registry,
-            yx_patch_size=_YX_PATCH,
-            tau_range_hours=(0.0, 0.5),
-        )
-        # Only 1 observation, tau=0 skipped, tau=1 -> t=6 missing -> not valid
-        assert len(index.valid_anchors) == 0
+        # Only 1 observation, tau=0 skipped, tau=1 -> t=6 missing -> no valid anchors
+        with pytest.raises(ValueError, match="No valid anchors found"):
+            MultiExperimentIndex(
+                registry=registry,
+                yx_patch_size=_YX_PATCH,
+                tau_range_hours=(0.0, 0.5),
+            )
 
 
 # ---------------------------------------------------------------------------
