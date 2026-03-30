@@ -9,10 +9,9 @@ from torch import Tensor
 class DINOv3Model(nn.Module):
     """Wrap a HuggingFace DINOv3 vision model for microscopy images.
 
-    The model expects preprocessed ``(B, 3, H, W)`` input in its
-    :meth:`forward`.  Use :meth:`preprocess_2d` to convert raw dataloader
-    output (e.g. ``(B, C, D, H, W)`` from ``TripletDataModule``) into the
-    expected format (channel repeat, resize, ImageNet normalisation).
+    The model accepts raw dataloader tensors ``(B, C, D, H, W)`` directly in
+    :meth:`forward` — preprocessing is applied inline.  Alternatively, call
+    :meth:`preprocess_2d` manually before passing ``(B, C, H, W)`` input.
 
     Z-slice selection is **not** handled here — configure ``z_range`` on the
     dataloader so it delivers the correct focal plane (see
@@ -26,10 +25,16 @@ class DINOv3Model(nn.Module):
     freeze : bool
         If ``True`` (default), all backbone parameters are frozen and the
         model is kept in eval mode.
+    projection : nn.Module or None
+        Optional trainable projection head applied to backbone features.
+        When provided, :meth:`forward` returns ``(features, projection(features))``.
+        When ``None`` (default), returns ``(features, features)``.
+        The projection is always trainable regardless of ``freeze``.
     """
 
-    def __init__(self, model_name: str, freeze: bool = True) -> None:
+    def __init__(self, model_name: str, freeze: bool = True, projection: nn.Module | None = None) -> None:
         super().__init__()
+        self.projection = projection
 
         from transformers import AutoImageProcessor, AutoModel
 
@@ -105,20 +110,26 @@ class DINOv3Model(nn.Module):
         return x
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        """Run the DINOv3 backbone on a preprocessed image batch.
+        """Run the DINOv3 backbone on an image batch.
+
+        Preprocessing is applied inline, so raw dataloader tensors
+        ``(B, C, D, H, W)`` or ``(B, C, H, W)`` can be passed directly.
 
         Parameters
         ----------
         x : Tensor
-            Input of shape ``(B, 3, H, W)`` — already preprocessed
-            (resized, normalised).  Call :meth:`preprocess` first when
-            working with raw 3-D volumes.
+            ``(B, C, D, H, W)`` or ``(B, C, H, W)`` — raw or preprocessed input.
 
         Returns
         -------
         tuple[Tensor, Tensor]
-            ``(features, features)`` — both are the pooler output of shape
-            ``(B, hidden_dim)``.  No separate projection head is used.
+            ``(features, projections)`` where features are the backbone pooler
+            output ``(B, hidden_dim)``.  If ``projection`` was provided at init,
+            projections are ``self.projection(features)``; otherwise both
+            elements are the same features tensor.
         """
+        x = self.preprocess_2d(x)
         features = self.model(pixel_values=x).pooler_output
+        if self.projection is not None:
+            return (features, self.projection(features))
         return (features, features)

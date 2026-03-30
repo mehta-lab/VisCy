@@ -76,10 +76,41 @@ from viscy_models import BetaVae25D, BetaVaeMonai
 | `BetaVae25D` | 2.5D beta-VAE with timm encoder and custom decoder |
 | `BetaVaeMonai` | Beta-VAE wrapping MONAI's VarAutoEncoder |
 
+## Heads (`viscy_models.components.heads`)
+
+Pluggable task heads for multi-task learning. Attach to `ContrastiveModule` via `auxiliary_heads`.
+
+| Class | Description |
+|-------|-------------|
+| `BaseHead` | Abstract base — subclass to add custom heads. Defines `forward`, `compute_loss`, `log_metrics` |
+| `ClassificationHead` | Classification on backbone features. Uses `MLP` + optional `CosineClassifier`. Logs top-1 and top-k accuracy |
+| `MLP` | Configurable projection/classification MLP with BN/LN and dropout |
+| `CosineClassifier` | L2-normalised linear head with learnable temperature — recommended for large class counts |
+
+### Label routing via `SampleMeta`
+
+Auxiliary heads consume labels from `anchor_meta["labels"]` in the batch — a `dict[str, int]` populated by the dataset. The `batch_key` on each head selects which label to use:
+
+```python
+# Dataset populates anchor_meta with integer labels
+anchor_meta = [{"labels": {"condition": 0, "gene_ko": 42}}]
+
+# Head config — batch_key must match a key in anchor_meta["labels"]
+ClassificationHead(
+    head_name="gene_ko",      # used for logging
+    batch_key="gene_ko",      # key in anchor_meta["labels"]
+    in_dims=768,
+    hidden_dims=512,
+    num_classes=1001,
+    loss_weight=0.5,
+)
+```
+
 ## Features
 
 - Pure `nn.Module` architectures — no Lightning or Hydra dependencies
 - Shared components in `components/` (stems, heads, decoder blocks, ConvBlocks)
+- Pluggable auxiliary heads via `BaseHead` — extend for custom losses and metrics
 - State dict key compatibility with original VisCy checkpoints
 - Immutable defaults for all model constructors
 

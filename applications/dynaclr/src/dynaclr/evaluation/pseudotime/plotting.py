@@ -35,7 +35,7 @@ def plot_response_curves(
     output_dir: Path,
     signal_type: Literal["fraction", "continuous"] = "fraction",
     min_cells_per_bin: int = 5,
-    title: str = "Organelle remodeling after infection",
+    title: str = "Organelle remodeling after sensor translocation",
     filename_prefix: str = "response_curves",
 ) -> plt.Figure:
     """Two-panel plot: signal with CI/IQR bands (top) + N cells (bottom).
@@ -93,7 +93,7 @@ def plot_response_curves(
         )
         axes[1].plot(time_hours, plot_df["n_cells"], color=color, label=label, lw=1.5)
 
-    axes[0].axvline(0, color="gray", ls="--", lw=1, label="Infection")
+    axes[0].axvline(0, color="gray", ls="--", lw=1, label="Sensor translocation")
     axes[0].set_ylabel(ylabel)
     if signal_type == "fraction":
         axes[0].set_ylim(-0.02, 1.0)
@@ -102,7 +102,7 @@ def plot_response_curves(
 
     axes[1].axvline(0, color="gray", ls="--", lw=1)
     axes[1].set_ylabel("N cells")
-    axes[1].set_xlabel("Time relative to infection (hours)")
+    axes[1].set_xlabel("Time relative to sensor translocation (hours)")
 
     plt.tight_layout()
     _save_figure(fig, output_dir, filename_prefix)
@@ -179,7 +179,7 @@ def plot_cell_heatmap(
         )
         # Sort by time of max signal
         first_positive = pivot.apply(
-            lambda row: (row.idxmax() if row.notna().any() and row.max() > 0 else np.inf),
+            lambda row: row.idxmax() if row.notna().any() and row.max() > 0 else np.inf,
             axis=1,
         )
 
@@ -215,8 +215,8 @@ def plot_cell_heatmap(
         )
         plt.colorbar(im, ax=ax, label="Distance from baseline")
 
-    ax.axvline(0, color="black", ls="--", lw=1, label="Infection")
-    ax.set_xlabel("Time relative to infection (hours)")
+    ax.axvline(0, color="black", ls="--", lw=1, label="Sensor translocation")
+    ax.set_xlabel("Time relative to sensor translocation (hours)")
     ax.set_ylabel("Cell tracks (sorted by onset)")
     ax.set_title(f"{organelle_label} — Per-track heatmap")
     ax.legend(loc="upper left", frameon=False)
@@ -277,7 +277,7 @@ def plot_timing_distributions(
         )
 
     axes[0].axvline(0, color="gray", ls="--", lw=1)
-    axes[0].set_xlabel("Remodeling onset relative to infection (hours)")
+    axes[0].set_xlabel("Remodeling onset relative to sensor translocation (hours)")
     axes[0].set_ylabel("N tracks")
     axes[0].set_title("When does remodeling start?")
     axes[0].legend(frameon=False)
@@ -338,8 +338,8 @@ def plot_onset_comparison(
 
     ax.set_xticks(x)
     ax.set_xticklabels(organelles)
-    ax.set_ylabel("Time relative to infection (hours)")
-    ax.set_title("Timing metric comparison across organelles")
+    ax.set_ylabel("Time relative to sensor translocation (hours)")
+    ax.set_title("Timing metric comparison across markers")
     ax.legend(frameon=False)
     ax.axhline(0, color="gray", ls="--", lw=0.5)
 

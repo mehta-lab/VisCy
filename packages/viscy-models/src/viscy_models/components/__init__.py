@@ -4,6 +4,8 @@ from viscy_models.components.blocks import UNeXt2Decoder, UNeXt2UpStage, icnr_in
 from viscy_models.components.conv_block_2d import ConvBlock2D
 from viscy_models.components.conv_block_3d import ConvBlock3D
 from viscy_models.components.heads import (
+    BaseHead,
+    ClassificationHead,
     PixelToVoxelHead,
     PixelToVoxelShuffleHead,
     UnsqueezeHead,
@@ -15,6 +17,8 @@ __all__ = [
     "ConvBlock3D",
     "UNeXt2Stem",
     "StemDepthtoChannels",
+    "BaseHead",
+    "ClassificationHead",
     "PixelToVoxelHead",
     "UnsqueezeHead",
     "PixelToVoxelShuffleHead",

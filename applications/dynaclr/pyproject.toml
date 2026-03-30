@@ -39,7 +39,7 @@ dependencies = [
   "viscy-data[triplet]",
   "viscy-models",
   "viscy-transforms",
-  "viscy-utils",
+  "viscy-utils[eval]",
 ]
 
 optional-dependencies.eval = [

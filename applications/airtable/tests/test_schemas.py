@@ -159,9 +159,9 @@ class TestDatasetRecordFromAirtable:
         assert rec.seeding_density == 50000
         assert rec.treatment_concentration_nm == 100.0
         assert rec.channel_0_name == "Phase3D"
-        assert rec.channel_0_biology == "Membrane"
+        assert rec.channel_0_marker == "Membrane"
         assert rec.channel_1_name == "raw GFP EX488 EM525-45"
-        assert rec.channel_1_biology == "Endoplasmic Reticulum"
+        assert rec.channel_1_marker == "Endoplasmic Reticulum"
         assert rec.data_path == "/hpc/datasets/alpha.zarr"
         assert rec.fluorescence_modality == "widefield"
         assert rec.t_shape == 50

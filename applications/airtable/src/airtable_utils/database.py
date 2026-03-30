@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 import pandas as pd
 from pyairtable import Api
@@ -10,6 +11,29 @@ from pyairtable import Api
 from airtable_utils.schemas import DatasetRecord
 
 TABLE_NAME = "Datasets"
+MARKER_REGISTRY_TABLE_ID = "tblmP8l2GmpCeERyD"
+
+
+@dataclass
+class MarkerRegistryEntry:
+    """A single entry from the Marker Registry.
+
+    Parameters
+    ----------
+    record_id : str
+        Airtable record ID.
+    marker_fluorophore : str
+        Construct name, e.g. ``"TOMM20-GFP"`` or ``"pAL40-mCherry"``.
+    channel_name_aliases : list[str]
+        Substring tokens to match against zarr channel names.
+    marker : str
+        Protein marker name, e.g. ``"TOMM20"``, ``"SEC61B"``.
+    """
+
+    record_id: str
+    marker_fluorophore: str
+    channel_name_aliases: list[str]
+    marker: str
 
 
 class AirtableDatasets:
@@ -30,15 +54,12 @@ class AirtableDatasets:
         api_key = os.environ.get("AIRTABLE_API_KEY", "")
         base_id = os.environ.get("AIRTABLE_BASE_ID", "")
         if not api_key:
-            raise ValueError(
-                "AIRTABLE_API_KEY environment variable is required but not set."
-            )
+            raise ValueError("AIRTABLE_API_KEY environment variable is required but not set.")
         if not base_id:
-            raise ValueError(
-                "AIRTABLE_BASE_ID environment variable is required but not set."
-            )
+            raise ValueError("AIRTABLE_BASE_ID environment variable is required but not set.")
         api = Api(api_key)
         self._table = api.table(base_id, TABLE_NAME)
+        self._registry_table = api.table(base_id, MARKER_REGISTRY_TABLE_ID)
 
     def list_records(self, filter_formula: str | None = None) -> pd.DataFrame:
         """Return all FOV records as a DataFrame.
@@ -82,6 +103,31 @@ class AirtableDatasets:
             Each dict has ``"id"`` (record ID) and ``"fields"`` keys.
         """
         self._table.batch_update(updates)
+
+    def get_marker_registry(self) -> dict[str, MarkerRegistryEntry]:
+        """Return the Marker Registry as a lookup by record ID.
+
+        Returns
+        -------
+        dict[str, MarkerRegistryEntry]
+            Mapping of Airtable record ID -> :class:`MarkerRegistryEntry`.
+        """
+        raw = self._registry_table.all(fields=["marker-fluorophore", "channel_name_aliases", "marker"])
+        registry: dict[str, MarkerRegistryEntry] = {}
+        for rec in raw:
+            fields = rec.get("fields", {})
+            marker_fluorophore = fields.get("marker-fluorophore", "")
+            aliases_raw = fields.get("channel_name_aliases", "")
+            aliases = [a.strip() for a in aliases_raw.split(",") if a.strip()]
+            marker = fields.get("marker", "")
+            if marker_fluorophore and aliases and marker:
+                registry[rec["id"]] = MarkerRegistryEntry(
+                    record_id=rec["id"],
+                    marker_fluorophore=marker_fluorophore,
+                    channel_name_aliases=aliases,
+                    marker=marker,
+                )
+        return registry
 
     def batch_create(self, records: list[dict]) -> list[dict]:
         """Batch-create new records.

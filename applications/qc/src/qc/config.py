@@ -46,13 +46,13 @@ class AnnotationConfig(BaseModel):
 
     Parameters
     ----------
-    channel_annotation : dict[str, ChannelAnnotationEntry]
+    channels_metadata : dict[str, ChannelAnnotationEntry]
         Keyed by channel name (must match omero.channels labels).
     experiment_metadata : dict[str, WellExperimentMetadata]
         Keyed by well path (e.g. "A/1").
     """
 
-    channel_annotation: dict[str, ChannelAnnotationEntry]
+    channels_metadata: dict[str, ChannelAnnotationEntry]
     experiment_metadata: dict[str, WellExperimentMetadata]
 
 

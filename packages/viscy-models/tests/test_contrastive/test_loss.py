@@ -1,7 +1,9 @@
 """Tests for NTXentHCL loss."""
 
+import pytest
 import torch
 from pytorch_metric_learning.losses import NTXentLoss
+from torch import nn
 
 from viscy_models.contrastive.loss import NTXentHCL
 
@@ -122,3 +124,72 @@ def test_hard_negatives_get_higher_gradient():
     assert grad_hard > grad_easy, (
         f"Hard negative should receive larger gradient. grad_easy={grad_easy:.4f}, grad_hard={grad_hard:.4f}"
     )
+
+
+def test_is_ntxent_and_nn_module_subclass():
+    loss = NTXentHCL()
+    assert isinstance(loss, NTXentLoss)
+    assert isinstance(loss, nn.Module)
+
+
+def test_default_parameters():
+    hcl = NTXentHCL()
+    assert hcl.temperature == 0.07
+    assert hcl.beta == 0.5
+
+
+def test_temperature_effect():
+    embeddings, labels = _make_embeddings_and_labels(16, dim=128)
+    loss_low = NTXentHCL(temperature=0.05, beta=0.5)(embeddings, labels)
+    loss_high = NTXentHCL(temperature=0.5, beta=0.5)(embeddings, labels)
+    assert not torch.allclose(loss_low, loss_high, atol=1e-4)
+
+
+def test_returns_scalar_with_grad():
+    hcl = NTXentHCL(temperature=0.1, beta=0.5)
+    embeddings, labels = _make_embeddings_and_labels(8)
+    embeddings.requires_grad_(True)
+    loss = hcl(embeddings, labels)
+    assert loss.shape == ()
+    assert loss.requires_grad
+
+
+def test_backward_through_encoder():
+    encoder = nn.Linear(64, 32)
+    hcl = NTXentHCL(temperature=0.1, beta=0.5)
+    torch.manual_seed(42)
+    x = torch.randn(16, 64)
+    embeddings = encoder(x)
+    labels = torch.arange(8).repeat_interleave(2)
+    loss = hcl(embeddings, labels)
+    loss.backward()
+    assert encoder.weight.grad is not None
+    assert encoder.weight.grad.abs().sum() > 0
+
+
+def test_batch_size_one():
+    hcl = NTXentHCL(temperature=0.1, beta=0.5)
+    embeddings, labels = _make_embeddings_and_labels(1)
+    loss = hcl(embeddings, labels)
+    assert not torch.isnan(loss)
+    assert not torch.isinf(loss)
+
+
+def test_large_batch():
+    hcl = NTXentHCL(temperature=0.07, beta=0.5)
+    embeddings, labels = _make_embeddings_and_labels(128, dim=128)
+    loss = hcl(embeddings, labels)
+    assert not torch.isnan(loss)
+    assert not torch.isinf(loss)
+    assert loss.item() > 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_cuda_beta_zero_matches_standard():
+    temperature = 0.1
+    standard = NTXentLoss(temperature=temperature).cuda()
+    hcl = NTXentHCL(temperature=temperature, beta=0.0).cuda()
+    gen = torch.Generator(device="cuda").manual_seed(42)
+    embeddings = torch.randn(32, 128, generator=gen, device="cuda")
+    labels = torch.arange(16, device="cuda").repeat(2)
+    torch.testing.assert_close(hcl(embeddings, labels), standard(embeddings, labels))

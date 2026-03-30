@@ -1,6 +1,5 @@
 """Training integration tests for DynaCLR ContrastiveModule."""
 
-import importlib
 from pathlib import Path
 
 import pytest
@@ -53,34 +52,11 @@ def test_contrastive_ntxent_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTri
     assert trainer.state.status == "finished"
 
 
-def _extract_class_paths(obj):
-    """Recursively extract all class_path values from a parsed YAML dict."""
-    paths = []
-    if isinstance(obj, dict):
-        for key, value in obj.items():
-            if key == "class_path" and isinstance(value, str):
-                paths.append(value)
-            else:
-                paths.extend(_extract_class_paths(value))
-    elif isinstance(obj, list):
-        for item in obj:
-            paths.extend(_extract_class_paths(item))
-    return paths
-
-
-def _resolve_class_path(class_path: str):
-    """Resolve a dotted class_path to the actual class object."""
-    parts = class_path.rsplit(".", 1)
-    module_path, class_name = parts[0], parts[1]
-    mod = importlib.import_module(module_path)
-    return getattr(mod, class_name)
-
-
 @pytest.mark.parametrize(
     "config_name,config_subdir",
     [("fit.yml", "training"), ("predict.yml", "prediction")],
 )
-def test_config_class_paths_resolve(config_name, config_subdir):
+def test_config_class_paths_resolve(config_name, config_subdir, _extract_class_paths, _resolve_class_path):
     configs_dir = Path(__file__).parents[1] / "configs" / config_subdir
     config_path = configs_dir / config_name
     assert config_path.exists(), f"Config file not found: {config_path}"
