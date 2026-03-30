@@ -10,6 +10,7 @@ tiny HCS OME-Zarr fixture.
 """
 
 import importlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from viscy_data.combined import CombinedDataModule
 from viscy_data.gpu_aug import CachedOmeZarrDataModule
 from viscy_data.hcs import HCSDataModule
 from viscy_transforms import BatchedStackChannelsd
+from viscy_utils.cli import _maybe_compose_config
 from viscy_utils.compose import load_composed_config
 from viscy_utils.losses import MixedLoss, SpotlightLoss
 from viscy_utils.meta_utils import generate_fg_masks
@@ -481,10 +483,6 @@ def test_compose_spotlight_overrides_normalizations():
 
 def test_cli_compose_with_long_flag(tmp_path):
     """CLI composes leaf config when --config is used."""
-    import sys
-
-    from viscy_utils.cli import _maybe_compose_config
-
     # Create a minimal base recipe
     base_dir = tmp_path / "recipes"
     base_dir.mkdir()
@@ -512,10 +510,6 @@ def test_cli_compose_with_long_flag(tmp_path):
 
 def test_cli_compose_with_short_flag(tmp_path):
     """CLI composes leaf config when -c is used."""
-    import sys
-
-    from viscy_utils.cli import _maybe_compose_config
-
     base_path = tmp_path / "base.yml"
     base_path.write_text(yaml.dump({"model": {"lr": 0.001}}))
     leaf_path = tmp_path / "leaf.yml"
@@ -534,10 +528,6 @@ def test_cli_compose_with_short_flag(tmp_path):
 
 def test_cli_passthrough_without_base(tmp_path):
     """CLI passes config unchanged when no base: key."""
-    import sys
-
-    from viscy_utils.cli import _maybe_compose_config
-
     config_path = tmp_path / "plain.yml"
     config_path.write_text(yaml.dump({"trainer": {"devices": 1}}))
     original_argv = sys.argv[:]

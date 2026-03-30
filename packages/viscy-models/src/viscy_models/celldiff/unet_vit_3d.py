@@ -75,9 +75,8 @@ class UNetViT3D(nn.Module):
     ) -> None:
         super().__init__()
 
-        assert len(dims) == len(num_res_block) + 1, (
-            f"len(dims)={len(dims)} must equal len(num_res_block)+1={len(num_res_block) + 1}"
-        )
+        if len(dims) != len(num_res_block) + 1:
+            raise ValueError(f"len(dims)={len(dims)} must equal len(num_res_block)+1={len(num_res_block) + 1}")
 
         self.input_spatial_size = input_spatial_size
         self.num_res_block = num_res_block

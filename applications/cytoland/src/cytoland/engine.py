@@ -772,7 +772,7 @@ class FcmaeUNet(VSUNet):
         self.fit_mask_ratio = fit_mask_ratio
         if ckpt_path is not None:
             self._load_encoder_weights(ckpt_path)
-        self.save_hyperparameters(ignore=["loss_function"])
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path"])
 
     def _load_encoder_weights(self, ckpt_path: str) -> None:
         """Load only encoder weights from a pretrained checkpoint.
