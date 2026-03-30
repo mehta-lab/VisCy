@@ -664,6 +664,9 @@ class HCSDataModule(LightningDataModule):
     ):
         """Set up the predict stage."""
         self._set_predict_global_state()
+        # fg_mask is only used during training (Spotlight loss) — prediction
+        # never reads it, and inference datasets may not have the array.
+        dataset_settings.pop("fg_mask_key", None)
         predict_transform = Compose(self.normalizations)
         self.predict_dataset = SlidingWindowDataset(
             positions=self._positions_maybe_single(),

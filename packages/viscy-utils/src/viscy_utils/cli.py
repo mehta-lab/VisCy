@@ -72,13 +72,25 @@ def _maybe_compose_config() -> None:
     The composed config is written to a temp file and ``sys.argv`` is
     updated in place.  Configs without ``base:`` pass through unchanged.
     """
-    config_idx = next(
-        (i for i, a in enumerate(sys.argv) if a in ("--config", "-c")),
-        None,
-    )
-    if config_idx is None or config_idx + 1 >= len(sys.argv):
+    # Match "--config path", "-c path", "--config=path", or "-c=path".
+    config_idx: int | None = None
+    config_path_str: str | None = None
+    for i, a in enumerate(sys.argv):
+        if a in ("--config", "-c"):
+            if i + 1 < len(sys.argv):
+                config_idx = i
+                config_path_str = sys.argv[i + 1]
+            break
+        for prefix in ("--config=", "-c="):
+            if a.startswith(prefix):
+                config_idx = i
+                config_path_str = a[len(prefix) :]
+                break
+        if config_idx is not None:
+            break
+    if config_idx is None or config_path_str is None:
         return
-    config_path = Path(sys.argv[config_idx + 1])
+    config_path = Path(config_path_str)
     try:
         with open(config_path) as f:
             raw = yaml.safe_load(f)
@@ -90,7 +102,12 @@ def _maybe_compose_config() -> None:
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False, mode="w") as tmp:
         yaml.dump(composed, tmp, default_flow_style=False)
     atexit.register(lambda p=tmp.name: Path(p).unlink(missing_ok=True))
-    sys.argv[config_idx + 1] = tmp.name
+    # Replace the path in argv, handling both "--config path" and "--config=path".
+    if "=" in sys.argv[config_idx]:
+        prefix = sys.argv[config_idx].split("=", 1)[0]
+        sys.argv[config_idx] = f"{prefix}={tmp.name}"
+    else:
+        sys.argv[config_idx + 1] = tmp.name
 
 
 def main() -> None:
