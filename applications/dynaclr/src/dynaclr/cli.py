@@ -125,6 +125,38 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="convert-ops-parquet",
+        import_path="dynaclr.data.convert_ops.main",
+        short_help="Convert OPS merged parquet to canonical cell index format",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="inspect-batches",
+        import_path="dynaclr.data.inspect_batches.main",
+        short_help="Inspect batch composition from a training config YAML",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="train-mlp-embedder",
+        import_path="dynaclr.evaluation.mlp_embedder.train_mlp_embedder.main",
+        short_help="Train an MLP embedder on cell embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="apply-mlp-embedder",
+        import_path="dynaclr.evaluation.mlp_embedder.apply_mlp_embedder.main",
+        short_help="Apply a trained MLP embedder to extract penultimate-layer representations",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI."""

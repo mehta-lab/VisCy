@@ -2,74 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from viscy_data.channel_utils import parse_channel_name
 from viscy_data.schemas import FOVRecord
 
-
-def parse_channel_name(name: str) -> dict:
-    """Extract channel metadata from a zarr channel label.
-
-    Parameters
-    ----------
-    name : str
-        Channel label from ``omero.channels[].label``,
-        e.g. ``"Phase3D"``, ``"raw GFP EX488 EM525-45"``,
-        ``"nuclei_prediction"``.
-
-    Returns
-    -------
-    dict
-        Parsed metadata with keys:
-        - ``channel_type``: ``"labelfree"`` | ``"fluorescence"`` | ``"virtual_stain"``
-        - ``filter_cube``: microscope filter name (e.g. ``"GFP"``) if fluorescence
-        - ``excitation_nm``: excitation wavelength if parseable
-        - ``emission_nm``: emission center wavelength if parseable
-    """
-    result: dict = {}
-    name_lower = name.lower()
-
-    # Fluorescence pattern: "raw <FILTER> EX<num> EM<num>[-<num>]"
-    fl_match = re.match(
-        r"raw\s+(\w+)\s+EX(\d+)\s+EM(\d+)(?:-(\d+))?",
-        name,
-        re.IGNORECASE,
-    )
-    if fl_match:
-        result["channel_type"] = "fluorescence"
-        result["filter_cube"] = fl_match.group(1)
-        result["excitation_nm"] = int(fl_match.group(2))
-        result["emission_nm"] = int(fl_match.group(3))
-        return result
-
-    # Virtual stain patterns (check before labelfree to avoid substring collisions)
-    vs_keywords = ("prediction", "virtual", "vs_")
-    if any(kw in name_lower for kw in vs_keywords):
-        result["channel_type"] = "virtual_stain"
-        return result
-
-    # Label-free patterns (use word boundaries for short keywords)
-    labelfree_substrings = ("phase", "brightfield", "retardance")
-    labelfree_word_patterns = (r"\bbf[\b_]", r"\bdic\b", r"\bpol\b")
-    if any(kw in name_lower for kw in labelfree_substrings) or any(
-        re.search(p, name_lower) for p in labelfree_word_patterns
-    ):
-        result["channel_type"] = "labelfree"
-        return result
-
-    # Fallback: if contains EX/EM pattern without "raw" prefix
-    ex_em_match = re.search(r"EX(\d+)\s*EM(\d+)", name, re.IGNORECASE)
-    if ex_em_match:
-        result["channel_type"] = "fluorescence"
-        result["excitation_nm"] = int(ex_em_match.group(1))
-        result["emission_nm"] = int(ex_em_match.group(2))
-        return result
-
-    result["channel_type"] = "unknown"
-    return result
+MAX_CHANNELS = 8
 
 
 def parse_position_name(name: str) -> tuple[str, str]:
@@ -106,9 +46,9 @@ class BiologicalAnnotation(BaseModel):
         Fluorophore name if applicable (e.g. "eGFP", "mCherry").
     """
 
-    organelle: str
+    organelle: str | None = None
     marker: str
-    marker_type: Literal["protein_tag", "direct_label", "nuclear_dye", "virtual_stain"]
+    marker_type: Literal["protein_tag", "direct_label", "nuclear_dye", "virtual_stain"] = "protein_tag"
     fluorophore: str | None = None
 
 
@@ -172,21 +112,29 @@ class DatasetRecord(FOVRecord):
     """
 
     channel_0_name: str | None = None
-    channel_0_biology: str | None = None
+    channel_0_marker: str | None = None
     channel_1_name: str | None = None
-    channel_1_biology: str | None = None
+    channel_1_marker: str | None = None
     channel_2_name: str | None = None
-    channel_2_biology: str | None = None
+    channel_2_marker: str | None = None
     channel_3_name: str | None = None
-    channel_3_biology: str | None = None
+    channel_3_marker: str | None = None
+    channel_4_name: str | None = None
+    channel_4_marker: str | None = None
+    channel_5_name: str | None = None
+    channel_5_marker: str | None = None
+    channel_6_name: str | None = None
+    channel_6_marker: str | None = None
+    channel_7_name: str | None = None
+    channel_7_marker: str | None = None
     record_id: str | None = None
 
     @model_validator(mode="after")
     def _derive_channel_names(self) -> DatasetRecord:
-        """Populate ``channel_names`` from ``channel_0..3_name`` fields."""
+        """Populate ``channel_names`` from ``channel_0..7_name`` fields."""
         if not self.channel_names:
             names = []
-            for i in range(4):
+            for i in range(MAX_CHANNELS):
                 name = getattr(self, f"channel_{i}_name")
                 if name is not None:
                     names.append(name)
@@ -231,14 +179,15 @@ class DatasetRecord(FOVRecord):
             time_interval_min=fields.get("time_interval_min"),
             seeding_density=fields.get("seeding_density"),
             treatment_concentration_nm=fields.get("treatment_concentration_nm"),
-            channel_0_name=fields.get("channel_0_name"),
-            channel_0_biology=_select_val(fields.get("channel_0_biology")),
-            channel_1_name=fields.get("channel_1_name"),
-            channel_1_biology=_select_val(fields.get("channel_1_biology")),
-            channel_2_name=fields.get("channel_2_name"),
-            channel_2_biology=_select_val(fields.get("channel_2_biology")),
-            channel_3_name=fields.get("channel_3_name"),
-            channel_3_biology=_select_val(fields.get("channel_3_biology")),
+            **{
+                f"channel_{i}_{attr}": (
+                    fields.get(f"channel_{i}_{attr}")
+                    if attr == "name"
+                    else _select_val(fields.get(f"channel_{i}_{attr}"))
+                )
+                for i in range(MAX_CHANNELS)
+                for attr in ("name", "marker")
+            },
             data_path=fields.get("data_path"),
             tracks_path=fields.get("tracks_path"),
             fluorescence_modality=_select_val(fields.get("fluorescence_modality")),
@@ -247,33 +196,39 @@ class DatasetRecord(FOVRecord):
             z_shape=fields.get("z_shape"),
             y_shape=fields.get("y_shape"),
             x_shape=fields.get("x_shape"),
+            pixel_size_xy_um=fields.get("pixel_size_xy_um"),
+            pixel_size_z_um=fields.get("pixel_size_z_um"),
             record_id=record.get("id"),
         )
 
-    def to_channel_annotation(self) -> dict[str, dict]:
-        """Return dict for writing to ``.zattrs["channel_annotation"]``.
+    def to_channels_metadata(self) -> dict[str, dict]:
+        """Return dict for writing to ``.zattrs["channels_metadata"]``.
 
         Maps each channel name to a ``ChannelAnnotationEntry``-compatible dict
         with ``channel_type`` (derived from channel name parsing) and
-        ``biological_annotation`` (from the Airtable biology field).
+        ``biological_annotation`` with the marker from Airtable.
+
+        For labelfree channels, ``marker`` defaults to the channel name
+        (e.g., Phase3D). For fluorescence channels, ``marker`` comes from
+        the ``channel_N_marker`` Airtable field (e.g., TOMM20, SEC61).
         """
         annotation: dict[str, dict] = {}
-        for i in range(4):
+        for i in range(MAX_CHANNELS):
             name = getattr(self, f"channel_{i}_name")
             if name is None:
                 continue
             parsed = parse_channel_name(name)
             ch_type = parsed.get("channel_type", "unknown")
-            # Map "unknown" to a valid literal for the schema
             if ch_type not in ("fluorescence", "labelfree", "virtual_stain"):
                 ch_type = "labelfree"
 
-            biology = getattr(self, f"channel_{i}_biology")
+            marker_value = getattr(self, f"channel_{i}_marker")
             bio_dict = None
-            if biology is not None:
+            if ch_type == "labelfree":
+                bio_dict = {"marker": name}
+            elif marker_value is not None:
                 bio_dict = {
-                    "organelle": biology.lower().replace(" ", "_"),
-                    "marker": "unknown",
+                    "marker": marker_value,
                     "marker_type": "protein_tag",
                     "fluorophore": None,
                 }

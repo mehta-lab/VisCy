@@ -53,6 +53,23 @@ The YAML config determines which model and data module to use via `class_path`:
 ```yaml
 model:
   class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentHCL
+    # Optional: auxiliary supervised heads added on top of contrastive loss.
+    # Labels are read from anchor_meta["labels"][batch_key] in the batch.
+    # auxiliary_heads:
+    #   gene_ko:
+    #     class_path: viscy_models.components.heads.ClassificationHead
+    #     init_args:
+    #       head_name: gene_ko
+    #       batch_key: gene_ko     # key in anchor_meta["labels"]
+    #       in_dims: 768
+    #       hidden_dims: 512
+    #       num_classes: 1001
+    #       loss_weight: 0.5
 data:
   class_path: viscy_data.triplet.TripletDataModule
 ```

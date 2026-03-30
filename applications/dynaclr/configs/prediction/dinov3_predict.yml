@@ -47,7 +47,7 @@ data:
       - RFP
     z_range: [29, 30]  # TODO: set to focal plane from .zattrs (single slice for 2D model)
     batch_size: 32
-    num_workers: 30
+    num_workers: 1
     initial_yx_patch_size: [160, 160]
     final_yx_patch_size: [160, 160]
     normalizations:

@@ -3,10 +3,59 @@
 import torch
 
 from viscy_models.components.heads import (
+    ClassificationHead,
     PixelToVoxelHead,
     PixelToVoxelShuffleHead,
     UnsqueezeHead,
 )
+
+IN_DIMS = 64
+NUM_CLASSES = 10
+
+
+def test_classification_head_output_shape(device):
+    """ClassificationHead forward produces logits of shape (B, num_classes)."""
+    head = ClassificationHead("gene_ko", "gene_ko", in_dims=IN_DIMS, hidden_dims=32, num_classes=NUM_CLASSES).to(device)
+    x = torch.randn(4, IN_DIMS, device=device)
+    logits = head(x)
+    assert logits.shape == (4, NUM_CLASSES)
+
+
+def test_classification_head_compute_loss(device):
+    """compute_loss returns a scalar cross-entropy loss."""
+    head = ClassificationHead("gene_ko", "gene_ko", in_dims=IN_DIMS, hidden_dims=32, num_classes=NUM_CLASSES).to(device)
+    logits = torch.randn(4, NUM_CLASSES, device=device)
+    y = torch.randint(0, NUM_CLASSES, (4,), device=device)
+    loss = head.compute_loss(logits, y)
+    assert loss.ndim == 0
+    assert loss.item() > 0
+
+
+def test_classification_head_log_metrics(device):
+    """log_metrics calls log_fn with loss, top1, and top-k accuracy keys."""
+    head = ClassificationHead(
+        "gene_ko", "gene_ko", in_dims=IN_DIMS, hidden_dims=32, num_classes=NUM_CLASSES, top_k=5
+    ).to(device)
+    logits = torch.randn(4, NUM_CLASSES, device=device)
+    y = torch.randint(0, NUM_CLASSES, (4,), device=device)
+    loss = head.compute_loss(logits, y)
+
+    logged = {}
+    head.log_metrics({"loss": loss, "logits": logits, "y": y}, lambda k, v: logged.update({k: v}), "train")
+
+    assert "loss/aux/gene_ko/train" in logged
+    assert "metrics/acc_top1/gene_ko/train" in logged
+    assert "metrics/acc_top5/gene_ko/train" in logged
+
+
+def test_classification_head_loss_weight():
+    """loss_weight attribute is stored correctly."""
+    head = ClassificationHead(
+        "gene_ko", "gene_ko", in_dims=IN_DIMS, hidden_dims=32, num_classes=NUM_CLASSES, loss_weight=0.3
+    )
+    assert head.loss_weight == 0.3
+    assert head.head_name == "gene_ko"
+    assert head.batch_key == "gene_ko"
 
 
 def test_pixel_to_voxel_head_output_shape(device):

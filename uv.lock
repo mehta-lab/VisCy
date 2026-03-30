@@ -170,10 +170,12 @@ wheels = [
 name = "airtable-utils"
 source = { editable = "applications/airtable" }
 dependencies = [
+    { name = "click" },
     { name = "iohub" },
     { name = "pandas" },
     { name = "pyairtable" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "viscy-data" },
 ]
 
@@ -184,11 +186,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click" },
     { name = "iohub" },
     { name = "pandas" },
     { name = "pyairtable" },
     { name = "pydantic" },
     { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pyyaml" },
     { name = "viscy-data", editable = "packages/viscy-data" },
 ]
 provides-extras = ["dev"]
@@ -1051,7 +1055,7 @@ dependencies = [
     { name = "viscy-data", extra = ["triplet"] },
     { name = "viscy-models" },
     { name = "viscy-transforms" },
-    { name = "viscy-utils" },
+    { name = "viscy-utils", extra = ["eval"] },
 ]
 
 [package.optional-dependencies]
@@ -1103,7 +1107,7 @@ requires-dist = [
     { name = "viscy-data", extras = ["triplet"], editable = "packages/viscy-data" },
     { name = "viscy-models", editable = "packages/viscy-models" },
     { name = "viscy-transforms", editable = "packages/viscy-transforms" },
-    { name = "viscy-utils", editable = "packages/viscy-utils" },
+    { name = "viscy-utils", extras = ["eval"], editable = "packages/viscy-utils" },
     { name = "wandb", marker = "extra == 'eval'" },
 ]
 provides-extras = ["eval"]
@@ -5768,6 +5772,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "torch" },
+    { name = "tqdm" },
     { name = "zarr" },
 ]
 
@@ -5824,6 +5829,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.10" },
     { name = "torchvision", marker = "extra == 'all'" },
     { name = "torchvision", marker = "extra == 'livecell'" },
+    { name = "tqdm" },
     { name = "zarr" },
 ]
 provides-extras = ["all", "livecell", "mmap", "triplet"]

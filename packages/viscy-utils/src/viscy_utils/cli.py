@@ -40,7 +40,7 @@ class VisCyCLI(LightningCLI):
             ),
         }
         if not sys.stdout.isatty():
-            defaults["trainer.callbacks"] = [lazy_instance(TQDMProgressBar, refresh_rate=10)]
+            defaults["trainer.callbacks"] = [lazy_instance(TQDMProgressBar, refresh_rate=10, leave=True)]
         parser.set_defaults(defaults)
 
     def _parse_ckpt_path(self) -> None:
@@ -59,7 +59,7 @@ def _setup_environment() -> None:
 
 
 def main() -> None:
-    """Main Lightning CLI entry point.
+    """Run the Lightning CLI entry point.
 
     Parse log level and set TF32 precision.
     Set default random seed to 42.
@@ -83,6 +83,7 @@ def main() -> None:
         seed_everything_default=42,
         subclass_mode_model=require_model,
         subclass_mode_data=require_data,
+        save_config_kwargs={"overwrite": True},
         parser_kwargs={"description": "Computer vision models for single-cell phenotyping."},
     )
 

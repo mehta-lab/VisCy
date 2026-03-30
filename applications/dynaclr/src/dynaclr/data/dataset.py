@@ -1,8 +1,16 @@
-"""Multi-experiment triplet dataset with lineage-aware positive sampling.
+"""Multi-experiment triplet dataset with flexible positive sampling.
 
 Provides :class:`MultiExperimentTripletDataset` which reads cell patches from
-multi-experiment OME-Zarr stores, samples temporal positives following lineage
-through division events, and produces the exact batch format expected by
+multi-experiment OME-Zarr stores and samples positives via three strategies:
+
+* ``positive_cell_source="lookup"`` with ``positive_match_columns=["lineage_id"]``
+  (default) — temporal positive: same lineage at ``t+tau``.
+* ``positive_cell_source="lookup"`` with other columns (e.g. ``["gene_name",
+  "reporter"]``) — perturbation positive: different cell with same column values.
+* ``positive_cell_source="self"`` — SimCLR-style: anchor and positive are the
+  same crop; augmentation creates two views.
+
+Produces the exact batch format expected by
 :class:`dynaclr.engine.ContrastiveModule`.
 """
 
@@ -31,13 +39,14 @@ from viscy_data._utils import _read_norm_meta
 
 _META_COLUMNS = [
     "experiment",
-    "condition",
+    "perturbation",
     "microscope",
     "fov_name",
     "global_track_id",
     "t",
     "hours_post_perturbation",
     "lineage_id",
+    "marker",
 ]
 
 _logger = logging.getLogger(__name__)
@@ -73,11 +82,10 @@ def _rescale_patch(patch: Tensor, scale: tuple[float, float, float], target: tup
 
 
 class MultiExperimentTripletDataset(Dataset):
-    """Dataset for multi-experiment triplet sampling with lineage-aware positives.
+    """Dataset for multi-experiment triplet sampling with flexible positive strategies.
 
     Works with :class:`~dynaclr.index.MultiExperimentIndex` to sample
-    anchor/positive cell patches across multiple experiments, following lineage
-    through division events.
+    anchor/positive cell patches across multiple experiments.
 
     The batch dict produced by :meth:`__getitems__` is directly compatible
     with :meth:`dynaclr.engine.ContrastiveModule.training_step`:
@@ -97,6 +105,8 @@ class MultiExperimentTripletDataset(Dataset):
         return anchor + index metadata for prediction.
     tau_range_hours : tuple[float, float]
         ``(min_hours, max_hours)`` converted to frames per experiment.
+        Only used when ``positive_cell_source="lookup"`` and
+        ``"lineage_id"`` is in ``positive_match_columns``.
     tau_decay_rate : float
         Exponential decay rate for :func:`~dynaclr.tau_sampling.sample_tau`.
     return_negative : bool
@@ -104,16 +114,31 @@ class MultiExperimentTripletDataset(Dataset):
         in-batch negatives).
     cache_pool_bytes : int
         Tensorstore cache pool size in bytes.
-    bag_of_channels : bool
-        If ``True``, randomly select one source channel per sample instead
-        of reading all source channels.  Output shape is ``(B, 1, Z, Y, X)``
-        instead of ``(B, C, Z, Y, X)``.
-    cross_scope_fraction : float
-        Fraction of positives sampled as cross-microscope positives
-        (same condition + HPI window, different microscope).
-        0.0 = pure temporal positives (default).
-    hpi_window : float
-        Half-width of HPI window (hours) for cross-scope positive matching.
+    channels_per_sample : int | list[str] | None
+        Controls how many source channels to read per sample.
+        ``None`` (default) — read all source channels, output ``(B, C, Z, Y, X)``.
+        ``1`` — randomly select one channel per sample, output ``(B, 1, Z, Y, X)``.
+        ``["labelfree", "reporter_gfp"]`` — read those specific channels by label.
+        Integer values > 1 are not supported (use list form).
+    positive_cell_source : str
+        ``"self"`` — SimCLR: positive is the same crop as anchor (augmentation
+        creates two views).  ``"lookup"`` (default) — find a different cell
+        using ``positive_match_columns``.
+    positive_match_columns : list[str] | None
+        Columns that define "same identity" for positive lookup.  Defaults to
+        ``["lineage_id"]`` (temporal matching).  For OPS perturbation use
+        ``["gene_name", "reporter"]``.  When ``"lineage_id"`` is in the list,
+        tau constraint is applied.
+    positive_channel_source : str
+        ``"same"`` (default) — anchor and positive use the same channel index.
+        ``"any"`` — positive draws its channel independently from anchor.
+        Only meaningful when ``channels_per_sample=1``.
+    label_columns : dict[str, str] | None
+        Mapping from ``batch_key`` (used by classification heads) to
+        dataframe column name.  E.g. ``{"gene_label": "condition"}`` builds
+        a label encoder from unique values in the ``condition`` column and
+        populates ``anchor_meta[i]["labels"]["gene_label"]`` with integer
+        class IDs.  Default: ``None`` (no labels).
     """
 
     def __init__(
@@ -124,9 +149,11 @@ class MultiExperimentTripletDataset(Dataset):
         tau_decay_rate: float = 2.0,
         return_negative: bool = False,
         cache_pool_bytes: int = 0,
-        bag_of_channels: bool = False,
-        cross_scope_fraction: float = 0.0,
-        hpi_window: float = 1.0,
+        channels_per_sample: int | list[str] | None = None,
+        positive_cell_source: str = "lookup",
+        positive_match_columns: list[str] | None = None,
+        positive_channel_source: str = "same",
+        label_columns: dict[str, str] | None = None,
     ) -> None:
         if ts is None:
             raise ImportError(
@@ -137,20 +164,49 @@ class MultiExperimentTripletDataset(Dataset):
         self.tau_range_hours = tau_range_hours
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
-        self.bag_of_channels = bag_of_channels
-        self.cross_scope_fraction = cross_scope_fraction
-        self.hpi_window = hpi_window
-
-        if cross_scope_fraction > 0:
-            missing_microscope = [e.name for e in index.registry.experiments if not e.microscope]
-            if missing_microscope:
-                raise ValueError(
-                    f"cross_scope_fraction > 0 but experiments are missing microscope field: {missing_microscope}"
+        # Resolve channel selection mode.
+        # In all-channels mode with a flat parquet (one row per cell×channel),
+        # deduplicate valid_anchors to one row per cell to avoid redundant
+        # batches — each row reads all channels anyway.
+        if channels_per_sample is None:
+            self._channel_mode = "all"
+            va = index.valid_anchors
+            if va["cell_id"].duplicated().any():
+                before = len(va)
+                index.valid_anchors = va.drop_duplicates(subset="cell_id").reset_index(drop=True)
+                _logger.info(
+                    "All-channels dedup: %d → %d valid_anchors (flat parquet)",
+                    before,
+                    len(index.valid_anchors),
                 )
+        elif isinstance(channels_per_sample, int):
+            if channels_per_sample != 1:
+                raise ValueError(
+                    f"channels_per_sample as int must be 1, got {channels_per_sample}. "
+                    "Use a list of labels for multiple specific channels."
+                )
+            self._channel_mode = "from_index"
+        elif isinstance(channels_per_sample, list):
+            self._channel_mode = "fixed"
+            self._fixed_channel_names = channels_per_sample
+        else:
+            raise TypeError(f"channels_per_sample must be int, list[str], or None, got {type(channels_per_sample)}")
+        self.channels_per_sample = channels_per_sample
+        self.positive_cell_source = positive_cell_source
+        self.positive_match_columns = positive_match_columns if positive_match_columns is not None else ["lineage_id"]
+        self.positive_channel_source = positive_channel_source
+
+        self._label_encoders: dict[str, tuple[str, dict[str, int]]] = {}
+        if label_columns:
+            for batch_key, col in label_columns.items():
+                unique_vals = sorted(index.valid_anchors[col].dropna().unique())
+                encoder = {v: i for i, v in enumerate(unique_vals)}
+                self._label_encoders[batch_key] = (col, encoder)
+                _logger.info("Label encoder '%s' (%s): %d classes", batch_key, col, len(encoder))
 
         self._rng = np.random.default_rng()
         self._setup_tensorstore_context(cache_pool_bytes)
-        self._build_lineage_lookup()
+        self._build_match_lookup()
 
     # ------------------------------------------------------------------
     # Initialization helpers
@@ -167,17 +223,40 @@ class MultiExperimentTripletDataset(Dataset):
             }
         )
         self._tensorstores: dict[str, ts.TensorStore] = {}
+        self._norm_meta_cache: dict[str, NormMeta | None] = {}
 
-    def _build_lineage_lookup(self) -> None:
-        """Build ``_lineage_timepoints`` for O(1) positive candidate lookup.
+    def _build_match_lookup(self) -> None:
+        """Build lookup structures for O(1) positive candidate lookup.
 
-        Structure: ``{(experiment, lineage_id): {t: [row_indices_in_tracks]}}``
+        For ``positive_cell_source="self"``, no lookup is needed.
+
+        For temporal mode (``"lineage_id"`` in ``positive_match_columns``),
+        builds ``_lineage_timepoints``:
+        ``{(experiment, lineage_id): {t: [row_indices_in_tracks]}}``.
+
+        For generic column-match mode, builds ``_match_lookup``:
+        ``{match_key_tuple: [row_indices_in_tracks]}``.
         """
-        self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
+        if self.positive_cell_source == "self":
+            return
 
-        for idx, row in self.index.tracks.iterrows():
-            key = (row["experiment"], row["lineage_id"])
-            self._lineage_timepoints[key][row["t"]].append(idx)
+        tracks = self.index.tracks
+        if "lineage_id" in self.positive_match_columns:
+            self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(
+                lambda: defaultdict(list)
+            )
+            experiments = tracks["experiment"].to_numpy()
+            lineage_ids = tracks["lineage_id"].to_numpy()
+            t_values = tracks["t"].to_numpy()
+            for idx in range(len(tracks)):
+                self._lineage_timepoints[(experiments[idx], lineage_ids[idx])][t_values[idx]].append(idx)
+        else:
+            cols = self.positive_match_columns
+            self._match_lookup: dict[tuple, list[int]] = defaultdict(list)
+            col_arrays = [tracks[c].to_numpy() for c in cols]
+            for idx in range(len(tracks)):
+                key = tuple(arr[idx] for arr in col_arrays)
+                self._match_lookup[key].append(idx)
 
     # ------------------------------------------------------------------
     # Dataset protocol
@@ -211,15 +290,15 @@ class MultiExperimentTripletDataset(Dataset):
         """
         anchor_rows = self.index.valid_anchors.iloc[indices]
 
-        # In bag-of-channels mode, pre-sample one channel index per item so that
-        # anchor and positive always use the same channel (phase↔phase, fluor↔fluor).
-        if self.bag_of_channels:
-            n_channels = len(self.index.registry.source_channel_labels)
-            forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
+        # Pre-compute per-sample channel names based on channel_mode.
+        if self._channel_mode == "from_index":
+            forced_channel_names = [[row["channel_name"]] for _, row in anchor_rows.iterrows()]
+        elif self._channel_mode == "fixed":
+            forced_channel_names = [self._fixed_channel_names] * len(indices)
         else:
-            forced_channel_indices = None
+            forced_channel_names = None
 
-        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_indices)
+        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_names)
         sample: dict = {
             "anchor": anchor_patches,
             "anchor_norm_meta": anchor_norms,
@@ -228,7 +307,11 @@ class MultiExperimentTripletDataset(Dataset):
 
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
-            positive_patches, positive_norms = self._slice_patches(positive_rows, forced_channel_indices)
+            if self._channel_mode == "from_index":
+                pos_forced_channel_names = [[row["channel_name"]] for _, row in positive_rows.iterrows()]
+            else:
+                pos_forced_channel_names = forced_channel_names
+            positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_names)
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
             sample["positive_meta"] = self._extract_meta(positive_rows)
@@ -247,8 +330,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         return sample
 
-    @staticmethod
-    def _extract_meta(rows: pd.DataFrame) -> list[SampleMeta]:
+    def _extract_meta(self, rows: pd.DataFrame) -> list[SampleMeta]:
         """Extract lightweight metadata dicts from track rows.
 
         Parameters
@@ -260,21 +342,31 @@ class MultiExperimentTripletDataset(Dataset):
         -------
         list[dict]
             One dict per row with keys from ``_META_COLUMNS``.
+            If ``label_columns`` was set, each dict also contains a
+            ``"labels"`` sub-dict with integer class IDs.
         """
         cols = [c for c in _META_COLUMNS if c in rows.columns]
-        return rows[cols].to_dict(orient="records")
+        records = rows[cols].to_dict(orient="records")
+        if self._label_encoders:
+            for i, (_, row) in enumerate(rows.iterrows()):
+                labels = {}
+                for batch_key, (col, encoder) in self._label_encoders.items():
+                    val = row.get(col)
+                    if val is not None and val in encoder:
+                        labels[batch_key] = encoder[val]
+                records[i]["labels"] = labels
+        return records
 
     # ------------------------------------------------------------------
     # Positive sampling
     # ------------------------------------------------------------------
 
     def _sample_positives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
-        """Sample one positive for each anchor using lineage-aware lookup.
+        """Sample one positive for each anchor.
 
-        When ``cross_scope_fraction > 0``, a fraction of positives are sampled
-        as cross-microscope positives (same condition + HPI window, different
-        microscope).  Falls back to temporal positive when no cross-scope
-        candidate is found.
+        When ``positive_cell_source="self"``, returns a copy of ``anchor_rows``
+        (same crop; augmentation creates two views).  Otherwise delegates to
+        :meth:`_find_positive`.
 
         Parameters
         ----------
@@ -286,23 +378,17 @@ class MultiExperimentTripletDataset(Dataset):
         pd.DataFrame
             One row per anchor from ``self.index.tracks``.
         """
-        n = len(anchor_rows)
-        n_cross = int(n * self.cross_scope_fraction)
-        cross_mask = [True] * n_cross + [False] * (n - n_cross)
-        self._rng.shuffle(cross_mask)
+        if self.positive_cell_source == "self":
+            return anchor_rows.copy().reset_index(drop=True)
 
         pos_rows = []
-        for use_cross, (_, row) in zip(cross_mask, anchor_rows.iterrows()):
-            if use_cross:
-                pos = self._find_cross_scope_positive(row, self._rng)
-                if pos is None:
-                    pos = self._find_positive(row, self._rng)
-            else:
-                pos = self._find_positive(row, self._rng)
+        for _, row in anchor_rows.iterrows():
+            pos = self._find_positive(row, self._rng)
             if pos is None:
                 raise RuntimeError(
                     f"No positive found for anchor (experiment={row.get('experiment')}, "
-                    f"lineage_id={row.get('lineage_id')}, t={row.get('t')}). "
+                    f"match_key={tuple(row.get(c) for c in self.positive_match_columns)}, "
+                    f"t={row.get('t')}). "
                     "This anchor should have been filtered out by valid_anchors."
                 )
             pos_rows.append(pos)
@@ -315,10 +401,31 @@ class MultiExperimentTripletDataset(Dataset):
     ) -> pd.Series | None:
         """Find a positive sample for a given anchor.
 
-        Searches for a row in ``self.index.tracks`` with the same
-        ``lineage_id`` at ``t + tau``.  When multiple candidates exist
-        (e.g. parent and daughter at the same timepoint), one is chosen
-        randomly.
+        Dispatches to temporal or generic column-match lookup based on
+        ``positive_match_columns``.
+
+        Parameters
+        ----------
+        anchor_row : pd.Series
+            A single row from ``valid_anchors``.
+        rng : numpy.random.Generator
+            Random number generator for tau sampling and tie-breaking.
+
+        Returns
+        -------
+        pd.Series or None
+            A track row for the positive, or ``None`` if no positive found.
+        """
+        if "lineage_id" in self.positive_match_columns:
+            return self._find_temporal_positive(anchor_row, rng)
+        return self._find_column_match_positive(anchor_row, rng)
+
+    def _find_temporal_positive(
+        self,
+        anchor_row: pd.Series,
+        rng: np.random.Generator,
+    ) -> pd.Series | None:
+        """Find a temporal positive: same lineage at ``t + tau``.
 
         Parameters
         ----------
@@ -336,45 +443,52 @@ class MultiExperimentTripletDataset(Dataset):
         lineage_id = anchor_row["lineage_id"]
         anchor_t = anchor_row["t"]
 
-        # Convert tau range to frames for this experiment
         tau_min, tau_max = self.index.registry.tau_range_frames(exp_name, self.tau_range_hours)
 
-        # Get lineage-timepoint lookup
         lt_key = (exp_name, lineage_id)
         lt_map = self._lineage_timepoints.get(lt_key)
         if lt_map is None:
             return None
 
-        # Sample tau and search for positive
-        # Try sampled tau first, then scan the full range as fallback
-        sampled_tau = sample_tau(tau_min, tau_max, rng, self.tau_decay_rate)
-        target_t = anchor_t + sampled_tau
-        candidates = lt_map.get(target_t, [])
-        if candidates:
-            chosen_idx = candidates[rng.integers(len(candidates))]
+        # In from_index mode (flat parquet), filter candidates to same marker.
+        # NOTE:The parquet SHOULD guarantee one channel_name per marker per experiment,
+        # so marker filtering is equivalent to channel_name filtering.
+        anchor_marker = anchor_row.get("marker") if self._channel_mode == "from_index" else None
+
+        def _pick(candidate_indices: list[int]) -> pd.Series | None:
+            if not candidate_indices:
+                return None
+            if anchor_marker is not None:
+                filtered = [
+                    idx for idx in candidate_indices if self.index.tracks.iloc[idx].get("marker") == anchor_marker
+                ]
+                if filtered:
+                    candidate_indices = filtered
+            chosen_idx = candidate_indices[rng.integers(len(candidate_indices))]
             return self.index.tracks.iloc[chosen_idx]
 
-        # Fallback: try all taus in range (skip tau=0)
+        # Try sampled tau first, then scan full range as fallback
+        sampled_tau = sample_tau(tau_min, tau_max, rng, self.tau_decay_rate)
+        target_t = anchor_t + sampled_tau
+        result = _pick(lt_map.get(target_t, []))
+        if result is not None:
+            return result
+
         for tau in range(tau_min, tau_max + 1):
             if tau == 0:
                 continue
-            target_t_fb = anchor_t + tau
-            candidates_fb = lt_map.get(target_t_fb, [])
-            if candidates_fb:
-                chosen_idx = candidates_fb[rng.integers(len(candidates_fb))]
-                return self.index.tracks.iloc[chosen_idx]
+            result = _pick(lt_map.get(anchor_t + tau, []))
+            if result is not None:
+                return result
 
         return None
 
-    def _find_cross_scope_positive(
+    def _find_column_match_positive(
         self,
         anchor_row: pd.Series,
         rng: np.random.Generator,
     ) -> pd.Series | None:
-        """Find a cross-microscope positive for a given anchor.
-
-        Searches for a row with a different ``microscope``, same ``condition``,
-        and ``hours_post_perturbation`` within ``self.hpi_window`` of the anchor.
+        """Find a positive by matching column values, excluding the anchor itself.
 
         Parameters
         ----------
@@ -386,17 +500,17 @@ class MultiExperimentTripletDataset(Dataset):
         Returns
         -------
         pd.Series or None
-            A track row for the cross-scope positive, or ``None`` if no candidate found.
+            A track row for the positive, or ``None`` if no candidates found.
         """
-        tracks = self.index.tracks
-        candidates = tracks[
-            (tracks["microscope"] != anchor_row["microscope"])
-            & (tracks["condition"] == anchor_row["condition"])
-            & ((tracks["hours_post_perturbation"] - anchor_row["hours_post_perturbation"]).abs() <= self.hpi_window)
-        ]
-        if candidates.empty:
+        cols = self.positive_match_columns
+        key = tuple(anchor_row[c] for c in cols)
+        all_candidates = self._match_lookup.get(key, [])
+        # Exclude the anchor row itself by integer index
+        candidates = [i for i in all_candidates if i != anchor_row.name]
+        if not candidates:
             return None
-        return candidates.iloc[rng.integers(len(candidates))]
+        chosen_idx = candidates[rng.integers(len(candidates))]
+        return self.index.tracks.iloc[chosen_idx]
 
     # ------------------------------------------------------------------
     # Patch extraction (tensorstore I/O)
@@ -424,7 +538,7 @@ class MultiExperimentTripletDataset(Dataset):
         return self._tensorstores[fov_name]
 
     def _slice_patch(
-        self, track_row: pd.Series, forced_source_idx: int | None = None
+        self, track_row: pd.Series, forced_channel_names: list[str] | None = None
     ) -> tuple[
         "ts.TensorStore",
         NormMeta | None,
@@ -433,7 +547,7 @@ class MultiExperimentTripletDataset(Dataset):
     ]:
         """Slice a patch from the image store for a given track row.
 
-        Uses per-experiment ``channel_maps`` for channel index remapping,
+        Resolves zarr channel indices directly from channel names. Uses
         ``y_clamp`` / ``x_clamp`` for border-safe centering, and scale factors
         from the registry for physical-space normalization.
 
@@ -441,6 +555,9 @@ class MultiExperimentTripletDataset(Dataset):
         ----------
         track_row : pd.Series
             A single row from ``tracks`` or ``valid_anchors``.
+        forced_channel_names : list[str] or None
+            Zarr channel names to read. When provided, only these channels
+            are sliced from the zarr. None reads all channels.
 
         Returns
         -------
@@ -464,17 +581,13 @@ class MultiExperimentTripletDataset(Dataset):
         y_half = round((self.index.yx_patch_size[0] // 2) * scale_y)
         x_half = round((self.index.yx_patch_size[1] // 2) * scale_x)
 
-        # Per-experiment channel remapping
-        channel_map = self.index.registry.channel_maps[exp_name]
-        source_labels = self.index.registry.source_channel_labels
-        if self.bag_of_channels:
-            source_idx = int(
-                forced_source_idx if forced_source_idx is not None else self._rng.integers(len(channel_map))
-            )
-            channel_indices = [channel_map[source_idx]]
-            selected_label = source_labels[source_idx]
+        # Resolve zarr channel indices from channel names
+        exp = self.index.registry._name_map[exp_name]
+        if forced_channel_names is not None:
+            channel_names_to_read = forced_channel_names
         else:
-            channel_indices = [channel_map[i] for i in sorted(channel_map.keys())]
+            channel_names_to_read = exp.channel_names
+        channel_indices = [exp.channel_names.index(name) for name in channel_names_to_read]
 
         # Per-experiment z_range (scale-adjusted window size centered on z_range center)
         z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
@@ -491,26 +604,46 @@ class MultiExperimentTripletDataset(Dataset):
             slice(x_center - x_half, x_center + x_half),
         ]
 
-        # Remap norm_meta keys from zarr channel names to source labels
-        # and pre-resolve timepoint_statistics for this sample's timepoint
-        raw_norm_meta = _read_norm_meta(position)
-        if raw_norm_meta is not None:
-            key_map = self.index.registry.norm_meta_key_maps[exp_name]
-            remapped = {key_map[k]: v for k, v in raw_norm_meta.items() if k in key_map}
-            for label, ch_meta in remapped.items():
+        # Look up norm_meta by zarr channel name directly
+        # and pre-resolve timepoint_statistics for this sample's timepoint.
+        # Cache the tensor-converted norm_meta per FOV to avoid repeated
+        # zattrs reads. Build a shallow per-sample copy (dict structure only,
+        # tensors shared) since we only replace dict entries, not tensor values.
+        cache_key = (track_row["store_path"], fov_name)
+        if cache_key not in self._norm_meta_cache:
+            self._norm_meta_cache[cache_key] = _read_norm_meta(position)
+        cached = self._norm_meta_cache[cache_key]
+        if cached is not None:
+            raw_norm_meta = {ch: {level: stats for level, stats in ch_meta.items()} for ch, ch_meta in cached.items()}
+            # Pre-resolve timepoint_statistics for all channels
+            for ch_name, ch_meta in raw_norm_meta.items():
                 if "timepoint_statistics" in ch_meta:
                     tp_stats = ch_meta["timepoint_statistics"].get(str(t))
                     ch_meta["timepoint_statistics"] = tp_stats
-            if self.bag_of_channels:
-                if selected_label in remapped:
-                    raw_norm_meta = {"channel": remapped[selected_label]}
+        else:
+            raw_norm_meta = None
+        if raw_norm_meta is not None:
+            # Filter to requested channels
+            if forced_channel_names is not None and self._channel_mode == "from_index":
+                ch = forced_channel_names[0]
+                if ch in raw_norm_meta:
+                    raw_norm_meta = {"channel_0": raw_norm_meta[ch]}
                 else:
                     raw_norm_meta = None
-            else:
-                raw_norm_meta = remapped
+            elif forced_channel_names is not None and self._channel_mode == "fixed":
+                raw_norm_meta = {name: raw_norm_meta[name] for name in forced_channel_names if name in raw_norm_meta}
+                if not raw_norm_meta:
+                    raw_norm_meta = None
+            # else: "all" mode — keep full raw_norm_meta
 
+        # Use the configured extraction window as uniform target Z,
+        # not the per-experiment capped range. This ensures all patches
+        # in a mixed-experiment batch rescale to the same Z depth.
+        # The random/center crop in on_after_batch_transfer then crops
+        # to the final z_window.
+        z_target = self.index.registry.z_extraction_window or z_window_size
         target_size = (
-            z_window_size,
+            z_target,
             self.index.yx_patch_size[0],
             self.index.yx_patch_size[1],
         )
@@ -519,7 +652,7 @@ class MultiExperimentTripletDataset(Dataset):
     def _slice_patches(
         self,
         track_rows: pd.DataFrame,
-        forced_channel_indices: list[int] | None = None,
+        forced_channel_names: list[list[str]] | None = None,
     ) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
@@ -527,9 +660,10 @@ class MultiExperimentTripletDataset(Dataset):
         ----------
         track_rows : pd.DataFrame
             Multiple rows from ``tracks`` / ``valid_anchors``.
-        forced_channel_indices : list[int] or None
-            Per-sample source channel indices to use (bag-of-channels mode).
-            When provided, overrides the random draw in ``_slice_patch``.
+        forced_channel_names : list[list[str]] or None
+            Per-sample zarr channel names to read. Each inner list
+            contains the channel names for that sample.
+            None reads all channels for every sample.
 
         Returns
         -------
@@ -541,16 +675,26 @@ class MultiExperimentTripletDataset(Dataset):
         scales = []
         targets = []
         for i, (_, row) in enumerate(track_rows.iterrows()):
-            forced = forced_channel_indices[i] if forced_channel_indices is not None else None
-            patch, norm, scale, target = self._slice_patch(row, forced_source_idx=forced)
+            forced = forced_channel_names[i] if forced_channel_names is not None else None
+            patch, norm, scale, target = self._slice_patch(row, forced_channel_names=forced)
             patches.append(patch)
             norms.append(norm)
             scales.append(scale)
             targets.append(target)
-        results = ts.stack([p.translate_to[0] for p in patches]).read().result()  # noqa: PD013
-        tensor = torch.from_numpy(results)
-        # Rescale patches that have non-unity scale factors
+        # Group patches by shape so ts.stack works within each group,
+        # then read and rescale. This handles mixed-experiment batches
+        # where different pixel sizes produce different native crop sizes.
+        shape_groups: dict[tuple, list[int]] = defaultdict(list)
+        for i, p in enumerate(patches):
+            shape_groups[tuple(p.shape)].append(i)
+        read_tensors: list[Tensor | None] = [None] * len(patches)
+        for idxs in shape_groups.values():
+            group_patches = [patches[i] for i in idxs]
+            group_result = ts.stack([p.translate_to[0] for p in group_patches]).read().result()  # noqa: PD013
+            for j, idx in enumerate(idxs):
+                read_tensors[idx] = torch.from_numpy(group_result[j])
+        # Rescale each patch to the uniform target size
         rescaled = []
-        for i in range(tensor.shape[0]):
-            rescaled.append(_rescale_patch(tensor[i], scales[i], targets[i]))
+        for i in range(len(patches)):
+            rescaled.append(_rescale_patch(read_tensors[i], scales[i], targets[i]))
         return torch.stack(rescaled), norms

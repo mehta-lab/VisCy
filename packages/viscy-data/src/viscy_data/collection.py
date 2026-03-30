@@ -49,19 +49,19 @@ class Provenance(BaseModel):
     created_by: str | None = None
 
 
-class SourceChannel(BaseModel):
-    """Semantic channel mapping across experiments.
+class ChannelEntry(BaseModel):
+    """A single channel in an experiment.
 
     Parameters
     ----------
-    label : str
-        Semantic label (e.g. ``"labelfree"``, ``"reporter"``).
-    per_experiment : dict[str, str]
-        ``{experiment_name: zarr_channel_name}`` mapping.
+    name : str
+        Zarr channel name (e.g. ``"Phase3D"``, ``"raw GFP EX488 EM525-45"``).
+    marker : str
+        Protein marker or channel identity (e.g. ``"Phase3D"``, ``"TOMM20"``).
     """
 
-    label: str
-    per_experiment: dict[str, str]
+    name: str
+    marker: str
 
 
 class ExperimentEntry(BaseModel):
@@ -70,25 +70,28 @@ class ExperimentEntry(BaseModel):
     Parameters
     ----------
     name : str
-        Unique experiment identifier.
+        Unique experiment identifier (typically the zarr plate stem).
     data_path : str
         Path to the HCS OME-Zarr store.
     tracks_path : str
         Root directory for per-FOV tracking CSVs.
+    channels : list[ChannelEntry]
+        Channels to include, each with zarr name + marker.
     channel_names : list[str]
-        All channel names in the zarr store.
-    condition_wells : dict[str, list[str]]
-        Mapping of condition label to well names.
+        All channel names in the zarr store (for channel index lookup).
+        If empty, derived from ``channels`` at validation time.
+    perturbation_wells : dict[str, list[str]]
+        Mapping of perturbation label to well names.
     interval_minutes : float
         Time between frames in minutes.
     start_hpi : float
         Hours post perturbation at frame 0.
     marker : str
-        Protein marker or dye name (e.g. ``"TOMM20"``, ``"SEC61B"``).
+        Primary protein marker (deprecated — use per-channel markers).
     organelle : str
-        Target organelle or cellular structure (e.g. ``"mitochondria"``).
+        Target organelle or cellular structure.
     microscope : str
-        Microscope identifier (e.g. ``"scope1"``, ``"scope2"``).
+        Microscope identifier.
     pixel_size_xy_um : float or None
         Pixel size in XY in micrometers. None means unknown / no rescaling.
     pixel_size_z_um : float or None
@@ -104,9 +107,10 @@ class ExperimentEntry(BaseModel):
     name: str
     data_path: str
     tracks_path: str
-    channel_names: list[str]
-    condition_wells: dict[str, list[str]]
-    interval_minutes: float
+    channels: list[ChannelEntry] = []
+    channel_names: list[str] = []
+    perturbation_wells: dict[str, list[str]] = {}
+    interval_minutes: float = 30.0
     start_hpi: float = 0.0
     marker: str = ""
     organelle: str = ""
@@ -117,9 +121,22 @@ class ExperimentEntry(BaseModel):
     moi: float = 0.0
     exclude_fovs: list[str] = []
 
+    @model_validator(mode="after")
+    def _normalize(self) -> ExperimentEntry:
+        # Derive channel_names from channels if not set
+        if not self.channel_names and self.channels:
+            self.channel_names = [ch.name for ch in self.channels]
+        # Derive channels from channel_names if not set
+        if not self.channels and self.channel_names:
+            self.channels = [ChannelEntry(name=ch, marker=ch) for ch in self.channel_names]
+        return self
+
 
 class Collection(BaseModel):
     """Curated collection of experiments for training.
+
+    The YAML is the complete reproducible recipe for building a flat
+    parquet. Channels are defined per-experiment with name + marker.
 
     Parameters
     ----------
@@ -129,8 +146,6 @@ class Collection(BaseModel):
         Human-readable description.
     provenance : Provenance
         How the collection was created.
-    source_channels : list[SourceChannel]
-        Semantic channel mapping across experiments.
     experiments : list[ExperimentEntry]
         Experiment entries.
     fov_records : list[FOVRecord]
@@ -140,7 +155,6 @@ class Collection(BaseModel):
     name: str
     description: str = ""
     provenance: Provenance = Provenance()
-    source_channels: list[SourceChannel]
     experiments: list[ExperimentEntry]
     fov_records: list[FOVRecord] = []
 
@@ -156,36 +170,14 @@ class Collection(BaseModel):
                     raise ValueError(f"Duplicate experiment name '{e.name}'.")
                 seen.add(e.name)
 
-        for sc in self.source_channels:
-            # 2. Every per_experiment key references a valid experiment
-            for key in sc.per_experiment:
-                if key not in exp_names:
-                    raise ValueError(
-                        f"source_channels['{sc.label}'].per_experiment references "
-                        f"unknown experiment '{key}'. Valid: {sorted(exp_names)}"
-                    )
-
-            # 3. Each mapped channel name exists in that experiment's channel_names
-            for exp in self.experiments:
-                if exp.name not in sc.per_experiment:
-                    continue  # experiment doesn't have this channel — allowed
-                mapped_ch = sc.per_experiment[exp.name]
-                if mapped_ch not in exp.channel_names:
-                    raise ValueError(
-                        f"source_channels['{sc.label}'] maps experiment '{exp.name}' "
-                        f"to channel '{mapped_ch}', but that experiment's "
-                        f"channel_names are {exp.channel_names}."
-                    )
-
         for exp in self.experiments:
-            # 5. interval_minutes > 0
             if exp.interval_minutes <= 0:
                 raise ValueError(
                     f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
                 )
-            # 6. condition_wells not empty
-            if not exp.condition_wells:
-                raise ValueError(f"Experiment '{exp.name}': condition_wells must not be empty.")
+            wells = exp.perturbation_wells
+            if not wells:
+                raise ValueError(f"Experiment '{exp.name}': perturbation_wells must not be empty.")
 
         return self
 
@@ -262,9 +254,9 @@ def _group_records(records: list[FOVRecord]) -> dict[str, list[FOVRecord]]:
 
 def build_collection(
     records: list[FOVRecord],
-    source_channels: list[SourceChannel],
     name: str,
     description: str = "",
+    channel_markers: dict[str, list[tuple[str, str]]] | None = None,
 ) -> Collection:
     """Build a collection by grouping FOVRecords into experiments.
 
@@ -273,21 +265,18 @@ def build_collection(
     automatically split into one experiment entry per marker with a
     ``_{MARKER}`` suffix on the name.
 
-    Derives ``condition_wells`` from ``cell_state`` + ``well_id``,
-    ``channel_names`` from records' ``channel_names``,
-    ``interval_minutes`` from ``time_interval_min``,
-    and ``start_hpi`` from ``hours_post_perturbation``.
-
     Parameters
     ----------
     records : list[FOVRecord]
         FOV-level records (typically from Airtable).
-    source_channels : list[SourceChannel]
-        Semantic channel mapping.
     name : str
         Collection name.
     description : str
         Collection description.
+    channel_markers : dict[str, list[tuple[str, str]]] or None
+        Per-experiment ``{exp_name: [(zarr_channel_name, marker), ...]}`` mapping.
+        If None, derives from the first record's ``channel_names`` using
+        channel names as markers.
 
     Returns
     -------
@@ -300,29 +289,35 @@ def build_collection(
     for exp_name, recs in grouped.items():
         first = recs[0]
 
-        # Derive condition_wells from cell_state + well_id
-        condition_wells: dict[str, list[str]] = defaultdict(list)
+        # Derive perturbation_wells from perturbation + well_id
+        perturbation_wells: dict[str, list[str]] = defaultdict(list)
         seen_wells: set[tuple[str, str]] = set()
         for rec in recs:
-            state = rec.cell_state or "unknown"
-            if (state, rec.well_id) not in seen_wells:
-                condition_wells[state].append(rec.well_id)
-                seen_wells.add((state, rec.well_id))
+            perturbation = rec.perturbation or rec.cell_state or "unknown"
+            if (perturbation, rec.well_id) not in seen_wells:
+                perturbation_wells[perturbation].append(rec.well_id)
+                seen_wells.add((perturbation, rec.well_id))
 
-        # Derive channel_names from first record
-        channel_names = first.channel_names if first.channel_names else []
+        # Derive channels from channel_markers or channel_names
+        channels: list[ChannelEntry] = []
+        if channel_markers and exp_name in channel_markers:
+            channels = [ChannelEntry(name=n, marker=m) for n, m in channel_markers[exp_name]]
+        elif first.channel_names:
+            channels = [ChannelEntry(name=n, marker=n) for n in first.channel_names]
 
         experiments.append(
             ExperimentEntry(
                 name=exp_name,
                 data_path=first.data_path or "",
                 tracks_path=first.tracks_path or "",
-                channel_names=channel_names,
-                condition_wells=dict(condition_wells),
+                channels=channels,
+                perturbation_wells=dict(perturbation_wells),
                 interval_minutes=first.time_interval_min or 30.0,
                 start_hpi=first.hours_post_perturbation or 0.0,
                 marker=first.marker or "",
                 organelle=first.organelle or "",
+                pixel_size_xy_um=getattr(first, "pixel_size_xy_um", None),
+                pixel_size_z_um=getattr(first, "pixel_size_z_um", None),
                 moi=first.moi or 0.0,
             )
         )
@@ -330,7 +325,6 @@ def build_collection(
     return Collection(
         name=name,
         description=description,
-        source_channels=source_channels,
         experiments=experiments,
         fov_records=records,
     )

@@ -42,24 +42,8 @@ from dynaclr.evaluation.pseudotime.signals import (
 ANNOTATIONS_ROOT = Path("/hpc/projects/organelle_phenotyping/datasets/annotations")
 
 ORGANELLE_CONFIG = {
-    "G3BP1": {
+    "G3BP1_ZIKV": {
         "experiments": [
-            {
-                "csv_path": ANNOTATIONS_ROOT
-                / "2025_01_24_A549_G3BP1_DENV"
-                / "2025_01_24_A549_G3BP1_DENV_combined_annotations.csv",
-                "fov_pattern": "C/2",
-                "frame_interval_minutes": 30,
-                "label": "2025_01_24 DENV",
-            },
-            {
-                "csv_path": ANNOTATIONS_ROOT
-                / "2025_01_28_A549_G3BP1_ZIKV_DENV"
-                / "2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv",
-                "fov_pattern": "C/4",
-                "frame_interval_minutes": 30,
-                "label": "2025_01_28 ZIKV/DENV",
-            },
             {
                 "csv_path": ANNOTATIONS_ROOT
                 / "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV"
@@ -80,14 +64,6 @@ ORGANELLE_CONFIG = {
         "controls": [
             {
                 "csv_path": ANNOTATIONS_ROOT
-                / "2025_01_28_A549_G3BP1_ZIKV_DENV"
-                / "2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv",
-                "fov_pattern": "B/4",
-                "frame_interval_minutes": 30,
-                "label": "2025_01_28 control (B/4)",
-            },
-            {
-                "csv_path": ANNOTATIONS_ROOT
                 / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV"
                 / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv",
                 "fov_pattern": "C/1",
@@ -95,10 +71,10 @@ ORGANELLE_CONFIG = {
                 "label": "2025_07_24 control (C/1)",
             },
         ],
-        "label": "G3BP1 (Stress Granule)",
+        "label": "G3BP1 ZIKV (Stress Granule)",
         "color": "#1f77b4",
     },
-    "SEC61B": {
+    "SEC61B_ZIKV": {
         "experiments": [
             {
                 "csv_path": ANNOTATIONS_ROOT
@@ -110,8 +86,40 @@ ORGANELLE_CONFIG = {
             },
         ],
         "controls": [],
-        "label": "SEC61B (ER)",
+        "label": "SEC61B ZIKV (ER)",
         "color": "#ff7f0e",
+    },
+    "G3BP1_DENV": {
+        "experiments": [
+            {
+                "csv_path": ANNOTATIONS_ROOT
+                / "2025_01_24_A549_G3BP1_DENV"
+                / "2025_01_24_A549_G3BP1_DENV_combined_annotations.csv",
+                "fov_pattern": "C/2",
+                "frame_interval_minutes": 10,
+                "label": "2025_01_24 DENV",
+            },
+            {
+                "csv_path": ANNOTATIONS_ROOT
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV"
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv",
+                "fov_pattern": "C/4",
+                "frame_interval_minutes": 30,
+                "label": "2025_01_28 DENV",
+            },
+        ],
+        "controls": [
+            {
+                "csv_path": ANNOTATIONS_ROOT
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV"
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv",
+                "fov_pattern": "B/4",
+                "frame_interval_minutes": 30,
+                "label": "2025_01_28 control (B/4)",
+            },
+        ],
+        "label": "G3BP1 DENV (Stress Granule)",
+        "color": "#2ca02c",
     },
 }
 
@@ -273,7 +281,7 @@ plot_response_curves(
     RESULTS_DIR,
     signal_type="fraction",
     min_cells_per_bin=MIN_CELLS_PER_BIN,
-    title="Annotation-based organelle remodeling after infection",
+    title="Annotation-based organelle remodeling after sensor translocation",
     filename_prefix="annotation_remodeling_comparison",
 )
 

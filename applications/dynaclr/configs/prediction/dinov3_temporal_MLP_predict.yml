@@ -1,0 +1,81 @@
+# DINOv3 frozen backbone + trained MLP head — inference config
+# =============================================================================
+# Runs predict on a registered zarr using the trained DINOv3-temporal-MLP
+# checkpoint. Embeddings are saved to an AnnData zarr via EmbeddingWriter.
+#
+# Projections (128-dim, MLP output) are saved as X — use these for downstream
+# analysis (linear classifiers, PHATE, etc.) since the MLP was finetuned.
+# Backbone features (768-dim) are saved in obsm["X_backbone"].
+#
+# TODO: set before launching:
+#   - trainer.callbacks[0].init_args.output_path  — where to save embeddings
+#   - data.init_args.data_path                    — registered zarr
+#   - data.init_args.tracks_path                  — tracks zarr
+#   - data.init_args.source_channel               — channel(s) to embed
+#   - data.init_args.z_range                      — focal plane (single slice for 2D)
+#   - ckpt_path                                   — trained checkpoint
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: 32-true
+  inference_mode: true
+  callbacks:
+    - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: # TODO: /path/to/embeddings.zarr
+        embedding_key: projections
+        phate_kwargs:
+          knn: 5
+          decay: 40
+          n_jobs: -1
+          random_state: 42
+        pca_kwargs:
+          n_components: 8
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.foundation.dinov3.DINOv3Model
+      init_args:
+        model_name: facebook/dinov3-convnext-tiny-pretrain-lvd1689m
+        freeze: true
+        projection:
+          class_path: viscy_models.components.heads.MLP
+          init_args:
+            in_dims: 768
+            hidden_dims: 768
+            out_dims: 128
+            norm: ln
+            activation: relu
+    loss_function:
+      class_path: pytorch_metric_learning.losses.NTXentLoss
+      init_args:
+        temperature: 0.5
+    example_input_array_shape: [1, 1, 1, 160, 160]
+data:
+  class_path: viscy_data.triplet.TripletDataModule
+  init_args:
+    data_path: # TODO: /path/to/registered.zarr
+    tracks_path: # TODO: /path/to/tracks.zarr
+    source_channel:
+      - # TODO: channel name (e.g. Phase3D)
+    z_range: # TODO: [z_focus, z_focus+1]  — single focal slice for 2D model
+    batch_size: 256
+    num_workers: 1
+    initial_yx_patch_size: [256, 256]
+    final_yx_patch_size: [160, 160]
+    normalizations:
+      - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [# TODO: channel name matching source_channel above]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+          clip: true
+return_predictions: false
+ckpt_path: # TODO: /path/to/checkpoints/last.ckpt

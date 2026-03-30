@@ -12,7 +12,7 @@ from iohub.ngff import Position, open_ome_zarr
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data.cell_index import build_timelapse_cell_index
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+from viscy_data.collection import Collection, ExperimentEntry, save_collection
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -25,135 +25,8 @@ _YX_PATCH = (32, 32)
 
 def _make_collection(
     experiments: list[ExperimentEntry],
-    source_channels: list[SourceChannel] | None = None,
 ) -> Collection:
-    """Build a minimal Collection from test experiments.
-
-    Parameters
-    ----------
-    experiments : list[ExperimentEntry]
-        Experiment entries to include.
-    source_channels : list[SourceChannel] | None
-        If None, derives defaults: first channel is labelfree, second is reporter.
-
-    Returns
-    -------
-    Collection
-        Validated collection wrapping the given experiments.
-    """
-    if source_channels is None:
-        lf: dict[str, str] = {}
-        rp: dict[str, str] = {}
-        for exp in experiments:
-            lf[exp.name] = exp.channel_names[0]
-            if len(exp.channel_names) > 1:
-                rp[exp.name] = exp.channel_names[1]
-        sc: list[SourceChannel] = [SourceChannel(label="labelfree", per_experiment=lf)]
-        if rp:
-            sc.append(SourceChannel(label="reporter", per_experiment=rp))
-        source_channels = sc
-    return Collection(
-        name="test_collection",
-        source_channels=source_channels,
-        experiments=experiments,
-    )
-
-
-def _make_tracks_csv(
-    path: Path,
-    n_tracks: int = 5,
-    n_t: int = 10,
-    *,
-    parent_map: dict[int, int] | None = None,
-    border_cell_track: int | None = None,
-    outside_cell_track: int | None = None,
-) -> None:
-    """Write a tracking CSV with standard columns.
-
-    Parameters
-    ----------
-    path : Path
-        Where to write the CSV file.
-    n_tracks : int
-        Number of tracks.
-    n_t : int
-        Number of timepoints per track.
-    parent_map : dict[int, int] | None
-        Mapping child_track_id -> parent_track_id for lineage testing.
-    border_cell_track : int | None
-        Track ID to place near the border (y=2, x=2).
-    outside_cell_track : int | None
-        Track ID to place outside the image boundary (y=-1).
-    """
-    rows = []
-    for tid in range(n_tracks):
-        for t in range(n_t):
-            y = 32.0  # center by default
-            x = 32.0
-            if border_cell_track is not None and tid == border_cell_track:
-                y = 2.0
-                x = 2.0
-            if outside_cell_track is not None and tid == outside_cell_track:
-                y = -1.0
-                x = -1.0
-            ptid = float("nan")
-            if parent_map and tid in parent_map:
-                ptid = parent_map[tid]
-            rows.append(
-                {
-                    "track_id": tid,
-                    "t": t,
-                    "id": tid * n_t + t,
-                    "parent_track_id": ptid,
-                    "parent_id": float("nan"),
-                    "z": 0,
-                    "y": y,
-                    "x": x,
-                }
-            )
-    df = pd.DataFrame(rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
-
-
-def _create_zarr_and_tracks(
-    tmp_path: Path,
-    name: str,
-    channel_names: list[str],
-    wells: list[tuple[str, str]],
-    hcs_dims: dict,
-    fovs_per_well: int = 2,
-    parent_map: dict[int, int] | None = None,
-    border_cell_track: int | None = None,
-    outside_cell_track: int | None = None,
-) -> tuple[Path, Path]:
-    """Create a mini HCS OME-Zarr store and matching tracking CSVs.
-
-    Returns (zarr_path, tracks_root_path).
-    """
-    zarr_path = tmp_path / f"{name}.zarr"
-    tracks_root = tmp_path / f"tracks_{name}"
-    n_ch = len(channel_names)
-
-    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
-        for row, col in wells:
-            for fov_idx in range(fovs_per_well):
-                pos = plate.create_position(row, col, str(fov_idx))
-                pos.create_zeros(
-                    "0",
-                    shape=(hcs_dims["n_t"], n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
-                    dtype=np.float32,
-                )
-                fov_name = f"{row}/{col}/{fov_idx}"
-                csv_path = tracks_root / fov_name / "tracks.csv"
-                _make_tracks_csv(
-                    csv_path,
-                    parent_map=parent_map,
-                    border_cell_track=border_cell_track,
-                    outside_cell_track=outside_cell_track,
-                )
-
-    return zarr_path, tracks_root
+    return Collection(name="test_collection", experiments=experiments)
 
 
 # ---------------------------------------------------------------------------
@@ -162,40 +35,25 @@ def _create_zarr_and_tracks(
 
 
 @pytest.fixture()
-def two_experiment_setup(tmp_path, hcs_dims):
+def two_experiment_setup(tmp_path, _create_experiment):
     """Create 2 experiments, 2 wells each, 2 FOVs each, with tracking CSVs."""
-    zarr_a, tracks_a = _create_zarr_and_tracks(
+    cfg_a = _create_experiment(
         tmp_path,
         name="exp_a",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1"), ("B", "1")],
-        hcs_dims=hcs_dims,
+        perturbation_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
         fovs_per_well=2,
-    )
-    zarr_b, tracks_b = _create_zarr_and_tracks(
-        tmp_path,
-        name="exp_b",
-        channel_names=_CHANNEL_NAMES_B,
-        wells=[("A", "1"), ("B", "1")],
-        hcs_dims=hcs_dims,
-        fovs_per_well=2,
-    )
-
-    cfg_a = ExperimentEntry(
-        name="exp_a",
-        data_path=str(zarr_a),
-        tracks_path=str(tracks_a),
-        channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
         interval_minutes=30.0,
         start_hpi=0.0,
     )
-    cfg_b = ExperimentEntry(
+    cfg_b = _create_experiment(
+        tmp_path,
         name="exp_b",
-        data_path=str(zarr_b),
-        tracks_path=str(tracks_b),
         channel_names=_CHANNEL_NAMES_B,
-        condition_wells={"control": ["A/1"], "treated": ["B/1"]},
+        wells=[("A", "1"), ("B", "1")],
+        perturbation_wells={"control": ["A/1"], "treated": ["B/1"]},
+        fovs_per_well=2,
         interval_minutes=15.0,
         start_hpi=2.0,
     )
@@ -205,31 +63,22 @@ def two_experiment_setup(tmp_path, hcs_dims):
 
 
 @pytest.fixture()
-def lineage_setup(tmp_path, hcs_dims):
+def lineage_setup(tmp_path, _create_experiment):
     """Create an experiment with lineage (parent_track_id) relationships.
 
     Track lineage: track 0 (root) -> track 1 (daughter) -> track 2 (granddaughter)
     Track 3: has parent_track_id=99 (not in data, should fallback)
     Track 4: no parent (independent root)
     """
-    parent_map = {1: 0, 2: 1, 3: 99}
-    zarr_path, tracks_root = _create_zarr_and_tracks(
+    cfg = _create_experiment(
         tmp_path,
         name="lineage_exp",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
-        hcs_dims=hcs_dims,
+        perturbation_wells={"ctrl": ["A/1"]},
         fovs_per_well=1,
-        parent_map=parent_map,
-    )
-
-    cfg = ExperimentEntry(
-        name="lineage_exp",
-        data_path=str(zarr_path),
-        tracks_path=str(tracks_root),
-        channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"ctrl": ["A/1"]},
         interval_minutes=30.0,
+        parent_map={1: 0, 2: 1, 3: 99},
     )
 
     registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -237,30 +86,22 @@ def lineage_setup(tmp_path, hcs_dims):
 
 
 @pytest.fixture()
-def border_setup(tmp_path, hcs_dims):
+def border_setup(tmp_path, _create_experiment):
     """Create an experiment with border cells and one outside-image cell.
 
     Track 3: near border (y=2, x=2)
     Track 4: outside image (y=-1)
     """
-    zarr_path, tracks_root = _create_zarr_and_tracks(
+    cfg = _create_experiment(
         tmp_path,
         name="border_exp",
         channel_names=_CHANNEL_NAMES_A,
         wells=[("A", "1")],
-        hcs_dims=hcs_dims,
+        perturbation_wells={"ctrl": ["A/1"]},
         fovs_per_well=1,
+        interval_minutes=30.0,
         border_cell_track=3,
         outside_cell_track=4,
-    )
-
-    cfg = ExperimentEntry(
-        name="border_exp",
-        data_path=str(zarr_path),
-        tracks_path=str(tracks_root),
-        channel_names=_CHANNEL_NAMES_A,
-        condition_wells={"ctrl": ["A/1"]},
-        interval_minutes=30.0,
     )
 
     registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -293,16 +134,16 @@ class TestUnifiedTracksDataFrame:
         assert len(exp_a_rows) == 200
         assert len(exp_b_rows) == 200
 
-    def test_condition_column(self, two_experiment_setup):
-        """'condition' column correctly maps wells to conditions."""
+    def test_perturbation_column(self, two_experiment_setup):
+        """'perturbation' column correctly maps wells to perturbations."""
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # exp_a: A/1 -> uninfected, B/1 -> infected
         exp_a_well_a = index.tracks[(index.tracks["experiment"] == "exp_a") & (index.tracks["well_name"] == "A/1")]
-        assert (exp_a_well_a["condition"] == "uninfected").all()
+        assert (exp_a_well_a["perturbation"] == "uninfected").all()
 
         exp_a_well_b = index.tracks[(index.tracks["experiment"] == "exp_a") & (index.tracks["well_name"] == "B/1")]
-        assert (exp_a_well_b["condition"] == "infected").all()
+        assert (exp_a_well_b["perturbation"] == "infected").all()
 
     def test_global_track_id_format(self, two_experiment_setup):
         """global_track_id is '{exp_name}_{fov_name}_{track_id}'."""
@@ -335,15 +176,15 @@ class TestUnifiedTracksDataFrame:
         expected_b = 2.0 + 4 * 15.0 / 60.0  # = 3.0
         assert row_b["hours_post_perturbation"] == pytest.approx(expected_b)
 
-    def test_fluorescence_channel(self, two_experiment_setup):
-        """fluorescence_channel is source_channel[1] when len > 1."""
+    def test_channel_name(self, two_experiment_setup):
+        """channel_name is source_channel[1] when len > 1."""
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         exp_a_rows = index.tracks[index.tracks["experiment"] == "exp_a"]
-        assert (exp_a_rows["fluorescence_channel"] == "GFP").all()
+        assert (exp_a_rows["channel_name"] == "GFP").all()
 
         exp_b_rows = index.tracks[index.tracks["experiment"] == "exp_b"]
-        assert (exp_b_rows["fluorescence_channel"] == "Mito").all()
+        assert (exp_b_rows["channel_name"] == "Mito").all()
 
     def test_required_columns_present(self, two_experiment_setup):
         """All required columns exist in the final DataFrame."""
@@ -359,10 +200,10 @@ class TestUnifiedTracksDataFrame:
             "fov_name",
             "well_name",
             "experiment",
-            "condition",
+            "perturbation",
             "global_track_id",
             "hours_post_perturbation",
-            "fluorescence_channel",
+            "channel_name",
             "lineage_id",
             "y_clamp",
             "x_clamp",
@@ -490,9 +331,9 @@ class TestBorderClamping:
         assert center_cell["x_clamp"] == 32.0
 
     def test_border_cell_clamped(self, border_setup):
-        """Cell near border (y=2, x=2) -> clamped to (16, 16) for 32x32 patch."""
+        """Cell near border (y=10, x=10) -> clamped to (16, 16) for 32x32 patch."""
         index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
-        # Track 3 is at y=2, x=2 (border)
+        # Track 3 is at y=10, x=10 (border)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         # y_half = 16, x_half = 16 -> clamp to (16, 16)
         assert border_cell["y_clamp"] == 16.0
@@ -502,8 +343,8 @@ class TestBorderClamping:
         """Original y, x are preserved even after clamping."""
         index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
-        assert border_cell["y"] == 2.0
-        assert border_cell["x"] == 2.0
+        assert border_cell["y"] == 10.0
+        assert border_cell["x"] == 10.0
 
     def test_outside_cell_excluded(self, border_setup):
         """Cell completely outside image (y=-1) is excluded."""
@@ -522,32 +363,34 @@ class TestBorderClamping:
         assert len(index.tracks) == 40
 
     def test_edge_cell_clamped(self, tmp_path, hcs_dims):
-        """Cell at exact edge (y=0, x=0) -> clamped to (y_half, x_half)."""
-        # Create a special setup with cell at y=0, x=0
+        """Cell near edge (y=10, x=10) -> clamped to (y_half, x_half)."""
         zarr_path = tmp_path / "edge.zarr"
         tracks_root = tmp_path / "tracks_edge"
 
+        n_t = 10
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32)
+            shape = (n_t, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"])
+            arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+            arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
-        # Create CSV with cell at exact edge
+        # Create CSV with cell near edge across multiple timepoints
         csv_path = tracks_root / "A" / "1" / "0" / "tracks.csv"
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-        df = pd.DataFrame(
-            [
-                {
-                    "track_id": 0,
-                    "t": 0,
-                    "id": 0,
-                    "parent_track_id": float("nan"),
-                    "parent_id": float("nan"),
-                    "z": 0,
-                    "y": 0.0,
-                    "x": 0.0,
-                }
-            ]
-        )
+        rows = [
+            {
+                "track_id": 0,
+                "t": t,
+                "id": t,
+                "parent_track_id": float("nan"),
+                "parent_id": float("nan"),
+                "z": 0,
+                "y": 10.0,
+                "x": 10.0,
+            }
+            for t in range(n_t)
+        ]
+        df = pd.DataFrame(rows)
         df.to_csv(csv_path, index=False)
 
         cfg = ExperimentEntry(
@@ -555,7 +398,7 @@ class TestBorderClamping:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -605,11 +448,9 @@ def _create_zarr_and_custom_tracks(
 
     with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
         pos = plate.create_position(well[0], well[1], "0")
-        pos.create_zeros(
-            "0",
-            shape=(n_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
-            dtype=np.float32,
-        )
+        shape = (n_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"])
+        arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+        arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
     fov_name = f"{well[0]}/{well[1]}/0"
     csv_path = tracks_root / fov_name / "tracks.csv"
@@ -684,7 +525,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -738,7 +579,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -776,7 +617,7 @@ class TestValidAnchors:
             data_path=str(zarr_fast),
             tracks_path=str(tracks_fast),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=15.0,
         )
 
@@ -795,7 +636,7 @@ class TestValidAnchors:
             data_path=str(zarr_slow),
             tracks_path=str(tracks_slow),
             channel_names=_CHANNEL_NAMES_B,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
 
@@ -827,14 +668,16 @@ class TestValidAnchors:
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"]), dtype=np.float32)
+            shape = (1, 2, 1, hcs_dims["img_h"], hcs_dims["img_w"])
+            arr = pos.create_zeros("0", shape=shape, dtype=np.float32)
+            arr[:] = np.random.default_rng(0).standard_normal(shape).astype(np.float32)
 
         cfg = ExperimentEntry(
             name="empty_exp",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -866,7 +709,7 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
@@ -901,17 +744,17 @@ class TestValidAnchors:
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
+            perturbation_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
-        index = MultiExperimentIndex(
-            registry=registry,
-            yx_patch_size=_YX_PATCH,
-            tau_range_hours=(0.0, 0.5),
-        )
-        # Only 1 observation, tau=0 skipped, tau=1 -> t=6 missing -> not valid
-        assert len(index.valid_anchors) == 0
+        # Only 1 observation, tau=0 skipped, tau=1 -> t=6 missing -> no valid anchors
+        with pytest.raises(ValueError, match="No valid anchors found"):
+            MultiExperimentIndex(
+                registry=registry,
+                yx_patch_size=_YX_PATCH,
+                tau_range_hours=(0.0, 0.5),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -989,7 +832,7 @@ class TestMultiExperimentIndexProperties:
         for cond, indices in groups.items():
             assert isinstance(indices, np.ndarray)
             for idx in indices:
-                assert index.tracks.loc[idx, "condition"] == cond
+                assert index.tracks.loc[idx, "perturbation"] == cond
 
     def test_summary_returns_string(self, two_experiment_setup):
         """summary() returns a non-empty string."""
@@ -1066,7 +909,7 @@ class TestParquetPath:
     """Tests for loading MultiExperimentIndex from a pre-built parquet."""
 
     def test_parquet_all_observations_present(self, two_experiment_setup, tmp_path):
-        """Parquet path yields same row count as legacy path."""
+        """Parquet path yields one row per (cell, timepoint, channel)."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -1075,11 +918,11 @@ class TestParquetPath:
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
-        # 2 experiments * 2 wells * 2 FOVs * 5 tracks * 10 timepoints = 400
-        assert len(index.tracks) == 400
+        # 2 experiments * 2 wells * 2 FOVs * 5 tracks * 10 timepoints * 2 channels = 800
+        assert len(index.tracks) == 800
 
     def test_parquet_column_alignment(self, two_experiment_setup, tmp_path):
-        """Parquet columns are renamed: fov_name, well_name, fluorescence_channel."""
+        """Parquet columns are renamed: fov_name, well_name, channel_name."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -1090,11 +933,10 @@ class TestParquetPath:
         )
         assert "fov_name" in index.tracks.columns
         assert "well_name" in index.tracks.columns
-        assert "fluorescence_channel" in index.tracks.columns
+        assert "channel_name" in index.tracks.columns
         # Original parquet names should be gone
         assert "fov" not in index.tracks.columns
         assert "well" not in index.tracks.columns
-        assert "channel_name" not in index.tracks.columns
 
     def test_parquet_include_wells(self, two_experiment_setup, tmp_path):
         """include_wells filters correctly with parquet path."""
@@ -1108,7 +950,8 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert set(index.tracks["well_name"].unique()) == {"A/1"}
-        assert len(index.tracks) == 200
+        # 2 experiments * 1 well * 2 FOVs * 5 tracks * 10 timepoints * 2 channels = 400
+        assert len(index.tracks) == 400
 
     def test_parquet_exclude_fovs(self, two_experiment_setup, tmp_path):
         """exclude_fovs removes specified FOVs with parquet path."""
@@ -1122,7 +965,8 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert "A/1/0" not in index.tracks["fov_name"].to_numpy()
-        assert len(index.tracks) == 300
+        # (800 total - 2 experiments * 1 FOV * 5 tracks * 10 timepoints * 2 channels) = 600
+        assert len(index.tracks) == 600
 
     def test_parquet_train_val_split(self, two_experiment_setup, tmp_path):
         """Same parquet, two registries → correct experiment filtering."""
@@ -1137,7 +981,8 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert set(train_index.tracks["experiment"].unique()) == {"exp_a"}
-        assert len(train_index.tracks) == 200
+        # 1 experiment * 2 wells * 2 FOVs * 5 tracks * 10 timepoints * 2 channels = 400
+        assert len(train_index.tracks) == 400
 
         # Val: only exp_b
         val_registry = ExperimentRegistry(collection=_make_collection([cfg_b]))
@@ -1147,10 +992,10 @@ class TestParquetPath:
             cell_index_path=parquet_path,
         )
         assert set(val_index.tracks["experiment"].unique()) == {"exp_b"}
-        assert len(val_index.tracks) == 200
+        assert len(val_index.tracks) == 400
 
     def test_parquet_valid_anchors_count(self, two_experiment_setup, tmp_path):
-        """valid_anchors count matches legacy path."""
+        """Flat parquet valid_anchors = 2x legacy (one row per channel)."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -1165,7 +1010,8 @@ class TestParquetPath:
             tau_range_hours=(0.5, 1.5),
             cell_index_path=parquet_path,
         )
-        assert len(parquet_index.valid_anchors) == len(legacy_index.valid_anchors)
+        n_channels = 2  # _CHANNEL_NAMES_A / _CHANNEL_NAMES_B each have 2 channels
+        assert len(parquet_index.valid_anchors) == len(legacy_index.valid_anchors) * n_channels
 
     def test_parquet_positions_resolved(self, two_experiment_setup, tmp_path):
         """position column contains iohub Position objects."""
@@ -1180,25 +1026,18 @@ class TestParquetPath:
         sample_pos = index.tracks.iloc[0]["position"]
         assert isinstance(sample_pos, Position)
 
-    def test_parquet_border_clamping(self, tmp_path, hcs_dims):
+    def test_parquet_border_clamping(self, tmp_path, _create_experiment):
         """y_clamp, x_clamp are computed correctly from parquet path."""
-        zarr_path, tracks_root = _create_zarr_and_tracks(
+        cfg = _create_experiment(
             tmp_path,
             name="border_pq",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
-            hcs_dims=hcs_dims,
+            perturbation_wells={"ctrl": ["A/1"]},
             fovs_per_well=1,
+            interval_minutes=30.0,
             border_cell_track=3,
             outside_cell_track=4,
-        )
-        cfg = ExperimentEntry(
-            name="border_pq",
-            data_path=str(zarr_path),
-            tracks_path=str(tracks_root),
-            channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
-            interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
@@ -1208,34 +1047,26 @@ class TestParquetPath:
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
-        # Track 3 at y=2, x=2 -> clamped to (16, 16)
+        # Track 3 at y=10, x=10 -> clamped to (16, 16)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         assert border_cell["y_clamp"] == 16.0
         assert border_cell["x_clamp"] == 16.0
         # Track 4 at y=-1 -> excluded
         assert len(index.tracks[index.tracks["track_id"] == 4]) == 0
-        # 4 remaining tracks * 10 timepoints = 40
-        assert len(index.tracks) == 40
+        # 4 remaining tracks * 10 timepoints * 2 channels = 80
+        assert len(index.tracks) == 80
 
-    def test_parquet_lineage_preserved(self, tmp_path, hcs_dims):
+    def test_parquet_lineage_preserved(self, tmp_path, _create_experiment):
         """lineage_id from parquet matches legacy reconstruction."""
-        parent_map = {1: 0, 2: 1, 3: 99}
-        zarr_path, tracks_root = _create_zarr_and_tracks(
+        cfg = _create_experiment(
             tmp_path,
             name="lineage_pq",
             channel_names=_CHANNEL_NAMES_A,
             wells=[("A", "1")],
-            hcs_dims=hcs_dims,
+            perturbation_wells={"ctrl": ["A/1"]},
             fovs_per_well=1,
-            parent_map=parent_map,
-        )
-        cfg = ExperimentEntry(
-            name="lineage_pq",
-            data_path=str(zarr_path),
-            tracks_path=str(tracks_root),
-            channel_names=_CHANNEL_NAMES_A,
-            condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
+            parent_map={1: 0, 2: 1, 3: 99},
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
 
@@ -1266,3 +1097,84 @@ class TestParquetPath:
             .sort_index()
         )
         pd.testing.assert_series_equal(legacy_lineage, parquet_lineage, check_dtype=False, check_index_type=False)
+
+
+class TestColumnMatchValidAnchors:
+    """Tests for _compute_valid_anchors with non-lineage column matching."""
+
+    def test_singleton_gene_excluded(self, two_experiment_setup):
+        """A gene with only 1 cell observation is excluded from valid_anchors."""
+        registry, *_ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+        )
+        n = len(index.tracks)
+        index.tracks["gene_name"] = ["PCNA" if i == 0 else "RPL35" for i in range(n)]
+        va = index._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name"],
+        )
+        assert "PCNA" not in va["gene_name"].to_numpy(), "Singleton gene should be excluded from valid_anchors"
+        assert (va["gene_name"] == "RPL35").all()
+
+    def test_all_unique_genes_empty(self, two_experiment_setup):
+        """If every gene has only 1 observation, valid_anchors is empty."""
+        registry, *_ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+        )
+        n = len(index.tracks)
+        index.tracks["gene_name"] = [f"GENE_{i}" for i in range(n)]
+        va = index._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name"],
+        )
+        assert va.empty, "All unique genes should produce empty valid_anchors"
+
+    def test_two_observations_per_gene_survives(self, two_experiment_setup):
+        """A gene with exactly 2 cell observations is kept as valid."""
+        registry, *_ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+        )
+        n = len(index.tracks)
+        index.tracks["gene_name"] = ["TP53" if i < 2 else f"GENE_{i}" for i in range(n)]
+        va = index._compute_valid_anchors(
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="lookup",
+            positive_match_columns=["gene_name"],
+        )
+        assert len(va) == 2
+        assert (va["gene_name"] == "TP53").all()
+
+
+class TestEmptyValidAnchorsError:
+    """Test that empty valid_anchors raises early."""
+
+    def test_single_timepoint_temporal_raises(self, tmp_path, _create_experiment):
+        """Temporal mode with single-timepoint data raises ValueError."""
+        cfg = _create_experiment(
+            tmp_path,
+            name="single_t",
+            channel_names=_CHANNEL_NAMES_A,
+            wells=[("A", "1")],
+            perturbation_wells={"ctrl": ["A/1"]},
+            fovs_per_well=1,
+            n_t=1,
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
+        with pytest.raises(ValueError, match="No valid anchors found"):
+            MultiExperimentIndex(
+                registry=registry,
+                yx_patch_size=_YX_PATCH,
+                tau_range_hours=(0.5, 2.0),
+            )
