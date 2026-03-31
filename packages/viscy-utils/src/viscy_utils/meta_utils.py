@@ -113,8 +113,10 @@ def generate_normalization_metadata(
                 smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
                 flat = smoothed.ravel()
                 # Otsu's method is undefined for constant-valued inputs.
+                # Use the constant value itself so generate_fg_masks marks
+                # nothing as foreground (no meaningful structure to supervise).
                 if flat.min() == flat.max():
-                    fov_stats["otsu_threshold"] = 0.0
+                    fov_stats["otsu_threshold"] = float(flat.min())
                 else:
                     fov_stats["otsu_threshold"] = float(threshold_otsu(flat))
             fov_statistics = {"fov_statistics": fov_stats}
