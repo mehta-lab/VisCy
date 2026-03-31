@@ -1,0 +1,27 @@
+# FNet3D on AICS iPSC SEC61B (ER) — dynacell benchmark.
+# Usage: uv run python -m cytoland fit --config dynacell/fit_fnet3d_sec61b.yml
+base:
+  - ../recipes/trainer/fit_1gpu.yml
+  - ../recipes/data/hcs_sec61b_3d.yml
+  - ../recipes/models/fnet3d_z8.yml
+
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        ms_dssim_alpha: 0.5
+    lr: 0.001
+    schedule: WarmupCosine
+
+trainer:
+  max_epochs: 50
+  logger:
+    init_args:
+      name: FNet3D_iPSC_SEC61B
+      save_dir: dynacell/ipsc/FNet3D_iPSC_SEC61B
+
+data:
+  init_args:
+    batch_size: 32
