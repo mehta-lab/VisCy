@@ -9,7 +9,7 @@ from monai.transforms import RandSpatialCropSamplesd
 from pytest import TempPathFactory, fixture, mark, raises
 
 from viscy_data import HCSDataModule
-from viscy_data.hcs import SlidingWindowDataset
+from viscy_data.sliding_window import SlidingWindowDataset
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
