@@ -192,7 +192,7 @@ class VSUNet(LightningModule):
         self.freeze_encoder = freeze_encoder
         self._original_shape_yx = None
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])  # loading only weights
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
