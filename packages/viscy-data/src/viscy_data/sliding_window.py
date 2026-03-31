@@ -216,9 +216,9 @@ class SlidingWindowDataset(Dataset):
                     )
             break
         # Inject mask as temp keys so MONAI spatial transforms (e.g. _final_crop) co-align them
-        fg_mask_keys = []
-        if self.fg_mask_support is not None and mask_images is not None:
-            fg_mask_keys = self.fg_mask_support.inject_into_sample(sample_images, mask_images)
+        has_masks = self.fg_mask_support is not None and mask_images is not None
+        if has_masks:
+            self.fg_mask_support.inject_into_sample(sample_images, mask_images)
         if self.target_ch_idx is not None:
             # NOTE: uses only the first target channel as weight for MONAI
             # spatial transform co-alignment. This does not copy the tensor.
@@ -235,8 +235,8 @@ class SlidingWindowDataset(Dataset):
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
-        if fg_mask_keys:
-            sample["fg_mask"] = self.fg_mask_support.extract_from_sample(sample_images, self._stack_channels)
+        if has_masks:
+            sample["fg_mask"] = self._stack_channels(sample_images, keys=list(self.fg_mask_support.mask_keys))
         if self.load_normalization_metadata and norm_meta is not None:
             sample["norm_meta"] = norm_meta
         return sample

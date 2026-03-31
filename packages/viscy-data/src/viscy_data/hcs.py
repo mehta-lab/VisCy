@@ -435,7 +435,7 @@ class HCSDataModule(LightningDataModule):
         final_crop = [self._final_crop()]
         augmentations = self._train_transform()
         if self.fg_mask_key is not None:
-            mask_keys = tuple(f"__fg_mask_{ch}" for ch in self.target_channel)
+            mask_keys = ForegroundMaskSupport.mask_temp_keys(list(self.target_channel))
             ForegroundMaskSupport.patch_spatial_transforms(augmentations, tuple(self.target_channel), mask_keys)
         train_transform = Compose(self.normalizations + augmentations + final_crop)
         val_transform = Compose(self.normalizations + final_crop)
@@ -446,7 +446,7 @@ class HCSDataModule(LightningDataModule):
         keys = self.source_channel + self.target_channel
         allow_missing = False
         if self.fg_mask_key is not None:
-            keys = keys + [f"__fg_mask_{ch}" for ch in self.target_channel]
+            keys = keys + list(ForegroundMaskSupport.mask_temp_keys(list(self.target_channel)))
             allow_missing = True
         return CenterSpatialCropd(
             keys=keys,

@@ -50,12 +50,22 @@ class ForegroundMaskSupport:
     def __init__(self, fg_mask_key: str, target_channels: list[str]) -> None:
         self.fg_mask_key = fg_mask_key
         self.target_channels = target_channels
-        self._mask_keys = tuple(f"__fg_mask_{ch}" for ch in target_channels)
+        self._mask_keys = self.mask_temp_keys(target_channels)
         self._mask_arrays: list[ImageArray] = []
+
+    @staticmethod
+    def mask_temp_keys(target_channels: list[str]) -> tuple[str, ...]:
+        """Return ``("__fg_mask_{ch}", ...)`` for the given channel names.
+
+        Single source of truth for temp-key naming.  Used by
+        ``ForegroundMaskSupport.__init__``, ``HCSDataModule._fit_transform``,
+        and ``HCSDataModule._final_crop``.
+        """
+        return tuple(f"__fg_mask_{ch}" for ch in target_channels)
 
     @property
     def mask_keys(self) -> tuple[str, ...]:
-        """Return ``("__fg_mask_{ch}", ...)`` tuple for transform patching."""
+        """Return precomputed ``("__fg_mask_{ch}", ...)`` tuple."""
         return self._mask_keys
 
     def validate_and_store(self, fov: Position) -> None:
@@ -108,7 +118,7 @@ class ForegroundMaskSupport:
         self,
         sample_images: dict[str, Tensor],
         mask_images: list[Tensor],
-    ) -> list[str]:
+    ) -> None:
         """Inject per-channel mask tensors as temporary keys for spatial co-alignment.
 
         Must be called **before** the transform pipeline so that MONAI spatial
@@ -120,41 +130,9 @@ class ForegroundMaskSupport:
             Mutable sample dict to inject into.
         mask_images : list[Tensor]
             Per-channel mask tensors from ``read_window``.
-
-        Returns
-        -------
-        list[str]
-            Keys that were injected (for later extraction).
         """
-        keys: list[str] = []
-        for ch_name, mask_tensor in zip(self.target_channels, mask_images):
-            key = f"__fg_mask_{ch_name}"
+        for key, mask_tensor in zip(self._mask_keys, mask_images):
             sample_images[key] = mask_tensor
-            keys.append(key)
-        return keys
-
-    def extract_from_sample(
-        self,
-        sample_images: dict[str, Tensor] | list[dict[str, Tensor]],
-        stack_fn: Callable,
-    ) -> Tensor | list[Tensor]:
-        """Stack per-channel masks into the final ``fg_mask`` tensor.
-
-        Must be called **after** the transform pipeline.
-
-        Parameters
-        ----------
-        sample_images : dict or list[dict]
-            Transformed sample dict(s).
-        stack_fn : Callable
-            The dataset's ``_stack_channels`` method.
-
-        Returns
-        -------
-        Tensor or list[Tensor]
-            Stacked mask tensor(s).
-        """
-        return stack_fn(sample_images, keys=list(self._mask_keys))
 
     @staticmethod
     def patch_spatial_transforms(
