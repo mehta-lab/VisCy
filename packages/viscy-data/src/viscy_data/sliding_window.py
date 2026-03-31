@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 
 from viscy_data._typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
 from viscy_data._utils import _ensure_channel_list, _read_norm_meta, _search_int_in_str
+from viscy_data.foreground_masks import ForegroundMaskSupport
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -90,7 +91,11 @@ class SlidingWindowDataset(Dataset):
         self.nonzero_threshold = nonzero_threshold
         self.nonzero_channel = nonzero_channel
         self.max_nonzero_retries = max_nonzero_retries
-        self.fg_mask_key = fg_mask_key
+        target_channels = list(channels.get("target", []))
+        if fg_mask_key is not None and target_channels:
+            self.fg_mask_support = ForegroundMaskSupport(fg_mask_key, target_channels)
+        else:
+            self.fg_mask_support = None
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -103,7 +108,6 @@ class SlidingWindowDataset(Dataset):
         self.window_keys = []
         self.window_arrays = []
         self.window_norm_meta: list[NormMeta | None] = []
-        self.window_fg_mask_arrays: list[ImageArray | None] = []
         for fov in self.positions:
             img_arr: ImageArray = fov[str(self.array_key)]
             ts = img_arr.frames
@@ -118,22 +122,15 @@ class SlidingWindowDataset(Dataset):
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
             self.window_norm_meta.append(_read_norm_meta(fov))
-            if self.fg_mask_key is not None:
-                if self.fg_mask_key not in fov:
-                    raise FileNotFoundError(
-                        f"Mask array '{self.fg_mask_key}' not found in position. "
-                        "Run preprocessing with --compute_fg_masks first."
-                    )
-                self.window_fg_mask_arrays.append(fov[self.fg_mask_key])
-            else:
-                self.window_fg_mask_arrays.append(None)
+            if self.fg_mask_support is not None:
+                self.fg_mask_support.validate_and_store(fov)
         self._max_window = w
 
-    def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, ImageArray | None]:
+    def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, int]:
         """Look up window given index."""
         arr_idx = bisect.bisect_right(self.window_keys, index)
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
-        return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], self.window_fg_mask_arrays[arr_idx])
+        return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
 
     def _read_img_window(self, img: ImageArray, ch_idx: list[int], tz: int) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
@@ -187,7 +184,7 @@ class SlidingWindowDataset(Dataset):
         )
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
-            img, tz, norm_meta, fg_mask_arr = self._find_window(idx)
+            img, tz, norm_meta, arr_idx = self._find_window(idx)
             ch_names = self.channels["source"].copy()
             ch_idx = self.source_ch_idx.copy()
             if self.target_ch_idx is not None:
@@ -197,8 +194,8 @@ class SlidingWindowDataset(Dataset):
             sample_images = {k: v for k, v in zip(ch_names, images)}
             # Read mask once — reused for both nonzero check and sample output
             mask_images = None
-            if fg_mask_arr is not None and self.target_ch_idx is not None:
-                mask_images, _ = self._read_img_window(fg_mask_arr, self.target_ch_idx, tz)
+            if self.fg_mask_support is not None and self.target_ch_idx is not None:
+                mask_images = self.fg_mask_support.read_window(arr_idx, self.target_ch_idx, tz, self._read_img_window)
             if check_key is not None:
                 if mask_images is not None and check_key in self.channels.get("target", []):
                     check_ch = self.channels["target"].index(check_key)
@@ -220,11 +217,8 @@ class SlidingWindowDataset(Dataset):
             break
         # Inject mask as temp keys so MONAI spatial transforms (e.g. _final_crop) co-align them
         fg_mask_keys = []
-        if mask_images is not None:
-            for ch_name, mask_tensor in zip(self.channels["target"], mask_images):
-                key = f"__fg_mask_{ch_name}"
-                sample_images[key] = mask_tensor
-                fg_mask_keys.append(key)
+        if self.fg_mask_support is not None and mask_images is not None:
+            fg_mask_keys = self.fg_mask_support.inject_into_sample(sample_images, mask_images)
         if self.target_ch_idx is not None:
             # NOTE: uses only the first target channel as weight for MONAI
             # spatial transform co-alignment. This does not copy the tensor.
@@ -242,7 +236,7 @@ class SlidingWindowDataset(Dataset):
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
         if fg_mask_keys:
-            sample["fg_mask"] = self._stack_channels(sample_images, keys=fg_mask_keys)
+            sample["fg_mask"] = self.fg_mask_support.extract_from_sample(sample_images, self._stack_channels)
         if self.load_normalization_metadata and norm_meta is not None:
             sample["norm_meta"] = norm_meta
         return sample

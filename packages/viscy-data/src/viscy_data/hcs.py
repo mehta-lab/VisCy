@@ -12,38 +12,16 @@ import torch
 from iohub.ngff import Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
-from monai.transforms import (
-    CenterSpatialCropd,
-    Compose,
-    MapTransform,
-    MultiSampleTrait,
-    RandAffined,
-    RandFlipd,
-    RandWeightedCropd,
-)
+from monai.transforms import CenterSpatialCropd, Compose, MapTransform, MultiSampleTrait, RandAffined
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from viscy_data._typing import Sample
 from viscy_data._utils import _collate_samples, _ensure_channel_list
+from viscy_data.foreground_masks import ForegroundMaskSupport
 from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset
-from viscy_transforms import BatchedCenterSpatialCropd, BatchedRandAffined, BatchedRandFlipd, BatchedRandSpatialCropd
 
 _logger = logging.getLogger("lightning.pytorch")
-
-# Spatial transforms that preserve pixel correspondence and must co-transform
-# fg_mask alongside source/target. Intensity transforms are excluded — applying
-# gamma correction or noise to a binary mask would corrupt it.
-_SPATIAL_TRANSFORMS: tuple[type, ...] = (
-    RandAffined,
-    RandFlipd,
-    CenterSpatialCropd,
-    RandWeightedCropd,
-    BatchedRandAffined,
-    BatchedRandFlipd,
-    BatchedCenterSpatialCropd,
-    BatchedRandSpatialCropd,
-)
 
 
 class HCSDataModule(LightningDataModule):
@@ -158,7 +136,7 @@ class HCSDataModule(LightningDataModule):
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
         if gpu_augmentations and self.fg_mask_key is not None:
-            self._inject_mask_keys(gpu_augmentations, ("target",), ("fg_mask",))
+            ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
 
     @staticmethod
@@ -169,9 +147,7 @@ class HCSDataModule(LightningDataModule):
     ) -> None:
         """Append mask keys to spatial transforms that operate on target keys.
 
-        Only modifies transforms in the ``_SPATIAL_TRANSFORMS`` allowlist.
-        Intensity transforms are never modified.  Idempotent — skips
-        transforms that already contain the mask keys.
+        Delegates to :meth:`ForegroundMaskSupport.patch_spatial_transforms`.
 
         Parameters
         ----------
@@ -184,14 +160,7 @@ class HCSDataModule(LightningDataModule):
             Keys to append (e.g. ``("__fg_mask_Nuclei",)`` or
             ``("fg_mask",)``).
         """
-        for t in transforms:
-            if (
-                isinstance(t, _SPATIAL_TRANSFORMS)
-                and any(k in t.keys for k in target_keys)
-                and not any(k in t.keys for k in mask_keys)
-            ):
-                t.keys = t.keys + mask_keys
-                t.allow_missing_keys = True
+        ForegroundMaskSupport.patch_spatial_transforms(transforms, target_keys, mask_keys)
 
     @property
     def cache_path(self):
@@ -467,7 +436,7 @@ class HCSDataModule(LightningDataModule):
         augmentations = self._train_transform()
         if self.fg_mask_key is not None:
             mask_keys = tuple(f"__fg_mask_{ch}" for ch in self.target_channel)
-            self._inject_mask_keys(augmentations, tuple(self.target_channel), mask_keys)
+            ForegroundMaskSupport.patch_spatial_transforms(augmentations, tuple(self.target_channel), mask_keys)
         train_transform = Compose(self.normalizations + augmentations + final_crop)
         val_transform = Compose(self.normalizations + final_crop)
         return train_transform, val_transform
