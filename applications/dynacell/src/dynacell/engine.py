@@ -1,7 +1,6 @@
 """Dynacell LightningModule for supervised virtual staining benchmarks."""
 
 import inspect
-import logging
 from typing import Literal, Sequence
 
 import numpy as np
@@ -20,8 +19,6 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNetViT3D": UNetViT3D,
     "FNet3D": Unet3d,
 }
-
-_logger = logging.getLogger("lightning.pytorch")
 
 
 class DynacellUNet(LightningModule):
@@ -124,12 +121,12 @@ class DynacellUNet(LightningModule):
             return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
         return self.loss_function(pred, target)
 
-    def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
+    def training_step(self, batch: Sample, batch_idx: int):
         """Execute a single training step.
 
         Parameters
         ----------
-        batch : Sample | Sequence[Sample]
+        batch : Sample
             Input batch.
         batch_idx : int
             Batch index.
@@ -139,31 +136,23 @@ class DynacellUNet(LightningModule):
         Tensor
             Training loss.
         """
-        losses = []
-        batch_size = 0
-        if not isinstance(batch, Sequence):
-            batch = [batch]
-        for b in batch:
-            source = b["source"]
-            target = b["target"]
-            pred = self.forward(source)
-            loss = self._compute_loss(pred, target, b)
-            losses.append(loss)
-            batch_size += source.shape[0]
-            if batch_idx < self.log_batches_per_epoch:
-                self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
-        loss_step = torch.stack(losses).mean()
+        source = batch["source"]
+        target = batch["target"]
+        pred = self.forward(source)
+        loss = self._compute_loss(pred, target, batch)
+        if batch_idx < self.log_batches_per_epoch:
+            self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
         self.log(
             "loss/train",
-            loss_step.to(self.device),
+            loss,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
             sync_dist=True,
-            batch_size=batch_size,
+            batch_size=source.shape[0],
         )
-        return loss_step
+        return loss
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         """Execute a single validation step.
@@ -186,7 +175,7 @@ class DynacellUNet(LightningModule):
         self.validation_losses[dataloader_idx].append(loss.detach())
         self.log(
             f"loss/val/{dataloader_idx}",
-            loss.to(self.device),
+            loss,
             sync_dist=True,
             batch_size=source.shape[0],
         )
@@ -220,7 +209,7 @@ class DynacellUNet(LightningModule):
         loss_means = [torch.stack(losses).mean() for losses in self.validation_losses]
         self.log(
             "loss/validate",
-            torch.stack(loss_means).mean().to(self.device),
+            torch.stack(loss_means).mean(),
             sync_dist=True,
         )
         self.validation_step_outputs.clear()
