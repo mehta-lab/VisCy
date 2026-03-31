@@ -31,6 +31,7 @@ from viscy_models import FullyConvolutionalMAE, Unet2d, Unet3d, Unet25d, UNeXt2
 from viscy_utils.callbacks.prediction_writer import _blend_in
 from viscy_utils.evaluation.metrics import mean_average_precision
 from viscy_utils.log_images import detach_sample, log_image_grid
+from viscy_utils.tensor_utils import to_numpy
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
@@ -357,7 +358,7 @@ class VSUNet(LightningModule):
     def _cellpose_predict(self, pred: Tensor, name: str) -> torch.ShortTensor:
         """Run CellPose segmentation on predicted image."""
         pred_labels_np = self.cellpose_model.eval(
-            pred.cpu().numpy(), channels=[0, 0], diameter=self.test_cellpose_diameter
+            to_numpy(pred), channels=[0, 0], diameter=self.test_cellpose_diameter
         )[0].astype(np.int16)
         imwrite(os.path.join(self.logger.log_dir, f"{name}.png"), pred_labels_np)
         return torch.from_numpy(pred_labels_np).to(self.device)

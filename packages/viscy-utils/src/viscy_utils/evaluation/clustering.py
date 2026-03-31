@@ -11,6 +11,8 @@ from sklearn.metrics import (
 )
 from sklearn.neighbors import KNeighborsClassifier
 
+from viscy_utils.tensor_utils import to_numpy
+
 
 def knn_accuracy(embeddings, annotations, k=5):
     """
@@ -33,9 +35,7 @@ def knn_accuracy(embeddings, annotations, k=5):
     return accuracy
 
 
-def pairwise_distance_matrix(
-    features: ArrayLike, metric: str = "cosine", device: str = "auto"
-) -> NDArray:
+def pairwise_distance_matrix(features: ArrayLike, metric: str = "cosine", device: str = "auto") -> NDArray:
     """Compute pairwise distances between all samples in the feature matrix.
 
     Uses PyTorch with GPU acceleration when available for significant speedup.
@@ -76,9 +76,7 @@ def pairwise_distance_matrix(
         elif device == "cpu":
             device_torch = torch.device("cpu")
         else:
-            raise ValueError(
-                f"Invalid device: {device}. Use 'auto', 'cuda', 'cpu', or 'scipy'"
-            )
+            raise ValueError(f"Invalid device: {device}. Use 'auto', 'cuda', 'cpu', or 'scipy'")
         features_array = np.asarray(features)
         if features_array.dtype == np.float32:
             features_tensor = torch.from_numpy(features_array).double().to(device_torch)
@@ -93,7 +91,7 @@ def pairwise_distance_matrix(
             distances = 1 - similarity
         elif metric == "euclidean":
             distances = torch.cdist(features_tensor, features_tensor, p=2)
-        return distances.cpu().numpy()
+        return to_numpy(distances)
 
     except ImportError:
         return cdist(features, features, metric=metric)
@@ -101,9 +99,7 @@ def pairwise_distance_matrix(
         return cdist(features, features, metric=metric)
 
 
-def rank_nearest_neighbors(
-    cross_dissimilarity: NDArray, normalize: bool = True
-) -> NDArray:
+def rank_nearest_neighbors(cross_dissimilarity: NDArray, normalize: bool = True) -> NDArray:
     """Rank each sample by (dis)similarity to all other samples.
 
     Parameters
@@ -132,9 +128,7 @@ def select_block(distances: NDArray, index: NDArray) -> NDArray:
     return distances[index][:, index]
 
 
-def compare_time_offset(
-    single_track_distances: NDArray, time_offset: int = 1
-) -> NDArray:
+def compare_time_offset(single_track_distances: NDArray, time_offset: int = 1) -> NDArray:
     """Extract the nearest neighbor distances/rankings
     of the next sample compared to each sample.
 

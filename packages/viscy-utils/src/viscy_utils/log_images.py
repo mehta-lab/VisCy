@@ -7,6 +7,8 @@ from matplotlib.pyplot import get_cmap
 from skimage.exposure import rescale_intensity
 from torch import Tensor
 
+from viscy_utils.tensor_utils import to_numpy
+
 if TYPE_CHECKING:
     from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 
@@ -37,7 +39,7 @@ def detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int) -> list[li
     for i in range(num_samples):
         row = []
         for img in imgs:
-            patch = img[i].detach().cpu().numpy()
+            patch = to_numpy(img[i])
             mid_z = patch.shape[1] // 2
             for c in range(n_channels):
                 row.append(patch[c, mid_z])
@@ -102,7 +104,7 @@ def log_chw_tensor(
     if isinstance(logger, WandbLogger):
         import wandb
 
-        img_np = grid.permute(1, 2, 0).cpu().numpy()
+        img_np = to_numpy(grid.permute(1, 2, 0))
         logger.experiment.log({key: wandb.Image(img_np), "epoch": step})
     else:
         logger.experiment.add_image(key, grid, step, dataformats="CHW")

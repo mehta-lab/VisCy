@@ -18,6 +18,7 @@ from sklearn.preprocessing import StandardScaler
 
 from viscy_data.triplet import TripletDataModule
 from viscy_utils.callbacks.embedding_writer import read_embedding_dataset
+from viscy_utils.tensor_utils import to_numpy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -124,8 +125,7 @@ class EmbeddingVisualizationApp:
 
             # Store explained variance for PCA
             self.pca_explained_variance = [
-                f"PC{i + 1} ({var:.1f}%)"
-                for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+                f"PC{i + 1} ({var:.1f}%)" for i, var in enumerate(pca.explained_variance_ratio_ * 100)
             ]
 
             # Add PCA options
@@ -141,9 +141,7 @@ class EmbeddingVisualizationApp:
                 existing_dims.append(dim)
 
         # Check for PHATE coordinates
-        phate_dims = [
-            col for col in self.features_df.columns if col.startswith("PHATE")
-        ]
+        phate_dims = [col for col in self.features_df.columns if col.startswith("PHATE")]
         if phate_dims:
             for dim in phate_dims:
                 dim_options.append({"label": dim, "value": dim})
@@ -160,13 +158,7 @@ class EmbeddingVisualizationApp:
         all_filtered_features = []
         for fov_name, track_ids in self.fov_tracks.items():
             if track_ids == "all":
-                fov_tracks = (
-                    self.features_df[self.features_df["fov_name"] == fov_name][
-                        "track_id"
-                    ]
-                    .unique()
-                    .tolist()
-                )
+                fov_tracks = self.features_df[self.features_df["fov_name"] == fov_name]["track_id"].unique().tolist()
             else:
                 fov_tracks = track_ids
 
@@ -174,8 +166,7 @@ class EmbeddingVisualizationApp:
 
             # Filter features for this FOV and its track IDs
             fov_features = self.features_df[
-                (self.features_df["fov_name"] == fov_name)
-                & (self.features_df["track_id"].isin(fov_tracks))
+                (self.features_df["fov_name"] == fov_name) & (self.features_df["track_id"].isin(fov_tracks))
             ]
             all_filtered_features.append(fov_features)
 
@@ -567,8 +558,7 @@ class EmbeddingVisualizationApp:
 
             # Get all timepoints for this track
             track_data = self.features_df[
-                (self.features_df["fov_name"] == fov_name)
-                & (self.features_df["track_id"] == track_id)
+                (self.features_df["fov_name"] == fov_name) & (self.features_df["track_id"] == track_id)
             ].sort_values("t")
 
             if track_data.empty:
@@ -612,17 +602,12 @@ class EmbeddingVisualizationApp:
                 channel_images = []
                 for t in timepoints:
                     cache_key = (fov_name, track_id, t)
-                    if (
-                        cache_key in self.image_cache
-                        and channel in self.image_cache[cache_key]
-                    ):
+                    if cache_key in self.image_cache and channel in self.image_cache[cache_key]:
                         is_clicked = t == clicked_time
                         image_style = {
                             "width": "150px",
                             "height": "150px",
-                            "border": (
-                                "3px solid #007bff" if is_clicked else "1px solid #ddd"
-                            ),
+                            "border": ("3px solid #007bff" if is_clicked else "1px solid #ddd"),
                             "borderRadius": "4px",
                         }
                         channel_images.append(
@@ -761,9 +746,7 @@ class EmbeddingVisualizationApp:
                     cluster_idx = id_dict["index"]
 
                     # Get current cluster name
-                    current_name = self.cluster_names.get(
-                        cluster_idx, f"Cluster {cluster_idx + 1}"
-                    )
+                    current_name = self.cluster_names.get(cluster_idx, f"Cluster {cluster_idx + 1}")
 
                     # Show modal
                     modal_style = {
@@ -799,11 +782,7 @@ class EmbeddingVisualizationApp:
                         dash.no_update,
                     )
 
-            if (
-                button_id == "assign-cluster"
-                and selected_data
-                and selected_data.get("points")
-            ):
+            if button_id == "assign-cluster" and selected_data and selected_data.get("points"):
                 # Create new cluster from selected points
                 new_cluster = []
                 for point in selected_data["points"]:
@@ -905,11 +884,7 @@ class EmbeddingVisualizationApp:
                     )
                     modal_style = {"display": "none"}
                     return (
-                        (
-                            {"display": "none"}
-                            if not self.clusters
-                            else {"display": "block"}
-                        ),
+                        ({"display": "none"} if not self.clusters else {"display": "block"}),
                         self._get_cluster_images() if self.clusters else None,
                         "timeline-tab" if not self.clusters else "clusters-tab",
                         fig,
@@ -1121,8 +1096,7 @@ class EmbeddingVisualizationApp:
         unique_tracks = self.filtered_features_df["track_id"].unique()
         cmap = plt.cm.tab20
         track_colors = {
-            track_id: f"rgb{tuple(int(x * 255) for x in cmap(i % 20)[:3])}"
-            for i, track_id in enumerate(unique_tracks)
+            track_id: f"rgb{tuple(int(x * 255) for x in cmap(i % 20)[:3])}" for i, track_id in enumerate(unique_tracks)
         }
 
         fig = go.Figure()
@@ -1188,9 +1162,7 @@ class EmbeddingVisualizationApp:
 
         # Add points for each selected track
         for track_id in unique_tracks:
-            track_data = self.filtered_features_df[
-                self.filtered_features_df["track_id"] == track_id
-            ].sort_values("t")
+            track_data = self.filtered_features_df[self.filtered_features_df["track_id"] == track_id].sort_values("t")
 
             # Get points for this track that are in clusters
             track_points = list(
@@ -1206,8 +1178,7 @@ class EmbeddingVisualizationApp:
             opacities = []
             if self.clusters:
                 cluster_colors = [
-                    f"rgb{tuple(int(x * 255) for x in plt.cm.Set2(i % 8)[:3])}"
-                    for i in range(len(self.clusters))
+                    f"rgb{tuple(int(x * 255) for x in plt.cm.Set2(i % 8)[:3])}" for i in range(len(self.clusters))
                 ]
                 point_to_cluster = {}
                 for cluster_idx, cluster in enumerate(self.clusters):
@@ -1280,9 +1251,7 @@ class EmbeddingVisualizationApp:
                 )
 
                 # Add arrows at regular intervals (reduced frequency)
-                arrow_interval = max(
-                    1, len(track_data) // 3
-                )  # Reduced number of arrows
+                arrow_interval = max(1, len(track_data) // 3)  # Reduced number of arrows
                 for i in range(0, len(track_data) - 1, arrow_interval):
                     # Calculate arrow angle
                     dx = x_coords[i + 1] - x_coords[i]
@@ -1313,15 +1282,11 @@ class EmbeddingVisualizationApp:
         all_y_data = self.filtered_features_df[y_axis]
 
         if not all_x_data.empty and not all_y_data.empty:
-            x_range, y_range = self._calculate_equal_aspect_ranges(
-                all_x_data, all_y_data
-            )
+            x_range, y_range = self._calculate_equal_aspect_ranges(all_x_data, all_y_data)
 
             # Set equal aspect ratio and range
             fig.update_layout(
-                xaxis=dict(
-                    range=x_range, scaleanchor="y", scaleratio=1, constrain="domain"
-                ),
+                xaxis=dict(range=x_range, scaleanchor="y", scaleratio=1, constrain="domain"),
                 yaxis=dict(range=y_range, constrain="domain"),
             )
 
@@ -1367,9 +1332,7 @@ class EmbeddingVisualizationApp:
         fig.update_yaxes(showgrid=False)
 
         # Add background points with hover info
-        all_tracks_df = self.features_df[
-            self.features_df["fov_name"].isin(self.fov_tracks.keys())
-        ]
+        all_tracks_df = self.features_df[self.features_df["fov_name"].isin(self.fov_tracks.keys())]
 
         # Subsample background points if there are too many
         if len(all_tracks_df) > 5000:  # Adjust this threshold as needed
@@ -1424,9 +1387,9 @@ class EmbeddingVisualizationApp:
         # Add arrows if requested, but more efficiently
         if show_arrows:
             for track_id in self.filtered_features_df["track_id"].unique():
-                track_data = self.filtered_features_df[
-                    self.filtered_features_df["track_id"] == track_id
-                ].sort_values("t")
+                track_data = self.filtered_features_df[self.filtered_features_df["track_id"] == track_id].sort_values(
+                    "t"
+                )
 
                 if len(track_data) > 1:
                     # Calculate distances between consecutive points
@@ -1466,15 +1429,11 @@ class EmbeddingVisualizationApp:
         all_x_data = self.filtered_features_df[x_axis]
         all_y_data = self.filtered_features_df[y_axis]
         if not all_x_data.empty and not all_y_data.empty:
-            x_range, y_range = self._calculate_equal_aspect_ranges(
-                all_x_data, all_y_data
-            )
+            x_range, y_range = self._calculate_equal_aspect_ranges(all_x_data, all_y_data)
 
             # Set equal aspect ratio and range
             fig.update_layout(
-                xaxis=dict(
-                    range=x_range, scaleanchor="y", scaleratio=1, constrain="domain"
-                ),
+                xaxis=dict(range=x_range, scaleanchor="y", scaleratio=1, constrain="domain"),
                 yaxis=dict(range=y_range, constrain="domain"),
             )
 
@@ -1499,9 +1458,7 @@ class EmbeddingVisualizationApp:
         buffered = BytesIO()
         # Use JPEG format with quality=85 for better compression
         img.save(buffered, format="JPEG", quality=85, optimize=True)
-        return "data:image/jpeg;base64," + base64.b64encode(buffered.getvalue()).decode(
-            "utf-8"
-        )
+        return "data:image/jpeg;base64," + base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     def save_cache(self, cache_path: str | None = None):
         """Save the image cache to disk using pickle.
@@ -1588,9 +1545,7 @@ class EmbeddingVisualizationApp:
                 return False
 
             self.image_cache = loaded_cache
-            logger.info(
-                f"Successfully loaded cache with {len(self.image_cache)} images"
-            )
+            logger.info(f"Successfully loaded cache with {len(self.image_cache)} images")
             return True
         except Exception as e:
             logger.error(f"Error loading cache: {e}")
@@ -1632,7 +1587,7 @@ class EmbeddingVisualizationApp:
 
                 for batch in data_module.predict_dataloader():
                     try:
-                        images = batch["anchor"].numpy()
+                        images = to_numpy(batch["anchor"])
                         indices = batch["index"]
                         track_id = indices["track_id"].tolist()
                         t = indices["t"].tolist()
@@ -1649,36 +1604,22 @@ class EmbeddingVisualizationApp:
                                 if channel in ["Phase3D", "DIC", "BF"]:
                                     # For phase contrast, use the middle z-slice
                                     z_idx = (self.z_range[1] - self.z_range[0]) // 2
-                                    processed = self._normalize_image(
-                                        img[0, idx, z_idx]
-                                    )
+                                    processed = self._normalize_image(img[0, idx, z_idx])
                                 else:
                                     # For fluorescence, use max projection
-                                    processed = self._normalize_image(
-                                        np.max(img[0, idx], axis=0)
-                                    )
+                                    processed = self._normalize_image(np.max(img[0, idx], axis=0))
 
-                                processed_channels[channel] = self._numpy_to_base64(
-                                    processed
-                                )
-                                logger.debug(
-                                    f"Successfully processed channel {channel} for {cache_key}"
-                                )
+                                processed_channels[channel] = self._numpy_to_base64(processed)
+                                logger.debug(f"Successfully processed channel {channel} for {cache_key}")
                             except Exception as e:
-                                logger.error(
-                                    f"Error processing channel {channel} for {cache_key}: {e}"
-                                )
+                                logger.error(f"Error processing channel {channel} for {cache_key}: {e}")
                                 continue
 
-                        if (
-                            processed_channels
-                        ):  # Only store if at least one channel was processed
+                        if processed_channels:  # Only store if at least one channel was processed
                             self.image_cache[cache_key] = processed_channels
 
                     except Exception as e:
-                        logger.error(
-                            f"Error processing batch for {fov_name}, track {track_id}: {e}"
-                        )
+                        logger.error(f"Error processing batch for {fov_name}, track {track_id}: {e}")
                         continue
 
             except Exception as e:
@@ -1911,23 +1852,18 @@ class EmbeddingVisualizationApp:
     def _get_cluster_images(self):
         """Display images for all clusters in a grid layout"""
         if not self.clusters:
-            return html.Div(
-                [self._get_output_info_display(), html.Div("No clusters created yet")]
-            )
+            return html.Div([self._get_output_info_display(), html.Div("No clusters created yet")])
 
         # Create cluster colors once
         cluster_colors = [
-            f"rgb{tuple(int(x * 255) for x in plt.cm.Set2(i % 8)[:3])}"
-            for i in range(len(self.clusters))
+            f"rgb{tuple(int(x * 255) for x in plt.cm.Set2(i % 8)[:3])}" for i in range(len(self.clusters))
         ]
 
         # Create individual cluster panels
         cluster_panels = []
         for cluster_idx, cluster_points in enumerate(self.clusters):
             # Get cluster name or use default
-            cluster_name = self.cluster_names.get(
-                cluster_idx, f"Cluster {cluster_idx + 1}"
-            )
+            cluster_name = self.cluster_names.get(cluster_idx, f"Cluster {cluster_idx + 1}")
 
             # Create a single scrollable container for all channels
             all_channel_images = []
@@ -2224,9 +2160,7 @@ class EmbeddingVisualizationApp:
                     port = p
                     break
             if port is None:
-                raise RuntimeError(
-                    f"Could not find an available port in range {port_range[0]}-{port_range[-1]}"
-                )
+                raise RuntimeError(f"Could not find an available port in range {port_range[0]}-{port_range[-1]}")
 
         try:
             logger.info(f"Starting server on port {port}")

@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from xarray import Dataset, open_zarr
 
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS
+from viscy_utils.tensor_utils import to_numpy
 
 __all__ = [
     "collect_data_provenance",
@@ -97,7 +98,7 @@ def collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
 
 def _move_and_stack_embeddings(predictions: Sequence, key: str) -> NDArray:
     """Move embeddings to CPU and stack them into a numpy array."""
-    return torch.cat([p[key].cpu() for p in predictions], dim=0).numpy()
+    return to_numpy(torch.cat([p[key] for p in predictions], dim=0))
 
 
 def write_embedding_dataset(
