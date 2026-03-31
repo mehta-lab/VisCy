@@ -253,10 +253,10 @@ class HCSDataModule(LightningDataModule):
         train_transform, val_transform = self._fit_transform()
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.maybe_cached_data_path
-        plate = open_ome_zarr(data_path, mode="r")
+        with open_ome_zarr(data_path, mode="r") as plate:
+            positions = [pos for _, pos in plate.positions()]
 
         # shuffle positions, randomness is handled globally
-        positions = [pos for _, pos in plate.positions()]
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
@@ -289,18 +289,19 @@ class HCSDataModule(LightningDataModule):
 
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.maybe_cached_data_path
-        plate = open_ome_zarr(data_path, mode="r")
+        with open_ome_zarr(data_path, mode="r") as plate:
+            positions = [p for _, p in plate.positions()]
         test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
             self.test_dataset = MaskTestDataset(
-                [p for _, p in plate.positions()],
+                positions,
                 transform=test_transform,
                 ground_truth_masks=self.ground_truth_masks,
                 **dataset_settings,
             )
         else:
             self.test_dataset = SlidingWindowDataset(
-                [p for _, p in plate.positions()],
+                positions,
                 transform=test_transform,
                 **dataset_settings,
             )
@@ -312,17 +313,17 @@ class HCSDataModule(LightningDataModule):
             _logger.warning("Ignoring caching config in 'predict' stage.")
 
     def _positions_maybe_single(self) -> list[Position]:
-        dataset: Plate | Position = open_ome_zarr(self.data_path, mode="r")
-        if isinstance(dataset, Position):
-            try:
-                plate_path = self.data_path.parent.parent.parent
-                fov_name = self.data_path.relative_to(plate_path).as_posix()
-                plate = open_ome_zarr(plate_path)
-            except (OSError, ValueError):
-                raise FileNotFoundError("Parent HCS store not found for single FOV input.")
-            positions = [plate[fov_name]]
-        elif isinstance(dataset, Plate):
-            positions = [p for _, p in dataset.positions()]
+        with open_ome_zarr(self.data_path, mode="r") as dataset:
+            if isinstance(dataset, Position):
+                try:
+                    plate_path = self.data_path.parent.parent.parent
+                    fov_name = self.data_path.relative_to(plate_path).as_posix()
+                    with open_ome_zarr(plate_path, mode="r") as plate:
+                        positions = [plate[fov_name]]
+                except (OSError, ValueError):
+                    raise FileNotFoundError("Parent HCS store not found for single FOV input.")
+            elif isinstance(dataset, Plate):
+                positions = [p for _, p in dataset.positions()]
         return positions
 
     def _setup_predict(
