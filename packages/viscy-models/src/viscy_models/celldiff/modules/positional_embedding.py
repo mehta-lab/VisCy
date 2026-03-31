@@ -35,10 +35,12 @@ def get_3d_sincos_pos_embed(
     grid_d = np.arange(grid_size[0], dtype=np.float32)
     grid_h = np.arange(grid_size[1], dtype=np.float32)
     grid_w = np.arange(grid_size[2], dtype=np.float32)
-    grid = np.meshgrid(grid_w, grid_h, grid_d)  # w, h, d
+    # indexing="ij" produces D-varies-slowest order matching PatchEmbed3D's
+    # C-order flattening of (B, C, D, H, W) → (B, C, D*H*W).
+    grid = np.meshgrid(grid_d, grid_h, grid_w, indexing="ij")  # d, h, w
     grid = np.stack(grid, axis=0)
 
-    grid = grid.reshape([3, 1, grid_size[2], grid_size[1], grid_size[0]])
+    grid = grid.reshape([3, 1, grid_size[0], grid_size[1], grid_size[2]])
     pos_embed = get_3d_sincos_pos_embed_from_grid(embed_dim, grid)
     if cls_token and extra_tokens > 0:
         pos_embed = np.concatenate([np.zeros([extra_tokens, embed_dim]), pos_embed], axis=0)
@@ -53,22 +55,23 @@ def get_3d_sincos_pos_embed_from_grid(embed_dim: int, grid: NDArray[np.float32])
     embed_dim : int
         Embedding dimension. Must be divisible by 8.
     grid : NDArray[np.float32]
-        Meshgrid array of shape ``(3, 1, W, H, D)``.
+        Meshgrid array of shape ``(3, 1, D, H, W)``.
 
     Returns
     -------
     NDArray[np.float64]
         Embeddings of shape ``(D*H*W, embed_dim)``.
     """
-    assert embed_dim % 8 == 0
+    if embed_dim % 8 != 0:
+        raise ValueError(f"embed_dim must be divisible by 8, got {embed_dim}")
 
     dim_d = embed_dim // 4
     dim_h = 3 * embed_dim // 8
     dim_w = 3 * embed_dim // 8
 
-    emb_d = get_1d_sincos_pos_embed_from_grid(dim_d, grid[2])  # (D*H*W, D/4)
+    emb_d = get_1d_sincos_pos_embed_from_grid(dim_d, grid[0])  # (D*H*W, D/4)
     emb_h = get_1d_sincos_pos_embed_from_grid(dim_h, grid[1])  # (D*H*W, 3*D/8)
-    emb_w = get_1d_sincos_pos_embed_from_grid(dim_w, grid[0])  # (D*H*W, 3*D/8)
+    emb_w = get_1d_sincos_pos_embed_from_grid(dim_w, grid[2])  # (D*H*W, 3*D/8)
 
     emb = np.concatenate([emb_d, emb_h, emb_w], axis=1)  # (D*H*W, D)
     return emb
@@ -89,7 +92,8 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: NDArray[np.floating])
     NDArray[np.float64]
         Embeddings of shape ``(M, embed_dim)``.
     """
-    assert embed_dim % 2 == 0
+    if embed_dim % 2 != 0:
+        raise ValueError(f"embed_dim must be even, got {embed_dim}")
     omega = np.arange(embed_dim // 2, dtype=np.float64)
     omega /= embed_dim / 2.0
     omega = 1.0 / 10000**omega  # (D/2,)

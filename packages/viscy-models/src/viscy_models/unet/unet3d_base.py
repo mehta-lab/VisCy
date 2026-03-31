@@ -158,6 +158,14 @@ class UNet3DBase(nn.Module):
         Tensor
             Output tensor of shape ``(B, out_channels, D, H, W)``.
         """
+        divisor = 2**self.num_blocks
+        for dim_name, size in zip(("D", "H", "W"), x.shape[2:]):
+            if self.downsamples_z or dim_name != "D":
+                if size % divisor != 0:
+                    raise ValueError(
+                        f"Spatial dim {dim_name}={size} must be divisible by {divisor} (2^{self.num_blocks} levels)."
+                    )
+
         # ── Timestep embedding ──────────────────────────────────────────
         time_embeds: Tensor | None = None
         if self._time_embedder is not None and t is not None:
