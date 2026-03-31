@@ -95,7 +95,7 @@ def main(config: Path) -> None:
     with torch.no_grad():
         for i in range(0, len(X_t), cfg.batch_size):
             batch = X_t[i : i + cfg.batch_size].to(device)
-            reps.append(model.encode(batch))
+            reps.append(model.encode(batch).cpu())
 
     X_mlp = to_numpy(torch.cat(reps, dim=0))
     click.echo(f"  Extracted representations: {X_mlp.shape}")
