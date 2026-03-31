@@ -46,11 +46,24 @@ def sample_with_norm_meta():
 
 
 class TestNormalizeSampled:
-    def test_mean_std(self, sample_with_norm_meta):
-        transform = NormalizeSampled(keys=["Phase3D"], level="fov_statistics")
-        result = transform(sample_with_norm_meta)
-        # (x - mean) / std
-        assert result["Phase3D"].shape == sample_with_norm_meta["Phase3D"].shape
+    def test_mean_std_values(self):
+        """Verify (x - mean) / std is computed correctly."""
+        image = torch.tensor([[[[[50.0, 60.0, 70.0]]]]])  # (1,1,1,1,3)
+        sample = {
+            "ch": image,
+            "norm_meta": {
+                "ch": {
+                    "fov_statistics": {
+                        "mean": torch.tensor(60.0),
+                        "std": torch.tensor(10.0),
+                    },
+                },
+            },
+        }
+        transform = NormalizeSampled(keys=["ch"], level="fov_statistics")
+        result = transform(sample)
+        expected = (image - 60.0) / (10.0 + 1e-8)
+        torch.testing.assert_close(result["ch"], expected)
         assert "norm_meta" in result
 
     def test_remove_meta(self, sample_with_norm_meta):
