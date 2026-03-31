@@ -52,7 +52,7 @@ class ForegroundMaskSupport:
         self.target_channels = target_channels
         self._mask_keys = self.mask_temp_keys(target_channels)
         self._mask_arrays: list[ImageArray] = []
-        self._mask_ch_idx: list[int] | None = None
+        self._mask_ch_indices: list[list[int]] = []
 
     @staticmethod
     def mask_temp_keys(target_channels: list[str]) -> tuple[str, ...]:
@@ -104,17 +104,16 @@ class ForegroundMaskSupport:
         n_mask_ch = mask_arr.channels
         n_image_ch = img_arr.channels
         n_target = len(self.target_channels)
-        if self._mask_ch_idx is None:
-            if n_mask_ch == n_image_ch:
-                self._mask_ch_idx = target_ch_idx
-            elif n_mask_ch == n_target:
-                self._mask_ch_idx = list(range(n_target))
-            else:
-                raise ValueError(
-                    f"Mask array '{self.fg_mask_key}' has {n_mask_ch} channels, "
-                    f"expected {n_image_ch} (all image channels) or "
-                    f"{n_target} (target channels only)."
-                )
+        if n_mask_ch == n_image_ch:
+            self._mask_ch_indices.append(target_ch_idx)
+        elif n_mask_ch == n_target:
+            self._mask_ch_indices.append(list(range(n_target)))
+        else:
+            raise ValueError(
+                f"Mask array '{self.fg_mask_key}' has {n_mask_ch} channels, "
+                f"expected {n_image_ch} (all image channels) or "
+                f"{n_target} (target channels only)."
+            )
         self._mask_arrays.append(mask_arr)
 
     def read_window(
@@ -139,7 +138,7 @@ class ForegroundMaskSupport:
         list[Tensor]
             Per-channel mask tensors with shape ``(1, Z, Y, X)``.
         """
-        mask_images, _ = read_fn(self._mask_arrays[arr_idx], self._mask_ch_idx, tz)
+        mask_images, _ = read_fn(self._mask_arrays[arr_idx], self._mask_ch_indices[arr_idx], tz)
         return mask_images
 
     def inject_into_sample(
