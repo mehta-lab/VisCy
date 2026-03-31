@@ -17,7 +17,7 @@ import click
 import numpy as np
 from numpy.typing import NDArray
 
-from viscy_utils.cli_utils import format_markdown_table, load_config
+from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
 
 from .config import (
@@ -77,7 +77,7 @@ def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
 def main(config: Path):
     """Compute PCA, UMAP, and/or PHATE on saved embeddings."""
     click.echo("Loading configuration...")
-    raw_config = load_config(config)
+    raw_config = load_config_section(config, None, default_section="reduce_dimensionality")
     cfg = DimensionalityReductionConfig(**raw_config)
 
     click.echo(f"Reading embeddings from {cfg.input_path}...")

@@ -31,7 +31,8 @@ def append_to_anndata_zarr(
     obs : pd.DataFrame, optional
         Observation metadata. Replaces the entire ``obs`` group.
     uns : dict, optional
-        Unstructured annotation. Replaces the entire ``uns`` group.
+        Mapping of uns keys to values. Each key is written to ``uns/{key}``,
+        replacing any existing entry while preserving other uns keys.
     """
     store = zarr.open(str(zarr_path), mode="a", use_consolidated=False)
     ad.settings.allow_write_nullable_strings = True
@@ -49,9 +50,13 @@ def append_to_anndata_zarr(
             write_elem(store, obsm_path, value)
 
     if uns is not None:
-        if "uns" in store:
-            del store["uns"]
-        write_elem(store, "uns", uns)
+        if "uns" not in store:
+            store.create_group("uns")
+        for key, value in uns.items():
+            uns_path = f"uns/{key}"
+            if uns_path in store:
+                del store[uns_path]
+            write_elem(store, uns_path, value)
 
     zarr.consolidate_metadata(str(zarr_path))
 

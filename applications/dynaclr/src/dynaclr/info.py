@@ -27,7 +27,7 @@ def main(path: Path):
             s = adata.obs[col]
             nuniq = s.nunique()
             if nuniq <= 10:
-                vals = ", ".join(str(v) for v in sorted(s.unique()[:10]))
+                vals = ", ".join(str(v) for v in sorted(s.dropna().unique()[:10]))
                 click.echo(f"  {col}: {s.dtype}, {nuniq} unique — [{vals}]")
             else:
                 click.echo(f"  {col}: {s.dtype}, {nuniq} unique")

@@ -37,7 +37,7 @@ from dynaclr.evaluation.linear_classifiers.utils import (
     get_available_tasks,
     resolve_task_channels,
 )
-from viscy_utils.cli_utils import format_markdown_table, load_config
+from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.annotation import load_annotation_anndata
 from viscy_utils.evaluation.linear_classifier import (
     load_and_combine_datasets,
@@ -828,7 +828,7 @@ def _get_recommended_subsets(summary_df: pd.DataFrame) -> pd.DataFrame:
 )
 def main(config: Path, task: str | None, report: bool):
     """Run rotating test-set leave-one-dataset-out cross-validation."""
-    config_dict = load_config(config)
+    config_dict = load_config_section(config, None, default_section="cross_validate")
 
     if report:
         config_dict["report"] = True

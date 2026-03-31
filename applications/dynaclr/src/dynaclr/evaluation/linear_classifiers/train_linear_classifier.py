@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 from pydantic import ValidationError
 
-from viscy_utils.cli_utils import format_markdown_table, load_config
+from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.linear_classifier import (
     load_and_combine_datasets,
     save_pipeline_to_wandb,
@@ -68,7 +68,7 @@ def main(config: Path):
     click.echo("=" * 60)
 
     try:
-        config_dict = load_config(config)
+        config_dict = load_config_section(config, None, default_section="train_linear_classifier")
         train_config = LinearClassifierTrainConfig(**config_dict)
     except ValidationError as e:
         click.echo(f"\n Configuration validation failed:\n{e}", err=True)

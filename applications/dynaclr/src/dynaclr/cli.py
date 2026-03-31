@@ -103,6 +103,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="combined-dim-reduction",
+        import_path="dynaclr.evaluation.dimensionality_reduction.reduce_combined.main",
+        short_help="Joint PCA/PHATE across multiple AnnData stores",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="cross-validate",
         import_path="dynaclr.evaluation.linear_classifiers.cross_validation.main",
         short_help="Run rotating leave-one-dataset-out cross-validation",
