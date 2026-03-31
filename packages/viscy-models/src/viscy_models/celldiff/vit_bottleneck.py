@@ -80,19 +80,25 @@ class ViTBottleneck3D(nn.Module):
         self._patch_size = patch_size
 
         # ── Compute latent spatial size after encoder downsamples ────────
+        # Stride-2 convolutions require exact divisibility; floor division
+        # silently accepts odd sizes that cause encoder/decoder shape mismatches.
+        factor = 2**num_downsamples
+        dim_names = ["D", "H", "W"]
+        downsampled_dims = [True, True, True] if downsample_z else [False, True, True]
+        for s, name, is_down in zip(input_spatial_size, dim_names, downsampled_dims):
+            if is_down and s % factor != 0:
+                raise ValueError(
+                    f"Input {name}={s} is not divisible by {factor} "
+                    f"({num_downsamples} stride-2 downsamples). "
+                    f"Use a multiple of {factor} to avoid encoder/decoder shape mismatches."
+                )
         if downsample_z:
-            latent_size = [s // (2**num_downsamples) for s in input_spatial_size]
+            latent_size = [s // factor for s in input_spatial_size]
         else:
-            latent_size = input_spatial_size[:1] + [s // (2**num_downsamples) for s in input_spatial_size[1:]]
+            latent_size = input_spatial_size[:1] + [s // factor for s in input_spatial_size[1:]]
 
         # ── Validate patch divisibility ─────────────────────────────────
-        dim_names = ["D", "H", "W"]
         for dim_val, name, orig in zip(latent_size, dim_names, input_spatial_size):
-            if dim_val == 0:
-                raise ValueError(
-                    f"Latent {name} dimension is 0 (from input {name}={orig}). "
-                    f"input_spatial_size is too small for {num_downsamples} downsamples."
-                )
             if dim_val % patch_size != 0:
                 raise ValueError(
                     f"Latent {name} dimension {dim_val} (from input {name}={orig}) "
