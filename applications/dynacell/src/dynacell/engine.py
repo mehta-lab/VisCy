@@ -60,6 +60,7 @@ class DynacellUNet(LightningModule):
         ckpt_path: str | None = None,
     ) -> None:
         super().__init__()
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path"])
         if model_config is None:
             model_config = {}
         net_class = _ARCHITECTURE.get(architecture)
@@ -72,7 +73,8 @@ class DynacellUNet(LightningModule):
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.training_step_outputs: list = []
-        self.validation_losses: list[list] = []
+        # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
+        self.validation_losses: list[list[tuple[Tensor, int]]] = []
         self.validation_step_outputs: list = []
 
         # Cache fg_mask compatibility to avoid per-batch inspect.signature().
@@ -172,7 +174,7 @@ class DynacellUNet(LightningModule):
         loss = self._compute_loss(pred, target, batch)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
-        self.validation_losses[dataloader_idx].append(loss.detach())
+        self.validation_losses[dataloader_idx].append((loss.detach(), source.shape[0]))
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -203,15 +205,20 @@ class DynacellUNet(LightningModule):
         self.training_step_outputs = []
 
     def on_validation_epoch_end(self):
-        """Log validation samples and aggregate loss."""
+        """Log validation samples and aggregate loss weighted by batch size."""
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-        loss_means = [torch.stack(losses).mean() for losses in self.validation_losses]
-        self.log(
-            "loss/validate",
-            torch.stack(loss_means).mean(),
-            sync_dist=True,
-        )
+        if self.validation_losses:
+            # Compute per-dataloader weighted mean, then weight dataloaders by sample count.
+            dl_means, dl_totals = [], []
+            for dl_batches in self.validation_losses:
+                losses, sizes = zip(*dl_batches)
+                sizes_t = torch.tensor(sizes, dtype=torch.float)
+                dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
+                dl_totals.append(sizes_t.sum())
+            total_n = torch.stack(dl_totals).sum()
+            weighted = sum(m * n for m, n in zip(dl_means, dl_totals))
+            self.log("loss/validate", weighted / total_n, sync_dist=True)
         self.validation_step_outputs.clear()
         self.validation_losses.clear()
 
@@ -222,7 +229,7 @@ class DynacellUNet(LightningModule):
             scheduler = WarmupCosineSchedule(
                 optimizer,
                 warmup_steps=3,
-                t_total=self.trainer.max_epochs,
+                t_total=self.trainer.estimated_stepping_batches,
                 warmup_multiplier=1e-3,
             )
         elif self.schedule == "Constant":
@@ -233,6 +240,6 @@ class DynacellUNet(LightningModule):
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         """Log image grid to the active logger."""
-        if not self.trainer.is_global_zero or self.logger is None:
+        if not imgs or not self.trainer.is_global_zero or self.logger is None:
             return
         log_image_grid(self.logger, key, imgs, self.current_epoch)
