@@ -123,7 +123,7 @@ class SlidingWindowDataset(Dataset):
             self.window_arrays.append(img_arr)
             self.window_norm_meta.append(_read_norm_meta(fov))
             if self.fg_mask_support is not None:
-                self.fg_mask_support.validate_and_store(fov)
+                self.fg_mask_support.validate_and_store(fov, img_arr, self.target_ch_idx)
         self._max_window = w
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, int]:
@@ -195,7 +195,7 @@ class SlidingWindowDataset(Dataset):
             # Read mask once — reused for both nonzero check and sample output
             mask_images = None
             if self.fg_mask_support is not None and self.target_ch_idx is not None:
-                mask_images = self.fg_mask_support.read_window(arr_idx, self.target_ch_idx, tz, self._read_img_window)
+                mask_images = self.fg_mask_support.read_window(arr_idx, tz, self._read_img_window)
             if check_key is not None:
                 if mask_images is not None and check_key in self.channels.get("target", []):
                     check_ch = self.channels["target"].index(check_key)
@@ -215,7 +215,7 @@ class SlidingWindowDataset(Dataset):
                         f"(index {index}). Returning last sample."
                     )
             break
-        # Inject mask as temp keys so MONAI spatial transforms (e.g. _final_crop) co-align them
+        # Inject mask as temp keys so spatial transforms in the pipeline co-align them
         has_masks = self.fg_mask_support is not None and mask_images is not None
         if has_masks:
             self.fg_mask_support.inject_into_sample(sample_images, mask_images)

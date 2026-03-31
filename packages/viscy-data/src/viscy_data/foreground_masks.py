@@ -52,6 +52,7 @@ class ForegroundMaskSupport:
         self.target_channels = target_channels
         self._mask_keys = self.mask_temp_keys(target_channels)
         self._mask_arrays: list[ImageArray] = []
+        self._mask_ch_idx: list[int] | None = None
 
     @staticmethod
     def mask_temp_keys(target_channels: list[str]) -> tuple[str, ...]:
@@ -68,28 +69,57 @@ class ForegroundMaskSupport:
         """Return precomputed ``("__fg_mask_{ch}", ...)`` tuple."""
         return self._mask_keys
 
-    def validate_and_store(self, fov: Position) -> None:
+    def validate_and_store(
+        self,
+        fov: Position,
+        img_arr: ImageArray,
+        target_ch_idx: list[int],
+    ) -> None:
         """Validate mask array exists in *fov* and store a reference.
 
-        Called once per position during ``SlidingWindowDataset._get_windows``.
-        The stored arrays are later looked up by index in ``read_window``.
+        On the first call, determines the mask channel indices by comparing
+        the mask array's channel count to the image array's.  Two layouts
+        are supported:
+
+        - **Full-channel** mask (same channels as image): use ``target_ch_idx``
+          to read the target channels from the mask, matching the image layout.
+        - **Target-only** mask (channel count equals ``len(target_channels)``):
+          channels are 0-indexed, so indices ``[0, 1, ...]`` are used.
 
         Parameters
         ----------
         fov : Position
             NGFF position to validate.
+        img_arr : ImageArray
+            The image array for this position (used to compare channel counts).
+        target_ch_idx : list[int]
+            Channel indices for target channels in the image array.
         """
         if self.fg_mask_key not in fov:
             raise FileNotFoundError(
                 f"Mask array '{self.fg_mask_key}' not found in position. "
                 "Run preprocessing with --compute_fg_masks first."
             )
-        self._mask_arrays.append(fov[self.fg_mask_key])
+        mask_arr = fov[self.fg_mask_key]
+        n_mask_ch = mask_arr.channels
+        n_image_ch = img_arr.channels
+        n_target = len(self.target_channels)
+        if self._mask_ch_idx is None:
+            if n_mask_ch == n_image_ch:
+                self._mask_ch_idx = target_ch_idx
+            elif n_mask_ch == n_target:
+                self._mask_ch_idx = list(range(n_target))
+            else:
+                raise ValueError(
+                    f"Mask array '{self.fg_mask_key}' has {n_mask_ch} channels, "
+                    f"expected {n_image_ch} (all image channels) or "
+                    f"{n_target} (target channels only)."
+                )
+        self._mask_arrays.append(mask_arr)
 
     def read_window(
         self,
         arr_idx: int,
-        target_ch_idx: list[int],
         tz: int,
         read_fn: Callable[..., tuple[list[Tensor], object]],
     ) -> list[Tensor]:
@@ -99,8 +129,6 @@ class ForegroundMaskSupport:
         ----------
         arr_idx : int
             Index into the stored mask arrays (matches ``window_arrays`` order).
-        target_ch_idx : list[int]
-            Channel indices for target channels.
         tz : int
             Window index within the FOV (counted Z-first).
         read_fn : Callable
@@ -111,7 +139,7 @@ class ForegroundMaskSupport:
         list[Tensor]
             Per-channel mask tensors with shape ``(1, Z, Y, X)``.
         """
-        mask_images, _ = read_fn(self._mask_arrays[arr_idx], target_ch_idx, tz)
+        mask_images, _ = read_fn(self._mask_arrays[arr_idx], self._mask_ch_idx, tz)
         return mask_images
 
     def inject_into_sample(
