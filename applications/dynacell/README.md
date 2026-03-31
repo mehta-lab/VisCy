@@ -19,4 +19,4 @@ uv run dynacell fit -c fnet3d/fit.yml
 
 - Only `fit` and `validate` subcommands are supported
 - `predict` raises `NotImplementedError` (requires DivisiblePad + tiled inference, Stage 3)
-- `test` is not implemented (no `test_step` override; Lightning default will fail on the batch dict)
+- `test` raises `MisconfigurationException` (no `test_step` override)
