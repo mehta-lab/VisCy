@@ -213,7 +213,9 @@ class DynacellUNet(LightningModule):
             dl_means, dl_totals = [], []
             for dl_batches in self.validation_losses:
                 losses, sizes = zip(*dl_batches)
-                sizes_t = torch.tensor(sizes, dtype=torch.float)
+                # Create sizes on the same device as the losses to avoid device
+                # mismatch on GPU/DDP where losses are on the model device.
+                sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
                 dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
                 dl_totals.append(sizes_t.sum())
             total_n = torch.stack(dl_totals).sum()
@@ -232,6 +234,9 @@ class DynacellUNet(LightningModule):
                 t_total=self.trainer.estimated_stepping_batches,
                 warmup_multiplier=1e-3,
             )
+            # t_total is a step count; must step the scheduler every optimizer
+            # step, not once per epoch (Lightning's default).
+            return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
         elif self.schedule == "Constant":
             scheduler = ConstantLR(optimizer, factor=1, total_iters=self.trainer.max_epochs)
         else:
