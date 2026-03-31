@@ -81,7 +81,7 @@ class DynacellUNet(LightningModule):
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
 
-        # Build example_input_array for TensorBoard graph logging.
+        # Build example_input_array for graph logging (TensorBoard/W&B).
         in_channels = model_config.get("in_channels") or 1
         if hasattr(self.model, "input_spatial_size"):
             # UNetViT3D: must use exact spatial dims.
@@ -121,7 +121,7 @@ class DynacellUNet(LightningModule):
             return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
         return self.loss_function(pred, target)
 
-    def training_step(self, batch: Sample, batch_idx: int):
+    def training_step(self, batch: Sample, batch_idx: int) -> Tensor:
         """Execute a single training step.
 
         Parameters
