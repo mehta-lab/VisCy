@@ -152,6 +152,7 @@ class VSUNet(LightningModule):
         tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
+        self.save_hyperparameters(ignore=["loss_function"])
         if model_config is None:
             model_config = {}
         net_class = _UNET_ARCHITECTURE.get(architecture)
