@@ -6,7 +6,6 @@ from typing import Any, Dict, Literal, Optional, Sequence
 
 import numpy as np
 import pandas as pd
-import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
@@ -98,7 +97,8 @@ def collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
 
 def _move_and_stack_embeddings(predictions: Sequence, key: str) -> NDArray:
     """Move embeddings to CPU and stack them into a numpy array."""
-    return to_numpy(torch.cat([p[key] for p in predictions], dim=0))
+    arrays = [to_numpy(p[key]) for p in predictions]
+    return np.concatenate(arrays, axis=0)
 
 
 def write_embedding_dataset(
