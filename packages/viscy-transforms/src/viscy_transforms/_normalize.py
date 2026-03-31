@@ -12,6 +12,17 @@ from viscy_transforms._typing import Sample
 
 __all__ = ["NormalizeSampled", "MinMaxSampled"]
 
+_DATA_RANGE_KEYS: dict[str, tuple[str, str]] = {
+    "min_max": ("min", "max"),
+    "p1_p99": ("p1", "p99"),
+    "p5_p95": ("p5", "p95"),
+}
+
+
+def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
+    """Reshape a scalar or ``(B,)`` stat tensor to broadcast against an image."""
+    return tensor.reshape(tensor.shape + (1,) * (target.ndim - tensor.ndim)).to(device=target.device)
+
 
 class NormalizeSampled(MapTransform):
     """Normalize using precomputed statistics stored in ``sample["norm_meta"]``.
@@ -56,17 +67,11 @@ class NormalizeSampled(MapTransform):
         self.level = level
         self.remove_meta = remove_meta
 
-    @staticmethod
-    def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
-        return tensor.reshape(tensor.shape + (1,) * (target.ndim - tensor.ndim)).to(device=target.device)
-
     def __call__(self, sample: Sample) -> Sample:
         for key in self.keys:
             level_meta = sample["norm_meta"][key][self.level]
-            subtrahend_val = level_meta[self.subtrahend]
-            subtrahend_val = self._match_image(subtrahend_val, sample[key])
-            divisor_val = level_meta[self.divisor] + 1e-8
-            divisor_val = self._match_image(divisor_val, sample[key])
+            subtrahend_val = _match_image(level_meta[self.subtrahend], sample[key])
+            divisor_val = _match_image(level_meta[self.divisor], sample[key]) + 1e-8
             sample[key] = (sample[key] - subtrahend_val) / divisor_val
         if self.remove_meta:
             sample.pop("norm_meta")
@@ -108,27 +113,16 @@ class MinMaxSampled(MapTransform):
     ) -> None:
         super().__init__(keys, allow_missing_keys=False)
         self.level = level
-        self.data_range = data_range
+        if data_range not in _DATA_RANGE_KEYS:
+            raise ValueError(f"Invalid data_range: {data_range}")
+        self._low_key, self._high_key = _DATA_RANGE_KEYS[data_range]
         self.remove_meta = remove_meta
-
-    @staticmethod
-    def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
-        return tensor.reshape(tensor.shape + (1,) * (target.ndim - tensor.ndim)).to(device=target.device)
 
     def __call__(self, sample: Sample) -> Sample:
         for key in self.keys:
             level_meta = sample["norm_meta"][key][self.level]
-            if self.data_range == "min_max":
-                min_val = self._match_image(level_meta["min"], sample[key])
-                max_val = self._match_image(level_meta["max"], sample[key])
-            elif self.data_range == "p1_p99":
-                min_val = self._match_image(level_meta["p1"], sample[key])
-                max_val = self._match_image(level_meta["p99"], sample[key])
-            elif self.data_range == "p5_p95":
-                min_val = self._match_image(level_meta["p5"], sample[key])
-                max_val = self._match_image(level_meta["p95"], sample[key])
-            else:
-                raise ValueError(f"Invalid data_range: {self.data_range}")
+            min_val = _match_image(level_meta[self._low_key], sample[key])
+            max_val = _match_image(level_meta[self._high_key], sample[key])
             sample[key] = sample[key].clamp(min_val, max_val)
             sample[key] = 2.0 * (sample[key] - min_val) / (max_val - min_val + 1e-8) - 1.0
         if self.remove_meta:

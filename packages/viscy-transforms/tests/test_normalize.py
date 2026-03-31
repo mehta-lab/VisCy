@@ -99,10 +99,9 @@ class TestMinMaxSampled:
         result = transform(sample_with_norm_meta)
         assert "norm_meta" not in result
 
-    def test_invalid_data_range(self, sample_with_norm_meta):
-        transform = MinMaxSampled(keys=["Phase3D"], level="fov_statistics", data_range="invalid")
+    def test_invalid_data_range(self):
         with pytest.raises(ValueError, match="Invalid data_range"):
-            transform(sample_with_norm_meta)
+            MinMaxSampled(keys=["Phase3D"], level="fov_statistics", data_range="invalid")
 
     def test_preserves_shape(self, sample_with_norm_meta):
         original_shape = sample_with_norm_meta["Phase3D"].shape

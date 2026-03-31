@@ -38,7 +38,7 @@ class RandGaussianNoiseTensor(RandGaussianNoise):
         Mean of the Gaussian distribution. Inherited from parent class.
     std : float
         Standard deviation (or max std if sample_std=True). Inherited.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Inherited from parent class.
     sample_std : bool
         If True, samples std uniformly from [0, std]. Inherited.
@@ -83,7 +83,7 @@ class RandGaussianNoiseTensord(RandGaussianNoised):
         Mean of the Gaussian distribution. Default: 0.0.
     std : float
         Standard deviation (or max std if sample_std=True). Default: 0.1.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Default: np.float32.
     allow_missing_keys : bool
         Whether to allow missing keys in data dictionary. Default: False.
@@ -133,7 +133,7 @@ class BatchedRandGaussianNoise(RandGaussianNoiseTensor):
         Mean of the Gaussian distribution. Inherited from parent class.
     std : float
         Standard deviation (or max std if sample_std=True). Inherited.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Inherited from parent class.
     sample_std : bool
         If True, samples std uniformly from [0, std] per batch. Inherited.
@@ -220,7 +220,7 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
         Mean of the Gaussian distribution. Default: 0.0.
     std : float
         Standard deviation (or max std if sample_std=True). Default: 0.1.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Default: np.float32.
     allow_missing_keys : bool
         Whether to allow missing keys in data dictionary. Default: False.
