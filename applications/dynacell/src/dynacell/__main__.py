@@ -3,8 +3,8 @@
 Usage
 -----
 cd applications/dynacell/examples/configs
-dynacell fit -c unetvit3d/fit.yml
-python -m dynacell fit --config unetvit3d/fit.yml
+uv run dynacell fit -c unetvit3d/fit.yml
+uv run python -m dynacell fit --config unetvit3d/fit.yml
 """
 
 from viscy_utils.cli import main

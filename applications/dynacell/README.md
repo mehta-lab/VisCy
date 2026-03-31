@@ -6,8 +6,8 @@ Benchmark virtual staining application using UNetViT3D and FNet3D architectures.
 
 ```bash
 cd applications/dynacell/examples/configs
-dynacell fit -c unetvit3d/fit.yml
-dynacell fit -c fnet3d/fit.yml
+uv run dynacell fit -c unetvit3d/fit.yml
+uv run dynacell fit -c fnet3d/fit.yml
 ```
 
 ## Architectures
@@ -18,4 +18,5 @@ dynacell fit -c fnet3d/fit.yml
 ## Limitations (Stage 2)
 
 - Only `fit` and `validate` subcommands are supported
-- `predict` and `test` appear in `--help` but raise errors (Stage 3)
+- `predict` raises `NotImplementedError` (requires DivisiblePad + tiled inference, Stage 3)
+- `test` is not implemented (no `test_step` override; Lightning default will fail on the batch dict)
