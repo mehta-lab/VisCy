@@ -14,10 +14,10 @@ class TestToNumpy:
         assert result.dtype == np.float32
         np.testing.assert_allclose(result, [1.0, 2.0, 3.0], atol=1e-2)
 
-    def test_fp16_to_float32(self):
+    def test_fp16_preserved(self):
         t = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
         result = to_numpy(t)
-        assert result.dtype == np.float32
+        assert result.dtype == np.float16
         np.testing.assert_allclose(result, [1.0, 2.0, 3.0], atol=1e-3)
 
     def test_fp32_passthrough(self):
@@ -26,10 +26,10 @@ class TestToNumpy:
         assert result.dtype == np.float32
         np.testing.assert_array_equal(result, [1.0, 2.0, 3.0])
 
-    def test_fp64_to_float32(self):
+    def test_fp64_preserved(self):
         t = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)
         result = to_numpy(t)
-        assert result.dtype == np.float32
+        assert result.dtype == np.float64
 
     def test_int_preserved(self):
         t = torch.tensor([1, 2, 3], dtype=torch.int32)

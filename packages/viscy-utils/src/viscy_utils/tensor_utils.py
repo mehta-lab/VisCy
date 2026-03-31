@@ -8,9 +8,9 @@ from torch import Tensor
 def to_numpy(t: Tensor) -> np.ndarray:
     """Convert a tensor to a NumPy array, handling mixed-precision dtypes.
 
-    Floating-point tensors are cast to float32 because NumPy does not
-    support bfloat16 or other AMP-produced dtypes. Integer and boolean
-    tensors preserve their dtype.
+    Bfloat16 tensors (from AMP/autocast) are cast to float32 because
+    NumPy does not support bfloat16. All other dtypes (float16, float32,
+    float64, integers, booleans) are preserved.
 
     Parameters
     ----------
@@ -23,7 +23,7 @@ def to_numpy(t: Tensor) -> np.ndarray:
         NumPy array on CPU.
     """
     t = t.detach()
-    if t.is_floating_point():
+    if t.dtype == torch.bfloat16:
         t = t.to(device="cpu", dtype=torch.float32)
     else:
         t = t.cpu()
