@@ -14,7 +14,6 @@ from monai.transforms import (
     RandGaussianNoised,
     RandomizableTransform,
 )
-from numpy.typing import DTypeLike
 from torch import Tensor
 
 __all__ = [
@@ -108,7 +107,7 @@ class RandGaussianNoiseTensord(RandGaussianNoised):
         prob: float = 0.1,
         mean: float = 0.0,
         std: float = 0.1,
-        dtype: DTypeLike = np.float32,
+        dtype: type = np.float32,
         allow_missing_keys: bool = False,
         sample_std: bool = True,
     ) -> None:
@@ -245,7 +244,7 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
         prob: float = 0.1,
         mean: float = 0.0,
         std: float = 0.1,
-        dtype: DTypeLike = np.float32,
+        dtype: type = np.float32,
         allow_missing_keys: bool = False,
         sample_std: bool = True,
     ) -> None:

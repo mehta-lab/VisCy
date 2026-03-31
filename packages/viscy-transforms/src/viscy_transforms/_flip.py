@@ -74,7 +74,7 @@ class BatchedRandFlipd(MapTransform, RandomizableTransform):
         self.random_flip = BatchedRandFlip(spatial_axes=spatial_axes, prob=prob)
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
-        self.random_flip.randomize(next(iter(sample.values())))
+        self.random_flip.randomize(sample[self.keys[0]])
         for key in self.key_iterator(sample):
             sample[key] = self.random_flip(sample[key], randomize=False)
         return sample
