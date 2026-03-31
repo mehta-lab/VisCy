@@ -27,13 +27,21 @@ T = TypeVar("T")
 OneOrSeq = T | Sequence[T]
 
 
-class LevelNormStats(TypedDict):
+class LevelNormStats(TypedDict, total=False):
     """Normalization statistics at a single level (FOV or dataset)."""
 
     mean: Tensor
     std: Tensor
     median: Tensor
     iqr: Tensor
+    min: Tensor
+    max: Tensor
+    p1: Tensor
+    p5: Tensor
+    p95: Tensor
+    p99: Tensor
+    p99_p1: Tensor
+    p95_p5: Tensor
 
 
 class ChannelNormStats(TypedDict):

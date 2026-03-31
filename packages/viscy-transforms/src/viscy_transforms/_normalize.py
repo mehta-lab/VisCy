@@ -10,7 +10,7 @@ from typing_extensions import Iterable, Literal
 
 from viscy_transforms._typing import Sample
 
-__all__ = ["NormalizeSampled"]
+__all__ = ["NormalizeSampled", "MinMaxSampled"]
 
 
 class NormalizeSampled(MapTransform):
@@ -68,6 +68,69 @@ class NormalizeSampled(MapTransform):
             divisor_val = level_meta[self.divisor] + 1e-8
             divisor_val = self._match_image(divisor_val, sample[key])
             sample[key] = (sample[key] - subtrahend_val) / divisor_val
+        if self.remove_meta:
+            sample.pop("norm_meta")
+        return sample
+
+
+class MinMaxSampled(MapTransform):
+    """Normalize to [-1, 1] by clipping then rescaling with precomputed range statistics.
+
+    Applies::
+
+        x_clipped = clamp(x, low, high)
+        x_norm = 2 * (x_clipped - low) / (high - low) - 1
+
+    where ``low`` and ``high`` are determined by ``data_range``.
+
+    Expects ``norm_meta`` to have structure::
+
+        {channel_label: {level: {stat_name: Tensor, ...}, ...}, ...}
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to normalize.
+    level : {'fov_statistics', 'dataset_statistics', 'timepoint_statistics'}
+        Level of normalization.
+    data_range : {'min_max', 'p1_p99', 'p5_p95'}
+        Statistic pair to use as ``[low, high]``. Defaults to ``'p1_p99'``.
+    remove_meta : bool
+        Whether to remove metadata after normalization, defaults to False.
+    """
+
+    def __init__(
+        self,
+        keys: str | Iterable[str],
+        level: Literal["fov_statistics", "dataset_statistics", "timepoint_statistics"],
+        data_range: Literal["min_max", "p1_p99", "p5_p95"] = "p1_p99",
+        remove_meta: bool = False,
+    ) -> None:
+        super().__init__(keys, allow_missing_keys=False)
+        self.level = level
+        self.data_range = data_range
+        self.remove_meta = remove_meta
+
+    @staticmethod
+    def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
+        return tensor.reshape(tensor.shape + (1,) * (target.ndim - tensor.ndim)).to(device=target.device)
+
+    def __call__(self, sample: Sample) -> Sample:
+        for key in self.keys:
+            level_meta = sample["norm_meta"][key][self.level]
+            if self.data_range == "min_max":
+                min_val = self._match_image(level_meta["min"], sample[key])
+                max_val = self._match_image(level_meta["max"], sample[key])
+            elif self.data_range == "p1_p99":
+                min_val = self._match_image(level_meta["p1"], sample[key])
+                max_val = self._match_image(level_meta["p99"], sample[key])
+            elif self.data_range == "p5_p95":
+                min_val = self._match_image(level_meta["p5"], sample[key])
+                max_val = self._match_image(level_meta["p95"], sample[key])
+            else:
+                raise ValueError(f"Invalid data_range: {self.data_range}")
+            sample[key] = sample[key].clamp(min_val, max_val)
+            sample[key] = 2.0 * (sample[key] - min_val) / (max_val - min_val + 1e-8) - 1.0
         if self.remove_meta:
             sample.pop("norm_meta")
         return sample
