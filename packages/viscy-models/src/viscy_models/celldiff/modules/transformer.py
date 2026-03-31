@@ -174,7 +174,8 @@ def unpatchify(
     c = out_channels
     p = patch_size
     d, h, w = latent_grid_size
-    assert d * h * w == x.shape[1]
+    if d * h * w != x.shape[1]:
+        raise ValueError(f"Expected {d * h * w} tokens (grid {d}x{h}x{w}), got {x.shape[1]}")
 
     x = x.reshape(x.shape[0], d, h, w, p, p, p, c)
     x = x.permute(0, 7, 1, 4, 2, 5, 3, 6)
