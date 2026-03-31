@@ -502,7 +502,11 @@ class VSUNet(LightningModule):
     def configure_optimizers(self):
         """Configure optimizer and learning rate scheduler."""
         if self.freeze_encoder:
-            self.model: FullyConvolutionalMAE
+            if not hasattr(self.model, "encoder"):
+                raise ValueError(
+                    f"freeze_encoder=True requires a model with an 'encoder' attribute "
+                    f"(e.g. FullyConvolutionalMAE), got {type(self.model).__name__}"
+                )
             self.model.encoder.requires_grad_(False)
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         if self.schedule == "WarmupCosine":
