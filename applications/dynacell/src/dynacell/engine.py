@@ -217,10 +217,10 @@ class DynacellUNet(LightningModule):
         """Log validation samples and aggregate loss."""
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-        loss_means = [torch.tensor(losses).mean() for losses in self.validation_losses]
+        loss_means = [torch.stack(losses).mean() for losses in self.validation_losses]
         self.log(
             "loss/validate",
-            torch.tensor(loss_means).mean().to(self.device),
+            torch.stack(loss_means).mean().to(self.device),
             sync_dist=True,
         )
         self.validation_step_outputs.clear()
@@ -238,6 +238,8 @@ class DynacellUNet(LightningModule):
             )
         elif self.schedule == "Constant":
             scheduler = ConstantLR(optimizer, factor=1, total_iters=self.trainer.max_epochs)
+        else:
+            raise ValueError(f"Unknown schedule {self.schedule!r}, expected 'WarmupCosine' or 'Constant'")
         return [optimizer], [scheduler]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
