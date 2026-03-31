@@ -12,6 +12,8 @@
 #SBATCH --output=slurm_log/%j.out
 #SBATCH --error=slurm_log/%j.err
 
+mkdir -p -m 775 slurm_log
+
 ml uv
 
 export PYTHONUNBUFFERED=1
