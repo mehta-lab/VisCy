@@ -17,7 +17,7 @@ from viscy_utils.losses import SpotlightLoss
 from viscy_utils.meta_utils import generate_fg_masks
 
 # Small model configs for tests (not production sizes).
-VIT_CONFIG = {
+VIT_TEST_CONFIG = {
     "input_spatial_size": [8, 32, 32],
     "in_channels": 1,
     "out_channels": 1,
@@ -30,7 +30,7 @@ VIT_CONFIG = {
     "patch_size": 4,
 }
 
-FNET_CONFIG = {
+FNET_TEST_CONFIG = {
     "in_channels": 1,
     "out_channels": 1,
     "depth": 1,
@@ -47,7 +47,7 @@ def test_unetvit3d_fast_dev_run(tmp_path, _SyntheticDataModule):
     seed_everything(42)
     module = DynacellUNet(
         architecture="UNetViT3D",
-        model_config=VIT_CONFIG,
+        model_config=VIT_TEST_CONFIG,
         log_batches_per_epoch=1,
     )
     trainer = Trainer(
@@ -67,7 +67,7 @@ def test_fnet3d_fast_dev_run(tmp_path, _SyntheticDataModule):
     seed_everything(42)
     module = DynacellUNet(
         architecture="FNet3D",
-        model_config=FNET_CONFIG,
+        model_config=FNET_TEST_CONFIG,
         log_batches_per_epoch=1,
     )
     trainer = Trainer(
@@ -90,7 +90,7 @@ def test_unetvit3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     seed_everything(42)
     module = DynacellUNet(
         architecture="UNetViT3D",
-        model_config=VIT_CONFIG,
+        model_config=VIT_TEST_CONFIG,
         log_batches_per_epoch=1,
     )
     datamodule = HCSDataModule(
@@ -120,7 +120,7 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     seed_everything(42)
     module = DynacellUNet(
         architecture="FNet3D",
-        model_config=FNET_CONFIG,
+        model_config=FNET_TEST_CONFIG,
         log_batches_per_epoch=1,
     )
     datamodule = HCSDataModule(
@@ -151,7 +151,7 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
     seed_everything(42)
     module = DynacellUNet(
         architecture="FNet3D",
-        model_config=FNET_CONFIG,
+        model_config=FNET_TEST_CONFIG,
         loss_function=SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95),
         log_batches_per_epoch=1,
     )
