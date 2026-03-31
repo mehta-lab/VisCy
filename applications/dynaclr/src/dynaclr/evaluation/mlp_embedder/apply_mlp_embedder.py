@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from viscy_models.components.heads import MLP
 from viscy_utils.cli_utils import load_config
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
+from viscy_utils.tensor_utils import to_numpy
 
 
 class MlpEmbedderApplyConfig(BaseModel):
@@ -96,7 +97,7 @@ def main(config: Path) -> None:
             batch = X_t[i : i + cfg.batch_size].to(device)
             reps.append(model.encode(batch).cpu())
 
-    X_mlp = torch.cat(reps, dim=0).numpy()
+    X_mlp = to_numpy(torch.cat(reps, dim=0))
     click.echo(f"  Extracted representations: {X_mlp.shape}")
 
     append_to_anndata_zarr(write_path, obsm={"X_mlp": X_mlp})

@@ -1,0 +1,53 @@
+# Data recipe: HCSDataModule for Phase3D -> Structure (SEC61B), 3D (z=8).
+# Uses MinMax p1_p99 normalization and GPU-side Batched* augmentations.
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
+    source_channel: Phase3D
+    target_channel: Structure
+    z_window_size: 8
+    num_workers: 8
+    yx_patch_size: [256, 256]
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Phase3D, Structure]
+          level: fov_statistics
+          data_range: p1_p99
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.5
+          rotate_range: [3.14, 0, 0]
+          shear_range: null
+          scale_range: [0.5, 1.5]
+      - class_path: viscy_transforms.BatchedRandSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [8, 256, 256]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.3
+          gamma: [0.75, 1.5]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          factors: 0.5
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 5.0
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 1.5]
+          sigma_y: [0.25, 1.5]
+          sigma_z: [0.25, 1.5]
+    caching: false

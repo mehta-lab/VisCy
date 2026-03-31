@@ -1,0 +1,25 @@
+# Trainer recipe: 1-GPU training with WandB logging and checkpointing.
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  log_every_n_steps: 10
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: dynacell
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+  enable_checkpointing: true
+  inference_mode: true

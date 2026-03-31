@@ -14,7 +14,6 @@ from monai.transforms import (
     RandGaussianNoised,
     RandomizableTransform,
 )
-from numpy.typing import DTypeLike
 from torch import Tensor
 
 __all__ = [
@@ -39,7 +38,7 @@ class RandGaussianNoiseTensor(RandGaussianNoise):
         Mean of the Gaussian distribution. Inherited from parent class.
     std : float
         Standard deviation (or max std if sample_std=True). Inherited.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Inherited from parent class.
     sample_std : bool
         If True, samples std uniformly from [0, std]. Inherited.
@@ -84,7 +83,7 @@ class RandGaussianNoiseTensord(RandGaussianNoised):
         Mean of the Gaussian distribution. Default: 0.0.
     std : float
         Standard deviation (or max std if sample_std=True). Default: 0.1.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Default: np.float32.
     allow_missing_keys : bool
         Whether to allow missing keys in data dictionary. Default: False.
@@ -108,7 +107,7 @@ class RandGaussianNoiseTensord(RandGaussianNoised):
         prob: float = 0.1,
         mean: float = 0.0,
         std: float = 0.1,
-        dtype: DTypeLike = np.float32,
+        dtype: type = np.float32,
         allow_missing_keys: bool = False,
         sample_std: bool = True,
     ) -> None:
@@ -134,7 +133,7 @@ class BatchedRandGaussianNoise(RandGaussianNoiseTensor):
         Mean of the Gaussian distribution. Inherited from parent class.
     std : float
         Standard deviation (or max std if sample_std=True). Inherited.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Inherited from parent class.
     sample_std : bool
         If True, samples std uniformly from [0, std] per batch. Inherited.
@@ -221,7 +220,7 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
         Mean of the Gaussian distribution. Default: 0.0.
     std : float
         Standard deviation (or max std if sample_std=True). Default: 0.1.
-    dtype : DTypeLike
+    dtype : type
         Output data type. Default: np.float32.
     allow_missing_keys : bool
         Whether to allow missing keys in data dictionary. Default: False.
@@ -245,7 +244,7 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
         prob: float = 0.1,
         mean: float = 0.0,
         std: float = 0.1,
-        dtype: DTypeLike = np.float32,
+        dtype: type = np.float32,
         allow_missing_keys: bool = False,
         sample_std: bool = True,
     ) -> None:

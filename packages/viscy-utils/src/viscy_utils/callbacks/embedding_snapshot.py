@@ -15,6 +15,7 @@ from viscy_utils.callbacks.embedding_writer import (
     collect_data_provenance,
     write_embedding_dataset,
 )
+from viscy_utils.tensor_utils import to_numpy
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -33,7 +34,7 @@ def _extract_mid_z_patches(images: torch.Tensor) -> np.ndarray:
         4D array of shape (B, C, H, W) at the middle Z slice.
     """
     mid_z = images.shape[2] // 2
-    return images[:, :, mid_z].detach().cpu().numpy()
+    return to_numpy(images[:, :, mid_z])
 
 
 class EmbeddingSnapshotCallback(Callback):
@@ -127,8 +128,8 @@ class EmbeddingSnapshotCallback(Callback):
         output_path = self.output_dir / f"epoch_{epoch}.zarr"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        features_np = self._features.numpy()
-        projections_np = self._projections.numpy()
+        features_np = to_numpy(self._features)
+        projections_np = to_numpy(self._projections)
 
         if self._index is not None:
             available = {k: v for k, v in self._index.items() if k in ULTRACK_INDEX_COLUMNS}

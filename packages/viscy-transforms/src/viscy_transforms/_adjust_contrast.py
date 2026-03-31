@@ -139,7 +139,7 @@ class BatchedRandAdjustContrastd(MapTransform, RandomizableTransform):
         """
         # Use the first tensor to generate random parameters, then apply
         # the same random state to all specified keys for consistency
-        first_key = next(iter(sample.keys()))
+        first_key = self.keys[0]
         self.contrast_transform.randomize(sample[first_key])
 
         for key in self.key_iterator(sample):
