@@ -55,16 +55,15 @@ class TestCollectionValidation:
         with pytest.raises(ValueError, match="Duplicate experiment name"):
             _make_collection(experiments=[exp, exp])
 
-    def test_interval_minutes_not_positive(self):
-        """Raise ValueError when interval_minutes <= 0."""
+    def test_zero_interval_minutes_allowed(self):
+        """Zero interval_minutes is valid (non-timelapse data)."""
         exp = _make_experiment(name="exp1", interval_minutes=0.0)
-        with pytest.raises(ValueError, match="interval_minutes must be positive"):
-            _make_collection(experiments=[exp])
+        _make_collection(experiments=[exp])
 
     def test_negative_interval_minutes(self):
         """Raise ValueError when interval_minutes is negative."""
         exp = _make_experiment(name="exp1", interval_minutes=-5.0)
-        with pytest.raises(ValueError, match="interval_minutes must be positive"):
+        with pytest.raises(ValueError, match="interval_minutes must be non-negative"):
             _make_collection(experiments=[exp])
 
     def test_perturbation_wells_empty(self):

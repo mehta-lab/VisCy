@@ -68,12 +68,18 @@ from viscy_transforms._scale_intensity import (
 from viscy_transforms._sharpen import BatchedRandSharpend
 from viscy_transforms._stack_channels import StackChannelsd
 from viscy_transforms._tiled_crop import TiledSpatialCropSamplesd
+from viscy_transforms._z_reduction import (
+    BatchedChannelWiseZReduction,
+    BatchedChannelWiseZReductiond,
+)
 from viscy_transforms._zoom import BatchedZoom, BatchedZoomd
 from viscy_transforms._zstack_shift import BatchedRandZStackShiftd
 
 __version__ = version("viscy-transforms")
 
 __all__ = [
+    "BatchedChannelWiseZReduction",
+    "BatchedChannelWiseZReductiond",
     "BatchedCenterSpatialCrop",
     "BatchedCenterSpatialCropd",
     "BatchedRandAdjustContrast",

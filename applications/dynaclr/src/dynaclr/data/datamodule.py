@@ -15,6 +15,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+import torch
 from lightning.pytorch import LightningDataModule
 from monai.data.thread_buffer import ThreadDataLoader
 from monai.transforms import Compose, MapTransform
@@ -25,6 +26,7 @@ from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data._utils import BatchedCenterSpatialCropd, _transform_channel_wise
 from viscy_data.channel_dropout import ChannelDropout
+from viscy_data.channel_utils import parse_channel_name
 from viscy_data.sampler import FlexibleBatchSampler
 from viscy_transforms import BatchedRandSpatialCropd
 
@@ -581,11 +583,23 @@ class MultiExperimentDataModule(LightningDataModule):
                             "All FOVs must have normalization metadata or none of them."
                         )
                     # else: all non-None, pass through as list
+                extra = None
+                if isinstance(self.channels_per_sample, int):
+                    meta = batch.get(f"{key}_meta")
+                    if meta is not None:
+                        extra = {
+                            "_is_labelfree": torch.tensor(
+                                [parse_channel_name(m.get("marker", ""))["channel_type"] == "labelfree" for m in meta],
+                                dtype=torch.bool,
+                                device=batch[key].device,
+                            )
+                        }
                 transformed = _transform_channel_wise(
                     transform=transform,
                     channel_names=self._channel_names,
                     patch=batch[key],
                     norm_meta=norm_meta,
+                    extra=extra,
                 )
                 batch[key] = transformed
                 if norm_meta_key in batch:

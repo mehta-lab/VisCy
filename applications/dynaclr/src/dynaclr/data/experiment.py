@@ -129,12 +129,14 @@ class ExperimentRegistry:
         self.z_ranges = self._resolve_z_ranges()
 
         # Validate pixel sizes and compute scale factors
-        if self.reference_pixel_size_xy_um is not None or self.reference_pixel_size_z_um is not None:
-            missing = [e.name for e in experiments if e.pixel_size_xy_um is None or e.pixel_size_z_um is None]
+        if self.reference_pixel_size_xy_um is not None:
+            missing = [e.name for e in experiments if e.pixel_size_xy_um is None]
             if missing:
-                raise ValueError(
-                    f"reference_pixel_size set but experiments are missing pixel_size_xy_um/z_um: {missing}"
-                )
+                raise ValueError(f"reference_pixel_size_xy_um set but experiments missing pixel_size_xy_um: {missing}")
+        if self.reference_pixel_size_z_um is not None:
+            missing = [e.name for e in experiments if e.pixel_size_z_um is None]
+            if missing:
+                raise ValueError(f"reference_pixel_size_z_um set but experiments missing pixel_size_z_um: {missing}")
         self.scale_factors = self._compute_scale_factors()
 
     @property
@@ -237,18 +239,15 @@ class ExperimentRegistry:
         """
         scale_factors: dict[str, tuple[float, float, float]] = {}
         for exp in self.collection.experiments:
-            if (
-                self.reference_pixel_size_xy_um is not None
-                and self.reference_pixel_size_z_um is not None
-                and exp.pixel_size_xy_um is not None
-                and exp.pixel_size_z_um is not None
-            ):
+            if self.reference_pixel_size_xy_um is not None and exp.pixel_size_xy_um is not None:
                 scale_y = self.reference_pixel_size_xy_um / exp.pixel_size_xy_um
                 scale_x = self.reference_pixel_size_xy_um / exp.pixel_size_xy_um
-                scale_z = self.reference_pixel_size_z_um / exp.pixel_size_z_um
             else:
                 scale_y = 1.0
                 scale_x = 1.0
+            if self.reference_pixel_size_z_um is not None and exp.pixel_size_z_um is not None:
+                scale_z = self.reference_pixel_size_z_um / exp.pixel_size_z_um
+            else:
                 scale_z = 1.0
             scale_factors[exp.name] = (scale_z, scale_y, scale_x)
         return scale_factors
