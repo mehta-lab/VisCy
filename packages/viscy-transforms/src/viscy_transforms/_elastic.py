@@ -144,9 +144,11 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         grid = torch.stack([coords[2], coords[1], coords[0]], dim=-1)
         grid = grid.unsqueeze(0).repeat(ref.shape[0], 1, 1, 1, 1)
         # Map displacement (D=0, H=1, W=2) → grid (X=0, Y=1, Z=2).
-        grid[..., 0] += displacement[:, 2] / ref.shape[4] * 2  # W disp → X grid
-        grid[..., 1] += displacement[:, 1] / ref.shape[3] * 2  # H disp → Y grid
-        grid[..., 2] += displacement[:, 0] / ref.shape[2] * 2  # D disp → Z grid
+        # With align_corners=True, 1 voxel = 2/(size-1) in normalized coords.
+        depth, height, width = ref.shape[2], ref.shape[3], ref.shape[4]
+        grid[..., 0] += displacement[:, 2] * (2.0 / max(width - 1, 1))  # W disp → X
+        grid[..., 1] += displacement[:, 1] * (2.0 / max(height - 1, 1))  # H disp → Y
+        grid[..., 2] += displacement[:, 0] * (2.0 / max(depth - 1, 1))  # D disp → Z
 
         # Apply the same grid to every key.
         for key in self.key_iterator(d):
