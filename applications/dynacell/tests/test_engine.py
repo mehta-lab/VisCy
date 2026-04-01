@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from monai.data import MetaTensor
 
 from dynacell.engine import DynacellUNet
 
@@ -97,8 +98,34 @@ def test_invalid_architecture():
         DynacellUNet(architecture="NonExistent")
 
 
-def test_predict_step_raises():
-    """predict_step raises NotImplementedError."""
+def test_fnet3d_predict_step(synth_fnet_batch):
+    """FNet3D predict_step returns the input spatial shape."""
     model = DynacellUNet(architecture="FNet3D", model_config=FNET_TEST_CONFIG)
-    with pytest.raises(NotImplementedError, match="not supported"):
-        model.predict_step({"source": torch.randn(1, 1, 4, 16, 16)}, batch_idx=0)
+    model.eval()
+    model.on_predict_start()
+    batch = {**synth_fnet_batch, "source": MetaTensor(synth_fnet_batch["source"])}
+    with torch.no_grad():
+        prediction = model.predict_step(batch, batch_idx=0)
+    assert prediction.shape == synth_fnet_batch["source"].shape
+
+
+def test_fnet3d_predict_step_pads_odd_spatial():
+    """FNet3D predict_step crops back to original shape for odd spatial inputs."""
+    model = DynacellUNet(architecture="FNet3D", model_config=FNET_TEST_CONFIG)
+    model.eval()
+    model.on_predict_start()
+    source = MetaTensor(torch.randn(1, 1, 4, 17, 17))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == source.shape
+
+
+def test_unetvit3d_predict_step(synth_vit_batch):
+    """UNetViT3D predict_step returns the input spatial shape."""
+    model = DynacellUNet(architecture="UNetViT3D", model_config=VIT_TEST_CONFIG)
+    model.eval()
+    model.on_predict_start()
+    batch = {**synth_vit_batch, "source": MetaTensor(synth_vit_batch["source"])}
+    with torch.no_grad():
+        prediction = model.predict_step(batch, batch_idx=0)
+    assert prediction.shape == synth_vit_batch["source"].shape

@@ -7,11 +7,13 @@ import importlib
 from pathlib import Path
 
 import pytest
+from iohub.ngff import open_ome_zarr
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from dynacell.engine import DynacellUNet
 from viscy_data.hcs import HCSDataModule
+from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.compose import load_composed_config
 from viscy_utils.losses import SpotlightLoss
 from viscy_utils.meta_utils import generate_fg_masks
@@ -176,6 +178,69 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
     trainer.fit(module, datamodule=datamodule)
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
+
+
+# ---- Predict integration tests (CPU) ----
+
+
+def test_fnet3d_predict_integration(tmp_path, tiny_hcs_zarr):
+    """DynacellUNet + FNet3D runs predict and writes predictions to OME-Zarr."""
+    seed_everything(42)
+    module = DynacellUNet(architecture="FNet3D", model_config=FNET_TEST_CONFIG)
+    datamodule = HCSDataModule(
+        data_path=str(tiny_hcs_zarr),
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=(16, 16),
+    )
+    output_store = str(tmp_path / "predict_out.zarr")
+    writer = HCSPredictionWriter(output_store=output_store)
+    trainer = Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        callbacks=[writer],
+    )
+    trainer.predict(module, datamodule=datamodule, return_predictions=False)
+    with open_ome_zarr(output_store, mode="r") as plate:
+        positions = list(plate.positions())
+    assert len(positions) == 4
+    for _, pos in positions:
+        assert "Fluorescence_prediction" in pos.channel_names
+
+
+def test_unetvit3d_predict_integration(tmp_path, tiny_hcs_zarr):
+    """DynacellUNet + UNetViT3D runs predict with spatial-matching tiles."""
+    seed_everything(42)
+    module = DynacellUNet(architecture="UNetViT3D", model_config=VIT_TEST_CONFIG)
+    datamodule = HCSDataModule(
+        data_path=str(tiny_hcs_zarr),
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=8,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=(32, 32),
+    )
+    output_store = str(tmp_path / "predict_out.zarr")
+    writer = HCSPredictionWriter(output_store=output_store)
+    trainer = Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        callbacks=[writer],
+    )
+    trainer.predict(module, datamodule=datamodule, return_predictions=False)
+    with open_ome_zarr(output_store, mode="r") as plate:
+        positions = list(plate.positions())
+    assert len(positions) == 4
+    for _, pos in positions:
+        assert "Fluorescence_prediction" in pos.channel_names
 
 
 # ---- Config validation tests ----

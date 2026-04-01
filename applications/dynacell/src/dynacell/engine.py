@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from lightning.pytorch import LightningModule
 from monai.optimizers import WarmupCosineSchedule
+from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 from torch.optim.lr_scheduler import ConstantLR
 
@@ -19,6 +20,26 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNetViT3D": UNetViT3D,
     "FNet3D": Unet3d,
 }
+
+
+def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
+    """Build a DivisiblePad matching the model's spatial downsampling axes.
+
+    Parameters
+    ----------
+    model : nn.Module
+        A model with ``num_blocks`` and optionally ``downsamples_z``.
+
+    Returns
+    -------
+    DivisiblePad
+        Pads YX (and Z if ``downsamples_z``) to the nearest multiple of
+        ``2**num_blocks``.
+    """
+    down_factor = 2**model.num_blocks
+    if getattr(model, "downsamples_z", False):
+        return DivisiblePad((0, down_factor, down_factor, down_factor))
+    return DivisiblePad((0, 0, down_factor, down_factor))
 
 
 class DynacellUNet(LightningModule):
@@ -184,20 +205,34 @@ class DynacellUNet(LightningModule):
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
 
-    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        """Not implemented in Stage 2.
+    def on_predict_start(self) -> None:
+        """Build the divisible-pad transform for tiled inference."""
+        self._predict_pad = _make_divisible_pad(self.model)
 
-        Raises
-        ------
-        NotImplementedError
-            Prediction requires DivisiblePad and tiled inference (Stage 3).
+    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
+        """Execute a single prediction step.
+
+        Pads the input tile to the nearest multiple of the model's downsampling
+        factor, runs the forward pass, then crops back to the original shape.
+
+        Parameters
+        ----------
+        batch : Sample
+            Input batch. Only ``"source"`` is used.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int
+            Dataloader index, defaults to 0.
+
+        Returns
+        -------
+        Tensor
+            Model prediction, cropped to the input spatial shape.
         """
-        raise NotImplementedError(
-            "Prediction is not supported in Dynacell v1. "
-            "The HCS predict pipeline passes full-FOV spatial sizes "
-            "which are incompatible with UNetViT3D/FNet3D without "
-            "DivisiblePad and tiled inference. See Stage 3."
-        )
+        source = batch["source"]
+        source = self._predict_pad(source)
+        prediction = self.forward(source)
+        return self._predict_pad.inverse(prediction)
 
     def on_train_epoch_end(self):
         """Log training image samples."""
