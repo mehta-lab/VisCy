@@ -151,6 +151,11 @@ class BatchedRandAffined(MapTransform):
         if len(scale_range) == 3 and isinstance(scale_range[0], (list, tuple)):
             z, y, x = scale_range
             return (tuple(x), tuple(y), tuple(z)), True
+        if len(scale_range) != 2:
+            raise ValueError(
+                f"scale_range must be (min, max) or [(z_min, z_max), (y_min, y_max), "
+                f"(x_min, x_max)]. Got {scale_range!r} with length {len(scale_range)}."
+            )
         # Flat (min, max) — Kornia samples independently per axis from this range.
         return tuple(scale_range), False
 
