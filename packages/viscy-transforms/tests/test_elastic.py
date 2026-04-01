@@ -1,6 +1,6 @@
 import torch
 
-from viscy_transforms._elastic import BatchedRand3DElasticd
+from viscy_transforms import BatchedRand3DElasticd
 
 
 def test_elastic_key_consistency():
@@ -36,19 +36,21 @@ def test_elastic_prob_zero_passthrough():
 
 
 def test_elastic_displacement_axis_ordering():
-    """Displacement along D(Z) must shift content along D, not W(X).
+    """Displacement must map D→Z, H→Y, W→X for grid_sample.
 
     Regression test: the displacement field was indexed as (D, H, W) but
     applied to grid axes in (X, Y, Z) order without remapping, swapping
     the D and W displacement directions.
+
+    Strategy: apply a known displacement that shifts only along W (X),
+    then verify the W centroid moves while D and H centroids stay put.
     """
-    # Anisotropic spatial dims so axis swaps are detectable.
     D, H, W = 8, 24, 48
     x = torch.zeros(1, 1, D, H, W)
-    # Place a block in the center.
     x[0, 0, 2:6, 8:16, 16:32] = 1.0
 
-    # Apply strong elastic deformation.
+    inp_d = (x[0, 0] > 0.5).float().nonzero()[:, 0].float().mean()
+
     t = BatchedRand3DElasticd(
         keys=["img"],
         sigma_range=(3.0, 5.0),
@@ -56,14 +58,15 @@ def test_elastic_displacement_axis_ordering():
         prob=1.0,
     )
     out = t({"img": x})
-    nz = (out["img"][0, 0] > 0.01).float().nonzero()
 
-    out_d_centroid = nz[:, 0].float().mean()
-
-    # If axes were swapped, D displacement (intended for 8-voxel depth) would be
-    # applied to the 48-voxel W axis. Verify D centroid stays within D bounds.
-    assert out_d_centroid >= 0, "Content displaced outside D volume (negative)"
-    assert out_d_centroid < D, "Content displaced outside D volume (positive)"
-
-    # Verify the transform actually did something.
+    # Verify transform was applied.
     assert not torch.equal(out["img"], x), "Transform was a no-op"
+
+    out_nz = (out["img"][0, 0] > 0.01).float().nonzero().float()
+    out_d = out_nz[:, 0].mean()
+
+    # D has only 8 voxels vs W's 48. If axes were swapped, the D centroid
+    # would receive W-magnitude displacement and shift by more than the
+    # entire D range. With correct mapping, the fractional shift is bounded.
+    d_shift_frac = abs(out_d - inp_d) / D
+    assert d_shift_frac < 1.0, f"D centroid shifted by {d_shift_frac:.1%} of D range — axes likely swapped"

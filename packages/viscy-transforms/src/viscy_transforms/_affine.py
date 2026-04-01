@@ -92,7 +92,12 @@ class BatchedRandAffined(MapTransform):
             rotate_range = (0.0, 0.0, 0.0)
         shear_range = self._radians_to_degrees(self._invert_per_axis(shear_range))
         translate_range = self._invert_per_axis(translate_range)
-        scale_range = self._parse_scale_range(scale_range)
+        scale_range, per_axis = self._parse_scale_range(scale_range)
+        if isotropic_scale and per_axis:
+            raise ValueError(
+                "isotropic_scale=True cannot be combined with per-axis scale_range. "
+                "Use a flat (min, max) range instead."
+            )
         self._isotropic_scale = isotropic_scale and scale_range is not None
         self.random_affine = RandomAffine3D(
             degrees=rotate_range,
@@ -130,22 +135,24 @@ class BatchedRandAffined(MapTransform):
     @staticmethod
     def _parse_scale_range(
         scale_range: tuple[float, float] | Sequence[tuple[float, float]] | None,
-    ) -> tuple[tuple[float, float], ...] | tuple[float, float] | None:
+    ) -> tuple[tuple[tuple[float, float], ...] | tuple[float, float] | None, bool]:
         """Parse scale_range into Kornia format.
 
         Returns
         -------
         kornia_scale
             Value passed to ``RandomAffine3D(scale=...)``.
+        per_axis
+            True if per-axis ZYX ranges were provided.
         """
         if scale_range is None:
-            return None
+            return None, False
         # Per-axis: list of 3 (min, max) pairs in ZYX order → reverse to XYZ.
         if len(scale_range) == 3 and isinstance(scale_range[0], (list, tuple)):
             z, y, x = scale_range
-            return (tuple(x), tuple(y), tuple(z))
+            return (tuple(x), tuple(y), tuple(z)), True
         # Flat (min, max) — Kornia samples independently per axis from this range.
-        return tuple(scale_range)
+        return tuple(scale_range), False
 
     @staticmethod
     def _make_scale_isotropic(params: dict[str, Tensor]) -> dict[str, Tensor]:
@@ -170,7 +177,10 @@ class BatchedRandAffined(MapTransform):
             Dictionary with transformed tensors for specified keys.
         """
         d = dict(sample)
+        # Find the first present key; return unchanged if none match.
         first_key = self.first_key(d)
+        if first_key not in d:
+            return d
         # Generate random parameters once from the first key's shape.
         params = self.random_affine.forward_parameters(d[first_key].shape)
         if self._isotropic_scale:

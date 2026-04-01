@@ -1,6 +1,6 @@
 import torch
 
-from viscy_transforms._affine import BatchedRandAffined
+from viscy_transforms import BatchedRandAffined
 
 
 def test_affine_key_consistency():
@@ -31,17 +31,21 @@ def test_affine_isotropic_scale():
         scale_range=[0.5, 1.5],
         isotropic_scale=True,
     )
-    # Use anisotropic spatial dims so uniform scaling is distinguishable.
+    x = torch.randn(8, 1, 8, 32, 32)
+    # Verify params directly: all three axes must have the same scale per sample.
+    params = t.random_affine.forward_parameters(x.shape)
+    BatchedRandAffined._make_scale_isotropic(params)
+    scale = params["scale"]
+    assert torch.equal(scale[:, 0], scale[:, 1])
+    assert torch.equal(scale[:, 0], scale[:, 2])
+
+    # Also verify end-to-end key consistency.
     base = torch.zeros(4, 1, 8, 24, 48)
     base[:, :, 2:6, 8:16, 16:32] = 1.0
     sample = {"source": base.clone(), "target": base.clone()}
-
     torch.manual_seed(0)
     out = t(sample)
-
-    # Source and target must still match (key consistency).
     assert torch.equal(out["source"], out["target"])
-    # Transform must change the data.
     assert not torch.equal(out["source"], base)
 
 

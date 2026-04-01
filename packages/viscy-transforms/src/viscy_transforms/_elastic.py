@@ -31,7 +31,9 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         Range for the displacement magnitude. Higher values produce
         stronger deformations.
     prob : float
-        Probability of applying the transform. Default: 0.1.
+        Probability of applying the transform to the entire batch.
+        When triggered, all samples in the batch are deformed with
+        independent random fields. Default: 0.1.
     mode : str
         Interpolation mode for grid sampling. Options: "bilinear", "nearest".
         Default: "bilinear".
@@ -81,7 +83,7 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         spatial_dims = shape[2:]
         displacement_fields = []
 
-        for b in range(batch_size):
+        for _ in range(batch_size):
             sigma = self.R.uniform(self.sigma_range[0], self.sigma_range[1])
             magnitude = self.R.uniform(self.magnitude_range[0], self.magnitude_range[1])
 
@@ -123,7 +125,10 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         self.randomize(None)
         if not self._do_transform:
             return d
+        # Find the first present key; return unchanged if none match.
         first_key = self.first_key(d)
+        if first_key not in d:
+            return d
         ref = d[first_key]
 
         # Generate displacement field and sampling grid once.
