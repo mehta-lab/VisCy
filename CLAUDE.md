@@ -2,6 +2,12 @@
 
 Project-specific instructions for Claude Code sessions in this repository.
 
+## Git Workflow
+- **NEVER** use `git commit --amend` or `git push --force` / `--force-with-lease` unless the user explicitly requests it. Always create NEW commits.
+- ALWAYS use atomic commits: one logical change per commit. Never bundle unrelated changes.
+- Never use `git add -A` or `git add .`. Always stage specific files by name.
+- Always pull before pushing. If push is rejected, pull and retry — never force-push.
+
 ## Repository Structure
 
 VisCy is a **uv workspace monorepo**. Sub-packages live under `packages/`:
