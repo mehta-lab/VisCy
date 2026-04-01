@@ -1,5 +1,5 @@
 # Data recipe: HCSDataModule for Phase3D -> Structure (SEC61B), 3D (z=8).
-# Uses MinMax p1_p99 normalization and GPU-side Batched* augmentations.
+# Uses mean/std (source) and median/iqr (target) normalization with GPU-side Batched* augmentations.
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
@@ -10,11 +10,18 @@ data:
     num_workers: 8
     yx_patch_size: [512, 512]
     normalizations:
-      - class_path: viscy_transforms.MinMaxSampled
+      - class_path: viscy_transforms.NormalizeSampled
         init_args:
-          keys: [Phase3D, Structure]
+          keys: [Phase3D]
           level: fov_statistics
-          data_range: p1_p99
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
     gpu_augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
@@ -42,7 +49,7 @@ data:
           keys: [source]
           prob: 0.5
           mean: 0.0
-          std: 5.0
+          std: 1.0
       - class_path: viscy_transforms.BatchedRandGaussianSmoothd
         init_args:
           keys: [source]
