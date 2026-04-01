@@ -2,6 +2,7 @@
 
 import bisect
 import logging
+import random
 from pathlib import Path
 
 import numpy as np
@@ -96,6 +97,12 @@ class SlidingWindowDataset(Dataset):
             self.fg_mask_support = ForegroundMaskSupport(fg_mask_key, target_channels)
         else:
             self.fg_mask_support = None
+        # Cache combined channel names and indices (used every __getitem__)
+        self._all_ch_names = self.channels["source"].copy()
+        self._all_ch_idx = self.source_ch_idx.copy()
+        if self.target_ch_idx is not None:
+            self._all_ch_names.extend(self.channels["target"])
+            self._all_ch_idx.extend(self.target_ch_idx)
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -185,13 +192,8 @@ class SlidingWindowDataset(Dataset):
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
             img, tz, norm_meta, arr_idx = self._find_window(idx)
-            ch_names = self.channels["source"].copy()
-            ch_idx = self.source_ch_idx.copy()
-            if self.target_ch_idx is not None:
-                ch_names.extend(self.channels["target"])
-                ch_idx.extend(self.target_ch_idx)
-            images, sample_index = self._read_img_window(img, ch_idx, tz)
-            sample_images = {k: v for k, v in zip(ch_names, images)}
+            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz)
+            sample_images = dict(zip(self._all_ch_names, images))
             # Read mask once — reused for both nonzero check and sample output
             mask_images = None
             if self.fg_mask_support is not None and self.target_ch_idx is not None:
@@ -207,7 +209,7 @@ class SlidingWindowDataset(Dataset):
                     break
                 if frac < self.min_nonzero_fraction:
                     if attempt < self.max_nonzero_retries:
-                        idx = torch.randint(len(self), (1,)).item()
+                        idx = random.randint(0, len(self) - 1)
                         continue
                     _logger.warning(
                         f"Exhausted {self.max_nonzero_retries} retries for nonzero fraction "
