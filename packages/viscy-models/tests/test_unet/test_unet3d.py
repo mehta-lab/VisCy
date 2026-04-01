@@ -51,11 +51,11 @@ def test_indivisible_spatial_dims_raises():
     """Non-divisible spatial dims raise ValueError, not opaque concat error."""
     model = Unet3d(in_channels=1, out_channels=1, depth=2, mult_chan=16)
     x = torch.randn(1, 1, 5, 16, 16)  # Z=5 not divisible by 2^2=4
-    with pytest.raises(ValueError, match="Z dimension 5 is not divisible by"):
+    with pytest.raises(ValueError, match="Spatial dim D=5 must be divisible by"):
         model(x)
 
     x = torch.randn(1, 1, 4, 15, 16)  # Y=15 not divisible by 4
-    with pytest.raises(ValueError, match="Y dimension 15 is not divisible by"):
+    with pytest.raises(ValueError, match="Spatial dim H=15 must be divisible by"):
         model(x)
 
 

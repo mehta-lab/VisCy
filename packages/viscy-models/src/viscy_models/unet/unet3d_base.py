@@ -76,6 +76,7 @@ class UNet3DBase(nn.Module):
             raise ValueError(f"len(dims)={len(dims)} must equal len(num_res_block)+1={len(num_res_block) + 1}")
 
         self._num_res_block = list(num_res_block)
+        self._divisor = 2 ** len(num_res_block)
         self.downsamples_z: bool = downsample_z
 
         block_kwargs = dict(norm=norm, activation=activation, groups=groups)
@@ -158,12 +159,12 @@ class UNet3DBase(nn.Module):
         Tensor
             Output tensor of shape ``(B, out_channels, D, H, W)``.
         """
-        divisor = 2**self.num_blocks
         for dim_name, size in zip(("D", "H", "W"), x.shape[2:]):
             if self.downsamples_z or dim_name != "D":
-                if size % divisor != 0:
+                if size % self._divisor != 0:
                     raise ValueError(
-                        f"Spatial dim {dim_name}={size} must be divisible by {divisor} (2^{self.num_blocks} levels)."
+                        f"Spatial dim {dim_name}={size} must be divisible by "
+                        f"{self._divisor} (2^{self.num_blocks} levels)."
                     )
 
         # ── Timestep embedding ──────────────────────────────────────────

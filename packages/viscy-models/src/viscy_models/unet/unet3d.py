@@ -11,7 +11,7 @@ of three-dimensional fluorescence images from transmitted-light microscopy.
 Nat Methods 15, 917-920 (2018). https://doi.org/10.1038/s41592-018-0111-2
 """
 
-from torch import Tensor, nn
+from torch import nn
 
 from viscy_models.unet.blocks import ConvBottleneck3D
 from viscy_models.unet.unet3d_base import UNet3DBase
@@ -83,33 +83,4 @@ class Unet3d(UNet3DBase):
         )
         self.in_stack_depth = in_stack_depth
         self.out_stack_depth = in_stack_depth
-        self._divisor = 2**depth
         self.apply(_fnet_weights_init)
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward pass.
-
-        Parameters
-        ----------
-        x : Tensor
-            Input tensor of shape ``(B, C, Z, Y, X)``.
-
-        Returns
-        -------
-        Tensor
-            Output tensor of shape ``(B, out_channels, Z, Y, X)``.
-
-        Raises
-        ------
-        ValueError
-            If any spatial dimension is not divisible by ``2**depth``.
-        """
-        if x.ndim != 5:
-            raise ValueError(f"Expected 5D input (B, C, Z, Y, X), got {x.ndim}D.")
-        for dim, name in zip(x.shape[2:], ("Z", "Y", "X")):
-            if dim % self._divisor != 0:
-                raise ValueError(
-                    f"{name} dimension {dim} is not divisible by 2**depth={self._divisor}. "
-                    f"All spatial dimensions must be divisible by {self._divisor}."
-                )
-        return super().forward(x)
