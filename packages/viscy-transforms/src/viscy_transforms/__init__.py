@@ -55,7 +55,7 @@ from viscy_transforms._noise import (
     RandGaussianNoiseTensor,
     RandGaussianNoiseTensord,
 )
-from viscy_transforms._normalize import NormalizeSampled
+from viscy_transforms._normalize import MinMaxSampled, NormalizeSampled
 from viscy_transforms._percentile_scale import (
     BatchedScaleIntensityRangePercentiles,
     BatchedScaleIntensityRangePercentilesd,
@@ -101,6 +101,7 @@ __all__ = [
     "CenterSpatialCropd",
     "Decollate",
     "Decollated",
+    "MinMaxSampled",
     "NormalizeSampled",
     "NormalizeIntensityd",
     "RandAdjustContrastd",

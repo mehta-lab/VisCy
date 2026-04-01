@@ -14,8 +14,8 @@ trainer:
     init_args:
       entity: computational_imaging
       project: dynacell
-      name: CELLDiff_FM_iPSC_Nucl
-      save_dir: pretrain/ipsc/CELLDiff_FM_iPSC_Nucl
+      name: CELLDiff_FM_iPSC_Nucl_R3
+      save_dir: pretrain/ipsc/CELLDiff_FM_iPSC_Nucl_R3
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -66,6 +66,11 @@ data:
           level: fov_statistics
           subtrahend: median
           divisor: iqr
+      # - class_path: viscy_transforms.MinMaxSampled
+      #   init_args:
+      #     keys: [*s, *t]
+      #     level: fov_statistics
+      #     data_range: p1_p99
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:

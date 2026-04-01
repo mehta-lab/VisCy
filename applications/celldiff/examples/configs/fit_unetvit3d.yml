@@ -12,19 +12,23 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      entity: computational_imaging
+      # entity: computational_imaging
       project: dynacell
-      name: PT_UNet_iPSC_Nucl
-      save_dir: pretrain/ipsc/PT_UNet_iPSC_Nucl
+      name: PT_UNet_iPSC_Nucl_R3
+      save_dir: pretrain/ipsc/PT_UNet_iPSC_Nucl_R3
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      # init_args:
+      #   monitor: loss/validate
+      #   every_n_epochs: 1
+      #   save_top_k: 4
+      #   save_last: true
       init_args:
-        monitor: loss/validate
         every_n_epochs: 1
-        save_top_k: 4
+        save_top_k: -1
         save_last: true
 model:
   class_path: celldiff_e2e.CELLDiffE2E
@@ -45,10 +49,10 @@ model:
     loss_function:
       class_path: viscy_utils.losses.MixedLoss
       init_args:
-        l1_alpha: 1.0
-        l2_alpha: 1.0
-        ms_dssim_alpha: 1.0
-    lr: 0.0001
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0003
     schedule: WarmupCosine
 data:
   class_path: viscy_data.hcs.HCSDataModule
@@ -67,6 +71,11 @@ data:
           level: fov_statistics
           subtrahend: median
           divisor: iqr
+      # - class_path: viscy_transforms.MinMaxSampled
+      #   init_args:
+      #     keys: [*s, *t]
+      #     level: fov_statistics
+      #     data_range: p1_p99
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:

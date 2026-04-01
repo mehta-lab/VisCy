@@ -1,5 +1,5 @@
-# UNetViT3D end-to-end 3D virtual staining — prediction
-# Usage: python -m celldiff_e2e predict --config predict_unetvit3d.yml
+# CELLDiff3DVS flow-matching virtual staining — prediction
+# Usage: python -m celldiff predict --config predict_celldiff_fm.yml
 seed_everything: 42
 trainer:
   accelerator: gpu
@@ -9,14 +9,13 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/celldiff_e2e/nuclei.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/celldiff_fm/nuclei.zarr
 model:
-  class_path: celldiff_e2e.CELLDiffE2E
+  class_path: celldiff.CELLDiff
   init_args:
-    model_config:
+    net_config:
       input_spatial_size: [8, 512, 512]
       in_channels: 1
-      out_channels: 1
       dims: [64, 128, 256, 256]
       num_res_block: [2, 2, 2]
       hidden_size: 512
@@ -26,15 +25,21 @@ model:
       final_dropout: 0.0
       num_hidden_layers: 8
       patch_size: 4
+    transport_config:
+      path_type: Linear
+      prediction: velocity
+    num_generate_steps: 100
+    predict_method: sliding_window
+    predict_overlap: [4, 256, 256]
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
     data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
     source_channel: Phase3D
     target_channel: Nuclei
-    z_window_size: 8
+    z_window_size: 40
     batch_size: 1
-    num_workers: 8
+    num_workers: 0
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
@@ -48,4 +53,4 @@ data:
       #     level: fov_statistics
       #     data_range: p1_p99
 return_predictions: false
-ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/VisCy/pretrain/ipsc/PT_UNet_iPSC_Nucl_R3/dynacell/20260331-173959/checkpoints/last.ckpt
+ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/VisCy/pretrain/ipsc/CELLDiff_FM_iPSC_Nucl_R2/dynacell/20260330-154523/checkpoints/last.ckpt
