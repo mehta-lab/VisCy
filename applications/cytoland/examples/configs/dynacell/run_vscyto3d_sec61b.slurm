@@ -9,10 +9,11 @@
 #SBATCH --gpus=1
 #SBATCH --mem=256G
 #SBATCH --constraint=h200
-#SBATCH --output=slurm_log/%j.out
-#SBATCH --error=slurm_log/%j.err
+#SBATCH --output=/hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d/slurm/%j.out
+#SBATCH --error=/hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d/slurm/%j.err
 
-mkdir -p -m 775 slurm_log
+mkdir -p -m 775 /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d/slurm
+mkdir -p -m 775 /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d/checkpoints
 
 ml uv
 

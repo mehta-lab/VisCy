@@ -16,12 +16,23 @@ model:
     schedule: WarmupCosine
 
 trainer:
-  max_epochs: 50
+  max_epochs: 100
   logger:
     init_args:
       name: VSCyto3D_iPSC_SEC61B
-      save_dir: dynacell/ipsc/VSCyto3D_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d/checkpoints
 
 data:
   init_args:
-    batch_size: 16
+    batch_size: 64
