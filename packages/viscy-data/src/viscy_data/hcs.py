@@ -83,6 +83,11 @@ class HCSDataModule(LightningDataModule):
         Maximum retries when a patch fails the nonzero check, by default 100.
     fg_mask_key : str or None, optional
         Zarr array key for precomputed foreground masks, by default None.
+    crop_at_read : bool, optional
+        When True, read only the ``yx_patch_size`` spatial region from
+        zarr during training, instead of reading the full FOV and
+        cropping later. Reduces zarr decompression for small patches.
+        Only affects the training dataset. Default False.
     """
 
     def __init__(
@@ -111,6 +116,7 @@ class HCSDataModule(LightningDataModule):
         fg_mask_key: str | None = None,
         gpu_augmentations: list[MapTransform] | None = None,
         fov_cache_maxsize: int = 5,
+        crop_at_read: bool = False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -137,6 +143,7 @@ class HCSDataModule(LightningDataModule):
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
         self.fov_cache_maxsize = fov_cache_maxsize
+        self.crop_at_read = crop_at_read
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
@@ -273,6 +280,9 @@ class HCSDataModule(LightningDataModule):
             expanded_z -= expanded_z % 2
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
+        if self.crop_at_read:
+            train_dataset_settings["yx_patch_size"] = tuple(self.yx_patch_size)
+            train_dataset_settings["fov_cache_maxsize"] = 0
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],

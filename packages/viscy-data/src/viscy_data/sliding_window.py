@@ -62,6 +62,11 @@ class SlidingWindowDataset(Dataset):
         Avoids redundant zarr chunk decompression when consecutive
         samples come from the same FOV (common with sliding windows).
         Set to 0 to disable caching. Default 5.
+    yx_patch_size : tuple[int, int] | None
+        When set, each ``__getitem__`` generates random (y, x) start
+        coordinates and reads only that patch from zarr, bypassing
+        the FOV cache. Reduces zarr decompression for small patches.
+        Default None reads full FOVs.
     """
 
     def __init__(
@@ -78,6 +83,7 @@ class SlidingWindowDataset(Dataset):
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
         fov_cache_maxsize: int = 5,
+        yx_patch_size: tuple[int, int] | None = None,
     ) -> None:
         super().__init__()
         if not 0.0 <= min_nonzero_fraction <= 1.0:
@@ -109,6 +115,7 @@ class SlidingWindowDataset(Dataset):
         if self.target_ch_idx is not None:
             self._all_ch_names.extend(self.channels["target"])
             self._all_ch_idx.extend(self.target_ch_idx)
+        self.yx_patch_size = yx_patch_size
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -137,6 +144,14 @@ class SlidingWindowDataset(Dataset):
                     f"is larger than the number of Z slices ({img_arr.slices}) "
                     f"for FOV {fov.name}."
                 )
+            if self.yx_patch_size is not None:
+                ph, pw = self.yx_patch_size
+                if img_arr.height < ph or img_arr.width < pw:
+                    raise IndexError(
+                        f"yx_patch_size {self.yx_patch_size} is larger than "
+                        f"FOV spatial dimensions ({img_arr.height}, {img_arr.width}) "
+                        f"for FOV {fov.name}."
+                    )
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
@@ -172,7 +187,12 @@ class SlidingWindowDataset(Dataset):
         return img.oindex[t : t + 1, [int(i) for i in ch_idx], :].astype(np.float32)
 
     def _read_img_window(
-        self, img: ImageArray, ch_idx: list[int], tz: int, arr_idx: int = -1
+        self,
+        img: ImageArray,
+        ch_idx: list[int],
+        tz: int,
+        arr_idx: int = -1,
+        yx_slice: tuple[slice, slice] | None = None,
     ) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
 
@@ -188,6 +208,10 @@ class SlidingWindowDataset(Dataset):
         arr_idx : int
             Index into ``self.window_arrays`` for FOV caching.
             When negative, falls back to direct zarr read.
+        yx_slice : tuple[slice, slice] | None
+            Optional (y_slice, x_slice) for partial spatial reads.
+            When set, bypasses the FOV cache and reads directly from
+            zarr with spatial subsetting.
 
         Returns
         -------
@@ -198,7 +222,16 @@ class SlidingWindowDataset(Dataset):
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
         z = tz - t * zs
-        if arr_idx >= 0:
+        if yx_slice is not None:
+            y_sl, x_sl = yx_slice
+            data = img.oindex[
+                slice(t, t + 1),
+                [int(i) for i in ch_idx],
+                slice(z, z + self.z_window_size),
+                y_sl,
+                x_sl,
+            ].astype(np.float32)
+        elif arr_idx >= 0:
             fov_data = self._read_fov_cached(arr_idx, t, tuple(ch_idx))
             data = fov_data[:, :, z : z + self.z_window_size]
         else:
@@ -233,12 +266,20 @@ class SlidingWindowDataset(Dataset):
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
             img, tz, norm_meta, arr_idx = self._find_window(idx)
-            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz, arr_idx)
+            # Generate random YX crop for partial zarr read
+            yx_slice = None
+            if self.yx_patch_size is not None:
+                Y, X = img.shape[-2], img.shape[-1]
+                ph, pw = self.yx_patch_size
+                y0 = torch.randint(0, Y - ph + 1, ()).item()
+                x0 = torch.randint(0, X - pw + 1, ()).item()
+                yx_slice = (slice(y0, y0 + ph), slice(x0, x0 + pw))
+            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz, arr_idx, yx_slice=yx_slice)
             sample_images = dict(zip(self._all_ch_names, images))
             # Read mask once — reused for both nonzero check and sample output
             mask_images = None
             if self.fg_mask_support is not None and self.target_ch_idx is not None:
-                mask_images = self.fg_mask_support.read_window(arr_idx, tz, self._read_img_window)
+                mask_images = self.fg_mask_support.read_window(arr_idx, tz, self._read_img_window, yx_slice=yx_slice)
             if check_key is not None:
                 if mask_images is not None and check_key in self.channels.get("target", []):
                     check_ch = self.channels["target"].index(check_key)
