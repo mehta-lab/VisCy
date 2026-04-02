@@ -164,7 +164,7 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
         batch_size=2,
         num_workers=0,
         split_ratio=0.5,
-        yx_patch_size=(16, 16),
+        yx_patch_size=(32, 32),
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -196,7 +196,7 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
         batch_size=2,
         num_workers=0,
         split_ratio=0.5,
-        yx_patch_size=(16, 16),
+        yx_patch_size=(32, 32),
         fg_mask_key="fg_mask",
     )
     trainer = Trainer(
@@ -225,7 +225,7 @@ def test_fnet3d_predict_integration(tmp_path, tiny_hcs_zarr):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        yx_patch_size=(16, 16),
+        yx_patch_size=(32, 32),
     )
     output_store = str(tmp_path / "predict_out.zarr")
     writer = HCSPredictionWriter(output_store=output_store)

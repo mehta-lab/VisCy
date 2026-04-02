@@ -43,6 +43,19 @@ def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
     return DivisiblePad((0, 0, down_factor, down_factor))
 
 
+def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Tensor:
+    """Center-crop trailing spatial dimensions to the requested shape."""
+    slices = [slice(None)] * tensor.ndim
+    start_dim = tensor.ndim - len(spatial_shape)
+    for dim, size in enumerate(spatial_shape, start=start_dim):
+        current = tensor.shape[dim]
+        if current < size:
+            raise ValueError(f"Cannot crop dimension {dim} from {current} to {size}")
+        start = (current - size) // 2
+        slices[dim] = slice(start, start + size)
+    return tensor[tuple(slices)]
+
+
 class DynacellUNet(LightningModule):
     """Supervised regression U-Net for benchmark virtual staining.
 
@@ -231,9 +244,10 @@ class DynacellUNet(LightningModule):
             Model prediction, cropped to the input spatial shape.
         """
         source = batch["source"]
+        original_shape = source.shape[2:]
         source = self._predict_pad(source)
         prediction = self.forward(source)
-        return self._predict_pad.inverse(prediction)
+        return _center_crop_to_shape(prediction, original_shape)
 
     def on_train_epoch_end(self):
         """Log training image samples."""
