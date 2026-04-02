@@ -11,7 +11,7 @@ from iohub.ngff import open_ome_zarr
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from dynacell.engine import DynacellUNet
+from dynacell.engine import DynacellFlowMatching, DynacellUNet
 from viscy_data.hcs import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.compose import load_composed_config
@@ -50,6 +50,20 @@ UNEXT2_TEST_CONFIG = {
     "head_expansion_ratio": 4,
     "head_pool": True,
 }
+
+CELLDIFF_TEST_NET_CONFIG = {
+    "input_spatial_size": [8, 32, 32],
+    "in_channels": 1,
+    "dims": [8, 16],
+    "num_res_block": [1],
+    "hidden_size": 32,
+    "num_heads": 2,
+    "dim_head": 16,
+    "num_hidden_layers": 1,
+    "patch_size": 4,
+}
+
+CELLDIFF_TEST_TRANSPORT_CONFIG = {"path_type": "Linear", "prediction": "velocity"}
 
 
 # ---- Synthetic tests (CPU) ----
@@ -164,7 +178,7 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
         batch_size=2,
         num_workers=0,
         split_ratio=0.5,
-        yx_patch_size=(16, 16),
+        yx_patch_size=(32, 32),
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -196,7 +210,7 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
         batch_size=2,
         num_workers=0,
         split_ratio=0.5,
-        yx_patch_size=(16, 16),
+        yx_patch_size=(32, 32),
         fg_mask_key="fg_mask",
     )
     trainer = Trainer(
@@ -283,6 +297,88 @@ def test_unext2_predict_integration(tmp_path, tiny_hcs_zarr):
         source_channel="Phase3D",
         target_channel="Fluorescence",
         z_window_size=5,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=(32, 32),
+    )
+    output_store = str(tmp_path / "predict_out.zarr")
+    writer = HCSPredictionWriter(output_store=output_store)
+    trainer = Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        callbacks=[writer],
+    )
+    trainer.predict(module, datamodule=datamodule, return_predictions=False)
+    with open_ome_zarr(output_store, mode="r") as plate:
+        positions = list(plate.positions())
+    assert len(positions) == 4
+    for _, pos in positions:
+        assert "Fluorescence_prediction" in pos.channel_names
+
+
+# ---- Flow-matching integration tests (CPU) ----
+
+
+def test_celldiff_fm_warmup_cosine_fast_dev_run(tmp_path, _SyntheticDataModule):
+    """DynacellFlowMatching + WarmupCosine trains for 1 batch."""
+    seed_everything(42)
+    module = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        lr=1e-4,
+        schedule="WarmupCosine",
+        log_batches_per_epoch=1,
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=_SyntheticDataModule(depth=8, height=32, width=32))
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
+def test_celldiff_fm_constant_schedule_fast_dev_run(tmp_path, _SyntheticDataModule):
+    """DynacellFlowMatching + Constant schedule trains for 1 batch."""
+    seed_everything(42)
+    module = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        lr=1e-4,
+        schedule="Constant",
+        log_batches_per_epoch=1,
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=_SyntheticDataModule(depth=8, height=32, width=32))
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
+def test_celldiff_fm_predict_integration(tmp_path, tiny_hcs_zarr):
+    """DynacellFlowMatching runs predict and writes predictions to OME-Zarr."""
+    seed_everything(42)
+    module = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=2,
+        predict_method="generate",
+    )
+    datamodule = HCSDataModule(
+        data_path=str(tiny_hcs_zarr),
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=8,
         batch_size=2,
         num_workers=0,
         yx_patch_size=(32, 32),

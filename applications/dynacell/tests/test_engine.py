@@ -4,7 +4,7 @@ import pytest
 import torch
 from monai.data import MetaTensor
 
-from dynacell.engine import DynacellUNet
+from dynacell.engine import DynacellFlowMatching, DynacellUNet
 
 # Small model configs for tests (not production sizes).
 VIT_TEST_CONFIG = {
@@ -38,6 +38,20 @@ UNEXT2_TEST_CONFIG = {
     "head_expansion_ratio": 4,
     "head_pool": True,
 }
+
+CELLDIFF_TEST_NET_CONFIG = {
+    "input_spatial_size": [8, 32, 32],
+    "in_channels": 1,
+    "dims": [8, 16],
+    "num_res_block": [1],
+    "hidden_size": 32,
+    "num_heads": 2,
+    "dim_head": 16,
+    "num_hidden_layers": 1,
+    "patch_size": 4,
+}
+
+CELLDIFF_TEST_TRANSPORT_CONFIG = {"path_type": "Linear", "prediction": "velocity"}
 
 
 def test_unetvit3d_init():
@@ -167,3 +181,58 @@ def test_unetvit3d_predict_step(synth_vit_batch):
     with torch.no_grad():
         prediction = model.predict_step(batch, batch_idx=0)
     assert prediction.shape == synth_vit_batch["source"].shape
+
+
+# ---- DynacellFlowMatching tests ----
+
+
+def test_flow_matching_instantiation():
+    """DynacellFlowMatching instantiates with test configs."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+    )
+    assert model.model is not None
+    assert model.lr == 1e-4
+
+
+def test_flow_matching_forward_loss(synth_celldiff_batch):
+    """Flow-matching forward returns a finite scalar loss."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+    )
+    model.train()
+    loss = model.model(synth_celldiff_batch["source"], synth_celldiff_batch["target"])
+    assert loss.dim() == 0
+    assert torch.isfinite(loss)
+
+
+def test_flow_matching_generate_shape(synth_celldiff_batch):
+    """model.generate() returns correct shape."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+    )
+    model.eval()
+    phase = synth_celldiff_batch["source"]
+    with torch.no_grad():
+        generated = model.model.generate(phase, num_steps=2)
+    assert generated.shape == phase.shape
+
+
+def test_flow_matching_predict_step_pad_crop(synth_celldiff_batch):
+    """Flow-matching predict_step pads small input and crops back."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=2,
+        predict_method="generate",
+    )
+    model.eval()
+    # Use smaller spatial dims to exercise padding.
+    small_source = torch.randn(1, 1, 6, 24, 24)
+    batch = {"source": small_source}
+    with torch.no_grad():
+        prediction = model.predict_step(batch, batch_idx=0)
+    assert prediction.shape == small_source.shape
