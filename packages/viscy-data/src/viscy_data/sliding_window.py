@@ -2,6 +2,7 @@
 
 import bisect
 import logging
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -56,6 +57,11 @@ class SlidingWindowDataset(Dataset):
         Zarr array key for precomputed foreground masks. When set,
         masks are loaded alongside images and included in the sample
         as ``"fg_mask"``. Default None disables mask loading.
+    fov_cache_maxsize : int
+        Number of decompressed FOV arrays to cache per worker.
+        Avoids redundant zarr chunk decompression when consecutive
+        samples come from the same FOV (common with sliding windows).
+        Set to 0 to disable caching. Default 5.
     """
 
     def __init__(
@@ -71,6 +77,7 @@ class SlidingWindowDataset(Dataset):
         nonzero_channel: str | None = None,
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
+        fov_cache_maxsize: int = 5,
     ) -> None:
         super().__init__()
         if not 0.0 <= min_nonzero_fraction <= 1.0:
@@ -107,6 +114,12 @@ class SlidingWindowDataset(Dataset):
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
             if nonzero_channel not in all_channels:
                 raise ValueError(f"nonzero_channel '{nonzero_channel}' not found in channels: {all_channels}")
+        # Per-worker FOV cache to avoid redundant zarr decompression.
+        # lru_cache is per-instance; each DataLoader worker fork gets its own.
+        if fov_cache_maxsize > 0:
+            self._read_fov_cached = lru_cache(maxsize=fov_cache_maxsize)(self._read_fov_uncached)
+        else:
+            self._read_fov_cached = self._read_fov_uncached
 
     def _get_windows(self) -> None:
         """Count the sliding windows along T and Z, and build an index-to-window LUT."""
@@ -138,7 +151,27 @@ class SlidingWindowDataset(Dataset):
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
         return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
 
-    def _read_img_window(self, img: ImageArray, ch_idx: list[int], tz: int) -> tuple[list[Tensor], HCSStackIndex]:
+    def _read_fov_uncached(self, arr_idx: int, ch_idx: tuple[int, ...]) -> np.ndarray:
+        """Read and decompress an entire FOV array from zarr.
+
+        Parameters
+        ----------
+        arr_idx : int
+            Index into ``self.window_arrays``.
+        ch_idx : tuple[int, ...]
+            Channel indices to read (tuple for hashability).
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape ``(T, C, Z, Y, X)`` in float32.
+        """
+        img = self.window_arrays[arr_idx]
+        return img.oindex[:, [int(i) for i in ch_idx], :].astype(np.float32)
+
+    def _read_img_window(
+        self, img: ImageArray, ch_idx: list[int], tz: int, arr_idx: int = -1
+    ) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
 
         Parameters
@@ -150,6 +183,9 @@ class SlidingWindowDataset(Dataset):
             output channel ordering will reflect the sequence.
         tz : int
             Window index within the FOV, counted Z-first.
+        arr_idx : int
+            Index into ``self.window_arrays`` for FOV caching.
+            When negative, falls back to direct zarr read.
 
         Returns
         -------
@@ -160,11 +196,15 @@ class SlidingWindowDataset(Dataset):
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
         z = tz - t * zs
-        data = img.oindex[
-            slice(t, t + 1),
-            [int(i) for i in ch_idx],
-            slice(z, z + self.z_window_size),
-        ].astype(np.float32)
+        if arr_idx >= 0:
+            fov_data = self._read_fov_cached(arr_idx, tuple(ch_idx))
+            data = fov_data[t : t + 1, :, z : z + self.z_window_size]
+        else:
+            data = img.oindex[
+                slice(t, t + 1),
+                [int(i) for i in ch_idx],
+                slice(z, z + self.z_window_size),
+            ].astype(np.float32)
         return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
@@ -191,7 +231,7 @@ class SlidingWindowDataset(Dataset):
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
             img, tz, norm_meta, arr_idx = self._find_window(idx)
-            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz)
+            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz, arr_idx)
             sample_images = dict(zip(self._all_ch_names, images))
             # Read mask once — reused for both nonzero check and sample output
             mask_images = None
