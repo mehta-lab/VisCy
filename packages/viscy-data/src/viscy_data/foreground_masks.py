@@ -15,6 +15,7 @@ from viscy_transforms import (
     BatchedRandAffined,
     BatchedRandFlipd,
     BatchedRandSpatialCropd,
+    BatchedRandWeightedCropd,
 )
 
 # Spatial transforms that preserve pixel correspondence and must co-transform
@@ -29,6 +30,7 @@ _SPATIAL_TRANSFORMS: tuple[type, ...] = (
     BatchedRandFlipd,
     BatchedCenterSpatialCropd,
     BatchedRandSpatialCropd,
+    BatchedRandWeightedCropd,
 )
 
 

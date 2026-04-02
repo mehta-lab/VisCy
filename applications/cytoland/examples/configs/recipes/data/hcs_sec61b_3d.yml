@@ -23,6 +23,11 @@ data:
           subtrahend: median
           divisor: iqr
     gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandWeightedCropd
+        init_args:
+          keys: [source, target]
+          w_key: target
+          spatial_size: [8, 384, 384]
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
           keys: [source, target]

@@ -24,6 +24,7 @@ from viscy_transforms._crop import (
     BatchedCenterSpatialCropd,
     BatchedRandSpatialCrop,
     BatchedRandSpatialCropd,
+    BatchedRandWeightedCropd,
 )
 from viscy_transforms._decollate import Decollate
 from viscy_transforms._elastic import BatchedRand3DElasticd
@@ -94,6 +95,7 @@ __all__ = [
     "BatchedRandSharpend",
     "BatchedRandSpatialCrop",
     "BatchedRandSpatialCropd",
+    "BatchedRandWeightedCropd",
     "BatchedRandZStackShiftd",
     "BatchedScaleIntensityRangePercentiles",
     "BatchedScaleIntensityRangePercentilesd",
