@@ -110,6 +110,7 @@ class HCSDataModule(LightningDataModule):
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
         gpu_augmentations: list[MapTransform] | None = None,
+        fov_cache_maxsize: int = 5,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -135,6 +136,7 @@ class HCSDataModule(LightningDataModule):
         self.nonzero_channel = nonzero_channel
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
+        self.fov_cache_maxsize = fov_cache_maxsize
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
@@ -213,6 +215,7 @@ class HCSDataModule(LightningDataModule):
             "channels": {"source": self.source_channel},
             "z_window_size": self.z_window_size,
             "array_key": self.array_key,
+            "fov_cache_maxsize": self.fov_cache_maxsize,
         }
         if self.fg_mask_key is not None:
             settings["fg_mask_key"] = self.fg_mask_key
