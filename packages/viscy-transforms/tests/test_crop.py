@@ -492,13 +492,8 @@ def test_batched_rand_weighted_cropd_5d_required():
         transform(data)
 
 
-def test_batched_rand_weighted_cropd_multichannel_weight():
-    """Test sum-over-C behavior with multi-channel weight maps.
-
-    Both channels contribute a delta at the same spatial location.
-    After summing over C, only the (y=0, x=0) crop window has nonzero
-    pooled weight, so the crop must always start there.
-    """
+def test_batched_rand_weighted_cropd_multichannel_sum():
+    """Test that sum-over-C at one location works with multi-channel weights."""
     weight = torch.zeros(2, 2, 4, 8, 8)
     weight[:, 0, 0, 0, 0] = 5.0  # channel 0 contributes at (0, 0)
     weight[:, 1, 0, 0, 0] = 5.0  # channel 1 contributes at same location
@@ -510,3 +505,30 @@ def test_batched_rand_weighted_cropd_multichannel_weight():
         output = transform(data)
         expected = source[:, :, :, :4, :4]
         assert torch.equal(output["source"], expected)
+
+
+def test_batched_rand_weighted_cropd_multichannel_competing_locations():
+    """Test that higher total weight across channels wins over lower.
+
+    Place deltas at opposite corners so each falls in exactly one crop
+    window. Channel 0 puts weak signal at (0, 0, 0, 0) — only window
+    (y=0, x=0). Channel 1 puts strong signal at (0, 0, 7, 7) — only
+    window (y=4, x=4). After sum-over-C the strong corner should win
+    ~10/(10+1) = 91% of the time.
+    """
+    weight = torch.zeros(1, 2, 4, 8, 8)
+    weight[:, 0, 0, 0, 0] = 1.0  # weak signal at top-left corner
+    weight[:, 1, 0, 7, 7] = 10.0  # strong signal at bottom-right corner
+    source = torch.rand(1, 2, 4, 8, 8)
+
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[4, 4, 4])
+    bottom_right_count = 0
+    n_trials = 200
+    for _ in range(n_trials):
+        data = {"source": source.clone(), "target": weight.clone()}
+        output = transform(data)
+        expected_br = source[:, :, :, 4:8, 4:8]
+        if torch.equal(output["source"], expected_br):
+            bottom_right_count += 1
+    # Bottom-right has 10x the weight → P ≈ 91%, threshold at 80%
+    assert bottom_right_count > n_trials * 0.8
