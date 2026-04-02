@@ -3,6 +3,7 @@
 import atexit
 import logging
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import torch
 import yaml
-from jsonargparse import lazy_instance
+from jsonargparse import Namespace, lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
 from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.cli import LightningCLI
@@ -18,6 +19,54 @@ from lightning.pytorch.loggers import TensorBoardLogger
 
 from viscy_utils.compose import load_composed_config
 from viscy_utils.trainer import VisCyTrainer
+
+_WANDB_LOGGER_CLASS_PATH = "lightning.pytorch.loggers.WandbLogger"
+_WANDB_RUN_NAME_PREFIX = re.compile(r"^\d{8}-\d{6}_")
+_WANDB_RUN_TIMESTAMP_FORMAT = r"%Y%m%d-%H%M%S"
+
+
+def _prefix_wandb_run_name(base_name: str, run_timestamp: str) -> str:
+    """Return a timestamped W&B run name unless already stamped."""
+    if _WANDB_RUN_NAME_PREFIX.match(base_name):
+        return base_name
+    return f"{run_timestamp}_{base_name}"
+
+
+def _configure_wandb_logger(
+    config: Namespace,
+    subcommand: str | None,
+    now: datetime | None = None,
+) -> None:
+    """Apply a consistent W&B naming and grouping convention."""
+    root = config[subcommand] if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return
+    logger = trainer.get("logger")
+    if not isinstance(logger, Namespace):
+        return
+    if logger.get("class_path") != _WANDB_LOGGER_CLASS_PATH:
+        return
+
+    init_args = logger.get("init_args")
+    if not isinstance(init_args, Namespace):
+        init_args = Namespace()
+        logger["init_args"] = init_args
+
+    base_name = init_args.get("name") or subcommand or "run"
+    run_timestamp = (now or datetime.now()).strftime(_WANDB_RUN_TIMESTAMP_FORMAT)
+    init_args["name"] = _prefix_wandb_run_name(base_name, run_timestamp)
+
+    if init_args.get("job_type") is None and subcommand is not None:
+        init_args["job_type"] = subcommand
+
+    group_override = os.getenv("VISCY_WANDB_GROUP") or os.getenv("VISCY_WANDB_LAUNCH")
+    if group_override:
+        init_args["group"] = group_override
+    elif init_args.get("group") is None:
+        init_args["group"] = base_name
 
 
 class VisCyCLI(LightningCLI):
@@ -54,6 +103,10 @@ class VisCyCLI(LightningCLI):
         except SystemExit:
             # FIXME: https://github.com/Lightning-AI/pytorch-lightning/issues/21255
             return None
+
+    def before_instantiate_classes(self) -> None:
+        """Apply shared config rewrites before Lightning object creation."""
+        _configure_wandb_logger(self.config, self.subcommand)
 
 
 def _setup_environment() -> None:

@@ -1,5 +1,7 @@
 # VSCyto3D (UNeXt2) on AICS iPSC SEC61B (ER) — dynacell benchmark.
 # Usage: uv run python -m cytoland fit --config dynacell/fit_vscyto3d_sec61b.yml
+# Batch related launches with:
+#   export VISCY_WANDB_LAUNCH=20260401-augfix-r1
 base:
   - ../recipes/trainer/fit_1gpu.yml
   - ../recipes/data/hcs_sec61b_3d.yml
