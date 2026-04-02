@@ -77,6 +77,8 @@ def create_transport(
         "GVP": PathType.GVP,
         "VP": PathType.VP,
     }
+    if path_type not in path_choice:
+        raise ValueError(f"Unknown path_type {path_type!r}, expected one of {set(path_choice)}")
     resolved_path_type = path_choice[path_type]
 
     if resolved_path_type == PathType.VP:
