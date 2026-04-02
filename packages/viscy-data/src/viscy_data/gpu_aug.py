@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
-from iohub.ngff import Plate, Position, open_ome_zarr
+from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data.meta_obj import set_track_meta
 from monai.data.utils import list_data_collate
@@ -304,8 +304,8 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         if stage not in ("fit", "validate"):
             raise NotImplementedError("Only fit and validate stages are supported.")
         cache_map = Manager().dict()
-        plate: Plate = open_ome_zarr(self.data_path, mode="r", layout="hcs")
-        positions = self._filter_fit_fovs(plate)
+        with open_ome_zarr(self.data_path, mode="r", layout="hcs") as plate:
+            positions = self._filter_fit_fovs(plate)
         shuffled_indices = self._set_fit_global_state(len(positions))
         num_train_fovs = int(len(positions) * self.split_ratio)
         train_fovs = [positions[i] for i in shuffled_indices[:num_train_fovs]]
