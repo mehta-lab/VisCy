@@ -51,6 +51,8 @@ class CELLDiff3DVS(nn.Module):
     ) -> None:
         super().__init__()
         self.net = net
+        self.path_type = path_type
+        self.prediction = prediction
         self.transport = create_transport(path_type, prediction, loss_weight, train_eps, sample_eps)
         self.transport_sampler = Sampler(self.transport)
 
@@ -75,6 +77,23 @@ class CELLDiff3DVS(nn.Module):
         loss_dict = self.transport.training_losses(pred, x0, x1, xt, ut, t)
         return loss_dict["loss"].mean()
 
+    def _noise_like_target(self, phase: Tensor) -> Tensor:
+        """Create Gaussian noise with the network's output channel count.
+
+        Parameters
+        ----------
+        phase : Tensor
+            Phase conditioning tensor whose batch and spatial dims are reused.
+
+        Returns
+        -------
+        Tensor
+            Noise of shape ``(B, in_channels, D, H, W)``.
+        """
+        b, _c, *spatial = phase.shape
+        in_ch = self.net.inconv.in_channels
+        return torch.randn(b, in_ch, *spatial, device=phase.device, dtype=phase.dtype)
+
     def generate(self, phase: Tensor, num_steps: int = 100) -> Tensor:
         """Generate virtual staining via ODE sampling.
 
@@ -88,9 +107,9 @@ class CELLDiff3DVS(nn.Module):
         Returns
         -------
         Tensor
-            Predicted fluorescence of shape ``(B, 1, D, H, W)``.
+            Predicted fluorescence of shape ``(B, in_channels, D, H, W)``.
         """
-        target = torch.randn_like(phase)
+        target = self._noise_like_target(phase)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
 
         def fn(xt: Tensor, t: Tensor) -> Tensor:
@@ -128,7 +147,9 @@ class CELLDiff3DVS(nn.Module):
             if spatial[i] < patch_spatial[i]:
                 raise ValueError(f"spatial dim {i} ({spatial[i]}) must be >= patch dim ({patch_spatial[i]})")
 
-        out = torch.empty_like(phase)
+        in_ch = self.net.inconv.in_channels
+        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        out = torch.empty(out_shape, device=phase.device, dtype=phase.dtype)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
 
         start_lists: list[list[int]] = []
@@ -145,7 +166,7 @@ class CELLDiff3DVS(nn.Module):
                 for i, st in enumerate(starts):
                     slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
                 phase_patch = phase[tuple(slicer)]
-                xt = torch.randn_like(phase_patch)
+                xt = self._noise_like_target(phase_patch)
 
                 def fn(
                     xt_: Tensor,
@@ -202,7 +223,16 @@ class CELLDiff3DVS(nn.Module):
             if not (0 <= ov < p_i):
                 raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs patch {p_i})")
 
-        out = torch.full_like(phase, float("nan"))
+        # Overlap anchoring uses x0 = xt - t*v which assumes Linear path + velocity prediction.
+        if self.path_type != "Linear" or self.prediction != "velocity":
+            raise NotImplementedError(
+                "generate_sliding_window only supports Linear path with velocity prediction, "
+                f"got path_type={self.path_type!r}, prediction={self.prediction!r}"
+            )
+
+        in_ch = self.net.inconv.in_channels
+        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        out = torch.full(out_shape, float("nan"), device=phase.device, dtype=phase.dtype)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
 
         start_lists: list[list[int]] = []
@@ -228,7 +258,7 @@ class CELLDiff3DVS(nn.Module):
 
                 phase_patch = phase[tuple(slicer)]
                 out_patch = out[tuple(slicer)].clone()
-                xt = torch.randn_like(phase_patch)
+                xt = self._noise_like_target(phase_patch)
                 known_mask = ~torch.isnan(out_patch)
 
                 def fn(
