@@ -112,22 +112,6 @@ def synth_unext2_batch():
     }
 
 
-# CellDiff flow-matching test configs (tiny: same spatial as VIT).
-CELLDIFF_TEST_NET_CONFIG = {
-    "input_spatial_size": [8, 32, 32],
-    "in_channels": 1,
-    "dims": [8, 16],
-    "num_res_block": [1],
-    "hidden_size": 32,
-    "num_heads": 2,
-    "dim_head": 16,
-    "num_hidden_layers": 1,
-    "patch_size": 4,
-}
-
-CELLDIFF_TEST_TRANSPORT_CONFIG = {"path_type": "Linear", "prediction": "velocity"}
-
-
 @pytest.fixture
 def synth_celldiff_batch():
     """Synthetic batch matching CELLDiffNet spatial requirements."""
