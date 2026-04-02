@@ -348,8 +348,7 @@ class HCSDataModule(LightningDataModule):
 
         Training: applies ``gpu_augmentations`` if configured, then validates
         that ``source`` spatial dimensions match ``(z_window_size, *yx_patch_size)``.
-        Validation: validates spatial shape only.
-        Test/predict: pass through unchanged.
+        Validation/test/predict: pass through unchanged.
 
         When ``target_2d`` is set, the target center Z slice is extracted
         after augmentations to save VRAM.
@@ -364,8 +363,8 @@ class HCSDataModule(LightningDataModule):
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
             if "fg_mask" in batch:
                 batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
-        # Validate spatial shape during training and validation
-        if self.trainer and (self.trainer.training or self.trainer.validating) and "source" in batch:
+        # Validate spatial shape during training
+        if self.trainer and self.trainer.training and "source" in batch:
             expected = (self.z_window_size, self.yx_patch_size[0], self.yx_patch_size[1])
             actual = tuple(batch["source"].shape[2:])
             if actual != expected:
