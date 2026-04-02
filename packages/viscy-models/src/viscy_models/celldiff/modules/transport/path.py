@@ -61,8 +61,13 @@ class ICPlan:
         return 1 - t, -1
 
     def compute_d_alpha_alpha_ratio_t(self, t: Tensor) -> Tensor:
-        """Compute the ratio ``d_alpha_t / alpha_t = 1 / t``."""
-        return 1 / t
+        """Compute the ratio ``d_alpha_t / alpha_t = 1 / t``.
+
+        Clamps ``t`` away from zero to avoid division by zero when the
+        SDE time grid starts at ``t=0`` (e.g. velocity + linear path
+        with ``sample_eps=0``).
+        """
+        return 1 / t.clamp(min=1e-7)
 
     def compute_drift(self, x: Tensor, t: Tensor) -> tuple[Tensor, Tensor]:
         """Compute the SDE drift in the score parametrization.
@@ -383,5 +388,10 @@ class GVPCPlan(ICPlan):
         return sigma_t, d_sigma_t
 
     def compute_d_alpha_alpha_ratio_t(self, t: Tensor) -> Tensor:
-        """Compute ``d_alpha_t / alpha_t = pi / (2 * tan(pi*t/2))``."""
-        return math.pi / (2 * torch.tan(t * math.pi / 2))
+        """Compute ``d_alpha_t / alpha_t = pi / (2 * tan(pi*t/2))``.
+
+        Clamps the tangent away from zero to avoid division by zero
+        when ``t=0``.
+        """
+        tan_val = torch.tan(t * math.pi / 2)
+        return math.pi / (2 * tan_val.clamp(min=1e-7))

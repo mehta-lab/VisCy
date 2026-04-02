@@ -93,8 +93,7 @@ class Transport:
         Tensor
             Log-probabilities of shape ``(B,)``.
         """
-        shape = torch.tensor(z.size())
-        n_dims = torch.prod(shape[1:])
+        n_dims = z[0].numel()
 
         def _logp_single(x: Tensor) -> Tensor:
             return -n_dims / 2.0 * math.log(2 * math.pi) - torch.sum(x**2) / 2.0
@@ -152,7 +151,7 @@ class Transport:
             t1 = 1 - eps if (not sde or last_step_size == 0) else 1 - last_step_size
 
         if reverse:
-            t0, t1 = 1 - t0, 1 - t1
+            t0, t1 = 1 - t1, 1 - t0
 
         return t0, t1
 
@@ -362,9 +361,13 @@ class Sampler:
         elif last_step == "Tweedie":
             alpha = self.transport.path_sampler.compute_alpha_t
             sigma = self.transport.path_sampler.compute_sigma_t
-            return lambda x, t, model, **model_kwargs: (
-                x / alpha(t)[0][0] + (sigma(t)[0][0] ** 2) / alpha(t)[0][0] * self.score(x, t, model, **model_kwargs)
-            )
+
+            def _tweedie(x, t, model, **model_kwargs):
+                alpha_t = _path.expand_t_like_x(alpha(t)[0], x)
+                sigma_t = _path.expand_t_like_x(sigma(t)[0], x)
+                return x / alpha_t + (sigma_t**2) / alpha_t * self.score(x, t, model, **model_kwargs)
+
+            return _tweedie
         elif last_step == "Euler":
             return lambda x, t, model, **model_kwargs: x + self.drift(x, t, model, **model_kwargs) * last_step_size
         else:
@@ -526,7 +529,7 @@ class Sampler:
 
         def _likelihood_drift(x, t, model, **model_kwargs):
             x, _ = x
-            eps = torch.randint(2, x.size(), dtype=torch.float, device=x.device) * 2 - 1
+            eps = torch.randint(2, x.size(), device=x.device).float() * 2 - 1
             t = torch.ones_like(t) * (1 - t)
             with torch.enable_grad():
                 x.requires_grad = True
