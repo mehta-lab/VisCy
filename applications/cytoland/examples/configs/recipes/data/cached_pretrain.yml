@@ -34,7 +34,7 @@ data:
                 keys: [Phase3D]
                 prob: 0.8
                 rotate_range: [3.14159, 0, 0]
-                scale_range: [0.2, 0.3, 0.3]
+                scale_range: [[0.8, 1.2], [0.7, 1.3], [0.7, 1.3]]
             - class_path: viscy_transforms.BatchedRandInvertIntensityd
               init_args:
                 keys: [Phase3D]
