@@ -151,23 +151,25 @@ class SlidingWindowDataset(Dataset):
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
         return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
 
-    def _read_fov_uncached(self, arr_idx: int, ch_idx: tuple[int, ...]) -> np.ndarray:
-        """Read and decompress an entire FOV array from zarr.
+    def _read_fov_uncached(self, arr_idx: int, t: int, ch_idx: tuple[int, ...]) -> np.ndarray:
+        """Read and decompress a single timepoint of a FOV from zarr.
 
         Parameters
         ----------
         arr_idx : int
             Index into ``self.window_arrays``.
+        t : int
+            Timepoint index.
         ch_idx : tuple[int, ...]
             Channel indices to read (tuple for hashability).
 
         Returns
         -------
         np.ndarray
-            Array of shape ``(T, C, Z, Y, X)`` in float32.
+            Array of shape ``(1, C, Z, Y, X)`` in float32.
         """
         img = self.window_arrays[arr_idx]
-        return img.oindex[:, [int(i) for i in ch_idx], :].astype(np.float32)
+        return img.oindex[t : t + 1, [int(i) for i in ch_idx], :].astype(np.float32)
 
     def _read_img_window(
         self, img: ImageArray, ch_idx: list[int], tz: int, arr_idx: int = -1
@@ -197,8 +199,8 @@ class SlidingWindowDataset(Dataset):
         t = (tz + zs) // zs - 1
         z = tz - t * zs
         if arr_idx >= 0:
-            fov_data = self._read_fov_cached(arr_idx, tuple(ch_idx))
-            data = fov_data[t : t + 1, :, z : z + self.z_window_size]
+            fov_data = self._read_fov_cached(arr_idx, t, tuple(ch_idx))
+            data = fov_data[:, :, z : z + self.z_window_size]
         else:
             data = img.oindex[
                 slice(t, t + 1),
