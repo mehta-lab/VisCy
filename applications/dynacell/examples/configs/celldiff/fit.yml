@@ -1,0 +1,22 @@
+# CellDiff flow-matching: fit from scratch.
+# Usage: cd applications/dynacell/examples/configs && uv run dynacell fit -c celldiff/fit.yml
+base:
+  - ../recipes/trainer/fit_fm_4gpu.yml
+  - ../recipes/data/hcs_phase_fluor_3d.yml
+  - ../recipes/models/celldiff_fm.yml
+
+model:
+  init_args:
+    lr: 0.0002
+    schedule: WarmupCosine
+    num_log_steps: 10
+
+trainer:
+  max_epochs: 200
+
+data:
+  init_args:
+    data_path: #TODO
+    z_window_size: 8
+    batch_size: 4
+    yx_patch_size: [512, 512]

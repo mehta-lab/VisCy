@@ -1,0 +1,16 @@
+model:
+  class_path: dynacell.engine.DynacellFlowMatching
+  init_args:
+    net_config:
+      input_spatial_size: [8, 512, 512]
+      in_channels: 1
+      dims: [64, 128, 256, 256]
+      num_res_block: [2, 2, 2]
+      hidden_size: 512
+      num_heads: 8
+      dim_head: 64
+      num_hidden_layers: 8
+      patch_size: 4
+    transport_config:
+      path_type: Linear
+      prediction: velocity
