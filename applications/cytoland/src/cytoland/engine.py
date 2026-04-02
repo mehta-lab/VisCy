@@ -395,6 +395,13 @@ class VSUNet(LightningModule):
             on_epoch=False,
         )
 
+    def _pad_forward_crop(self, source: Tensor) -> Tensor:
+        """Pad input to divisible size, run forward pass, crop back."""
+        original_shape = source.shape[2:]
+        source = self._predict_pad(source)
+        prediction = self.forward(source)
+        return _center_crop_to_shape(prediction, original_shape)
+
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         """Execute a single prediction step.
 
@@ -416,9 +423,7 @@ class VSUNet(LightningModule):
         if self.test_time_augmentations:
             prediction = self.perform_test_time_augmentations(source)
         else:
-            source = self._predict_pad(source)
-            prediction = self.forward(source)
-            prediction = self._predict_pad.inverse(prediction)
+            prediction = self._pad_forward_crop(source)
 
         return prediction
 
@@ -442,9 +447,7 @@ class VSUNet(LightningModule):
         predictions = []
         for i in range(4):
             augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
-            augmented = self._predict_pad(augmented)
-            augmented_prediction = self.forward(augmented)
-            de_augmented_prediction = self._predict_pad.inverse(augmented_prediction)
+            de_augmented_prediction = self._pad_forward_crop(augmented)
             de_augmented_prediction = self._rotate_volume(de_augmented_prediction, k=4 - i, spatial_axes=(1, 2))
             de_augmented_prediction = self._crop_to_original(de_augmented_prediction)
 
@@ -912,6 +915,19 @@ class FcmaeUNet(VSUNet):
             vals = [b[key] for b in batch if key in b]
             if isinstance(vals[0], Tensor):
                 combined[key] = torch.cat(vals, dim=0)
+            elif isinstance(vals[0], tuple):
+                # Merge inner elements of collated tuples
+                # (e.g. index = (list[str], Tensor, Tensor)).
+                merged = []
+                for i in range(len(vals[0])):
+                    elems = [v[i] for v in vals]
+                    if isinstance(elems[0], Tensor):
+                        merged.append(torch.cat(elems, dim=0))
+                    elif isinstance(elems[0], list):
+                        merged.append([x for sublist in elems for x in sublist])
+                    else:
+                        merged.append(elems[0])
+                combined[key] = tuple(merged)
             else:
                 combined[key] = vals[0]
         return combined
