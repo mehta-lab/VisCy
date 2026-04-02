@@ -239,7 +239,7 @@ def test_fnet3d_predict_integration(tmp_path, tiny_hcs_zarr):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        yx_patch_size=(16, 16),
+        yx_patch_size=(32, 32),
     )
     output_store = str(tmp_path / "predict_out.zarr")
     writer = HCSPredictionWriter(output_store=output_store)
