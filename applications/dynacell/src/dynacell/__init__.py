@@ -1,5 +1,5 @@
-"""Dynacell: benchmark virtual staining with UNetViT3D and FNet3D."""
+"""Dynacell: benchmark virtual staining application."""
 
-from dynacell.engine import DynacellUNet
+from dynacell.engine import DynacellFlowMatching, DynacellUNet
 
-__all__ = ["DynacellUNet"]
+__all__ = ["DynacellFlowMatching", "DynacellUNet"]

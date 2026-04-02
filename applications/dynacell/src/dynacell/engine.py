@@ -1,19 +1,25 @@
-"""Dynacell LightningModule for supervised virtual staining benchmarks."""
+"""Dynacell LightningModules for virtual staining benchmarks.
+
+Provides :class:`DynacellUNet` for supervised regression and
+:class:`DynacellFlowMatching` for flow-matching generative staining.
+"""
 
 import inspect
 from typing import Literal, Sequence
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 from torch.optim.lr_scheduler import ConstantLR
 
+from dynacell.celldiff_wrapper import CELLDiff3DVS
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
-from viscy_models.celldiff import UNetViT3D
+from viscy_models.celldiff import CELLDiffNet, UNetViT3D
 from viscy_utils.log_images import detach_sample, log_image_grid
 
 _ARCHITECTURE: dict[str, type[nn.Module]] = {
@@ -21,6 +27,32 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "FNet3D": Unet3d,
     "UNeXt2": UNeXt2,
 }
+
+
+def _configure_adamw_scheduler(
+    module: LightningModule,
+    model: nn.Module,
+    lr: float,
+    schedule: str,
+) -> tuple[list, list]:
+    """Build AdamW optimizer with WarmupCosine or Constant LR schedule.
+
+    Shared by :class:`DynacellUNet` and :class:`DynacellFlowMatching`.
+    """
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    if schedule == "WarmupCosine":
+        scheduler = WarmupCosineSchedule(
+            optimizer,
+            warmup_steps=3,
+            t_total=module.trainer.estimated_stepping_batches,
+            warmup_multiplier=1e-3,
+        )
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+    elif schedule == "Constant":
+        scheduler = ConstantLR(optimizer, factor=1, total_iters=module.trainer.max_epochs)
+    else:
+        raise ValueError(f"Unknown schedule {schedule!r}, expected 'WarmupCosine' or 'Constant'")
+    return [optimizer], [scheduler]
 
 
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
@@ -276,24 +308,194 @@ class DynacellUNet(LightningModule):
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
-        if self.schedule == "WarmupCosine":
-            scheduler = WarmupCosineSchedule(
-                optimizer,
-                warmup_steps=3,
-                t_total=self.trainer.estimated_stepping_batches,
-                warmup_multiplier=1e-3,
-            )
-            # t_total is a step count; must step the scheduler every optimizer
-            # step, not once per epoch (Lightning's default).
-            return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
-        elif self.schedule == "Constant":
-            scheduler = ConstantLR(optimizer, factor=1, total_iters=self.trainer.max_epochs)
-        else:
-            raise ValueError(f"Unknown schedule {self.schedule!r}, expected 'WarmupCosine' or 'Constant'")
-        return [optimizer], [scheduler]
+        return _configure_adamw_scheduler(self, self.model, self.lr, self.schedule)
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
+        """Log image grid to the active logger."""
+        if not imgs or not self.trainer.is_global_zero or self.logger is None:
+            return
+        log_image_grid(self.logger, key, imgs, self.current_epoch)
+
+
+class DynacellFlowMatching(LightningModule):
+    """Flow-matching LightningModule for generative virtual staining.
+
+    Wraps :class:`~dynacell.celldiff_wrapper.CELLDiff3DVS` for training,
+    validation image logging, and ODE-based prediction.  The flow-matching
+    loss is computed entirely inside ``CELLDiff3DVS.forward``; no external
+    loss function is needed.
+
+    Parameters
+    ----------
+    net_config : dict or None
+        Keyword arguments forwarded to ``CELLDiffNet``.
+    transport_config : dict or None
+        Keyword arguments forwarded to ``CELLDiff3DVS`` (excluding ``net``).
+        Supports ``path_type``, ``prediction``, ``loss_weight``, ``train_eps``,
+        ``sample_eps``.
+    lr : float
+        Learning rate for AdamW optimizer.
+    schedule : {"WarmupCosine", "Constant"}
+        Learning rate schedule.
+    log_batches_per_epoch : int
+        Number of batches per epoch to accumulate for image logging.
+    log_samples_per_batch : int
+        Number of samples per batch to log.
+    num_generate_steps : int
+        Number of ODE steps for prediction inference.
+    num_log_steps : int
+        Number of ODE steps for validation image generation (cheaper than
+        ``num_generate_steps``).
+    predict_method : {"generate", "non_overlapping", "sliding_window"}
+        Prediction generation method.  ``"generate"`` runs single-patch ODE
+        (default, matches standard HCS tile workflow).
+    predict_overlap : int or tuple of int
+        Overlap for sliding-window prediction.
+    """
+
+    def __init__(
+        self,
+        net_config: dict | None = None,
+        transport_config: dict | None = None,
+        lr: float = 1e-4,
+        schedule: Literal["WarmupCosine", "Constant"] = "WarmupCosine",
+        log_batches_per_epoch: int = 8,
+        log_samples_per_batch: int = 1,
+        num_generate_steps: int = 100,
+        num_log_steps: int = 10,
+        predict_method: Literal["generate", "non_overlapping", "sliding_window"] = "generate",
+        predict_overlap: int | tuple[int, int, int] = 256,
+    ) -> None:
+        super().__init__()
+        self.save_hyperparameters()
+        net = CELLDiffNet(**(net_config or {}))
+        self.model = CELLDiff3DVS(net, **(transport_config or {}))
+        self.lr = lr
+        self.schedule = schedule
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+        self.num_generate_steps = num_generate_steps
+        self.num_log_steps = num_log_steps
+        self.predict_method = predict_method
+        self.predict_overlap = predict_overlap
+        self._training_step_outputs: list = []
+        self._val_log_batch: tuple[Tensor, Tensor] | None = None
+
+    def training_step(self, batch: dict, batch_idx: int) -> Tensor:
+        """Compute flow-matching training loss for one batch.
+
+        Parameters
+        ----------
+        batch : dict
+            Must contain ``"source"`` and ``"target"`` tensors.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        Tensor
+            Scalar flow-matching loss.
+        """
+        phase: Tensor = batch["source"]
+        target: Tensor = batch["target"]
+        loss = self.model(phase, target)
+        self.log(
+            "loss/train",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+            batch_size=phase.shape[0],
+        )
+        if batch_idx < self.log_batches_per_epoch:
+            self._training_step_outputs.extend(detach_sample((phase, target), self.log_samples_per_batch))
+        return loss
+
+    def validation_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> None:
+        """Capture one validation batch for epoch-end generation logging.
+
+        Flow-matching does not compute a validation loss.
+        """
+        if batch_idx == 0 and self._val_log_batch is None:
+            n = self.log_samples_per_batch
+            self._val_log_batch = (
+                batch["source"][:n].clone(),
+                batch["target"][:n].clone(),
+            )
+
+    def on_train_epoch_end(self) -> None:
+        """Log training image samples at end of epoch."""
+        self._log_samples("train_samples", self._training_step_outputs)
+        self._training_step_outputs = []
+
+    def on_validation_epoch_end(self) -> None:
+        """Generate ODE samples from captured validation batch and log."""
+        super().on_validation_epoch_end()
+        if self._val_log_batch is not None and self.logger is not None:
+            phase_log, target_log = self._val_log_batch
+            n = min(self.log_samples_per_batch, phase_log.shape[0])
+            generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
+            gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
+            self._log_samples("val_generated_samples", gen_samples)
+            self._val_log_batch = None
+
+    def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
+        """Generate virtual staining for one batch via ODE sampling.
+
+        Pads source if smaller than ``input_spatial_size``, dispatches to
+        the configured predict method, then crops back to the original shape.
+
+        Parameters
+        ----------
+        batch : dict
+            Must contain ``"source"`` tensor.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int
+            Dataloader index.
+
+        Returns
+        -------
+        Tensor
+            Generated fluorescence, cropped to original spatial shape.
+        """
+        source: Tensor = batch["source"]
+        original_shape = source.shape[2:]
+
+        # Pad source if any spatial dim is smaller than input_spatial_size.
+        patch_size = self.model.net.input_spatial_size
+        min_size = tuple(patch_size)
+        if any(s < p for s, p in zip(source.shape[2:], min_size)):
+            pad: list[int] = []
+            for s, p in zip(reversed(source.shape[2:]), reversed(min_size)):
+                pad.extend([0, max(0, p - s)])
+            source = F.pad(source, pad, mode="replicate")
+
+        if self.predict_method == "generate":
+            prediction = self.model.generate(source, num_steps=self.num_generate_steps)
+        elif self.predict_method == "non_overlapping":
+            prediction = self.model.generate_non_overlapping(source, num_steps=self.num_generate_steps)
+        elif self.predict_method == "sliding_window":
+            prediction = self.model.generate_sliding_window(
+                source,
+                num_steps=self.num_generate_steps,
+                overlap_size=self.predict_overlap,
+            )
+        else:
+            raise ValueError(
+                f"Unknown predict_method: {self.predict_method!r}. "
+                "Choose 'generate', 'non_overlapping', or 'sliding_window'."
+            )
+
+        return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
+
+    def configure_optimizers(self):
+        """Configure AdamW optimizer with LR scheduler."""
+        return _configure_adamw_scheduler(self, self.model, self.lr, self.schedule)
+
+    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
         """Log image grid to the active logger."""
         if not imgs or not self.trainer.is_global_zero or self.logger is None:
             return

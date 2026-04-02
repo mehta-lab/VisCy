@@ -40,7 +40,7 @@ dependencies = [
   "transformers>=4.40",
 ]
 
-optional-dependencies.celldiff = [ "diffusers" ]
+optional-dependencies.celldiff = [ "diffusers", "torchdiffeq" ]
 
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"

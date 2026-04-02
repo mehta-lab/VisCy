@@ -113,6 +113,20 @@ def synth_unext2_batch():
 
 
 @pytest.fixture
+def synth_celldiff_batch():
+    """Synthetic batch matching CELLDiffNet spatial requirements."""
+    return {
+        "source": torch.randn(SYNTH_B, SYNTH_C, SYNTH_D_VIT, SYNTH_H_VIT, SYNTH_W_VIT),
+        "target": torch.randn(SYNTH_B, SYNTH_C, SYNTH_D_VIT, SYNTH_H_VIT, SYNTH_W_VIT),
+        "index": (
+            ["row/col/pos/0"] * SYNTH_B,
+            [torch.tensor(0)] * SYNTH_B,
+            [torch.tensor(0)] * SYNTH_B,
+        ),
+    }
+
+
+@pytest.fixture
 def _SyntheticDataModule():
     """Return the SyntheticDataModule class (not an instance)."""
     return SyntheticDataModule

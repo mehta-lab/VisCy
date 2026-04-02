@@ -5548,6 +5548,19 @@ wheels = [
 ]
 
 [[package]]
+name = "torchdiffeq"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "scipy" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/87/ec/a40aa124660f0ee65e6760cb53df6a82ad91a1a3ef1da5e747f1336644dd/torchdiffeq-0.2.5.tar.gz", hash = "sha256:b50d3760d13fd138dcceac651f4b80396f44fefcebd037a033fecfeaa9cc12e7", size = 31197, upload-time = "2024-11-21T20:20:11.552Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/35/537f64f2d0b3cfebaae0f903b4e3a3b239abcc99d0f73cb15b9cee9b8212/torchdiffeq-0.2.5-py3-none-any.whl", hash = "sha256:aa1db4bed13bd04952f28a53cdf4336d1ab60417c1d9698d7a239fec1cf2bcf8", size = 32902, upload-time = "2024-11-21T20:20:09.938Z" },
+]
+
+[[package]]
 name = "torchmetrics"
 version = "1.8.2"
 source = { registry = "https://pypi.org/simple" }
@@ -5928,6 +5941,7 @@ dependencies = [
 [package.optional-dependencies]
 celldiff = [
     { name = "diffusers" },
+    { name = "torchdiffeq" },
 ]
 
 [package.dev-dependencies]
@@ -5948,6 +5962,7 @@ requires-dist = [
     { name = "pytorch-metric-learning" },
     { name = "timm", specifier = ">=1.0.15" },
     { name = "torch", specifier = ">=2.10" },
+    { name = "torchdiffeq", marker = "extra == 'celldiff'" },
     { name = "transformers", specifier = ">=4.40" },
 ]
 provides-extras = ["celldiff"]
