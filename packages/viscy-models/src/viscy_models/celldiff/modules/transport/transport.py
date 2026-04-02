@@ -6,6 +6,7 @@ loss computation, drift/score extraction, and ODE/SDE sampling.
 
 import enum
 import math
+from collections.abc import Callable
 
 import torch
 from torch import Tensor
@@ -234,7 +235,7 @@ class Transport:
 
         return terms
 
-    def get_drift(self) -> callable:
+    def get_drift(self) -> Callable:
         """Return the ODE drift function for the configured model type.
 
         Returns
@@ -282,7 +283,7 @@ class Transport:
 
         return body_fn
 
-    def get_score(self) -> callable:
+    def get_score(self) -> Callable:
         """Return the score function for the configured model type.
 
         Returns
@@ -335,7 +336,7 @@ class Sampler:
         *,
         diffusion_form: str = "SBDM",
         diffusion_norm: float = 1.0,
-    ) -> tuple[callable, callable]:
+    ) -> tuple[Callable, Callable]:
         """Build SDE drift and diffusion functions."""
 
         def diffusion_fn(x, t):
@@ -348,11 +349,11 @@ class Sampler:
 
     def _get_last_step(
         self,
-        sde_drift: callable,
+        sde_drift: Callable,
         *,
         last_step: str | None,
         last_step_size: float,
-    ) -> callable:
+    ) -> Callable:
         """Build the final SDE step function."""
         if last_step is None:
             return lambda x, t, model, **model_kwargs: x
@@ -378,7 +379,7 @@ class Sampler:
         last_step: str | None = "Mean",
         last_step_size: float = 0.04,
         num_steps: int = 250,
-    ) -> callable:
+    ) -> Callable:
         """Return an SDE sampling function.
 
         Parameters
@@ -430,7 +431,7 @@ class Sampler:
 
         last_step_fn = self._get_last_step(sde_drift, last_step=last_step, last_step_size=last_step_size)
 
-        def _sample(init: Tensor, model: callable, **model_kwargs) -> list[Tensor]:
+        def _sample(init: Tensor, model: Callable, **model_kwargs) -> list[Tensor]:
             x_final = _sde.sample(init, model, **model_kwargs)
             ts = torch.ones(init.size(0), device=init.device) * t1
             x = last_step_fn(x_final, ts, model, **model_kwargs)
@@ -446,7 +447,7 @@ class Sampler:
         atol: float = 1e-6,
         rtol: float = 1e-3,
         reverse: bool = False,
-    ) -> callable:
+    ) -> Callable:
         """Return an ODE sampling function.
 
         Parameters
@@ -503,7 +504,7 @@ class Sampler:
         num_steps: int = 50,
         atol: float = 1e-6,
         rtol: float = 1e-3,
-    ) -> callable:
+    ) -> Callable:
         """Return an ODE sampling function that also computes log-likelihood.
 
         Parameters
@@ -553,7 +554,7 @@ class Sampler:
             rtol=rtol,
         )
 
-        def _sample_fn(x: Tensor, model: callable, **model_kwargs) -> tuple[Tensor, Tensor]:
+        def _sample_fn(x: Tensor, model: Callable, **model_kwargs) -> tuple[Tensor, Tensor]:
             init_logp = torch.zeros(x.size(0)).to(x)
             input_state = (x, init_logp)
             drift, delta_logp = _ode.sample(input_state, model, **model_kwargs)

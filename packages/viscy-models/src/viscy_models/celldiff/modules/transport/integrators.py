@@ -4,6 +4,8 @@ Uses ``torchdiffeq`` for adaptive ODE integration and provides
 fixed-step SDE solvers (Euler-Maruyama, Heun).
 """
 
+from collections.abc import Callable
+
 import torch
 from torch import Tensor
 from torchdiffeq import odeint
@@ -30,8 +32,8 @@ class SDESolver:
 
     def __init__(
         self,
-        drift: callable,
-        diffusion: callable,
+        drift: Callable,
+        diffusion: Callable,
         *,
         t0: float,
         t1: float,
@@ -52,7 +54,7 @@ class SDESolver:
         x: Tensor,
         mean_x: Tensor,
         t: float,
-        model: callable,
+        model: Callable,
         **model_kwargs,
     ) -> tuple[Tensor, Tensor]:
         """Single Euler-Maruyama step."""
@@ -70,7 +72,7 @@ class SDESolver:
         x: Tensor,
         _mean_x: Tensor,
         t: float,
-        model: callable,
+        model: Callable,
         **model_kwargs,
     ) -> tuple[Tensor, Tensor]:
         """Single Heun SDE step."""
@@ -84,7 +86,7 @@ class SDESolver:
         k2 = self.drift(xp, t_cur + self.dt, model, **model_kwargs)
         return xhat + 0.5 * self.dt * (k1 + k2), xhat
 
-    def _forward_fn(self) -> callable:
+    def _forward_fn(self) -> Callable:
         """Select the step function based on sampler type."""
         sampler_dict = {
             "Euler": self._euler_maruyama_step,
@@ -94,7 +96,7 @@ class SDESolver:
             raise KeyError(f"Sampler type {self.sampler_type!r} not implemented. Choose from {set(sampler_dict)}.")
         return sampler_dict[self.sampler_type]
 
-    def sample(self, init: Tensor, model: callable, **model_kwargs) -> Tensor:
+    def sample(self, init: Tensor, model: Callable, **model_kwargs) -> Tensor:
         """Run the forward SDE loop and return the final state.
 
         Parameters
@@ -144,7 +146,7 @@ class ODESolver:
 
     def __init__(
         self,
-        drift: callable,
+        drift: Callable,
         *,
         t0: float,
         t1: float,
@@ -161,7 +163,7 @@ class ODESolver:
         self.rtol = rtol
         self.sampler_type = sampler_type
 
-    def sample(self, x: Tensor | tuple, model: callable, **model_kwargs) -> Tensor:
+    def sample(self, x: Tensor | tuple, model: Callable, **model_kwargs) -> Tensor:
         """Integrate the ODE from ``t0`` to ``t1``.
 
         Parameters
