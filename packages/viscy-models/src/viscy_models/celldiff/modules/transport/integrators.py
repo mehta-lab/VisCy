@@ -55,15 +55,17 @@ class SDESolver:
         mean_x: Tensor,
         t: float,
         model: Callable,
+        *,
+        dt: Tensor,
         **model_kwargs,
     ) -> tuple[Tensor, Tensor]:
         """Single Euler-Maruyama step."""
         w_cur = torch.randn_like(x)
         t_vec = x.new_ones(x.size(0)) * t
-        dw = w_cur * torch.sqrt(self.dt)
+        dw = w_cur * torch.sqrt(dt)
         drift = self.drift(x, t_vec, model, **model_kwargs)
         diffusion = self.diffusion(x, t_vec)
-        mean_x = x + drift * self.dt
+        mean_x = x + drift * dt
         x = mean_x + torch.sqrt(2 * diffusion) * dw
         return x, mean_x
 
@@ -73,18 +75,20 @@ class SDESolver:
         _mean_x: Tensor,
         t: float,
         model: Callable,
+        *,
+        dt: Tensor,
         **model_kwargs,
     ) -> tuple[Tensor, Tensor]:
         """Single Heun SDE step."""
         w_cur = torch.randn_like(x)
-        dw = w_cur * torch.sqrt(self.dt)
+        dw = w_cur * torch.sqrt(dt)
         t_cur = x.new_ones(x.size(0)) * t
         diffusion = self.diffusion(x, t_cur)
         xhat = x + torch.sqrt(2 * diffusion) * dw
         k1 = self.drift(xhat, t_cur, model, **model_kwargs)
-        xp = xhat + self.dt * k1
-        k2 = self.drift(xp, t_cur + self.dt, model, **model_kwargs)
-        return xhat + 0.5 * self.dt * (k1 + k2), xhat
+        xp = xhat + dt * k1
+        k2 = self.drift(xp, t_cur + dt, model, **model_kwargs)
+        return xhat + 0.5 * dt * (k1 + k2), xhat
 
     def _forward_fn(self) -> Callable:
         """Select the step function based on sampler type."""
@@ -113,12 +117,15 @@ class SDESolver:
         Tensor
             Final state after integration.
         """
+        device = init.device
+        t = self.t.to(device)
+        dt = self.dt.to(device)
         x = init
         mean_x = init
         sampler = self._forward_fn()
-        for ti in self.t[:-1]:
+        for ti in t[:-1]:
             with torch.no_grad():
-                x, mean_x = sampler(x, mean_x, ti, model, **model_kwargs)
+                x, mean_x = sampler(x, mean_x, ti, model, dt=dt, **model_kwargs)
         return x
 
 
