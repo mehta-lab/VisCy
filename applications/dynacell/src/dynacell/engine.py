@@ -12,13 +12,14 @@ from torch import Tensor, nn
 from torch.optim.lr_scheduler import ConstantLR
 
 from viscy_data import Sample
-from viscy_models import Unet3d
+from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import UNetViT3D
 from viscy_utils.log_images import detach_sample, log_image_grid
 
 _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNetViT3D": UNetViT3D,
     "FNet3D": Unet3d,
+    "UNeXt2": UNeXt2,
 }
 
 
@@ -47,7 +48,7 @@ class DynacellUNet(LightningModule):
 
     Parameters
     ----------
-    architecture : {"UNetViT3D", "FNet3D"}
+    architecture : {"UNetViT3D", "FNet3D", "UNeXt2"}
         Architecture key selecting the backbone.
     model_config : dict | None
         Keyword arguments forwarded to the backbone constructor.
@@ -70,7 +71,7 @@ class DynacellUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["UNetViT3D", "FNet3D"] = "UNetViT3D",
+        architecture: Literal["UNetViT3D", "FNet3D", "UNeXt2"] = "UNetViT3D",
         model_config: dict | None = None,
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,

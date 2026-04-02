@@ -21,6 +21,11 @@ SYNTH_D_FNET = 4
 SYNTH_H_FNET = 16
 SYNTH_W_FNET = 16
 
+# UNeXt2 test spatial sizes (num_blocks=6 → divisor=64; YX must be ≥64 for training).
+SYNTH_D_UNEXT2 = 5
+SYNTH_H_UNEXT2 = 64
+SYNTH_W_UNEXT2 = 64
+
 
 class SyntheticDataset(Dataset):
     """Synthetic dataset returning Sample dicts."""
@@ -85,6 +90,20 @@ def synth_fnet_batch():
     return {
         "source": torch.randn(SYNTH_B, SYNTH_C, SYNTH_D_FNET, SYNTH_H_FNET, SYNTH_W_FNET),
         "target": torch.randn(SYNTH_B, SYNTH_C, SYNTH_D_FNET, SYNTH_H_FNET, SYNTH_W_FNET),
+        "index": (
+            ["row/col/pos/0"] * SYNTH_B,
+            [torch.tensor(0)] * SYNTH_B,
+            [torch.tensor(0)] * SYNTH_B,
+        ),
+    }
+
+
+@pytest.fixture
+def synth_unext2_batch():
+    """Synthetic batch for UNeXt2 (YX=64 required by num_blocks=6)."""
+    return {
+        "source": torch.randn(SYNTH_B, SYNTH_C, SYNTH_D_UNEXT2, SYNTH_H_UNEXT2, SYNTH_W_UNEXT2),
+        "target": torch.randn(SYNTH_B, SYNTH_C, SYNTH_D_UNEXT2, SYNTH_H_UNEXT2, SYNTH_W_UNEXT2),
         "index": (
             ["row/col/pos/0"] * SYNTH_B,
             [torch.tensor(0)] * SYNTH_B,

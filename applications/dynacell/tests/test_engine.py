@@ -28,6 +28,17 @@ FNET_TEST_CONFIG = {
     "in_stack_depth": 4,
 }
 
+UNEXT2_TEST_CONFIG = {
+    "in_channels": 1,
+    "out_channels": 1,
+    "in_stack_depth": 5,
+    "backbone": "convnextv2_tiny",
+    "stem_kernel_size": [5, 4, 4],
+    "decoder_mode": "pixelshuffle",
+    "head_expansion_ratio": 4,
+    "head_pool": True,
+}
+
 
 def test_unetvit3d_init():
     """DynacellUNet instantiates with UNetViT3D architecture."""
@@ -118,6 +129,33 @@ def test_fnet3d_predict_step_pads_odd_spatial():
     with torch.no_grad():
         prediction = model.predict_step({"source": source}, batch_idx=0)
     assert prediction.shape == source.shape
+
+
+def test_unext2_init():
+    """DynacellUNet instantiates with UNeXt2 architecture."""
+    model = DynacellUNet(architecture="UNeXt2", model_config=UNEXT2_TEST_CONFIG)
+    assert model.model is not None
+    assert model.lr == 1e-3
+
+
+def test_unext2_forward(synth_unext2_batch):
+    """UNeXt2 forward pass produces correct output shape."""
+    model = DynacellUNet(architecture="UNeXt2", model_config=UNEXT2_TEST_CONFIG)
+    model.eval()
+    with torch.no_grad():
+        output = model(synth_unext2_batch["source"])
+    assert output.shape == synth_unext2_batch["source"].shape
+
+
+def test_unext2_predict_step(synth_unext2_batch):
+    """UNeXt2 predict_step returns the input spatial shape."""
+    model = DynacellUNet(architecture="UNeXt2", model_config=UNEXT2_TEST_CONFIG)
+    model.eval()
+    model.on_predict_start()
+    batch = {**synth_unext2_batch, "source": MetaTensor(synth_unext2_batch["source"])}
+    with torch.no_grad():
+        prediction = model.predict_step(batch, batch_idx=0)
+    assert prediction.shape == synth_unext2_batch["source"].shape
 
 
 def test_unetvit3d_predict_step(synth_vit_batch):

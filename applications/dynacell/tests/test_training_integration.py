@@ -40,6 +40,17 @@ FNET_TEST_CONFIG = {
     "in_stack_depth": 4,
 }
 
+UNEXT2_TEST_CONFIG = {
+    "in_channels": 1,
+    "out_channels": 1,
+    "in_stack_depth": 5,
+    "backbone": "convnextv2_tiny",
+    "stem_kernel_size": [5, 4, 4],
+    "decoder_mode": "pixelshuffle",
+    "head_expansion_ratio": 4,
+    "head_pool": True,
+}
+
 
 # ---- Synthetic tests (CPU) ----
 
@@ -80,6 +91,26 @@ def test_fnet3d_fast_dev_run(tmp_path, _SyntheticDataModule):
         enable_progress_bar=False,
     )
     trainer.fit(module, datamodule=_SyntheticDataModule(depth=4, height=16, width=16))
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
+def test_unext2_fast_dev_run(tmp_path, _SyntheticDataModule):
+    """DynacellUNet + UNeXt2 trains for 1 batch (YX=64 required)."""
+    seed_everything(42)
+    module = DynacellUNet(
+        architecture="UNeXt2",
+        model_config=UNEXT2_TEST_CONFIG,
+        log_batches_per_epoch=1,
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=_SyntheticDataModule(depth=5, height=64, width=64))
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
@@ -222,6 +253,36 @@ def test_unetvit3d_predict_integration(tmp_path, tiny_hcs_zarr):
         source_channel="Phase3D",
         target_channel="Fluorescence",
         z_window_size=8,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=(32, 32),
+    )
+    output_store = str(tmp_path / "predict_out.zarr")
+    writer = HCSPredictionWriter(output_store=output_store)
+    trainer = Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        callbacks=[writer],
+    )
+    trainer.predict(module, datamodule=datamodule, return_predictions=False)
+    with open_ome_zarr(output_store, mode="r") as plate:
+        positions = list(plate.positions())
+    assert len(positions) == 4
+    for _, pos in positions:
+        assert "Fluorescence_prediction" in pos.channel_names
+
+
+def test_unext2_predict_integration(tmp_path, tiny_hcs_zarr):
+    """DynacellUNet + UNeXt2 runs predict and writes predictions to OME-Zarr."""
+    seed_everything(42)
+    module = DynacellUNet(architecture="UNeXt2", model_config=UNEXT2_TEST_CONFIG)
+    datamodule = HCSDataModule(
+        data_path=str(tiny_hcs_zarr),
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=5,
         batch_size=2,
         num_workers=0,
         yx_patch_size=(32, 32),
