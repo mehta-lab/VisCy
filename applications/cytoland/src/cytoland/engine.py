@@ -217,7 +217,7 @@ class VSUNet(LightningModule):
         When ``fg_mask_key`` is set in the data config, ``batch["fg_mask"]``
         is forwarded as a keyword argument.  The loss function must accept
         ``fg_mask`` explicitly or via ``**kwargs``; standard losses like
-        ``nn.MSELoss`` will raise ``TypeError`` at configuration time.
+        ``nn.MSELoss`` will raise ``TypeError`` at training time.
         """
         if "fg_mask" in batch:
             if not self._loss_accepts_fg_mask:
@@ -498,10 +498,7 @@ class VSUNet(LightningModule):
                 )
 
     def on_predict_start(self):
-        """Pad the input shape to be divisible by the downsampling factor.
-
-        The inverse of this transform crops the prediction to original shape.
-        """
+        """Pad the input shape to be divisible by the downsampling factor."""
         self._predict_pad = _make_divisible_pad(self.model)
 
     def configure_optimizers(self):
