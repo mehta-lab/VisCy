@@ -6,11 +6,12 @@ import numpy as np
 import torch
 from imageio import imwrite
 from iohub import open_ome_zarr
-from monai.transforms import RandSpatialCropSamplesd
+from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandFlipd, RandSpatialCropSamplesd
 from pytest import TempPathFactory, fixture, mark, raises
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
+from viscy_transforms import BatchedRandFlipd
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
@@ -363,8 +364,6 @@ def test_fg_mask_key_missing_errors(tmp_path):
 
 def test_fg_mask_keys_injected_into_spatial_not_intensity():
     """Spatial augmentations get mask keys; intensity augmentations do not."""
-    from monai.transforms import RandAdjustContrastd, RandAffined
-
     spatial = RandAffined(keys=["Phase", "Fluorescence"], prob=0.5, rotate_range=[0.1])
     intensity = RandAdjustContrastd(keys=["Phase", "Fluorescence"], prob=0.5)
     HCSDataModule._inject_mask_keys(
@@ -386,8 +385,6 @@ def test_fg_mask_keys_injected_into_spatial_not_intensity():
 
 def test_fg_mask_aligned_after_cpu_spatial_augmentation():
     """fg_mask stays pixel-aligned with target after RandFlipd(prob=1)."""
-    from monai.transforms import Compose, RandFlipd
-
     H, W = 16, 16
     target = torch.zeros(1, 1, H, W)
     target[:, :, : H // 2, :] = 1.0
@@ -404,8 +401,6 @@ def test_fg_mask_aligned_after_cpu_spatial_augmentation():
 
 def test_fg_mask_aligned_after_gpu_spatial_augmentation():
     """fg_mask stays pixel-aligned with target after BatchedRandFlipd(prob=1)."""
-    from viscy_transforms import BatchedRandFlipd
-
     B, C, D, H, W = 2, 1, 4, 16, 16
     target = torch.zeros(B, C, D, H, W)
     target[:, :, :, : H // 2, :] = 1.0
