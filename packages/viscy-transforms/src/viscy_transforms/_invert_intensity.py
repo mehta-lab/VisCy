@@ -31,6 +31,8 @@ class BatchedRandInvertIntensityd(MapTransform, RandomizableTransform):
         Whether to allow missing keys. Default: False.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

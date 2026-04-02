@@ -191,6 +191,8 @@ class BatchedRandGaussianSmoothd(MapTransform, RandomizableTransform):
         Whether to allow missing keys. Default is False.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

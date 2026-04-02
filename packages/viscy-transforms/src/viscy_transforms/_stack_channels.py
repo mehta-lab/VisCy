@@ -75,4 +75,6 @@ class BatchedStackChannelsd(StackChannelsd):
         Example: ``{"source": ["phase"], "target": ["nuclei", "membrane"]}``
     """
 
+    is_spatial = False
+
     _cat_dim = 1

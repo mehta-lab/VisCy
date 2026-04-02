@@ -238,6 +238,8 @@ class BatchedRandGaussianNoised(RandGaussianNoiseTensord):
     RandGaussianNoiseTensord : Single-sample version.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

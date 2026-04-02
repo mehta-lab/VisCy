@@ -50,6 +50,8 @@ class BatchedRandSharpend(MapTransform, RandomizableTransform):
     >>> output = sharpen(sample)
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

@@ -85,6 +85,8 @@ class BatchedRandAffined(MapTransform):
     kornia.augmentation.RandomAffine3D : Underlying Kornia transform.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: str | Iterable[str],

@@ -143,6 +143,8 @@ class BatchedZoomd(MapTransform):
     torch.Size([2, 1, 32, 64, 64])
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str],
