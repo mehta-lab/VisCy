@@ -25,14 +25,18 @@ uv run dynacell predict -c fnet3d/predict.yml --data.init_args.data_path=/path/t
 Launch SEC61B training from Dynacell (canonical location):
 
 ```bash
-# FNet3D
+# FNet3D benchmark config
 uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d.yml
+
+# FNet3D paper-native baseline config
+uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d_paper.yml
 
 # UNeXt2 (VSCyto3D)
 uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_unext2.yml
 
 # SLURM (H200)
 sbatch applications/dynacell/examples/configs/sec61b/run_fnet3d.slurm
+sbatch applications/dynacell/examples/configs/sec61b/run_fnet3d_paper.slurm
 sbatch applications/dynacell/examples/configs/sec61b/run_unext2.slurm
 ```
 
