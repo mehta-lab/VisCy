@@ -405,9 +405,10 @@ class DynacellFlowMatching(LightningModule):
         Flow-matching does not compute a validation loss.
         """
         if batch_idx == 0 and self._val_log_batch is None:
+            n = self.log_samples_per_batch
             self._val_log_batch = (
-                batch["source"].clone(),
-                batch["target"].clone(),
+                batch["source"][:n].clone(),
+                batch["target"][:n].clone(),
             )
 
     def on_train_epoch_end(self) -> None:
