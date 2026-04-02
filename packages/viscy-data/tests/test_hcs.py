@@ -19,11 +19,13 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
     z_window_size = 5
     channel_split = 2
     split_ratio = 0.8
-    yx_patch_size = [128, 96]
     batch_size = 4
     with open_ome_zarr(data_path) as dataset:
         channel_names = dataset.channel_names
+        img = next(dataset.positions())[1]["0"]
+        fov_yx = (img.height, img.width)
     if multi_sample_augmentation:
+        yx_patch_size = [128, 96]
         transforms = [
             RandSpatialCropSamplesd(
                 keys=channel_names,
@@ -32,6 +34,8 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
             )
         ]
     else:
+        # No augmentation: yx_patch_size matches FOV so no crop needed
+        yx_patch_size = list(fov_yx)
         transforms = []
     dm = HCSDataModule(
         data_path=data_path,
@@ -47,8 +51,6 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
     )
     dm.setup(stage="fit")
     for batch in dm.train_dataloader():
-        # Apply default GPU crop (no trainer attached)
-        batch = dm._default_train_crop(batch)
         assert batch["source"].shape == (
             batch_size,
             channel_split,
@@ -63,11 +65,10 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
         )
 
 
-def test_on_after_batch_transfer_training(preprocessed_hcs_dataset):
-    """Training path applies gpu_augmentations or default random crop."""
+def test_on_after_batch_transfer_shape_mismatch_raises(preprocessed_hcs_dataset):
+    """Shape mismatch between source and yx_patch_size raises ValueError."""
     data_path = preprocessed_hcs_dataset
     z_window_size = 5
-    yx_patch_size = [128, 96]
     with open_ome_zarr(data_path) as dataset:
         channel_names = dataset.channel_names
     dm = HCSDataModule(
@@ -77,7 +78,7 @@ def test_on_after_batch_transfer_training(preprocessed_hcs_dataset):
         z_window_size=z_window_size,
         batch_size=2,
         num_workers=0,
-        yx_patch_size=yx_patch_size,
+        yx_patch_size=[128, 96],
     )
     dm.setup(stage="fit")
     dm.trainer = MagicMock(training=True, validating=False)
@@ -85,13 +86,12 @@ def test_on_after_batch_transfer_training(preprocessed_hcs_dataset):
         "source": torch.randn(2, 2, z_window_size, 256, 256),
         "target": torch.randn(2, 2, z_window_size, 256, 256),
     }
-    result = dm.on_after_batch_transfer(batch, 0)
-    assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)
-    assert result["target"].shape == (2, 2, z_window_size, *yx_patch_size)
+    with raises(ValueError, match="does not match expected"):
+        dm.on_after_batch_transfer(batch, 0)
 
 
-def test_on_after_batch_transfer_validation(preprocessed_hcs_dataset):
-    """Validation path applies deterministic center crop."""
+def test_on_after_batch_transfer_passthrough(preprocessed_hcs_dataset):
+    """Correct-sized batch passes through without error."""
     data_path = preprocessed_hcs_dataset
     z_window_size = 5
     yx_patch_size = [128, 96]
@@ -109,8 +109,8 @@ def test_on_after_batch_transfer_validation(preprocessed_hcs_dataset):
     dm.setup(stage="fit")
     dm.trainer = MagicMock(training=False, validating=True)
     batch = {
-        "source": torch.randn(2, 2, z_window_size, 256, 256),
-        "target": torch.randn(2, 2, z_window_size, 256, 256),
+        "source": torch.randn(2, 2, z_window_size, *yx_patch_size),
+        "target": torch.randn(2, 2, z_window_size, *yx_patch_size),
     }
     result = dm.on_after_batch_transfer(batch, 0)
     assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)
@@ -118,7 +118,7 @@ def test_on_after_batch_transfer_validation(preprocessed_hcs_dataset):
 
 
 def test_on_after_batch_transfer_target_2d(preprocessed_hcs_dataset):
-    """target_2d slices target Z to 1 after GPU crop."""
+    """target_2d slices target Z to 1."""
     data_path = preprocessed_hcs_dataset
     z_window_size = 5
     yx_patch_size = [128, 96]
@@ -137,8 +137,8 @@ def test_on_after_batch_transfer_target_2d(preprocessed_hcs_dataset):
     dm.setup(stage="fit")
     dm.trainer = MagicMock(training=True, validating=False)
     batch = {
-        "source": torch.randn(2, 2, z_window_size, 256, 256),
-        "target": torch.randn(2, 2, z_window_size, 256, 256),
+        "source": torch.randn(2, 2, z_window_size, *yx_patch_size),
+        "target": torch.randn(2, 2, z_window_size, *yx_patch_size),
     }
     result = dm.on_after_batch_transfer(batch, 0)
     assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)

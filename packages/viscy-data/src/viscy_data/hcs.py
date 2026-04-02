@@ -20,7 +20,6 @@ from viscy_data._typing import Sample
 from viscy_data._utils import _collate_samples, _ensure_channel_list
 from viscy_data.foreground_masks import ForegroundMaskSupport
 from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset
-from viscy_transforms import BatchedCenterSpatialCropd, BatchedRandSpatialCropd
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -139,23 +138,6 @@ class HCSDataModule(LightningDataModule):
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
-        # GPU-side crops cached for reuse across batches
-        crop_keys = ["source", "target"]
-        allow_missing = False
-        if self.fg_mask_key is not None:
-            crop_keys = crop_keys + ["fg_mask"]
-            allow_missing = True
-        crop_roi = (self.z_window_size, self.yx_patch_size[0], self.yx_patch_size[1])
-        self._val_crop = BatchedCenterSpatialCropd(
-            keys=crop_keys,
-            roi_size=crop_roi,
-            allow_missing_keys=allow_missing,
-        )
-        self._default_train_crop = BatchedRandSpatialCropd(
-            keys=crop_keys,
-            roi_size=crop_roi,
-            allow_missing_keys=allow_missing,
-        )
 
     @staticmethod
     def _inject_mask_keys(
@@ -360,41 +342,40 @@ class HCSDataModule(LightningDataModule):
             **dataset_settings,
         )
 
-    def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        """Pass through; spatial transforms are handled in ``on_after_batch_transfer``."""
-        if isinstance(batch, Tensor):
-            return batch
-        return batch
-
     @torch.no_grad()
     def on_after_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        """Apply GPU crop and augmentations after batch transfer.
+        """Apply GPU augmentations and validate output spatial shape.
 
-        Training with ``gpu_augmentations``: user-specified transforms.
-        Training without: random crop to ``(z_window_size, yx_patch_size)``.
-        Validation: deterministic center crop to ``(z_window_size, yx_patch_size)``.
+        Training: applies ``gpu_augmentations`` if configured, then validates
+        that ``source`` spatial dimensions match ``(z_window_size, *yx_patch_size)``.
+        Validation: validates spatial shape only.
         Test/predict: pass through unchanged.
 
         When ``target_2d`` is set, the target center Z slice is extracted
-        after cropping to save VRAM.
+        after augmentations to save VRAM.
         """
         if isinstance(batch, Tensor):
             return batch
-        has_source_target = "source" in batch and "target" in batch
-        if self.trainer and has_source_target:
-            if self.trainer.training:
-                if self._gpu_augmentations is not None:
-                    batch = self._gpu_augmentations(batch)
-                else:
-                    batch = self._default_train_crop(batch)
-            elif self.trainer.validating:
-                batch = self._val_crop(batch)
-        # target_2d Z slicing — after crop so Z dims are consistent
+        if self.trainer and self.trainer.training and self._gpu_augmentations is not None:
+            batch = self._gpu_augmentations(batch)
+        # target_2d Z slicing
         if self.target_2d and "target" in batch:
             z_index = self.z_window_size // 2
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
             if "fg_mask" in batch:
                 batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
+        # Validate spatial shape during training and validation
+        if self.trainer and (self.trainer.training or self.trainer.validating) and "source" in batch:
+            expected = (self.z_window_size, self.yx_patch_size[0], self.yx_patch_size[1])
+            actual = tuple(batch["source"].shape[2:])
+            if actual != expected:
+                raise ValueError(
+                    f"Source spatial shape {actual} does not match expected "
+                    f"{expected} (z_window_size={self.z_window_size}, "
+                    f"yx_patch_size={list(self.yx_patch_size)}). "
+                    f"Configure gpu_augmentations with a spatial crop that "
+                    f"produces the expected output size."
+                )
         return batch
 
     def train_dataloader(self):
