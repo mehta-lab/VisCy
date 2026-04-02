@@ -49,6 +49,10 @@ data:
 > **FNet3D note:** All spatial dimensions (Z, Y, X) must be divisible by `2^depth`
 > (default depth=4 requires divisibility by 16). See `examples/configs/fnet3d/fit.yml`.
 
+> **Benchmark note:** FNet3D and SEC61B benchmarks now launch from
+> [`applications/dynacell/`](../dynacell/README.md). Cytoland copies are
+> transitional legacy — see `examples/configs/dynacell/` and `examples/configs/fnet3d/`.
+
 ## References
 
 <details>

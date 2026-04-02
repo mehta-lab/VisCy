@@ -1,3 +1,5 @@
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
 # FNet3D on AICS iPSC SEC61B (ER) — dynacell benchmark.
 # Usage: uv run python -m cytoland fit --config dynacell/fit_fnet3d_sec61b.yml
 # Batch related launches with:

@@ -1,3 +1,5 @@
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
 # Model recipe: UNeXt2 (VSCyto3D) for z=8 input (stem=[8,4,4]).
 model:
   class_path: cytoland.engine.VSUNet

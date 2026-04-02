@@ -1,3 +1,5 @@
+# FNet3D benchmark ownership has moved to Dynacell.
+# See: applications/dynacell/examples/configs/fnet3d/
 # FNet3D: inference.
 # Usage: python -m cytoland predict --config fnet3d/predict.yml
 base:

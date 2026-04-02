@@ -1,3 +1,5 @@
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
 # Model recipe: FNet3D for z=8 input (depth=3, divisor=8).
 model:
   class_path: cytoland.engine.VSUNet

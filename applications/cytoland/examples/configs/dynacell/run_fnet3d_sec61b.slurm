@@ -1,4 +1,6 @@
 #!/bin/bash
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
 
 #SBATCH --job-name=FNet3D_SEC61B
 #SBATCH --time=20-00:00:00

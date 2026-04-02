@@ -1,3 +1,5 @@
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
 # Data recipe: HCSDataModule for Phase3D -> Structure (SEC61B), 3D (z=8).
 # Uses mean/std (source) and median/iqr (target) normalization with GPU-side Batched* augmentations.
 data:

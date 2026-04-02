@@ -1,3 +1,5 @@
+# FNet3D benchmark ownership has moved to Dynacell.
+# See: applications/dynacell/examples/configs/fnet3d/
 # FNet3D: supervised training (Ounkomol et al. 2018).
 # Usage: python -m cytoland fit --config fnet3d/fit.yml
 base:
