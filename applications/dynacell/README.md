@@ -17,7 +17,24 @@ uv run dynacell predict -c fnet3d/predict.yml --data.init_args.data_path=/path/t
 ## Architectures
 
 - **UNetViT3D**: 3D U-Net with Vision Transformer bottleneck
+- **UNeXt2**: timm encoder with custom stem, decoder, and head (VSCyto3D backbone)
 - **FNet3D**: Recursive encoder-decoder baseline (Ounkomol et al. 2018)
+
+## SEC61B Benchmark
+
+Launch SEC61B training from Dynacell (canonical location):
+
+```bash
+# FNet3D
+uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d.yml
+
+# UNeXt2 (VSCyto3D)
+uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_unext2.yml
+
+# SLURM (H200)
+sbatch applications/dynacell/examples/configs/sec61b/run_fnet3d.slurm
+sbatch applications/dynacell/examples/configs/sec61b/run_unext2.slurm
+```
 
 ## Supported subcommands
 
