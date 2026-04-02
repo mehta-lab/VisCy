@@ -12,7 +12,7 @@ import torch
 from iohub.ngff import Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
-from monai.transforms import CenterSpatialCropd, Compose, MapTransform, MultiSampleTrait, RandAffined
+from monai.transforms import Compose, MapTransform, MultiSampleTrait, RandAffined
 from torch import Tensor
 from torch.utils.data import DataLoader
 
@@ -20,6 +20,7 @@ from viscy_data._typing import Sample
 from viscy_data._utils import _collate_samples, _ensure_channel_list
 from viscy_data.foreground_masks import ForegroundMaskSupport
 from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset
+from viscy_transforms import BatchedCenterSpatialCropd, BatchedRandSpatialCropd
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -138,6 +139,23 @@ class HCSDataModule(LightningDataModule):
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
+        # GPU-side crops cached for reuse across batches
+        crop_keys = ["source", "target"]
+        allow_missing = False
+        if self.fg_mask_key is not None:
+            crop_keys = crop_keys + ["fg_mask"]
+            allow_missing = True
+        crop_roi = (self.z_window_size, self.yx_patch_size[0], self.yx_patch_size[1])
+        self._val_crop = BatchedCenterSpatialCropd(
+            keys=crop_keys,
+            roi_size=crop_roi,
+            allow_missing_keys=allow_missing,
+        )
+        self._default_train_crop = BatchedRandSpatialCropd(
+            keys=crop_keys,
+            roi_size=crop_roi,
+            allow_missing_keys=allow_missing,
+        )
 
     @staticmethod
     def _inject_mask_keys(
@@ -343,44 +361,41 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        """Remove redundant Z slices if the target is 2D to save VRAM."""
-        predicting = False
-        if self.trainer:
-            if self.trainer.predicting:
-                predicting = True
-        if predicting or isinstance(batch, Tensor):
-            # skipping example input array
+        """Pass through; spatial transforms are handled in ``on_after_batch_transfer``."""
+        if isinstance(batch, Tensor):
             return batch
-        if self.target_2d:
-            # slice the center during training or testing
+        return batch
+
+    @torch.no_grad()
+    def on_after_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
+        """Apply GPU crop and augmentations after batch transfer.
+
+        Training with ``gpu_augmentations``: user-specified transforms.
+        Training without: random crop to ``(z_window_size, yx_patch_size)``.
+        Validation: deterministic center crop to ``(z_window_size, yx_patch_size)``.
+        Test/predict: pass through unchanged.
+
+        When ``target_2d`` is set, the target center Z slice is extracted
+        after cropping to save VRAM.
+        """
+        if isinstance(batch, Tensor):
+            return batch
+        has_source_target = "source" in batch and "target" in batch
+        if self.trainer and has_source_target:
+            if self.trainer.training:
+                if self._gpu_augmentations is not None:
+                    batch = self._gpu_augmentations(batch)
+                else:
+                    batch = self._default_train_crop(batch)
+            elif self.trainer.validating:
+                batch = self._val_crop(batch)
+        # target_2d Z slicing — after crop so Z dims are consistent
+        if self.target_2d and "target" in batch:
             z_index = self.z_window_size // 2
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
             if "fg_mask" in batch:
                 batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
         return batch
-
-    @torch.no_grad()
-    def on_after_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        """Apply GPU augmentations after batch transfer to device.
-
-        Parameters
-        ----------
-        batch : Sample
-            Batch dict with ``source``, ``target`` keys as
-            ``(B, C, Z, Y, X)`` tensors.
-        dataloader_idx : int
-            Dataloader index (unused).
-
-        Returns
-        -------
-        Sample
-            Augmented batch (training only; validation/test pass through).
-        """
-        if isinstance(batch, Tensor) or self._gpu_augmentations is None:
-            return batch
-        if self.trainer and not self.trainer.training:
-            return batch
-        return self._gpu_augmentations(batch)
 
     def train_dataloader(self):
         """Return training data loader."""
@@ -429,35 +444,18 @@ class HCSDataModule(LightningDataModule):
     def _fit_transform(self) -> tuple[Compose, Compose]:
         """Build training and validation transforms.
 
-        Apply normalization, augmentation, then center crop as the last step.
+        Apply normalization and augmentation on CPU.
+        Spatial cropping is deferred to ``on_after_batch_transfer`` on GPU.
         When ``fg_mask_key`` is set, spatial augmentations are patched to
         also transform the mask keys so they stay pixel-aligned with the target.
         """
-        final_crop = [self._final_crop()]
         augmentations = self._train_transform()
         if self.fg_mask_key is not None:
             mask_keys = ForegroundMaskSupport.mask_temp_keys(list(self.target_channel))
             ForegroundMaskSupport.patch_spatial_transforms(augmentations, tuple(self.target_channel), mask_keys)
-        train_transform = Compose(self.normalizations + augmentations + final_crop)
-        val_transform = Compose(self.normalizations + final_crop)
+        train_transform = Compose(self.normalizations + augmentations)
+        val_transform = Compose(self.normalizations)
         return train_transform, val_transform
-
-    def _final_crop(self) -> CenterSpatialCropd:
-        """Set up final cropping: center crop to the target size."""
-        keys = self.source_channel + self.target_channel
-        allow_missing = False
-        if self.fg_mask_key is not None:
-            keys = keys + list(ForegroundMaskSupport.mask_temp_keys(list(self.target_channel)))
-            allow_missing = True
-        return CenterSpatialCropd(
-            keys=keys,
-            roi_size=(
-                self.z_window_size,
-                self.yx_patch_size[0],
-                self.yx_patch_size[1],
-            ),
-            allow_missing_keys=allow_missing,
-        )
 
     def _train_transform(self) -> list[Callable]:
         """Set up training augmentations.

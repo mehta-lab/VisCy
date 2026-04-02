@@ -61,8 +61,7 @@ class ForegroundMaskSupport:
         """Return ``("__fg_mask_{ch}", ...)`` for the given channel names.
 
         Single source of truth for temp-key naming.  Used by
-        ``ForegroundMaskSupport.__init__``, ``HCSDataModule._fit_transform``,
-        and ``HCSDataModule._final_crop``.
+        ``ForegroundMaskSupport.__init__`` and ``HCSDataModule._fit_transform``.
         """
         return tuple(f"__fg_mask_{ch}" for ch in target_channels)
 

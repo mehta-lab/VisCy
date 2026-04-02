@@ -62,6 +62,12 @@ data:
           divisor: std
     augmentations: []
     gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [32, 64, 64]
+          random_center: true
+          random_size: false
       - class_path: viscy_transforms.BatchedRandFlipd
         init_args:
           keys: [source, target]

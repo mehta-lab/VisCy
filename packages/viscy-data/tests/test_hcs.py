@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import torch
@@ -46,6 +47,8 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
     )
     dm.setup(stage="fit")
     for batch in dm.train_dataloader():
+        # Apply default GPU crop (no trainer attached)
+        batch = dm._default_train_crop(batch)
         assert batch["source"].shape == (
             batch_size,
             channel_split,
@@ -58,6 +61,88 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
             z_window_size,
             *yx_patch_size,
         )
+
+
+def test_on_after_batch_transfer_training(preprocessed_hcs_dataset):
+    """Training path applies gpu_augmentations or default random crop."""
+    data_path = preprocessed_hcs_dataset
+    z_window_size = 5
+    yx_patch_size = [128, 96]
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:2],
+        target_channel=channel_names[2:],
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=yx_patch_size,
+    )
+    dm.setup(stage="fit")
+    dm.trainer = MagicMock(training=True, validating=False)
+    batch = {
+        "source": torch.randn(2, 2, z_window_size, 256, 256),
+        "target": torch.randn(2, 2, z_window_size, 256, 256),
+    }
+    result = dm.on_after_batch_transfer(batch, 0)
+    assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)
+    assert result["target"].shape == (2, 2, z_window_size, *yx_patch_size)
+
+
+def test_on_after_batch_transfer_validation(preprocessed_hcs_dataset):
+    """Validation path applies deterministic center crop."""
+    data_path = preprocessed_hcs_dataset
+    z_window_size = 5
+    yx_patch_size = [128, 96]
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:2],
+        target_channel=channel_names[2:],
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=yx_patch_size,
+    )
+    dm.setup(stage="fit")
+    dm.trainer = MagicMock(training=False, validating=True)
+    batch = {
+        "source": torch.randn(2, 2, z_window_size, 256, 256),
+        "target": torch.randn(2, 2, z_window_size, 256, 256),
+    }
+    result = dm.on_after_batch_transfer(batch, 0)
+    assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)
+    assert result["target"].shape == (2, 2, z_window_size, *yx_patch_size)
+
+
+def test_on_after_batch_transfer_target_2d(preprocessed_hcs_dataset):
+    """target_2d slices target Z to 1 after GPU crop."""
+    data_path = preprocessed_hcs_dataset
+    z_window_size = 5
+    yx_patch_size = [128, 96]
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:2],
+        target_channel=channel_names[2:],
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=yx_patch_size,
+        target_2d=True,
+    )
+    dm.setup(stage="fit")
+    dm.trainer = MagicMock(training=True, validating=False)
+    batch = {
+        "source": torch.randn(2, 2, z_window_size, 256, 256),
+        "target": torch.randn(2, 2, z_window_size, 256, 256),
+    }
+    result = dm.on_after_batch_transfer(batch, 0)
+    assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)
+    assert result["target"].shape == (2, 2, 1, *yx_patch_size)
 
 
 def test_datamodule_caching(preprocessed_hcs_dataset):
