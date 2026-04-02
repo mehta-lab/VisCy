@@ -5,10 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --partition=gpu
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --gpus=1
-#SBATCH --mem=256G
-#SBATCH --constraint=h200
+#SBATCH --mem=128G
 #SBATCH --output=/hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/slurm/%j.out
 #SBATCH --error=/hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/slurm/%j.err
 

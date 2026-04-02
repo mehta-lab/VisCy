@@ -72,4 +72,4 @@ data:
           keys: [source, target]
           spatial_axes: [2]
           prob: 0.5
-    caching: false
+    caching: true
