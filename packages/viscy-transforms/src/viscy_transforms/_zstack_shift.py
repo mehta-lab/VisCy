@@ -53,6 +53,8 @@ class BatchedRandZStackShiftd(MapTransform, RandomizableTransform):
     >>> output = zshift(sample)
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: str | Iterable[str],

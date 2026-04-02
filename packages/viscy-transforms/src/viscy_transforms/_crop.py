@@ -125,6 +125,8 @@ class BatchedRandSpatialCrop(RandSpatialCrop):
 
 
 class BatchedRandSpatialCropd(RandCropd):
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str],
@@ -198,6 +200,8 @@ class BatchedCenterSpatialCropd(Cropd):
         Don't raise exception if key is missing. Default is False.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str],
@@ -232,6 +236,8 @@ class BatchedRandWeightedCropd(MapTransform):
     allow_missing_keys : bool
         Whether to skip missing keys. Default: False.
     """
+
+    is_spatial = True
 
     def __init__(
         self,

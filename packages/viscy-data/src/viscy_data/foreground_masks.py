@@ -7,31 +7,24 @@ that SlidingWindowDataset delegates to when ``fg_mask_key`` is set.
 from collections.abc import Callable
 
 from iohub.ngff import ImageArray, Position
-from monai.transforms import CenterSpatialCropd, RandAffined, RandFlipd, RandWeightedCropd
 from torch import Tensor
 
-from viscy_transforms import (
-    BatchedCenterSpatialCropd,
-    BatchedRandAffined,
-    BatchedRandFlipd,
-    BatchedRandSpatialCropd,
-    BatchedRandWeightedCropd,
-)
 
-# Spatial transforms that preserve pixel correspondence and must co-transform
-# fg_mask alongside source/target. Intensity transforms are excluded — applying
-# gamma correction or noise to a binary mask would corrupt it.
-_SPATIAL_TRANSFORMS: tuple[type, ...] = (
-    RandAffined,
-    RandFlipd,
-    CenterSpatialCropd,
-    RandWeightedCropd,
-    BatchedRandAffined,
-    BatchedRandFlipd,
-    BatchedCenterSpatialCropd,
-    BatchedRandSpatialCropd,
-    BatchedRandWeightedCropd,
-)
+def _is_spatial(t) -> bool:
+    """Check if a transform modifies spatial positions.
+
+    Uses the ``is_spatial`` class attribute when available (all viscy-transforms
+    classes). Falls back to checking the MRO for MONAI spatial/croppad module
+    paths, which catches raw MONAI transforms and viscy-transforms wrappers
+    that inherit from them.
+    """
+    if hasattr(t, "is_spatial"):
+        return t.is_spatial
+    for base in type(t).__mro__:
+        module = getattr(base, "__module__", "")
+        if "spatial" in module or "croppad" in module:
+            return True
+    return False
 
 
 class ForegroundMaskSupport:
@@ -170,9 +163,10 @@ class ForegroundMaskSupport:
     ) -> None:
         """Append mask keys to spatial transforms that operate on target keys.
 
-        Only modifies transforms in the ``_SPATIAL_TRANSFORMS`` allowlist.
-        Intensity transforms are never modified.  Idempotent — skips
-        transforms that already contain the mask keys.
+        Only modifies transforms with ``is_spatial = True`` or from
+        MONAI spatial/croppad modules.  Intensity transforms are never
+        modified.  Idempotent — skips transforms that already contain
+        the mask keys.
 
         Parameters
         ----------
@@ -187,7 +181,8 @@ class ForegroundMaskSupport:
         """
         for t in transforms:
             if (
-                isinstance(t, _SPATIAL_TRANSFORMS)
+                _is_spatial(t)
+                and hasattr(t, "keys")
                 and any(k in t.keys for k in target_keys)
                 and not any(k in t.keys for k in mask_keys)
             ):

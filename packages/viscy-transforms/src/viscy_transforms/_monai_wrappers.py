@@ -160,6 +160,8 @@ class RandWeightedCropd(_RandWeightedCropd):
     monai.transforms.RandWeightedCropd : Parent MONAI transform.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -210,6 +212,8 @@ class RandAffined(_RandAffined):
     --------
     monai.transforms.RandAffined : Parent MONAI transform.
     """
+
+    is_spatial = True
 
     def __init__(
         self,
@@ -472,6 +476,8 @@ class RandSpatialCropd(_RandSpatialCropd):
     CenterSpatialCropd : Deterministic center cropping.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -508,6 +514,8 @@ class CenterSpatialCropd(_CenterSpatialCropd):
     RandSpatialCropd : Random position cropping.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -539,6 +547,8 @@ class RandFlipd(_RandFlipd):
     --------
     monai.transforms.RandFlipd : Parent MONAI transform.
     """
+
+    is_spatial = True
 
     def __init__(
         self,
