@@ -78,6 +78,8 @@ class BatchedRandInvertIntensityd(MapTransform, RandomizableTransform):
 
 
 class RandInvertIntensityd(MapTransform, RandomizableTransform):
+    is_spatial = False
+
     """Randomly invert the intensity of the image.
 
     Multiplies intensity values by -1 to invert the image contrast.

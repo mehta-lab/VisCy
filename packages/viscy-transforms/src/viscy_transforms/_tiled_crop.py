@@ -15,6 +15,8 @@ __all__ = ["TiledSpatialCropSamplesd"]
 
 
 class TiledSpatialCropSamplesd(MapTransform, MultiSampleTrait):
+    is_spatial = True
+
     """Crop multiple tiled ROIs from an image.
 
     Generates multiple non-overlapping crops arranged in a grid pattern.

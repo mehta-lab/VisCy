@@ -25,6 +25,8 @@ def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
 
 
 class NormalizeSampled(MapTransform):
+    is_spatial = False
+
     """Normalize using precomputed statistics stored in ``sample["norm_meta"]``.
 
     Expects ``norm_meta`` to have structure::
@@ -79,6 +81,8 @@ class NormalizeSampled(MapTransform):
 
 
 class MinMaxSampled(MapTransform):
+    is_spatial = False
+
     """Normalize to [-1, 1] by clipping then rescaling with precomputed range statistics.
 
     Applies::

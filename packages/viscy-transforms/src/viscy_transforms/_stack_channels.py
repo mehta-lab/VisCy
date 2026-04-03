@@ -13,6 +13,8 @@ __all__ = ["BatchedStackChannelsd", "StackChannelsd"]
 
 
 class StackChannelsd(MapTransform):
+    is_spatial = False
+
     """Stack source and target channels from multiple keys.
 
     Combines multiple single-channel tensors into multi-channel tensors
