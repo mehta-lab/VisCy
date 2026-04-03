@@ -247,6 +247,11 @@ class BatchedDivisibleCropd(MapTransform):
         spatial = first.shape[2:]  # (B, C, *spatial)
         k = self.k if len(self.k) == len(spatial) else self.k * len(spatial)
         roi = tuple(s // ki * ki for s, ki in zip(spatial, k))
+        if any(r == 0 for r in roi):
+            raise ValueError(
+                f"DivisibleCrop k={k} is larger than spatial dimensions {tuple(spatial)}. "
+                f"Computed roi {roi} contains zero-size dimension."
+            )
         if roi == tuple(spatial):
             return data
         cropper = BatchedCenterSpatialCrop(roi)
