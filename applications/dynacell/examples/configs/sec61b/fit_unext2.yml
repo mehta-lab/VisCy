@@ -19,6 +19,7 @@ model:
     schedule: WarmupCosine
 
 trainer:
+  devices: 4
   precision: 16-mixed
   max_epochs: 200
   logger:

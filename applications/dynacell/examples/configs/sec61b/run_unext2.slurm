@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=32
-#SBATCH --gpus=1
+#SBATCH --gpus=4
 #SBATCH --mem=256G
 #SBATCH --constraint=h200
 #SBATCH --output=/hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2/slurm/%j.out
