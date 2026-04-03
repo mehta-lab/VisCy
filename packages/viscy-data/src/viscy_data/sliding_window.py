@@ -268,7 +268,7 @@ class SlidingWindowDataset(Dataset):
             ].astype(np.float32)
         elif arr_idx >= 0:
             fov_data = self._read_fov_cached(arr_idx, t, tuple(ch_idx))
-            data = fov_data[:, :, z : z + self.z_window_size]
+            data = fov_data[:, :, z : z + self.z_window_size].copy()
         else:
             data = img.oindex[
                 slice(t, t + 1),
