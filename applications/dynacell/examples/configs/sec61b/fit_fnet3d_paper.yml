@@ -1,8 +1,8 @@
 # FNet3D on AICS iPSC SEC61B (ER) using paper-native baseline settings on Dynacell data.
 # Matches the pytorch_fnet baseline architecture and core training hyperparameters:
-# depth=4, mult_chan=32, z_window_size=32, yx_patch_size=64, batch_size=24,
-# lr=1e-3, no scheduler, 50k steps, seed=0, single-GPU execution, plus the
-# baseline's basic paired Y/X flip augmentation.
+# depth=4, mult_chan=32, z_window_size=32, yx_patch_size=64, batch_size=48
+# (6 FOVs × 8 patches via num_samples=8), lr=1e-3, no scheduler, 50k steps,
+# seed=0, single-GPU execution, plus the baseline's basic paired Y/X flip augmentation.
 # Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d_paper.yml
 seed_everything: 0
 
