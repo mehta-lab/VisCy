@@ -62,11 +62,13 @@ class SlidingWindowDataset(Dataset):
         Avoids redundant zarr chunk decompression when consecutive
         samples come from the same FOV (common with sliding windows).
         Set to 0 to disable caching. Default 5.
-    yx_patch_size : tuple[int, int] | None
-        When set, each ``__getitem__`` generates random (y, x) start
-        coordinates and reads only that patch from zarr, bypassing
-        the FOV cache. Reduces zarr decompression for small patches.
-        Default None reads full FOVs.
+    yx_read_size : tuple[int, int] | None
+        Spatial (Y, X) region to read from zarr per sample. When set,
+        each ``__getitem__`` generates random (y, x) start coordinates
+        and reads only that region, bypassing the FOV cache. This is
+        the *read* size, not the final output size — downstream
+        augmentations (e.g. affine + center crop) may reduce it
+        further. Default None reads full FOVs.
     """
 
     def __init__(
@@ -83,7 +85,7 @@ class SlidingWindowDataset(Dataset):
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
         fov_cache_maxsize: int = 5,
-        yx_patch_size: tuple[int, int] | None = None,
+        yx_read_size: tuple[int, int] | None = None,
     ) -> None:
         super().__init__()
         if not 0.0 <= min_nonzero_fraction <= 1.0:
@@ -115,10 +117,10 @@ class SlidingWindowDataset(Dataset):
         if self.target_ch_idx is not None:
             self._all_ch_names.extend(self.channels["target"])
             self._all_ch_idx.extend(self.target_ch_idx)
-        if yx_patch_size is not None:
-            if len(yx_patch_size) != 2 or any(s < 1 for s in yx_patch_size):
-                raise ValueError(f"yx_patch_size must be a 2-tuple of positive integers, got {yx_patch_size}")
-        self.yx_patch_size = yx_patch_size
+        if yx_read_size is not None:
+            if len(yx_read_size) != 2 or any(s < 1 for s in yx_read_size):
+                raise ValueError(f"yx_read_size must be a 2-tuple of positive integers, got {yx_read_size}")
+        self.yx_read_size = yx_read_size
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -147,11 +149,11 @@ class SlidingWindowDataset(Dataset):
                     f"is larger than the number of Z slices ({img_arr.slices}) "
                     f"for FOV {img_arr.name}."
                 )
-            if self.yx_patch_size is not None:
-                ph, pw = self.yx_patch_size
+            if self.yx_read_size is not None:
+                ph, pw = self.yx_read_size
                 if img_arr.height < ph or img_arr.width < pw:
                     raise IndexError(
-                        f"yx_patch_size {self.yx_patch_size} is larger than "
+                        f"yx_read_size {self.yx_read_size} is larger than "
                         f"FOV spatial dimensions ({img_arr.height}, {img_arr.width}) "
                         f"for FOV {img_arr.name}."
                     )
@@ -271,9 +273,9 @@ class SlidingWindowDataset(Dataset):
             img, tz, norm_meta, arr_idx = self._find_window(idx)
             # Generate random YX crop for partial zarr read
             yx_slice = None
-            if self.yx_patch_size is not None:
+            if self.yx_read_size is not None:
                 Y, X = img.shape[-2], img.shape[-1]
-                ph, pw = self.yx_patch_size
+                ph, pw = self.yx_read_size
                 y0 = torch.randint(0, Y - ph + 1, ()).item()
                 x0 = torch.randint(0, X - pw + 1, ()).item()
                 yx_slice = (slice(y0, y0 + ph), slice(x0, x0 + pw))

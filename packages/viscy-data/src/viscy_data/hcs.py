@@ -83,13 +83,14 @@ class HCSDataModule(LightningDataModule):
         Maximum retries when a patch fails the nonzero check, by default 100.
     fg_mask_key : str or None, optional
         Zarr array key for precomputed foreground masks, by default None.
-    crop_at_read : bool, optional
-        When True, read only the ``yx_patch_size`` spatial region from
-        zarr during training, instead of reading the full FOV and
-        cropping later. Reduces zarr decompression for small patches.
+    crop_at_read : bool | tuple[int, int], optional
+        Controls partial zarr reads during training. When a 2-tuple
+        ``(Y, X)``, reads only that spatial region from zarr per
+        sample. When ``True``, uses ``yx_patch_size`` as the read
+        size (appropriate when no augmentation margin is needed).
+        When ``False`` (default), reads full FOVs.
         Only affects the training dataset. Disables the FOV cache
         (sets ``fov_cache_maxsize=0``) since partial reads bypass it.
-        Default False.
     """
 
     def __init__(
@@ -118,7 +119,7 @@ class HCSDataModule(LightningDataModule):
         fg_mask_key: str | None = None,
         gpu_augmentations: list[MapTransform] | None = None,
         fov_cache_maxsize: int = 5,
-        crop_at_read: bool = False,
+        crop_at_read: bool | tuple[int, int] = False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -283,7 +284,11 @@ class HCSDataModule(LightningDataModule):
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
         if self.crop_at_read:
-            train_dataset_settings["yx_patch_size"] = tuple(self.yx_patch_size)
+            if isinstance(self.crop_at_read, tuple):
+                read_size = self.crop_at_read
+            else:
+                read_size = tuple(self.yx_patch_size)
+            train_dataset_settings["yx_read_size"] = read_size
             train_dataset_settings["fov_cache_maxsize"] = 0
         # train/val split
         self.train_dataset = SlidingWindowDataset(

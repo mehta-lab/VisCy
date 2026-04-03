@@ -442,8 +442,8 @@ def test_fg_mask_aligned_after_cpu_rand_spatial_crop():
 
 
 def test_partial_zarr_read(hcs_with_fg_mask):
-    """yx_patch_size on SlidingWindowDataset produces correct output shapes."""
-    yx_patch_size = (16, 16)
+    """yx_read_size on SlidingWindowDataset produces correct output shapes."""
+    yx_read_size = (16, 16)
     z_window_size = 4
     with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
         positions = [pos for _, pos in ds.positions()]
@@ -451,16 +451,16 @@ def test_partial_zarr_read(hcs_with_fg_mask):
             positions=positions,
             channels={"source": ["Phase"], "target": ["Fluorescence"]},
             z_window_size=z_window_size,
-            yx_patch_size=yx_patch_size,
+            yx_read_size=yx_read_size,
         )
         sample = dataset[0]
-    assert sample["source"].shape == (1, z_window_size, *yx_patch_size)
-    assert sample["target"].shape == (1, z_window_size, *yx_patch_size)
+    assert sample["source"].shape == (1, z_window_size, *yx_read_size)
+    assert sample["target"].shape == (1, z_window_size, *yx_read_size)
 
 
 def test_partial_zarr_read_with_fg_mask(hcs_with_fg_mask):
-    """yx_patch_size reads fg_mask from the same spatial region."""
-    yx_patch_size = (16, 16)
+    """yx_read_size reads fg_mask from the same spatial region."""
+    yx_read_size = (16, 16)
     z_window_size = 4
     with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
         positions = [pos for _, pos in ds.positions()]
@@ -469,11 +469,11 @@ def test_partial_zarr_read_with_fg_mask(hcs_with_fg_mask):
             channels={"source": ["Phase"], "target": ["Fluorescence"]},
             z_window_size=z_window_size,
             fg_mask_key="fg_mask",
-            yx_patch_size=yx_patch_size,
+            yx_read_size=yx_read_size,
         )
         sample = dataset[0]
     assert "fg_mask" in sample
-    assert sample["fg_mask"].shape == (1, z_window_size, *yx_patch_size)
+    assert sample["fg_mask"].shape == (1, z_window_size, *yx_read_size)
     assert set(sample["fg_mask"].unique().tolist()).issubset({0.0, 1.0})
     # Verify spatial co-alignment: mask was built as (target > 0.5)
     assert torch.equal((sample["target"] > 0.5).float(), sample["fg_mask"]), (
@@ -481,16 +481,16 @@ def test_partial_zarr_read_with_fg_mask(hcs_with_fg_mask):
     )
 
 
-def test_yx_patch_size_too_large_errors(hcs_with_fg_mask):
-    """IndexError when yx_patch_size exceeds FOV spatial dimensions."""
+def test_yx_read_size_too_large_errors(hcs_with_fg_mask):
+    """IndexError when yx_read_size exceeds FOV spatial dimensions."""
     with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
         positions = [pos for _, pos in ds.positions()]
-        with raises(IndexError, match="yx_patch_size"):
+        with raises(IndexError, match="yx_read_size"):
             SlidingWindowDataset(
                 positions=positions,
                 channels={"source": ["Phase"], "target": ["Fluorescence"]},
                 z_window_size=4,
-                yx_patch_size=(64, 64),  # FOV is 32x32
+                yx_read_size=(64, 64),  # FOV is 32x32
             )
 
 
