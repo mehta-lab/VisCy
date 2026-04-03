@@ -136,8 +136,8 @@ class SlidingWindowDataset(Dataset):
             if nonzero_channel not in all_channels:
                 raise ValueError(f"nonzero_channel '{nonzero_channel}' not found in channels: {all_channels}")
         # Per-worker FOV cache to avoid redundant zarr decompression.
-        # lru_cache is per-instance; each DataLoader worker fork gets its own.
-        if fov_cache_maxsize > 0:
+        # Skipped when in_memory (data already preloaded).
+        if not in_memory and fov_cache_maxsize > 0:
             self._read_fov_cached = lru_cache(maxsize=fov_cache_maxsize)(self._read_fov_uncached)
         else:
             self._read_fov_cached = self._read_fov_uncached
