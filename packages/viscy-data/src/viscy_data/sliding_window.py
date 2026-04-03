@@ -115,6 +115,9 @@ class SlidingWindowDataset(Dataset):
         if self.target_ch_idx is not None:
             self._all_ch_names.extend(self.channels["target"])
             self._all_ch_idx.extend(self.target_ch_idx)
+        if yx_patch_size is not None:
+            if len(yx_patch_size) != 2 or any(s < 1 for s in yx_patch_size):
+                raise ValueError(f"yx_patch_size must be a 2-tuple of positive integers, got {yx_patch_size}")
         self.yx_patch_size = yx_patch_size
         self._get_windows()
         if nonzero_channel is not None:
