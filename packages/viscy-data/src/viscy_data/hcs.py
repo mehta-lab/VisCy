@@ -83,6 +83,11 @@ class HCSDataModule(LightningDataModule):
         Maximum retries when a patch fails the nonzero check, by default 100.
     fg_mask_key : str or None, optional
         Zarr array key for precomputed foreground masks, by default None.
+    val_gpu_augmentations : list[MapTransform] or None, optional
+        GPU transforms applied to validation batches in
+        ``on_after_batch_transfer``. Use for validation-time spatial
+        crops (e.g. ``BatchedDivisibleCropd``) when the FOV is not
+        compatible with the model's downsampling factor.
     crop_at_read : bool | tuple[int, int], optional
         Controls partial zarr reads during training. When a 2-tuple
         ``(Y, X)``, reads only that spatial region from zarr per
@@ -118,6 +123,7 @@ class HCSDataModule(LightningDataModule):
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
         gpu_augmentations: list[MapTransform] | None = None,
+        val_gpu_augmentations: list[MapTransform] | None = None,
         fov_cache_maxsize: int = 5,
         crop_at_read: bool | tuple[int, int] = False,
     ):
@@ -150,6 +156,7 @@ class HCSDataModule(LightningDataModule):
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
+        self._val_gpu_augmentations = Compose(val_gpu_augmentations) if val_gpu_augmentations else None
 
     @staticmethod
     def _inject_mask_keys(
@@ -368,7 +375,8 @@ class HCSDataModule(LightningDataModule):
 
         Training: applies ``gpu_augmentations`` if configured, then validates
         that ``source`` spatial dimensions match ``(z_window_size, *yx_patch_size)``.
-        Validation/test/predict: pass through unchanged.
+        Validation: applies ``val_gpu_augmentations`` if configured.
+        Test/predict: pass through unchanged.
 
         When ``target_2d`` is set, the target center Z slice is extracted
         after augmentations to save VRAM.
@@ -377,6 +385,8 @@ class HCSDataModule(LightningDataModule):
             return batch
         if self.trainer and self.trainer.training and self._gpu_augmentations is not None:
             batch = self._gpu_augmentations(batch)
+        elif self.trainer and self.trainer.validating and self._val_gpu_augmentations is not None:
+            batch = self._val_gpu_augmentations(batch)
         # target_2d Z slicing
         if self.target_2d and "target" in batch:
             z_index = self.z_window_size // 2

@@ -22,6 +22,7 @@ from viscy_transforms._affine import BatchedRandAffined
 from viscy_transforms._crop import (
     BatchedCenterSpatialCrop,
     BatchedCenterSpatialCropd,
+    BatchedDivisibleCropd,
     BatchedRandSpatialCrop,
     BatchedRandSpatialCropd,
     BatchedRandWeightedCropd,
@@ -77,6 +78,7 @@ __version__ = version("viscy-transforms")
 __all__ = [
     "BatchedCenterSpatialCrop",
     "BatchedCenterSpatialCropd",
+    "BatchedDivisibleCropd",
     "BatchedRandAdjustContrast",
     "BatchedRandAdjustContrastd",
     "BatchedRandAffined",

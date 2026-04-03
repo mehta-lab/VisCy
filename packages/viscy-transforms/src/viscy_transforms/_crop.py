@@ -17,6 +17,7 @@ __all__ = [
     "BatchedRandWeightedCropd",
     "BatchedCenterSpatialCrop",
     "BatchedCenterSpatialCropd",
+    "BatchedDivisibleCropd",
 ]
 
 
@@ -210,6 +211,48 @@ class BatchedCenterSpatialCropd(Cropd):
     ) -> None:
         cropper = BatchedCenterSpatialCrop(roi_size)
         super().__init__(keys, cropper=cropper, allow_missing_keys=allow_missing_keys)
+
+
+class BatchedDivisibleCropd(MapTransform):
+    """Center-crop spatial dimensions to the nearest smaller multiple of ``k``.
+
+    Useful for validation where the FOV may not be divisible by the model's
+    downsampling factor. Computes the crop size from the input shape at call
+    time — no hardcoded spatial dimensions needed in the config.
+
+    Parameters
+    ----------
+    keys : Sequence[str]
+        Keys to pick data for transformation.
+    k : int or Sequence[int]
+        Divisibility factor per spatial dimension.
+        If int, same factor for all spatial dims.
+    allow_missing_keys : bool, optional
+        Don't raise exception if key is missing. Default is False.
+    """
+
+    is_spatial = True
+
+    def __init__(
+        self,
+        keys: Sequence[str],
+        k: int | Sequence[int],
+        allow_missing_keys: bool = False,
+    ) -> None:
+        super().__init__(keys, allow_missing_keys=allow_missing_keys)
+        self.k = k if isinstance(k, Sequence) else (k,)
+
+    def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        first = data[self.first_key(data)]
+        spatial = first.shape[2:]  # (B, C, *spatial)
+        k = self.k if len(self.k) == len(spatial) else self.k * len(spatial)
+        roi = tuple(s // ki * ki for s, ki in zip(spatial, k))
+        if roi == tuple(spatial):
+            return data
+        cropper = BatchedCenterSpatialCrop(roi)
+        for key in self.key_iterator(data):
+            data[key] = cropper(data[key])
+        return data
 
 
 class BatchedRandWeightedCropd(MapTransform):
