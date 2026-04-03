@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from iohub.ngff import Position, open_ome_zarr
+from iohub.ngff import open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
@@ -196,7 +196,6 @@ class TestUnifiedTracksDataFrame:
             "y",
             "x",
             "z",
-            "position",
             "fov_name",
             "well_name",
             "experiment",
@@ -234,22 +233,6 @@ class TestUnifiedTracksDataFrame:
         # Removed 1 FOV from each experiment: 2 * (4 - 1) * 5 * 10 = 300
         assert len(index.tracks) == 300
 
-    def test_positions_stored(self, two_experiment_setup):
-        """Position objects are stored in self.positions."""
-        registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
-        # 2 experiments * 2 wells * 2 FOVs = 8 positions
-        assert len(index.positions) == 8
-
-    def test_position_column_is_position_object(self, two_experiment_setup):
-        """'position' column contains iohub Position objects."""
-        registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
-        from iohub.ngff import Position
-
-        sample_pos = index.tracks.iloc[0]["position"]
-        assert isinstance(sample_pos, Position)
-
     def test_parallel_load_matches_serial(self, two_experiment_setup):
         """Parallel loading (num_workers=2) produces same result as serial (num_workers=1)."""
         registry, _, _ = two_experiment_setup
@@ -261,10 +244,9 @@ class TestUnifiedTracksDataFrame:
         serial_tracks = index_serial.tracks.sort_values(sort_cols).reset_index(drop=True)
         parallel_tracks = index_parallel.tracks.sort_values(sort_cols).reset_index(drop=True)
 
-        # Drop position column (object identity differs across processes)
         pd.testing.assert_frame_equal(
-            serial_tracks.drop(columns=["position"]),
-            parallel_tracks.drop(columns=["position"]),
+            serial_tracks,
+            parallel_tracks,
             check_like=True,
         )
         assert len(index_serial.valid_anchors) == len(index_parallel.valid_anchors)
@@ -1013,8 +995,8 @@ class TestParquetPath:
         n_channels = 2  # _CHANNEL_NAMES_A / _CHANNEL_NAMES_B each have 2 channels
         assert len(parquet_index.valid_anchors) == len(legacy_index.valid_anchors) * n_channels
 
-    def test_parquet_positions_resolved(self, two_experiment_setup, tmp_path):
-        """position column contains iohub Position objects."""
+    def test_parquet_dims_from_columns(self, two_experiment_setup, tmp_path):
+        """Parquet path reads Y_shape/X_shape from parquet columns (no zarr opens)."""
         registry, _, _ = two_experiment_setup
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
@@ -1023,8 +1005,9 @@ class TestParquetPath:
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
-        sample_pos = index.tracks.iloc[0]["position"]
-        assert isinstance(sample_pos, Position)
+        assert "Y_shape" in index.tracks.columns
+        assert "X_shape" in index.tracks.columns
+        assert "position" not in index.tracks.columns  # no longer stored
 
     def test_parquet_border_clamping(self, tmp_path, _create_experiment):
         """y_clamp, x_clamp are computed correctly from parquet path."""

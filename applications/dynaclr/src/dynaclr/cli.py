@@ -135,6 +135,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="preprocess-cell-index",
+        import_path="dynaclr.data.preprocess_cell_index.main",
+        short_help="Remove empty-frame rows from a cell index parquet",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="convert-ops-parquet",
         import_path="dynaclr.data.convert_ops.main",
         short_help="Convert OPS merged parquet to canonical cell index format",

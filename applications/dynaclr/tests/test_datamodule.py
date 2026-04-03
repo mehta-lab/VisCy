@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 import torch
 
+from viscy_data.cell_index import build_timelapse_cell_index
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -23,7 +25,7 @@ _FINAL_YX_PATCH = (24, 24)
 
 @pytest.fixture()
 def four_experiments(tmp_path, _create_experiment, _write_collection_yaml):
-    """Four synthetic experiments with collection YAML."""
+    """Four synthetic experiments with collection YAML and cell index parquet."""
     entries = []
     for i, name in enumerate(["exp_a", "exp_b", "exp_c", "exp_d"]):
         row_letter = chr(ord("A") + i)
@@ -37,12 +39,14 @@ def four_experiments(tmp_path, _create_experiment, _write_collection_yaml):
             )
         )
     collection_path = _write_collection_yaml(tmp_path, entries)
-    return collection_path, entries
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(collection_path, parquet_path)
+    return parquet_path, entries
 
 
 @pytest.fixture()
 def two_experiments(tmp_path, _create_experiment, _write_collection_yaml):
-    """Two synthetic experiments for simpler tests."""
+    """Two synthetic experiments with cell index parquet."""
     entries = [
         _create_experiment(
             tmp_path,
@@ -60,7 +64,9 @@ def two_experiments(tmp_path, _create_experiment, _write_collection_yaml):
         ),
     ]
     collection_path = _write_collection_yaml(tmp_path, entries)
-    return collection_path, entries
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(collection_path, parquet_path)
+    return parquet_path, entries
 
 
 @pytest.fixture()
@@ -85,7 +91,9 @@ def multi_fov_experiments(tmp_path, _create_experiment, _write_collection_yaml):
         ),
     ]
     collection_path = _write_collection_yaml(tmp_path, entries)
-    return collection_path, entries
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(collection_path, parquet_path)
+    return parquet_path, entries
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +108,9 @@ class TestInitExposesAllHyperparameters:
         """Instantiate with all hyperparameters explicitly set and verify storage."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -148,9 +156,9 @@ class TestTrainValSplitByExperiment:
         """With 4 experiments and val_experiments=[exp_c, exp_d], verify correct split."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = four_experiments
+        parquet_path, _ = four_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -183,9 +191,9 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         """train_dataloader() returns a ThreadDataLoader with FlexibleBatchSampler."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -222,9 +230,9 @@ class TestValDataloaderNoBatchSampler:
         """val_dataloader uses simple sequential loading."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -250,9 +258,9 @@ class TestOnAfterBatchTransferAppliesTransforms:
         """Create a mock batch and verify on_after_batch_transfer processes it."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -297,9 +305,9 @@ class TestChannelDropoutIntegration:
         """With p=1.0 on channel 1, training zeros ch1; eval preserves it."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -346,9 +354,9 @@ class TestFovLevelSplit:
         """With split_ratio=0.6, FOVs are split within each experiment with no overlap."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = multi_fov_experiments
+        parquet_path, _ = multi_fov_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -381,9 +389,9 @@ class TestFovLevelSplit:
         """With split_ratio=1.0, all FOVs go to train and val_dataset is None."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = multi_fov_experiments
+        parquet_path, _ = multi_fov_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -401,9 +409,9 @@ class TestFovLevelSplit:
         """Default val_experiments=[] triggers FOV split."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = multi_fov_experiments
+        parquet_path, _ = multi_fov_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -428,9 +436,9 @@ class TestNewPositiveParams:
         """positive_cell_source='self' is stored and passed to datasets."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -447,9 +455,9 @@ class TestNewPositiveParams:
         """positive_match_columns is stored on datamodule."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -464,9 +472,9 @@ class TestNewPositiveParams:
         """positive_channel_source='any' is stored on datamodule and dataset."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -483,9 +491,9 @@ class TestNewPositiveParams:
         """With positive_cell_source='self', all tracks become valid anchors."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        collection_path, _ = two_experiments
+        parquet_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            collection_path=str(collection_path),
+            cell_index_path=str(parquet_path),
             z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
@@ -495,6 +503,6 @@ class TestNewPositiveParams:
             positive_cell_source="self",
         )
         dm.setup("fit")
-        n_tracks = len(dm.train_dataset.index.tracks)
+        n_unique_cells = dm.train_dataset.index.tracks["cell_id"].nunique()
         n_anchors = len(dm.train_dataset.index.valid_anchors)
-        assert n_anchors == n_tracks
+        assert n_anchors == n_unique_cells

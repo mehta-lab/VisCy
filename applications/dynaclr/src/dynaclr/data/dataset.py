@@ -32,6 +32,8 @@ try:
 except ImportError:
     ts = None
 
+from iohub.ngff import open_ome_zarr
+
 from dynaclr.data.index import MultiExperimentIndex
 from dynaclr.data.tau_sampling import sample_tau
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta, SampleMeta
@@ -42,11 +44,14 @@ _META_COLUMNS = [
     "perturbation",
     "microscope",
     "fov_name",
+    "store_path",
     "global_track_id",
     "t",
     "hours_post_perturbation",
     "lineage_id",
     "marker",
+    "y_clamp",
+    "x_clamp",
 ]
 
 _logger = logging.getLogger(__name__)
@@ -223,6 +228,8 @@ class MultiExperimentTripletDataset(Dataset):
             }
         )
         self._tensorstores: dict[str, ts.TensorStore] = {}
+        self._store_cache: dict[str, object] = {}  # store_path -> Plate
+        self._position_cache: dict[str, object] = {}  # fov_name -> Position
         self._norm_meta_cache: dict[str, NormMeta | None] = {}
 
     def _build_match_lookup(self) -> None:
@@ -516,13 +523,34 @@ class MultiExperimentTripletDataset(Dataset):
     # Patch extraction (tensorstore I/O)
     # ------------------------------------------------------------------
 
-    def _get_tensorstore(self, position, fov_name: str) -> "ts.TensorStore":
+    def _get_position(self, store_path: str, fov_name: str):
+        """Get or create a cached Position object for the given FOV.
+
+        Parameters
+        ----------
+        store_path : str
+            Path to the OME-Zarr plate store.
+        fov_name : str
+            FOV name (e.g. ``"A/1/0"``).
+
+        Returns
+        -------
+        iohub.ngff.Position
+        """
+        if fov_name not in self._position_cache:
+            if store_path not in self._store_cache:
+                self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
+            plate = self._store_cache[store_path]
+            self._position_cache[fov_name] = plate[fov_name]
+        return self._position_cache[fov_name]
+
+    def _get_tensorstore(self, store_path: str, fov_name: str) -> "ts.TensorStore":
         """Get or create a cached tensorstore object for the given FOV.
 
         Parameters
         ----------
-        position : iohub.ngff.Position
-            Position object from the OME-Zarr store.
+        store_path : str
+            Path to the OME-Zarr plate store.
         fov_name : str
             FOV name used as cache key.
 
@@ -531,11 +559,78 @@ class MultiExperimentTripletDataset(Dataset):
         ts.TensorStore
         """
         if fov_name not in self._tensorstores:
+            position = self._get_position(store_path, fov_name)
             self._tensorstores[fov_name] = position["0"].tensorstore(
                 context=self._ts_context,
                 recheck_cached_data="open",
             )
         return self._tensorstores[fov_name]
+
+    def _build_norm_meta(
+        self,
+        track_row: pd.Series,
+        forced_channel_names: list[str] | None,
+    ) -> NormMeta | None:
+        """Build per-sample normalization metadata from parquet columns.
+
+        When the parquet has ``norm_mean`` / ``norm_std`` columns (written by
+        ``preprocess-cell-index``), reads stats directly from the row — no
+        zarr zattrs access needed. Falls back to zarr zattrs for old parquets.
+
+        Parameters
+        ----------
+        track_row : pd.Series
+            A single row from ``tracks`` or ``valid_anchors``.
+        forced_channel_names : list[str] or None
+            Zarr channel names being read for this sample.
+
+        Returns
+        -------
+        NormMeta or None
+        """
+        # Parquet path: norm columns present
+        if "norm_mean" in track_row.index and pd.notna(track_row.get("norm_mean")):
+            tp_stats = {
+                "mean": torch.tensor(track_row["norm_mean"], dtype=torch.float32),
+                "std": torch.tensor(track_row["norm_std"], dtype=torch.float32),
+                "median": torch.tensor(track_row["norm_median"], dtype=torch.float32),
+                "iqr": torch.tensor(track_row["norm_iqr"], dtype=torch.float32),
+            }
+            if self._channel_mode == "from_index":
+                return {"channel_0": {"timepoint_statistics": tp_stats}}
+            else:
+                ch_name = track_row.get("channel_name", "channel_0")
+                return {ch_name: {"timepoint_statistics": tp_stats}}
+
+        # Fallback: read from zarr zattrs (old parquets without norm columns)
+        store_path = track_row["store_path"]
+        fov_name = track_row["fov_name"]
+        t = track_row["t"]
+        cache_key = (store_path, fov_name)
+        if cache_key not in self._norm_meta_cache:
+            position = self._get_position(store_path, fov_name)
+            self._norm_meta_cache[cache_key] = _read_norm_meta(position)
+        cached = self._norm_meta_cache[cache_key]
+        if cached is None:
+            return None
+        raw_norm_meta = {}
+        for ch, ch_meta in cached.items():
+            resolved = {}
+            for level, level_stats in ch_meta.items():
+                if level == "timepoint_statistics" and isinstance(level_stats, dict):
+                    resolved[level] = level_stats.get(str(t))
+                else:
+                    resolved[level] = level_stats
+            raw_norm_meta[ch] = resolved
+        if forced_channel_names is not None and self._channel_mode == "from_index":
+            ch = forced_channel_names[0]
+            if ch in raw_norm_meta:
+                return {"channel_0": raw_norm_meta[ch]}
+            return None
+        if forced_channel_names is not None and self._channel_mode == "fixed":
+            raw_norm_meta = {name: raw_norm_meta[name] for name in forced_channel_names if name in raw_norm_meta}
+            return raw_norm_meta or None
+        return raw_norm_meta
 
     def _slice_patch(
         self, track_row: pd.Series, forced_channel_names: list[str] | None = None
@@ -566,11 +661,11 @@ class MultiExperimentTripletDataset(Dataset):
             scale factors ``(scale_z, scale_y, scale_x)``, and target size
             ``(z_window, patch_h, patch_w)``.
         """
-        position = track_row["position"]
+        store_path = track_row["store_path"]
         fov_name = track_row["fov_name"]
         exp_name = track_row["experiment"]
 
-        image = self._get_tensorstore(position, fov_name)
+        image = self._get_tensorstore(store_path, fov_name)
 
         t = track_row["t"]
         y_center = int(track_row["y_clamp"])
@@ -604,37 +699,8 @@ class MultiExperimentTripletDataset(Dataset):
             slice(x_center - x_half, x_center + x_half),
         ]
 
-        # Look up norm_meta by zarr channel name directly
-        # and pre-resolve timepoint_statistics for this sample's timepoint.
-        # Cache the tensor-converted norm_meta per FOV to avoid repeated
-        # zattrs reads. Build a shallow per-sample copy (dict structure only,
-        # tensors shared) since we only replace dict entries, not tensor values.
-        cache_key = (track_row["store_path"], fov_name)
-        if cache_key not in self._norm_meta_cache:
-            self._norm_meta_cache[cache_key] = _read_norm_meta(position)
-        cached = self._norm_meta_cache[cache_key]
-        if cached is not None:
-            raw_norm_meta = {ch: {level: stats for level, stats in ch_meta.items()} for ch, ch_meta in cached.items()}
-            # Pre-resolve timepoint_statistics for all channels
-            for ch_name, ch_meta in raw_norm_meta.items():
-                if "timepoint_statistics" in ch_meta:
-                    tp_stats = ch_meta["timepoint_statistics"].get(str(t))
-                    ch_meta["timepoint_statistics"] = tp_stats
-        else:
-            raw_norm_meta = None
-        if raw_norm_meta is not None:
-            # Filter to requested channels
-            if forced_channel_names is not None and self._channel_mode == "from_index":
-                ch = forced_channel_names[0]
-                if ch in raw_norm_meta:
-                    raw_norm_meta = {"channel_0": raw_norm_meta[ch]}
-                else:
-                    raw_norm_meta = None
-            elif forced_channel_names is not None and self._channel_mode == "fixed":
-                raw_norm_meta = {name: raw_norm_meta[name] for name in forced_channel_names if name in raw_norm_meta}
-                if not raw_norm_meta:
-                    raw_norm_meta = None
-            # else: "all" mode — keep full raw_norm_meta
+        # Build norm_meta from parquet columns (preferred) or zarr zattrs (fallback).
+        raw_norm_meta = self._build_norm_meta(track_row, forced_channel_names)
 
         # Use the configured extraction window as uniform target Z,
         # not the per-experiment capped range. This ensures all patches

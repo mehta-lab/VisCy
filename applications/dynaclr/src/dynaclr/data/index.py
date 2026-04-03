@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from iohub.ngff import Plate, Position, open_ome_zarr
+from iohub.ngff import Plate, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
 from viscy_data.cell_index import read_cell_index
@@ -219,19 +219,16 @@ class MultiExperimentIndex:
             if all_exclude_fovs is not None:
                 tracks = tracks[~tracks["fov_name"].isin(all_exclude_fovs)].copy()
             tracks = self._filter_to_registry_experiments(tracks)
-            positions, tracks = self._resolve_positions_and_dims(tracks)
-            self.positions = positions
+            tracks = self._resolve_dims(tracks)
             # lineage_id already present from build step — skip _reconstruct_lineage
-            tracks = self._filter_empty_frames(tracks)
+            # Empty frames already filtered at parquet build time — skip _filter_empty_frames
         else:
             all_tracks = self._load_all_experiments(
                 include_wells=include_wells, exclude_fovs=all_exclude_fovs, num_workers=num_workers
             )
             tracks = pd.concat(all_tracks, ignore_index=True) if all_tracks else pd.DataFrame()
             tracks = self._reconstruct_lineage(tracks)
-            positions, tracks = self._resolve_positions_and_dims(tracks)
-            self.positions = positions
-            tracks = self._filter_empty_frames(tracks)
+            tracks = self._resolve_dims(tracks)
 
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
@@ -344,80 +341,45 @@ class MultiExperimentIndex:
         registry_names = {exp.name for exp in self.registry.experiments}
         return tracks[tracks["experiment"].isin(registry_names)].copy()
 
-    def _resolve_positions_and_dims(self, tracks: pd.DataFrame) -> tuple[list[Position], pd.DataFrame]:
-        """Open zarr stores for unique (store_path, fov_name) pairs.
+    def _resolve_dims(self, tracks: pd.DataFrame) -> pd.DataFrame:
+        """Attach image dimensions to tracks for border clamping.
 
-        Attaches ``position``, ``_img_height``, ``_img_width`` columns to
-        *tracks* and returns the list of resolved Position objects.
+        When the parquet has ``Y_shape`` / ``X_shape`` columns (built with the
+        latest ``build_timelapse_cell_index``), reads dimensions directly — no
+        zarr opens needed.  Falls back to opening stores when the columns are
+        missing (old parquets).
         """
-        all_positions: list[Position] = []
-        pos_lookup: dict[tuple[str, str], Position] = {}
-        dim_lookup: dict[tuple[str, str], tuple[int, int]] = {}
-
         if tracks.empty:
-            tracks["position"] = pd.Series(dtype=object)
             tracks["_img_height"] = pd.Series(dtype=int)
             tracks["_img_width"] = pd.Series(dtype=int)
-            return all_positions, tracks
+            return tracks
 
+        if "Y_shape" in tracks.columns and "X_shape" in tracks.columns:
+            tracks["_img_height"] = tracks["Y_shape"]
+            tracks["_img_width"] = tracks["X_shape"]
+            return tracks
+
+        _logger.warning(
+            "Parquet missing Y_shape/X_shape columns. Falling back to opening "
+            "zarr stores for image dimensions. Rebuild the parquet with "
+            "`build-cell-index` for faster startup."
+        )
+        dim_lookup: dict[tuple[str, str], tuple[int, int]] = {}
         for (store_path, well_name, fov_name), _group in tracks.groupby(["store_path", "well_name", "fov_name"]):
             if store_path not in self._store_cache:
                 self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
             plate = self._store_cache[store_path]
-            # fov_name may be just the FOV id (e.g. "000000") or the full
-            # position path (e.g. "C/1/000000"). Prepend well_name when needed.
             if "/" in fov_name:
                 position_path = fov_name
             else:
                 position_path = f"{well_name}/{fov_name}"
             position = plate[position_path]
-            pos_lookup[(store_path, fov_name)] = position
             image = position["0"]
             dim_lookup[(store_path, fov_name)] = (image.height, image.width)
-            all_positions.append(position)
 
-        tracks["position"] = [pos_lookup[(sp, fn)] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
         tracks["_img_height"] = [dim_lookup[(sp, fn)][0] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
         tracks["_img_width"] = [dim_lookup[(sp, fn)][1] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
-
-        return all_positions, tracks
-
-    @staticmethod
-    def _filter_empty_frames(tracks: pd.DataFrame) -> pd.DataFrame:
-        """Remove rows whose image frame is all zeros (missing acquisition).
-
-        For each unique (store_path, fov_name, t) combination, reads a small
-        center crop of channel 0 to detect empty frames. Rows with an all-zero
-        frame are dropped.
-        """
-        if tracks.empty or "t" not in tracks.columns:
-            return tracks
-
-        valid_mask = pd.Series(True, index=tracks.index)
-
-        for (store_path, fov_name), group in tracks.groupby(["store_path", "fov_name"]):
-            pos = group["position"].iloc[0]
-            image = pos["0"]
-            h, w = image.shape[-2], image.shape[-1]
-            cy, cx = h // 2, w // 2
-            crop = 16  # 32x32 center crop is enough to detect empty frames
-
-            for t in group["t"].unique():
-                try:
-                    patch = np.asarray(image[int(t), 0, :, cy - crop : cy + crop, cx - crop : cx + crop])
-                    if patch.max() == 0:
-                        row_mask = (
-                            (tracks["store_path"] == store_path) & (tracks["fov_name"] == fov_name) & (tracks["t"] == t)
-                        )
-                        valid_mask[row_mask] = False
-                except Exception:
-                    pass  # if we can't read, keep the row
-
-        n_dropped = (~valid_mask).sum()
-        if n_dropped > 0:
-            _logger.info("Excluded %d observations from empty frames", n_dropped)
-
-        return tracks[valid_mask].copy()
+        return tracks
 
     @staticmethod
     def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
@@ -661,7 +623,6 @@ class MultiExperimentIndex:
         clone.yx_patch_size = self.yx_patch_size
         clone.tau_range_hours = self.tau_range_hours
         clone._store_cache = self._store_cache
-        clone.positions = self.positions
         clone.max_border_shift = self.max_border_shift if max_border_shift < 0 else max_border_shift
         clone.tracks = tracks_subset.reset_index(drop=True)
         clone.valid_anchors = clone._compute_valid_anchors(

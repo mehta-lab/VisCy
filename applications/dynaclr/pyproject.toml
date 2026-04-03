@@ -44,6 +44,7 @@ dependencies = [
 
 optional-dependencies.eval = [
   "anndata",
+  "dtaidistance",
   "natsort",
   "phate",
   "scikit-learn",

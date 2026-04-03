@@ -28,7 +28,6 @@ from viscy_data._utils import BatchedCenterSpatialCropd, _transform_channel_wise
 from viscy_data.channel_dropout import ChannelDropout
 from viscy_data.channel_utils import parse_channel_name
 from viscy_data.sampler import FlexibleBatchSampler
-from viscy_transforms import BatchedRandSpatialCropd
 
 _logger = logging.getLogger(__name__)
 
@@ -51,11 +50,10 @@ class MultiExperimentDataModule(LightningDataModule):
 
     Parameters
     ----------
-    collection_path : str or None
-        Path to collection YAML for ExperimentRegistry.from_collection().
-        Optional when ``cell_index_path`` is provided — the registry is
-        built directly from parquet + zarr metadata via
-        ExperimentRegistry.from_cell_index().
+    cell_index_path : str
+        Path to preprocessed cell index parquet (from ``build-cell-index``
+        + ``preprocess-cell-index``). Contains all metadata needed for
+        training: TCZYX shape, normalization stats, focus slice.
     z_window : int
         Number of Z slices the model consumes (final crop size).
     z_extraction_window : int or None
@@ -122,17 +120,9 @@ class MultiExperimentDataModule(LightningDataModule):
         Only include these wells. Default: None.
     exclude_fovs : list[str] | None
         Exclude these FOVs. Default: None.
-    cell_index_path : str | None
-        Optional path to a pre-built cell index parquet for faster startup.
-        When provided, both train and val indices load from this parquet
-        (filtered by their respective registries). Default: None.
     focus_channel : str | None
         Channel name for ``focus_slice`` lookup when auto-resolving z_range.
         Default: None (uses first source_channel).
-    num_workers_index : int
-        Number of parallel processes for building the cell index. Default: 1
-        (sequential). When > 1, one process is spawned per experiment.
-        Ignored when ``cell_index_path`` is provided.
     reference_pixel_size_xy_um : float or None
         Reference pixel size in XY (micrometers) for physical-scale normalization.
         None = no rescaling. Default: None.
@@ -157,7 +147,7 @@ class MultiExperimentDataModule(LightningDataModule):
 
     def __init__(
         self,
-        collection_path: str | None,
+        cell_index_path: str,
         z_window: int,
         z_extraction_window: int | None = None,
         z_focus_offset: float = 0.5,
@@ -189,9 +179,7 @@ class MultiExperimentDataModule(LightningDataModule):
         seed: int = 0,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
-        cell_index_path: str | None = None,
         focus_channel: str | None = None,
-        num_workers_index: int = 1,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
         positive_cell_source: str = "lookup",
@@ -204,7 +192,7 @@ class MultiExperimentDataModule(LightningDataModule):
         super().__init__()
 
         # Core parameters
-        self.collection_path = collection_path
+        self.cell_index_path = cell_index_path
         self.z_window = z_window
         self.z_extraction_window = z_extraction_window
         self.z_focus_offset = z_focus_offset
@@ -243,9 +231,7 @@ class MultiExperimentDataModule(LightningDataModule):
         self.seed = seed
         self.include_wells = include_wells
         self.exclude_fovs = exclude_fovs
-        self.cell_index_path = cell_index_path
         self.focus_channel = focus_channel
-        self.num_workers_index = num_workers_index
         self.reference_pixel_size_xy_um = reference_pixel_size_xy_um
         self.reference_pixel_size_z_um = reference_pixel_size_z_um
         self.positive_cell_source = positive_cell_source
@@ -286,28 +272,15 @@ class MultiExperimentDataModule(LightningDataModule):
             Lightning stage: ``"fit"``, ``"predict"``, etc.
         """
         if stage == "fit" or stage is None:
-            if self.collection_path is not None:
-                registry = ExperimentRegistry.from_collection(
-                    self.collection_path,
-                    z_window=self.z_window,
-                    z_extraction_window=self.z_extraction_window,
-                    z_focus_offset=self.z_focus_offset,
-                    focus_channel=getattr(self, "focus_channel", None),
-                    reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
-                    reference_pixel_size_z_um=self.reference_pixel_size_z_um,
-                )
-            elif self.cell_index_path is not None:
-                registry = ExperimentRegistry.from_cell_index(
-                    self.cell_index_path,
-                    z_window=self.z_window,
-                    z_extraction_window=self.z_extraction_window,
-                    z_focus_offset=self.z_focus_offset,
-                    focus_channel=getattr(self, "focus_channel", None),
-                    reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
-                    reference_pixel_size_z_um=self.reference_pixel_size_z_um,
-                )
-            else:
-                raise ValueError("Either collection_path or cell_index_path must be provided.")
+            registry = ExperimentRegistry.from_cell_index(
+                self.cell_index_path,
+                z_window=self.z_window,
+                z_extraction_window=self.z_extraction_window,
+                z_focus_offset=self.z_focus_offset,
+                focus_channel=self.focus_channel,
+                reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+                reference_pixel_size_z_um=self.reference_pixel_size_z_um,
+            )
 
             if self.val_experiments:
                 self._setup_experiment_split(registry)
@@ -359,7 +332,6 @@ class MultiExperimentDataModule(LightningDataModule):
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
             cell_index_path=self.cell_index_path,
-            num_workers=self.num_workers_index,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
@@ -386,7 +358,6 @@ class MultiExperimentDataModule(LightningDataModule):
                 include_wells=self.include_wells,
                 exclude_fovs=self.exclude_fovs,
                 cell_index_path=self.cell_index_path,
-                num_workers=self.num_workers_index,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
                 max_border_shift=self.max_border_shift,
@@ -418,7 +389,6 @@ class MultiExperimentDataModule(LightningDataModule):
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
             cell_index_path=self.cell_index_path,
-            num_workers=self.num_workers_index,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
         )
@@ -531,9 +501,9 @@ class MultiExperimentDataModule(LightningDataModule):
     # Transforms
     # ------------------------------------------------------------------
 
-    def _train_final_crop(self) -> BatchedRandSpatialCropd:
-        """Random crop from extraction size to model input size (training)."""
-        return BatchedRandSpatialCropd(
+    def _train_final_crop(self) -> BatchedCenterSpatialCropd:
+        """Center crop from extraction size to model input size (training)."""
+        return BatchedCenterSpatialCropd(
             keys=self._channel_names,
             roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),
         )
