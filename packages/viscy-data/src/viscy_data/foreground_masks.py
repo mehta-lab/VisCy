@@ -115,6 +115,7 @@ class ForegroundMaskSupport:
         arr_idx: int,
         tz: int,
         read_fn: Callable[..., tuple[list[Tensor], object]],
+        yx_slice: tuple[slice, slice] | None = None,
     ) -> list[Tensor]:
         """Read a mask window using the dataset's image reader.
 
@@ -126,13 +127,21 @@ class ForegroundMaskSupport:
             Window index within the FOV (counted Z-first).
         read_fn : Callable
             The dataset's ``_read_img_window`` method.
+        yx_slice : tuple[slice, slice] | None
+            Optional (y_slice, x_slice) for partial spatial reads.
+            When set, only the specified YX region is read from zarr.
 
         Returns
         -------
         list[Tensor]
             Per-channel mask tensors with shape ``(1, Z, Y, X)``.
         """
-        mask_images, _ = read_fn(self._mask_arrays[arr_idx], self._mask_ch_indices[arr_idx], tz)
+        mask_images, _ = read_fn(
+            self._mask_arrays[arr_idx],
+            self._mask_ch_indices[arr_idx],
+            tz,
+            yx_slice=yx_slice,
+        )
         return mask_images
 
     def inject_into_sample(

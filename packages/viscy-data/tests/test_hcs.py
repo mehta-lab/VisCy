@@ -11,7 +11,7 @@ from pytest import TempPathFactory, fixture, mark, raises
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_transforms import BatchedRandFlipd
+from viscy_transforms import BatchedRandFlipd, RandSpatialCropd
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
@@ -413,3 +413,109 @@ def test_fg_mask_aligned_after_gpu_spatial_augmentation():
     assert torch.equal((result["target"] > 0).float(), result["fg_mask"]), (
         "fg_mask is not spatially aligned with target after GPU augmentation"
     )
+
+
+# ---------------------------------------------------------------------------
+# CPU-side RandSpatialCropd co-alignment test
+# ---------------------------------------------------------------------------
+
+
+def test_fg_mask_aligned_after_cpu_rand_spatial_crop():
+    """fg_mask stays pixel-aligned with target after RandSpatialCropd."""
+    H, W = 32, 32
+    target = torch.zeros(1, 1, H, W)
+    target[:, :, : H // 2, :] = 1.0
+    mask = (target > 0).float()
+
+    crop = RandSpatialCropd(keys=["target"], roi_size=[1, 16, 16])
+    HCSDataModule._inject_mask_keys([crop], ("target",), ("__fg_mask",))
+    result = Compose([crop])({"target": target, "__fg_mask": mask})
+
+    assert torch.equal((result["target"] > 0).float(), result["__fg_mask"]), (
+        "fg_mask is not spatially aligned with target after RandSpatialCropd"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Partial zarr read (crop_at_read) tests
+# ---------------------------------------------------------------------------
+
+
+def test_partial_zarr_read(hcs_with_fg_mask):
+    """yx_read_size on SlidingWindowDataset produces correct output shapes."""
+    yx_read_size = (16, 16)
+    z_window_size = 4
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        dataset = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluorescence"]},
+            z_window_size=z_window_size,
+            yx_read_size=yx_read_size,
+        )
+        sample = dataset[0]
+    assert sample["source"].shape == (1, z_window_size, *yx_read_size)
+    assert sample["target"].shape == (1, z_window_size, *yx_read_size)
+
+
+def test_partial_zarr_read_with_fg_mask(hcs_with_fg_mask):
+    """yx_read_size reads fg_mask from the same spatial region."""
+    yx_read_size = (16, 16)
+    z_window_size = 4
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        dataset = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluorescence"]},
+            z_window_size=z_window_size,
+            fg_mask_key="fg_mask",
+            yx_read_size=yx_read_size,
+        )
+        sample = dataset[0]
+    assert "fg_mask" in sample
+    assert sample["fg_mask"].shape == (1, z_window_size, *yx_read_size)
+    assert set(sample["fg_mask"].unique().tolist()).issubset({0.0, 1.0})
+    # Verify spatial co-alignment: mask was built as (target > 0.5)
+    assert torch.equal((sample["target"] > 0.5).float(), sample["fg_mask"]), (
+        "fg_mask is not spatially aligned with target after partial zarr read"
+    )
+
+
+def test_yx_read_size_too_large_errors(hcs_with_fg_mask):
+    """IndexError when yx_read_size exceeds FOV spatial dimensions."""
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        with raises(IndexError, match="yx_read_size"):
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                yx_read_size=(64, 64),  # FOV is 32x32
+            )
+
+
+def test_crop_at_read_datamodule(hcs_with_fg_mask):
+    """HCSDataModule with crop_at_read=True produces correct batch shapes."""
+    yx_patch_size = [16, 16]
+    z_window_size = 4
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=yx_patch_size,
+        split_ratio=0.5,
+        crop_at_read=True,
+        fg_mask_key="fg_mask",
+    )
+    dm.setup(stage="fit")
+    dm.trainer = MagicMock(training=True, validating=False)
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape == (2, 1, z_window_size, *yx_patch_size)
+        assert batch["target"].shape == (2, 1, z_window_size, *yx_patch_size)
+        assert batch["fg_mask"].shape == (2, 1, z_window_size, *yx_patch_size)
+        result = dm.on_after_batch_transfer(batch, 0)
+        assert result["source"].shape == batch["source"].shape
+        break

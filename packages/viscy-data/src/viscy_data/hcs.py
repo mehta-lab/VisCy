@@ -83,6 +83,14 @@ class HCSDataModule(LightningDataModule):
         Maximum retries when a patch fails the nonzero check, by default 100.
     fg_mask_key : str or None, optional
         Zarr array key for precomputed foreground masks, by default None.
+    crop_at_read : bool | tuple[int, int], optional
+        Controls partial zarr reads during training. When a 2-tuple
+        ``(Y, X)``, reads only that spatial region from zarr per
+        sample. When ``True``, uses ``yx_patch_size`` as the read
+        size (appropriate when no augmentation margin is needed).
+        When ``False`` (default), reads full FOVs.
+        Only affects the training dataset. Disables the FOV cache
+        (sets ``fov_cache_maxsize=0``) since partial reads bypass it.
     """
 
     def __init__(
@@ -111,6 +119,7 @@ class HCSDataModule(LightningDataModule):
         fg_mask_key: str | None = None,
         gpu_augmentations: list[MapTransform] | None = None,
         fov_cache_maxsize: int = 5,
+        crop_at_read: bool | tuple[int, int] = False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -137,6 +146,7 @@ class HCSDataModule(LightningDataModule):
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
         self.fov_cache_maxsize = fov_cache_maxsize
+        self.crop_at_read = crop_at_read
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
@@ -273,6 +283,13 @@ class HCSDataModule(LightningDataModule):
             expanded_z -= expanded_z % 2
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
+        if self.crop_at_read:
+            if isinstance(self.crop_at_read, tuple):
+                read_size = self.crop_at_read
+            else:
+                read_size = tuple(self.yx_patch_size)
+            train_dataset_settings["yx_read_size"] = read_size
+            train_dataset_settings["fov_cache_maxsize"] = 0
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
@@ -375,8 +392,8 @@ class HCSDataModule(LightningDataModule):
                     f"Source spatial shape {actual} does not match expected "
                     f"{expected} (z_window_size={self.z_window_size}, "
                     f"yx_patch_size={list(self.yx_patch_size)}). "
-                    f"Configure gpu_augmentations with a spatial crop that "
-                    f"produces the expected output size."
+                    f"Either configure gpu_augmentations with a spatial crop "
+                    f"or enable crop_at_read to crop at zarr read time."
                 )
         return batch
 
@@ -428,7 +445,8 @@ class HCSDataModule(LightningDataModule):
         """Build training and validation transforms.
 
         Apply normalization and augmentation on CPU.
-        Spatial cropping is deferred to ``on_after_batch_transfer`` on GPU.
+        Spatial cropping is handled by ``on_after_batch_transfer`` on GPU,
+        or at zarr read time when ``crop_at_read`` is enabled.
         When ``fg_mask_key`` is set, spatial augmentations are patched to
         also transform the mask keys so they stay pixel-aligned with the target.
         """
