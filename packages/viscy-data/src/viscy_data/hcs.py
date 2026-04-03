@@ -164,6 +164,8 @@ class HCSDataModule(LightningDataModule):
         self.val_augmentations = val_augmentations or []
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
+        if val_gpu_augmentations and self.fg_mask_key is not None:
+            ForegroundMaskSupport.patch_spatial_transforms(val_gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
         self._val_gpu_augmentations = Compose(val_gpu_augmentations) if val_gpu_augmentations else None
 
@@ -478,6 +480,10 @@ class HCSDataModule(LightningDataModule):
         if self.fg_mask_key is not None:
             mask_keys = ForegroundMaskSupport.mask_temp_keys(list(self.target_channel))
             ForegroundMaskSupport.patch_spatial_transforms(augmentations, tuple(self.target_channel), mask_keys)
+            if self.val_augmentations:
+                ForegroundMaskSupport.patch_spatial_transforms(
+                    list(self.val_augmentations), tuple(self.target_channel), mask_keys
+                )
         train_transform = Compose(self.normalizations + augmentations)
         val_transform = Compose(self.normalizations + list(self.val_augmentations))
         return train_transform, val_transform
