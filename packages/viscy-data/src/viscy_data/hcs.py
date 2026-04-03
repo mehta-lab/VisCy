@@ -393,7 +393,11 @@ class HCSDataModule(LightningDataModule):
             return batch
         if self.trainer and self.trainer.training and self._gpu_augmentations is not None:
             batch = self._gpu_augmentations(batch)
-        elif self.trainer and self.trainer.validating and self._val_gpu_augmentations is not None:
+        elif (
+            self.trainer
+            and (self.trainer.validating or self.trainer.sanity_checking)
+            and self._val_gpu_augmentations is not None
+        ):
             batch = self._val_gpu_augmentations(batch)
         # target_2d Z slicing
         if self.target_2d and "target" in batch:
