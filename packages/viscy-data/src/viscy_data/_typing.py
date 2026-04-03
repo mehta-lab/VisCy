@@ -53,7 +53,12 @@ OneOrSeq = T | Sequence[T]
 
 
 class LevelNormStats(TypedDict, total=False):
-    """Per-level normalization statistics."""
+    """Per-level normalization statistics.
+
+    Not all fields are present for every level. The normalize transforms
+    access fields dynamically based on ``subtrahend`` and ``divisor``
+    config (e.g. ``mean``/``std`` or ``median``/``iqr``).
+    """
 
     mean: Tensor
     std: Tensor
