@@ -2,6 +2,7 @@
 
 import bisect
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
@@ -174,11 +175,19 @@ class SlidingWindowDataset(Dataset):
                 self.fg_mask_support.validate_and_store(fov, img_arr, self.target_ch_idx)
         self._max_window = w
         # Preload all FOVs into RAM (before DataLoader fork → shared via COW).
+        # Uses threads because blosc/zstd decompression releases the GIL.
         if self.in_memory:
             ch_idx = [int(i) for i in self._all_ch_idx]
-            self._fov_data = [arr.oindex[:, ch_idx, :].astype(np.float32) for arr in self.window_arrays]
+
+            def _load_fov(arr):
+                return arr.oindex[:, ch_idx, :].astype(np.float32)
+
+            n_threads = min(len(self.window_arrays), 16)
+            _logger.info(f"Loading {len(self.window_arrays)} FOVs into RAM ({n_threads} threads)...")
+            with ThreadPoolExecutor(max_workers=n_threads) as pool:
+                self._fov_data = list(pool.map(_load_fov, self.window_arrays))
             total_gb = sum(a.nbytes for a in self._fov_data) / 1e9
-            _logger.info(f"Loaded {len(self._fov_data)} FOVs into RAM ({total_gb:.1f} GB).")
+            _logger.info(f"Loaded {len(self._fov_data)} FOVs ({total_gb:.1f} GB).")
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, int]:
         """Look up window given index."""
