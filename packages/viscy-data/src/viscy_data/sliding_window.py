@@ -252,7 +252,7 @@ class SlidingWindowDataset(Dataset):
         t = (tz + zs) // zs - 1
         z = tz - t * zs
         if self.in_memory and arr_idx >= 0:
-            data = self._fov_data[arr_idx][t : t + 1, :, z : z + self.z_window_size]
+            data = self._fov_data[arr_idx][t : t + 1, :, z : z + self.z_window_size].copy()
             if yx_slice is not None:
                 y_sl, x_sl = yx_slice
                 data = data[:, :, :, y_sl, x_sl]
