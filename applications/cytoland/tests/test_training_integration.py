@@ -23,7 +23,7 @@ from cytoland.engine import FcmaeUNet, MaskedMSELoss, VSUNet
 from viscy_data.combined import CombinedDataModule
 from viscy_data.gpu_aug import CachedOmeZarrDataModule
 from viscy_data.hcs import HCSDataModule
-from viscy_transforms import BatchedStackChannelsd
+from viscy_transforms import BatchedStackChannelsd, RandSpatialCropd
 from viscy_utils.cli import _maybe_compose_config
 from viscy_utils.compose import load_composed_config
 from viscy_utils.losses import MixedLoss, SpotlightLoss
@@ -134,6 +134,9 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
         yx_patch_size=(32, 32),
         fg_mask_key="fg_mask",
         split_ratio=0.5,
+        augmentations=[
+            RandSpatialCropd(keys=["Phase3D", "Fluorescence"], roi_size=[4, 32, 32]),
+        ],
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -320,6 +323,12 @@ def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims
         batch_size=2,
         num_workers=0,
         yx_patch_size=(synth_dims["h"], synth_dims["w"]),
+        augmentations=[
+            RandSpatialCropd(
+                keys=["Phase3D", "Fluorescence"],
+                roi_size=[synth_dims["d"], synth_dims["h"], synth_dims["w"]],
+            ),
+        ],
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -356,6 +365,9 @@ def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
         batch_size=2,
         num_workers=0,
         yx_patch_size=(32, 32),
+        augmentations=[
+            RandSpatialCropd(keys=["Phase3D", "Fluorescence"], roi_size=[4, 32, 32]),
+        ],
     )
     trainer = Trainer(
         fast_dev_run=True,
