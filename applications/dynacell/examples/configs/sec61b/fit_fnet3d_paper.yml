@@ -44,9 +44,10 @@ data:
     target_channel: Structure
     split_ratio: 0.8
     z_window_size: 32
-    batch_size: 24
+    batch_size: 48
     num_workers: 8
     yx_patch_size: [64, 64]
+    fov_cache_maxsize: 0
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
@@ -60,14 +61,15 @@ data:
           level: fov_statistics
           subtrahend: mean
           divisor: std
-    augmentations: []
-    gpu_augmentations:
-      - class_path: viscy_transforms.BatchedRandSpatialCropd
+    augmentations:
+      # CPU: 8 random patches per FOV (amortizes zarr decompression).
+      # batch_size=24 → DataLoader loads 3 FOVs, each yields 8 patches = 24 effective.
+      - class_path: monai.transforms.RandSpatialCropSamplesd
         init_args:
-          keys: [source, target]
+          keys: [Phase3D, Structure]
           roi_size: [32, 64, 64]
-          random_center: true
-          random_size: false
+          num_samples: 8
+    gpu_augmentations:
       - class_path: viscy_transforms.BatchedRandFlipd
         init_args:
           keys: [source, target]
@@ -78,4 +80,9 @@ data:
           keys: [source, target]
           spatial_axes: [2]
           prob: 0.5
+    val_gpu_augmentations:
+      - class_path: viscy_transforms.BatchedDivisibleCropd
+        init_args:
+          keys: [source, target]
+          k: 16
     caching: true
