@@ -24,6 +24,7 @@ __all__ = [
     "CELL_INDEX_CORE_COLUMNS",
     "CELL_INDEX_GROUPING_COLUMNS",
     "CELL_INDEX_IMAGING_COLUMNS",
+    "CELL_INDEX_NORMALIZATION_COLUMNS",
     "CELL_INDEX_OPS_COLUMNS",
     "CELL_INDEX_TIMELAPSE_COLUMNS",
     "CellIndex",
@@ -230,7 +231,25 @@ CELL_INDEX_TIMELAPSE_COLUMNS = [
 
 CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]
 
-CELL_INDEX_IMAGING_COLUMNS = ["pixel_size_xy_um", "pixel_size_z_um"]
+CELL_INDEX_IMAGING_COLUMNS = [
+    "pixel_size_xy_um",
+    "pixel_size_z_um",
+    "T_shape",
+    "C_shape",
+    "Z_shape",
+    "Y_shape",
+    "X_shape",
+    "z_focus_mean",
+]
+
+CELL_INDEX_NORMALIZATION_COLUMNS = [
+    "norm_mean",
+    "norm_std",
+    "norm_median",
+    "norm_iqr",
+    "norm_max",
+    "norm_min",
+]
 
 # Extracted from viscy/data/triplet.py for shared access
 ULTRACK_INDEX_COLUMNS = [

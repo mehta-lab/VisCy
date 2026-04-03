@@ -15,6 +15,7 @@ from viscy_data._typing import (
     CELL_INDEX_CORE_COLUMNS,
     CELL_INDEX_GROUPING_COLUMNS,
     CELL_INDEX_IMAGING_COLUMNS,
+    CELL_INDEX_NORMALIZATION_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
 )
@@ -130,6 +131,7 @@ class TestValidation:
             + CELL_INDEX_TIMELAPSE_COLUMNS
             + CELL_INDEX_OPS_COLUMNS
             + CELL_INDEX_IMAGING_COLUMNS
+            + CELL_INDEX_NORMALIZATION_COLUMNS
         ):
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
@@ -143,6 +145,7 @@ class TestValidation:
             + CELL_INDEX_TIMELAPSE_COLUMNS
             + CELL_INDEX_OPS_COLUMNS
             + CELL_INDEX_IMAGING_COLUMNS
+            + CELL_INDEX_NORMALIZATION_COLUMNS
         ):
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
@@ -246,7 +249,7 @@ class TestTimelapseBuilder:
         dataset = open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=["nuclei_labels"])
         pos = dataset.create_position("A", "1", "0")
         rng = np.random.default_rng(42)
-        pos.create_image("0", rng.random((2, 1, 1, 64, 64)).astype(np.float32))
+        pos.create_image("0", rng.random((4, 1, 1, 64, 64)).astype(np.float32))
 
         # Track 0 → root, Track 1 → child of 0, Track 2 → grandchild of 1
         tracks_df = pd.DataFrame(
@@ -336,19 +339,29 @@ class TestCrossParadigm:
     def test_timelapse_has_null_ops_columns(self):
         """15. Time-lapse parquet has OPS columns as null."""
         df = _make_timelapse_df()
-        for col in CELL_INDEX_OPS_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_IMAGING_COLUMNS:
+        for col in (
+            CELL_INDEX_OPS_COLUMNS
+            + CELL_INDEX_BIOLOGY_COLUMNS
+            + CELL_INDEX_IMAGING_COLUMNS
+            + CELL_INDEX_NORMALIZATION_COLUMNS
+        ):
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
-        ops_warnings = [w for w in warnings if any(c in w for c in CELL_INDEX_OPS_COLUMNS)]
+        ops_warnings = [w for w in warnings if any(f"'{c}'" in w for c in CELL_INDEX_OPS_COLUMNS)]
         assert len(ops_warnings) == len(CELL_INDEX_OPS_COLUMNS)
 
     def test_ops_has_null_timelapse_columns(self):
         """16. OPS parquet has time-lapse columns as null."""
         df = _make_ops_df()
-        for col in CELL_INDEX_TIMELAPSE_COLUMNS + CELL_INDEX_BIOLOGY_COLUMNS + CELL_INDEX_IMAGING_COLUMNS:
+        for col in (
+            CELL_INDEX_TIMELAPSE_COLUMNS
+            + CELL_INDEX_BIOLOGY_COLUMNS
+            + CELL_INDEX_IMAGING_COLUMNS
+            + CELL_INDEX_NORMALIZATION_COLUMNS
+        ):
             df[col] = None
         warnings = validate_cell_index(df, strict=True)
-        tl_warnings = [w for w in warnings if any(c in w for c in CELL_INDEX_TIMELAPSE_COLUMNS)]
+        tl_warnings = [w for w in warnings if any(f"'{c}'" in w for c in CELL_INDEX_TIMELAPSE_COLUMNS)]
         assert len(tl_warnings) == len(CELL_INDEX_TIMELAPSE_COLUMNS)
 
     def test_concat_schema_compatible(self, tmp_path):
