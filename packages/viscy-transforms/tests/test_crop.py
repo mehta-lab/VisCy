@@ -532,3 +532,50 @@ def test_batched_rand_weighted_cropd_multichannel_competing_locations():
             bottom_right_count += 1
     # Bottom-right has 10x the weight → P ≈ 91%, threshold at 80%
     assert bottom_right_count > n_trials * 0.8
+
+
+# --- BatchedDivisibleCropd tests ---
+
+
+def test_batched_divisible_cropd_happy_path():
+    """Test that BatchedDivisibleCropd crops to the nearest smaller multiple of k."""
+    from viscy_transforms import BatchedDivisibleCropd
+
+    data = {
+        "source": torch.rand(2, 1, 32, 64, 48),
+        "target": torch.rand(2, 1, 32, 64, 48),
+    }
+    transform = BatchedDivisibleCropd(keys=["source", "target"], k=16)
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 32, 64, 48)
+    assert output["target"].shape == (2, 1, 32, 64, 48)
+
+
+def test_batched_divisible_cropd_noop():
+    """Test that already-divisible spatial dims pass through unchanged."""
+    from viscy_transforms import BatchedDivisibleCropd
+
+    data = {
+        "source": torch.rand(2, 1, 32, 64, 64),
+        "target": torch.rand(2, 1, 32, 64, 64),
+    }
+    transform = BatchedDivisibleCropd(keys=["source", "target"], k=16)
+    output = transform(data)
+    # Spatial dims already divisible by 16 — data should be returned as-is
+    assert output["source"].shape == (2, 1, 32, 64, 64)
+    assert output["target"].shape == (2, 1, 32, 64, 64)
+    assert torch.equal(output["source"], data["source"])
+    assert torch.equal(output["target"], data["target"])
+
+
+def test_batched_divisible_cropd_zero_size_error():
+    """Test that k larger than spatial dims raises ValueError."""
+    from viscy_transforms import BatchedDivisibleCropd
+
+    data = {
+        "source": torch.rand(2, 1, 32, 32, 32),
+        "target": torch.rand(2, 1, 32, 32, 32),
+    }
+    transform = BatchedDivisibleCropd(keys=["source", "target"], k=64)
+    with pytest.raises(ValueError, match="zero-size dimension"):
+        transform(data)

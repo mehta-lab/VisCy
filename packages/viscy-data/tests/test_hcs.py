@@ -519,3 +519,120 @@ def test_crop_at_read_datamodule(hcs_with_fg_mask):
         result = dm.on_after_batch_transfer(batch, 0)
         assert result["source"].shape == batch["source"].shape
         break
+
+
+# ---------------------------------------------------------------------------
+# val_gpu_augmentations tests
+# ---------------------------------------------------------------------------
+
+
+def test_val_gpu_augmentations_applied_during_validation(preprocessed_hcs_dataset):
+    """val_gpu_augmentations crops validation batches via on_after_batch_transfer."""
+    from viscy_transforms import BatchedCenterSpatialCropd
+
+    data_path = preprocessed_hcs_dataset
+    z_window_size = 5
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    crop_yx = [128, 128]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:2],
+        target_channel=channel_names[2:],
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[256, 256],
+        val_gpu_augmentations=[
+            BatchedCenterSpatialCropd(keys=["source", "target"], roi_size=[z_window_size, *crop_yx]),
+        ],
+    )
+    dm.setup(stage="fit")
+    dm.trainer = MagicMock(training=False, validating=True, sanity_checking=False)
+    batch = {
+        "source": torch.randn(2, 2, z_window_size, 256, 256),
+        "target": torch.randn(2, 2, z_window_size, 256, 256),
+    }
+    result = dm.on_after_batch_transfer(batch, 0)
+    assert result["source"].shape == (2, 2, z_window_size, *crop_yx)
+    assert result["target"].shape == (2, 2, z_window_size, *crop_yx)
+
+
+def test_val_gpu_augmentations_applied_during_sanity_checking(preprocessed_hcs_dataset):
+    """val_gpu_augmentations also fires when trainer.sanity_checking is True."""
+    from viscy_transforms import BatchedCenterSpatialCropd
+
+    data_path = preprocessed_hcs_dataset
+    z_window_size = 5
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    crop_yx = [128, 128]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:2],
+        target_channel=channel_names[2:],
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[256, 256],
+        val_gpu_augmentations=[
+            BatchedCenterSpatialCropd(keys=["source", "target"], roi_size=[z_window_size, *crop_yx]),
+        ],
+    )
+    dm.setup(stage="fit")
+    dm.trainer = MagicMock(training=False, validating=False, sanity_checking=True)
+    batch = {
+        "source": torch.randn(2, 2, z_window_size, 256, 256),
+        "target": torch.randn(2, 2, z_window_size, 256, 256),
+    }
+    result = dm.on_after_batch_transfer(batch, 0)
+    assert result["source"].shape == (2, 2, z_window_size, *crop_yx)
+    assert result["target"].shape == (2, 2, z_window_size, *crop_yx)
+
+
+# ---------------------------------------------------------------------------
+# in_memory preloading tests
+# ---------------------------------------------------------------------------
+
+
+def test_sliding_window_in_memory(hcs_with_fg_mask):
+    """in_memory=True preloads FOVs and __getitem__ returns correct shapes."""
+    z_window_size = 4
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        dataset = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluorescence"]},
+            z_window_size=z_window_size,
+            in_memory=True,
+        )
+        # _fov_data should be populated
+        assert hasattr(dataset, "_fov_data")
+        assert len(dataset._fov_data) == len(positions)
+        # Each preloaded array should be float32
+        for arr in dataset._fov_data:
+            assert arr.dtype == np.float32
+        # __getitem__ should return correct shapes
+        sample = dataset[0]
+    assert sample["source"].shape == (1, z_window_size, 32, 32)
+    assert sample["target"].shape == (1, z_window_size, 32, 32)
+
+
+def test_sliding_window_in_memory_returns_copy(hcs_with_fg_mask):
+    """in_memory path returns a copy, not a view into the preloaded buffer."""
+    z_window_size = 4
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        dataset = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluorescence"]},
+            z_window_size=z_window_size,
+            in_memory=True,
+        )
+        sample = dataset[0]
+        original_source = sample["source"].clone()
+        # Mutate the returned tensor
+        sample["source"].fill_(999.0)
+        # Fetch the same index again — should still match original
+        sample2 = dataset[0]
+    assert torch.equal(sample2["source"], original_source)
