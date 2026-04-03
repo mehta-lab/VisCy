@@ -128,6 +128,7 @@ class HCSDataModule(LightningDataModule):
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
         gpu_augmentations: list[MapTransform] | None = None,
+        val_augmentations: list[MapTransform] | None = None,
         val_gpu_augmentations: list[MapTransform] | None = None,
         fov_cache_maxsize: int = 5,
         crop_at_read: bool | tuple[int, int] = False,
@@ -160,6 +161,7 @@ class HCSDataModule(LightningDataModule):
         self.fov_cache_maxsize = fov_cache_maxsize
         self.crop_at_read = crop_at_read
         self.in_memory = in_memory
+        self.val_augmentations = val_augmentations or []
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
@@ -477,7 +479,7 @@ class HCSDataModule(LightningDataModule):
             mask_keys = ForegroundMaskSupport.mask_temp_keys(list(self.target_channel))
             ForegroundMaskSupport.patch_spatial_transforms(augmentations, tuple(self.target_channel), mask_keys)
         train_transform = Compose(self.normalizations + augmentations)
-        val_transform = Compose(self.normalizations)
+        val_transform = Compose(self.normalizations + list(self.val_augmentations))
         return train_transform, val_transform
 
     def _train_transform(self) -> list[Callable]:
