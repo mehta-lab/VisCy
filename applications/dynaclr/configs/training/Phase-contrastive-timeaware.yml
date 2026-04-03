@@ -68,7 +68,6 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    collection_path: applications/dynaclr/configs/collections/Phase-contrastive-timeaware.yml
     cell_index_path: applications/dynaclr/configs/cell_index/Phase-contrastive-timeaware.parquet
     z_window: 30
     z_extraction_window: 40

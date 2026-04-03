@@ -53,8 +53,7 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    collection_path: applications/dynaclr/configs/collections/demo_bag_of_channels_v3.yml
-    cell_index_path: null
+    cell_index_path: applications/dynaclr/configs/cell_index/demo_bag_of_channels_v3.parquet
     z_window: 30
     yx_patch_size: [288, 288]
     final_yx_patch_size: [192, 192]

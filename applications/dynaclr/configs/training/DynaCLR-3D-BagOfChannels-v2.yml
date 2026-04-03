@@ -1,8 +1,12 @@
 # DynaCLR-3D-BagOfChannels-v2
 # ============================
 # 3D bag-of-channels contrastive learning.
-# One random fluorescence channel per sample, 16-slice Z window.
+# One random fluorescence channel per sample, 32-slice Z window.
 # Temporal positive pairs (same lineage at t+tau), stratified by perturbation.
+#
+# Augmentation pipeline:
+#   extract (45,256,256) → normalize → affine → RandCrop (40,228,228)
+#   → flip/contrast/noise → CenterCrop (32,160,160) [auto-appended]
 #
 # Launch:
 #   sbatch applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2.sh
@@ -15,7 +19,7 @@ seed_everything: 42
 trainer:
   accelerator: gpu
   strategy: ddp
-  devices: 4
+  devices: 2
   num_nodes: 1
   precision: bf16-mixed
   max_epochs: 150
@@ -29,7 +33,7 @@ trainer:
     init_args:
       entity: computational_imaging
       project: DynaCLR-3D-BagOfChannels-v2
-      name: unnamed-run
+      name: 3d-z32-256to228to160-ntxent-t0p2
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -57,7 +61,7 @@ model:
       init_args:
         backbone: convnext_tiny
         in_channels: 1
-        in_stack_depth: 16
+        in_stack_depth: 32
         stem_kernel_size: [4, 4, 4]
         stem_stride: [4, 4, 4]
         embedding_dim: 768
@@ -73,20 +77,19 @@ model:
     log_embeddings_every_n_epochs: 10
     pca_color_keys: "[perturbation,hours_post_perturbation,experiment,marker]"
     log_negative_metrics_every_n_epochs: 2
-    example_input_array_shape: [1, 1, 16, 160, 160]
+    example_input_array_shape: [1, 1, 32, 160, 160]
 
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    collection_path: applications/dynaclr/configs/collections/DynaCLR-3D-BagOfChannels-v2.yml
     cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-3D-BagOfChannels-v2.parquet
     focus_channel: Phase3D
     reference_pixel_size_xy_um: 0.1494
     reference_pixel_size_z_um: 0.174
-    z_window: 16
+    z_window: 32
     z_extraction_window: 45
     z_focus_offset: 0.3
-    yx_patch_size: [192, 192]
+    yx_patch_size: [256, 256]
     final_yx_patch_size: [160, 160]
     channels_per_sample: 1
     positive_cell_source: lookup
@@ -96,7 +99,7 @@ data:
     tau_decay_rate: 2.0
     stratify_by: [perturbation]
     split_ratio: 0.8
-    batch_size: 512
+    batch_size: 256
     num_workers: 1
     seed: 42
     normalizations:
@@ -114,6 +117,13 @@ data:
           scale_range: [[0.9, 1.1], [0.9, 1.1], [0.9, 1.1]]
           rotate_range: [3.14, 0.0, 0.0]
           shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      # Random crop: Z for focus invariance + YX for translation augmentation.
+      # The datamodule auto-appends a CenterCrop to [32, 160, 160] after this
+      # to remove rotation zero-fill artifacts at the edges.
+      - class_path: viscy_transforms.BatchedRandSpatialCropd
+        init_args:
+          keys: [channel_0]
+          roi_size: [40, 228, 228]
       - class_path: viscy_transforms.BatchedRandFlipd
         init_args:
           keys: [channel_0]

@@ -13,7 +13,7 @@ annotations. Checkmarks verify that the sampling contract holds:
 
 Usage::
 
-    python applications/dynaclr/scripts/dataloader_inspection/check_batch_composition.py
+   uv run  python applications/dynaclr/scripts/dataloader_inspection/check_batch_composition.py
 """
 
 # ruff: noqa: E402, D103
@@ -45,7 +45,7 @@ CELL_INDEX_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs
 COLLECTION_PATH = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/collections/example_cell_index.yaml"
 
 Z_WINDOW = 1
-YX_PATCH_SIZE = (256, 256)
+YX_PATCH_SIZE = (192, 192)
 FINAL_YX_PATCH_SIZE = (160, 160)
 BATCH_SIZE = 8
 NUM_WORKERS = 4
@@ -164,7 +164,7 @@ def run_scenario(
             bi,
             name,
             checks=checks,
-            save_path=OUTPUT_DIR / f"{name.lower().replace(' ', '_')}_batch{bi}.png" if OUTPUT_DIR else None,
+            save_path=(OUTPUT_DIR / f"{name.lower().replace(' ', '_')}_batch{bi}.png" if OUTPUT_DIR else None),
         )
 
     return batches
@@ -183,7 +183,6 @@ if OUTPUT_DIR:
 
 print("Building DataModule...")
 dm = MultiExperimentDataModule(
-    collection_path=COLLECTION_PATH,
     cell_index_path=CELL_INDEX_PATH,
     z_window=Z_WINDOW,
     yx_patch_size=YX_PATCH_SIZE,
@@ -367,7 +366,6 @@ run_scenario(
 
 # %%
 dm_simclr = MultiExperimentDataModule(
-    collection_path=COLLECTION_PATH,
     cell_index_path=CELL_INDEX_PATH,
     z_window=Z_WINDOW,
     yx_patch_size=YX_PATCH_SIZE,
@@ -434,7 +432,6 @@ from viscy_transforms import NormalizeSampled
 
 def run_normalization_scenario(name: str, level: str) -> None:
     dm_n = MultiExperimentDataModule(
-        collection_path=COLLECTION_PATH,
         cell_index_path=CELL_INDEX_PATH,
         z_window=Z_WINDOW,
         yx_patch_size=YX_PATCH_SIZE,
