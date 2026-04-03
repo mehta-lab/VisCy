@@ -87,7 +87,9 @@ class HCSDataModule(LightningDataModule):
         When True, read only the ``yx_patch_size`` spatial region from
         zarr during training, instead of reading the full FOV and
         cropping later. Reduces zarr decompression for small patches.
-        Only affects the training dataset. Default False.
+        Only affects the training dataset. Disables the FOV cache
+        (sets ``fov_cache_maxsize=0``) since partial reads bypass it.
+        Default False.
     """
 
     def __init__(
@@ -385,8 +387,8 @@ class HCSDataModule(LightningDataModule):
                     f"Source spatial shape {actual} does not match expected "
                     f"{expected} (z_window_size={self.z_window_size}, "
                     f"yx_patch_size={list(self.yx_patch_size)}). "
-                    f"Configure gpu_augmentations with a spatial crop that "
-                    f"produces the expected output size."
+                    f"Either configure gpu_augmentations with a spatial crop "
+                    f"or enable crop_at_read to crop at zarr read time."
                 )
         return batch
 
@@ -438,7 +440,8 @@ class HCSDataModule(LightningDataModule):
         """Build training and validation transforms.
 
         Apply normalization and augmentation on CPU.
-        Spatial cropping is deferred to ``on_after_batch_transfer`` on GPU.
+        Spatial cropping is handled by ``on_after_batch_transfer`` on GPU,
+        or at zarr read time when ``crop_at_read`` is enabled.
         When ``fg_mask_key`` is set, spatial augmentations are patched to
         also transform the mask keys so they stay pixel-aligned with the target.
         """

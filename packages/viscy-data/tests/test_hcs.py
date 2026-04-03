@@ -475,6 +475,23 @@ def test_partial_zarr_read_with_fg_mask(hcs_with_fg_mask):
     assert "fg_mask" in sample
     assert sample["fg_mask"].shape == (1, z_window_size, *yx_patch_size)
     assert set(sample["fg_mask"].unique().tolist()).issubset({0.0, 1.0})
+    # Verify spatial co-alignment: mask was built as (target > 0.5)
+    assert torch.equal((sample["target"] > 0.5).float(), sample["fg_mask"]), (
+        "fg_mask is not spatially aligned with target after partial zarr read"
+    )
+
+
+def test_yx_patch_size_too_large_errors(hcs_with_fg_mask):
+    """IndexError when yx_patch_size exceeds FOV spatial dimensions."""
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        with raises(IndexError, match="yx_patch_size"):
+            SlidingWindowDataset(
+                positions=positions,
+                channels={"source": ["Phase"], "target": ["Fluorescence"]},
+                z_window_size=4,
+                yx_patch_size=(64, 64),  # FOV is 32x32
+            )
 
 
 def test_crop_at_read_datamodule(hcs_with_fg_mask):

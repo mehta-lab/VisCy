@@ -142,7 +142,7 @@ class SlidingWindowDataset(Dataset):
                 raise IndexError(
                     f"Z window size {self.z_window_size} "
                     f"is larger than the number of Z slices ({img_arr.slices}) "
-                    f"for FOV {fov.name}."
+                    f"for FOV {img_arr.name}."
                 )
             if self.yx_patch_size is not None:
                 ph, pw = self.yx_patch_size
@@ -150,7 +150,7 @@ class SlidingWindowDataset(Dataset):
                     raise IndexError(
                         f"yx_patch_size {self.yx_patch_size} is larger than "
                         f"FOV spatial dimensions ({img_arr.height}, {img_arr.width}) "
-                        f"for FOV {fov.name}."
+                        f"for FOV {img_arr.name}."
                     )
             w += ts * zs
             self.window_keys.append(w)
