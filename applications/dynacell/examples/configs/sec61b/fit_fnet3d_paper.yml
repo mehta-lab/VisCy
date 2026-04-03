@@ -86,4 +86,3 @@ data:
         init_args:
           keys: [source, target]
           roi_size: [32, 64, 64]
-    caching: true

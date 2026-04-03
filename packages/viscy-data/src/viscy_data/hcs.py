@@ -200,7 +200,7 @@ class HCSDataModule(LightningDataModule):
     @property
     def maybe_cached_data_path(self):
         """Return the cached data path if caching is enabled."""
-        return self.cache_path if self.caching else self.data_path
+        return self.cache_path if (self.caching and not self.in_memory) else self.data_path
 
     def _data_log_path(self) -> Path:
         log_dir = Path.cwd()
@@ -213,7 +213,7 @@ class HCSDataModule(LightningDataModule):
 
     def prepare_data(self):
         """Cache dataset if caching is enabled."""
-        if not self.caching:
+        if not self.caching or self.in_memory:
             return
         # setup logger
         logger = logging.getLogger("viscy_data.hcs.cache")
