@@ -96,6 +96,11 @@ class HCSDataModule(LightningDataModule):
         When ``False`` (default), reads full FOVs.
         Only affects the training dataset. Disables the FOV cache
         (sets ``fov_cache_maxsize=0``) since partial reads bypass it.
+    in_memory : bool, optional
+        Load the entire dataset into RAM during setup (before
+        DataLoader workers fork). Workers share the data via
+        copy-on-write — no duplication. Eliminates all zarr I/O
+        during training and validation. Default False.
     """
 
     def __init__(
@@ -126,6 +131,7 @@ class HCSDataModule(LightningDataModule):
         val_gpu_augmentations: list[MapTransform] | None = None,
         fov_cache_maxsize: int = 5,
         crop_at_read: bool | tuple[int, int] = False,
+        in_memory: bool = False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -153,6 +159,7 @@ class HCSDataModule(LightningDataModule):
         self.fg_mask_key = fg_mask_key
         self.fov_cache_maxsize = fov_cache_maxsize
         self.crop_at_read = crop_at_read
+        self.in_memory = in_memory
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         self._gpu_augmentations = Compose(gpu_augmentations) if gpu_augmentations else None
@@ -233,6 +240,7 @@ class HCSDataModule(LightningDataModule):
             "z_window_size": self.z_window_size,
             "array_key": self.array_key,
             "fov_cache_maxsize": self.fov_cache_maxsize,
+            "in_memory": self.in_memory,
         }
         if self.fg_mask_key is not None:
             settings["fg_mask_key"] = self.fg_mask_key

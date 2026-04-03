@@ -69,6 +69,13 @@ class SlidingWindowDataset(Dataset):
         the *read* size, not the final output size — downstream
         augmentations (e.g. affine + center crop) may reduce it
         further. Default None reads full FOVs.
+    in_memory : bool
+        Load and decompress the entire dataset into RAM during
+        ``__init__`` (before DataLoader workers fork). All workers
+        share the preloaded arrays via copy-on-write, so memory is
+        not duplicated. Eliminates all zarr I/O during training.
+        Requires enough RAM to hold all FOVs as float32.
+        Default False.
     """
 
     def __init__(
@@ -86,6 +93,7 @@ class SlidingWindowDataset(Dataset):
         fg_mask_key: str | None = None,
         fov_cache_maxsize: int = 5,
         yx_read_size: tuple[int, int] | None = None,
+        in_memory: bool = False,
     ) -> None:
         super().__init__()
         if not 0.0 <= min_nonzero_fraction <= 1.0:
@@ -121,6 +129,7 @@ class SlidingWindowDataset(Dataset):
             if len(yx_read_size) != 2 or any(s < 1 for s in yx_read_size):
                 raise ValueError(f"yx_read_size must be a 2-tuple of positive integers, got {yx_read_size}")
         self.yx_read_size = yx_read_size
+        self.in_memory = in_memory
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
@@ -164,6 +173,12 @@ class SlidingWindowDataset(Dataset):
             if self.fg_mask_support is not None:
                 self.fg_mask_support.validate_and_store(fov, img_arr, self.target_ch_idx)
         self._max_window = w
+        # Preload all FOVs into RAM (before DataLoader fork → shared via COW).
+        if self.in_memory:
+            ch_idx = [int(i) for i in self._all_ch_idx]
+            self._fov_data = [arr.oindex[:, ch_idx, :].astype(np.float32) for arr in self.window_arrays]
+            total_gb = sum(a.nbytes for a in self._fov_data) / 1e9
+            _logger.info(f"Loaded {len(self._fov_data)} FOVs into RAM ({total_gb:.1f} GB).")
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, int]:
         """Look up window given index."""
@@ -227,6 +242,12 @@ class SlidingWindowDataset(Dataset):
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
         z = tz - t * zs
+        if self.in_memory and arr_idx >= 0:
+            data = self._fov_data[arr_idx][t : t + 1, :, z : z + self.z_window_size]
+            if yx_slice is not None:
+                y_sl, x_sl = yx_slice
+                data = data[:, :, :, y_sl, x_sl]
+            return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
         if yx_slice is not None:
             y_sl, x_sl = yx_slice
             data = img.oindex[
