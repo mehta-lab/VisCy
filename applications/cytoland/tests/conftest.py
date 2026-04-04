@@ -249,18 +249,17 @@ def tiny_hcs_zarr(tmp_path):
     """
     zarr_path = tmp_path / "tiny.zarr"
     channel_names = ["Phase3D", "Fluorescence"]
-    dataset = open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names)
-    rng = np.random.default_rng(42)
-    for row in ("A",):
-        for col in ("1", "2"):
-            for fov in ("0", "1"):
-                pos = dataset.create_position(row, col, fov)
-                pos.create_image(
-                    "0",
-                    rng.random((1, len(channel_names), SYNTH_D, FCMAE_H, FCMAE_W)).astype(np.float32),
-                    chunks=(1, 1, SYNTH_D, FCMAE_H, FCMAE_W),
-                )
-    dataset.close()
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as dataset:
+        rng = np.random.default_rng(42)
+        for row in ("A",):
+            for col in ("1", "2"):
+                for fov in ("0", "1"):
+                    pos = dataset.create_position(row, col, fov)
+                    pos.create_image(
+                        "0",
+                        rng.random((1, len(channel_names), SYNTH_D, FCMAE_H, FCMAE_W)).astype(np.float32),
+                        chunks=(1, 1, SYNTH_D, FCMAE_H, FCMAE_W),
+                    )
     # Write per-FOV normalization metadata.
     norm_meta = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29, "otsu_threshold": 0.5}} for ch in channel_names}
     with open_ome_zarr(zarr_path, mode="r+") as ds:
