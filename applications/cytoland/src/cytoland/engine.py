@@ -515,9 +515,10 @@ class VSUNet(LightningModule):
             scheduler = WarmupCosineSchedule(
                 optimizer,
                 warmup_steps=3,
-                t_total=self.trainer.max_epochs,
+                t_total=self.trainer.estimated_stepping_batches,
                 warmup_multiplier=1e-3,
             )
+            return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
         elif self.schedule == "Constant":
             scheduler = ConstantLR(optimizer, factor=1, total_iters=self.trainer.max_epochs)
         return [optimizer], [scheduler]
