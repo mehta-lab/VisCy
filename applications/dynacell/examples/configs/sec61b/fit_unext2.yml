@@ -114,4 +114,4 @@ data:
       - class_path: viscy_transforms.BatchedDivisibleCropd
         init_args:
           keys: [source, target]
-          k: 64
+          k: [1, 64, 64]
