@@ -57,10 +57,10 @@ class CELLDiffNet(UNet3DBase):
 
     def __init__(
         self,
-        input_spatial_size: list[int] = [8, 512, 512],
+        input_spatial_size: list[int] | None = None,
         in_channels: int = 1,
-        dims: list[int] = [32, 64, 128],
-        num_res_block: list[int] = [2, 2],
+        dims: list[int] | None = None,
+        num_res_block: list[int] | None = None,
         hidden_size: int = 512,
         num_heads: int = 8,
         dim_head: int = 64,
@@ -69,6 +69,12 @@ class CELLDiffNet(UNet3DBase):
         num_hidden_layers: int = 2,
         patch_size: int = 4,
     ) -> None:
+        if input_spatial_size is None:
+            input_spatial_size = [8, 512, 512]
+        if dims is None:
+            dims = [32, 64, 128]
+        if num_res_block is None:
+            num_res_block = [2, 2]
         bottleneck = ViTBottleneck3D(
             in_channels=dims[-1],
             input_spatial_size=input_spatial_size,
