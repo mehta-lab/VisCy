@@ -7,7 +7,6 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import anndata as ad
 import click
@@ -30,7 +29,7 @@ class MlpEmbedderApplyConfig(BaseModel):
         Path to the AnnData zarr store with embeddings in ``.X``.
     model_path : str
         Path to the ``.pt`` checkpoint saved by train-mlp-embedder.
-    output_path : Optional[str]
+    output_path : str | None
         Path to write output zarr. When ``None``, writes back to ``embeddings_path``.
     batch_size : int
         Inference batch size.
@@ -38,7 +37,7 @@ class MlpEmbedderApplyConfig(BaseModel):
 
     embeddings_path: str = Field(..., min_length=1)
     model_path: str = Field(..., min_length=1)
-    output_path: Optional[str] = Field(default=None)
+    output_path: str | None = Field(default=None)
     batch_size: int = Field(default=256, gt=0)
 
 
