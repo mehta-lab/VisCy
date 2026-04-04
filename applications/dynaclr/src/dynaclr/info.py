@@ -12,6 +12,7 @@ import numpy as np
 def main(path: Path):
     """Print summary of an AnnData zarr store."""
     import anndata as ad
+    import scipy.sparse as sp
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -19,7 +20,14 @@ def main(path: Path):
 
     click.echo(f"Path:  {path}")
     click.echo(f"Shape: {adata.n_obs:,} obs × {adata.n_vars:,} vars")
-    click.echo(f"X:     dtype={adata.X.dtype}, range=[{np.nanmin(adata.X):.4f}, {np.nanmax(adata.X):.4f}]")
+    X = adata.X
+    if sp.issparse(X):
+        X_dense = X.toarray()
+    else:
+        X_dense = X
+    sparse = sp.issparse(adata.X)
+    xmin, xmax = np.nanmin(X_dense), np.nanmax(X_dense)
+    click.echo(f"X:     dtype={X_dense.dtype}, sparse={sparse}, range=[{xmin:.4f}, {xmax:.4f}]")
 
     if len(adata.obs.columns):
         click.echo("\nobs columns:")
