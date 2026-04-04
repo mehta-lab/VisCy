@@ -18,7 +18,7 @@ def get_3d_sincos_pos_embed(
     Parameters
     ----------
     embed_dim : int
-        Embedding dimension. Must be divisible by 8.
+        Embedding dimension. Must be divisible by 16.
     grid_size : list[int]
         Grid dimensions ``[D, H, W]``.
     cls_token : bool
@@ -53,7 +53,7 @@ def get_3d_sincos_pos_embed_from_grid(embed_dim: int, grid: NDArray[np.float32])
     Parameters
     ----------
     embed_dim : int
-        Embedding dimension. Must be divisible by 8.
+        Embedding dimension. Must be divisible by 16.
     grid : NDArray[np.float32]
         Meshgrid array of shape ``(3, 1, D, H, W)``.
 
@@ -62,8 +62,8 @@ def get_3d_sincos_pos_embed_from_grid(embed_dim: int, grid: NDArray[np.float32])
     NDArray[np.float64]
         Embeddings of shape ``(D*H*W, embed_dim)``.
     """
-    if embed_dim % 8 != 0:
-        raise ValueError(f"embed_dim must be divisible by 8, got {embed_dim}")
+    if embed_dim % 16 != 0:
+        raise ValueError(f"embed_dim must be divisible by 16, got {embed_dim}")
 
     dim_d = embed_dim // 4
     dim_h = 3 * embed_dim // 8
