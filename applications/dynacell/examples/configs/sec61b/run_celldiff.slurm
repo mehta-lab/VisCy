@@ -16,7 +16,7 @@ mkdir -p -m 775 /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/s
 mkdir -p -m 775 /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/celldiff/checkpoints
 
 function cleanup() {
-  rm -rf /tmp/$SLURM_JOB_ID/*.zarr
+  rm -rf /tmp/$SLURM_JOB_ID /dev/shm/$SLURM_JOB_ID
   echo "Cleanup Completed."
 }
 trap cleanup EXIT
