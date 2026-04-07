@@ -1,7 +1,7 @@
 # CellDiff flow-matching on AICS iPSC SEC61B (ER).
 # Data pipeline aligned with VSCyto3D SEC61B config (same dataset, same
 # augmentation strategy). Architecture: CELLDiffNet with ViT bottleneck,
-# z_read=13, z_final=8, yx=512, Linear transport, velocity prediction.
+# read=[13, 624, 624], input=[8, 512, 512], Linear transport, velocity prediction.
 # Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_celldiff.yml
 base:
   - ../recipes/trainer/fit_1gpu.yml
