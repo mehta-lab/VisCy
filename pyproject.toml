@@ -34,7 +34,7 @@ dependencies = [
   "timm>=0.9.5",
   "torch>=2.4.1",
   "wandb",
-  "waveorder>3.0.2",
+  "waveorder>=3.0.2",
   # temporary pin for xarray#10851
   "xarray<=2025.9",
 ]
