@@ -2,8 +2,6 @@
 
 import bisect
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -58,25 +56,11 @@ class SlidingWindowDataset(Dataset):
         Zarr array key for precomputed foreground masks. When set,
         masks are loaded alongside images and included in the sample
         as ``"fg_mask"``. Default None disables mask loading.
-    fov_cache_maxsize : int
-        Number of decompressed FOV arrays to cache per worker.
-        Avoids redundant zarr chunk decompression when consecutive
-        samples come from the same FOV (common with sliding windows).
-        Set to 0 to disable caching. Default 5.
-    yx_read_size : tuple[int, int] | None
-        Spatial (Y, X) region to read from zarr per sample. When set,
-        each ``__getitem__`` generates random (y, x) start coordinates
-        and reads only that region, bypassing the FOV cache. This is
-        the *read* size, not the final output size — downstream
-        augmentations (e.g. affine + center crop) may reduce it
-        further. Default None reads full FOVs.
-    in_memory : bool
-        Load and decompress the entire dataset into RAM during
-        ``__init__`` (before DataLoader workers fork). All workers
-        share the preloaded arrays via copy-on-write, so memory is
-        not duplicated. Eliminates all zarr I/O during training.
-        Requires enough RAM to hold all FOVs as float32.
-        Default False.
+    preloaded_fovs : list[Tensor] or None
+        Pre-loaded FOV data, one tensor per position with shape
+        ``(T, C, Z, Y, X)``. Channels are ``source + target`` in order.
+        When set, bypasses zarr reads via ``.clone()`` copies from the
+        preloaded data. Default None reads from zarr.
     """
 
     def __init__(
@@ -92,9 +76,7 @@ class SlidingWindowDataset(Dataset):
         nonzero_channel: str | None = None,
         max_nonzero_retries: int = 100,
         fg_mask_key: str | None = None,
-        fov_cache_maxsize: int = 5,
-        yx_read_size: tuple[int, int] | None = None,
-        in_memory: bool = False,
+        preloaded_fovs: list[Tensor] | None = None,
     ) -> None:
         super().__init__()
         if not 0.0 <= min_nonzero_fraction <= 1.0:
@@ -126,22 +108,12 @@ class SlidingWindowDataset(Dataset):
         if self.target_ch_idx is not None:
             self._all_ch_names.extend(self.channels["target"])
             self._all_ch_idx.extend(self.target_ch_idx)
-        if yx_read_size is not None:
-            if len(yx_read_size) != 2 or any(s < 1 for s in yx_read_size):
-                raise ValueError(f"yx_read_size must be a 2-tuple of positive integers, got {yx_read_size}")
-        self.yx_read_size = yx_read_size
-        self.in_memory = in_memory
+        self._preloaded = preloaded_fovs
         self._get_windows()
         if nonzero_channel is not None:
             all_channels = list(self.channels.get("source", [])) + list(self.channels.get("target", []))
             if nonzero_channel not in all_channels:
                 raise ValueError(f"nonzero_channel '{nonzero_channel}' not found in channels: {all_channels}")
-        # Per-worker FOV cache to avoid redundant zarr decompression.
-        # Skipped when in_memory (data already preloaded).
-        if not in_memory and fov_cache_maxsize > 0:
-            self._read_fov_cached = lru_cache(maxsize=fov_cache_maxsize)(self._read_fov_uncached)
-        else:
-            self._read_fov_cached = self._read_fov_uncached
 
     def _get_windows(self) -> None:
         """Count the sliding windows along T and Z, and build an index-to-window LUT."""
@@ -159,14 +131,6 @@ class SlidingWindowDataset(Dataset):
                     f"is larger than the number of Z slices ({img_arr.slices}) "
                     f"for FOV {img_arr.name}."
                 )
-            if self.yx_read_size is not None:
-                ph, pw = self.yx_read_size
-                if img_arr.height < ph or img_arr.width < pw:
-                    raise IndexError(
-                        f"yx_read_size {self.yx_read_size} is larger than "
-                        f"FOV spatial dimensions ({img_arr.height}, {img_arr.width}) "
-                        f"for FOV {img_arr.name}."
-                    )
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
@@ -174,20 +138,6 @@ class SlidingWindowDataset(Dataset):
             if self.fg_mask_support is not None:
                 self.fg_mask_support.validate_and_store(fov, img_arr, self.target_ch_idx)
         self._max_window = w
-        # Preload all FOVs into RAM (before DataLoader fork → shared via COW).
-        # Uses threads because blosc/zstd decompression releases the GIL.
-        if self.in_memory:
-            ch_idx = [int(i) for i in self._all_ch_idx]
-
-            def _load_fov(arr):
-                return arr.oindex[:, ch_idx, :].astype(np.float32)
-
-            n_threads = min(len(self.window_arrays), 16)
-            _logger.info(f"Loading {len(self.window_arrays)} FOVs into RAM ({n_threads} threads)...")
-            with ThreadPoolExecutor(max_workers=n_threads) as pool:
-                self._fov_data = list(pool.map(_load_fov, self.window_arrays))
-            total_gb = sum(a.nbytes for a in self._fov_data) / 1e9
-            _logger.info(f"Loaded {len(self._fov_data)} FOVs ({total_gb:.1f} GB).")
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None, int]:
         """Look up window given index."""
@@ -195,33 +145,13 @@ class SlidingWindowDataset(Dataset):
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
         return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
 
-    def _read_fov_uncached(self, arr_idx: int, t: int, ch_idx: tuple[int, ...]) -> np.ndarray:
-        """Read and decompress a single timepoint of a FOV from zarr.
-
-        Parameters
-        ----------
-        arr_idx : int
-            Index into ``self.window_arrays``.
-        t : int
-            Timepoint index.
-        ch_idx : tuple[int, ...]
-            Channel indices to read (tuple for hashability).
-
-        Returns
-        -------
-        np.ndarray
-            Array of shape ``(1, C, Z, Y, X)`` in float32.
-        """
-        img = self.window_arrays[arr_idx]
-        return img.oindex[t : t + 1, [int(i) for i in ch_idx], :].astype(np.float32)
-
     def _read_img_window(
         self,
         img: ImageArray,
         ch_idx: list[int],
         tz: int,
         arr_idx: int = -1,
-        yx_slice: tuple[slice, slice] | None = None,
+        _preloaded: list[Tensor] | None = None,
     ) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
 
@@ -235,12 +165,11 @@ class SlidingWindowDataset(Dataset):
         tz : int
             Window index within the FOV, counted Z-first.
         arr_idx : int
-            Index into ``self.window_arrays`` for FOV caching.
+            Index into preloaded FOV list.
             When negative, falls back to direct zarr read.
-        yx_slice : tuple[slice, slice] | None
-            Optional (y_slice, x_slice) for partial spatial reads.
-            When set, bypasses the FOV cache and reads directly from
-            zarr with spatial subsetting.
+        _preloaded : list[Tensor] or None
+            Override for ``self._preloaded``. When set, uses this list
+            instead of the dataset-level preloaded data.
 
         Returns
         -------
@@ -251,30 +180,15 @@ class SlidingWindowDataset(Dataset):
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
         z = tz - t * zs
-        if self.in_memory and arr_idx >= 0:
-            data = self._fov_data[arr_idx][t : t + 1, :, z : z + self.z_window_size].copy()
-            if yx_slice is not None:
-                y_sl, x_sl = yx_slice
-                data = data[:, :, :, y_sl, x_sl]
-            return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
-        if yx_slice is not None:
-            y_sl, x_sl = yx_slice
-            data = img.oindex[
-                slice(t, t + 1),
-                [int(i) for i in ch_idx],
-                slice(z, z + self.z_window_size),
-                y_sl,
-                x_sl,
-            ].astype(np.float32)
-        elif arr_idx >= 0:
-            fov_data = self._read_fov_cached(arr_idx, t, tuple(ch_idx))
-            data = fov_data[:, :, z : z + self.z_window_size].copy()
-        else:
-            data = img.oindex[
-                slice(t, t + 1),
-                [int(i) for i in ch_idx],
-                slice(z, z + self.z_window_size),
-            ].astype(np.float32)
+        preloaded = _preloaded if _preloaded is not None else self._preloaded
+        if preloaded is not None and arr_idx >= 0:
+            data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].clone()
+            return data.unbind(dim=1), (img.name, t, z)
+        data = img.oindex[
+            slice(t, t + 1),
+            [int(i) for i in ch_idx],
+            slice(z, z + self.z_window_size),
+        ].astype(np.float32)
         return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
@@ -301,20 +215,12 @@ class SlidingWindowDataset(Dataset):
         idx = index
         for attempt in range(self.max_nonzero_retries + 1):
             img, tz, norm_meta, arr_idx = self._find_window(idx)
-            # Generate random YX crop for partial zarr read
-            yx_slice = None
-            if self.yx_read_size is not None:
-                Y, X = img.shape[-2], img.shape[-1]
-                ph, pw = self.yx_read_size
-                y0 = torch.randint(0, Y - ph + 1, ()).item()
-                x0 = torch.randint(0, X - pw + 1, ()).item()
-                yx_slice = (slice(y0, y0 + ph), slice(x0, x0 + pw))
-            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz, arr_idx, yx_slice=yx_slice)
+            images, sample_index = self._read_img_window(img, self._all_ch_idx, tz, arr_idx)
             sample_images = dict(zip(self._all_ch_names, images))
             # Read mask once — reused for both nonzero check and sample output
             mask_images = None
             if self.fg_mask_support is not None and self.target_ch_idx is not None:
-                mask_images = self.fg_mask_support.read_window(arr_idx, tz, self._read_img_window, yx_slice=yx_slice)
+                mask_images = self.fg_mask_support.read_window(arr_idx, tz, self._read_img_window)
             if check_key is not None:
                 if mask_images is not None and check_key in self.channels.get("target", []):
                     check_ch = self.channels["target"].index(check_key)

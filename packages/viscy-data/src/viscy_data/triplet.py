@@ -309,7 +309,6 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
         augment_validation: bool = True,
-        caching: bool = False,
         fit_include_wells: list[str] | None = None,
         fit_exclude_fovs: list[str] | None = None,
         predict_cells: bool = False,
@@ -354,8 +353,6 @@ class TripletDataModule(HCSDataModule):
         augment_validation : bool, optional
             Apply augmentations to validation data, by default True.
             Set to False for VAE training where clean validation is needed.
-        caching : bool, optional
-            Whether to cache the dataset, by default False
         fit_include_wells : list[str], optional
             Only include these wells for fitting, by default None
         fit_exclude_fovs : list[str], optional
@@ -399,7 +396,6 @@ class TripletDataModule(HCSDataModule):
             yx_patch_size=final_yx_patch_size,
             normalizations=normalizations,
             augmentations=augmentations,
-            caching=caching,
             persistent_workers=persistent_workers,
             prefetch_factor=prefetch_factor,
             pin_memory=pin_memory,

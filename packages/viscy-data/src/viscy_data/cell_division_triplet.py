@@ -354,7 +354,6 @@ class CellDivisionTripletDataModule(HCSDataModule):
             yx_patch_size=final_yx_patch_size,
             normalizations=normalizations,
             augmentations=augmentations,
-            caching=False,  # NOTE: Not applicable for npy files
             persistent_workers=persistent_workers,
             prefetch_factor=prefetch_factor,
             pin_memory=pin_memory,
