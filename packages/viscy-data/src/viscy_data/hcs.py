@@ -119,7 +119,7 @@ class HCSDataModule(LightningDataModule):
         persistent_workers=False,
         prefetch_factor=None,
         array_key: str = "0",
-        pin_memory=False,
+        pin_memory=True,
         min_nonzero_fraction: float = 0.0,
         nonzero_threshold: float = 0.0,
         nonzero_channel: str | None = None,
