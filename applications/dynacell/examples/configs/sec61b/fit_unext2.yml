@@ -50,6 +50,7 @@ data:
     num_workers: 8
     yx_patch_size: [384, 384]
     preload: true
+    scratch_dir: /dev/shm
     persistent_workers: true
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
