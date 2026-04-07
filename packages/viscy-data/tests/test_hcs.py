@@ -565,6 +565,34 @@ def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
     assert mmap_file.stat().st_mtime == mtime_after_first
 
 
+def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
+    """prepare_data() cleans up and rebuilds if a previous run was killed mid-write."""
+    importorskip("tensordict")
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        preload=True,
+        scratch_dir=tmp_path,
+    )
+    # Simulate a killed preload: create the cache dir with a partial .mmap but no .done
+    cache_dir = dm._mmap_cache_dir
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "data.mmap").write_bytes(b"partial garbage")
+    assert not (cache_dir / ".done").exists()
+    # prepare_data should clean up and succeed
+    dm.prepare_data()
+    assert (cache_dir / ".done").exists()
+    # Verify the rebuilt buffer works end-to-end
+    dm.setup(stage="fit")
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape[1] == 1
+        break
+
+
 def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
     import multiprocessing

@@ -4,6 +4,7 @@ import hashlib
 import logging
 import math
 import os
+import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -205,51 +206,64 @@ class HCSDataModule(LightningDataModule):
         if done_marker.exists():
             _logger.info(f"Preload cache found at {cache_dir}, skipping.")
             return
+        # Clean up partial files from a previously killed preload.
+        # MemoryMappedTensor.empty() raises RuntimeError if the file exists,
+        # so stale .mmap files must be removed before we can recreate them.
+        if cache_dir.exists():
+            _logger.warning(f"Partial preload cache at {cache_dir} (no .done marker), rebuilding.")
+            shutil.rmtree(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
-        all_ch = list(self.source_channel) + list(self.target_channel)
-        with open_ome_zarr(self.data_path, mode="r") as plate:
-            positions = [pos for _, pos in plate.positions()]
-            ch_idx = [positions[0].get_channel_index(c) for c in all_ch]
-            arr0 = positions[0][self.array_key]
-            T = arr0.frames
-            total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
-            data_path = cache_dir / "data.mmap"
-            data_buf = MemoryMappedTensor.empty(total_shape, dtype=torch.float32, filename=data_path)
+        try:
+            all_ch = list(self.source_channel) + list(self.target_channel)
+            with open_ome_zarr(self.data_path, mode="r") as plate:
+                positions = [pos for _, pos in plate.positions()]
+                ch_idx = [positions[0].get_channel_index(c) for c in all_ch]
+                arr0 = positions[0][self.array_key]
+                T = arr0.frames
+                total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
+                data_path = cache_dir / "data.mmap"
+                data_buf = MemoryMappedTensor.empty(total_shape, dtype=torch.float32, filename=data_path)
 
-            def _write_fov(i_pos):
-                i, pos = i_pos
-                data_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                    pos[self.array_key].oindex[:, ch_idx, :].astype(np.float32)
-                )
-
-            n_threads = min(len(positions), 16)
-            _logger.info(f"Preloading {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
-            with ThreadPoolExecutor(max_workers=n_threads) as pool:
-                list(pool.map(_write_fov, enumerate(positions)))
-            if self.fg_mask_key:
-                target_ch_idx = [positions[0].get_channel_index(c) for c in self.target_channel]
-                n_target = len(self.target_channel)
-                mask_arr_0 = positions[0][self.fg_mask_key]
-                mask_ch_idx = ForegroundMaskSupport.resolve_mask_ch_indices(
-                    mask_arr_0.channels, arr0.channels, n_target, target_ch_idx, self.fg_mask_key
-                )
-                mask_shape = (len(positions) * T, n_target, arr0.slices, arr0.height, arr0.width)
-                mask_buf = MemoryMappedTensor.empty(
-                    mask_shape,
-                    dtype=torch.float32,
-                    filename=cache_dir / "fg_mask.mmap",
-                )
-
-                def _write_mask(i_pos):
+                def _write_fov(i_pos):
                     i, pos = i_pos
-                    mask_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                        pos[self.fg_mask_key].oindex[:, mask_ch_idx, :].astype(np.float32)
+                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(
+                        pos[self.array_key].oindex[:, ch_idx, :].astype(np.float32)
                     )
 
+                n_threads = min(len(positions), 16)
+                _logger.info(f"Preloading {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
                 with ThreadPoolExecutor(max_workers=n_threads) as pool:
-                    list(pool.map(_write_mask, enumerate(positions)))
-        done_marker.touch()
-        _logger.info("Preload complete.")
+                    list(pool.map(_write_fov, enumerate(positions)))
+                if self.fg_mask_key:
+                    target_ch_idx = [positions[0].get_channel_index(c) for c in self.target_channel]
+                    n_target = len(self.target_channel)
+                    mask_arr_0 = positions[0][self.fg_mask_key]
+                    mask_ch_idx = ForegroundMaskSupport.resolve_mask_ch_indices(
+                        mask_arr_0.channels, arr0.channels, n_target, target_ch_idx, self.fg_mask_key
+                    )
+                    mask_shape = (len(positions) * T, n_target, arr0.slices, arr0.height, arr0.width)
+                    mask_buf = MemoryMappedTensor.empty(
+                        mask_shape,
+                        dtype=torch.float32,
+                        filename=cache_dir / "fg_mask.mmap",
+                    )
+
+                    def _write_mask(i_pos):
+                        i, pos = i_pos
+                        mask_buf[i * T : (i + 1) * T] = torch.from_numpy(
+                            pos[self.fg_mask_key].oindex[:, mask_ch_idx, :].astype(np.float32)
+                        )
+
+                    with ThreadPoolExecutor(max_workers=n_threads) as pool:
+                        list(pool.map(_write_mask, enumerate(positions)))
+            done_marker.touch()
+            _logger.info("Preload complete.")
+        except BaseException:
+            # Clean up so the next attempt starts fresh instead of hitting
+            # RuntimeError from MemoryMappedTensor.empty() on existing files.
+            if cache_dir.exists():
+                shutil.rmtree(cache_dir)
+            raise
 
     def _open_mmap_buffer(
         self,
