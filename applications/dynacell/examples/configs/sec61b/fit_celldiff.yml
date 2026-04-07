@@ -1,21 +1,23 @@
 # CellDiff flow-matching on AICS iPSC SEC61B (ER).
 # Data pipeline aligned with VSCyto3D SEC61B config (same dataset, same
 # augmentation strategy). Architecture: CELLDiffNet with ViT bottleneck,
-# z=8, yx=512, Linear transport, velocity prediction.
+# z_read=13, z_final=8, yx=512, Linear transport, velocity prediction.
 # Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_celldiff.yml
 base:
-  - ../recipes/trainer/fit_fm_4gpu.yml
+  - ../recipes/trainer/fit_1gpu.yml
   - ../recipes/models/celldiff_fm.yml
 
 model:
   init_args:
+    net_config:
+      input_spatial_size: [8, 512, 512]
     lr: 0.0001
     schedule: WarmupCosine
     num_log_steps: 10
 
 trainer:
   precision: bf16-mixed
-  max_epochs: 200
+  max_epochs: 10
   logger:
     init_args:
       name: CELLDiff_iPSC_SEC61B
@@ -38,8 +40,8 @@ data:
     source_channel: Phase3D
     target_channel: Structure
     split_ratio: 0.8
-    z_window_size: 8
-    batch_size: 4
+    z_window_size: 13
+    batch_size: 8
     num_workers: 8
     yx_patch_size: [512, 512]
     preload: true
@@ -49,8 +51,8 @@ data:
         init_args:
           keys: [Phase3D]
           level: fov_statistics
-          subtrahend: median
-          divisor: iqr
+          subtrahend: mean
+          divisor: std
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
           keys: [Structure]
@@ -59,13 +61,14 @@ data:
           divisor: iqr
     augmentations:
       # CPU: 2 foreground-weighted patches per FOV (amortizes zarr read).
-      # batch_size=4 → DataLoader loads 2 FOVs, each yields 2 patches = 4 effective.
-      # Oversized crop in YX (768) leaves border for affine rotation artifacts.
+      # batch_size=8 → DataLoader loads 4 FOVs, each yields 2 patches = 8 effective.
+      # Oversized crop in YX (624) leaves 112px border for affine artifacts (624→512).
+      # 624 = smallest FOV dimension, maximizes context for augmentation.
       - class_path: viscy_transforms.RandWeightedCropd
         init_args:
           keys: [Phase3D, Structure]
           w_key: Structure
-          spatial_size: [8, 768, 768]
+          spatial_size: [13, 624, 624]
           num_samples: 2
     gpu_augmentations:
       # GPU: affine on oversized patch → center crop to final 8×512×512.
@@ -104,7 +107,9 @@ data:
           sigma_y: [0.25, 0.75]
           sigma_z: [0.25, 0.75]
     val_gpu_augmentations:
-      - class_path: viscy_transforms.BatchedDivisibleCropd
+      # CellDiff requires exact input_spatial_size (fixed ViT positional embeddings).
+      # DivisibleCropd is insufficient — must center-crop to exact model input size.
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
         init_args:
           keys: [source, target]
-          k: [1, 64, 64]
+          roi_size: [8, 512, 512]
