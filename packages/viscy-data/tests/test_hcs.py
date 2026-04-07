@@ -1,4 +1,3 @@
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -144,41 +143,6 @@ def test_on_after_batch_transfer_target_2d(preprocessed_hcs_dataset):
     result = dm.on_after_batch_transfer(batch, 0)
     assert result["source"].shape == (2, 2, z_window_size, *yx_patch_size)
     assert result["target"].shape == (2, 2, 1, *yx_patch_size)
-
-
-def test_datamodule_caching(preprocessed_hcs_dataset):
-    """Test that prepare_data caches the dataset to a local directory."""
-    data_path = preprocessed_hcs_dataset
-    with open_ome_zarr(data_path) as dataset:
-        channel_names = dataset.channel_names
-    dm = HCSDataModule(
-        data_path=data_path,
-        source_channel=channel_names[:2],
-        target_channel=channel_names[2:],
-        z_window_size=5,
-        batch_size=2,
-        num_workers=0,
-        caching=True,
-    )
-    cache_path = dm.cache_path
-    if cache_path.exists():
-        shutil.rmtree(cache_path)
-    try:
-        assert not cache_path.exists()
-        dm.prepare_data()
-        assert cache_path.exists()
-        with open_ome_zarr(cache_path) as cached:
-            assert len(list(cached.positions())) == len(list(open_ome_zarr(data_path).positions()))
-        # Second call should skip (cache exists)
-        dm.prepare_data()
-        # Setup should use cached path
-        dm.setup(stage="fit")
-        for batch in dm.train_dataloader():
-            assert batch["source"].shape[1] == 2
-            break
-    finally:
-        if cache_path.exists():
-            shutil.rmtree(cache_path)
 
 
 @mark.parametrize("z_window_size", [1, 5])
@@ -437,88 +401,8 @@ def test_fg_mask_aligned_after_cpu_rand_spatial_crop():
 
 
 # ---------------------------------------------------------------------------
-# Partial zarr read (crop_at_read) tests
+# Preloaded FOV (mmap) tests
 # ---------------------------------------------------------------------------
-
-
-def test_partial_zarr_read(hcs_with_fg_mask):
-    """yx_read_size on SlidingWindowDataset produces correct output shapes."""
-    yx_read_size = (16, 16)
-    z_window_size = 4
-    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
-        positions = [pos for _, pos in ds.positions()]
-        dataset = SlidingWindowDataset(
-            positions=positions,
-            channels={"source": ["Phase"], "target": ["Fluorescence"]},
-            z_window_size=z_window_size,
-            yx_read_size=yx_read_size,
-        )
-        sample = dataset[0]
-    assert sample["source"].shape == (1, z_window_size, *yx_read_size)
-    assert sample["target"].shape == (1, z_window_size, *yx_read_size)
-
-
-def test_partial_zarr_read_with_fg_mask(hcs_with_fg_mask):
-    """yx_read_size reads fg_mask from the same spatial region."""
-    yx_read_size = (16, 16)
-    z_window_size = 4
-    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
-        positions = [pos for _, pos in ds.positions()]
-        dataset = SlidingWindowDataset(
-            positions=positions,
-            channels={"source": ["Phase"], "target": ["Fluorescence"]},
-            z_window_size=z_window_size,
-            fg_mask_key="fg_mask",
-            yx_read_size=yx_read_size,
-        )
-        sample = dataset[0]
-    assert "fg_mask" in sample
-    assert sample["fg_mask"].shape == (1, z_window_size, *yx_read_size)
-    assert set(sample["fg_mask"].unique().tolist()).issubset({0.0, 1.0})
-    # Verify spatial co-alignment: mask was built as (target > 0.5)
-    assert torch.equal((sample["target"] > 0.5).float(), sample["fg_mask"]), (
-        "fg_mask is not spatially aligned with target after partial zarr read"
-    )
-
-
-def test_yx_read_size_too_large_errors(hcs_with_fg_mask):
-    """IndexError when yx_read_size exceeds FOV spatial dimensions."""
-    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
-        positions = [pos for _, pos in ds.positions()]
-        with raises(IndexError, match="yx_read_size"):
-            SlidingWindowDataset(
-                positions=positions,
-                channels={"source": ["Phase"], "target": ["Fluorescence"]},
-                z_window_size=4,
-                yx_read_size=(64, 64),  # FOV is 32x32
-            )
-
-
-def test_crop_at_read_datamodule(hcs_with_fg_mask):
-    """HCSDataModule with crop_at_read=True produces correct batch shapes."""
-    yx_patch_size = [16, 16]
-    z_window_size = 4
-    dm = HCSDataModule(
-        data_path=hcs_with_fg_mask,
-        source_channel="Phase",
-        target_channel="Fluorescence",
-        z_window_size=z_window_size,
-        batch_size=2,
-        num_workers=0,
-        yx_patch_size=yx_patch_size,
-        split_ratio=0.5,
-        crop_at_read=True,
-        fg_mask_key="fg_mask",
-    )
-    dm.setup(stage="fit")
-    dm.trainer = MagicMock(training=True, validating=False)
-    for batch in dm.train_dataloader():
-        assert batch["source"].shape == (2, 1, z_window_size, *yx_patch_size)
-        assert batch["target"].shape == (2, 1, z_window_size, *yx_patch_size)
-        assert batch["fg_mask"].shape == (2, 1, z_window_size, *yx_patch_size)
-        result = dm.on_after_batch_transfer(batch, 0)
-        assert result["source"].shape == batch["source"].shape
-        break
 
 
 # ---------------------------------------------------------------------------
@@ -590,49 +474,143 @@ def test_val_gpu_augmentations_applied_during_sanity_checking(preprocessed_hcs_d
     assert result["target"].shape == (2, 2, z_window_size, *crop_yx)
 
 
-# ---------------------------------------------------------------------------
-# in_memory preloading tests
-# ---------------------------------------------------------------------------
-
-
-def test_sliding_window_in_memory(hcs_with_fg_mask):
-    """in_memory=True preloads FOVs and __getitem__ returns correct shapes."""
+def test_sliding_window_preloaded(hcs_with_fg_mask):
+    """preloaded_fovs bypasses zarr reads and returns correct shapes."""
     z_window_size = 4
     with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
         positions = [pos for _, pos in ds.positions()]
+        # Build plain tensors shaped (T, C, Z, Y, X) — channels: source + target
+        arr0 = positions[0]["0"]
+        T, C, Z, Y, X = arr0.frames, 2, arr0.slices, arr0.height, arr0.width
+        preloaded = [torch.rand(T, C, Z, Y, X) for _ in positions]
         dataset = SlidingWindowDataset(
             positions=positions,
             channels={"source": ["Phase"], "target": ["Fluorescence"]},
             z_window_size=z_window_size,
-            in_memory=True,
+            preloaded_fovs=preloaded,
         )
-        # _fov_data should be populated
-        assert hasattr(dataset, "_fov_data")
-        assert len(dataset._fov_data) == len(positions)
-        # Each preloaded array should be float32
-        for arr in dataset._fov_data:
-            assert arr.dtype == np.float32
-        # __getitem__ should return correct shapes
         sample = dataset[0]
-    assert sample["source"].shape == (1, z_window_size, 32, 32)
-    assert sample["target"].shape == (1, z_window_size, 32, 32)
+    assert sample["source"].shape == (1, z_window_size, Y, X)
+    assert sample["target"].shape == (1, z_window_size, Y, X)
 
 
-def test_sliding_window_in_memory_returns_copy(hcs_with_fg_mask):
-    """in_memory path returns a copy, not a view into the preloaded buffer."""
+def test_sliding_window_preloaded_returns_copy(hcs_with_fg_mask):
+    """preloaded path returns a clone, not a view into the preloaded buffer."""
     z_window_size = 4
     with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
         positions = [pos for _, pos in ds.positions()]
+        arr0 = positions[0]["0"]
+        T, C, Z, Y, X = arr0.frames, 2, arr0.slices, arr0.height, arr0.width
+        preloaded = [torch.rand(T, C, Z, Y, X) for _ in positions]
         dataset = SlidingWindowDataset(
             positions=positions,
             channels={"source": ["Phase"], "target": ["Fluorescence"]},
             z_window_size=z_window_size,
-            in_memory=True,
+            preloaded_fovs=preloaded,
         )
         sample = dataset[0]
         original_source = sample["source"].clone()
         # Mutate the returned tensor
         sample["source"].fill_(999.0)
-        # Fetch the same index again — should still match original
+        # Fetch the same index again — buffer should be unchanged
         sample2 = dataset[0]
     assert torch.equal(sample2["source"], original_source)
+
+
+def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
+    """prepare_data() + setup() + dataloader roundtrip with preload=True."""
+    pytest = __import__("pytest")
+    pytest.importorskip("tensordict")
+    z_window_size = 4
+    yx_patch_size = [32, 32]
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=z_window_size,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=yx_patch_size,
+        split_ratio=0.5,
+        preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+    dm.setup(stage="fit")
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape[1] == 1  # 1 source channel
+        assert batch["target"].shape[1] == 1  # 1 target channel
+        break
+    # .done marker must exist after prepare_data
+    assert (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
+    """prepare_data() is idempotent: skips preload if .done marker exists."""
+    pytest = __import__("pytest")
+    pytest.importorskip("tensordict")
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+    mmap_file = dm._mmap_cache_dir / "data.mmap"
+    mtime_after_first = mmap_file.stat().st_mtime
+    # Second call must not rewrite the buffer
+    dm.prepare_data()
+    assert mmap_file.stat().st_mtime == mtime_after_first
+
+
+def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
+    """Both parent and child processes can open the mmap buffer after prepare_data."""
+    import multiprocessing
+
+    pytest = __import__("pytest")
+    pytest.importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+    cache_dir = dm._mmap_cache_dir
+
+    result_queue = multiprocessing.Queue()
+
+    def _child(cache_dir, result_queue):
+        try:
+            from iohub import open_ome_zarr
+
+            with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+                positions = [pos for _, pos in ds.positions()]
+            arr_shape = positions[0]["0"].shape
+            T, C = arr_shape[0], 2
+            shape = (len(positions) * T, C, *arr_shape[2:])
+            buf = MemoryMappedTensor.from_filename(cache_dir / "data.mmap", dtype=torch.float32, shape=shape)
+            result_queue.put(("ok", tuple(buf.shape)))
+        except Exception as e:
+            result_queue.put(("err", str(e)))
+
+    proc = multiprocessing.Process(target=_child, args=(cache_dir, result_queue))
+    proc.start()
+    proc.join(timeout=30)
+    status, value = result_queue.get_nowait()
+    assert status == "ok", f"Child process failed: {value}"
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+    arr0 = positions[0]["0"]
+    expected_n = len(positions) * arr0.frames
+    assert value[0] == expected_n
