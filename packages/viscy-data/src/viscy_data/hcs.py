@@ -501,8 +501,9 @@ class HCSDataModule(LightningDataModule):
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
             if "fg_mask" in batch:
                 batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
-        # Validate spatial shape during training
-        if self.trainer and self.trainer.training and "source" in batch:
+        # Validate spatial shape during training (skip when gpu_augmentations
+        # handle cropping — they may intentionally reduce Z or YX).
+        if self.trainer and self.trainer.training and self._gpu_augmentations is None and "source" in batch:
             expected = (self.z_window_size, self.yx_patch_size[0], self.yx_patch_size[1])
             actual = tuple(batch["source"].shape[2:])
             if actual != expected:
@@ -511,7 +512,7 @@ class HCSDataModule(LightningDataModule):
                     f"{expected} (z_window_size={self.z_window_size}, "
                     f"yx_patch_size={list(self.yx_patch_size)}). "
                     f"Configure gpu_augmentations with a spatial crop "
-                    f"to match yx_patch_size."
+                    f"or enable crop_at_read to crop at zarr read time."
                 )
         return batch
 
