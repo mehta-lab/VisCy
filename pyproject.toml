@@ -21,7 +21,7 @@ dynamic = [ "version" ]
 
 dependencies = [
   "anndata>=0.12.2",
-  "iohub[tensorstore]>=0.3a2",
+  "iohub[tensorstore]>=0.3a2,<0.3",
   "jsonargparse[signatures]>=4.20.1",
   "kornia",
   "lightning>=2.3",
