@@ -22,6 +22,10 @@ trainer:
   enable_model_summary: false
   inference_mode: true
   use_distributed_sampler: false
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      entity: computational_imaging
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -100,7 +104,7 @@ data:
       - class_path: viscy_transforms.BatchedScaleIntensityRangePercentilesd
         init_args:
           keys: [channel_0]
-          lower: 50
+          lower: 1
           upper: 99
           b_min: 0.0
           b_max: 1.0

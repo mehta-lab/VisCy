@@ -23,7 +23,7 @@ export RUN_NAME="3d-z32-256to228to160-ntxent-t0p2"
 export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2.yml"
 
 # ── Resume (uncomment to continue from checkpoint) ────────────────────
-# export CKPT_PATH="/hpc/projects/organelle_phenotyping/models/DynaCLR-3D-BagOfChannels-v2/3d-z32-256to228to160-ntxent-t0p2/checkpoints/last.ckpt"
-# export WANDB_RUN_ID=""
+export CKPT_PATH="/hpc/projects/organelle_phenotyping/models/DynaCLR-3D-BagOfChannels-v2/3d-z32-256to228to160-ntxent-t0p2/DynaCLR-3D-BagOfChannels-v2/20260402-185442/checkpoints/last.ckpt"
+export WANDB_RUN_ID="20260402-185442"
 
 source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh

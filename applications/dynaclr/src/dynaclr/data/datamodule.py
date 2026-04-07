@@ -188,6 +188,9 @@ class MultiExperimentDataModule(LightningDataModule):
         label_columns: dict[str, str] | None = None,
         max_border_shift: int = -1,
         shuffle_val: bool = False,
+        pin_memory: bool = False,
+        prefetch_factor: int | None = None,
+        buffer_size: int = 1,
     ) -> None:
         super().__init__()
 
@@ -240,6 +243,9 @@ class MultiExperimentDataModule(LightningDataModule):
         self.label_columns = label_columns
         self.max_border_shift = max_border_shift
         self.shuffle_val = shuffle_val
+        self.pin_memory = pin_memory
+        self.prefetch_factor = prefetch_factor
+        self.buffer_size = buffer_size
 
         # Create ChannelDropout module
         self.channel_dropout = ChannelDropout(
@@ -300,7 +306,6 @@ class MultiExperimentDataModule(LightningDataModule):
             self._augmentation_transform = Compose(
                 self.normalizations + self.augmentations + [self._train_final_crop()]
             )
-            self._no_augmentation_transform = Compose(self.normalizations + [self._val_final_crop()])
 
             _logger.info(
                 "MultiExperimentDataModule setup: %d train anchors, %d val anchors",
@@ -478,8 +483,11 @@ class MultiExperimentDataModule(LightningDataModule):
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
+            buffer_size=self.buffer_size,
             batch_sampler=sampler,
             num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.prefetch_factor,
             collate_fn=lambda x: x,
         )
 
@@ -490,10 +498,13 @@ class MultiExperimentDataModule(LightningDataModule):
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
+            buffer_size=self.buffer_size,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=self.shuffle_val,
             drop_last=False,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.prefetch_factor,
             collate_fn=lambda x: x,
         )
 
@@ -503,13 +514,6 @@ class MultiExperimentDataModule(LightningDataModule):
 
     def _train_final_crop(self) -> BatchedCenterSpatialCropd:
         """Center crop from extraction size to model input size (training)."""
-        return BatchedCenterSpatialCropd(
-            keys=self._channel_names,
-            roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),
-        )
-
-    def _val_final_crop(self) -> BatchedCenterSpatialCropd:
-        """Center crop from extraction size to model input size (validation)."""
         return BatchedCenterSpatialCropd(
             keys=self._channel_names,
             roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),
@@ -533,11 +537,7 @@ class MultiExperimentDataModule(LightningDataModule):
         if isinstance(batch, Tensor):
             return batch
 
-        # Determine transform: augmentation for training, no-aug for val
-        if self.trainer and self.trainer.validating:
-            transform = self._no_augmentation_transform
-        else:
-            transform = self._augmentation_transform
+        transform = self._augmentation_transform
 
         for key in ["anchor", "positive", "negative"]:
             if key in batch:
@@ -575,10 +575,9 @@ class MultiExperimentDataModule(LightningDataModule):
                 if norm_meta_key in batch:
                     del batch[norm_meta_key]
 
-        # Apply ChannelDropout to anchor and positive (training only)
-        if not (self.trainer and self.trainer.validating):
-            for key in ["anchor", "positive"]:
-                if key in batch:
-                    batch[key] = self.channel_dropout(batch[key])
+        # Apply ChannelDropout to anchor and positive
+        for key in ["anchor", "positive"]:
+            if key in batch:
+                batch[key] = self.channel_dropout(batch[key])
 
         return batch
