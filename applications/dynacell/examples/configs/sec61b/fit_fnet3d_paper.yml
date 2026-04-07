@@ -47,7 +47,7 @@ data:
     batch_size: 48
     num_workers: 8
     yx_patch_size: [64, 64]
-    in_memory: true
+    preload: true
     persistent_workers: true
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled

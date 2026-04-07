@@ -1,42 +1,35 @@
-# UNeXt2 (VSCyto3D) on SEC61B — matches published VSCyto3D training settings.
-# Augmentation parameters from vs_test/finetune_3d.py (actual training script).
-# Architecture: convnextv2_tiny, z=15, MixedLoss(L1+DSSIM).
-# Adapted for single-channel ER target on single GPU.
-# Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_unext2.yml
+# CellDiff flow-matching on AICS iPSC SEC61B (ER).
+# Data pipeline aligned with VSCyto3D SEC61B config (same dataset, same
+# augmentation strategy). Architecture: CELLDiffNet with ViT bottleneck,
+# z=8, yx=512, Linear transport, velocity prediction.
+# Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_celldiff.yml
 base:
-  - ../recipes/trainer/fit_1gpu.yml
-  - ../recipes/models/unext2_3d.yml
+  - ../recipes/trainer/fit_fm_4gpu.yml
+  - ../recipes/models/celldiff_fm.yml
 
 model:
   init_args:
-    loss_function:
-      class_path: viscy_utils.losses.MixedLoss
-      init_args:
-        l1_alpha: 0.5
-        l2_alpha: 0.0
-        ms_dssim_alpha: 0.5
-    lr: 0.0002
+    lr: 0.0001
     schedule: WarmupCosine
+    num_log_steps: 10
 
 trainer:
-  devices: 4
-  precision: 16-mixed
+  precision: bf16-mixed
   max_epochs: 200
   logger:
     init_args:
-      name: UNeXt2_iPSC_SEC61B
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2
+      name: CELLDiff_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/celldiff
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        monitor: loss/validate
         every_n_epochs: 1
-        save_top_k: 5
+        save_top_k: -1
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/celldiff/checkpoints
 
 data:
   class_path: viscy_data.hcs.HCSDataModule
@@ -45,10 +38,10 @@ data:
     source_channel: Phase3D
     target_channel: Structure
     split_ratio: 0.8
-    z_window_size: 15
-    batch_size: 8
+    z_window_size: 8
+    batch_size: 4
     num_workers: 8
-    yx_patch_size: [384, 384]
+    yx_patch_size: [512, 512]
     preload: true
     persistent_workers: true
     normalizations:
@@ -56,8 +49,8 @@ data:
         init_args:
           keys: [Phase3D]
           level: fov_statistics
-          subtrahend: mean
-          divisor: std
+          subtrahend: median
+          divisor: iqr
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
           keys: [Structure]
@@ -66,16 +59,16 @@ data:
           divisor: iqr
     augmentations:
       # CPU: 2 foreground-weighted patches per FOV (amortizes zarr read).
-      # batch_size=8 → DataLoader loads 4 FOVs, each yields 2 patches = 8 effective.
+      # batch_size=4 → DataLoader loads 2 FOVs, each yields 2 patches = 4 effective.
+      # Oversized crop in YX (768) leaves border for affine rotation artifacts.
       - class_path: viscy_transforms.RandWeightedCropd
         init_args:
           keys: [Phase3D, Structure]
           w_key: Structure
-          spatial_size: [20, 600, 600]
+          spatial_size: [8, 768, 768]
           num_samples: 2
     gpu_augmentations:
-      # GPU: affine on oversized patch → center crop to final size.
-      # Border pixels prevent zero-padded rotation artifacts.
+      # GPU: affine on oversized patch → center crop to final 8×512×512.
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
           keys: [source, target]
@@ -86,7 +79,7 @@ data:
       - class_path: viscy_transforms.BatchedCenterSpatialCropd
         init_args:
           keys: [source, target]
-          roi_size: [15, 384, 384]
+          roi_size: [8, 512, 512]
       - class_path: viscy_transforms.BatchedRandAdjustContrastd
         init_args:
           keys: [source]
