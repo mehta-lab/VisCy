@@ -7,6 +7,7 @@ for 3D microscopy data, simulating natural tissue deformations.
 import torch
 from monai.transforms import MapTransform, RandomizableTransform
 from torch import Tensor
+from torch.nn.functional import conv3d
 from typing_extensions import Iterable
 
 __all__ = ["BatchedRand3DElasticd"]
@@ -29,10 +30,10 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
     magnitude_range : tuple[float, float]
         Range for the displacement magnitude. Higher values produce
         stronger deformations.
-    spatial_size : tuple[int, int, int] | int | None
-        Target spatial size. If None, uses input size. Default: None.
     prob : float
-        Probability of applying the transform. Default: 0.1.
+        Probability of applying the transform to the entire batch.
+        When triggered, all samples in the batch are deformed with
+        independent random fields. Default: 0.1.
     mode : str
         Interpolation mode for grid sampling. Options: "bilinear", "nearest".
         Default: "bilinear".
@@ -59,12 +60,13 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
     >>> output = elastic(sample)
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: str | Iterable[str],
         sigma_range: tuple[float, float],
         magnitude_range: tuple[float, float],
-        spatial_size: tuple[int, int, int] | int | None = None,
         prob: float = 0.1,
         mode: str = "bilinear",
         padding_mode: str = "reflection",
@@ -74,51 +76,42 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         RandomizableTransform.__init__(self, prob)
         self.sigma_range = sigma_range
         self.magnitude_range = magnitude_range
-        self.spatial_size = spatial_size
         self.mode = mode
         self.padding_mode = padding_mode
 
     def _generate_elastic_field(self, shape: torch.Size, device: torch.device) -> Tensor:
         """Generate batched elastic deformation field."""
         batch_size = shape[0]
-        spatial_dims = shape[2:]  # Skip batch and channel
-
-        # Generate random displacement field for each sample in batch
+        spatial_dims = shape[2:]
         displacement_fields = []
 
-        for b in range(batch_size):
-            if self.R.rand() < self.prob:
-                # Random sigma and magnitude for this sample
-                sigma = self.R.uniform(self.sigma_range[0], self.sigma_range[1])
-                magnitude = self.R.uniform(self.magnitude_range[0], self.magnitude_range[1])
+        for _ in range(batch_size):
+            sigma = self.R.uniform(self.sigma_range[0], self.sigma_range[1])
+            magnitude = self.R.uniform(self.magnitude_range[0], self.magnitude_range[1])
 
-                # Generate random field
-                random_field = torch.randn((3,) + spatial_dims, device=device) * magnitude
+            random_field = torch.randn((3,) + spatial_dims, device=device) * magnitude
 
-                # Smooth with Gaussian kernel (simplified version)
-                # In practice, you'd use proper Gaussian smoothing
-                kernel_size = int(sigma * 6) | 1  # Ensure odd
-                if kernel_size > 1:
-                    from torch.nn.functional import conv3d
+            # Smooth with box filter approximation of Gaussian.
+            kernel_size = int(sigma * 6) | 1  # Ensure odd
+            if kernel_size > 1:
+                kernel = torch.ones(1, 1, kernel_size, kernel_size, kernel_size, device=device) / (kernel_size**3)
+                for dim in range(3):
+                    random_field[dim : dim + 1] = conv3d(
+                        random_field[dim : dim + 1].unsqueeze(0),
+                        kernel,
+                        padding=kernel_size // 2,
+                    ).squeeze(0)
 
-                    # Simple box filter approximation
-                    kernel = torch.ones(1, 1, kernel_size, kernel_size, kernel_size, device=device) / (kernel_size**3)
-                    for dim in range(3):
-                        random_field[dim : dim + 1] = conv3d(
-                            random_field[dim : dim + 1].unsqueeze(0),
-                            kernel,
-                            padding=kernel_size // 2,
-                        ).squeeze(0)
-
-                displacement_fields.append(random_field)
-            else:
-                # No deformation
-                displacement_fields.append(torch.zeros((3,) + spatial_dims, device=device))
+            displacement_fields.append(random_field)
 
         return torch.stack(displacement_fields)
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         """Apply elastic deformation to the sample.
+
+        The displacement field and sampling grid are generated once from the
+        first key and reused for all keys so that paired inputs (e.g.
+        source/target) receive identical spatial deformations.
 
         Parameters
         ----------
@@ -130,36 +123,43 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         dict[str, Tensor]
             Dictionary with deformed tensors for specified keys.
         """
-        self.randomize(None)
         d = dict(sample)
+        self.randomize(None)
+        if not self._do_transform:
+            return d
+        # Find the first present key; return unchanged if none match.
+        first_key = self.first_key(d)
+        if first_key not in d:
+            return d
+        ref = d[first_key]
 
+        # Generate displacement field and sampling grid once.
+        # displacement has shape (B, 3, D, H, W) where axis-1 is (D, H, W) order.
+        displacement = self._generate_elastic_field(ref.shape, ref.device)
+        coords = torch.meshgrid(
+            torch.linspace(-1, 1, ref.shape[2], device=ref.device),
+            torch.linspace(-1, 1, ref.shape[3], device=ref.device),
+            torch.linspace(-1, 1, ref.shape[4], device=ref.device),
+            indexing="ij",
+        )
+        # grid_sample expects grid[..., 0]=X(W), [..1]=Y(H), [..2]=Z(D).
+        grid = torch.stack([coords[2], coords[1], coords[0]], dim=-1)
+        grid = grid.unsqueeze(0).repeat(ref.shape[0], 1, 1, 1, 1)
+        # Map displacement (D=0, H=1, W=2) → grid (X=0, Y=1, Z=2).
+        # With align_corners=True, 1 voxel = 2/(size-1) in normalized coords.
+        depth, height, width = ref.shape[2], ref.shape[3], ref.shape[4]
+        grid[..., 0] += displacement[:, 2] * (2.0 / max(width - 1, 1))  # W disp → X
+        grid[..., 1] += displacement[:, 1] * (2.0 / max(height - 1, 1))  # H disp → Y
+        grid[..., 2] += displacement[:, 0] * (2.0 / max(depth - 1, 1))  # D disp → Z
+
+        # Apply the same grid to every key.
         for key in self.key_iterator(d):
-            data = d[key]
-            if self.R.rand() < self.prob:
-                # Apply elastic deformation using grid_sample
-                displacement = self._generate_elastic_field(data.shape, data.device)
-
-                # Create sampling grid
-                coords = torch.meshgrid(
-                    torch.linspace(-1, 1, data.shape[2], device=data.device),
-                    torch.linspace(-1, 1, data.shape[3], device=data.device),
-                    torch.linspace(-1, 1, data.shape[4], device=data.device),
-                    indexing="ij",
-                )
-                grid = torch.stack([coords[2], coords[1], coords[0]], dim=-1)  # xyz order
-                grid = grid.unsqueeze(0).repeat(data.shape[0], 1, 1, 1, 1)
-
-                # Add displacement (normalize to [-1, 1] range)
-                for i in range(3):
-                    grid[..., i] += displacement[:, i] / data.shape[2 + i] * 2
-
-                # Apply transformation
-                d[key] = torch.nn.functional.grid_sample(
-                    data,
-                    grid,
-                    mode=self.mode,
-                    padding_mode=self.padding_mode,
-                    align_corners=True,
-                )
+            d[key] = torch.nn.functional.grid_sample(
+                d[key],
+                grid,
+                mode=self.mode,
+                padding_mode=self.padding_mode,
+                align_corners=True,
+            )
 
         return d

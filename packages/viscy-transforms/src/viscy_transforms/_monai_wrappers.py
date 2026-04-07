@@ -69,6 +69,8 @@ __all__ = [
 
 
 class Decollated(_Decollated):
+    is_spatial = False
+
     """Decollate batch data back into a list of samples.
 
     Wrapper around MONAI's Decollated transform with explicit constructor
@@ -110,6 +112,8 @@ class Decollated(_Decollated):
 
 
 class ToDeviced(_ToDeviced):
+    is_spatial = False
+
     """Move data to a specified device.
 
     Wrapper around MONAI's ToDeviced transform with explicit constructor
@@ -159,6 +163,8 @@ class RandWeightedCropd(_RandWeightedCropd):
     --------
     monai.transforms.RandWeightedCropd : Parent MONAI transform.
     """
+
+    is_spatial = True
 
     def __init__(
         self,
@@ -211,6 +217,8 @@ class RandAffined(_RandAffined):
     monai.transforms.RandAffined : Parent MONAI transform.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -231,6 +239,8 @@ class RandAffined(_RandAffined):
 
 
 class RandAdjustContrastd(_RandAdjustContrastd):
+    is_spatial = False
+
     """Randomly adjust image contrast using gamma correction.
 
     Wrapper around MONAI's RandAdjustContrastd transform with explicit
@@ -265,6 +275,8 @@ class RandAdjustContrastd(_RandAdjustContrastd):
 
 
 class RandScaleIntensityd(_RandScaleIntensityd):
+    is_spatial = False
+
     """Randomly scale image intensity by a multiplicative factor.
 
     Wrapper around MONAI's RandScaleIntensityd transform with explicit
@@ -299,6 +311,8 @@ class RandScaleIntensityd(_RandScaleIntensityd):
 
 
 class RandGaussianNoised(_RandGaussianNoised):
+    is_spatial = False
+
     """Randomly add Gaussian noise to image data.
 
     Wrapper around MONAI's RandGaussianNoised transform with explicit
@@ -336,6 +350,8 @@ class RandGaussianNoised(_RandGaussianNoised):
 
 
 class RandGaussianSmoothd(_RandGaussianSmoothd):
+    is_spatial = False
+
     """Randomly apply Gaussian smoothing (blur) to image data.
 
     Wrapper around MONAI's RandGaussianSmoothd transform with explicit
@@ -386,6 +402,8 @@ class RandGaussianSmoothd(_RandGaussianSmoothd):
 
 
 class ScaleIntensityRangePercentilesd(_ScaleIntensityRangePercentilesd):
+    is_spatial = False
+
     """Scale intensity values based on percentile range.
 
     Wrapper around MONAI's ScaleIntensityRangePercentilesd transform with
@@ -472,6 +490,8 @@ class RandSpatialCropd(_RandSpatialCropd):
     CenterSpatialCropd : Deterministic center cropping.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -508,6 +528,8 @@ class CenterSpatialCropd(_CenterSpatialCropd):
     RandSpatialCropd : Random position cropping.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -540,6 +562,8 @@ class RandFlipd(_RandFlipd):
     monai.transforms.RandFlipd : Parent MONAI transform.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -551,6 +575,8 @@ class RandFlipd(_RandFlipd):
 
 
 class NormalizeIntensityd(_NormalizeIntensityd):
+    is_spatial = False
+
     """Normalize intensity values using mean and standard deviation.
 
     Wrapper around MONAI's NormalizeIntensityd transform with explicit

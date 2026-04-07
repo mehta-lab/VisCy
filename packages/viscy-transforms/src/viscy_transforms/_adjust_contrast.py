@@ -106,6 +106,8 @@ class BatchedRandAdjustContrastd(MapTransform, RandomizableTransform):
         Whether to allow missing keys in the dictionary. Default is False.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],
@@ -139,7 +141,7 @@ class BatchedRandAdjustContrastd(MapTransform, RandomizableTransform):
         """
         # Use the first tensor to generate random parameters, then apply
         # the same random state to all specified keys for consistency
-        first_key = next(iter(sample.keys()))
+        first_key = self.keys[0]
         self.contrast_transform.randomize(sample[first_key])
 
         for key in self.key_iterator(sample):

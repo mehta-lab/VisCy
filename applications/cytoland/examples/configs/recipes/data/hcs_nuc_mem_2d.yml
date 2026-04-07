@@ -1,0 +1,19 @@
+# Data recipe: HCSDataModule for Phase3D → Nuclei + Membrane, 2D (z=1).
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: #TODO
+    source_channel: Phase3D
+    target_channel: [Nuclei, Membrane]
+    z_window_size: 1
+    split_ratio: 0.8
+    batch_size: 32
+    num_workers: 8
+    yx_patch_size: [256, 256]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D, Nuclei, Membrane]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std

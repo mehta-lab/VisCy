@@ -11,6 +11,7 @@ from torchmetrics.functional.classification import binary_accuracy, binary_f1_sc
 
 from viscy_models.contrastive import ContrastiveEncoder
 from viscy_utils.log_images import render_images
+from viscy_utils.tensor_utils import to_numpy
 
 
 class ClassificationPredictionWriter(BasePredictionWriter):
@@ -27,7 +28,7 @@ class ClassificationPredictionWriter(BasePredictionWriter):
         for prediction in predictions:
             for key, value in prediction.items():
                 if isinstance(value, torch.Tensor):
-                    prediction[key] = value.detach().cpu().numpy().flatten()
+                    prediction[key] = to_numpy(value).flatten()
             all_predictions.append(pd.DataFrame(prediction))
         pd.concat(all_predictions).to_csv(self.output_path, index=False)
 
@@ -83,7 +84,7 @@ class ClassificationModule(LightningModule):
             on_step=False,
             on_epoch=True,
         )
-        return loss, x[0, 0, x.shape[2] // 2].detach().cpu().numpy()
+        return loss, to_numpy(x[0, 0, x.shape[2] // 2])
 
     def training_step(self, batch, batch_idx: int):  # noqa: D102
         loss, example = self._fit_step(batch, "train", loss_on_step=True)

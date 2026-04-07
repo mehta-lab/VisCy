@@ -7,6 +7,7 @@ from viscy_transforms._crop import (
     BatchedCenterSpatialCropd,
     BatchedRandSpatialCrop,
     BatchedRandSpatialCropd,
+    BatchedRandWeightedCropd,
 )
 
 
@@ -367,3 +368,214 @@ def test_batched_center_spatial_crop_vs_monai_2d_loop():
             assert torch.allclose(monai_result, batch_single_result, rtol=1e-6, atol=1e-6), (
                 f"2D Value mismatch for config {(batch_size, channels, H, W, roi_size)} at batch {i}"
             )
+
+
+# --- BatchedRandWeightedCropd tests ---
+
+
+def test_batched_rand_weighted_cropd_shape():
+    """Test basic output shape correctness."""
+    data = {
+        "source": torch.rand(2, 1, 8, 64, 64),
+        "target": torch.rand(2, 1, 8, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 32, 32])
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 8, 32, 32)
+    assert output["target"].shape == (2, 1, 8, 32, 32)
+
+
+def test_batched_rand_weighted_cropd_multi_key_consistency():
+    """Test that all keys receive the same crop coordinates."""
+    base = torch.rand(2, 1, 8, 64, 64)
+    data = {"source": base.clone(), "target": base.clone()}
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 32, 32])
+    output = transform(data)
+    assert torch.equal(output["source"], output["target"])
+
+
+def test_batched_rand_weighted_cropd_weight_bias():
+    """Test that a delta-function weight forces a deterministic crop position."""
+    # Single nonzero pixel at (b, 0, 0, 0, 0) — only the (y=0, x=0) crop window includes it
+    weight = torch.zeros(2, 1, 4, 8, 8)
+    weight[:, 0, 0, 0, 0] = 1.0
+    source = torch.rand(2, 1, 4, 8, 8)
+
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[4, 4, 4])
+    for _ in range(50):
+        data = {"source": source.clone(), "target": weight.clone()}
+        output = transform(data)
+        # The crop must start at y=0, x=0 — verify by checking the output matches input[..., :4, :4]
+        expected = source[:, :, :, :4, :4]
+        assert torch.equal(output["source"], expected)
+
+
+def test_batched_rand_weighted_cropd_all_zero_weights():
+    """Test uniform fallback when weight map is all zeros."""
+    data = {
+        "source": torch.rand(2, 1, 8, 64, 64),
+        "target": torch.zeros(2, 1, 8, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 32, 32])
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 8, 32, 32)
+    assert output["target"].shape == (2, 1, 8, 32, 32)
+
+
+def test_batched_rand_weighted_cropd_crop_too_large_yx():
+    """Test that oversized YX crop raises ValueError."""
+    data = {
+        "source": torch.rand(2, 1, 8, 64, 64),
+        "target": torch.rand(2, 1, 8, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 128, 128])
+    with pytest.raises(ValueError, match="exceeds input YX"):
+        transform(data)
+
+
+def test_batched_rand_weighted_cropd_crop_too_large_z():
+    """Test that oversized Z crop raises ValueError."""
+    data = {
+        "source": torch.rand(2, 1, 8, 64, 64),
+        "target": torch.rand(2, 1, 8, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[16, 32, 32])
+    with pytest.raises(ValueError, match="exceeds input Z"):
+        transform(data)
+
+
+def test_batched_rand_weighted_cropd_allow_missing_keys():
+    """Test that missing keys are skipped with allow_missing_keys=True."""
+    data = {"source": torch.rand(2, 1, 8, 64, 64), "target": torch.rand(2, 1, 8, 64, 64)}
+    transform = BatchedRandWeightedCropd(
+        keys=["source", "missing"], w_key="target", spatial_size=[8, 32, 32], allow_missing_keys=True
+    )
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 8, 32, 32)
+    assert "missing" not in output
+
+
+def test_batched_rand_weighted_cropd_z_crop():
+    """Test Z dimension cropping when crop_z < Z."""
+    data = {
+        "source": torch.rand(2, 1, 16, 64, 64),
+        "target": torch.rand(2, 1, 16, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 32, 32])
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 8, 32, 32)
+    assert output["target"].shape == (2, 1, 8, 32, 32)
+
+
+@pytest.mark.parametrize("compose", [True, False])
+def test_batched_rand_weighted_cropd_compose(compose):
+    """Test that the transform works inside Compose."""
+    data = {
+        "source": torch.rand(2, 1, 8, 64, 64),
+        "target": torch.rand(2, 1, 8, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 32, 32])
+    if compose:
+        transform = Compose([transform])
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 8, 32, 32)
+
+
+def test_batched_rand_weighted_cropd_5d_required():
+    """Test that non-5D input raises ValueError."""
+    data = {
+        "source": torch.rand(2, 1, 64, 64),
+        "target": torch.rand(2, 1, 64, 64),
+    }
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[8, 32, 32])
+    with pytest.raises(ValueError, match="requires 5D input"):
+        transform(data)
+
+
+def test_batched_rand_weighted_cropd_multichannel_sum():
+    """Test that sum-over-C at one location works with multi-channel weights."""
+    weight = torch.zeros(2, 2, 4, 8, 8)
+    weight[:, 0, 0, 0, 0] = 5.0  # channel 0 contributes at (0, 0)
+    weight[:, 1, 0, 0, 0] = 5.0  # channel 1 contributes at same location
+    source = torch.rand(2, 2, 4, 8, 8)
+
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[4, 4, 4])
+    for _ in range(50):
+        data = {"source": source.clone(), "target": weight.clone()}
+        output = transform(data)
+        expected = source[:, :, :, :4, :4]
+        assert torch.equal(output["source"], expected)
+
+
+def test_batched_rand_weighted_cropd_multichannel_competing_locations():
+    """Test that higher total weight across channels wins over lower.
+
+    Place deltas at opposite corners so each falls in exactly one crop
+    window. Channel 0 puts weak signal at (0, 0, 0, 0) — only window
+    (y=0, x=0). Channel 1 puts strong signal at (0, 0, 7, 7) — only
+    window (y=4, x=4). After sum-over-C the strong corner should win
+    ~10/(10+1) = 91% of the time.
+    """
+    weight = torch.zeros(1, 2, 4, 8, 8)
+    weight[:, 0, 0, 0, 0] = 1.0  # weak signal at top-left corner
+    weight[:, 1, 0, 7, 7] = 10.0  # strong signal at bottom-right corner
+    source = torch.rand(1, 2, 4, 8, 8)
+
+    transform = BatchedRandWeightedCropd(keys=["source", "target"], w_key="target", spatial_size=[4, 4, 4])
+    bottom_right_count = 0
+    n_trials = 200
+    for _ in range(n_trials):
+        data = {"source": source.clone(), "target": weight.clone()}
+        output = transform(data)
+        expected_br = source[:, :, :, 4:8, 4:8]
+        if torch.equal(output["source"], expected_br):
+            bottom_right_count += 1
+    # Bottom-right has 10x the weight → P ≈ 91%, threshold at 80%
+    assert bottom_right_count > n_trials * 0.8
+
+
+# --- BatchedDivisibleCropd tests ---
+
+
+def test_batched_divisible_cropd_happy_path():
+    """Test that BatchedDivisibleCropd crops to the nearest smaller multiple of k."""
+    from viscy_transforms import BatchedDivisibleCropd
+
+    data = {
+        "source": torch.rand(2, 1, 32, 64, 48),
+        "target": torch.rand(2, 1, 32, 64, 48),
+    }
+    transform = BatchedDivisibleCropd(keys=["source", "target"], k=16)
+    output = transform(data)
+    assert output["source"].shape == (2, 1, 32, 64, 48)
+    assert output["target"].shape == (2, 1, 32, 64, 48)
+
+
+def test_batched_divisible_cropd_noop():
+    """Test that already-divisible spatial dims pass through unchanged."""
+    from viscy_transforms import BatchedDivisibleCropd
+
+    data = {
+        "source": torch.rand(2, 1, 32, 64, 64),
+        "target": torch.rand(2, 1, 32, 64, 64),
+    }
+    transform = BatchedDivisibleCropd(keys=["source", "target"], k=16)
+    output = transform(data)
+    # Spatial dims already divisible by 16 — data should be returned as-is
+    assert output["source"].shape == (2, 1, 32, 64, 64)
+    assert output["target"].shape == (2, 1, 32, 64, 64)
+    assert torch.equal(output["source"], data["source"])
+    assert torch.equal(output["target"], data["target"])
+
+
+def test_batched_divisible_cropd_zero_size_error():
+    """Test that k larger than spatial dims raises ValueError."""
+    from viscy_transforms import BatchedDivisibleCropd
+
+    data = {
+        "source": torch.rand(2, 1, 32, 32, 32),
+        "target": torch.rand(2, 1, 32, 32, 32),
+    }
+    transform = BatchedDivisibleCropd(keys=["source", "target"], k=64)
+    with pytest.raises(ValueError, match="zero-size dimension"):
+        transform(data)

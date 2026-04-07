@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from monai.data import get_track_meta, set_track_meta
 
 from cytoland.engine import AugmentedPredictionVSUNet, FcmaeUNet, VSUNet
 
@@ -54,13 +55,57 @@ def test_vsunet_state_dict_keys(synth_dims):
         model_config={"in_channels": synth_dims["c"], "out_channels": 1, "in_stack_depth": synth_dims["d"]},
     )
     state_dict = model.state_dict()
-    # All keys should start with "model." since VSUNet stores the architecture as self.model
     for key in state_dict:
         assert key.startswith("model."), f"Unexpected key prefix: {key}"
-    # Verify some known keys exist (from UNeXt2 architecture)
     key_names = set(state_dict.keys())
     assert any("model." in k for k in key_names), "No model keys found"
     assert len(key_names) > 0, "Empty state dict"
+
+
+def test_fnet3d_init():
+    """Verify VSUNet instantiates with FNet3D architecture."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    assert model.model is not None
+
+
+def test_fnet3d_forward():
+    """Verify FNet3D forward pass produces correct output shape."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    model.eval()
+    x = torch.randn(2, 1, 4, 16, 16)
+    with torch.no_grad():
+        y = model(x)
+    assert y.shape == (2, 1, 4, 16, 16)
+
+
+def test_fnet3d_predict_start():
+    """Verify on_predict_start works with FNet3D (requires num_blocks)."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    model.on_predict_start()
+    assert model._predict_pad is not None
+
+
+def test_fnet3d_predict_sliding_windows():
+    """Verify FNet wrapper exposes out_stack_depth for sliding window prediction."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    vs = AugmentedPredictionVSUNet(model=model.model)
+    vs.eval()
+    x = torch.randn(1, 1, 8, 16, 16)
+    with torch.inference_mode():
+        output = vs.predict_sliding_windows(x, out_channel=1, step=1)
+    assert output.shape == (1, 1, 8, 16, 16)
 
 
 def test_mixed_loss_integration(synthetic_batch, synth_dims):
@@ -97,15 +142,20 @@ def test_no_old_imports():
 
 def test_augmented_prediction_optional_transforms(synth_dims):
     """Verify AugmentedPredictionVSUNet works without specifying transforms."""
-    model = VSUNet(
-        architecture="UNeXt2",
-        model_config={"in_channels": synth_dims["c"], "out_channels": 1, "in_stack_depth": synth_dims["d"]},
-    )
-    vs = AugmentedPredictionVSUNet(model=model.model)
-    vs.eval()
-    x = torch.randn(synth_dims["b"], synth_dims["c"], synth_dims["d"], 64, 64)
-    with torch.inference_mode():
-        output = vs._predict_with_tta(x)
+    previous_track_meta = get_track_meta()
+    set_track_meta(False)
+    try:
+        model = VSUNet(
+            architecture="UNeXt2",
+            model_config={"in_channels": synth_dims["c"], "out_channels": 1, "in_stack_depth": synth_dims["d"]},
+        )
+        vs = AugmentedPredictionVSUNet(model=model.model)
+        vs.eval()
+        x = torch.randn(synth_dims["b"], synth_dims["c"], synth_dims["d"], 64, 64)
+        with torch.inference_mode():
+            output = vs._predict_with_tta(x)
+    finally:
+        set_track_meta(previous_track_meta)
     assert output.shape[0] == synth_dims["b"]
     assert output.shape[1] == 1
 

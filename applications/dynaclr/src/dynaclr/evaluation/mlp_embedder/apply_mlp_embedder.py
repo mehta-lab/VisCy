@@ -7,7 +7,6 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import anndata as ad
 import click
@@ -18,6 +17,7 @@ from pydantic import BaseModel, Field
 from viscy_models.components.heads import MLP
 from viscy_utils.cli_utils import load_config
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
+from viscy_utils.tensor_utils import to_numpy
 
 
 class MlpEmbedderApplyConfig(BaseModel):
@@ -29,7 +29,7 @@ class MlpEmbedderApplyConfig(BaseModel):
         Path to the AnnData zarr store with embeddings in ``.X``.
     model_path : str
         Path to the ``.pt`` checkpoint saved by train-mlp-embedder.
-    output_path : Optional[str]
+    output_path : str | None
         Path to write output zarr. When ``None``, writes back to ``embeddings_path``.
     batch_size : int
         Inference batch size.
@@ -37,7 +37,7 @@ class MlpEmbedderApplyConfig(BaseModel):
 
     embeddings_path: str = Field(..., min_length=1)
     model_path: str = Field(..., min_length=1)
-    output_path: Optional[str] = Field(default=None)
+    output_path: str | None = Field(default=None)
     batch_size: int = Field(default=256, gt=0)
 
 
@@ -96,7 +96,7 @@ def main(config: Path) -> None:
             batch = X_t[i : i + cfg.batch_size].to(device)
             reps.append(model.encode(batch).cpu())
 
-    X_mlp = torch.cat(reps, dim=0).numpy()
+    X_mlp = to_numpy(torch.cat(reps, dim=0))
     click.echo(f"  Extracted representations: {X_mlp.shape}")
 
     append_to_anndata_zarr(write_path, obsm={"X_mlp": X_mlp})

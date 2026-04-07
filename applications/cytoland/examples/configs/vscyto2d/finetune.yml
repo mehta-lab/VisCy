@@ -1,0 +1,23 @@
+# VSCyto2D: supervised fine-tuning from FCMAE-pretrained encoder.
+# Usage: python -m cytoland fit --config vscyto2d/finetune.yml
+base:
+  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/data/hcs_nuc_mem_2d.yml
+  - ../recipes/models/fcmae_2d.yml
+
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    encoder_only: true
+    ckpt_path: #TODO pretrained FCMAE checkpoint
+    lr: 0.0002
+    schedule: WarmupCosine
+
+data:
+  init_args:
+    data_path: #TODO HCS OME-Zarr data

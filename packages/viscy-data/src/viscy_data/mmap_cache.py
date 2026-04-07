@@ -269,15 +269,19 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
         val_fovs = [positions[i] for i in shuffled_indices[num_train_fovs:]]
         _logger.debug(f"Training FOVs: {[p.zgroup.name for p in train_fovs]}")
         _logger.debug(f"Validation FOVs: {[p.zgroup.name for p in val_fovs]}")
+        train_path = self.cache_dir / "train.mmap"
+        train_path.unlink(missing_ok=True)
         train_buffer = MemoryMappedTensor.empty(
             self._buffer_shape(arr_shape, train_fovs),
             dtype=torch.float32,
-            filename=self.cache_dir / "train.mmap",
+            filename=train_path,
         )
+        val_path = self.cache_dir / "val.mmap"
+        val_path.unlink(missing_ok=True)
         val_buffer = MemoryMappedTensor.empty(
             self._buffer_shape(arr_shape, val_fovs),
             dtype=torch.float32,
-            filename=self.cache_dir / "val.mmap",
+            filename=val_path,
         )
         cache_map_train = Manager().dict()
         self.train_dataset = MmappedDataset(

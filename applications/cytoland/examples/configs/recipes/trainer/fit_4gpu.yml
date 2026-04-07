@@ -1,0 +1,32 @@
+# Trainer recipe: 4-GPU DDP training with WandB logging and checkpointing.
+# W&B convention:
+# - run name: YYYYMMDD-HHMMSS_<trainer.logger.init_args.name>
+# - group: VISCY_WANDB_GROUP, else VISCY_WANDB_LAUNCH, else the base name
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  precision: 16-mixed
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: cytoland
+      name: #TODO run name
+      save_dir: #TODO save directory
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+  fast_dev_run: false
+  max_epochs: 200
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true

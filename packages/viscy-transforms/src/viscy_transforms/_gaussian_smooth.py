@@ -191,6 +191,8 @@ class BatchedRandGaussianSmoothd(MapTransform, RandomizableTransform):
         Whether to allow missing keys. Default is False.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],
@@ -215,7 +217,7 @@ class BatchedRandGaussianSmoothd(MapTransform, RandomizableTransform):
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         # Use the first tensor to randomize, then apply same random state to all keys
-        first_key = next(iter(sample.keys()))
+        first_key = self.keys[0]
         self.blur_transform.randomize(sample[first_key])
 
         for key in self.key_iterator(sample):  # type: ignore[arg-type]

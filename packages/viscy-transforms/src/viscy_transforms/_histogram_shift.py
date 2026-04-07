@@ -47,6 +47,8 @@ class BatchedRandHistogramShiftd(MapTransform, RandomizableTransform):
     >>> output = shift(sample)
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

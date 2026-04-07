@@ -1,0 +1,21 @@
+# VSNeuromast: supervised training from scratch (no pretraining).
+# Usage: python -m cytoland fit --config vsneuromast/fit.yml
+base:
+  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/data/hcs_nuc_mem_neuromast.yml
+  - ../recipes/models/unext2_neuromast.yml
+
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.001
+    schedule: Constant
+
+data:
+  init_args:
+    data_path: #TODO HCS OME-Zarr data

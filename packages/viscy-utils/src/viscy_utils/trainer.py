@@ -10,7 +10,7 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
-from viscy_utils.meta_utils import generate_normalization_metadata
+from viscy_utils.meta_utils import generate_fg_masks, generate_normalization_metadata
 from viscy_utils.precompute import precompute_array
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -25,6 +25,11 @@ class VisCyTrainer(Trainer):
         channel_names: list[str] | Literal[-1] = -1,
         num_workers: int = 1,
         block_size: int = 32,
+        compute_otsu: bool = False,
+        otsu_grid_spacing: int = 8,
+        compute_fg_masks: bool = False,
+        fg_mask_channels: list[str] | None = None,
+        fg_mask_key: str = "fg_mask",
         model: LightningModule | None = None,
     ):
         """Compute dataset statistics for normalization.
@@ -39,6 +44,19 @@ class VisCyTrainer(Trainer):
             Number of CPU workers, by default 1.
         block_size : int, optional
             Block size to subsample images, by default 32.
+        compute_otsu : bool, optional
+            Whether to compute Otsu thresholds for Spotlight loss,
+            by default False.
+        otsu_grid_spacing : int, optional
+            Grid spacing for Otsu sampling (denser than default), by default 8.
+        compute_fg_masks : bool, optional
+            Whether to precompute binary foreground masks from Otsu
+            thresholds, by default False. Requires ``compute_otsu=True``.
+        fg_mask_channels : list[str] or None, optional
+            Channel names to compute FG masks for. Defaults to all channels
+            that had Otsu thresholds computed (``channel_names``).
+        fg_mask_key : str, optional
+            Zarr array key for the mask, by default ``"fg_mask"``.
         model : LightningModule, optional
             Ignored placeholder, by default None.
         """
@@ -46,16 +64,28 @@ class VisCyTrainer(Trainer):
             _logger.warning("Ignoring model configuration during preprocessing.")
         with open_ome_zarr(data_path, layout="hcs", mode="r") as dataset:
             channel_indices = (
-                [dataset.channel_names.index(c) for c in channel_names]
-                if channel_names != -1
-                else channel_names
+                [dataset.channel_names.index(c) for c in channel_names] if channel_names != -1 else channel_names
+            )
+            resolved_channel_names = (
+                [dataset.channel_names[i] for i in channel_indices] if channel_names != -1 else dataset.channel_names
             )
         generate_normalization_metadata(
             zarr_dir=data_path,
             num_workers=num_workers,
             channel_ids=channel_indices,
             grid_spacing=block_size,
+            compute_otsu=compute_otsu,
+            otsu_grid_spacing=otsu_grid_spacing,
         )
+        if compute_fg_masks:
+            if not compute_otsu:
+                raise ValueError("compute_fg_masks requires compute_otsu=True")
+            mask_channels = fg_mask_channels if fg_mask_channels is not None else resolved_channel_names
+            generate_fg_masks(
+                zarr_dir=data_path,
+                channel_names=mask_channels,
+                fg_mask_key=fg_mask_key,
+            )
 
     def export(
         self,
@@ -177,9 +207,7 @@ class VisCyTrainer(Trainer):
         from viscy_utils.evaluation.annotation import convert
 
         if model is not None:
-            _logger.warning(
-                "Ignoring model configuration during conversion to AnnData."
-            )
+            _logger.warning("Ignoring model configuration during conversion to AnnData.")
 
         convert(
             embeddings_ds=embeddings_path,

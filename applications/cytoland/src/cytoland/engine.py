@@ -1,8 +1,8 @@
 """Cytoland LightningModules for virtual staining."""
 
+import inspect
 import logging
 import os
-import random
 from typing import Callable, Literal, Sequence
 
 import numpy as np
@@ -10,7 +10,6 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from monai.data.utils import collate_meta_tensor
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from torch import Tensor, nn
@@ -28,15 +27,17 @@ from torchmetrics.functional import (
 from torchmetrics.functional.segmentation import dice_score
 
 from viscy_data import CombinedDataModule, GPUTransformDataModule, Sample
-from viscy_models import FullyConvolutionalMAE, Unet2d, Unet25d, UNeXt2
+from viscy_models import FullyConvolutionalMAE, Unet2d, Unet3d, Unet25d, UNeXt2
 from viscy_utils.callbacks.prediction_writer import _blend_in
 from viscy_utils.evaluation.metrics import mean_average_precision
-from viscy_utils.log_images import detach_sample, render_images
+from viscy_utils.log_images import detach_sample, log_image_grid
+from viscy_utils.tensor_utils import to_numpy
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
+    "FNet3D": Unet3d,
     "fcmae": FullyConvolutionalMAE,
     "UNeXt2_2D": FullyConvolutionalMAE,
 }
@@ -44,9 +45,30 @@ _UNET_ARCHITECTURE = {
 _logger = logging.getLogger("lightning.pytorch")
 
 
+def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
+    """Build a DivisiblePad that matches the model's downsampling axes."""
+    down_factor = 2**model.num_blocks
+    if getattr(model, "downsamples_z", False):
+        return DivisiblePad((0, down_factor, down_factor, down_factor))
+    return DivisiblePad((0, 0, down_factor, down_factor))
+
+
 def _identity(x: Tensor) -> Tensor:
     """Identity transform (no-op)."""
     return x
+
+
+def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Tensor:
+    """Center-crop trailing spatial dimensions to the requested shape."""
+    slices = [slice(None)] * tensor.ndim
+    start_dim = tensor.ndim - len(spatial_shape)
+    for dim, size in enumerate(spatial_shape, start=start_dim):
+        current = tensor.shape[dim]
+        if current < size:
+            raise ValueError(f"Cannot crop dimension {dim} from {current} to {size}")
+        start = (current - size) // 2
+        slices[dim] = slice(start, start + size)
+    return tensor[tuple(slices)]
 
 
 class MaskedMSELoss(nn.Module):
@@ -79,7 +101,7 @@ class VSUNet(LightningModule):
 
     Parameters
     ----------
-    architecture : Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"]
+    architecture : Literal["2D", "UNeXt2", "2.5D", "FNet3D", "fcmae", "UNeXt2_2D"]
         Architecture type to use.
     model_config : dict
         Model configuration dictionary.
@@ -114,7 +136,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "FNet3D", "fcmae", "UNeXt2_2D"],
         model_config: dict | None = None,
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,
@@ -131,6 +153,7 @@ class VSUNet(LightningModule):
         tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
+        self.save_hyperparameters(ignore=["loss_function"])
         if model_config is None:
             model_config = {}
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -161,12 +184,17 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        # Cache loss function fg_mask compatibility to avoid per-batch inspect.signature().
+        sig = inspect.signature(self.loss_function.forward)
+        self._loss_accepts_fg_mask = "fg_mask" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
         self.test_time_augmentations = test_time_augmentations
         self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
         self._original_shape_yx = None
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])  # loading only weights
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
@@ -182,6 +210,23 @@ class VSUNet(LightningModule):
             Model output.
         """
         return self.model(x)
+
+    def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> Tensor:
+        """Compute loss, passing precomputed fg_mask to the loss if present.
+
+        When ``fg_mask_key`` is set in the data config, ``batch["fg_mask"]``
+        is forwarded as a keyword argument.  The loss function must accept
+        ``fg_mask`` explicitly or via ``**kwargs``; standard losses like
+        ``nn.MSELoss`` will raise ``TypeError`` at training time.
+        """
+        if "fg_mask" in batch:
+            if not self._loss_accepts_fg_mask:
+                raise TypeError(
+                    f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
+                    f"Use SpotlightLoss or remove fg_mask_key from the data config."
+                )
+            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
+        return self.loss_function(pred, target)
 
     def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
         """Execute a single training step.
@@ -206,7 +251,7 @@ class VSUNet(LightningModule):
             source = b["source"]
             target = b["target"]
             pred = self.forward(source)
-            loss = self.loss_function(pred, target)
+            loss = self._compute_loss(pred, target, b)
             losses.append(loss)
             batch_size += source.shape[0]
             if batch_idx < self.log_batches_per_epoch:
@@ -239,7 +284,7 @@ class VSUNet(LightningModule):
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         pred = self.forward(source)
-        loss = self.loss_function(pred, target)
+        loss = self._compute_loss(pred, target, batch)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
         self.validation_losses[dataloader_idx].append(loss.detach())
@@ -313,7 +358,7 @@ class VSUNet(LightningModule):
     def _cellpose_predict(self, pred: Tensor, name: str) -> torch.ShortTensor:
         """Run CellPose segmentation on predicted image."""
         pred_labels_np = self.cellpose_model.eval(
-            pred.cpu().numpy(), channels=[0, 0], diameter=self.test_cellpose_diameter
+            to_numpy(pred), channels=[0, 0], diameter=self.test_cellpose_diameter
         )[0].astype(np.int16)
         imwrite(os.path.join(self.logger.log_dir, f"{name}.png"), pred_labels_np)
         return torch.from_numpy(pred_labels_np).to(self.device)
@@ -350,6 +395,13 @@ class VSUNet(LightningModule):
             on_epoch=False,
         )
 
+    def _pad_forward_crop(self, source: Tensor) -> Tensor:
+        """Pad input to divisible size, run forward pass, crop back."""
+        original_shape = source.shape[2:]
+        source = self._predict_pad(source)
+        prediction = self.forward(source)
+        return _center_crop_to_shape(prediction, original_shape)
+
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         """Execute a single prediction step.
 
@@ -371,9 +423,7 @@ class VSUNet(LightningModule):
         if self.test_time_augmentations:
             prediction = self.perform_test_time_augmentations(source)
         else:
-            source = self._predict_pad(source)
-            prediction = self.forward(source)
-            prediction = self._predict_pad.inverse(prediction)
+            prediction = self._pad_forward_crop(source)
 
         return prediction
 
@@ -397,9 +447,7 @@ class VSUNet(LightningModule):
         predictions = []
         for i in range(4):
             augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
-            augmented = self._predict_pad(augmented)
-            augmented_prediction = self.forward(augmented)
-            de_augmented_prediction = self._predict_pad.inverse(augmented_prediction)
+            de_augmented_prediction = self._pad_forward_crop(augmented)
             de_augmented_prediction = self._rotate_volume(de_augmented_prediction, k=4 - i, spatial_axes=(1, 2))
             de_augmented_prediction = self._crop_to_original(de_augmented_prediction)
 
@@ -450,34 +498,36 @@ class VSUNet(LightningModule):
                 )
 
     def on_predict_start(self):
-        """Pad the input shape to be divisible by the downsampling factor.
-
-        The inverse of this transform crops the prediction to original shape.
-        """
-        down_factor = 2**self.model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        """Pad the input shape to be divisible by the downsampling factor."""
+        self._predict_pad = _make_divisible_pad(self.model)
 
     def configure_optimizers(self):
         """Configure optimizer and learning rate scheduler."""
         if self.freeze_encoder:
-            self.model: FullyConvolutionalMAE
+            if not hasattr(self.model, "encoder"):
+                raise ValueError(
+                    f"freeze_encoder=True requires a model with an 'encoder' attribute "
+                    f"(e.g. FullyConvolutionalMAE), got {type(self.model).__name__}"
+                )
             self.model.encoder.requires_grad_(False)
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         if self.schedule == "WarmupCosine":
             scheduler = WarmupCosineSchedule(
                 optimizer,
                 warmup_steps=3,
-                t_total=self.trainer.max_epochs,
+                t_total=self.trainer.estimated_stepping_batches,
                 warmup_multiplier=1e-3,
             )
+            return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
         elif self.schedule == "Constant":
             scheduler = ConstantLR(optimizer, factor=1, total_iters=self.trainer.max_epochs)
         return [optimizer], [scheduler]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        """Log image samples to TensorBoard."""
-        grid = render_images(imgs)
-        self.logger.experiment.add_image(key, grid, self.current_epoch, dataformats="HWC")
+        """Log image sample grid to the active logger (TensorBoard or W&B)."""
+        if not self.trainer.is_global_zero or self.logger is None:
+            return
+        log_image_grid(self.logger, key, imgs, self.current_epoch)
 
     def _rotate_volume(self, tensor: Tensor, k: int, spatial_axes: tuple) -> Tensor:
         """Rotate a volume tensor by k*90 degrees."""
@@ -548,8 +598,7 @@ class AugmentedPredictionVSUNet(LightningModule):
         reduction: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
-        down_factor = 2**model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        self._predict_pad = _make_divisible_pad(model)
         self.model = model
         self._forward_transforms = forward_transforms or [_identity]
         self._inverse_transforms = inverse_transforms or [_identity]
@@ -613,7 +662,7 @@ class AugmentedPredictionVSUNet(LightningModule):
             aug_source = fwd_t(source)
             aug_source = self._predict_pad(aug_source)
             pred = self.forward(aug_source)
-            pred = self._predict_pad.inverse(pred)
+            pred = _center_crop_to_shape(pred, source.shape[2:])
             preds.append(inv_t(pred))
         if len(preds) == 1:
             return preds[0]
@@ -689,10 +738,28 @@ class AugmentedPredictionVSUNet(LightningModule):
 class FcmaeUNet(VSUNet):
     """FCMAE-based U-Net for self-supervised pre-training and fine-tuning.
 
+    Workflow
+    --------
+    1. **Pretrain** with ``fit_mask_ratio > 0`` and ``MaskedMSELoss``.
+       Set ``model_config["pretraining"] = True`` (the default).
+    2. **Fine-tune** by loading the pretrained checkpoint with
+       ``encoder_only=True`` and ``ckpt_path=<path>``.  Set
+       ``model_config["pretraining"] = False`` and change
+       ``out_channels`` / loss as needed.  Optionally set
+       ``freeze_encoder=True`` to freeze the encoder.
+
     Parameters
     ----------
     fit_mask_ratio : float
         Mask ratio for FCMAE pre-training, defaults to 0.0.
+    encoder_only : bool
+        When True and ``ckpt_path`` is set, load only encoder weights
+        from the checkpoint (ignoring decoder/head).  Useful for
+        fine-tuning with a different number of output channels.
+        Defaults to False.
+    freeze_encoder : bool
+        Freeze encoder weights during fine-tuning (passed to VSUNet).
+        Defaults to False.
     **kwargs
         Additional keyword arguments passed to VSUNet.
     """
@@ -700,11 +767,34 @@ class FcmaeUNet(VSUNet):
     def __init__(
         self,
         fit_mask_ratio: float = 0.0,
+        encoder_only: bool = False,
         **kwargs,
     ):
+        if encoder_only:
+            if "ckpt_path" not in kwargs or kwargs["ckpt_path"] is None:
+                raise ValueError("encoder_only=True requires ckpt_path")
+            ckpt_path = kwargs.pop("ckpt_path")
+        else:
+            ckpt_path = None
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
-        self.save_hyperparameters(ignore=["loss_function"])
+        if ckpt_path is not None:
+            self._load_encoder_weights(ckpt_path)
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path", "encoder_only"])
+
+    def _load_encoder_weights(self, ckpt_path: str) -> None:
+        """Load only encoder weights from a pretrained checkpoint.
+
+        Parameters
+        ----------
+        ckpt_path : str
+            Path to the pretrained checkpoint file.
+        """
+        state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+        prefix = "model.encoder."
+        encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
+        self.model.encoder.load_state_dict(encoder_weights, strict=True)
+        _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
 
     def on_fit_start(self):
         """Validate datamodule configuration for FCMAE training."""
@@ -714,7 +804,6 @@ class FcmaeUNet(VSUNet):
         for subdm in dm.data_modules:
             if not isinstance(subdm, GPUTransformDataModule):
                 raise ValueError(f"Member data module type {type(subdm)} is not supported for FCMAE training")
-        self.datamodules = dm.data_modules
         if self.model.pretraining and not isinstance(self.loss_function, MaskedMSELoss):
             raise ValueError(f"MaskedMSELoss is required for FCMAE pre-training, got {type(self.loss_function)}")
 
@@ -775,7 +864,7 @@ class FcmaeUNet(VSUNet):
         x = batch["source"]
         target = batch["target"]
         pred = self.forward(x)
-        loss = self.loss_function(pred, target)
+        loss = self._compute_loss(pred, target, batch)
         return pred, target, loss
 
     def forward_fit_task(self, batch: Sample, batch_idx: int) -> tuple[Tensor, Tensor | None, Tensor]:
@@ -802,54 +891,53 @@ class FcmaeUNet(VSUNet):
             pred, target, loss = self.forward_fit_supervised(batch)
         return pred, target, loss
 
-    @torch.no_grad()
-    def train_transform_and_collate(self, batch: list[dict[str, Tensor]]) -> Sample:
-        """Apply GPU transforms and collate training batch.
+    @staticmethod
+    def _merge_batches(batch: list[Sample] | Sample) -> Sample:
+        """Merge per-dataset batches from CombinedLoader into one batch.
 
         Parameters
         ----------
-        batch : list[dict[str, Tensor]]
-            List of dataset batches.
+        batch : list[Sample] | Sample
+            List of per-dataset batches (training) or a single batch
+            (validation).
 
         Returns
         -------
         Sample
-            Collated and transformed batch.
+            Merged batch with concatenated tensors.
         """
-        transformed = []
-        for dataset_batch, dm in zip(batch, self.datamodules):
-            dataset_batch = dm.train_gpu_transforms(dataset_batch)
-            transformed.extend(dataset_batch)
-        # shuffle references in place for better logging
-        random.shuffle(transformed)
-        return collate_meta_tensor(transformed)
+        if not isinstance(batch, list):
+            return batch
+        combined: dict[str, Tensor] = {}
+        for key in batch[0]:
+            vals = [b[key] for b in batch if key in b]
+            if isinstance(vals[0], Tensor):
+                combined[key] = torch.cat(vals, dim=0)
+            elif isinstance(vals[0], tuple):
+                # Merge inner elements of collated tuples
+                # (e.g. index = (list[str], Tensor, Tensor)).
+                merged = []
+                for i in range(len(vals[0])):
+                    elems = [v[i] for v in vals]
+                    if isinstance(elems[0], Tensor):
+                        merged.append(torch.cat(elems, dim=0))
+                    elif isinstance(elems[0], list):
+                        merged.append([x for sublist in elems for x in sublist])
+                    else:
+                        merged.append(elems[0])
+                combined[key] = tuple(merged)
+            else:
+                combined[key] = vals[0]
+        return combined
 
-    @torch.no_grad()
-    def val_transform_and_collate(self, batch: list[Sample], dataloader_idx: int) -> Tensor:
-        """Apply GPU transforms and collate validation batch.
-
-        Parameters
-        ----------
-        batch : list[Sample]
-            List of validation samples.
-        dataloader_idx : int
-            Dataloader index.
-
-        Returns
-        -------
-        Tensor
-            Collated and transformed batch.
-        """
-        batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
-        return collate_meta_tensor(batch)
-
-    def training_step(self, batch: list[list[Sample]], batch_idx: int) -> Tensor:
+    def training_step(self, batch: list[Sample] | Sample, batch_idx: int) -> Tensor:
         """Execute a single FCMAE training step.
 
         Parameters
         ----------
-        batch : list[list[Sample]]
-            Input batch from combined datamodule.
+        batch : list[Sample] | Sample
+            Per-dataset batches from CombinedLoader (already transformed
+            by ``CombinedDataModule.on_after_batch_transfer``).
         batch_idx : int
             Batch index.
 
@@ -858,7 +946,7 @@ class FcmaeUNet(VSUNet):
         Tensor
             Training loss.
         """
-        batch = self.train_transform_and_collate(batch)
+        batch = self._merge_batches(batch)
         pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
@@ -876,19 +964,19 @@ class FcmaeUNet(VSUNet):
         )
         return loss
 
-    def validation_step(self, batch: list[Sample], batch_idx: int, dataloader_idx: int = 0) -> None:
+    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> None:
         """Execute a single FCMAE validation step.
 
         Parameters
         ----------
-        batch : list[Sample]
-            Input batch.
+        batch : Sample
+            Input batch (already transformed by
+            ``CombinedDataModule.on_after_batch_transfer``).
         batch_idx : int
             Batch index.
         dataloader_idx : int
             Dataloader index, defaults to 0.
         """
-        batch = self.val_transform_and_collate(batch, dataloader_idx)
         pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])

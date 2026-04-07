@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
-from iohub.ngff import Plate, Position, open_ome_zarr
+from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data.meta_obj import set_track_meta
 from monai.data.utils import list_data_collate
@@ -102,6 +102,30 @@ class GPUTransformDataModule(ABC, LightningDataModule):
     def val_gpu_transforms(self) -> Compose:
         """Return validation GPU transforms."""
         ...
+
+    @torch.no_grad()
+    def on_after_batch_transfer(self, batch: dict, dataloader_idx: int) -> dict:
+        """Apply GPU transforms after batch transfer to device.
+
+        Parameters
+        ----------
+        batch : dict
+            Batch dict with channel-name keys mapped to ``(B, 1, Z, Y, X)``
+            tensors from ``list_data_collate``.
+        dataloader_idx : int
+            Dataloader index (unused).
+
+        Returns
+        -------
+        dict
+            Transformed batch (e.g., with ``source`` and ``target`` keys
+            after ``BatchedStackChannelsd``).
+        """
+        if isinstance(batch, Tensor):
+            return batch
+        if self.trainer and not self.trainer.training:
+            return self.val_gpu_transforms(batch)
+        return self.train_gpu_transforms(batch)
 
 
 class CachedOmeZarrDataset(Dataset):
@@ -280,8 +304,8 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         if stage not in ("fit", "validate"):
             raise NotImplementedError("Only fit and validate stages are supported.")
         cache_map = Manager().dict()
-        plate: Plate = open_ome_zarr(self.data_path, mode="r", layout="hcs")
-        positions = self._filter_fit_fovs(plate)
+        with open_ome_zarr(self.data_path, mode="r", layout="hcs") as plate:
+            positions = self._filter_fit_fovs(plate)
         shuffled_indices = self._set_fit_global_state(len(positions))
         num_train_fovs = int(len(positions) * self.split_ratio)
         train_fovs = [positions[i] for i in shuffled_indices[:num_train_fovs]]

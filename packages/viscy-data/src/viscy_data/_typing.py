@@ -52,13 +52,26 @@ T = TypeVar("T")
 OneOrSeq = T | Sequence[T]
 
 
-class LevelNormStats(TypedDict):
-    """Per-level normalization statistics."""
+class LevelNormStats(TypedDict, total=False):
+    """Per-level normalization statistics.
+
+    Not all fields are present for every level. The normalize transforms
+    access fields dynamically based on ``subtrahend`` and ``divisor``
+    config (e.g. ``mean``/``std`` or ``median``/``iqr``).
+    """
 
     mean: Tensor
     std: Tensor
     median: Tensor
     iqr: Tensor
+    min: Tensor
+    max: Tensor
+    p1: Tensor
+    p5: Tensor
+    p95: Tensor
+    p99: Tensor
+    p99_p1: Tensor
+    p95_p5: Tensor
 
 
 class ChannelNormStats(TypedDict, total=False):
@@ -92,6 +105,8 @@ class Sample(TypedDict, total=False):
     source: OneOrSeq[Tensor]
     target: OneOrSeq[Tensor]
     weight: OneOrSeq[Tensor]
+    # Precomputed foreground mask
+    fg_mask: OneOrSeq[Tensor]
     # Instance segmentation masks
     labels: OneOrSeq[Tensor]
     # None: not available

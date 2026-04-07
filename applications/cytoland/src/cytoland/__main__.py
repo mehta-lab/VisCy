@@ -2,8 +2,8 @@
 
 Usage
 -----
-python -m cytoland fit --config fit.yml
-python -m cytoland predict --config predict.yml
+python -m cytoland fit --config vscyto3d/finetune.yml
+python -m cytoland predict --config vscyto3d/predict.yml
 """
 
 from viscy_utils.cli import main
