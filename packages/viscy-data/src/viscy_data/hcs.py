@@ -512,7 +512,7 @@ class HCSDataModule(LightningDataModule):
                     f"{expected} (z_window_size={self.z_window_size}, "
                     f"yx_patch_size={list(self.yx_patch_size)}). "
                     f"Configure gpu_augmentations with a spatial crop "
-                    f"or enable crop_at_read to crop at zarr read time."
+                    f"to match yx_patch_size."
                 )
         return batch
 
