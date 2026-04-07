@@ -64,6 +64,51 @@ class ForegroundMaskSupport:
         """Return precomputed ``("__fg_mask_{ch}", ...)`` tuple."""
         return self._mask_keys
 
+    @staticmethod
+    def resolve_mask_ch_indices(
+        n_mask_ch: int,
+        n_image_ch: int,
+        n_target: int,
+        target_ch_idx: list[int],
+        mask_key: str = "fg_mask",
+    ) -> list[int]:
+        """Determine which channel indices to read from a mask array.
+
+        Two layouts are supported:
+
+        - **Full-channel** mask (same channels as image): use ``target_ch_idx``
+          to read the target channels from the mask, matching the image layout.
+        - **Target-only** mask (channel count equals ``n_target``):
+          channels are 0-indexed, so indices ``[0, 1, ...]`` are used.
+
+        Parameters
+        ----------
+        n_mask_ch : int
+            Number of channels in the mask array.
+        n_image_ch : int
+            Number of channels in the image array.
+        n_target : int
+            Number of target channels.
+        target_ch_idx : list[int]
+            Channel indices for target channels in the image array.
+        mask_key : str
+            Mask array key name (used in error messages).
+
+        Returns
+        -------
+        list[int]
+            Channel indices to read from the mask array.
+        """
+        if n_mask_ch == n_image_ch:
+            return list(target_ch_idx)
+        if n_mask_ch == n_target:
+            return list(range(n_target))
+        raise ValueError(
+            f"Mask array '{mask_key}' has {n_mask_ch} channels, "
+            f"expected {n_image_ch} (all image channels) or "
+            f"{n_target} (target channels only)."
+        )
+
     def validate_and_store(
         self,
         fov: Position,
@@ -71,15 +116,6 @@ class ForegroundMaskSupport:
         target_ch_idx: list[int],
     ) -> None:
         """Validate mask array exists in *fov* and store a reference.
-
-        On the first call, determines the mask channel indices by comparing
-        the mask array's channel count to the image array's.  Two layouts
-        are supported:
-
-        - **Full-channel** mask (same channels as image): use ``target_ch_idx``
-          to read the target channels from the mask, matching the image layout.
-        - **Target-only** mask (channel count equals ``len(target_channels)``):
-          channels are 0-indexed, so indices ``[0, 1, ...]`` are used.
 
         Parameters
         ----------
@@ -96,19 +132,11 @@ class ForegroundMaskSupport:
                 "Run preprocessing with --compute_fg_masks first."
             )
         mask_arr = fov[self.fg_mask_key]
-        n_mask_ch = mask_arr.channels
-        n_image_ch = img_arr.channels
-        n_target = len(self.target_channels)
-        if n_mask_ch == n_image_ch:
-            self._mask_ch_indices.append(target_ch_idx)
-        elif n_mask_ch == n_target:
-            self._mask_ch_indices.append(list(range(n_target)))
-        else:
-            raise ValueError(
-                f"Mask array '{self.fg_mask_key}' has {n_mask_ch} channels, "
-                f"expected {n_image_ch} (all image channels) or "
-                f"{n_target} (target channels only)."
+        self._mask_ch_indices.append(
+            self.resolve_mask_ch_indices(
+                mask_arr.channels, img_arr.channels, len(self.target_channels), target_ch_idx, self.fg_mask_key
             )
+        )
         self._mask_arrays.append(mask_arr)
 
     def read_window(
@@ -133,20 +161,15 @@ class ForegroundMaskSupport:
         list[Tensor]
             Per-channel mask tensors with shape ``(1, Z, Y, X)``.
         """
+        kwargs = {}
         if self._preloaded_masks is not None:
-            mask_images, _ = read_fn(
-                self._mask_arrays[arr_idx],
-                self._mask_ch_indices[arr_idx],
-                tz,
-                arr_idx=arr_idx,
-                _preloaded=self._preloaded_masks,
-            )
-        else:
-            mask_images, _ = read_fn(
-                self._mask_arrays[arr_idx],
-                self._mask_ch_indices[arr_idx],
-                tz,
-            )
+            kwargs = {"arr_idx": arr_idx, "_preloaded": self._preloaded_masks}
+        mask_images, _ = read_fn(
+            self._mask_arrays[arr_idx],
+            self._mask_ch_indices[arr_idx],
+            tz,
+            **kwargs,
+        )
         return mask_images
 
     def inject_into_sample(

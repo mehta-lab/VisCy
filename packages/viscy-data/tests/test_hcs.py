@@ -6,7 +6,7 @@ import torch
 from imageio import imwrite
 from iohub import open_ome_zarr
 from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandFlipd, RandSpatialCropSamplesd
-from pytest import TempPathFactory, fixture, mark, raises
+from pytest import TempPathFactory, fixture, importorskip, mark, raises
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
@@ -519,8 +519,7 @@ def test_sliding_window_preloaded_returns_copy(hcs_with_fg_mask):
 
 def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
     """prepare_data() + setup() + dataloader roundtrip with preload=True."""
-    pytest = __import__("pytest")
-    pytest.importorskip("tensordict")
+    importorskip("tensordict")
     z_window_size = 4
     yx_patch_size = [32, 32]
     dm = HCSDataModule(
@@ -547,8 +546,7 @@ def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
 
 def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
     """prepare_data() is idempotent: skips preload if .done marker exists."""
-    pytest = __import__("pytest")
-    pytest.importorskip("tensordict")
+    importorskip("tensordict")
     dm = HCSDataModule(
         data_path=hcs_with_fg_mask,
         source_channel="Phase",
@@ -571,8 +569,7 @@ def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
     import multiprocessing
 
-    pytest = __import__("pytest")
-    pytest.importorskip("tensordict")
+    importorskip("tensordict")
     from tensordict.memmap import MemoryMappedTensor
 
     dm = HCSDataModule(

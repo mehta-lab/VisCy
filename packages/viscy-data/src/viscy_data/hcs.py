@@ -230,16 +230,9 @@ class HCSDataModule(LightningDataModule):
                 target_ch_idx = [positions[0].get_channel_index(c) for c in self.target_channel]
                 n_target = len(self.target_channel)
                 mask_arr_0 = positions[0][self.fg_mask_key]
-                n_mask_ch = mask_arr_0.channels
-                n_image_ch = arr0.channels
-                if n_mask_ch == n_image_ch:
-                    mask_ch_idx = target_ch_idx
-                elif n_mask_ch == n_target:
-                    mask_ch_idx = list(range(n_target))
-                else:
-                    raise ValueError(
-                        f"Mask '{self.fg_mask_key}' has {n_mask_ch} channels, expected {n_image_ch} or {n_target}."
-                    )
+                mask_ch_idx = ForegroundMaskSupport.resolve_mask_ch_indices(
+                    mask_arr_0.channels, arr0.channels, n_target, target_ch_idx, self.fg_mask_key
+                )
                 mask_shape = (len(positions) * T, n_target, arr0.slices, arr0.height, arr0.width)
                 mask_buf = MemoryMappedTensor.empty(
                     mask_shape,
@@ -353,11 +346,11 @@ class HCSDataModule(LightningDataModule):
         train_transform, val_transform = self._fit_transform()
         dataset_settings["channels"]["target"] = self.target_channel
         with open_ome_zarr(self.data_path, mode="r") as plate:
-            positions = [pos for _, pos in plate.positions()]
+            orig_positions = [pos for _, pos in plate.positions()]
 
         # shuffle positions, randomness is handled globally
-        shuffled_indices = self._set_fit_global_state(len(positions))
-        positions = list(positions[i] for i in shuffled_indices)
+        shuffled_indices = self._set_fit_global_state(len(orig_positions))
+        positions = [orig_positions[i] for i in shuffled_indices]
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
         train_dataset_settings = dataset_settings.copy()
@@ -370,15 +363,11 @@ class HCSDataModule(LightningDataModule):
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
         # Preload mmap views — buffer stores FOVs in original plate order, so
-        # we open original positions, create views, then reindex by shuffled_indices.
+        # we create views from orig_positions, then reindex by shuffled_indices.
         train_preloaded = None
         val_preloaded = None
-        train_mask_views = None
-        val_mask_views = None
         if self.preload:
             cache_dir = self._mmap_cache_dir
-            with open_ome_zarr(self.data_path, mode="r") as plate:
-                orig_positions = [pos for _, pos in plate.positions()]
             all_views = self._fov_views(
                 self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions),
                 orig_positions,
@@ -386,19 +375,6 @@ class HCSDataModule(LightningDataModule):
             shuffled_views = [all_views[i] for i in shuffled_indices]
             train_preloaded = shuffled_views[:num_train_fovs]
             val_preloaded = shuffled_views[num_train_fovs:]
-            if self.fg_mask_key:
-                n_target = len(self.target_channel)
-                all_mask_views = self._fov_views(
-                    self._open_mmap_buffer(
-                        cache_dir / "fg_mask.mmap",
-                        orig_positions,
-                        n_channels=n_target,
-                    ),
-                    orig_positions,
-                )
-                shuffled_mask = [all_mask_views[i] for i in shuffled_indices]
-                train_mask_views = shuffled_mask[:num_train_fovs]
-                val_mask_views = shuffled_mask[num_train_fovs:]
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
@@ -412,9 +388,19 @@ class HCSDataModule(LightningDataModule):
             preloaded_fovs=val_preloaded,
             **dataset_settings,
         )
-        if train_mask_views is not None:
-            self.train_dataset.fg_mask_support._preloaded_masks = train_mask_views
-            self.val_dataset.fg_mask_support._preloaded_masks = val_mask_views
+        if self.preload and self.fg_mask_key:
+            n_target = len(self.target_channel)
+            all_mask_views = self._fov_views(
+                self._open_mmap_buffer(
+                    cache_dir / "fg_mask.mmap",
+                    orig_positions,
+                    n_channels=n_target,
+                ),
+                orig_positions,
+            )
+            shuffled_mask = [all_mask_views[i] for i in shuffled_indices]
+            self.train_dataset.fg_mask_support._preloaded_masks = shuffled_mask[:num_train_fovs]
+            self.val_dataset.fg_mask_support._preloaded_masks = shuffled_mask[num_train_fovs:]
 
     def _setup_test(self, dataset_settings: dict):
         """Set up the test stage."""
