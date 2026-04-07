@@ -1,7 +1,7 @@
 # UNeXt2 (VSCyto3D) on SEC61B — matches published VSCyto3D training settings.
 # Augmentation parameters from vs_test/finetune_3d.py (actual training script).
-# Architecture: convnextv2_tiny, z=15, MixedLoss(L1+DSSIM).
-# Adapted for single-channel ER target on single GPU.
+# Architecture: convnextv2_tiny, z=15, MixedLoss(L1+DSSIM), 4-GPU DDP.
+# See fit_unext2.md for detailed explanation of config values.
 # Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_unext2.yml
 base:
   - ../recipes/trainer/fit_1gpu.yml
@@ -15,7 +15,7 @@ model:
         l1_alpha: 0.5
         l2_alpha: 0.0
         ms_dssim_alpha: 0.5
-    lr: 0.0002
+    lr: 0.0006
     schedule: WarmupCosine
 
 trainer:
@@ -45,8 +45,8 @@ data:
     source_channel: Phase3D
     target_channel: Structure
     split_ratio: 0.8
-    z_window_size: 15
-    batch_size: 8
+    z_window_size: 20
+    batch_size: 64
     num_workers: 8
     yx_patch_size: [384, 384]
     preload: true
@@ -66,14 +66,15 @@ data:
           subtrahend: median
           divisor: iqr
     augmentations:
-      # CPU: 2 foreground-weighted patches per FOV (amortizes zarr read).
-      # batch_size=8 → DataLoader loads 4 FOVs, each yields 2 patches = 8 effective.
+      # CPU: 4 foreground-weighted patches per FOV (amortizes mmap read).
+      # batch_size=64 → DataLoader loads 16 FOVs, each yields 4 patches = 64 effective.
+      # 4 GPUs DDP → 16 patches/GPU (13 GB VRAM, 16% of 80 GB A100/H100).
       - class_path: viscy_transforms.RandWeightedCropd
         init_args:
           keys: [Phase3D, Structure]
           w_key: Structure
           spatial_size: [20, 600, 600]
-          num_samples: 2
+          num_samples: 4
     gpu_augmentations:
       # GPU: affine on oversized patch → center crop to final size.
       # Border pixels prevent zero-padded rotation artifacts.
