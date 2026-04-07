@@ -1,4 +1,4 @@
-/# DINOv3-temporal-MLP-2D-BagOfChannels
+# DINOv3-temporal-MLP-2D-BagOfChannels
 # =========================================
 # Frozen DINOv3 backbone + trainable MLP projection head.
 # 2D bag-of-channels with MIP z-reduction (same data pipeline as
