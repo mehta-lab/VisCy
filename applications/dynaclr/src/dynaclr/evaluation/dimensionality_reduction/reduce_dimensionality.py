@@ -51,7 +51,7 @@ def _run_umap(features: NDArray, cfg: UMAPConfig) -> tuple[str, NDArray]:
     return "X_umap", umap_embedding
 
 
-def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
+def _run_phate(features: NDArray, cfg: PHATEConfig, lineage_ids: NDArray | None = None) -> tuple[str, NDArray]:
     from viscy_utils.evaluation.dimensionality_reduction import compute_phate
 
     _, phate_embedding = compute_phate(
@@ -62,6 +62,9 @@ def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
         knn_dist=cfg.knn_dist,
         scale_embeddings=cfg.scale_embeddings,
         random_state=cfg.random_state,
+        n_pca=cfg.n_pca,
+        subsample=cfg.subsample,
+        lineage_ids=lineage_ids,
     )
     return "X_phate", phate_embedding
 
@@ -103,10 +106,15 @@ def main(config: Path):
 
     click.echo(f"Computing {len(methods_to_run)} reduction(s): {', '.join(name for name, _, _ in methods_to_run)}")
 
+    lineage_ids = adata.obs["lineage_id"].to_numpy() if "lineage_id" in adata.obs.columns else None
+
     results = {}
     for method_name, method_cfg, obsm_key in methods_to_run:
         try:
-            key, embedding = runner_map[method_name](features, method_cfg)
+            if method_name == "phate":
+                key, embedding = _run_phate(features, method_cfg, lineage_ids=lineage_ids)
+            else:
+                key, embedding = runner_map[method_name](features, method_cfg)
             results[key] = embedding
             click.echo(f"  {method_name.upper()} done -> {key} ({embedding.shape[1]} components)")
         except Exception as e:

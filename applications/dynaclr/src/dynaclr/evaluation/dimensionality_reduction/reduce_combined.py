@@ -64,6 +64,7 @@ def main(config: str):
 
     # Load embeddings from all stores
     all_features = []
+    all_lineage_ids = []
     sample_counts = []
     for path in resolved_paths:
         click.echo(f"Reading {path}...")
@@ -71,9 +72,12 @@ def main(config: str):
         features = np.asarray(adata.X)
         all_features.append(features)
         sample_counts.append(features.shape[0])
+        if "lineage_id" in adata.obs.columns:
+            all_lineage_ids.append(adata.obs["lineage_id"].to_numpy())
         click.echo(f"  {features.shape[0]:,} samples x {features.shape[1]} features")
 
     combined = np.concatenate(all_features, axis=0)
+    combined_lineage_ids = np.concatenate(all_lineage_ids) if all_lineage_ids else None
     click.echo(f"Combined: {combined.shape[0]:,} samples x {combined.shape[1]} features")
 
     # Compute reductions on joint data
@@ -81,7 +85,10 @@ def main(config: str):
 
     runner_map = {"pca": _run_pca, "umap": _run_umap, "phate": _run_phate}
     for method_name, method_cfg in methods_to_run:
-        _, embedding = runner_map[method_name](combined, method_cfg)
+        if method_name == "phate":
+            _, embedding = _run_phate(combined, method_cfg, lineage_ids=combined_lineage_ids)
+        else:
+            _, embedding = runner_map[method_name](combined, method_cfg)
         out_key = key_map[method_name]
         results[out_key] = embedding
         click.echo(f"  {method_name.upper()} done -> {out_key} ({embedding.shape[1]} components)")

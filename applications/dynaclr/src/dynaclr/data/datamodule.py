@@ -256,6 +256,7 @@ class MultiExperimentDataModule(LightningDataModule):
         # Datasets (populated in setup)
         self.train_dataset: MultiExperimentTripletDataset | None = None
         self.val_dataset: MultiExperimentTripletDataset | None = None
+        self.predict_dataset: MultiExperimentTripletDataset | None = None
 
     # ------------------------------------------------------------------
     # Setup
@@ -312,6 +313,61 @@ class MultiExperimentDataModule(LightningDataModule):
                 len(self.train_dataset) if self.train_dataset else 0,
                 len(self.val_dataset) if self.val_dataset else 0,
             )
+
+        elif stage == "predict":
+            self._setup_predict()
+            _logger.info(
+                "MultiExperimentDataModule predict setup: %d anchors",
+                len(self.predict_dataset) if self.predict_dataset else 0,
+            )
+
+    def _setup_predict(self) -> None:
+        """Set up predict dataset over the full cell index (no train/val split)."""
+        registry = ExperimentRegistry.from_cell_index(
+            self.cell_index_path,
+            z_window=self.z_window,
+            z_extraction_window=self.z_extraction_window,
+            z_focus_offset=self.z_focus_offset,
+            focus_channel=self.focus_channel,
+            reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+            reference_pixel_size_z_um=self.reference_pixel_size_z_um,
+        )
+
+        if self.channels_per_sample is None:
+            self._channel_names = registry.source_channel_labels
+        elif isinstance(self.channels_per_sample, int):
+            self._channel_names = [f"channel_{i}" for i in range(self.channels_per_sample)]
+        else:
+            self._channel_names = list(self.channels_per_sample)
+
+        predict_index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=self.yx_patch_size,
+            tau_range_hours=self.tau_range,
+            include_wells=self.include_wells,
+            exclude_fovs=self.exclude_fovs,
+            cell_index_path=self.cell_index_path,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
+        )
+        self.predict_dataset = MultiExperimentTripletDataset(
+            index=predict_index,
+            fit=False,
+            tau_range_hours=self.tau_range,
+            tau_decay_rate=self.tau_decay_rate,
+            cache_pool_bytes=self.cache_pool_bytes,
+            channels_per_sample=self.channels_per_sample,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
+            positive_channel_source=self.positive_channel_source,
+            label_columns=self.label_columns,
+        )
+
+        # Predict transform: normalizations + final center crop only (no augmentations).
+        # BatchedChannelWiseZReductiond is kept if present in self.augmentations
+        # since it is architecturally required to produce the 2D model input.
+        z_reduction = [t for t in self.augmentations if type(t).__name__ == "BatchedChannelWiseZReductiond"]
+        self._predict_transform = Compose(self.normalizations + z_reduction + [self._train_final_crop()])
 
     def _setup_experiment_split(self, registry: ExperimentRegistry) -> None:
         """Split by whole experiments into train/val."""
@@ -508,6 +564,21 @@ class MultiExperimentDataModule(LightningDataModule):
             collate_fn=lambda x: x,
         )
 
+    def predict_dataloader(self) -> ThreadDataLoader:
+        """Return predict data loader (no shuffling, no dropping)."""
+        return ThreadDataLoader(
+            self.predict_dataset,
+            use_thread_workers=True,
+            buffer_size=self.buffer_size,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.prefetch_factor,
+            collate_fn=lambda x: x,
+        )
+
     # ------------------------------------------------------------------
     # Transforms
     # ------------------------------------------------------------------
@@ -535,6 +606,37 @@ class MultiExperimentDataModule(LightningDataModule):
             Transformed batch.
         """
         if isinstance(batch, Tensor):
+            return batch
+
+        # During predict: normalizations + z_reduction only (no augmentations, no channel dropout).
+        if self.trainer.predicting:
+            norm_meta = batch.get("anchor_norm_meta")
+            if isinstance(norm_meta, list):
+                non_none = [m for m in norm_meta if m is not None]
+                if len(non_none) == 0:
+                    norm_meta = None
+                elif len(non_none) != len(norm_meta):
+                    raise ValueError("Mixed None/non-None norm_meta in predict batch.")
+            extra = None
+            if isinstance(self.channels_per_sample, int):
+                meta = batch.get("anchor_meta")
+                if meta is not None:
+                    extra = {
+                        "_is_labelfree": torch.tensor(
+                            [parse_channel_name(m.get("marker", ""))["channel_type"] == "labelfree" for m in meta],
+                            dtype=torch.bool,
+                            device=batch["anchor"].device,
+                        )
+                    }
+            batch["anchor"] = _transform_channel_wise(
+                transform=self._predict_transform,
+                channel_names=self._channel_names,
+                patch=batch["anchor"],
+                norm_meta=norm_meta,
+                extra=extra,
+            )
+            batch.pop("anchor_norm_meta", None)
+            batch.pop("anchor_meta", None)
             return batch
 
         transform = self._augmentation_transform

@@ -1,0 +1,68 @@
+# Test evaluation config for DINOv3-temporal-MLP-2D-BagOfChannels
+# Uses 2-FOV subset parquet for fast end-to-end pipeline validation.
+#
+# Usage:
+#   dynaclr evaluate -c applications/dynaclr/configs/evaluation/DINOv3-temporal-MLP-2D-BagOfChannels_test.yaml --mode local
+
+training_config: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/config_updated.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/DINOv3-temporal-MLP-2D-BagOfChannels-v1/20260319-235942/checkpoints/epoch=71-step=14040.ckpt
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels_2fov_test.parquet
+output_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluation_test
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - plot
+  - smoothness
+
+predict:
+  batch_size: 400
+  num_workers: 4
+  precision: 32-true
+  devices: 1
+
+reduce_dimensionality:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+  # PHATE skipped here — run jointly in reduce_combined instead
+
+reduce_combined:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+  phate:
+    n_components: 2
+    knn: 5
+    decay: 40
+    scale_embeddings: false
+    random_state: 42
+
+plot:
+  embedding_keys:
+    - X_pca
+  combined_embedding_keys:
+    - X_pca_combined
+    - X_phate_combined
+  color_by:
+    - perturbation
+    - hours_post_perturbation
+    - experiment
+    - marker
+  point_size: 1.0
+  components: [0, 1]
+  format: pdf
+
+slurm:
+  gpu_partition: gpu
+  cpu_partition: cpu
+  gpu_mem: 112G
+  cpu_mem: 128G
+  gpu_time: "0-04:00:00"
+  cpu_time: "0-02:00:00"
+  cpus_per_task: 16
+  workspace_dir: /hpc/mydata/eduardo.hirata/repos/viscy

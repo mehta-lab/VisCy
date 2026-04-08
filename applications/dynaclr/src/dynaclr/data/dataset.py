@@ -332,6 +332,9 @@ class MultiExperimentTripletDataset(Dataset):
                     elif col not in ["y", "x", "z"]:
                         # optional columns
                         pass
+                for col in ["experiment", "marker", "perturbation", "hours_post_perturbation"]:
+                    if col in anchor_row.index:
+                        idx_dict[col] = anchor_row[col]
                 indices_list.append(idx_dict)
             sample["index"] = indices_list
 

@@ -119,6 +119,22 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="run-linear-classifiers",
+        import_path="dynaclr.evaluation.linear_classifiers.orchestrated.main",
+        short_help="Run linear classifiers on orchestrator embeddings (batch, CSV metrics)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="split-embeddings",
+        import_path="dynaclr.evaluation.split_embeddings.main",
+        short_help="Split combined embeddings zarr into one zarr per experiment",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="info",
         import_path="dynaclr.info.main",
         short_help="Print summary of an AnnData zarr store",
@@ -170,6 +186,22 @@ dynaclr.add_command(
         name="apply-mlp-embedder",
         import_path="dynaclr.evaluation.mlp_embedder.apply_mlp_embedder.main",
         short_help="Apply a trained MLP embedder to extract penultimate-layer representations",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="evaluate",
+        import_path="dynaclr.evaluation.evaluate.main",
+        short_help="Generate evaluation configs and SLURM scripts for a trained model",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="plot-embeddings",
+        import_path="dynaclr.evaluation.plot_embeddings.main",
+        short_help="Generate scatter plots from an AnnData embedding store",
     )
 )
 

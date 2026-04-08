@@ -30,6 +30,8 @@ class PHATEConfig(BaseModel):
     knn_dist: str = "cosine"
     scale_embeddings: bool = False
     random_state: int = 42
+    n_pca: int = 50
+    subsample: Optional[int] = 50_000
 
 
 class DimensionalityReductionConfig(BaseModel):
