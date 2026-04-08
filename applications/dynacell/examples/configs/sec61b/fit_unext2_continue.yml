@@ -1,0 +1,5 @@
+# Continue UNeXt2 training from checkpoint. Same config, just needs more wall time.
+base:
+  - fit_unext2.yml
+
+ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2/checkpoints/last-v1.ckpt
