@@ -1,5 +1,4 @@
-# Continue UNeXt2 training from checkpoint. Same config, just needs more wall time.
+# Continue UNeXt2 training from scratch with corrected config.
+# lr/batch_size changed and val_gpu_augmentations fixed — not resuming stale checkpoint.
 base:
   - fit_unext2.yml
-
-ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2/checkpoints/last-v1.ckpt
