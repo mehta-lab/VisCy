@@ -6,77 +6,42 @@
 # Launch:
 #   sbatch applications/dynaclr/configs/training/OPS-373genes.sh
 
-seed_everything: 42
+base:
+  - recipes/trainer.yml
+  - recipes/model/contrastive_encoder_convnext_tiny.yml
+  - recipes/data/ops_gene_reporter.yml
+  - recipes/augmentations/ops_2d_mild.yml
 
 trainer:
-  accelerator: gpu
   strategy: ddp
   devices: 4
-  num_nodes: 1
   precision: bf16-mixed
   max_epochs: 300
   limit_train_batches: 400
   limit_val_batches: 100
   log_every_n_steps: 5
-  enable_checkpointing: true
-  enable_model_summary: false
-  inference_mode: true
-  use_distributed_sampler: false
-  callbacks:
-    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-      init_args:
-        logging_interval: step
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        monitor: loss/val
-        every_n_epochs: 1
-        save_top_k: 5
-        save_last: true
-    - class_path: viscy_utils.callbacks.SaveConfigToWandb
 
 model:
-  class_path: dynaclr.engine.ContrastiveModule
   init_args:
     encoder:
-      class_path: viscy_models.contrastive.ContrastiveEncoder
       init_args:
-        backbone: convnext_tiny
-        in_channels: 1
         in_stack_depth: 1
         stem_kernel_size: [1, 4, 4]
         stem_stride: [1, 4, 4]
-        embedding_dim: 768
         projection_dim: 256
         drop_path_rate: 0.0
     loss_function:
-      class_path: viscy_models.contrastive.loss.NTXentLoss
       init_args:
         temperature: 0.5
     ckpt_path: /hpc/projects/intracellular_dashboard/ops/models/logs/dynaclr/ops_bagofchannels_gene_n_reporter_grouped_reporter_256proj_373genes_convnext_tiny_temp0p5_512bs_lr1e-4_pretrained_self/version_0/checkpoints/last.ckpt
     lr: 0.0001
     log_batches_per_epoch: 8
     log_samples_per_batch: 1
-    log_embeddings_every_n_epochs: 10
     example_input_array_shape: [1, 1, 1, 128, 128]
 
 data:
-  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
     cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/ops_373genes.parquet
-    z_window: 1
-    yx_patch_size: [224, 224]
-    final_yx_patch_size: [128, 128]
-    channels_per_sample: 1
-    positive_cell_source: lookup
-    positive_match_columns: [perturbation, marker]
-    stratify_by: marker
-    split_ratio: 0.8
-    batch_size: 512
-    num_workers: 4
-    seed: 0
-    shuffle_val: true
-    label_columns:
-      gene_label: perturbation
     normalizations:
       - class_path: viscy_transforms.BatchedScaleIntensityRangePercentilesd
         init_args:
@@ -86,39 +51,3 @@ data:
           b_min: 0.0
           b_max: 1.0
           clip: true
-    augmentations:
-      - class_path: viscy_transforms.BatchedRandAffined
-        init_args:
-          keys: [channel_0]
-          prob: 0.8
-          scale_range: [[1.0, 1.0], [0.9, 1.1], [0.9, 1.1]]
-          rotate_range: [3.14, 0.0, 0.0]
-          shear_range: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      - class_path: viscy_transforms.BatchedRandFlipd
-        init_args:
-          keys: [channel_0]
-          spatial_axes: [1, 2]
-          prob: 0.5
-      - class_path: viscy_transforms.BatchedRandAdjustContrastd
-        init_args:
-          keys: [channel_0]
-          prob: 0.5
-          gamma: [0.8, 1.2]
-      - class_path: viscy_transforms.BatchedRandScaleIntensityd
-        init_args:
-          keys: [channel_0]
-          prob: 0.5
-          factors: 0.5
-      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
-        init_args:
-          keys: [channel_0]
-          prob: 0.5
-          sigma_x: [0.2, 0.5]
-          sigma_y: [0.2, 0.5]
-          sigma_z: [0.0, 0.0]
-      - class_path: viscy_transforms.BatchedRandGaussianNoised
-        init_args:
-          keys: [channel_0]
-          prob: 0.5
-          mean: 0.0
-          std: 0.08

@@ -1,0 +1,41 @@
+# Augmentation recipe: mild 2D augmentations for OPS data.
+# Lighter affine (no Z scaling, no shear), narrower gamma, lower noise std.
+
+data:
+  init_args:
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel_0]
+          prob: 0.8
+          scale_range: [[1.0, 1.0], [0.9, 1.1], [0.9, 1.1]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          sigma_x: [0.2, 0.5]
+          sigma_y: [0.2, 0.5]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.08

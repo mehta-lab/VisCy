@@ -10,24 +10,17 @@
 # Resume:
 #   CKPT_PATH=.../last.ckpt sbatch .../DINOv3-temporal-MLP-2D-BagOfChannels.sh
 
-seed_everything: 42
+base:
+  - recipes/trainer.yml
+  - recipes/model/dinov3_frozen_mlp.yml
 
 trainer:
-  accelerator: gpu
   strategy: ddp
   devices: 2
-  num_nodes: 1
   precision: bf16-mixed
   max_epochs: 100
-  log_every_n_steps: 10
-  enable_checkpointing: true
-  enable_model_summary: false
-  inference_mode: true
-  use_distributed_sampler: false
   logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      entity: computational_imaging
       project: DINOv3-temporal-MLP-2D-BagOfChannels-v1
       name: null
   callbacks:
@@ -50,29 +43,7 @@ trainer:
     - class_path: viscy_utils.callbacks.SaveConfigToWandb
 
 model:
-  class_path: dynaclr.engine.ContrastiveModule
   init_args:
-    encoder:
-      class_path: viscy_models.foundation.dinov3.DINOv3Model
-      init_args:
-        model_name: facebook/dinov3-convnext-tiny-pretrain-lvd1689m
-        freeze: true
-        projection:
-          class_path: viscy_models.components.heads.MLP
-          init_args:
-            in_dims: 768
-            hidden_dims: 768
-            out_dims: 128
-            norm: ln
-            activation: relu
-    loss_function:
-      class_path: viscy_models.contrastive.loss.NTXentLoss
-      init_args:
-        temperature: 0.5
-    lr: 0.0001
-    log_batches_per_epoch: 3
-    log_samples_per_batch: 3
-    log_embeddings_every_n_epochs: 10
     pca_color_keys: [perturbation, hours_post_perturbation, experiment, marker]
     log_negative_metrics_every_n_epochs: 2
     example_input_array_shape: [1, 1, 1, 160, 160]
