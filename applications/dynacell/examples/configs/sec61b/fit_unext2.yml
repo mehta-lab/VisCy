@@ -15,7 +15,7 @@ model:
         l1_alpha: 0.5
         l2_alpha: 0.0
         ms_dssim_alpha: 0.5
-    lr: 0.0006
+    lr: 0.0004
     schedule: WarmupCosine
 
 trainer:
@@ -46,7 +46,7 @@ data:
     target_channel: Structure
     split_ratio: 0.8
     z_window_size: 20
-    batch_size: 64
+    batch_size: 32
     num_workers: 8
     yx_patch_size: [384, 384]
     preload: true
@@ -67,8 +67,8 @@ data:
           divisor: iqr
     augmentations:
       # CPU: 4 foreground-weighted patches per FOV (amortizes mmap read).
-      # batch_size=64 → DataLoader loads 16 FOVs, each yields 4 patches = 64 effective.
-      # 4 GPUs DDP → 16 patches/GPU (13 GB VRAM, 16% of 80 GB A100/H100).
+      # batch_size=32 → DataLoader loads 8 FOVs, each yields 4 patches = 32 effective.
+      # 4 GPUs DDP → 8 patches/GPU.
       - class_path: viscy_transforms.RandWeightedCropd
         init_args:
           keys: [Phase3D, Structure]
@@ -113,7 +113,9 @@ data:
           sigma_y: [0.25, 0.75]
           sigma_z: [0.25, 0.75]
     val_gpu_augmentations:
-      - class_path: viscy_transforms.BatchedDivisibleCropd
+      # Center-crop to model input size: Z from 20→15, YX to 384×384.
+      # 384 is divisible by 64 (UNeXt2 downsampling factor).
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
         init_args:
           keys: [source, target]
-          k: [1, 64, 64]
+          roi_size: [15, 384, 384]
