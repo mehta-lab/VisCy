@@ -17,6 +17,8 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
 
+from viscy_utils.tensor_utils import to_numpy
+
 if TYPE_CHECKING:
     from viscy_data import HCSDataModule, Sample
 
@@ -272,7 +274,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             Index of this sample within the batch.
         """
         _logger.debug(f"Writing sample {sample_index}.")
-        sample_prediction = sample_prediction.cpu().numpy()
+        sample_prediction = to_numpy(sample_prediction)
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)

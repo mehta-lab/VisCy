@@ -1,0 +1,40 @@
+# FNet3D on AICS iPSC SEC61B (ER) — dynacell benchmark.
+# Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d.yml
+# Batch related launches with:
+#   export VISCY_WANDB_LAUNCH=20260401-augfix-r1
+base:
+  - ../recipes/trainer/fit_1gpu.yml
+  - ../recipes/data/hcs_sec61b_3d.yml
+  - ../recipes/models/fnet3d_z8.yml
+
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        ms_dssim_alpha: 0.5
+    lr: 0.001
+    schedule: WarmupCosine
+
+trainer:
+  max_epochs: 100
+  logger:
+    init_args:
+      name: FNet3D_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d/checkpoints
+
+data:
+  init_args:
+    batch_size: 64

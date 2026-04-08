@@ -1,0 +1,19 @@
+# VSCyto3D: inference with published checkpoint.
+# Checkpoint: https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto3D/epoch=48-step=18130.ckpt
+# Usage: python -m cytoland predict --config vscyto3d/predict.yml
+base:
+  - ../recipes/trainer/predict_gpu.yml
+  - ../recipes/data/hcs_nuc_mem_3d.yml
+  - ../recipes/models/unext2_3d.yml
+
+data:
+  init_args:
+    data_path: #TODO input OME-Zarr
+    batch_size: 2
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr

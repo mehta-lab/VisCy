@@ -1,0 +1,42 @@
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
+# VSCyto3D (UNeXt2) on AICS iPSC SEC61B (ER) — dynacell benchmark.
+# Usage: uv run python -m cytoland fit --config dynacell/fit_vscyto3d_sec61b.yml
+# Batch related launches with:
+#   export VISCY_WANDB_LAUNCH=20260401-augfix-r1
+base:
+  - ../recipes/trainer/fit_1gpu.yml
+  - ../recipes/data/hcs_sec61b_3d.yml
+  - ../recipes/models/unext2_3d_z8.yml
+
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        ms_dssim_alpha: 0.5
+    lr: 0.0002
+    schedule: WarmupCosine
+
+trainer:
+  max_epochs: 100
+  logger:
+    init_args:
+      name: VSCyto3D_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d/checkpoints
+
+data:
+  init_args:
+    batch_size: 64

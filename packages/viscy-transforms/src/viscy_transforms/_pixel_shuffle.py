@@ -52,6 +52,8 @@ class BatchedRandLocalPixelShufflingd(MapTransform, RandomizableTransform):
     >>> output = shuffle(sample)
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

@@ -68,13 +68,15 @@ class BatchedRandFlipd(MapTransform, RandomizableTransform):
         Whether to allow missing keys. Default is False.
     """
 
+    is_spatial = True
+
     def __init__(self, keys, spatial_axes=[0, 1, 2], prob=0.5, allow_missing_keys=False):
         MapTransform.__init__(self, keys, allow_missing_keys)
         RandomizableTransform.__init__(self, prob)
         self.random_flip = BatchedRandFlip(spatial_axes=spatial_axes, prob=prob)
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
-        self.random_flip.randomize(next(iter(sample.values())))
+        self.random_flip.randomize(sample[self.keys[0]])
         for key in self.key_iterator(sample):
             sample[key] = self.random_flip(sample[key], randomize=False)
         return sample

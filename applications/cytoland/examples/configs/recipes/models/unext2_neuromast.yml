@@ -1,0 +1,15 @@
+# Model recipe: VSNeuromast — UNeXt2 for zebrafish neuromast (in_stack_depth=21).
+# Published model: compmicro-czb/VSNeuromast
+model:
+  class_path: cytoland.engine.VSUNet
+  init_args:
+    architecture: UNeXt2
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      in_stack_depth: 21
+      backbone: convnextv2_tiny
+      stem_kernel_size: [7, 4, 4]
+      decoder_mode: pixelshuffle
+      head_expansion_ratio: 4
+      head_pool: true

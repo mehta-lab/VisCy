@@ -1,6 +1,7 @@
 from viscy_utils.log_images import detach_sample, render_images
 from viscy_utils.mp_utils import get_val_stats, mp_wrapper
 from viscy_utils.normalize import hist_clipping, unzscore, zscore
+from viscy_utils.tensor_utils import to_numpy
 
 __all__ = [
     "detach_sample",
@@ -8,6 +9,7 @@ __all__ = [
     "hist_clipping",
     "mp_wrapper",
     "render_images",
+    "to_numpy",
     "unzscore",
     "zscore",
 ]

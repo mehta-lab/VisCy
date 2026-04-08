@@ -95,6 +95,8 @@ class BatchedRandScaleIntensityd(MapTransform, RandomizableTransform):
         Whether to allow missing keys in the dictionary. Default is False.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],
@@ -124,7 +126,7 @@ class BatchedRandScaleIntensityd(MapTransform, RandomizableTransform):
         dict[str, Tensor]
             Dictionary with transformed tensors.
         """
-        first_key = next(iter(sample.keys()))
+        first_key = self.keys[0]
         self.intensity_transform.randomize(sample[first_key])
 
         for key in self.key_iterator(sample):

@@ -1,9 +1,11 @@
 """Batch-aware spatial cropping transforms."""
 
 import torch
+import torch.nn.functional as F
 from monai.transforms import (
     CenterSpatialCrop,
     Cropd,
+    MapTransform,
     RandCropd,
     RandSpatialCrop,
 )
@@ -12,8 +14,10 @@ from typing_extensions import Sequence
 __all__ = [
     "BatchedRandSpatialCrop",
     "BatchedRandSpatialCropd",
+    "BatchedRandWeightedCropd",
     "BatchedCenterSpatialCrop",
     "BatchedCenterSpatialCropd",
+    "BatchedDivisibleCropd",
 ]
 
 
@@ -122,6 +126,8 @@ class BatchedRandSpatialCrop(RandSpatialCrop):
 
 
 class BatchedRandSpatialCropd(RandCropd):
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str],
@@ -195,6 +201,8 @@ class BatchedCenterSpatialCropd(Cropd):
         Don't raise exception if key is missing. Default is False.
     """
 
+    is_spatial = True
+
     def __init__(
         self,
         keys: Sequence[str],
@@ -203,3 +211,176 @@ class BatchedCenterSpatialCropd(Cropd):
     ) -> None:
         cropper = BatchedCenterSpatialCrop(roi_size)
         super().__init__(keys, cropper=cropper, allow_missing_keys=allow_missing_keys)
+
+
+class BatchedDivisibleCropd(MapTransform):
+    """Center-crop spatial dimensions to the nearest smaller multiple of ``k``.
+
+    Useful for validation where the FOV may not be divisible by the model's
+    downsampling factor. Computes the crop size from the input shape at call
+    time — no hardcoded spatial dimensions needed in the config.
+
+    Parameters
+    ----------
+    keys : Sequence[str]
+        Keys to pick data for transformation.
+    k : int or Sequence[int]
+        Divisibility factor per spatial dimension.
+        If int, same factor for all spatial dims.
+    allow_missing_keys : bool, optional
+        Don't raise exception if key is missing. Default is False.
+    """
+
+    is_spatial = True
+
+    def __init__(
+        self,
+        keys: Sequence[str],
+        k: int | Sequence[int],
+        allow_missing_keys: bool = False,
+    ) -> None:
+        super().__init__(keys, allow_missing_keys=allow_missing_keys)
+        self.k = k if isinstance(k, Sequence) else (k,)
+
+    def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        first = data[self.first_key(data)]
+        spatial = first.shape[2:]  # (B, C, *spatial)
+        k = self.k if len(self.k) == len(spatial) else self.k * len(spatial)
+        roi = tuple(s // ki * ki for s, ki in zip(spatial, k))
+        if any(r == 0 for r in roi):
+            raise ValueError(
+                f"DivisibleCrop k={k} is larger than spatial dimensions {tuple(spatial)}. "
+                f"Computed roi {roi} contains zero-size dimension."
+            )
+        if roi == tuple(spatial):
+            return data
+        cropper = BatchedCenterSpatialCrop(roi)
+        for key in self.key_iterator(data):
+            data[key] = cropper(data[key])
+        return data
+
+
+class BatchedRandWeightedCropd(MapTransform):
+    """Randomly crop regions weighted by a spatial importance map.
+
+    Samples crop positions with probability proportional to the weight map
+    values, then extracts crops at those positions. Each sample in the batch
+    gets an independently sampled crop position. All keys share the same crop
+    coordinates so paired inputs (e.g. source/target) remain aligned.
+
+    The weight map is reduced to ``(B, Y, X)`` by summing over all channels
+    and Z slices. For single-channel targets (the common case), this is
+    equivalent to using the channel directly. For multi-channel targets, all
+    channels contribute equally.
+
+    Parameters
+    ----------
+    keys : Sequence[str] | str
+        Keys of the data dictionary to crop.
+    w_key : str
+        Key of the weight map tensor in the data dictionary.
+    spatial_size : Sequence[int]
+        Size of the crop region as ``(Z, Y, X)``.
+    allow_missing_keys : bool
+        Whether to skip missing keys. Default: False.
+    """
+
+    is_spatial = True
+
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        w_key: str,
+        spatial_size: Sequence[int],
+        allow_missing_keys: bool = False,
+    ) -> None:
+        super().__init__(keys, allow_missing_keys)
+        self.w_key = w_key
+        self._spatial_size = tuple(spatial_size)
+
+    def _sample_crop_starts(self, weight_map: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample per-batch crop start positions from the weight map.
+
+        Parameters
+        ----------
+        weight_map : torch.Tensor
+            Weight map tensor of shape ``(B, C, Z, Y, X)``.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            ``(z_starts, y_starts, x_starts)`` each of shape ``(B,)``.
+        """
+        B, _C, Z, Y, X = weight_map.shape
+        crop_z, crop_y, crop_x = self._spatial_size
+        device = weight_map.device
+
+        # Reduce to 2D: sum over channels and Z
+        w = weight_map.sum(dim=(1, 2))  # (B, Y, X)
+        w = w.clamp(min=0).float()
+
+        # Pool over crop windows to get per-window aggregate weight
+        w_4d = w.unsqueeze(1)  # (B, 1, Y, X)
+        w_pooled = F.avg_pool2d(w_4d, (crop_y, crop_x), stride=1)  # (B, 1, valid_y, valid_x)
+        valid_x = w_pooled.shape[3]
+
+        # Flatten and handle all-zero maps (uniform fallback)
+        w_flat = w_pooled.view(B, -1)  # (B, valid_y * valid_x)
+        zero_mask = w_flat.sum(dim=1) == 0
+        w_flat[zero_mask] = 1.0
+
+        # Sample YX start positions
+        indices = torch.multinomial(w_flat, 1).squeeze(1)  # (B,)
+        y_starts = indices // valid_x
+        x_starts = indices % valid_x
+
+        # Z start positions: uniform random, or 0 if crop covers full Z
+        if crop_z >= Z:
+            z_starts = torch.zeros(B, dtype=torch.long, device=device)
+        else:
+            z_starts = torch.randint(0, Z - crop_z + 1, (B,), device=device)
+
+        return z_starts, y_starts, x_starts
+
+    def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Apply weighted spatial crop to all specified keys.
+
+        Parameters
+        ----------
+        data : dict[str, torch.Tensor]
+            Dictionary with tensors of shape ``(B, C, Z, Y, X)``.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Dictionary with cropped tensors.
+        """
+        d = dict(data)
+        weight_map = d[self.w_key]
+
+        if weight_map.ndim != 5:
+            raise ValueError(f"BatchedRandWeightedCropd requires 5D input (B, C, Z, Y, X), got {weight_map.ndim}D.")
+        B, _C, Z, Y, X = weight_map.shape
+        crop_z, crop_y, crop_x = self._spatial_size
+        if crop_z > Z:
+            raise ValueError(f"spatial_size Z ({crop_z}) exceeds input Z ({Z}).")
+        if crop_y > Y or crop_x > X:
+            raise ValueError(f"spatial_size YX ({crop_y}, {crop_x}) exceeds input YX ({Y}, {X}).")
+
+        z_starts, y_starts, x_starts = self._sample_crop_starts(weight_map)
+
+        for key in self.key_iterator(d):
+            img = d[key]
+            d[key] = torch.stack(
+                [
+                    img[
+                        b,
+                        :,
+                        z_starts[b] : z_starts[b] + crop_z,
+                        y_starts[b] : y_starts[b] + crop_y,
+                        x_starts[b] : x_starts[b] + crop_x,
+                    ]
+                    for b in range(B)
+                ]
+            )
+        return d

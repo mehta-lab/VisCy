@@ -1,0 +1,18 @@
+# CellDiff flow-matching: predict from checkpoint.
+# Usage: cd applications/dynacell/examples/configs && uv run dynacell predict -c celldiff/predict.yml --ckpt_path=/path/to/checkpoint.ckpt
+base:
+  - ../recipes/trainer/predict_gpu.yml
+  - ../recipes/data/hcs_phase_fluor_3d.yml
+  - ../recipes/models/celldiff_fm.yml
+
+model:
+  init_args:
+    num_generate_steps: 100
+    predict_method: generate
+
+data:
+  init_args:
+    data_path: #TODO
+    z_window_size: 8
+    batch_size: 1
+    yx_patch_size: [512, 512]

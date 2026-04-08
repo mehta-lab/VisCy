@@ -47,7 +47,7 @@ package = true
 
 [tool.uv.workspace]
 members = [ "packages/*", "applications/*" ]
-exclude = [ "applications/dynacell", "applications/benchmarking" ]
+exclude = [ "applications/benchmarking" ]
 
 [tool.uv.sources]
 viscy-data = { workspace = true }
@@ -58,6 +58,7 @@ dynaclr = { workspace = true }
 cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
+dynacell = { workspace = true }
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 
 [tool.ruff]

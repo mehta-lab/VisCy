@@ -1,0 +1,39 @@
+# VSCyto2D: FCMAE self-supervised pretraining (2D, in_stack_depth=1).
+# Usage: python -m cytoland fit --config vscyto2d/pretrain.yml
+base:
+  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/data/cached_pretrain.yml
+
+model:
+  class_path: cytoland.engine.FcmaeUNet
+  init_args:
+    fit_mask_ratio: 0.5
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      encoder_blocks: [3, 3, 9, 3]
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 1
+      stem_kernel_size: [1, 2, 2]
+      in_stack_depth: 1
+    loss_function:
+      class_path: cytoland.engine.MaskedMSELoss
+    lr: 0.0002
+    schedule: WarmupCosine
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 1
+
+trainer:
+  strategy: ddp_find_unused_parameters_true
+  max_epochs: 400
+  use_distributed_sampler: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true

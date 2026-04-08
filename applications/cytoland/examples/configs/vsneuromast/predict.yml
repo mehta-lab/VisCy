@@ -1,0 +1,18 @@
+# VSNeuromast: inference with published checkpoint.
+# Checkpoint: https://public.czbiohub.org/comp.micro/viscy/VS_models/VSNeuromast/epoch=64-step=24960.ckpt
+# Usage: python -m cytoland predict --config vsneuromast/predict.yml
+base:
+  - ../recipes/trainer/predict_gpu.yml
+  - ../recipes/data/hcs_nuc_mem_neuromast.yml
+  - ../recipes/models/unext2_neuromast.yml
+
+data:
+  init_args:
+    data_path: #TODO input OME-Zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr

@@ -22,8 +22,10 @@ from viscy_transforms._affine import BatchedRandAffined
 from viscy_transforms._crop import (
     BatchedCenterSpatialCrop,
     BatchedCenterSpatialCropd,
+    BatchedDivisibleCropd,
     BatchedRandSpatialCrop,
     BatchedRandSpatialCropd,
+    BatchedRandWeightedCropd,
 )
 from viscy_transforms._decollate import Decollate
 from viscy_transforms._elastic import BatchedRand3DElasticd
@@ -33,7 +35,7 @@ from viscy_transforms._gaussian_smooth import (
     BatchedRandGaussianSmoothd,
 )
 from viscy_transforms._histogram_shift import BatchedRandHistogramShiftd
-from viscy_transforms._invert_intensity import RandInvertIntensityd
+from viscy_transforms._invert_intensity import BatchedRandInvertIntensityd, RandInvertIntensityd
 from viscy_transforms._monai_wrappers import (
     CenterSpatialCropd,
     Decollated,
@@ -55,7 +57,7 @@ from viscy_transforms._noise import (
     RandGaussianNoiseTensor,
     RandGaussianNoiseTensord,
 )
-from viscy_transforms._normalize import NormalizeSampled
+from viscy_transforms._normalize import MinMaxSampled, NormalizeSampled
 from viscy_transforms._percentile_scale import (
     BatchedScaleIntensityRangePercentiles,
     BatchedScaleIntensityRangePercentilesd,
@@ -66,7 +68,7 @@ from viscy_transforms._scale_intensity import (
     BatchedRandScaleIntensityd,
 )
 from viscy_transforms._sharpen import BatchedRandSharpend
-from viscy_transforms._stack_channels import StackChannelsd
+from viscy_transforms._stack_channels import BatchedStackChannelsd, StackChannelsd
 from viscy_transforms._tiled_crop import TiledSpatialCropSamplesd
 from viscy_transforms._z_reduction import (
     BatchedChannelWiseZReduction,
@@ -82,6 +84,7 @@ __all__ = [
     "BatchedChannelWiseZReductiond",
     "BatchedCenterSpatialCrop",
     "BatchedCenterSpatialCropd",
+    "BatchedDivisibleCropd",
     "BatchedRandAdjustContrast",
     "BatchedRandAdjustContrastd",
     "BatchedRandAffined",
@@ -93,20 +96,24 @@ __all__ = [
     "BatchedRandGaussianNoise",
     "BatchedRandGaussianNoised",
     "BatchedRandHistogramShiftd",
+    "BatchedRandInvertIntensityd",
     "BatchedRandLocalPixelShufflingd",
     "BatchedRandScaleIntensity",
     "BatchedRandScaleIntensityd",
     "BatchedRandSharpend",
     "BatchedRandSpatialCrop",
     "BatchedRandSpatialCropd",
+    "BatchedRandWeightedCropd",
     "BatchedRandZStackShiftd",
     "BatchedScaleIntensityRangePercentiles",
     "BatchedScaleIntensityRangePercentilesd",
+    "BatchedStackChannelsd",
     "BatchedZoom",
     "BatchedZoomd",
     "CenterSpatialCropd",
     "Decollate",
     "Decollated",
+    "MinMaxSampled",
     "NormalizeSampled",
     "NormalizeIntensityd",
     "RandAdjustContrastd",

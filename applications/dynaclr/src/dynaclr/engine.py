@@ -17,6 +17,7 @@ from viscy_models.schedule import cosine_anneal
 from viscy_models.vae import BetaVae25D, BetaVaeMonai
 from viscy_utils.log_embeddings import pca_pairplot
 from viscy_utils.log_images import detach_sample, log_chw_tensor, log_histogram, log_image_grid
+from viscy_utils.tensor_utils import to_numpy
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -106,8 +107,8 @@ class ContrastiveModule(LightningModule):
 
     def log_feature_statistics(self, embeddings: Tensor, prefix: str):
         """Log feature statistics for debugging."""
-        mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
-        std = torch.std(embeddings, dim=0).detach().cpu().numpy()
+        mean = to_numpy(torch.mean(embeddings, dim=0))
+        std = to_numpy(torch.std(embeddings, dim=0))
         _logger.debug(f"{prefix}_mean: {mean}")
         _logger.debug(f"{prefix}_std: {std}")
 
@@ -208,7 +209,7 @@ class ContrastiveModule(LightningModule):
 
         import wandb
 
-        embeddings_np = embeddings.detach().cpu().numpy()
+        embeddings_np = to_numpy(embeddings)
         _logger.debug(f"Computing PCA for {tag}: {len(embeddings_np)} embeddings, {len(meta)} meta dicts.")
         if len(meta) != len(embeddings_np):
             _logger.warning("PCA meta/embedding count mismatch: %d vs %d.", len(meta), len(embeddings_np))
@@ -503,7 +504,7 @@ class BetaVaeModule(LightningModule):
         )
 
         if stage == "val" and self.current_epoch % 10 == 0 and self.trainer.is_global_zero:
-            z_np = z.detach().cpu().numpy()
+            z_np = to_numpy(z)
             for i in range(min(16, z_np.shape[1])):
                 log_histogram(self.logger, f"latent_distributions/dim_{i}_{stage}", z_np[:, i], self.current_epoch)
 
@@ -537,8 +538,8 @@ class BetaVaeModule(LightningModule):
         originals = []
         reconstructions = []
         for sample in samples_list:
-            orig = sample["original"][:, :, mid_z].numpy()
-            recon = sample["reconstruction"][:, :, mid_z].numpy()
+            orig = to_numpy(sample["original"][:, :, mid_z])
+            recon = to_numpy(sample["reconstruction"][:, :, mid_z])
             originals.extend([orig[i] for i in range(orig.shape[0])])
             reconstructions.extend([recon[i] for i in range(recon.shape[0])])
         combined = [[o, r] for o, r in zip(originals[:4], reconstructions[:4])]

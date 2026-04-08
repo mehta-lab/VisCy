@@ -38,6 +38,7 @@ dependencies = [
   "numpy>=2.4.1",
   "pyyaml",
   "scikit-image",
+  "scipy",
   "tensorboard",
   "tensorstore",
   "torch>=2.10",

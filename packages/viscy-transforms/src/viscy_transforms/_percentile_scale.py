@@ -148,6 +148,8 @@ class BatchedScaleIntensityRangePercentilesd(MapTransform):
     BatchedScaleIntensityRangePercentiles : Underlying transform.
     """
 
+    is_spatial = False
+
     def __init__(
         self,
         keys: str | Iterable[str],

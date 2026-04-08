@@ -90,8 +90,8 @@ from viscy_data.gpu_aug import (
     GPUTransformDataModule,
 )
 
-# Core DataModules (from hcs.py)
-from viscy_data.hcs import HCSDataModule, MaskTestDataset, SlidingWindowDataset
+# Core DataModules
+from viscy_data.hcs import HCSDataModule
 
 # LiveCell benchmark (from livecell.py -- requires [livecell] extra at runtime)
 from viscy_data.livecell import LiveCellDataModule, LiveCellDataset, LiveCellTestDataset
@@ -107,6 +107,7 @@ from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
 
 # Utility modules (from select.py, distributed.py)
 from viscy_data.select import SelectWell
+from viscy_data.sliding_window import MaskTestDataset, SlidingWindowDataset
 
 # Triplet learning (from triplet.py -- requires [triplet] extra at runtime)
 from viscy_data.triplet import TripletDataModule, TripletDataset

@@ -25,6 +25,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.neighbors import KNeighborsClassifier
 
 from viscy_data._typing import TripletSample
+from viscy_utils.tensor_utils import to_numpy
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -191,7 +192,7 @@ class OnlineEvalCallback(Callback):
             self._reset()
             return
 
-        features_np = torch.cat(self._features).numpy()
+        features_np = to_numpy(torch.cat(self._features))
         n_samples = features_np.shape[0]
         epoch = trainer.current_epoch
 

@@ -18,11 +18,14 @@ uv pip install -e "applications/cytoland"
 Training and prediction use the shared `viscy` CLI provided by `viscy-utils`:
 
 ```bash
-# Training
-uv run --package cytoland viscy fit -c examples/configs/fit.yml
+# Training (pick a model-specific config)
+uv run --package cytoland viscy fit -c examples/configs/vscyto3d/finetune.yml
+
+# Training with Spotlight loss
+uv run --package cytoland viscy fit -c examples/configs/vscyto3d/train_spotlight.yml
 
 # Prediction
-uv run --package cytoland viscy predict -c examples/configs/predict.yml
+uv run --package cytoland viscy predict -c examples/configs/vscyto3d/predict.yml
 ```
 
 The YAML config determines which model and data module to use via `class_path`:
@@ -41,6 +44,14 @@ data:
 | VSCyto3D | Phase3D | Nuclei + Membrane | FCMAE / UNeXt2 |
 | VSCyto2D | Phase2D | Nuclei + Membrane | UNeXt2 |
 | VSNeuromast | DIC | Multiple fluorescent markers | UNeXt2 |
+| FNet3D | Transmitted light | Fluorescence | Unet3d (Ounkomol et al. 2018) |
+
+> **FNet3D note:** All spatial dimensions (Z, Y, X) must be divisible by `2^depth`
+> (default depth=4 requires divisibility by 16). See `examples/configs/fnet3d/fit.yml`.
+
+> **Benchmark note:** FNet3D and SEC61B benchmarks now launch from
+> [`applications/dynacell/`](../dynacell/README.md). Cytoland copies are
+> transitional legacy — see `examples/configs/dynacell/` and `examples/configs/fnet3d/`.
 
 ## References
 
