@@ -16,6 +16,7 @@ model:
     num_log_steps: 10
 
 trainer:
+  devices: 4
   precision: bf16-mixed
   max_epochs: 10
   logger:
@@ -42,7 +43,7 @@ data:
     split_ratio: 0.8
     z_window_size: 13
     batch_size: 2
-    num_workers: 8
+    num_workers: 4
     yx_patch_size: [512, 512]
     preload: true
     scratch_dir: /dev/shm
@@ -62,7 +63,7 @@ data:
           divisor: iqr
     augmentations:
       # CPU: 2 foreground-weighted patches per FOV (amortizes zarr read).
-      # batch_size=2 → DataLoader loads 1 FOV, which yields 2 patches = 2 effective.
+      # batch_size=2/GPU × 4 GPUs → global batch=8. Each GPU loads 1 FOV, yields 2 patches.
       # Oversized crop in YX (624) leaves 112px border for affine artifacts (624→512).
       # 624 = smallest FOV dimension, maximizes context for augmentation.
       - class_path: viscy_transforms.RandWeightedCropd
