@@ -137,17 +137,6 @@ def _get_class_counts(datasets_for_combo: list[dict], task: str) -> dict[str, in
     return dict(pd.Series(all_labels).value_counts())
 
 
-def _detect_n_features(datasets: list[dict], channel: str) -> int | None:
-    """Detect embedding dimensionality from the first available zarr."""
-    for ds in datasets:
-        embeddings_dir = Path(ds["embeddings_dir"])
-        channel_zarrs = find_channel_zarrs(embeddings_dir, [channel])
-        if channel in channel_zarrs:
-            adata = ad.read_zarr(channel_zarrs[channel])
-            return adata.shape[1]
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Core rotating CV unit
 # ---------------------------------------------------------------------------
@@ -234,7 +223,7 @@ def _train_and_evaluate(
             "random_state": seed,
         }
 
-        pipeline, metrics = train_linear_classifier(
+        pipeline, metrics, _ = train_linear_classifier(
             adata=combined_adata,
             task=task,
             use_scaling=use_scaling,

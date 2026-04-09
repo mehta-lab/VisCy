@@ -103,7 +103,7 @@ def main(config: Path):
             "random_state": train_config.random_seed,
         }
 
-        pipeline, metrics = train_linear_classifier(
+        pipeline, metrics, _ = train_linear_classifier(
             adata=combined_adata,
             task=train_config.task,
             use_scaling=train_config.use_scaling,
