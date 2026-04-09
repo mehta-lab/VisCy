@@ -7,11 +7,40 @@ RandomAffine3D for efficient GPU execution on microscopy data.
 import numpy as np
 import torch
 from kornia.augmentation import RandomAffine3D
+from kornia.geometry.transform import warp_affine3d
 from monai.transforms import MapTransform
 from torch import Tensor
 from typing_extensions import Iterable, Sequence
 
 __all__ = ["BatchedRandAffined"]
+
+
+class _PaddedRandomAffine3D(RandomAffine3D):
+    """RandomAffine3D with configurable padding_mode.
+
+    Kornia 0.8.x hard-codes ``padding_mode='zeros'`` in apply_transform.
+    This subclass overrides that call to forward the user-specified mode.
+    """
+
+    def __init__(self, *args: object, padding_mode: str = "zeros", **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._padding_mode = padding_mode
+
+    def apply_transform(
+        self,
+        input: Tensor,
+        params: dict,
+        flags: dict,
+        transform: Tensor | None = None,
+    ) -> Tensor:
+        return warp_affine3d(
+            input,
+            transform[:, :3, :],
+            (input.shape[-3], input.shape[-2], input.shape[-1]),
+            flags["resample"].name.lower(),
+            padding_mode=self._padding_mode,
+            align_corners=flags["align_corners"],
+        )
 
 
 class BatchedRandAffined(MapTransform):
@@ -66,6 +95,13 @@ class BatchedRandAffined(MapTransform):
         Set to False for unscaled (raw) shear values.
     mode : str
         Interpolation mode. Default: "bilinear".
+    padding_mode : str
+        Padding mode for areas outside the rotated image boundary.
+        ``"zeros"`` fills with 0, ``"border"`` replicates edge pixels,
+        ``"reflection"`` mirrors the image. Default: ``"zeros"``.
+
+        Use ``"border"`` when the oversized crop border is insufficient
+        to absorb large rotation angles (i.e. crop/output ratio < √2).
     allow_missing_keys : bool
         Whether to allow missing keys. Default: False.
 
@@ -98,6 +134,7 @@ class BatchedRandAffined(MapTransform):
         isotropic_scale: bool = False,
         scale_z_shear: bool = True,
         mode: str = "bilinear",
+        padding_mode: str = "zeros",
         allow_missing_keys: bool = False,
     ) -> None:
         super().__init__(keys, allow_missing_keys)
@@ -114,13 +151,14 @@ class BatchedRandAffined(MapTransform):
                 "Use a flat (min, max) range instead."
             )
         self._isotropic_scale = isotropic_scale and scale_range is not None
-        self.random_affine = RandomAffine3D(
+        self.random_affine = _PaddedRandomAffine3D(
             degrees=rotate_range,
             translate=translate_range,
             scale=scale_range,
             shears=shear_range,
             resample=mode,
             p=prob,
+            padding_mode=padding_mode,
         )
 
     @staticmethod
