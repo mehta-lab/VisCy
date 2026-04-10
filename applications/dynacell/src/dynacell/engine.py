@@ -351,7 +351,7 @@ class DynacellFlowMatching(LightningModule):
         (default, matches standard HCS tile workflow).
     predict_overlap : int or tuple of int
         Overlap for sliding-window prediction.
-    ckpt_path : str or None
+    ckpt_path : str | None
         Path to a checkpoint to load weights from at construction time.
         Bypasses LightningCLI's checkpoint hparam merging, so predict-time
         settings (``predict_method``, ``predict_overlap``, etc.) are taken
