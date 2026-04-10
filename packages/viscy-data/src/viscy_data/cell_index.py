@@ -251,6 +251,7 @@ def preprocess_cell_index(
     # Build lookups from zarr zattrs (one open per unique FOV)
     stat_lookup: dict[tuple[str, str, str, int], dict[str, float]] = {}
     focus_lookup: dict[tuple[str, str], float] = {}
+    focus_per_t_lookup: dict[tuple[str, str], dict[int, int]] = {}
 
     for (store_path, fov), group in df.groupby(["store_path", fov_col]):
         fov_path = f"{group['well'].iloc[0]}/{fov}" if "/" not in str(fov) else str(fov)
@@ -272,6 +273,11 @@ def preprocess_cell_index(
         z_focus = fov_stats.get("z_focus_mean")
         if z_focus is not None:
             focus_lookup[(str(store_path), str(fov))] = float(z_focus)
+        per_timepoint = ch_focus.get("per_timepoint", {})
+        if per_timepoint:
+            focus_per_t_lookup[(str(store_path), str(fov))] = {
+                int(t_str): int(z_idx) for t_str, z_idx in per_timepoint.items()
+            }
 
     # Vectorized lookup: build norm + focus column arrays
     stat_keys = ["mean", "std", "median", "iqr", "max", "min"]
@@ -282,6 +288,7 @@ def preprocess_cell_index(
 
     norm_arrays = {stat: np.full(len(df), float("nan"), dtype=np.float32) for stat in stat_keys}
     focus_arr = np.full(len(df), float("nan"), dtype=np.float32)
+    z_arr = df["z"].to_numpy(dtype=np.int16).copy()
     valid_mask = np.ones(len(df), dtype=bool)
 
     for i in range(len(df)):
@@ -291,13 +298,18 @@ def preprocess_cell_index(
             continue
         for stat in stat_keys:
             norm_arrays[stat][i] = float(tp_stats[stat])
-        z_focus = focus_lookup.get((store_arr[i], fov_arr[i]))
+        fov_key = (store_arr[i], fov_arr[i])
+        z_focus = focus_lookup.get(fov_key)
         if z_focus is not None:
             focus_arr[i] = z_focus
+        z_t = focus_per_t_lookup.get(fov_key, {}).get(t_arr[i])
+        if z_t is not None:
+            z_arr[i] = z_t
 
     for stat in stat_keys:
         df[f"norm_{stat}"] = norm_arrays[stat]
     df["z_focus_mean"] = focus_arr
+    df["z"] = z_arr
 
     df = df[valid_mask].reset_index(drop=True)
     n_dropped = n_before - len(df)
@@ -401,8 +413,8 @@ def _build_experiment_tracks(
     if exclude_fovs is not None:
         all_exclude.update(exclude_fovs)
 
-    # Channel-marker pairs from per-experiment channels list
-    channel_marker_pairs = [(ch.name, ch.marker) for ch in exp.channels]
+    # Channel entries from per-experiment channels list
+    channel_entries = [(ch.name, ch.marker, set(ch.wells)) for ch in exp.channels]
 
     exp_tracks: list[pd.DataFrame] = []
 
@@ -462,8 +474,10 @@ def _build_experiment_tracks(
         if "z" not in tracks_df.columns:
             tracks_df["z"] = 0
 
-        # Explode: one row per channel
-        for zarr_ch, marker in channel_marker_pairs:
+        # Explode: one row per channel (skip channels restricted to other wells)
+        for zarr_ch, marker, valid_wells in channel_entries:
+            if valid_wells and well_name not in valid_wells:
+                continue
             ch_df = tracks_df.copy()
             ch_df["channel_name"] = zarr_ch
             ch_df["marker"] = marker

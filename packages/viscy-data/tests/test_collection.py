@@ -1,6 +1,7 @@
 """Tests for viscy_data.collection: Collection, load/save, build_collection."""
 
 import pytest
+import yaml
 
 from viscy_data.collection import (
     ChannelEntry,
@@ -240,3 +241,211 @@ class TestBuildCollection:
         grouped = _group_records(records)
         assert len(grouped) == 1
         assert "plate1" in grouped
+
+
+class TestChannelWells:
+    """Test per-well channel validity restriction via ChannelEntry.wells."""
+
+    def _make_viral_sensor_records(self):
+        """FOVRecords for a mixed plate where viral sensor is only in B/3 and C/2."""
+        common = dict(
+            dataset="2025_01_24",
+            data_path="/data/2025_01_24.zarr",
+            tracks_path="/tracks/2025_01_24",
+            channel_names=["Phase3D", "raw mCherry EX561 EM600-37"],
+            time_interval_min=15.0,
+        )
+        # B/1, B/2: no viral sensor (channel_markers has no entry for mCherry)
+        no_sensor = [
+            FOVRecord(**common, well_id="B/1", cell_state="uninfected", channel_markers={"Phase3D": "Phase3D"}),
+            FOVRecord(**common, well_id="B/2", cell_state="uninfected", channel_markers={"Phase3D": "Phase3D"}),
+        ]
+        # B/3, C/2: viral sensor present
+        sensor = [
+            FOVRecord(
+                **common,
+                well_id="B/3",
+                cell_state="uninfected",
+                channel_markers={"Phase3D": "Phase3D", "raw mCherry EX561 EM600-37": "pAL40"},
+            ),
+            FOVRecord(
+                **common,
+                well_id="C/2",
+                cell_state="infected",
+                channel_markers={"Phase3D": "Phase3D", "raw mCherry EX561 EM600-37": "pAL40"},
+            ),
+        ]
+        return no_sensor + sensor
+
+    def test_wells_auto_populated_for_partial_channel(self):
+        """build_collection restricts a channel to wells where it has a marker."""
+        records = self._make_viral_sensor_records()
+        coll = build_collection(records, name="test")
+        exp = coll.experiments[0]
+
+        phase = next(ch for ch in exp.channels if ch.name == "Phase3D")
+        mcherry = next(ch for ch in exp.channels if ch.name == "raw mCherry EX561 EM600-37")
+
+        assert phase.wells == [], "Phase3D is valid in all wells — wells must be empty"
+        assert sorted(mcherry.wells) == ["B/3", "C/2"], "mCherry only valid in B/3, C/2"
+
+    def test_wells_empty_when_all_wells_have_marker(self):
+        """When all wells share a marker, wells stays empty (no restriction needed)."""
+        records = [
+            FOVRecord(
+                dataset="exp",
+                well_id="A/1",
+                data_path="/d.zarr",
+                tracks_path="/t",
+                channel_names=["Phase3D"],
+                cell_state="uninfected",
+                channel_markers={"Phase3D": "Phase3D"},
+            ),
+            FOVRecord(
+                dataset="exp",
+                well_id="A/2",
+                data_path="/d.zarr",
+                tracks_path="/t",
+                channel_names=["Phase3D"],
+                cell_state="infected",
+                channel_markers={"Phase3D": "Phase3D"},
+            ),
+        ]
+        coll = build_collection(records, name="test")
+        phase = coll.experiments[0].channels[0]
+        assert phase.wells == []
+
+    def test_wells_round_trips_yaml(self, tmp_path):
+        """wells field survives save_collection → load_collection."""
+        records = self._make_viral_sensor_records()
+        coll = build_collection(records, name="test")
+        path = tmp_path / "col.yml"
+        save_collection(coll, path)
+        loaded = load_collection(path)
+        mcherry = next(ch for ch in loaded.experiments[0].channels if ch.name == "raw mCherry EX561 EM600-37")
+        assert sorted(mcherry.wells) == ["B/3", "C/2"]
+
+    def test_channel_entry_wells_default_empty(self):
+        """ChannelEntry.wells defaults to empty list."""
+        ch = ChannelEntry(name="Phase3D", marker="Phase3D")
+        assert ch.wells == []
+
+
+def _write_yaml(path, data):
+    with open(path, "w") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def _minimal_experiment(name, data_path, tracks_path):
+    return {
+        "name": name,
+        "data_path": data_path,
+        "tracks_path": tracks_path,
+        "channels": [{"name": "Phase3D", "marker": "Phase3D"}],
+        "perturbation_wells": {"mock": ["A/1"]},
+    }
+
+
+class TestDatasetsRoot:
+    """Test ${datasets_root} substitution in load/save round-trip."""
+
+    def test_resolve_datasets_root(self, tmp_path):
+        """Paths with ${datasets_root} are fully resolved after load."""
+        data = {
+            "name": "test",
+            "datasets_root": "/hpc/projects/organelle_phenotyping",
+            "experiments": [
+                _minimal_experiment(
+                    "exp1",
+                    "${datasets_root}/datasets/exp1/exp1.zarr",
+                    "${datasets_root}/datasets/exp1/tracking.zarr",
+                )
+            ],
+        }
+        _write_yaml(tmp_path / "col.yml", data)
+        coll = load_collection(tmp_path / "col.yml")
+        assert coll.experiments[0].data_path == "/hpc/projects/organelle_phenotyping/datasets/exp1/exp1.zarr"
+        assert coll.experiments[0].tracks_path == "/hpc/projects/organelle_phenotyping/datasets/exp1/tracking.zarr"
+        assert coll.datasets_root == "/hpc/projects/organelle_phenotyping"
+
+    def test_round_trip_preserves_templates(self, tmp_path):
+        """save_collection writes ${datasets_root} back; reload resolves again."""
+        data = {
+            "name": "test",
+            "datasets_root": "/hpc/projects/organelle_phenotyping",
+            "experiments": [
+                _minimal_experiment(
+                    "exp1",
+                    "${datasets_root}/datasets/exp1/exp1.zarr",
+                    "${datasets_root}/datasets/exp1/tracking.zarr",
+                )
+            ],
+        }
+        yaml_path = tmp_path / "col.yml"
+        _write_yaml(yaml_path, data)
+        coll = load_collection(yaml_path)
+        out_path = tmp_path / "col_out.yml"
+        save_collection(coll, out_path)
+
+        with open(out_path) as f:
+            on_disk = yaml.safe_load(f)
+
+        assert "${datasets_root}" in on_disk["experiments"][0]["data_path"]
+        assert "${datasets_root}" in on_disk["experiments"][0]["tracks_path"]
+
+        reloaded = load_collection(out_path)
+        assert reloaded.experiments[0].data_path == "/hpc/projects/organelle_phenotyping/datasets/exp1/exp1.zarr"
+
+    def test_mixed_paths_non_root_stays_absolute(self, tmp_path):
+        """Paths not under datasets_root survive save unchanged."""
+        data = {
+            "name": "test",
+            "datasets_root": "/hpc/projects/organelle_phenotyping",
+            "experiments": [
+                _minimal_experiment(
+                    "exp_vast",
+                    "${datasets_root}/datasets/exp1/exp1.zarr",
+                    "${datasets_root}/datasets/exp1/tracking.zarr",
+                ),
+                _minimal_experiment(
+                    "exp_nfs",
+                    "${datasets_root}/datasets/exp2/exp2.zarr",
+                    "/hpc/projects/intracellular_dashboard/viral-sensor/tracking.zarr",
+                ),
+            ],
+        }
+        yaml_path = tmp_path / "col.yml"
+        _write_yaml(yaml_path, data)
+        coll = load_collection(yaml_path)
+        assert coll.experiments[1].tracks_path == "/hpc/projects/intracellular_dashboard/viral-sensor/tracking.zarr"
+
+        out_path = tmp_path / "col_out.yml"
+        save_collection(coll, out_path)
+        with open(out_path) as f:
+            on_disk = yaml.safe_load(f)
+        nfs_path = "/hpc/projects/intracellular_dashboard/viral-sensor/tracking.zarr"
+        assert on_disk["experiments"][1]["tracks_path"] == nfs_path
+
+    def test_no_datasets_root_passthrough(self, tmp_path):
+        """Collections without datasets_root load and save unchanged."""
+        data = {
+            "name": "test",
+            "experiments": [
+                _minimal_experiment(
+                    "exp1",
+                    "/absolute/data/exp1.zarr",
+                    "/absolute/tracks/exp1",
+                )
+            ],
+        }
+        yaml_path = tmp_path / "col.yml"
+        _write_yaml(yaml_path, data)
+        coll = load_collection(yaml_path)
+        assert coll.datasets_root is None
+        assert coll.experiments[0].data_path == "/absolute/data/exp1.zarr"
+
+        out_path = tmp_path / "col_out.yml"
+        save_collection(coll, out_path)
+        with open(out_path) as f:
+            on_disk = yaml.safe_load(f)
+        assert on_disk["experiments"][0]["data_path"] == "/absolute/data/exp1.zarr"

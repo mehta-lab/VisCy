@@ -68,6 +68,10 @@ class FOVRecord(BaseModel):
         Physical pixel size in the XY plane (micrometers).
     pixel_size_z_um : float or None
         Physical pixel size in Z (micrometers).
+    channel_markers : dict[str, str]
+        Maps zarr channel name to marker for this well.
+        Only channels with a non-None marker in Airtable are included.
+        Empty dict means no per-well channel marker information is available.
     """
 
     dataset: str
@@ -95,3 +99,4 @@ class FOVRecord(BaseModel):
     x_shape: int | None = None
     pixel_size_xy_um: float | None = None
     pixel_size_z_um: float | None = None
+    channel_markers: dict[str, str] = {}

@@ -58,10 +58,14 @@ class ChannelEntry(BaseModel):
         Zarr channel name (e.g. ``"Phase3D"``, ``"raw GFP EX488 EM525-45"``).
     marker : str
         Protein marker or channel identity (e.g. ``"Phase3D"``, ``"TOMM20"``).
+    wells : list[str]
+        Wells where this channel is biologically valid (e.g. ``["B/3", "C/2"]``).
+        Empty list means the channel is valid in all wells of the experiment.
     """
 
     name: str
     marker: str
+    wells: list[str] = []
 
 
 class ExperimentEntry(BaseModel):
@@ -144,6 +148,10 @@ class Collection(BaseModel):
         Collection name.
     description : str
         Human-readable description.
+    datasets_root : str or None
+        Optional path prefix substituted for ``${datasets_root}`` in
+        ``data_path`` and ``tracks_path`` at load time.  Paths not
+        starting with this root are left unchanged.
     provenance : Provenance
         How the collection was created.
     experiments : list[ExperimentEntry]
@@ -154,6 +162,7 @@ class Collection(BaseModel):
 
     name: str
     description: str = ""
+    datasets_root: str | None = None
     provenance: Provenance = Provenance()
     experiments: list[ExperimentEntry]
     fov_records: list[FOVRecord] = []
@@ -182,6 +191,39 @@ class Collection(BaseModel):
         return self
 
 
+_DATASETS_ROOT_VAR = "${datasets_root}"
+
+
+def _resolve_datasets_root(data: dict) -> None:
+    """Replace ``${datasets_root}`` in experiment paths with the root value.
+
+    Mutates *data* in place.
+    """
+    root = data.get("datasets_root")
+    if not root:
+        return
+    root = root.rstrip("/")
+    for exp in data.get("experiments", []):
+        for key in ("data_path", "tracks_path"):
+            val = exp.get(key, "")
+            if _DATASETS_ROOT_VAR in val:
+                exp[key] = val.replace(_DATASETS_ROOT_VAR, root)
+
+
+def _unresolve_datasets_root(data: dict, datasets_root: str) -> None:
+    """Replace the resolved root prefix with ``${datasets_root}`` for portable YAML.
+
+    Mutates *data* in place.  Only paths that start with *datasets_root* are
+    modified; paths pointing elsewhere are left as absolute strings.
+    """
+    root = datasets_root.rstrip("/")
+    for exp in data.get("experiments", []):
+        for key in ("data_path", "tracks_path"):
+            val = exp.get(key, "")
+            if val.startswith(root + "/"):
+                exp[key] = _DATASETS_ROOT_VAR + val[len(root) :]
+
+
 def load_collection(path: str | Path) -> Collection:
     """Load a collection from a YAML file.
 
@@ -197,6 +239,7 @@ def load_collection(path: str | Path) -> Collection:
     """
     with open(Path(path)) as f:
         data = yaml.safe_load(f)
+    _resolve_datasets_root(data)
     return Collection(**data)
 
 
@@ -211,6 +254,8 @@ def save_collection(collection: Collection, path: str | Path) -> None:
         Output YAML path.
     """
     data = collection.model_dump(mode="json")
+    if collection.datasets_root:
+        _unresolve_datasets_root(data, collection.datasets_root)
     with open(Path(path), "w") as f:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
@@ -257,6 +302,7 @@ def build_collection(
     name: str,
     description: str = "",
     channel_markers: dict[str, list[tuple[str, str]]] | None = None,
+    datasets_root: str | None = None,
 ) -> Collection:
     """Build a collection by grouping FOVRecords into experiments.
 
@@ -277,6 +323,9 @@ def build_collection(
         Per-experiment ``{exp_name: [(zarr_channel_name, marker), ...]}`` mapping.
         If None, derives from the first record's ``channel_names`` using
         channel names as markers.
+    datasets_root : str or None
+        Passed through to :class:`Collection`.  When set, ``save_collection``
+        will write ``${datasets_root}`` prefixes instead of absolute paths.
 
     Returns
     -------
@@ -305,6 +354,15 @@ def build_collection(
         elif first.channel_names:
             channels = [ChannelEntry(name=n, marker=n) for n in first.channel_names]
 
+        # Auto-populate wells per channel from per-record channel_markers.
+        # A channel gets a wells restriction if only a subset of wells have
+        # a non-None marker for it in Airtable.
+        all_wells = sorted({rec.well_id for rec in recs})
+        for ch in channels:
+            wells_with_marker = sorted({rec.well_id for rec in recs if ch.name in rec.channel_markers})
+            if wells_with_marker and wells_with_marker != all_wells:
+                ch.wells = wells_with_marker
+
         experiments.append(
             ExperimentEntry(
                 name=exp_name,
@@ -325,6 +383,7 @@ def build_collection(
     return Collection(
         name=name,
         description=description,
+        datasets_root=datasets_root,
         experiments=experiments,
         fov_records=records,
     )
