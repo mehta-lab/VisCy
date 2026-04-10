@@ -351,6 +351,11 @@ class DynacellFlowMatching(LightningModule):
         (default, matches standard HCS tile workflow).
     predict_overlap : int or tuple of int
         Overlap for sliding-window prediction.
+    ckpt_path : str or None
+        Path to a checkpoint to load weights from at construction time.
+        Bypasses LightningCLI's checkpoint hparam merging, so predict-time
+        settings (``predict_method``, ``predict_overlap``, etc.) are taken
+        from the config rather than from the checkpoint.
     """
 
     def __init__(
@@ -365,9 +370,12 @@ class DynacellFlowMatching(LightningModule):
         num_log_steps: int = 10,
         predict_method: Literal["generate", "non_overlapping", "sliding_window"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
+        ckpt_path: str | None = None,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(
+            ignore=["predict_method", "predict_overlap", "num_generate_steps", "num_log_steps", "ckpt_path"]
+        )
         net = CELLDiffNet(**(net_config or {}))
         self.model = CELLDiff3DVS(net, **(transport_config or {}))
         self.lr = lr
@@ -380,6 +388,8 @@ class DynacellFlowMatching(LightningModule):
         self.predict_overlap = predict_overlap
         self._training_step_outputs: list = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
+        if ckpt_path is not None:
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
     def training_step(self, batch: dict, batch_idx: int) -> Tensor:
         """Compute flow-matching training loss for one batch.

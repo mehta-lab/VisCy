@@ -1,0 +1,38 @@
+# CellDiff flow-matching: predict from checkpoint.
+# Usage: cd applications/dynacell/examples/configs && uv run dynacell predict -c sec61b/predict_celldiff.yml
+base:
+  - ../recipes/trainer/predict_gpu.yml
+  - ../recipes/models/celldiff_fm.yml
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff.zarr
+
+model:
+  init_args:
+    net_config:
+      input_spatial_size: [8, 512, 512]
+    num_generate_steps: 100
+    predict_method: sliding_window
+    predict_overlap: [4, 256, 256]
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/celldiff/checkpoints/last.ckpt
+
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+    source_channel: Phase3D
+    target_channel: Structure
+    z_window_size: 40
+    batch_size: 1
+    yx_patch_size: [512, 512]
+    num_workers: 0
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std

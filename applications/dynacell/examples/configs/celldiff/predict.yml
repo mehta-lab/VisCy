@@ -8,11 +8,14 @@ base:
 model:
   init_args:
     num_generate_steps: 100
-    predict_method: generate
+#    predict_method: generate
+    predict_method: sliding_window
+    predict_overlap: [4, 256, 256]
+    ckpt_path: #TODO checkpoint path
 
 data:
   init_args:
-    data_path: #TODO
-    z_window_size: 8
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+    z_window_size: 40
     batch_size: 1
     yx_patch_size: [512, 512]

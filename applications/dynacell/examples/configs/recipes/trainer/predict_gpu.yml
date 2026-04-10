@@ -8,4 +8,3 @@ trainer:
       init_args:
         output_store: #TODO output zarr path
 return_predictions: false
-ckpt_path: #TODO checkpoint path
