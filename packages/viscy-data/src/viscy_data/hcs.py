@@ -477,8 +477,9 @@ class HCSDataModule(LightningDataModule):
     def on_after_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         """Apply GPU augmentations and validate output spatial shape.
 
-        Training: applies ``gpu_augmentations`` if configured, then validates
-        that ``source`` spatial dimensions match ``(z_window_size, *yx_patch_size)``.
+        Training: applies ``gpu_augmentations`` if configured. When no
+        ``gpu_augmentations`` are set, validates that ``source`` spatial
+        dimensions match ``(z_window_size, *yx_patch_size)``.
         Validation: applies ``val_gpu_augmentations`` if configured.
         Test/predict: pass through unchanged.
 
