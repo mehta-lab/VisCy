@@ -421,8 +421,8 @@ def register_fovs(
 
     result = RegisterResult(dataset=dataset_name)
 
-    # Filter to directories only — glob("*/*/*") also picks up .zattrs/.zgroup files
-    pos_names = [p for p in pos_names if not Path(zarr_root / p).name.startswith(".")]
+    # Filter to directories only — glob("*/*/*") also picks up zarr.json, .zattrs, .zgroup files
+    pos_names = [p for p in pos_names if (zarr_root / p).is_dir()]
 
     with open_ome_zarr(str(zarr_root), mode="r") as plate:
         result.channel_names = plate.channel_names
