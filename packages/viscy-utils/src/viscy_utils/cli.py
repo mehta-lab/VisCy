@@ -98,11 +98,35 @@ class VisCyCLI(LightningCLI):
         parser.set_defaults(defaults)
 
     def _parse_ckpt_path(self) -> None:
+        # Snapshot model init_args from the user config before checkpoint hparams
+        # overwrite them. LightningCLI applies checkpoint hyper_parameters as the
+        # highest-priority layer, but the correct hierarchy is:
+        #   base-class defaults → checkpoint hparams → user config
+        # Restoring the snapshot after the merge enforces that hierarchy.
+        subcommand = self.config.get("subcommand")
+        saved_init_args: dict = {}
+        if subcommand:
+            sc = self.config.get(subcommand)
+            if isinstance(sc, Namespace):
+                model = sc.get("model")
+                if isinstance(model, Namespace):
+                    init_args = model.get("init_args")
+                    if isinstance(init_args, Namespace):
+                        saved_init_args = vars(init_args).copy()
         try:
-            return super()._parse_ckpt_path()
+            super()._parse_ckpt_path()
         except SystemExit:
             # FIXME: https://github.com/Lightning-AI/pytorch-lightning/issues/21255
             return None
+        if subcommand and saved_init_args:
+            sc = self.config.get(subcommand)
+            if isinstance(sc, Namespace):
+                model = sc.get("model")
+                if isinstance(model, Namespace):
+                    init_args = model.get("init_args")
+                    if isinstance(init_args, Namespace):
+                        for key, val in saved_init_args.items():
+                            init_args[key] = val
 
     def before_instantiate_classes(self) -> None:
         """Apply shared config rewrites before Lightning object creation."""
