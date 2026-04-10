@@ -1,3 +1,5 @@
+import math
+
 import torch
 
 from viscy_transforms import BatchedRandAffined
@@ -193,3 +195,110 @@ def test_affine_rotation_axis_zyx():
     inp_y_centroid = (x[0, 0] > 0.5).float().nonzero()[:, 1].float().mean()
     out_y_centroid = (out["img"][0, 0] > 0.01).float().nonzero()[:, 1].float().mean()
     assert abs(inp_y_centroid - out_y_centroid) > 1.0, "YX unchanged — rotation not applied"
+
+
+def test_compute_scale_floor_known_angles():
+    """_compute_scale_floor returns correct values for known geometries."""
+    B = 4
+    # Angles: 0°, 45°, 90°, 180° around Z (Kornia XYZ order: col 2 = Z).
+    angles_deg = torch.tensor([[0, 0, 0.0], [0, 0, 45.0], [0, 0, 90.0], [0, 0, 180.0]])
+    # CellDiff-like: source 624×624, crop 512×512, Z: source 13, crop 8.
+    input_shape = torch.Size([B, 1, 13, 624, 624])
+    safe_crop = (8, 512, 512)
+
+    s_floor = BatchedRandAffined._compute_scale_floor(angles_deg, input_shape, safe_crop)
+    assert s_floor.shape == (B, 3)
+
+    R = 624 / 512  # 1.21875
+    # θ=0°: k=1, s_min = 1/R
+    assert math.isclose(s_floor[0, 0].item(), 1 / R, rel_tol=1e-5)
+    # θ=45°: k=√2, s_min = √2/R
+    assert math.isclose(s_floor[1, 0].item(), math.sqrt(2) / R, rel_tol=1e-5)
+    # θ=90°: k=1 (for square crop), s_min = 1/R
+    assert math.isclose(s_floor[2, 0].item(), 1 / R, rel_tol=1e-5)
+    # θ=180°: k=1, s_min = 1/R
+    assert math.isclose(s_floor[3, 0].item(), 1 / R, rel_tol=1e-5)
+
+    # Z axis: s_min_z = 8 / 13
+    for i in range(B):
+        assert math.isclose(s_floor[i, 2].item(), 8 / 13, rel_tol=1e-5)
+
+
+def test_safe_crop_size_clamps_infeasible_scale():
+    """Infeasible scale+rotation combos get clamped; safe combos pass through."""
+    # CellDiff geometry: 624→512, full Z rotation.
+    t = BatchedRandAffined(
+        keys=["source", "target"],
+        prob=1.0,
+        rotate_range=[3.14, 0, 0],
+        scale_range=[[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]],
+        safe_crop_size=[8, 512, 512],
+    )
+    x = torch.randn(16, 1, 13, 624, 624)
+    params = t.random_affine.forward_parameters(x.shape)
+
+    # Record original scale.
+    orig_scale = params["scale"].clone()
+
+    # Compute floor and apply clamping (replicate __call__ logic).
+    s_floor = BatchedRandAffined._compute_scale_floor(params["angles"], x.shape, (8, 512, 512))
+    clamped_scale = torch.max(orig_scale, s_floor)
+
+    # Every clamped value should be ≥ the floor.
+    assert (clamped_scale >= s_floor - 1e-6).all()
+    # Samples that were already above the floor should be unchanged.
+    above_mask = orig_scale >= s_floor
+    assert torch.allclose(clamped_scale[above_mask], orig_scale[above_mask])
+    # Samples that were below should be raised to exactly the floor.
+    below_mask = orig_scale < s_floor
+    if below_mask.any():
+        assert torch.allclose(clamped_scale[below_mask], s_floor[below_mask])
+
+
+def test_safe_crop_size_eliminates_zero_corners():
+    """With safe_crop_size, no output pixel should sample outside the source."""
+    # Use a non-zero constant input so any zero pixel indicates out-of-bounds.
+    t = BatchedRandAffined(
+        keys=["img"],
+        prob=1.0,
+        rotate_range=[3.14, 0, 0],
+        scale_range=[0.5, 1.5],
+        safe_crop_size=[8, 32, 32],
+        padding_mode="zeros",
+    )
+    # Fill with 1.0 — after affine, any 0.0 pixel means out-of-bounds sampling.
+    x = torch.ones(4, 1, 10, 48, 48)
+
+    # Run multiple seeds to cover various rotation angles.
+    for seed in range(20):
+        torch.manual_seed(seed)
+        out = t({"img": x})
+        # Center-crop to the safe region (the guarantee).
+        d, h, w = 8, 32, 32
+        D, H, W = x.shape[2], x.shape[3], x.shape[4]
+        crop = out["img"][
+            :,
+            :,
+            (D - d) // 2 : (D + d) // 2,
+            (H - h) // 2 : (H + h) // 2,
+            (W - w) // 2 : (W + w) // 2,
+        ]
+        assert (crop > 0).all(), f"Seed {seed}: zero pixels found in safe crop region — coverage guarantee violated"
+
+
+def test_safe_crop_size_preserves_key_consistency():
+    """safe_crop_size should not break source/target consistency."""
+    t = BatchedRandAffined(
+        keys=["source", "target"],
+        prob=1.0,
+        rotate_range=[3.14, 0, 0],
+        scale_range=[0.5, 1.5],
+        safe_crop_size=[8, 32, 32],
+    )
+    base = torch.ones(2, 1, 10, 48, 48)
+    base[:, :, 2:8, 10:38, 10:38] = 2.0
+    sample = {"source": base.clone(), "target": base.clone()}
+
+    torch.manual_seed(42)
+    out = t(sample)
+    assert torch.equal(out["source"], out["target"])

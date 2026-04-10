@@ -102,6 +102,24 @@ class BatchedRandAffined(MapTransform):
 
         Use ``"border"`` when the oversized crop border is insufficient
         to absorb large rotation angles (i.e. crop/output ratio < √2).
+    safe_crop_size : Sequence[int] | None
+        ZYX size of the downstream center crop. When set, the sampled
+        scale is clamped so that the rotated source covers this crop
+        region, reducing zero-corner artifacts.
+
+        The per-sample lower bound on Kornia scale is:
+
+        ``s_min_i = coverage * (sum_j |R_ij| * d_j) / h_i``
+
+        where ``d = safe_crop_size / 2``, ``h = input_size / 2``,
+        ``R`` is the rotation matrix, and ``coverage`` is
+        ``safe_crop_coverage``. Default: None (no clamping).
+    safe_crop_coverage : float
+        Fraction of the ``safe_crop_size`` that must be covered by
+        the source after the affine transform. ``1.0`` eliminates all
+        zero-corner artifacts; lower values (e.g. ``0.85``) allow
+        small corners to remain as extra augmentation while still
+        preventing the worst cases. Default: 1.0.
     allow_missing_keys : bool
         Whether to allow missing keys. Default: False.
 
@@ -135,6 +153,8 @@ class BatchedRandAffined(MapTransform):
         scale_z_shear: bool = True,
         mode: str = "bilinear",
         padding_mode: str = "zeros",
+        safe_crop_size: Sequence[int] | None = None,
+        safe_crop_coverage: float = 1.0,
         allow_missing_keys: bool = False,
     ) -> None:
         super().__init__(keys, allow_missing_keys)
@@ -151,6 +171,8 @@ class BatchedRandAffined(MapTransform):
                 "Use a flat (min, max) range instead."
             )
         self._isotropic_scale = isotropic_scale and scale_range is not None
+        self._safe_crop_size = tuple(safe_crop_size) if safe_crop_size is not None else None
+        self._safe_crop_coverage = safe_crop_coverage
         self.random_affine = _PaddedRandomAffine3D(
             degrees=rotate_range,
             translate=translate_range,
@@ -268,6 +290,54 @@ class BatchedRandAffined(MapTransform):
         params["scale"] = iso
         return params
 
+    @staticmethod
+    def _compute_scale_floor(
+        angles: Tensor,
+        input_shape: torch.Size,
+        safe_crop_size: tuple[int, ...],
+    ) -> Tensor:
+        """Per-axis minimum Kornia scale for full source coverage.
+
+        For Z-only rotation by θ in the YX plane, the backward-warp
+        footprint along each axis is ``D_i * k(θ) / s_i`` where
+        ``k = |cos θ| + |sin θ|``. Requiring this ≤ ``S_i`` gives
+        ``s_i ≥ k(θ) * D_i / S_i``.
+
+        Parameters
+        ----------
+        angles : Tensor
+            Sampled rotation angles in degrees, shape ``(B, 3)``,
+            Kornia ``(X, Y, Z)`` order. Matches the ``"angles"`` key
+            from ``RandomAffine3D.forward_parameters()``.
+        input_shape : torch.Size
+            Input tensor shape ``(B, C, D, H, W)``.
+        safe_crop_size : tuple[int, ...]
+            Downstream crop size in ``(Z, Y, X)`` order.
+
+        Returns
+        -------
+        Tensor
+            Minimum scale per axis, shape ``(B, 3)``, Kornia
+            ``(X, Y, Z)`` order.
+        """
+        theta_z = torch.deg2rad(angles[:, 2])
+        cos_z = theta_z.cos().abs()
+        sin_z = theta_z.sin().abs()
+
+        dz = safe_crop_size[0] / 2.0
+        dy = safe_crop_size[1] / 2.0
+        dx = safe_crop_size[2] / 2.0
+        hz = input_shape[2] / 2.0
+        hy = input_shape[3] / 2.0
+        hx = input_shape[4] / 2.0
+
+        # Z rotation mixes X and Y in the backward warp.
+        s_min_x = (cos_z * dx + sin_z * dy) / hx
+        s_min_y = (sin_z * dx + cos_z * dy) / hy
+        s_min_z = torch.full_like(s_min_x, dz / hz)
+
+        return torch.stack([s_min_x, s_min_y, s_min_z], dim=-1)
+
     @torch.no_grad()
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         """Apply random affine transformation to specified keys.
@@ -292,6 +362,12 @@ class BatchedRandAffined(MapTransform):
         params = self.random_affine.forward_parameters(ref.shape)
         if self._isotropic_scale:
             params = self._make_scale_isotropic(params)
+        if self._safe_crop_size is not None:
+            s_floor = self._compute_scale_floor(params["angles"], ref.shape, self._safe_crop_size)
+            s_floor *= self._safe_crop_coverage
+            if self._isotropic_scale:
+                s_floor = s_floor.max(dim=-1, keepdim=True).values.expand_as(s_floor)
+            params["scale"] = torch.max(params["scale"], s_floor)
         if self._scale_z_shear:
             params = self._scale_z_shear_facets(params, ref.shape)
         # Apply with the same parameters to every key.
