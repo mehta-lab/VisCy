@@ -1,0 +1,401 @@
+name: DynaCLR-BoC-lc-evaluation-v1
+description: "Annotated experiments for linear classifier evaluation of bag-of-channels DynaCLR models.
+  Includes all datasets with infection_state / cell_division_state annotations and processed zarr stores."
+datasets_root: /hpc/projects/organelle_phenotyping
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "OR(SEARCH(\"2024_11_07\", {dataset}), SEARCH(\"2025_01_24\", {dataset}), SEARCH(\"2025_01_28_A549_G3BP1_ZIKV_DENV\", {dataset}), SEARCH(\"2025_07_22\", {dataset}), SEARCH(\"2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV\", {dataset}), SEARCH(\"2025_08_26\", {dataset}))"
+  record_ids: []
+  created_at: "2026-04-09T00:00:00"
+  created_by: "eduardo.hirata"
+
+experiments:
+  # ── 2025_01_28: G3BP1 (stress granules), ZIKV + DENV ──
+  # Annotated wells: B/4 (uninfected), C/4 (infected)
+  - name: 2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - B/2
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_01_28_A549_viral_sensor_ZIKV_DENV
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - B/2
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_01_28_A549_Phase3D_ZIKV_DENV
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - B/2
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_24: multi-channel (G3BP1, SEC61B, viral sensor, Phase3D), ZIKV ──
+  # Annotated wells: A/2 (infected), C/1 (uninfected), C/2 (infected)
+  # TOMM20 wells B/1, B/2 not annotated — excluded from this collection
+  - name: 2025_07_24_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_07_24_A549_SEC61_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+    perturbation_wells:
+      uninfected:
+        - A/1
+      infected:
+        - A/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: SEC61B
+    organelle: endoplasmic_reticulum
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_07_24_A549_viral_sensor_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - C/1
+        - B/1
+      infected:
+        - C/2
+        - B/2
+        - A/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_07_24_A549_Phase3D_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - C/1
+        - B/1
+      infected:
+        - C/2
+        - B/2
+        - A/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2024_11_07: SEC61B (ER), DENV ──
+  # Annotated wells: B/3 (uninfected), C/2 (infected+uninfected)
+  - name: 2024_11_07_A549_SEC61_DENV_SEC61B
+    data_path: ${datasets_root}/datasets/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_11_07_A549_SEC61_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+    perturbation_wells:
+      uninfected:
+        - B/3
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: SEC61B
+    organelle: endoplasmic_reticulum
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2024_11_07_A549_SEC61_DENV_viral_sensor
+    data_path: ${datasets_root}/datasets/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_11_07_A549_SEC61_DENV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - B/3
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2024_11_07_A549_SEC61_DENV_Phase3D
+    data_path: ${datasets_root}/datasets/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_11_07_A549_SEC61_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/3
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_01_24: G3BP1 (stress granules), DENV ──
+  # Annotated wells: B/1 (uninfected), B/2 (infected), B/3 (uninfected), C/2 (infected)
+  - name: 2025_01_24_A549_G3BP1_DENV_G3BP1
+    data_path: ${datasets_root}/datasets/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_24_A549_G3BP1_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - B/1
+        - B/3
+      infected:
+        - B/2
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_01_24_A549_G3BP1_DENV_viral_sensor
+    data_path: ${datasets_root}/datasets/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_24_A549_G3BP1_DENV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - B/1
+        - B/3
+      infected:
+        - B/2
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_01_24_A549_G3BP1_DENV_Phase3D
+    data_path: ${datasets_root}/datasets/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_24_A549_G3BP1_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/1
+        - B/3
+      infected:
+        - B/2
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_22: G3BP1 (stress granules) + pAL17 (viral sensor), ZIKV ──
+  # Annotated wells: C/1 (uninfected), C/2 (infected)
+  - name: 2025_07_22_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_07_22_A549_viral_sensor_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_07_22_A549_Phase3D_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_08_26: SEC61B (ER), ZIKV ──
+  # Annotated wells: A/1 (uninfected), B/1 (infected+uninfected)
+  - name: 2025_08_26_A549_SEC61_ZIKV
+    data_path: ${datasets_root}/datasets/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_08_26_A549_SEC61_TOMM20_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+    perturbation_wells:
+      uninfected:
+        - A/1
+      infected:
+        - B/1
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: SEC61B
+    organelle: endoplasmic_reticulum
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_08_26_A549_viral_sensor_ZIKV
+    data_path: ${datasets_root}/datasets/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_08_26_A549_SEC61_TOMM20_ZIKV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - A/1
+      infected:
+        - B/1
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_08_26_A549_Phase3D_ZIKV
+    data_path: ${datasets_root}/datasets/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_08_26_A549_SEC61_TOMM20_ZIKV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - A/1
+      infected:
+        - B/1
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
