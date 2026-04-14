@@ -1,0 +1,50 @@
+# Evaluation config for microglia dynamorph dataset
+# Checkpoint: DynaCLR-2D-MIP-BagOfChannels
+# Data: 20191107_1209_1_GW23_dynamorph — Brightfield, Phase3D, Retardance
+# Perturbations: untreated, IL17, IFN-beta, Rubella, Glioblastoma_supernatant
+#
+# Steps:
+#   1. Build cell index:
+#      dynaclr build-cell-index /home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/evaluation/microglia-eval.yaml /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/microglia/cell_index.parquet
+#
+#   2. Run predict:
+#      viscy predict -c <generated predict.yml>
+#      (or use the Nextflow orchestrator)
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/microglia-eval.parquet
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/microglia/
+
+steps:
+  # - predict
+  - reduce_dimensionality
+  - reduce_combined
+  - smoothness
+  - plot
+
+predict:
+  batch_size: 256
+  num_workers: 4
+  precision: 32-true
+  devices: 1
+
+reduce_dimensionality:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+  umap:
+    n_components: 2
+    n_neighbors: 15
+    normalize: true
+
+reduce_combined:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+
+smoothness: {}
+
+plot: {}
