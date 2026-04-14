@@ -79,6 +79,9 @@ test = [
   "tensorboard",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 
