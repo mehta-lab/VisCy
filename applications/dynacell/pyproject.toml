@@ -32,6 +32,8 @@ dynamic = [ "version" ]
 dependencies = [
   "lightning>=2.3",
   "monai",
+  "omegaconf",
+  "pydantic>=2",
   "viscy-data",
   "viscy-models[celldiff]",
   "viscy-transforms",
