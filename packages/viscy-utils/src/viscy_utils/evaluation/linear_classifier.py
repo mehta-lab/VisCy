@@ -340,6 +340,15 @@ def train_linear_classifier(
             else:
                 val_metrics["val_auroc"] = roc_auc_score(y_val, y_val_proba, multi_class="ovr", average="macro")
             print(f"  Val AUROC: {val_metrics['val_auroc']:.3f}")
+
+            if len(classifier.classes_) > 2:
+                for i, class_name in enumerate(classifier.classes_):
+                    try:
+                        val_metrics[f"val_{class_name}_auroc"] = roc_auc_score(
+                            (y_val == class_name).astype(int), y_val_proba[:, i]
+                        )
+                    except ValueError:
+                        pass
         except ValueError as e:
             _logger.warning(f"Could not compute val AUROC (likely only one class present): {e}")
 
