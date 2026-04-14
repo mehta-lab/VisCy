@@ -271,7 +271,7 @@ def main():
 
     zarr_store = cfg["zarr_store"]
     analysis_base = cfg["analysis_base"]
-    transcriptome_anndata = cfg["transcriptome_anndata"]
+    transcriptome_anndata = cfg.get("transcriptome_anndata", None)
     output_path = cfg["output_path"]
     model_name = cfg.get("model_name", "facebook/dinov2-base")
     channels = cfg.get("channels", None)
@@ -292,10 +292,13 @@ def main():
     logger.info(f"After filtering: {len(df)} cells (removed {n_raw - len(df)})")
 
     df = derive_zarr_paths(df)
-    lookup = build_barcode_lookup(transcriptome_anndata)
-    df = join_barcodes(df, lookup)
-    n_matched = df["in_anndata"].sum()
-    logger.info(f"Barcode match: {n_matched}/{len(df)} cells ({100 * n_matched / len(df):.1f}%)")
+    if transcriptome_anndata is not None:
+        lookup = build_barcode_lookup(transcriptome_anndata)
+        df = join_barcodes(df, lookup)
+        n_matched = df["in_anndata"].sum()
+        logger.info(f"Barcode match: {n_matched}/{len(df)} cells ({100 * n_matched / len(df):.1f}%)")
+    else:
+        logger.info("No transcriptome_anndata provided; skipping barcode join")
 
     # --- Pixel size rescaling ---
     # raw_crop covers the same physical area as patch_size at reference resolution.
