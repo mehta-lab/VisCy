@@ -118,6 +118,9 @@ class HCSPredictionWriter(BasePredictionWriter):
     ----------
     output_store : str
         Path to the zarr store to store output.
+    overwrite : bool, optional
+        When True, overwrite existing prediction channels in the output
+        store instead of raising an error. Default False.
     write_input : bool, optional
         Write the source and target channels too
         (must be writing to a new store), by default False.
@@ -128,11 +131,13 @@ class HCSPredictionWriter(BasePredictionWriter):
     def __init__(
         self,
         output_store: str,
+        overwrite: bool = False,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
     ) -> None:
         super().__init__(write_interval)
         self.output_store = output_store
+        self.overwrite = overwrite
         self.write_input = write_input
         self._dataset_scale = None
 
@@ -177,8 +182,16 @@ class HCSPredictionWriter(BasePredictionWriter):
             else:
                 with open_ome_zarr(self.output_store, mode="r+") as plate:
                     for _, pos in plate.positions():
+                        existing = set(pos.channel_names)
                         for ch in prediction_channel:
-                            pos.append_channel(ch, resize_arrays=True)
+                            if ch in existing and not self.overwrite:
+                                raise FileExistsError(
+                                    f"Channel '{ch}' already exists in "
+                                    f"'{self.output_store}'. "
+                                    f"Set overwrite=True to replace."
+                                )
+                            elif ch not in existing:
+                                pos.append_channel(ch, resize_arrays=True)
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
         else:
             channel_names = prediction_channel
