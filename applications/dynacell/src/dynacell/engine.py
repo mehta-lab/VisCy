@@ -352,10 +352,12 @@ class DynacellFlowMatching(LightningModule):
     predict_overlap : int or tuple of int
         Overlap for sliding-window prediction.
     ckpt_path : str | None
-        Path to a checkpoint to load weights from at construction time.
-        Bypasses LightningCLI's checkpoint hparam merging, so predict-time
-        settings (``predict_method``, ``predict_overlap``, etc.) are taken
-        from the config rather than from the checkpoint.
+        Path to a checkpoint to load **weights only** at construction time.
+        Intended for inference (predict/test), not training resumption —
+        optimizer state, epoch counters, and scheduler state are not
+        restored.  Bypasses LightningCLI's checkpoint hparam merging, so
+        predict-time settings (``predict_method``, ``predict_overlap``,
+        etc.) are taken from the config rather than the checkpoint.
     """
 
     def __init__(
