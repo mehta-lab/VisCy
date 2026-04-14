@@ -1,0 +1,37 @@
+# Diagnostic spectra plot for real A549 nuclei data.
+#
+# Loads one position from zarr, generates diagnostic spectra plot
+# (reusing plot_diagnostic_spectra from simulate_beads.py),
+# computes DCR A₀ per timepoint, and generates comparison plots.
+
+input_zarr: /hpc/projects/virtual_staining/datasets/huang-lab/crops/2025_04_17_A549_H2B_CAAX_DENV.zarr
+position: B/1/0000001
+gt_channel: 1       # "raw Cy5 EX639 EM698-70"
+pred_channel: 3     # "nuclei_prediction"
+metrics_dir: ./output
+output_dir: ./output_diagnostic_real
+n_snapshots: 6
+
+optics:
+  wavelength_emission: 0.698
+  numerical_aperture: 1.35
+
+spectral_pcc:
+  bin_delta: 1.0
+  tail_fraction: 0.2
+  apodization: tukey
+  frcw_threshold: 0.143
+  frcw_alpha: 2.0
+  frcw_nbins_low: 3
+  frcw_smooth_window: 5
+
+dcr:
+  num_radii: 100
+  num_highpass: 10
+  windowing: true
+  refine: true
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

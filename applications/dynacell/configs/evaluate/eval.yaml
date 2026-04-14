@@ -1,0 +1,42 @@
+defaults:
+  - _self_
+
+target_name: ???
+io:
+  pred_path: ???
+  gt_path: ???
+  cell_segmentation_path: ???
+  pred_channel_name: prediction
+  gt_channel_name: target
+
+pixel_metrics:
+  spacing: ???
+  fsc:
+    bin_delta: 5
+  spectral_pcc:
+    bin_delta: 1.0
+    tail_fraction: 0.2
+    apodization: tukey
+    nbins_low: 3
+
+feature_metrics:
+  patch_size: 256
+
+use_gpu: true
+compute_microssim: true
+compute_feature_metrics: false
+recalculate_metrics: true
+
+save:
+  save_dir: ???
+  pixel_csv_filename: pixel_metrics.csv
+  pixel_metrics_filename: pixel_metrics.npy
+  mask_csv_filename: mask_metrics.csv
+  mask_metrics_filename: mask_metrics.npy
+  feature_csv_filename: feature_metrics.csv
+  feature_metrics_filename: feature_metrics.npy
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
