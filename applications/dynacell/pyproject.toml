@@ -39,10 +39,36 @@ dependencies = [
   "viscy-transforms",
   "viscy-utils",
 ]
-
+optional-dependencies.eval = [
+  "accelerate>=1.13",
+  "aicssegmentation",
+  "cellpose",
+  "cubic==0.7.0a2",
+  "dynaclr",
+  "hydra-core>=1.2",
+  "iohub",
+  "matplotlib",
+  "microssim",
+  "pandas",
+  "scikit-image",
+  "scipy",
+  "segmenter-model-zoo",
+  "tqdm",
+  "transformers",
+]
+optional-dependencies.preprocess = [
+  "iohub",
+  "tqdm",
+]
+optional-dependencies.report = [
+  "hydra-core>=1.2",
+  "matplotlib",
+  "pandas",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
+
 scripts.dynacell = "dynacell.__main__:main_cli"
 
 [dependency-groups]
