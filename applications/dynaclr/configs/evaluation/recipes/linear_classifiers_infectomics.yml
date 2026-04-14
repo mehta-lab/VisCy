@@ -1,0 +1,47 @@
+# Linear classifier settings for the infectomics benchmark (14 annotated experiments).
+# Covers ZIKV + DENV datasets across G3BP1, SEC61B, Phase3D, viral_sensor markers.
+linear_classifiers:
+  annotations:
+    - experiment: "2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_G3BP1_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_SEC61_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_viral_sensor_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_Phase3D_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2024_11_07_A549_SEC61_DENV_SEC61B"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61B_DENV_combined_annotations.csv
+    - experiment: "2024_11_07_A549_SEC61_DENV_Phase3D"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61B_DENV_combined_annotations.csv
+    - experiment: "2025_01_24_A549_G3BP1_DENV_G3BP1"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV_combined_annotations.csv
+    - experiment: "2025_01_24_A549_G3BP1_DENV_Phase3D"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV_combined_annotations.csv
+    - experiment: "2025_07_22_A549_G3BP1_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_22_A549_viral_sensor_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_22_A549_Phase3D_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_08_26_A549_SEC61_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV_combined_annotations.csv
+    - experiment: "2025_08_26_A549_Phase3D_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV_combined_annotations.csv
+  tasks:
+    - task: infection_state
+    - task: cell_division_state
+    - task: organelle_state
+      marker_filters:
+        - G3BP1
+        - SEC61B
+    - task: cell_death_state
+      marker_filters:
+        - G3BP1
+        - SEC61B
+  use_scaling: true
+  use_pca: false
+  split_train_data: 0.8
+  random_seed: 42

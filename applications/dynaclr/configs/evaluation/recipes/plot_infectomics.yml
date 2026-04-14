@@ -1,0 +1,15 @@
+# Default plot settings for infectomics DynaCLR evaluation.
+plot:
+  embedding_keys:
+    - X_pca
+  combined_embedding_keys:
+    - X_pca_combined
+    - X_phate_combined
+  color_by:
+    - perturbation
+    - hours_post_perturbation
+    - experiment
+    - marker
+  point_size: 1.0
+  components: [0, 1]
+  format: pdf

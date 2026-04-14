@@ -1,0 +1,30 @@
+# Evaluation config for DynaCLR-2D-BagOfChannels-v3
+# Experiments: 14 infectomics experiments (ZIKV + DENV, G3BP1/SEC61B/Phase3D/viral_sensor)
+#
+# Usage:
+#   nextflow run applications/dynaclr/nextflow/main.nf \
+#     --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-BagOfChannels-v3.yaml \
+#     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+#     -resume
+
+base:
+  - recipes/predict.yml
+  - recipes/reduce.yml
+  - recipes/plot_infectomics.yml
+  - recipes/linear_classifiers_infectomics.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/DynaCLR-2D-BagOfChannels-v3.yml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/v3
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-BoC-lc-evaluation-v1.parquet
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - plot
+  - smoothness
+  - linear_classifiers
+  - append_annotations
+  - append_predictions

@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import yaml
-
 
 def format_markdown_table(data: dict | list[dict], title: str = None, headers: list[str] = None) -> str:
     """Format data as a markdown table.
@@ -88,12 +86,12 @@ def load_config(config_path: str | Path) -> dict:
     yaml.YAMLError
         If the YAML file is malformed.
     """
+    from viscy_utils.compose import load_composed_config
+
     config_path = Path(config_path)
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+    return load_composed_config(config_path)
 
 
 def load_config_section(config_path: str | Path, section: str | None, default_section: str | None = None) -> dict:
