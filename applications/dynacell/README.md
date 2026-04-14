@@ -7,17 +7,15 @@ Benchmark virtual staining application for deterministic and generative architec
 Set `data_path` in the config file or pass it on the command line:
 
 ```bash
-cd applications/dynacell/examples/configs
+cd applications/dynacell/configs/examples
 
 # Deterministic models
-uv run dynacell fit -c unetvit3d/fit.yml --data.init_args.data_path=/path/to/data.zarr
 uv run dynacell fit -c fnet3d/fit.yml --data.init_args.data_path=/path/to/data.zarr
-uv run dynacell predict -c unetvit3d/predict.yml --data.init_args.data_path=/path/to/data.zarr --ckpt_path=/path/to/checkpoint.ckpt
-uv run dynacell predict -c fnet3d/predict.yml --data.init_args.data_path=/path/to/data.zarr --ckpt_path=/path/to/checkpoint.ckpt
+uv run dynacell fit -c unext2/fit.yml --data.init_args.data_path=/path/to/data.zarr
+uv run dynacell fit -c unetvit3d/fit.yml --data.init_args.data_path=/path/to/data.zarr
 
 # Flow-matching CellDiff
 uv run dynacell fit -c celldiff/fit.yml --data.init_args.data_path=/path/to/data.zarr
-uv run dynacell predict -c celldiff/predict.yml --data.init_args.data_path=/path/to/data.zarr --ckpt_path=/path/to/checkpoint.ckpt
 ```
 
 ## Architectures
@@ -34,25 +32,12 @@ uv run dynacell predict -c celldiff/predict.yml --data.init_args.data_path=/path
   Uses ODE sampling for inference. No external loss function needed —
   the flow-matching loss is computed internally.
 
-## SEC61B Benchmark
+## Config Structure
 
-Launch SEC61B training from Dynacell (canonical location):
+- `configs/recipes/` — Reusable fragments (model, trainer, data, modes)
+- `configs/examples/` — Generic fit/predict pair per model family
 
-```bash
-# FNet3D benchmark config
-uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d.yml
-
-# FNet3D paper-native baseline config
-uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_fnet3d_paper.yml
-
-# UNeXt2 (VSCyto3D)
-uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_unext2.yml
-
-# SLURM (H200)
-sbatch applications/dynacell/examples/configs/sec61b/run_fnet3d.slurm
-sbatch applications/dynacell/examples/configs/sec61b/run_fnet3d_paper.slurm
-sbatch applications/dynacell/examples/configs/sec61b/run_unext2.slurm
-```
+Benchmark-specific configs (SEC61B, nuclei-mix) live in the `dynacell-paper` repo.
 
 ## Supported subcommands
 
