@@ -14,15 +14,18 @@ dynaclr run-linear-classifiers -c linear_classifiers.yaml
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
+import joblib
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
+from sklearn.model_selection import train_test_split
 
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
@@ -81,12 +84,22 @@ def run_linear_classifiers(
         )
 
     all_metrics: list[dict] = []
-    all_val_outputs: list[dict[str, Any]] = []
+    # val_outputs_by_task: task → list of per-marker dicts for plotting
+    val_outputs_by_task: dict[str, list[dict[str, Any]]] = {}
+    # Saved pipelines for append-predictions step
+    pipelines_dir = output_dir / "pipelines"
+    pipelines_dir.mkdir(parents=True, exist_ok=True)
+    pipeline_manifest: list[dict] = []
 
     for task_spec in config.tasks:
         task = task_spec.task
-        # Expand marker_filters: None → [None] (one run, all markers); list → one run per marker
-        runs: list[str | None] = task_spec.marker_filters if task_spec.marker_filters is not None else [None]
+        # Expand marker_filters: None → all unique markers; list → one run per specified marker
+        runs: list[str] = (
+            task_spec.marker_filters
+            if task_spec.marker_filters is not None
+            else sorted(adata.obs["marker"].unique().tolist())
+        )
+        val_outputs_by_task[task] = []
 
         for marker_filter in runs:
             label = f"{task}" + (f" (marker={marker_filter})" if marker_filter else " (all markers)")
@@ -149,16 +162,43 @@ def run_linear_classifiers(
                 "random_state": config.random_seed,
             }
 
-            _, metrics, val_outputs = train_linear_classifier(
-                adata=combined,
-                task=task,
-                use_scaling=config.use_scaling,
-                use_pca=config.use_pca,
-                n_pca_components=config.n_pca_components,
-                classifier_params=classifier_params,
-                split_train_data=config.split_train_data,
-                random_seed=config.random_seed,
-            )
+            try:
+                pipeline, metrics, val_outputs = train_linear_classifier(
+                    adata=combined,
+                    task=task,
+                    use_scaling=config.use_scaling,
+                    use_pca=config.use_pca,
+                    n_pca_components=config.n_pca_components,
+                    classifier_params=classifier_params,
+                    split_train_data=config.split_train_data,
+                    random_seed=config.random_seed,
+                )
+            except ValueError as exc:
+                click.echo(f"  Skipping {label}: {exc}")
+                continue
+
+            # Save pipeline for append-predictions step
+            pipeline_filename = f"{task}_{marker_filter}.joblib"
+            joblib.dump(pipeline, pipelines_dir / pipeline_filename)
+            pipeline_manifest.append({"task": task, "marker_filter": marker_filter, "path": pipeline_filename})
+            click.echo(f"  Pipeline saved: {pipeline_filename}")
+
+            # Replay the same split to recover val obs (hours_post_perturbation)
+            y_full = combined.obs[task].to_numpy(dtype=object)
+            val_hours: np.ndarray | None = None
+            if config.split_train_data < 1.0 and "hours_post_perturbation" in combined.obs.columns:
+                try:
+                    idx = np.arange(len(combined))
+                    _, idx_val = train_test_split(
+                        idx,
+                        train_size=config.split_train_data,
+                        random_state=config.random_seed,
+                        stratify=y_full,
+                        shuffle=True,
+                    )
+                    val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
+                except ValueError:
+                    click.echo("  Could not replay stratified split for val_hours; F1-over-time plot skipped.")
 
             row = {
                 "task": task,
@@ -167,7 +207,13 @@ def run_linear_classifiers(
                 **metrics,
             }
             all_metrics.append(row)
-            all_val_outputs.append({"task": task, "marker_filter": marker_filter, **val_outputs})
+            val_outputs_by_task[task].append(
+                {
+                    "marker_filter": marker_filter,
+                    "val_hours": val_hours,
+                    **val_outputs,
+                }
+            )
 
     if not all_metrics:
         click.echo("\nNo classifiers trained — check annotations and marker filters.")
@@ -179,8 +225,15 @@ def run_linear_classifiers(
     results_df.to_csv(summary_path, index=False)
     click.echo(f"\nMetrics summary written to {summary_path}")
 
+    manifest_path = pipelines_dir / "manifest.json"
+    with open(manifest_path, "w") as f:
+        json.dump(pipeline_manifest, f, indent=2)
+    click.echo(f"Pipeline manifest written to {manifest_path}")
+
     _print_summary(results_df)
-    _save_summary_plots(results_df, all_val_outputs, output_dir)
+    for task, task_val_outputs in val_outputs_by_task.items():
+        task_df = results_df[results_df["task"] == task]
+        _save_task_plots(task, task_df, task_val_outputs, output_dir)
     return results_df
 
 
@@ -188,7 +241,15 @@ def _print_summary(results_df: pd.DataFrame) -> None:
     """Print a markdown summary table of key metrics."""
     click.echo("\n## Linear Classifier Results\n")
 
-    summary_cols = ["task", "marker_filter", "n_samples", "val_accuracy", "val_weighted_f1", "val_auroc"]
+    per_class_f1_cols = sorted(c for c in results_df.columns if c.startswith("val_") and c.endswith("_f1"))
+    summary_cols = [
+        "task",
+        "marker_filter",
+        "n_samples",
+        "val_accuracy",
+        "val_weighted_f1",
+        "val_auroc",
+    ] + per_class_f1_cols
     display = results_df[[c for c in summary_cols if c in results_df.columns]].copy()
 
     float_cols = [c for c in display.columns if c not in ("task", "marker_filter")]
@@ -200,49 +261,50 @@ def _print_summary(results_df: pd.DataFrame) -> None:
     click.echo(format_markdown_table(rows, headers=list(display.columns)))
 
 
-def _save_summary_plots(
-    results_df: pd.DataFrame,
-    all_val_outputs: list[dict[str, Any]],
+def _save_task_plots(
+    task: str,
+    task_df: pd.DataFrame,
+    task_val_outputs: list[dict[str, Any]],
     output_dir: Path,
 ) -> None:
-    """Save a PDF with bar charts and ROC curves for quick visual assessment.
+    """Save one PDF per task with bar chart, ROC curves, and F1-over-time plots.
 
     Parameters
     ----------
-    results_df : pd.DataFrame
-        Metrics summary (one row per task/marker_filter).
-    all_val_outputs : list[dict]
-        Raw validation outputs per classifier run. Each entry has keys
-        ``task``, ``marker_filter``, ``y_val``, ``y_val_proba``, ``classes``.
+    task : str
+        Task name (used in filename and titles).
+    task_df : pd.DataFrame
+        Rows from metrics_summary.csv for this task (one row per marker).
+    task_val_outputs : list[dict]
+        Per-marker val outputs. Each entry has keys ``marker_filter``,
+        ``y_val``, ``y_val_proba``, ``classes``, ``val_hours``.
     output_dir : Path
-        Directory to write ``metrics_summary.pdf``.
+        Directory to write ``{task}_summary.pdf``.
     """
-
-    pdf_path = output_dir / "metrics_summary.pdf"
+    pdf_path = output_dir / f"{task}_summary.pdf"
 
     with PdfPages(pdf_path) as pdf:
-        _plot_metrics_bar(pdf, results_df)
-        for vo in all_val_outputs:
-            if vo["y_val"] is not None and vo["y_val_proba"] is not None:
-                _plot_roc_curves(pdf, vo["task"], vo["marker_filter"], vo["y_val"], vo["y_val_proba"], vo["classes"])
+        _plot_metrics_bar(pdf, task, task_df)
+        for vo in task_val_outputs:
+            if vo["y_val"] is None or vo["y_val_proba"] is None:
+                continue
+            _plot_roc_curves(pdf, task, vo["marker_filter"], vo["y_val"], vo["y_val_proba"], vo["classes"])
+            if vo["val_hours"] is not None:
+                _plot_f1_over_time(
+                    pdf, task, vo["marker_filter"], vo["y_val"], vo["y_val_proba"], vo["classes"], vo["val_hours"]
+                )
 
-    click.echo(f"Summary plots written to {pdf_path}")
+    click.echo(f"Plots written to {pdf_path}")
 
 
-def _plot_metrics_bar(pdf: PdfPages, results_df: pd.DataFrame) -> None:
-    """Bar chart of AUROC, accuracy, and weighted F1 across all classifiers."""
+def _plot_metrics_bar(pdf: PdfPages, task: str, task_df: pd.DataFrame) -> None:
+    """Bar chart of AUROC, accuracy, and weighted F1 per marker for one task."""
     metric_cols = ["val_auroc", "val_accuracy", "val_weighted_f1"]
-    present = [c for c in metric_cols if c in results_df.columns]
+    present = [c for c in metric_cols if c in task_df.columns]
     if not present:
         return
 
-    labels = []
-    for _, row in results_df.iterrows():
-        label = str(row["task"])
-        if pd.notna(row.get("marker_filter")):
-            label += f"\n({row['marker_filter']})"
-        labels.append(label)
-
+    labels = task_df["marker_filter"].fillna("all").tolist()
     x = np.arange(len(labels))
     n_metrics = len(present)
     width = 0.8 / n_metrics
@@ -250,9 +312,9 @@ def _plot_metrics_bar(pdf: PdfPages, results_df: pd.DataFrame) -> None:
     metric_display = {"val_auroc": "AUROC", "val_accuracy": "Accuracy", "val_weighted_f1": "Weighted F1"}
     colors = ["#0072B2", "#E69F00", "#009E73"]
 
-    fig, ax = plt.subplots(figsize=(max(8, len(labels) * 1.5), 5))
+    fig, ax = plt.subplots(figsize=(max(6, len(labels) * 1.5), 5))
     for i, col in enumerate(present):
-        vals = results_df[col].fillna(0).values
+        vals = task_df[col].fillna(0).values
         ax.bar(x + i * width, vals, width, label=metric_display.get(col, col), color=colors[i], alpha=0.85)
 
     ax.set_xticks(x + width * (n_metrics - 1) / 2)
@@ -260,7 +322,7 @@ def _plot_metrics_bar(pdf: PdfPages, results_df: pd.DataFrame) -> None:
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, color="gray", linewidth=0.8, linestyle="--", label="Random (0.5)")
     ax.set_ylabel("Score")
-    ax.set_title("Linear Classifier Performance Summary")
+    ax.set_title(f"{task} — classifier performance per marker")
     ax.legend(fontsize=9)
     fig.tight_layout()
     pdf.savefig(fig, bbox_inches="tight")
@@ -275,17 +337,15 @@ def _plot_roc_curves(
     y_val_proba: np.ndarray,
     classes: list[str],
 ) -> None:
-    """One-vs-rest ROC curves for a single classifier."""
+    """One-vs-rest ROC curves for a single (task, marker) classifier."""
     from sklearn.metrics import roc_curve
     from sklearn.preprocessing import label_binarize
-
-    title = task + (f" (marker={marker_filter})" if marker_filter else "")
 
     # Colorblind-friendly palette (Wong 2011)
     palette = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#F0E442"]
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.set_title(f"ROC Curves: {title}", fontsize=11)
+    ax.set_title(f"ROC — {task} ({marker_filter})", fontsize=11)
 
     if len(classes) == 2:
         fpr, tpr, _ = roc_curve(y_val, y_val_proba[:, 1], pos_label=classes[1])
@@ -304,6 +364,47 @@ def _plot_roc_curves(
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1.05])
     ax.legend(fontsize=8, loc="lower right")
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_f1_over_time(
+    pdf: PdfPages,
+    task: str,
+    marker_filter: str | None,
+    y_val: np.ndarray,
+    y_val_proba: np.ndarray,
+    classes: list[str],
+    val_hours: np.ndarray,
+) -> None:
+    """Per-class F1 at each unique timepoint for a single (task, marker) classifier."""
+    from sklearn.metrics import f1_score
+
+    palette = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#F0E442"]
+
+    y_pred = np.array(classes)[np.argmax(y_val_proba, axis=1)]
+    timepoints = sorted(np.unique(val_hours[~np.isnan(val_hours)]))
+
+    # (n_timepoints, n_classes)
+    f1_per_time = np.full((len(timepoints), len(classes)), np.nan)
+    for ti, t in enumerate(timepoints):
+        mask = val_hours == t
+        if mask.sum() < 2:
+            continue
+        f1s = f1_score(y_val[mask], y_pred[mask], labels=classes, average=None, zero_division=0)
+        f1_per_time[ti] = f1s
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for ci, cls in enumerate(classes):
+        ax.plot(timepoints, f1_per_time[:, ci], marker="o", color=palette[ci % len(palette)], linewidth=2, label=cls)
+
+    ax.set_xlabel("Hours post perturbation")
+    ax.set_ylabel("F1 score")
+    ax.set_ylim(0, 1.05)
+    ax.axhline(0.5, color="gray", linewidth=0.8, linestyle="--")
+    ax.set_title(f"F1 over time — {task} ({marker_filter})")
+    ax.legend(fontsize=9)
     fig.tight_layout()
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
