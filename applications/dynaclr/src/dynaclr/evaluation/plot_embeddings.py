@@ -121,17 +121,28 @@ def _pairplot(
             df,
             hue=color_col,
             palette=palette,
-            plot_kws={"s": point_size, "alpha": 0.4, "rasterized": True},
-            diag_kind="kde",
+            plot_kws={"s": point_size, "alpha": 0.4, "rasterized": True, "zorder": 0},
+            diag_kind="hist",
             corner=True,
         )
+        pg.legend.set(title=color_col)
+        for lh in pg.legend.legend_handles:
+            lh.set_alpha(1.0)
+            if hasattr(lh, "set_sizes"):
+                lh.set_sizes([40])
+            else:
+                lh.set_markersize(8)
+        for ax_row in pg.axes:
+            for ax in ax_row:
+                if ax is not None:
+                    ax.set_rasterization_zorder(1)
     else:
         # Continuous: no hue support in pairplot — use a custom scatter matrix
         df[color_col] = values.astype(float)
         pg = sns.pairplot(
             df,
-            plot_kws={"s": point_size, "alpha": 0.4, "rasterized": True, "color": "#888888"},
-            diag_kind="kde",
+            plot_kws={"s": point_size, "alpha": 0.4, "rasterized": True, "color": "#888888", "zorder": 0},
+            diag_kind="hist",
             corner=True,
         )
         # Overlay color on lower-triangle axes
@@ -152,8 +163,13 @@ def _pairplot(
                     s=point_size,
                     alpha=0.4,
                     rasterized=True,
+                    zorder=0,
                 )
         pg.figure.colorbar(sc, ax=pg.axes[-1][-1], label=color_col)
+        for ax_row in pg.axes:
+            for ax in ax_row:
+                if ax is not None:
+                    ax.set_rasterization_zorder(1)
 
     pg.figure.suptitle(f"{emb_key} — {color_col}", y=1.01, fontsize=11, fontweight="bold")
     return pg.figure
@@ -186,7 +202,9 @@ def _scatter_2d(
                 ax.scatter(
                     x[mask], y[mask], s=point_size, c=_PALETTE[i % len(_PALETTE)], label=cat, alpha=0.5, rasterized=True
                 )
-            ax.legend(markerscale=5, fontsize=7, loc="best", framealpha=0.7, ncol=max(1, len(cats) // 8))
+            ax.legend(
+                markerscale=6, fontsize=10, loc="best", framealpha=1.0, edgecolor="black", ncol=max(1, len(cats) // 8)
+            )
         else:
             sc = ax.scatter(x, y, s=point_size, c=values.astype(float), cmap="viridis", alpha=0.5, rasterized=True)
             plt.colorbar(sc, ax=ax, shrink=0.8)
