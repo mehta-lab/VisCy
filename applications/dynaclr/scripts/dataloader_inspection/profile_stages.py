@@ -47,7 +47,7 @@ N_BATCHES = 15
 WARMUP = 3
 CACHE_POOL_BYTES = 500_000_000
 
-Z_WINDOW = 16
+Z_WINDOW = 32
 Z_EXTRACTION_WINDOW = 45
 YX_PATCH = (192, 192)
 FINAL_YX_PATCH = (160, 160)
@@ -214,11 +214,24 @@ def main():
         return batch
 
     io_stats, _ = time_stage(io_step)
-    print(f"   {io_stats['mean_ms']:.1f} ± {io_stats['std_ms']:.1f} ms")
 
     # Use the last batch for subsequent stages
     sample_batch = batches[-1]
     anchor = sample_batch["anchor"]
+    positive = sample_batch.get("positive")
+
+    # Read volume: what was actually fetched from VAST (z_extraction_window, not z_window).
+    # anchor + positive (fit mode reads both). Lower bound — chunk alignment may add overhead.
+    n_tensors = 2 if positive is not None else 1
+    read_bytes = anchor.nelement() * anchor.element_size() * n_tensors
+    read_mb = read_bytes / 1e6
+    bandwidth_mb_s = read_mb / (io_stats["mean_ms"] / 1000)
+    io_stats["read_mb"] = read_mb
+    io_stats["bandwidth_mb_s"] = bandwidth_mb_s
+
+    print(f"   {io_stats['mean_ms']:.1f} ± {io_stats['std_ms']:.1f} ms")
+    pos_label = "+ positive" if positive is not None else ""
+    print(f"   read volume: {read_mb:.0f} MB (anchor{pos_label}) | bandwidth: {bandwidth_mb_s:.0f} MB/s")
     print(f"   anchor shape: {anchor.shape}, dtype: {anchor.dtype}")
 
     # ── Stage 2: CPU→GPU transfer ──
@@ -298,11 +311,15 @@ def main():
     }
     total = sum(stages.values())
 
-    print("\n| Stage | Time (ms) | % of total |")
-    print("|-------|-----------|-----------|")
+    print("\n| Stage | Time (ms) | % of total | Bandwidth |")
+    print("|-------|-----------|------------|-----------|")
     for name, ms in stages.items():
-        print(f"| {name} | {ms:.1f} | {ms / total * 100:.1f}% |")
-    print(f"| **Total** | **{total:.1f}** | **100%** |")
+        if name == "I/O (__getitems__)":
+            bw = f"{io_stats['bandwidth_mb_s']:.0f} MB/s ({io_stats['read_mb']:.0f} MB read)"
+        else:
+            bw = "—"
+        print(f"| {name} | {ms:.1f} | {ms / total * 100:.1f}% | {bw} |")
+    print(f"| **Total** | **{total:.1f}** | **100%** | |")
 
 
 if __name__ == "__main__":
