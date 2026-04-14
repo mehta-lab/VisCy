@@ -39,8 +39,9 @@ def append_to_anndata_zarr(
     ad.settings.allow_write_nullable_strings = True
 
     if obs is not None:
-        # anndata's zarr writer cannot serialize pandas ArrowStringArray;
-        # convert Arrow-backed string columns and index to plain object dtype.
+        # TODO: remove once anndata 0.13 supports pandas 3 Arrow-backed strings natively.
+        # anndata 0.12.9+ requires pandas <3, so we stay on 0.12.6 + pandas 3 and
+        # must manually downcast ArrowStringArray columns to object dtype before writing.
         obs = obs.copy()
         for col in obs.columns:
             arr = obs[col].array

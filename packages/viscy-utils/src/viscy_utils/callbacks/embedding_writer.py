@@ -156,6 +156,9 @@ def write_embedding_dataset(
 
     ultrack_indices = index_df.copy()
     ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
+    # TODO: remove once anndata 0.13 supports pandas 3 Arrow-backed strings natively.
+    # anndata 0.12.9+ requires pandas <3, so we stay on 0.12.6 + pandas 3 and
+    # must manually downcast ArrowStringArray columns to object dtype before writing.
     for col in ultrack_indices.columns:
         s = ultrack_indices[col]
         if isinstance(s.dtype, pd.StringDtype):
