@@ -10,7 +10,7 @@ data:
     batch_size: 16
     num_workers: 8
     yx_patch_size: [512, 512]
-    preload: true
+    preload: false
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:

@@ -427,7 +427,7 @@ def _resolve_class_path(class_path: str):
 
 def _discover_leaf_configs():
     """Discover leaf configs (skip recipes/ directory)."""
-    configs_dir = Path(__file__).resolve().parents[1] / "examples" / "configs"
+    configs_dir = Path(__file__).resolve().parents[1] / "configs" / "examples"
     leaf_configs = []
     for yml in sorted(configs_dir.rglob("*.yml")):
         if "recipes" not in yml.parts:

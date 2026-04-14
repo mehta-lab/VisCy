@@ -2,7 +2,7 @@
 
 Usage
 -----
-cd applications/dynacell/examples/configs
+cd applications/dynacell/configs/examples
 uv run dynacell fit -c unetvit3d/fit.yml
 uv run python -m dynacell fit --config unetvit3d/fit.yml
 """
