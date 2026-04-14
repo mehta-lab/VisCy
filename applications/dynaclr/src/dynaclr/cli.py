@@ -87,6 +87,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="evaluate-tracking-accuracy",
+        import_path="dynaclr.evaluation.benchmarking.tracking_accuracy.evaluate_tracking.main",
+        short_help="Evaluate CTC tracking accuracy with DynaCLR ONNX embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="append-obs",
         import_path="dynaclr.evaluation.append_obs.main",
         short_help="Append columns from a CSV to an AnnData zarr obs",
@@ -191,11 +199,52 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
-        name="evaluate",
-        import_path="dynaclr.evaluation.evaluate.main",
-        short_help="Generate evaluation configs and SLURM scripts for a trained model",
+        name="compute-mmd",
+        import_path="dynaclr.evaluation.mmd.compute_mmd.main",
+        short_help="Compute MMD between perturbation groups in cell embeddings",
     )
 )
+
+dynaclr.add_command(
+    LazyCommand(
+        name="plot-mmd-heatmap",
+        import_path="dynaclr.evaluation.mmd.compute_mmd.plot_mmd_heatmap_cmd",
+        short_help="Plot combined MMD heatmap (all markers) from per-experiment CSVs",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="prepare-eval-configs",
+        import_path="dynaclr.evaluation.evaluate.main",
+        short_help="Generate evaluation YAML configs and print JSON manifest (Nextflow entry point)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="check-evals",
+        import_path="dynaclr.evaluation.check_evals.main",
+        short_help="Check eval completion status for all models in the registry",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="append-annotations",
+        import_path="dynaclr.evaluation.append_annotations.main",
+        short_help="Append annotation columns to per-experiment zarrs",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="append-predictions",
+        import_path="dynaclr.evaluation.append_predictions.main",
+        short_help="Apply saved classifiers and write predictions to per-experiment zarrs",
+    )
+)
+
 
 dynaclr.add_command(
     LazyCommand(

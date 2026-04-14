@@ -7,6 +7,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from dynaclr.evaluation.dimensionality_reduction.config import PCAConfig, PHATEConfig, UMAPConfig
+from dynaclr.evaluation.mmd.config import ComparisonSpec, MAPSettings, MMDSettings
 
 
 class PredictStepConfig(BaseModel):
@@ -105,7 +106,9 @@ class PlotStepConfig(BaseModel):
         Cross-experiment obsm keys to plot once across all zarrs concatenated.
         Default: ["X_pca_combined", "X_phate_combined"].
     color_by : list[str]
-        obs columns to color scatter plots by. Default: common metadata columns.
+        obs columns for per-experiment plots. Default: perturbation, hours, marker.
+    combined_color_by : list[str]
+        obs columns for combined (cross-experiment) plots. Adds "experiment" to color_by.
     point_size : float
         Scatter plot point size. Default: 1.0.
     components : tuple[int, int]
@@ -116,7 +119,8 @@ class PlotStepConfig(BaseModel):
 
     embedding_keys: list[str] = ["X_pca"]
     combined_embedding_keys: list[str] = ["X_pca_combined", "X_phate_combined"]
-    color_by: list[str] = ["perturbation", "hours_post_perturbation", "experiment", "marker"]
+    color_by: list[str] = ["perturbation", "hours_post_perturbation", "marker"]
+    combined_color_by: list[str] = ["perturbation", "hours_post_perturbation", "experiment", "marker"]
     point_size: float = 1.0
     components: tuple[int, int] = (0, 1)
     format: str = "pdf"
@@ -146,13 +150,66 @@ class TaskSpec(BaseModel):
     task : str
         Task column name in annotation CSVs (e.g. infection_state, organelle_state).
     marker_filters : list[str] or None
-        If set, run one classifier per marker, using only embeddings where
-        obs["marker"] == that marker. None (default) runs one classifier using
-        all markers combined — useful to compare predictive power across channels.
+        If set, run one classifier per listed marker. None (default) runs one
+        classifier per marker discovered in the data (all unique obs["marker"] values).
     """
 
     task: str
     marker_filters: Optional[list[str]] = None
+
+
+class MMDStepConfig(BaseModel):
+    """Configuration for one MMD evaluation block.
+
+    Comparisons are explicit ``(cond_a, cond_b, label)`` pairs — no auto-discovery.
+    Include a null comparison (e.g. uninfected1 vs uninfected2) to establish
+    a baseline false-positive rate.
+
+    Parameters
+    ----------
+    comparisons : list[ComparisonSpec]
+        Explicit pairwise comparisons to run.
+    group_by : str
+        obs column whose values are referenced by ``cond_a``/``cond_b``.
+        Default: "perturbation".
+    obs_filter : dict[str, str] or None
+        Subset adata to rows where obs[key] == value before running MMD.
+        Example: ``{perturbation: uninfected}`` to restrict batch-QC
+        comparisons to control cells only. None = use all cells.
+    embedding_key : str or None
+        obsm key to use. None = raw .X. Default: None.
+    mmd : MMDSettings
+        Kernel MMD algorithm settings (permutations, cell caps, seed, etc.).
+    map_settings : MAPSettings
+        copairs-based mAP settings. Default: disabled.
+    temporal_bin_size : float or None
+        Width of each temporal bin in hours. Edges derived from data max.
+        None = aggregate MMD.
+    combined_temporal_bin_size : float or None
+        Override temporal_bin_size for the combined (cross-experiment) run only.
+        If not set, falls back to temporal_bin_size. Use None to aggregate across
+        all time in the combined run while keeping per-experiment binning.
+    save_plots : bool
+        Generate kinetics and heatmap plots. Default: True.
+    combined_mode : bool
+        Also run cross-experiment MMD with per-experiment batch centering.
+        Default: False.
+    name : str or None
+        Short name used in output filenames (e.g. "perturbation", "batch_qc").
+        Auto-derived from group_by if None.
+    """
+
+    comparisons: list[ComparisonSpec]
+    group_by: str = "perturbation"
+    obs_filter: Optional[dict[str, str]] = None
+    embedding_key: Optional[str] = None
+    mmd: MMDSettings = MMDSettings()
+    map_settings: MAPSettings = MAPSettings()
+    temporal_bin_size: Optional[float] = None
+    combined_temporal_bin_size: Optional[float] = None
+    save_plots: bool = True
+    combined_mode: bool = False
+    name: Optional[str] = None
 
 
 class LinearClassifiersStepConfig(BaseModel):
@@ -195,42 +252,6 @@ class LinearClassifiersStepConfig(BaseModel):
     random_seed: int = 42
 
 
-class SlurmConfig(BaseModel):
-    """SLURM configuration for generated job scripts.
-
-    Parameters
-    ----------
-    gpu_partition : str
-        Partition for GPU jobs. Default: "gpu".
-    cpu_partition : str
-        Partition for CPU jobs. Default: "cpu".
-    gpu_mem : str
-        Memory for GPU jobs. Default: "112G".
-    cpu_mem : str
-        Memory for CPU jobs. Default: "128G".
-    gpu_time : str
-        Time limit for GPU jobs. Default: "0-04:00:00".
-    cpu_time : str
-        Time limit for CPU jobs. Default: "0-02:00:00".
-    cpus_per_task : int
-        CPUs per task for CPU jobs. Default: 16.
-    conda_env : str or None
-        Conda environment name to activate. None uses uv directly.
-    workspace_dir : str
-        Path to the viscy repository root.
-    """
-
-    gpu_partition: str = "gpu"
-    cpu_partition: str = "cpu"
-    gpu_mem: str = "112G"
-    cpu_mem: str = "128G"
-    gpu_time: str = "0-04:00:00"
-    cpu_time: str = "0-02:00:00"
-    cpus_per_task: int = 16
-    conda_env: Optional[str] = None
-    workspace_dir: str = "/hpc/mydata/eduardo.hirata/repos/viscy"
-
-
 class EvaluationConfig(BaseModel):
     """Top-level configuration for the DynaCLR evaluation orchestrator.
 
@@ -249,7 +270,7 @@ class EvaluationConfig(BaseModel):
     steps : list[str]
         Ordered list of steps to generate configs for.
         Valid values: predict, split, reduce_dimensionality, reduce_combined,
-        plot, smoothness, linear_classifiers.
+        plot, smoothness, mmd, linear_classifiers.
     predict : PredictStepConfig
         Predict step configuration.
     reduce_dimensionality : ReduceStepConfig
@@ -262,8 +283,9 @@ class EvaluationConfig(BaseModel):
         Embedding visualization configuration.
     linear_classifiers : LinearClassifiersStepConfig or None
         Linear classifier configuration. None disables this step.
-    slurm : SlurmConfig
-        SLURM job configuration for generated scripts.
+    mmd : list[MMDStepConfig]
+        MMD evaluation blocks. Each block is an independent run with its own
+        group_by, comparisons, and optional obs_filter. Empty list disables MMD.
     """
 
     training_config: str
@@ -277,4 +299,4 @@ class EvaluationConfig(BaseModel):
     smoothness: SmoothnessStepConfig = SmoothnessStepConfig()
     plot: PlotStepConfig = PlotStepConfig()
     linear_classifiers: Optional[LinearClassifiersStepConfig] = None
-    slurm: SlurmConfig = SlurmConfig()
+    mmd: list[MMDStepConfig] = []
