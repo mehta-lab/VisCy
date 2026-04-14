@@ -53,6 +53,13 @@ optional-dependencies.eval = [
   "umap-learn",
   "wandb",
 ]
+optional-dependencies.tracking = [
+  "gurobipy>=13.0.1",
+  "onnxruntime-gpu",
+  "py-ctcmetrics",
+  "tabulate",
+  "tracksdata",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"

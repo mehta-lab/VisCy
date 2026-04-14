@@ -36,6 +36,8 @@ dependencies = [
   "lightning>=2.3",
   "matplotlib>=3.10",
   "numpy>=2.4.1",
+  "onnx",
+  "onnxscript",
   "pyyaml",
   "scikit-image",
   "scipy",
@@ -49,6 +51,7 @@ dependencies = [
 optional-dependencies.all = [ "viscy-utils[anndata,eval]" ]
 optional-dependencies.anndata = [ "anndata", "natsort" ]
 optional-dependencies.eval = [
+  "copairs",
   "phate",
   "scikit-learn",
   "umap-learn",
