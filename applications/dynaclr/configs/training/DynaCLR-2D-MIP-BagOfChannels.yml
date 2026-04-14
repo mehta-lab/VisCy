@@ -1,8 +1,9 @@
 # DynaCLR-2D-MIP-BagOfChannels
 # ==============================
 # 2D bag-of-channels contrastive learning with channel-wise z-reduction.
-# Extracts z-stacks around focus, applies MIP for fluorescence and
-# center-slice for label-free (Phase3D, BF, DIC, Retardance).
+# Extracts a 20-slice z-stack around focus, randomly crops to 10 slices
+# (Z-invariance), then applies MIP for fluorescence and center-slice for
+# label-free (Phase3D, BF, DIC, Retardance).
 # Multi-cell-type: A549 infectomics, microglia dynamorph, ALFI mitosis.
 #
 # Launch:
@@ -63,13 +64,13 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/DynaCLR-2D-MIP-BagOfChannels.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels.parquet
     focus_channel: Phase3D
     reference_pixel_size_xy_um: 0.1494
     z_window: 1
-    z_extraction_window: 11
-    z_focus_offset: 0.5
-    yx_patch_size: [192, 192]
+    z_extraction_window: 20
+    z_focus_offset: 0.3
+    yx_patch_size: [256, 256]
     final_yx_patch_size: [160, 160]
     channels_per_sample: 1
     positive_cell_source: lookup
@@ -125,6 +126,12 @@ data:
           prob: 0.5
           mean: 0.0
           std: 0.1
+      # Random Z crop: select 10 of 20 extracted slices for Z-invariance.
+      # Must come before ZReduction so MIP sees a variable sub-stack.
+      - class_path: viscy_transforms.BatchedRandSpatialCropd
+        init_args:
+          keys: [channel_0]
+          roi_size: [10, 192, 192]
       # Z-reduction: MIP for fluorescence, center-slice for label-free.
       # Must be LAST augmentation (before implicit final spatial crop).
       - class_path: viscy_transforms.BatchedChannelWiseZReductiond

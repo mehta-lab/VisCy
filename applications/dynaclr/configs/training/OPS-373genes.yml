@@ -41,7 +41,7 @@ model:
 
 data:
   init_args:
-    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/ops_373genes.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/OPS-373genes.parquet
     normalizations:
       - class_path: viscy_transforms.BatchedScaleIntensityRangePercentilesd
         init_args:

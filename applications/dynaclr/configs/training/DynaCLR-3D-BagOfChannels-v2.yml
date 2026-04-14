@@ -84,7 +84,7 @@ data:
     stratify_by: [perturbation]
     split_ratio: 0.8
     batch_size: 256
-    num_workers: 2
+    num_workers: 4
     seed: 42
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled

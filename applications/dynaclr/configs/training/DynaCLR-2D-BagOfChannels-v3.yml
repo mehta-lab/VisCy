@@ -52,7 +52,7 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/DynaCLR-2D-BagOfChannels-v3.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-BagOfChannels-v3.parquet
     z_window: 1
     yx_patch_size: [192, 192]
     final_yx_patch_size: [160, 160]

@@ -15,7 +15,7 @@
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=15
 #SBATCH --mem-per-cpu=12G
-#SBATCH --time=2-00:00:00
+#SBATCH --time=4-00:00:00
 
 # ── Run identity ──────────────────────────────────────────────────────
 export PROJECT="DynaCLR-3D-BagOfChannels-v2"
