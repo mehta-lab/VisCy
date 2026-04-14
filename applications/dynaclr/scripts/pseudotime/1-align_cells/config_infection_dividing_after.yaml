@@ -1,0 +1,25 @@
+embeddings:
+  sensor: timeaware_sensor_*.zarr
+  organelle: timeaware_organelle_*.zarr
+  phase: timeaware_phase_*.zarr
+
+alignment:
+  template: infection_dividing_after
+  min_track_minutes: 240
+  psi: null
+  datasets:
+    - dataset_id: 2025_07_24_SEC61
+      pred_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3
+      annotations_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+      fov_pattern: "A/2"
+      frame_interval_minutes: 30
+    - dataset_id: 2025_07_24_TOMM20
+      pred_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3
+      annotations_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+      fov_pattern: "B/2"
+      frame_interval_minutes: 30
+    - dataset_id: 2025_07_24_G3BP1
+      pred_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3
+      annotations_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+      fov_pattern: "C/2"
+      frame_interval_minutes: 30
