@@ -21,6 +21,7 @@ def compute_phate(
     n_pca: int = 50,
     subsample: int | None = None,
     lineage_ids: NDArray | None = None,
+    n_jobs: int = 1,
     **phate_kwargs,
 ) -> tuple[object, NDArray]:
     """Compute PHATE embeddings.
@@ -77,7 +78,7 @@ def compute_phate(
         decay=decay,
         knn_dist=knn_dist,
         random_state=random_state,
-        n_jobs=-1,
+        n_jobs=n_jobs,
         n_pca=n_pca,
         **phate_kwargs,
     )

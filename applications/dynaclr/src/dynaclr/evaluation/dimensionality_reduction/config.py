@@ -32,6 +32,7 @@ class PHATEConfig(BaseModel):
     random_state: int = 42
     n_pca: int = 50
     subsample: Optional[int] = 50_000
+    n_jobs: int = 1
 
 
 class DimensionalityReductionConfig(BaseModel):

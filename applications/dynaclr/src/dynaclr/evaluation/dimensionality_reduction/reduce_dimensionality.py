@@ -65,6 +65,7 @@ def _run_phate(features: NDArray, cfg: PHATEConfig, lineage_ids: NDArray | None 
         n_pca=cfg.n_pca,
         subsample=cfg.subsample,
         lineage_ids=lineage_ids,
+        n_jobs=cfg.n_jobs,
     )
     return "X_phate", phate_embedding
 

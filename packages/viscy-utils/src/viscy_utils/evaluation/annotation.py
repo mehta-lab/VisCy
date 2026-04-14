@@ -129,9 +129,24 @@ def load_annotation_anndata(adata: ad.AnnData, path: str, name: str, categories:
     annotation = pd.read_csv(path)
     annotation["fov_name"] = annotation["fov_name"].str.strip("/")
 
-    annotation = annotation.set_index(["fov_name", "id"])
+    # Normalize obs fov_name: strip leading/trailing slashes so both sides match.
+    obs_fov = adata.obs["fov_name"].astype(object).str.strip("/")
 
-    mi = pd.MultiIndex.from_arrays([adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"])
+    if "id" in adata.obs.columns and "id" in annotation.columns:
+        annotation = annotation.set_index(["fov_name", "id"])
+        mi = pd.MultiIndex.from_arrays([obs_fov, adata.obs["id"]], names=["fov_name", "id"])
+    elif all(c in adata.obs.columns for c in ("fov_name", "t", "track_id")) and all(
+        c in annotation.columns for c in ("fov_name", "t", "track_id")
+    ):
+        annotation = annotation.set_index(["fov_name", "t", "track_id"])
+        mi = pd.MultiIndex.from_arrays(
+            [obs_fov, adata.obs["t"], adata.obs["track_id"]],
+            names=["fov_name", "t", "track_id"],
+        )
+    else:
+        raise KeyError(
+            "Cannot join annotations: embeddings have neither (fov_name, id) nor (fov_name, t, track_id) columns."
+        )
 
     # Use reindex to handle missing annotations gracefully
     # This will return NaN for observations that don't have annotations
