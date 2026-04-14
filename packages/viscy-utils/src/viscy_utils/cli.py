@@ -98,14 +98,16 @@ class VisCyCLI(LightningCLI):
         parser.set_defaults(defaults)
 
     def _parse_ckpt_path(self) -> None:
-        # Snapshot model init_args from the user config before checkpoint hparams
-        # overwrite them. LightningCLI applies checkpoint hyper_parameters as the
-        # highest-priority layer, but the correct hierarchy is:
-        #   base-class defaults → checkpoint hparams → user config
-        # Restoring the snapshot after the merge enforces that hierarchy.
+        # For predict/test/validate: snapshot model init_args before checkpoint
+        # hparams overwrite them, then restore after.  This lets the user config
+        # win over stale checkpoint values (e.g. predict_method, predict_overlap).
+        #
+        # For fit: skip the snapshot so checkpoint hparams correctly override
+        # parser defaults (important for training resumption — lr, architecture,
+        # model_config, etc. must come from the checkpoint, not defaults).
         subcommand = self.config.get("subcommand")
         saved_init_args: dict = {}
-        if subcommand:
+        if subcommand and subcommand != "fit":
             sc = self.config.get(subcommand)
             if isinstance(sc, Namespace):
                 model = sc.get("model")
@@ -118,7 +120,7 @@ class VisCyCLI(LightningCLI):
         except SystemExit:
             # FIXME: https://github.com/Lightning-AI/pytorch-lightning/issues/21255
             return None
-        if subcommand and saved_init_args:
+        if saved_init_args:
             sc = self.config.get(subcommand)
             if isinstance(sc, Namespace):
                 model = sc.get("model")
