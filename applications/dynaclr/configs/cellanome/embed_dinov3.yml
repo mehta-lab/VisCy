@@ -1,0 +1,38 @@
+# DINOv3 embedding extraction for cellanome dataset.
+# Reads primary_analysis.csv directly, outputs cell-level anndata.
+# Usage: uv run python applications/dynaclr/scripts/cellanome/embed_dinov3.py configs/cellanome/embed_dinov3.yml
+
+# --- Data paths ---
+zarr_store: /hpc/projects/multimodal/datasets/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes.zarr
+analysis_base: /hpc/instruments/cm.r3200/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/image_analysis_output-12032025-143316
+transcriptome_anndata: /hpc/projects/multimodal/datasets/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/anndata/seurat-bc3a-l_all.zarr
+output_path: /hpc/projects/multimodal/datasets/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/2-embeddings/dinov3-convnext-tiny-BF.zarr
+
+# --- Experiment ---
+# Omit to auto-discover all scans/lanes under analysis_base.
+# scan_ids: [5]
+# lane_ids: [3, 4, 5, 6]
+
+# --- Model ---
+model_name: facebook/dinov3-convnext-tiny-pretrain-lvd1689m
+
+# --- Channels ---
+channels:
+  - White
+
+# --- Crop ---
+patch_size: 96
+reference_pixel_size: 1.0
+source_pixel_size: 1.0
+
+# --- Filtering ---
+# Dict of column_name: {min, max, eq, isin} applied to primary_analysis.csv.
+filters:
+  object_class:
+    isin: [cell, cell-adhered]
+  object_radius_px:
+    min: 39
+
+# --- Inference ---
+batch_size: 128
+device: cuda

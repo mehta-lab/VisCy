@@ -1,0 +1,38 @@
+# DynaCLR embedding extraction — cellanome dataset R000439
+# Usage: uv run python applications/dynaclr/scripts/cellanome/embed_dynaclr.py \
+#   applications/dynaclr/configs/cellanome/20260211112411_P-05_R000439_FC_2026_02_11_manual_loading_mixed_GFP+RFP/embed_dynaclr.yml
+
+# --- Data paths ---
+zarr_store: /hpc/projects/multimodal/datasets/cellanome/20260211112411_P-05_R000439_FC_2026_02_11_manual_loading_mixed_GFP+RFP/0-convert/ome-zarr/20260211112411_P-05_R000439_FC_2026_02_11_manual_loading_mixed_GFP+RFP.zarr
+analysis_base: /hpc/instruments/cm.r3200/20260211112411_P-05_R000439_FC_2026_02_11_manual_loading_mixed_GFP+RFP/image_analysis_output-02112026-113741
+output_path: /hpc/projects/multimodal/datasets/cellanome/20260211112411_P-05_R000439_FC_2026_02_11_manual_loading_mixed_GFP+RFP/2-embeddings/dynaclr-2d-boc-BF.zarr
+
+# --- Model ---
+ckpt_path: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt
+encoder_config:
+  backbone: convnext_tiny
+  in_channels: 1
+  in_stack_depth: 1
+  stem_kernel_size: [1, 4, 4]
+  stem_stride: [1, 4, 4]
+  embedding_dim: 768
+  projection_dim: 32
+
+# --- Channel ---
+channel_name: White
+
+# --- Crop ---
+patch_size: 160
+reference_pixel_size: 0.149
+source_pixel_size: 0.247
+
+# --- Filtering ---
+filters:
+  object_class:
+    isin: [cell, cell-adhered]
+  object_radius_px:
+    min: 39
+
+# --- Inference ---
+batch_size: 128
+device: cuda
