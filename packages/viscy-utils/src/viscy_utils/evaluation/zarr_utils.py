@@ -7,6 +7,7 @@ import anndata as ad
 import pandas as pd
 import zarr
 from anndata.io import write_elem
+from pandas.arrays import ArrowStringArray
 
 
 def append_to_anndata_zarr(
@@ -38,6 +39,17 @@ def append_to_anndata_zarr(
     ad.settings.allow_write_nullable_strings = True
 
     if obs is not None:
+        # anndata's zarr writer cannot serialize pandas ArrowStringArray;
+        # convert Arrow-backed string columns and index to plain object dtype.
+        obs = obs.copy()
+        for col in obs.columns:
+            arr = obs[col].array
+            if isinstance(arr, ArrowStringArray):
+                obs[col] = obs[col].astype(object)
+            elif isinstance(arr, pd.Categorical) and isinstance(arr.categories._values, ArrowStringArray):
+                obs[col] = obs[col].cat.rename_categories(arr.categories.astype(object))
+        if isinstance(obs.index._values, ArrowStringArray):
+            obs.index = obs.index.astype(object)
         if "obs" in store:
             del store["obs"]
         write_elem(store, "obs", obs)

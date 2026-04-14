@@ -156,8 +156,12 @@ def write_embedding_dataset(
 
     ultrack_indices = index_df.copy()
     ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
-    for col in ultrack_indices.select_dtypes(include="string").columns:
-        ultrack_indices[col] = ultrack_indices[col].astype(object)
+    for col in ultrack_indices.columns:
+        s = ultrack_indices[col]
+        if isinstance(s.dtype, pd.StringDtype):
+            ultrack_indices[col] = s.astype(object)
+        elif hasattr(s, "cat") and isinstance(s.cat.categories.dtype, pd.StringDtype):
+            ultrack_indices[col] = s.cat.rename_categories(s.cat.categories.astype(object))
 
     if embedding_key == "projections":
         if projections is None:
