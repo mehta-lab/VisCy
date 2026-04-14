@@ -180,34 +180,31 @@ def plot_taper_comparison(
     log.info("Saved %s", output_path)
 
 
-_DIAG_CONFIG_DIR = str(Path(__file__).resolve().parents[4] / "configs" / "evaluate" / "spectral_pcc")
-
-
-@hydra.main(version_base="1.2", config_path=_DIAG_CONFIG_DIR, config_name="diagnostic_real")
+@hydra.main(version_base="1.2", config_path="../_configs/spectral_pcc", config_name="diagnostic_real")
 def main(cfg: DictConfig) -> None:
     """Generate diagnostic spectra and DCR A0 plots for real A549 data."""
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log.info("Loading position %s from %s...", cfg.position, cfg.input_zarr)
-    store = open_ome_zarr(cfg.input_zarr, mode="r")
-    pos = store[cfg.position]
+    with open_ome_zarr(cfg.input_zarr, mode="r") as store:
+        pos = store[cfg.position]
 
-    mid_z = pos.data.shape[2] // 2
-    n_tp = pos.data.shape[0]
-    spacing_2d = list(pos.scale[-2:])
-    log.info(
-        "  Shape: %s, mid_z=%d, spacing=%s, %d timepoints",
-        pos.data.shape,
-        mid_z,
-        spacing_2d,
-        n_tp,
-    )
+        mid_z = pos.data.shape[2] // 2
+        n_tp = pos.data.shape[0]
+        spacing_2d = list(pos.scale[-2:])
+        log.info(
+            "  Shape: %s, mid_z=%d, spacing=%s, %d timepoints",
+            pos.data.shape,
+            mid_z,
+            spacing_2d,
+            n_tp,
+        )
 
-    # Load all mid-Z GT and prediction slices
-    log.info("Loading %d mid-Z GT + prediction slices...", n_tp)
-    gt_series = np.array(pos.data[:, cfg.gt_channel, mid_z]).astype(np.float32)
-    pred_series = np.array(pos.data[:, cfg.pred_channel, mid_z]).astype(np.float32)
+        # Load all mid-Z GT and prediction slices into memory
+        log.info("Loading %d mid-Z GT + prediction slices...", n_tp)
+        gt_series = np.array(pos.data[:, cfg.gt_channel, mid_z]).astype(np.float32)
+        pred_series = np.array(pos.data[:, cfg.pred_channel, mid_z]).astype(np.float32)
     pred_slice = pred_series[0]
     log.info("  GT series shape: %s", gt_series.shape)
 

@@ -90,6 +90,7 @@ def prepare_segmentation_model(config):
     """Load and return the segmentation model specified in *config*.
 
     Returns ``None`` for organelles that use classical (non-DL) workflows.
+    Respects ``config.use_gpu`` when deciding whether to move models to GPU.
     """
     if config.target_name not in [
         "nucleus",
@@ -108,7 +109,8 @@ def prepare_segmentation_model(config):
             checkpoint_name = "structure_AAVS1_100x_hipsc"
         checkpoints_dir = Path(__file__).parent / "checkpoints"
         seg_model = SuperModel(checkpoint_name, {"local_path": str(checkpoints_dir)})
-        if torch.cuda.is_available():
+        use_gpu = getattr(config, "use_gpu", True)
+        if use_gpu and torch.cuda.is_available():
             for m in seg_model.models:
                 if isinstance(m, SegModel):
                     m.to_gpu("cuda")

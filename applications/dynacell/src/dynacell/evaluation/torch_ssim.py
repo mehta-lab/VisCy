@@ -1,3 +1,5 @@
+"""PyTorch SSIM implementation for 2D and 3D volumes."""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

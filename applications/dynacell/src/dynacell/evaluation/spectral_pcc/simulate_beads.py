@@ -1452,10 +1452,7 @@ def run_plots(
 # ---------------------------------------------------------------------------
 
 
-_SIM_CONFIG_DIR = str(Path(__file__).resolve().parents[4] / "configs" / "evaluate" / "spectral_pcc")
-
-
-@hydra.main(version_base="1.2", config_path=_SIM_CONFIG_DIR, config_name="simulate")
+@hydra.main(version_base="1.2", config_path="../_configs/spectral_pcc", config_name="simulate")
 def main(cfg: DictConfig) -> None:
     """Simulate fluorescent beads and evaluate spectral PCC metrics."""
     output_dir = Path(cfg.output_dir)

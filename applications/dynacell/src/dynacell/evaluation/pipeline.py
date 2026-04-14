@@ -94,9 +94,10 @@ def evaluate_predictions(config: DictConfig):
             pos_name_pred, pos_pred = p1
             pos_name_gt, pos_gt = p2
             pos_name_seg, pos_seg = p3
-            assert pos_name_pred == pos_name_gt == pos_name_seg, (
-                "Prediction, GT, and segmentation position names do not match."
-            )
+            if not (pos_name_pred == pos_name_gt == pos_name_seg):
+                raise ValueError(
+                    f"Position name mismatch: pred={pos_name_pred!r}, gt={pos_name_gt!r}, seg={pos_name_seg!r}"
+                )
 
             pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
             gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
@@ -124,6 +125,7 @@ def evaluate_predictions(config: DictConfig):
                     spacing=config.pixel_metrics.spacing,
                     fsc_kwargs=config.pixel_metrics.fsc,
                     spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
+                    use_gpu=config.use_gpu,
                 )
 
                 if config.compute_microssim:
@@ -214,10 +216,7 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
         print(f"Saved feature metric plots to {save_dir / 'feature_metrics'}")
 
 
-_EVAL_CONFIG_DIR = str(Path(__file__).resolve().parents[3] / "configs" / "evaluate")
-
-
-@hydra.main(version_base="1.2", config_path=_EVAL_CONFIG_DIR, config_name="eval")
+@hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
     save_dir = Path(config.save.save_dir)

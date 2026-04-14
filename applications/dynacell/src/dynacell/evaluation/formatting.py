@@ -13,14 +13,15 @@ def aps_to_df(metrics, models, segmenters, thresholds, metric="ap_to_gt"):
             for model_ix in range(len(image_aps[metric])):
                 image_model_ap = np.asarray(image_aps[metric][model_ix])
                 for iou_ix in range(len(image_model_ap.T)):
+                    tp_fn = image_model_ap[1][iou_ix] + image_model_ap[3][iou_ix]
+                    recall = float(image_model_ap[1][iou_ix] / tp_fn) if tp_fn != 0 else 0.0
                     results.append(
                         {
                             "Segmenter": segmenter,
                             "Model": models[model_ix],
                             "IoU threshold": thresholds[iou_ix],
                             "AP": image_model_ap[0][iou_ix],
-                            "Recall": image_model_ap[1][iou_ix]
-                            / (image_model_ap[1][iou_ix] + image_model_ap[3][iou_ix]),
+                            "Recall": recall,
                         }
                     )
 

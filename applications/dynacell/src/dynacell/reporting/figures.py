@@ -79,11 +79,13 @@ def metric_comparison_barplot(
 
     for i, (name, stats) in enumerate(model_data.items()):
         offsets = [xi + i * width - (n_models - 1) * width / 2 for xi in x]
+        means = stats["mean"].reindex(plot_metrics)
+        stds = stats["std"].reindex(plot_metrics)
         ax.bar(
             offsets,
-            stats["mean"].values,
+            means.values,
             width,
-            yerr=stats["std"].values,
+            yerr=stds.values,
             label=name,
             capsize=3,
         )

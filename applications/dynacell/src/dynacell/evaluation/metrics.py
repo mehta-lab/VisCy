@@ -57,7 +57,8 @@ def _normalize_to_target_scale(
 @torch.inference_mode()
 def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """Calculate the Pearson correlation coefficient between two PyTorch tensors."""
-    assert a.shape == b.shape, "Inputs must be same shape"
+    if a.shape != b.shape:
+        raise ValueError(f"Inputs must be same shape, got {a.shape} and {b.shape}")
     num = (a - a.mean()) * (b - b.mean())
     denom = a.std() * b.std()
     if denom <= 1e-12:

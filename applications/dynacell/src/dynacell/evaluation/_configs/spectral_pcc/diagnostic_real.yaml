@@ -4,7 +4,7 @@
 # (reusing plot_diagnostic_spectra from simulate_beads.py),
 # computes DCR A₀ per timepoint, and generates comparison plots.
 
-input_zarr: /hpc/projects/virtual_staining/datasets/huang-lab/crops/2025_04_17_A549_H2B_CAAX_DENV.zarr
+input_zarr: ???  # OME-Zarr store path, e.g. /path/to/dataset.zarr
 position: B/1/0000001
 gt_channel: 1       # "raw Cy5 EX639 EM698-70"
 pred_channel: 3     # "nuclei_prediction"

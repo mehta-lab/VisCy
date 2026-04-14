@@ -183,10 +183,10 @@ def load_predict_target(
         config.use_gpu,
     )
 
-    assert predict.shape == target.shape, f"Prediction and image shapes do not match: {predict.shape} vs {target.shape}"
-    assert target.shape == target_bin.shape, (
-        f"Image and binary mask shapes do not match: {target.shape} vs {target_bin.shape}"
-    )
+    if predict.shape != target.shape:
+        raise ValueError(f"Prediction and image shapes do not match: {predict.shape} vs {target.shape}")
+    if target.shape != target_bin.shape:
+        raise ValueError(f"Image and binary mask shapes do not match: {target.shape} vs {target_bin.shape}")
 
     if "preprocess" in config and config.preprocess:
         target, predict = preprocess_predictions(target, predict, config.preprocess)

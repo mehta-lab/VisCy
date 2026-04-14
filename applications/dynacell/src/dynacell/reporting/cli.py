@@ -15,12 +15,10 @@ from dynacell.reporting.tables import comparison_table, to_latex
 
 logger = logging.getLogger(__name__)
 
-_REPORT_CONFIG_DIR = str(Path(__file__).resolve().parents[3] / "configs" / "report")
-
 
 @hydra.main(
     version_base="1.2",
-    config_path=_REPORT_CONFIG_DIR,
+    config_path="_configs",
     config_name="base",
 )
 def generate_report(cfg: DictConfig) -> None:

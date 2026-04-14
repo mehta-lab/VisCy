@@ -1,13 +1,15 @@
-"""Preprocessing config loading with OmegaConf fallback."""
+"""Preprocessing config loading with OmegaConf."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
+from omegaconf import OmegaConf
+
 
 def load_preprocess_config(config_path: Path) -> dict[str, Any]:
-    """Load a YAML config via OmegaConf, falling back to an empty dict.
+    """Load a YAML config via OmegaConf.
 
     Parameters
     ----------
@@ -17,14 +19,8 @@ def load_preprocess_config(config_path: Path) -> dict[str, Any]:
     Returns
     -------
     dict[str, Any]
-        Loaded config as a dict-like object (OmegaConf DictConfig
-        or plain dict if OmegaConf is not installed).
+        Loaded config as an OmegaConf DictConfig.
     """
-    try:
-        from omegaconf import OmegaConf
-
-        if config_path.exists():
-            return OmegaConf.load(config_path)
-        return OmegaConf.create({})
-    except ImportError:
-        return {}
+    if config_path.exists():
+        return OmegaConf.load(config_path)
+    return OmegaConf.create({})

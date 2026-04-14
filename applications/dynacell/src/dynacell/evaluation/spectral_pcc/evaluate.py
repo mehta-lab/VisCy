@@ -67,14 +67,16 @@ except ImportError:
 
 def corr_coef(a, b, mask=None):
     """Pearson correlation coefficient (numpy/cupy, with optional mask)."""
-    assert get_device(a) == get_device(b), "Images must be on same device."
-    assert a.shape == b.shape, "Inputs must be same shape"
+    if get_device(a) != get_device(b):
+        raise ValueError(f"Images must be on same device, got {get_device(a)} and {get_device(b)}")
+    if a.shape != b.shape:
+        raise ValueError(f"Inputs must be same shape, got {a.shape} and {b.shape}")
     if mask is not None:
         a = a[mask]
         b = b[mask]
     num = (a - a.mean()) * (b - b.mean())
     denom = a.std() * b.std()
-    return float(num.mean() / denom) if float(denom) > 0 else 0.0
+    return float(num.mean() / denom) if float(denom) > 0 else float("nan")
 
 
 def psnr(image_true, image_test, data_range=None, mask=None):
@@ -1395,57 +1397,56 @@ def compute(cfg: DictConfig) -> None:
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    input_store = open_ome_zarr(cfg.input_zarr, mode="r")
-    two_zarr = cfg.pred_zarr is not None
-    pred_store = open_ome_zarr(cfg.pred_zarr, mode="r") if two_zarr else input_store
+    from contextlib import ExitStack
 
     allowed_positions = set(cfg.positions) if cfg.get("positions") else None
+    two_zarr = cfg.pred_zarr is not None
 
-    for pos_name, pos_gt in input_store.positions():
-        if allowed_positions is not None and pos_name not in allowed_positions:
-            log.debug("Skipping position: %s", pos_name)
-            continue
-        log.info("Processing position: %s", pos_name)
+    with ExitStack() as stack:
+        input_store = stack.enter_context(open_ome_zarr(cfg.input_zarr, mode="r"))
+        pred_store = stack.enter_context(open_ome_zarr(cfg.pred_zarr, mode="r")) if two_zarr else input_store
 
-        pos_pred = pred_store[pos_name] if two_zarr else pos_gt
-        gt_channel = cfg.gt_channel or cfg.channel
-        pred_channel = cfg.pred_channel or cfg.channel
-        gt_ch_idx = resolve_channel_index(pos_gt, gt_channel)
-        pred_ch_idx = resolve_channel_index(pos_pred, pred_channel)
+        for pos_name, pos_gt in input_store.positions():
+            if allowed_positions is not None and pos_name not in allowed_positions:
+                log.debug("Skipping position: %s", pos_name)
+                continue
+            log.info("Processing position: %s", pos_name)
 
-        spacing = resolve_spacing(pos_gt, cfg)
+            pos_pred = pred_store[pos_name] if two_zarr else pos_gt
+            gt_channel = cfg.gt_channel or cfg.channel
+            pred_channel = cfg.pred_channel or cfg.channel
+            gt_ch_idx = resolve_channel_index(pos_gt, gt_channel)
+            pred_ch_idx = resolve_channel_index(pos_pred, pred_channel)
 
-        df = evaluate_position(pos_name, pos_gt, pos_pred, gt_ch_idx, pred_ch_idx, spacing, cfg)
+            spacing = resolve_spacing(pos_gt, cfg)
 
-        pos_dir = output_dir / pos_name
-        pos_dir.mkdir(parents=True, exist_ok=True)
+            df = evaluate_position(pos_name, pos_gt, pos_pred, gt_ch_idx, pred_ch_idx, spacing, cfg)
 
-        csv_path = pos_dir / "metrics.csv"
-        df.to_csv(csv_path, index=False)
-        log.info("  Saved %s", csv_path)
+            pos_dir = output_dir / pos_name
+            pos_dir.mkdir(parents=True, exist_ok=True)
 
-        # Extract and save mid-Z XY slices for later plotting
-        n_t = pos_gt.data.shape[0]
-        n_z = pos_gt.data.shape[2]
-        mid_z = n_z // 2
-        t_indices = [0, n_t // 2, n_t - 1]
-        labels, gt_slices, pred_slices = [], [], []
-        for t_idx in t_indices:
-            labels.append(f"t={t_idx}")
-            gt_slices.append(np.asarray(pos_gt.data[t_idx, gt_ch_idx, mid_z]))
-            pred_slices.append(np.asarray(pos_pred.data[t_idx, pred_ch_idx, mid_z]))
+            csv_path = pos_dir / "metrics.csv"
+            df.to_csv(csv_path, index=False)
+            log.info("  Saved %s", csv_path)
 
-        np.savez(
-            pos_dir / "slices.npz",
-            labels=labels,
-            gt=gt_slices,
-            pred=pred_slices,
-        )
-        log.info("  Saved %s/slices.npz", pos_dir)
+            # Extract and save mid-Z XY slices for later plotting
+            n_t = pos_gt.data.shape[0]
+            n_z = pos_gt.data.shape[2]
+            mid_z = n_z // 2
+            t_indices = [0, n_t // 2, n_t - 1]
+            labels, gt_slices, pred_slices = [], [], []
+            for t_idx in t_indices:
+                labels.append(f"t={t_idx}")
+                gt_slices.append(np.asarray(pos_gt.data[t_idx, gt_ch_idx, mid_z]))
+                pred_slices.append(np.asarray(pos_pred.data[t_idx, pred_ch_idx, mid_z]))
 
-    input_store.close()
-    if two_zarr:
-        pred_store.close()
+            np.savez(
+                pos_dir / "slices.npz",
+                labels=labels,
+                gt=gt_slices,
+                pred=pred_slices,
+            )
+            log.info("  Saved %s/slices.npz", pos_dir)
 
     log.info("Compute done.")
 
@@ -1476,12 +1477,9 @@ def plot(cfg: DictConfig) -> None:
     log.info("Plot done.")
 
 
-_SPECTRAL_PCC_CONFIG_DIR = str(Path(__file__).resolve().parents[4] / "configs" / "evaluate" / "spectral_pcc")
-
-
 @hydra.main(
     version_base="1.2",
-    config_path=_SPECTRAL_PCC_CONFIG_DIR,
+    config_path="../_configs/spectral_pcc",
     config_name="base",
 )
 def main(cfg: DictConfig) -> None:
