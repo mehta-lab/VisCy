@@ -211,7 +211,8 @@ class MultiExperimentTripletDataset(Dataset):
 
         self._rng = np.random.default_rng()
         self._setup_tensorstore_context(cache_pool_bytes)
-        self._build_match_lookup()
+        if self.fit:
+            self._build_match_lookup()
 
     # ------------------------------------------------------------------
     # Initialization helpers
@@ -249,21 +250,16 @@ class MultiExperimentTripletDataset(Dataset):
 
         tracks = self.index.tracks
         if "lineage_id" in self.positive_match_columns:
+            grouped = tracks.groupby(["experiment", "lineage_id", "t"]).indices
             self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(
                 lambda: defaultdict(list)
             )
-            experiments = tracks["experiment"].to_numpy()
-            lineage_ids = tracks["lineage_id"].to_numpy()
-            t_values = tracks["t"].to_numpy()
-            for idx in range(len(tracks)):
-                self._lineage_timepoints[(experiments[idx], lineage_ids[idx])][t_values[idx]].append(idx)
+            for (exp, lid, t), row_indices in grouped.items():
+                self._lineage_timepoints[(exp, lid)][int(t)] = row_indices.tolist()
         else:
             cols = self.positive_match_columns
-            self._match_lookup: dict[tuple, list[int]] = defaultdict(list)
-            col_arrays = [tracks[c].to_numpy() for c in cols]
-            for idx in range(len(tracks)):
-                key = tuple(arr[idx] for arr in col_arrays)
-                self._match_lookup[key].append(idx)
+            grouped = tracks.groupby(cols).indices
+            self._match_lookup: dict[tuple, list[int]] = {k: v.tolist() for k, v in grouped.items()}
 
     # ------------------------------------------------------------------
     # Dataset protocol
@@ -332,7 +328,15 @@ class MultiExperimentTripletDataset(Dataset):
                     elif col not in ["y", "x", "z"]:
                         # optional columns
                         pass
-                for col in ["experiment", "marker", "perturbation", "hours_post_perturbation"]:
+                for col in [
+                    "experiment",
+                    "marker",
+                    "perturbation",
+                    "hours_post_perturbation",
+                    "organelle",
+                    "well",
+                    "microscope",
+                ]:
                     if col in anchor_row.index:
                         idx_dict[col] = anchor_row[col]
                 indices_list.append(idx_dict)

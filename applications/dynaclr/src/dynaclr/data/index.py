@@ -184,10 +184,12 @@ class MultiExperimentIndex:
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
         cell_index_path: str | Path | None = None,
+        cell_index_df: pd.DataFrame | None = None,
         num_workers: int = 1,
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
+        fit: bool = True,
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
@@ -210,10 +212,14 @@ class MultiExperimentIndex:
         else:
             all_exclude_fovs = None
 
-        if cell_index_path is not None:
-            _logger.info("Loading cell index from parquet: %s", cell_index_path)
-            tracks = read_cell_index(cell_index_path)
-            tracks = self._align_parquet_columns(tracks)
+        if cell_index_df is not None or cell_index_path is not None:
+            if cell_index_df is not None:
+                _logger.info("Using pre-loaded cell index DataFrame (%d rows)", len(cell_index_df))
+                tracks = self._align_parquet_columns(cell_index_df.copy())
+            else:
+                _logger.info("Loading cell index from parquet: %s", cell_index_path)
+                tracks = read_cell_index(cell_index_path)
+                tracks = self._align_parquet_columns(tracks)
             if include_wells is not None:
                 tracks = tracks[tracks["well_name"].isin(include_wells)].copy()
             if all_exclude_fovs is not None:
@@ -232,19 +238,22 @@ class MultiExperimentIndex:
 
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
-        self.valid_anchors = self._compute_valid_anchors(
-            tau_range_hours,
-            positive_cell_source=positive_cell_source,
-            positive_match_columns=positive_match_columns,
-        )
-        if self.valid_anchors.empty and not self.tracks.empty:
-            raise ValueError(
-                f"No valid anchors found from {len(self.tracks)} tracks. "
-                f"positive_cell_source={positive_cell_source!r}, "
-                f"positive_match_columns={positive_match_columns!r}, "
-                f"tau_range_hours={tau_range_hours}. "
-                "Check that tracks have matching positives under these settings."
+        if fit:
+            self.valid_anchors = self._compute_valid_anchors(
+                tau_range_hours,
+                positive_cell_source=positive_cell_source,
+                positive_match_columns=positive_match_columns,
             )
+            if self.valid_anchors.empty and not self.tracks.empty:
+                raise ValueError(
+                    f"No valid anchors found from {len(self.tracks)} tracks. "
+                    f"positive_cell_source={positive_cell_source!r}, "
+                    f"positive_match_columns={positive_match_columns!r}, "
+                    f"tau_range_hours={tau_range_hours}. "
+                    "Check that tracks have matching positives under these settings."
+                )
+        else:
+            self.valid_anchors = self.tracks
 
     # ------- internal methods -------
 
@@ -546,28 +555,28 @@ class MultiExperimentIndex:
 
         for exp in self.registry.experiments:
             min_f, max_f = self.registry.tau_range_frames(exp.name, tau_range_hours)
-            exp_mask = self.tracks["experiment"].to_numpy() == exp.name
-            exp_indices = np.where(exp_mask)[0]
-            if len(exp_indices) == 0:
+            exp_mask = self.tracks["experiment"] == exp.name
+            exp_df = self.tracks.loc[exp_mask, ["lineage_id", "t"]]
+            if exp_df.empty:
                 continue
 
-            lineage_ids = self.tracks["lineage_id"].to_numpy()[exp_indices]
-            t_values = self.tracks["t"].to_numpy()[exp_indices]
-            existing_pairs: set[tuple] = set(zip(lineage_ids, t_values))
+            taus = [tau for tau in range(min_f, max_f + 1) if tau != 0]
 
-            # Collect all anchor (lineage_id, t) that have any valid positive
-            valid_anchors: set[tuple] = set()
-            for tau in range(min_f, max_f + 1):
-                if tau == 0:
-                    continue
-                for lid, t in existing_pairs:
-                    if (lid, t + tau) in existing_pairs:
-                        valid_anchors.add((lid, t))
+            # Unique (lineage_id, t) pairs as a MultiIndex for O(1) isin checks.
+            existing = exp_df[["lineage_id", "t"]].drop_duplicates()
+            existing_mi = pd.MultiIndex.from_frame(existing)
 
-            # Mark matching rows
-            for i, idx in enumerate(exp_indices):
-                if (lineage_ids[i], t_values[i]) in valid_anchors:
-                    valid_mask[idx] = True
+            # For each unique anchor (lid, t), check if (lid, t+tau) exists for any tau.
+            # Iterate over ~15 tau values instead of millions of cells.
+            found_any = np.zeros(len(existing), dtype=bool)
+            for tau in taus:
+                targets = pd.MultiIndex.from_arrays([existing["lineage_id"].to_numpy(), existing["t"].to_numpy() + tau])
+                found_any |= targets.isin(existing_mi)
+
+            # Map valid unique pairs back to all rows in the experiment.
+            valid_pairs_mi = pd.MultiIndex.from_frame(existing[found_any])
+            row_keys = pd.MultiIndex.from_frame(exp_df[["lineage_id", "t"]])
+            valid_mask[exp_mask.to_numpy()] = row_keys.isin(valid_pairs_mi)
 
         return self.tracks[valid_mask].reset_index(drop=True)
 
@@ -601,11 +610,13 @@ class MultiExperimentIndex:
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
+        precomputed_valid_anchors: pd.DataFrame | None = None,
     ) -> "MultiExperimentIndex":
         """Create a shallow copy with a different tracks DataFrame.
 
         Reuses the parent's registry, positions, and store cache so no
-        zarr stores are re-opened.  Recomputes ``valid_anchors``.
+        zarr stores are re-opened.  Recomputes ``valid_anchors`` unless
+        ``precomputed_valid_anchors`` is provided.
 
         Parameters
         ----------
@@ -617,6 +628,10 @@ class MultiExperimentIndex:
             Forwarded to ``_compute_valid_anchors``.
         max_border_shift : int
             Forwarded to ``self.max_border_shift``. -1 inherits from parent.
+        precomputed_valid_anchors : pd.DataFrame | None
+            When provided, skip recomputing valid anchors. Pass the already-
+            filtered valid_anchors subset for this tracks_subset. Avoids
+            redundant O(N * tau_range) computation in FOV split mode.
         """
         clone = object.__new__(MultiExperimentIndex)
         clone.registry = self.registry
@@ -625,11 +640,14 @@ class MultiExperimentIndex:
         clone._store_cache = self._store_cache
         clone.max_border_shift = self.max_border_shift if max_border_shift < 0 else max_border_shift
         clone.tracks = tracks_subset.reset_index(drop=True)
-        clone.valid_anchors = clone._compute_valid_anchors(
-            tau_range_hours=self.tau_range_hours,
-            positive_cell_source=positive_cell_source,
-            positive_match_columns=positive_match_columns,
-        )
+        if precomputed_valid_anchors is not None:
+            clone.valid_anchors = precomputed_valid_anchors.reset_index(drop=True)
+        else:
+            clone.valid_anchors = clone._compute_valid_anchors(
+                tau_range_hours=self.tau_range_hours,
+                positive_cell_source=positive_cell_source,
+                positive_match_columns=positive_match_columns,
+            )
         if clone.valid_anchors.empty and not clone.tracks.empty:
             raise ValueError(
                 f"No valid anchors found from {len(clone.tracks)} tracks in subset. "

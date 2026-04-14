@@ -83,7 +83,7 @@ class MultiExperimentDataModule(LightningDataModule):
     batch_size : int
         Batch size. Default: 128.
     num_workers : int
-        Thread workers for ThreadDataLoader. Default: 1.
+        Thread workers for ThreadDataLoader. Default: 4.
     batch_group_by : str or list[str] or None
         Column(s) to group batches by (e.g. ``"experiment"``). Default: None.
     stratify_by : str | list[str] | None
@@ -158,7 +158,7 @@ class MultiExperimentDataModule(LightningDataModule):
         tau_range: tuple[float, float] = (0.5, 2.0),
         tau_decay_rate: float = 2.0,
         batch_size: int = 128,
-        num_workers: int = 1,
+        num_workers: int = 4,
         # Sampling hyperparameters (passed to FlexibleBatchSampler)
         batch_group_by: str | list[str] | None = None,
         stratify_by: str | list[str] | None = "perturbation",
@@ -175,7 +175,7 @@ class MultiExperimentDataModule(LightningDataModule):
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
         # Other
-        cache_pool_bytes: int = 0,
+        cache_pool_bytes: int = 500_000_000,
         seed: int = 0,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
@@ -188,9 +188,9 @@ class MultiExperimentDataModule(LightningDataModule):
         label_columns: dict[str, str] | None = None,
         max_border_shift: int = -1,
         shuffle_val: bool = False,
-        pin_memory: bool = False,
+        pin_memory: bool = True,
         prefetch_factor: int | None = None,
-        buffer_size: int = 1,
+        buffer_size: int = 4,
     ) -> None:
         super().__init__()
 
@@ -279,7 +279,7 @@ class MultiExperimentDataModule(LightningDataModule):
             Lightning stage: ``"fit"``, ``"predict"``, etc.
         """
         if stage == "fit" or stage is None:
-            registry = ExperimentRegistry.from_cell_index(
+            registry, cell_index_df = ExperimentRegistry.from_cell_index(
                 self.cell_index_path,
                 z_window=self.z_window,
                 z_extraction_window=self.z_extraction_window,
@@ -290,9 +290,9 @@ class MultiExperimentDataModule(LightningDataModule):
             )
 
             if self.val_experiments:
-                self._setup_experiment_split(registry)
+                self._setup_experiment_split(registry, cell_index_df)
             else:
-                self._setup_fov_split(registry)
+                self._setup_fov_split(registry, cell_index_df)
 
             if self.channels_per_sample is None:
                 self._channel_names = registry.source_channel_labels
@@ -323,7 +323,7 @@ class MultiExperimentDataModule(LightningDataModule):
 
     def _setup_predict(self) -> None:
         """Set up predict dataset over the full cell index (no train/val split)."""
-        registry = ExperimentRegistry.from_cell_index(
+        registry, cell_index_df = ExperimentRegistry.from_cell_index(
             self.cell_index_path,
             z_window=self.z_window,
             z_extraction_window=self.z_extraction_window,
@@ -346,9 +346,10 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
-            cell_index_path=self.cell_index_path,
+            cell_index_df=cell_index_df,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
+            fit=False,
         )
         self.predict_dataset = MultiExperimentTripletDataset(
             index=predict_index,
@@ -369,7 +370,7 @@ class MultiExperimentDataModule(LightningDataModule):
         z_reduction = [t for t in self.augmentations if type(t).__name__ == "BatchedChannelWiseZReductiond"]
         self._predict_transform = Compose(self.normalizations + z_reduction + [self._train_final_crop()])
 
-    def _setup_experiment_split(self, registry: ExperimentRegistry) -> None:
+    def _setup_experiment_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
         """Split by whole experiments into train/val."""
         train_names = [e.name for e in registry.experiments if e.name not in self.val_experiments]
         val_names = [e.name for e in registry.experiments if e.name in self.val_experiments]
@@ -392,7 +393,7 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
-            cell_index_path=self.cell_index_path,
+            cell_index_df=cell_index_df,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
@@ -418,7 +419,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_range_hours=self.tau_range,
                 include_wells=self.include_wells,
                 exclude_fovs=self.exclude_fovs,
-                cell_index_path=self.cell_index_path,
+                cell_index_df=cell_index_df,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
                 max_border_shift=self.max_border_shift,
@@ -436,7 +437,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 label_columns=self.label_columns,
             )
 
-    def _setup_fov_split(self, registry: ExperimentRegistry) -> None:
+    def _setup_fov_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
         """Split FOVs within each experiment by split_ratio.
 
         Uses experiment-qualified keys ``(experiment, fov_name)`` so that
@@ -449,7 +450,7 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
-            cell_index_path=self.cell_index_path,
+            cell_index_df=cell_index_df,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
         )
@@ -474,17 +475,27 @@ class MultiExperimentDataModule(LightningDataModule):
             len(val_keys),
         )
 
-        full_qual = list(zip(full_index.tracks["experiment"], full_index.tracks["fov_name"]))
-        train_mask = pd.Series([k in train_keys for k in full_qual], index=full_index.tracks.index)
+        # Partition tracks using vectorized isin instead of a Python list comprehension.
+        qual_keys = pd.MultiIndex.from_arrays([full_index.tracks["experiment"], full_index.tracks["fov_name"]])
+        train_mask = qual_keys.isin(pd.MultiIndex.from_tuples(train_keys))
 
         train_tracks = full_index.tracks[train_mask].reset_index(drop=True)
         val_tracks = full_index.tracks[~train_mask].reset_index(drop=True)
+
+        # Partition valid_anchors from the already-computed full set — avoids
+        # rerunning _compute_valid_anchors for each subset.
+        va = full_index.valid_anchors
+        va_qual = pd.MultiIndex.from_arrays([va["experiment"], va["fov_name"]])
+        train_va_mask = va_qual.isin(pd.MultiIndex.from_tuples(train_keys))
+        train_va = va[train_va_mask].reset_index(drop=True)
+        val_va = va[~train_va_mask].reset_index(drop=True)
 
         train_index = full_index.clone_with_subset(
             train_tracks,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
+            precomputed_valid_anchors=train_va,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
@@ -504,6 +515,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 val_tracks,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
+                precomputed_valid_anchors=val_va,
             )
             self.val_dataset = MultiExperimentTripletDataset(
                 index=val_index,

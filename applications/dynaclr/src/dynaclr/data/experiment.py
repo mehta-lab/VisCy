@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pandas as pd
 from iohub.ngff import open_ome_zarr
 
 from viscy_data.cell_index import read_cell_index
@@ -279,7 +280,7 @@ class ExperimentRegistry:
         focus_channel: str | None = None,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
-    ) -> ExperimentRegistry:
+    ) -> tuple["ExperimentRegistry", "pd.DataFrame"]:
         """Build a registry from a flat cell index parquet and zarr metadata.
 
         Derives per-experiment channels from the parquet's ``marker`` and
@@ -305,8 +306,8 @@ class ExperimentRegistry:
 
         Returns
         -------
-        ExperimentRegistry
-            Validated registry of experiments.
+        tuple[ExperimentRegistry, pd.DataFrame]
+            Validated registry of experiments and the raw cell index DataFrame.
         """
         df = read_cell_index(cell_index_path)
         if df.empty:
@@ -404,7 +405,7 @@ class ExperimentRegistry:
             experiments=experiments,
         )
 
-        return cls(
+        registry = cls(
             collection=collection,
             z_window=z_window,
             z_extraction_window=z_extraction_window,
@@ -413,6 +414,7 @@ class ExperimentRegistry:
             reference_pixel_size_xy_um=reference_pixel_size_xy_um,
             reference_pixel_size_z_um=reference_pixel_size_z_um,
         )
+        return registry, df
 
     def subset(self, experiment_names: list[str]) -> ExperimentRegistry:
         """Create a new registry with a subset of experiments.
