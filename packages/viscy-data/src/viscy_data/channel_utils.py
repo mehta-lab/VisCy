@@ -50,7 +50,7 @@ def parse_channel_name(name: str) -> dict:
 
     # Label-free patterns (use word boundaries for short keywords)
     labelfree_substrings = ("phase", "brightfield", "retardance")
-    labelfree_word_patterns = (r"\bbf[\b_]", r"\bdic\b", r"\bpol\b")
+    labelfree_word_patterns = (r"\bbf(\b|_)", r"\bdic\b", r"\bpol\b", r"\bphc\b")
     if any(kw in name_lower for kw in labelfree_substrings) or any(
         re.search(p, name_lower) for p in labelfree_word_patterns
     ):
