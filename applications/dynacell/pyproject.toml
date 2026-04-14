@@ -48,7 +48,7 @@ optional-dependencies.eval = [
   "hydra-core>=1.2",
   "iohub",
   "matplotlib",
-  "microssim",
+  "microssim @ git+https://github.com/juglab/microssim.git@main",
   "pandas",
   "scikit-image",
   "scipy",
