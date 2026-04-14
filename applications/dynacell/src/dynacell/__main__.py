@@ -24,14 +24,13 @@ _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
 def main_cli():
     """Console script entry point for ``dynacell`` command."""
     if len(sys.argv) >= 2 and sys.argv[1] in _HYDRA_COMMANDS:
-        module_path, func_name, extra = _HYDRA_COMMANDS[sys.argv[1]]
+        command = sys.argv[1]
+        module_path, func_name, extra = _HYDRA_COMMANDS[command]
         sys.argv = [sys.argv[0]] + sys.argv[2:]  # strip subcommand for Hydra
         try:
             module = importlib.import_module(module_path)
         except ModuleNotFoundError as e:
-            print(
-                f"Missing dependencies for 'dynacell {sys.argv[0]}': {e}\nInstall with: pip install 'dynacell[{extra}]'"
-            )
+            print(f"Missing dependencies for 'dynacell {command}': {e}\nInstall with: pip install 'dynacell[{extra}]'")
             raise SystemExit(1) from e
         getattr(module, func_name)()
     else:

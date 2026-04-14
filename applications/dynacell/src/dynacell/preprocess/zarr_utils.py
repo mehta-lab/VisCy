@@ -18,6 +18,11 @@ def rewrite_zarr(
     Iterates all positions, copies data, channel names, and coordinate
     transforms into a new store with the specified chunk/shard layout.
 
+    .. note::
+       Each position is materialized fully in memory via ``.numpy()``.
+       This is suitable for small-to-medium stores but may OOM on
+       large plates. For production rechunking, use a streaming approach.
+
     Parameters
     ----------
     input_path : Path

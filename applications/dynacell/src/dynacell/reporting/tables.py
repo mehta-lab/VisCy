@@ -1,8 +1,8 @@
 """Benchmark comparison tables from evaluation CSV outputs.
 
 Reads the per-FOV, per-timepoint CSVs written by
-``dynacell_paper.evaluation.pipeline`` and aggregates them into benchmark-ready
-tables for the paper.
+``dynacell.evaluation.pipeline`` and aggregates them into
+comparison tables.
 """
 
 from pathlib import Path

@@ -1351,7 +1351,7 @@ requires-dist = [
     { name = "lightning", specifier = ">=2.3" },
     { name = "matplotlib", marker = "extra == 'eval'" },
     { name = "matplotlib", marker = "extra == 'report'" },
-    { name = "microssim", marker = "extra == 'eval'", git = "https://github.com/juglab/microssim.git?rev=main" },
+    { name = "microssim", marker = "extra == 'eval'", git = "https://github.com/juglab/microssim.git?rev=8bccb17d" },
     { name = "monai" },
     { name = "omegaconf" },
     { name = "pandas", marker = "extra == 'eval'" },
@@ -3263,7 +3263,7 @@ wheels = [
 [[package]]
 name = "microssim"
 version = "0.0.4.dev8+g8bccb17db"
-source = { git = "https://github.com/juglab/microssim.git?rev=main#8bccb17db64a2a94aa1c268503ba4558b9c08308" }
+source = { git = "https://github.com/juglab/microssim.git?rev=8bccb17d#8bccb17db64a2a94aa1c268503ba4558b9c08308" }
 dependencies = [
     { name = "numpy" },
     { name = "scikit-image" },
