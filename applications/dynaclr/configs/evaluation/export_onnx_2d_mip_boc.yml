@@ -1,0 +1,24 @@
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.1
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentLoss
+      init_args:
+        temperature: 0.2
+    lr: 0.00002
+    example_input_array_shape: [1, 1, 1, 160, 160]
+
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
+
+export_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/onnx/last.onnx
