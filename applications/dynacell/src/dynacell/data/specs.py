@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from omegaconf import OmegaConf
 from pydantic import BaseModel
+
+from dynacell.data._yaml import load_yaml
 
 
 class BenchmarkSpec(BaseModel):
@@ -37,5 +38,4 @@ def load_benchmark_spec(spec_path: Path) -> BenchmarkSpec:
     BenchmarkSpec
         Validated benchmark spec.
     """
-    raw = OmegaConf.to_container(OmegaConf.load(spec_path), resolve=True)
-    return BenchmarkSpec.model_validate(raw)
+    return load_yaml(spec_path, BenchmarkSpec)

@@ -4,25 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from omegaconf import OmegaConf
 from pydantic import BaseModel
+
+from dynacell.data._yaml import load_yaml
+from viscy_data.collection import ChannelEntry
 
 
 class Provenance(BaseModel):
-    """Airtable-derived provenance for a frozen collection."""
+    """Airtable-derived provenance for a frozen collection.
+
+    Stricter than ``viscy_data.collection.Provenance`` — requires
+    ``created_at`` and ``created_by`` for benchmark traceability.
+    """
 
     airtable_base_id: str | None = None
     airtable_query: str | None = None
     record_ids: list[str] = []
     created_at: str
     created_by: str
-
-
-class ChannelEntry(BaseModel):
-    """Single channel in a collection experiment."""
-
-    name: str
-    marker: str
 
 
 class CollectionExperiment(BaseModel):
@@ -65,5 +64,4 @@ def load_collection(collection_path: Path) -> BenchmarkCollection:
     BenchmarkCollection
         Validated collection.
     """
-    raw = OmegaConf.to_container(OmegaConf.load(collection_path), resolve=True)
-    return BenchmarkCollection.model_validate(raw)
+    return load_yaml(collection_path, BenchmarkCollection)

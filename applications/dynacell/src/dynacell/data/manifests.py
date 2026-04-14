@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from omegaconf import OmegaConf
 from pydantic import BaseModel, field_validator, model_validator
+
+from dynacell.data._yaml import load_yaml
 
 
 class VoxelSpacing(BaseModel):
@@ -102,8 +103,7 @@ def load_manifest(manifest_path: Path) -> DatasetManifest:
     DatasetManifest
         Validated manifest.
     """
-    raw = OmegaConf.to_container(OmegaConf.load(manifest_path), resolve=True)
-    return DatasetManifest.model_validate(raw)
+    return load_yaml(manifest_path, DatasetManifest)
 
 
 def load_splits(split_path: Path) -> SplitDefinition:
@@ -119,8 +119,7 @@ def load_splits(split_path: Path) -> SplitDefinition:
     SplitDefinition
         Validated split definition.
     """
-    raw = OmegaConf.to_container(OmegaConf.load(split_path), resolve=True)
-    return SplitDefinition.model_validate(raw)
+    return load_yaml(split_path, SplitDefinition)
 
 
 def get_target(manifest: DatasetManifest, target_name: str) -> TargetConfig:
