@@ -121,7 +121,7 @@ class CELLDiff3DVS(nn.Module):
         return target
 
     def generate_sliding_window(self, phase: Tensor, num_steps: int = 100) -> Tensor:
-        """Generate virtual staining via non-overlapping tiling.
+        """Generate virtual staining via tiled sliding window (stride == patch size).
 
         Partitions the input into non-overlapping patches of size
         ``net.input_spatial_size``.  Each patch is generated independently
@@ -244,7 +244,7 @@ class CELLDiff3DVS(nn.Module):
 
         if self.path_type != "Linear" or self.prediction != "velocity":
             raise NotImplementedError(
-                "generate_sliding_window only supports Linear path with velocity prediction, "
+                "generate_iterative only supports Linear path with velocity prediction, "
                 f"got path_type={self.path_type!r}, prediction={self.prediction!r}"
             )
 
