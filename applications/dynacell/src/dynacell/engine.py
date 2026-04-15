@@ -370,7 +370,7 @@ class DynacellFlowMatching(LightningModule):
         Whether to compute and log flow-matching validation loss on the
         validation loader. Disabled by default to preserve the previous
         cheaper validation behavior.
-    predict_method : {"generate", "non_overlapping", "sliding_window"}
+    predict_method : {"generate", "sliding_window", "iterative"}
         Prediction generation method.  ``"generate"`` runs single-patch ODE
         (default, matches standard HCS tile workflow).
     predict_overlap : int or tuple of int
@@ -395,7 +395,7 @@ class DynacellFlowMatching(LightningModule):
         num_generate_steps: int = 100,
         num_log_steps: int = 10,
         compute_validation_loss: bool = False,
-        predict_method: Literal["generate", "non_overlapping", "sliding_window"] = "generate",
+        predict_method: Literal["generate", "sliding_window", "iterative"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
         ckpt_path: str | None = None,
     ) -> None:
@@ -529,18 +529,17 @@ class DynacellFlowMatching(LightningModule):
 
         if self.predict_method == "generate":
             prediction = self.model.generate(source, num_steps=self.num_generate_steps)
-        elif self.predict_method == "non_overlapping":
-            prediction = self.model.generate_non_overlapping(source, num_steps=self.num_generate_steps)
         elif self.predict_method == "sliding_window":
-            prediction = self.model.generate_sliding_window(
+            prediction = self.model.generate_sliding_window(source, num_steps=self.num_generate_steps)
+        elif self.predict_method == "iterative":
+            prediction = self.model.generate_iterative(
                 source,
                 num_steps=self.num_generate_steps,
                 overlap_size=self.predict_overlap,
             )
         else:
             raise ValueError(
-                f"Unknown predict_method: {self.predict_method!r}. "
-                "Choose 'generate', 'non_overlapping', or 'sliding_window'."
+                f"Unknown predict_method: {self.predict_method!r}. Choose 'generate', 'sliding_window', or 'iterative'."
             )
 
         return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
