@@ -221,6 +221,24 @@ def test_flow_matching_generate_shape(synth_celldiff_batch):
     assert generated.shape == phase.shape
 
 
+def test_flow_matching_validation_step_records_loss_when_enabled(synth_celldiff_batch):
+    """Validation step can record a scalar loss without changing batch capture."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        compute_validation_loss=True,
+    )
+    model.log = lambda *args, **kwargs: None
+    model.eval()
+    model.validation_step(synth_celldiff_batch, batch_idx=0)
+    assert model._val_log_batch is not None
+    assert len(model._validation_losses) == 1
+    assert len(model._validation_losses[0]) == 1
+    loss, batch_size = model._validation_losses[0][0]
+    assert torch.isfinite(loss)
+    assert batch_size == synth_celldiff_batch["source"].shape[0]
+
+
 def test_flow_matching_predict_step_pad_crop(synth_celldiff_batch):
     """Flow-matching predict_step pads small input and crops back."""
     model = DynacellFlowMatching(

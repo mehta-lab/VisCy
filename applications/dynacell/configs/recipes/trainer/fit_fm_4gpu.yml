@@ -1,5 +1,6 @@
 # Trainer recipe: 4-GPU DDP training for flow-matching models.
-# Flow-matching has no validation loss — checkpoint by epoch count.
+# By default, flow-matching checkpoints by epoch count.
+# Model configs can enable compute_validation_loss when they want loss/validate.
 seed_everything: 42
 trainer:
   accelerator: gpu

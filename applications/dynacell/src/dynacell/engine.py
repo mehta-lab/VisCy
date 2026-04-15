@@ -349,6 +349,10 @@ class DynacellFlowMatching(LightningModule):
     num_log_steps : int
         Number of ODE steps for validation image generation (cheaper than
         ``num_generate_steps``).
+    compute_validation_loss : bool
+        Whether to compute and log flow-matching validation loss on the
+        validation loader. Disabled by default to preserve the previous
+        cheaper validation behavior.
     predict_method : {"generate", "non_overlapping", "sliding_window"}
         Prediction generation method.  ``"generate"`` runs single-patch ODE
         (default, matches standard HCS tile workflow).
@@ -373,6 +377,7 @@ class DynacellFlowMatching(LightningModule):
         log_samples_per_batch: int = 1,
         num_generate_steps: int = 100,
         num_log_steps: int = 10,
+        compute_validation_loss: bool = False,
         predict_method: Literal["generate", "non_overlapping", "sliding_window"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
         ckpt_path: str | None = None,
@@ -389,9 +394,11 @@ class DynacellFlowMatching(LightningModule):
         self.log_samples_per_batch = log_samples_per_batch
         self.num_generate_steps = num_generate_steps
         self.num_log_steps = num_log_steps
+        self.compute_validation_loss = compute_validation_loss
         self.predict_method = predict_method
         self.predict_overlap = predict_overlap
         self._training_step_outputs: list = []
+        self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
         if ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
@@ -429,16 +436,27 @@ class DynacellFlowMatching(LightningModule):
         return loss
 
     def validation_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> None:
-        """Capture one validation batch for epoch-end generation logging.
-
-        Flow-matching does not compute a validation loss.
-        """
+        """Capture validation samples and optionally compute loss."""
         if batch_idx == 0 and self._val_log_batch is None:
             n = self.log_samples_per_batch
             self._val_log_batch = (
                 batch["source"][:n].clone(),
                 batch["target"][:n].clone(),
             )
+        if not self.compute_validation_loss:
+            return
+        phase: Tensor = batch["source"]
+        target: Tensor = batch["target"]
+        loss = self.model(phase, target)
+        while dataloader_idx >= len(self._validation_losses):
+            self._validation_losses.append([])
+        self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
+        self.log(
+            f"loss/val/{dataloader_idx}",
+            loss,
+            sync_dist=True,
+            batch_size=phase.shape[0],
+        )
 
     def on_train_epoch_end(self) -> None:
         """Log training image samples at end of epoch."""
@@ -448,13 +466,25 @@ class DynacellFlowMatching(LightningModule):
     def on_validation_epoch_end(self) -> None:
         """Generate ODE samples from captured validation batch and log."""
         super().on_validation_epoch_end()
-        if self._val_log_batch is not None and self.logger is not None:
-            phase_log, target_log = self._val_log_batch
-            n = min(self.log_samples_per_batch, phase_log.shape[0])
-            generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
-            gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
-            self._log_samples("val_generated_samples", gen_samples)
+        if self._val_log_batch is not None:
+            if self.logger is not None:
+                phase_log, target_log = self._val_log_batch
+                n = min(self.log_samples_per_batch, phase_log.shape[0])
+                generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
+                gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
+                self._log_samples("val_generated_samples", gen_samples)
             self._val_log_batch = None
+        if self._validation_losses:
+            dl_means, dl_totals = [], []
+            for dl_batches in self._validation_losses:
+                losses, sizes = zip(*dl_batches)
+                sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
+                dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
+                dl_totals.append(sizes_t.sum())
+            total_n = torch.stack(dl_totals).sum()
+            weighted = sum(m * n for m, n in zip(dl_means, dl_totals))
+            self.log("loss/validate", weighted / total_n, sync_dist=True)
+        self._validation_losses.clear()
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
