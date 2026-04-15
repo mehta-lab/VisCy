@@ -55,6 +55,34 @@ def _configure_adamw_scheduler(
     return [optimizer], [scheduler]
 
 
+def _aggregate_validation_losses(
+    validation_losses: list[list[tuple[Tensor, int]]],
+) -> Tensor:
+    """Compute sample-weighted mean loss across dataloaders.
+
+    Parameters
+    ----------
+    validation_losses : list of list of (Tensor, int)
+        Per-dataloader list of ``(scalar_loss, batch_size)`` tuples
+        accumulated during validation.
+
+    Returns
+    -------
+    Tensor
+        Scalar weighted mean loss.
+    """
+    dl_means: list[Tensor] = []
+    dl_totals: list[Tensor] = []
+    for dl_batches in validation_losses:
+        losses, sizes = zip(*dl_batches)
+        sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
+        dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
+        dl_totals.append(sizes_t.sum())
+    total_n = torch.stack(dl_totals).sum()
+    weighted = torch.stack([m * n for m, n in zip(dl_means, dl_totals)]).sum()
+    return weighted / total_n
+
+
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
     """Build a DivisiblePad matching the model's spatial downsampling axes.
 
@@ -294,18 +322,7 @@ class DynacellUNet(LightningModule):
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
         if self.validation_losses:
-            # Compute per-dataloader weighted mean, then weight dataloaders by sample count.
-            dl_means, dl_totals = [], []
-            for dl_batches in self.validation_losses:
-                losses, sizes = zip(*dl_batches)
-                # Create sizes on the same device as the losses to avoid device
-                # mismatch on GPU/DDP where losses are on the model device.
-                sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
-                dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
-                dl_totals.append(sizes_t.sum())
-            total_n = torch.stack(dl_totals).sum()
-            weighted = sum(m * n for m, n in zip(dl_means, dl_totals))
-            self.log("loss/validate", weighted / total_n, sync_dist=True)
+            self.log("loss/validate", _aggregate_validation_losses(self.validation_losses), sync_dist=True)
         self.validation_step_outputs.clear()
         self.validation_losses.clear()
 
@@ -448,7 +465,7 @@ class DynacellFlowMatching(LightningModule):
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
         loss = self.model(phase, target)
-        while dataloader_idx >= len(self._validation_losses):
+        if dataloader_idx + 1 > len(self._validation_losses):
             self._validation_losses.append([])
         self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
         self.log(
@@ -475,15 +492,7 @@ class DynacellFlowMatching(LightningModule):
                 self._log_samples("val_generated_samples", gen_samples)
             self._val_log_batch = None
         if self._validation_losses:
-            dl_means, dl_totals = [], []
-            for dl_batches in self._validation_losses:
-                losses, sizes = zip(*dl_batches)
-                sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
-                dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
-                dl_totals.append(sizes_t.sum())
-            total_n = torch.stack(dl_totals).sum()
-            weighted = sum(m * n for m, n in zip(dl_means, dl_totals))
-            self.log("loss/validate", weighted / total_n, sync_dist=True)
+            self.log("loss/validate", _aggregate_validation_losses(self._validation_losses), sync_dist=True)
         self._validation_losses.clear()
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
