@@ -14,13 +14,18 @@ def load_preprocess_config(config_path: Path) -> dict[str, Any]:
     Parameters
     ----------
     config_path : Path
-        Absolute path to the YAML config file.
+        Path to the YAML config file. Must exist.
 
     Returns
     -------
     dict[str, Any]
         Loaded config as an OmegaConf DictConfig.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *config_path* does not exist.
     """
-    if config_path.exists():
-        return OmegaConf.load(config_path)
-    return OmegaConf.create({})
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    return OmegaConf.load(config_path)

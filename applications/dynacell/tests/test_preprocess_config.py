@@ -14,10 +14,12 @@ class TestLoadPreprocessConfig:
         assert cfg.get("key1") == "value1"
         assert cfg.get("key2") == 42
 
-    def test_nonexistent_path_returns_empty(self, tmp_path):
-        """Loading a nonexistent path returns an empty dict-like."""
-        cfg = load_preprocess_config(tmp_path / "does_not_exist.yaml")
-        assert cfg.get("key", "default") == "default"
+    def test_nonexistent_path_raises(self, tmp_path):
+        """Loading a nonexistent path raises FileNotFoundError."""
+        import pytest
+
+        with pytest.raises(FileNotFoundError):
+            load_preprocess_config(tmp_path / "does_not_exist.yaml")
 
     def test_get_with_default(self, tmp_path):
         """The .get() interface works with fallback defaults."""
