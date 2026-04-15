@@ -20,8 +20,8 @@ except ImportError:
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
 
-from .torch_ssim import ssim as torch_ssim
-from .utils import _minmax_norm, _pairwise_feature_metrics
+from dynacell.evaluation.torch_ssim import ssim as torch_ssim
+from dynacell.evaluation.utils import _minmax_norm, _pairwise_feature_metrics
 
 
 def _require_microssim():
@@ -60,7 +60,7 @@ def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     if a.shape != b.shape:
         raise ValueError(f"Inputs must be same shape, got {a.shape} and {b.shape}")
     num = (a - a.mean()) * (b - b.mean())
-    denom = a.std() * b.std()
+    denom = a.std(correction=0) * b.std(correction=0)
     if denom <= 1e-12:
         return torch.tensor(float("nan"), device=a.device)
     return num.mean() / denom

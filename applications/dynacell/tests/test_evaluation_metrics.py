@@ -70,21 +70,17 @@ def test_identical_images_still_score_perfectly(monkeypatch) -> None:
 
 
 def test_corr_coef_perfect_correlation(monkeypatch) -> None:
-    """Identical signals give PCC close to 1.0.
-
-    Note: the implementation uses Bessel-corrected std (N-1) in the
-    denominator but mean (N) in the numerator, creating a small bias.
-    """
+    """Identical signals give PCC = 1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    a = torch.linspace(0.0, 1.0, 1000)
-    assert metrics.corr_coef(a, a).item() == pytest.approx(1.0, abs=0.002)
+    a = torch.linspace(0.0, 1.0, 100)
+    assert metrics.corr_coef(a, a).item() == pytest.approx(1.0)
 
 
 def test_corr_coef_negative_correlation(monkeypatch) -> None:
-    """Perfectly inverted signal gives PCC close to -1.0."""
+    """Perfectly inverted signal gives PCC = -1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    a = torch.linspace(0.0, 1.0, 1000)
-    assert metrics.corr_coef(a, -a).item() == pytest.approx(-1.0, abs=0.002)
+    a = torch.linspace(0.0, 1.0, 100)
+    assert metrics.corr_coef(a, -a).item() == pytest.approx(-1.0)
 
 
 def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
