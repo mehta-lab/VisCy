@@ -181,8 +181,11 @@ class HCSPredictionWriter(BasePredictionWriter):
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
+                # Validate all positions before mutating any.
+                needs_append: list[tuple[Position, list[str]]] = []
                 for _, pos in self.plate.positions():
                     existing = set(pos.channel_names)
+                    missing = [ch for ch in prediction_channel if ch not in existing]
                     for ch in prediction_channel:
                         if ch in existing and not self.overwrite:
                             self.plate.close()
@@ -197,8 +200,11 @@ class HCSPredictionWriter(BasePredictionWriter):
                                 ch,
                                 self.output_store,
                             )
-                        else:
-                            pos.append_channel(ch, resize_arrays=True)
+                    if missing:
+                        needs_append.append((pos, missing))
+                for pos, channels in needs_append:
+                    for ch in channels:
+                        pos.append_channel(ch, resize_arrays=True)
         else:
             channel_names = prediction_channel
             if self.write_input:
