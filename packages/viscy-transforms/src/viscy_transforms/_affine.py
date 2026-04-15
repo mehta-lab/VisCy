@@ -177,6 +177,19 @@ class BatchedRandAffined(MapTransform):
         self._isotropic_scale = isotropic_scale and scale_range is not None
         self._safe_crop_size = tuple(safe_crop_size) if safe_crop_size is not None else None
         self._safe_crop_coverage = safe_crop_coverage
+        if self._safe_crop_size is not None and rotate_range is not None:
+            # rotate_range is in Kornia (X, Y, Z) order at this point.
+            # _compute_scale_floor only handles Z rotation; warn once if
+            # X or Y ranges are non-zero.
+            xy = rotate_range[:2] if len(rotate_range) >= 2 else ()
+            has_xy = any(
+                (abs(r[0]) > 1e-3 or abs(r[1]) > 1e-3) if isinstance(r, (tuple, list)) else abs(r) > 1e-3 for r in xy
+            )
+            if has_xy:
+                _logger.warning(
+                    "safe_crop_size only accounts for Z-axis rotation; "
+                    "non-zero X/Y rotation ranges may cause zero-corner artifacts."
+                )
         self.random_affine = _PaddedRandomAffine3D(
             degrees=rotate_range,
             translate=translate_range,
@@ -367,14 +380,6 @@ class BatchedRandAffined(MapTransform):
         if self._isotropic_scale:
             params = self._make_scale_isotropic(params)
         if self._safe_crop_size is not None:
-            xy_angles = params["angles"][:, :2]
-            if (xy_angles.abs() > 1e-3).any():
-                _logger.warning(
-                    "safe_crop_size only accounts for Z-axis rotation; "
-                    "X/Y rotations (%.1f, %.1f deg) may cause zero-corner artifacts.",
-                    xy_angles[:, 0].abs().max().item(),
-                    xy_angles[:, 1].abs().max().item(),
-                )
             s_floor = self._compute_scale_floor(params["angles"], ref.shape, self._safe_crop_size)
             s_floor *= self._safe_crop_coverage
             if self._isotropic_scale:
