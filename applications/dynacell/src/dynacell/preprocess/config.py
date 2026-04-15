@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 
-def load_preprocess_config(config_path: Path) -> dict[str, Any]:
+def load_preprocess_config(config_path: Path) -> DictConfig:
     """Load a YAML config via OmegaConf.
 
     Parameters
@@ -18,8 +17,8 @@ def load_preprocess_config(config_path: Path) -> dict[str, Any]:
 
     Returns
     -------
-    dict[str, Any]
-        Loaded config as an OmegaConf DictConfig.
+    DictConfig
+        Loaded config.
 
     Raises
     ------

@@ -68,8 +68,10 @@ def metric_comparison_barplot(
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return fig
 
-    first_model = next(iter(model_data.values()))
-    plot_metrics = list(first_model["mean"].index)
+    all_available = set()
+    for stats in model_data.values():
+        all_available.update(stats["mean"].index)
+    plot_metrics = [m for m in metrics if m in all_available]
     n_models = len(model_data)
     n_metrics = len(plot_metrics)
 

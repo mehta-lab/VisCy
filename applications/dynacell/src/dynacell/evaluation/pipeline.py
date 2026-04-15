@@ -182,7 +182,7 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    if mask_metrics:
+    if mask_metrics is not None:
         mask_metrics_df = pd.DataFrame(mask_metrics)
         mask_metrics_df.to_csv(save_dir / config.save.mask_csv_filename, index=False)
         np.save(save_dir / config.save.mask_metrics_filename, mask_metrics)
@@ -193,7 +193,7 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
         plot_metrics(mask_metrics_df, save_dir, "mask_metrics")
         print(f"Saved mask metric plots to {save_dir / 'mask_metrics'}")
 
-    if pixel_metrics:
+    if pixel_metrics is not None:
         pixel_metrics_df = pd.DataFrame(pixel_metrics)
         pixel_metrics_df.to_csv(save_dir / config.save.pixel_csv_filename, index=False)
         np.save(save_dir / config.save.pixel_metrics_filename, pixel_metrics)
@@ -204,7 +204,7 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
         plot_metrics(pixel_metrics_df, save_dir, "pixel_metrics")
         print(f"Saved pixel metric plots to {save_dir / 'pixel_metrics'}")
 
-    if feature_metrics:
+    if feature_metrics is not None:
         feature_metrics_df = pd.DataFrame(feature_metrics)
         feature_metrics_df.to_csv(save_dir / config.save.feature_csv_filename, index=False)
         np.save(save_dir / config.save.feature_metrics_filename, feature_metrics)

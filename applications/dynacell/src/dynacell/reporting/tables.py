@@ -7,6 +7,7 @@ comparison tables.
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 PIXEL_METRICS = ["PCC", "SSIM", "NRMSE", "PSNR", "Spectral_PCC", "MicroMS3IM"]
@@ -206,8 +207,8 @@ def to_latex(
             vals: list[float | None] = []
             for cell in formatted[col]:
                 try:
-                    mean_str = cell.split(" +/- ")[0]
-                    vals.append(float(mean_str))
+                    v = float(cell.split(" +/- ")[0])
+                    vals.append(v if np.isfinite(v) else None)
                 except (ValueError, AttributeError):
                     vals.append(None)
 
