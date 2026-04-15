@@ -6,6 +6,7 @@ per-position CSVs and plots.
 """
 
 import logging
+from contextlib import ExitStack
 from pathlib import Path
 
 import hydra
@@ -1396,8 +1397,6 @@ def compute(cfg: DictConfig) -> None:
     """Compute metrics and save CSVs + mid-Z slices."""
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    from contextlib import ExitStack
 
     allowed_positions = set(cfg.positions) if cfg.get("positions") else None
     two_zarr = cfg.pred_zarr is not None

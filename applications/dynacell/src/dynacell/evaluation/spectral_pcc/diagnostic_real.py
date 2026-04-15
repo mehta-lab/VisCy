@@ -201,7 +201,6 @@ def main(cfg: DictConfig) -> None:
             n_tp,
         )
 
-        # Load all mid-Z GT and prediction slices into memory
         log.info("Loading %d mid-Z GT + prediction slices...", n_tp)
         gt_series = np.array(pos.data[:, cfg.gt_channel, mid_z]).astype(np.float32)
         pred_series = np.array(pos.data[:, cfg.pred_channel, mid_z]).astype(np.float32)

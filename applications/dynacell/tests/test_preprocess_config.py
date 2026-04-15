@@ -1,5 +1,7 @@
 """Tests for dynacell.preprocess.config."""
 
+import pytest
+
 from dynacell.preprocess.config import load_preprocess_config
 
 
@@ -16,8 +18,6 @@ class TestLoadPreprocessConfig:
 
     def test_nonexistent_path_raises(self, tmp_path):
         """Loading a nonexistent path raises FileNotFoundError."""
-        import pytest
-
         with pytest.raises(FileNotFoundError):
             load_preprocess_config(tmp_path / "does_not_exist.yaml")
 

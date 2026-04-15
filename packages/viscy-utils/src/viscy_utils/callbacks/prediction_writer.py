@@ -180,25 +180,25 @@ class HCSPredictionWriter(BasePredictionWriter):
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
-                with open_ome_zarr(self.output_store, mode="r+") as plate:
-                    for _, pos in plate.positions():
-                        existing = set(pos.channel_names)
-                        for ch in prediction_channel:
-                            if ch in existing and not self.overwrite:
-                                raise FileExistsError(
-                                    f"Channel '{ch}' already exists in "
-                                    f"'{self.output_store}'. "
-                                    f"Set overwrite=True to replace."
-                                )
-                            elif ch in existing and self.overwrite:
-                                _logger.info(
-                                    "Overwriting existing channel '%s' in '%s'.",
-                                    ch,
-                                    self.output_store,
-                                )
-                            else:
-                                pos.append_channel(ch, resize_arrays=True)
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
+                for _, pos in self.plate.positions():
+                    existing = set(pos.channel_names)
+                    for ch in prediction_channel:
+                        if ch in existing and not self.overwrite:
+                            self.plate.close()
+                            raise FileExistsError(
+                                f"Channel '{ch}' already exists in "
+                                f"'{self.output_store}'. "
+                                f"Set overwrite=True to replace."
+                            )
+                        elif ch in existing and self.overwrite:
+                            _logger.info(
+                                "Overwriting existing channel '%s' in '%s'.",
+                                ch,
+                                self.output_store,
+                            )
+                        else:
+                            pos.append_channel(ch, resize_arrays=True)
         else:
             channel_names = prediction_channel
             if self.write_input:

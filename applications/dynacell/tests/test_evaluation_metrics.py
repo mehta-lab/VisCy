@@ -4,8 +4,11 @@ import importlib
 import sys
 import types
 
+import numpy as np
 import pytest
 import torch
+
+from dynacell.evaluation.metrics import evaluate_segmentations
 
 
 def _import_metrics_with_stubs(monkeypatch):
@@ -103,10 +106,6 @@ def test_corr_coef_shape_mismatch_raises(monkeypatch) -> None:
 
 def test_evaluate_segmentations_perfect_overlap() -> None:
     """Perfect overlap gives all metrics = 1.0."""
-    import numpy as np
-
-    from dynacell.evaluation.metrics import evaluate_segmentations
-
     mask = np.ones((8, 8), dtype=bool)
     result = evaluate_segmentations(mask, mask)
     assert result["Dice"] == pytest.approx(1.0)
@@ -118,10 +117,6 @@ def test_evaluate_segmentations_perfect_overlap() -> None:
 
 def test_evaluate_segmentations_no_overlap() -> None:
     """No overlap gives Dice = IoU = 0."""
-    import numpy as np
-
-    from dynacell.evaluation.metrics import evaluate_segmentations
-
     pred = np.zeros((8, 8), dtype=bool)
     gt = np.ones((8, 8), dtype=bool)
     result = evaluate_segmentations(pred, gt)
@@ -133,10 +128,6 @@ def test_evaluate_segmentations_no_overlap() -> None:
 
 def test_evaluate_segmentations_partial_overlap() -> None:
     """Known partial overlap gives expected values."""
-    import numpy as np
-
-    from dynacell.evaluation.metrics import evaluate_segmentations
-
     pred = np.zeros((4, 4), dtype=bool)
     gt = np.zeros((4, 4), dtype=bool)
     # TP: 4 pixels, FP: 2 pixels, FN: 2 pixels, TN: 8 pixels
@@ -155,20 +146,12 @@ def test_evaluate_segmentations_partial_overlap() -> None:
 
 def test_evaluate_segmentations_shape_mismatch_raises() -> None:
     """Mismatched shapes raise ValueError."""
-    import numpy as np
-
-    from dynacell.evaluation.metrics import evaluate_segmentations
-
     with pytest.raises(ValueError, match="Shape mismatch"):
         evaluate_segmentations(np.ones((4, 4)), np.ones((4, 5)))
 
 
 def test_evaluate_segmentations_both_empty() -> None:
     """Both masks empty (all background) gives Dice=0, Accuracy=1."""
-    import numpy as np
-
-    from dynacell.evaluation.metrics import evaluate_segmentations
-
     empty = np.zeros((4, 4), dtype=bool)
     result = evaluate_segmentations(empty, empty)
     assert result["Dice"] == pytest.approx(0.0)
