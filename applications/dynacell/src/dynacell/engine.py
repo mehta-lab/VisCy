@@ -111,7 +111,10 @@ class DynacellUNet(LightningModule):
         YX shape for example input (used by FNet3D for graph logging).
         Ignored when the model provides ``input_spatial_size``.
     ckpt_path : str | None
-        Checkpoint path to load model weights.
+        Path to a checkpoint to load **weights only** at construction time.
+        Intended for inference (predict/test), not training resumption —
+        optimizer state, epoch counters, and scheduler state are not
+        restored.
     """
 
     def __init__(
