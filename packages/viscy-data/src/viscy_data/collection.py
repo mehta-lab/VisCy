@@ -374,6 +374,7 @@ def build_collection(
                 start_hpi=first.hours_post_perturbation or 0.0,
                 marker=first.marker or "",
                 organelle=first.organelle or "",
+                microscope=first.microscope or "",
                 pixel_size_xy_um=getattr(first, "pixel_size_xy_um", None),
                 pixel_size_z_um=getattr(first, "pixel_size_z_um", None),
                 moi=first.moi or 0.0,

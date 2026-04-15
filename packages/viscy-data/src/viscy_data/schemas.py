@@ -54,6 +54,14 @@ class FOVRecord(BaseModel):
         Treatment concentration in nanomolar.
     fluorescence_modality : str or None
         Fluorescence imaging modality.
+    microscope : str or None
+        Microscope identifier (e.g. ``"mantis"``, ``"dragonfly"``).
+    labelfree_modality : str or None
+        Label-free imaging modality (e.g. ``"widefield"``, ``"oblique"``).
+    treatment : str or None
+        Treatment name (e.g. ``"DMSO"``, ``"Bafilomycin"``).
+    hours_post_treatment : float or None
+        Hours post treatment at imaging start.
     t_shape : int or None
         Number of timepoints.
     c_shape : int or None
@@ -92,6 +100,10 @@ class FOVRecord(BaseModel):
     seeding_density: int | None = None
     treatment_concentration_nm: float | None = None
     fluorescence_modality: str | None = None
+    microscope: str | None = None
+    labelfree_modality: str | None = None
+    treatment: str | None = None
+    hours_post_treatment: float | None = None
     t_shape: int | None = None
     c_shape: int | None = None
     z_shape: int | None = None
