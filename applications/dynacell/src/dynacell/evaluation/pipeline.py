@@ -231,10 +231,10 @@ def evaluate_model(config: DictConfig):
         and not config.recalculate_metrics
     ):
         print("Found existing metrics.")
-        pixel_metrics = np.load(pixel_metrics_path, allow_pickle=True)
-        mask_metrics = np.load(mask_metrics_path, allow_pickle=True)
+        pixel_metrics = np.load(pixel_metrics_path, allow_pickle=True).tolist()
+        mask_metrics = np.load(mask_metrics_path, allow_pickle=True).tolist()
         if config.compute_feature_metrics:
-            feature_metrics = np.load(feature_metrics_path, allow_pickle=True)
+            feature_metrics = np.load(feature_metrics_path, allow_pickle=True).tolist()
         else:
             feature_metrics = []
     else:

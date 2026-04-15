@@ -78,6 +78,6 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     fn = getattr(pipeline.evaluate_model, "__wrapped__", pipeline.evaluate_model)
     pixel_metrics, mask_metrics, feature_metrics = fn(config)
 
-    assert pixel_metrics.tolist() == expected_pixel_metrics
-    assert mask_metrics.tolist() == expected_mask_metrics
+    assert pixel_metrics == expected_pixel_metrics
+    assert mask_metrics == expected_mask_metrics
     assert feature_metrics == []
