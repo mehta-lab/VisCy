@@ -187,38 +187,20 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    if mask_metrics is not None:
-        mask_metrics_df = pd.DataFrame(mask_metrics)
-        mask_metrics_df.to_csv(save_dir / config.save.mask_csv_filename, index=False)
-        np.save(save_dir / config.save.mask_metrics_filename, mask_metrics)
-        print(
-            f"Saved mask metrics to {save_dir / config.save.mask_csv_filename} "
-            f"and {save_dir / config.save.mask_metrics_filename}"
-        )
-        plot_metrics(mask_metrics_df, save_dir, "mask_metrics")
-        print(f"Saved mask metric plots to {save_dir / 'mask_metrics'}")
-
-    if pixel_metrics is not None:
-        pixel_metrics_df = pd.DataFrame(pixel_metrics)
-        pixel_metrics_df.to_csv(save_dir / config.save.pixel_csv_filename, index=False)
-        np.save(save_dir / config.save.pixel_metrics_filename, pixel_metrics)
-        print(
-            f"Saved pixel metrics to {save_dir / config.save.pixel_csv_filename} "
-            f"and {save_dir / config.save.pixel_metrics_filename}"
-        )
-        plot_metrics(pixel_metrics_df, save_dir, "pixel_metrics")
-        print(f"Saved pixel metric plots to {save_dir / 'pixel_metrics'}")
-
-    if feature_metrics is not None:
-        feature_metrics_df = pd.DataFrame(feature_metrics)
-        feature_metrics_df.to_csv(save_dir / config.save.feature_csv_filename, index=False)
-        np.save(save_dir / config.save.feature_metrics_filename, feature_metrics)
-        print(
-            f"Saved feature metrics to {save_dir / config.save.feature_csv_filename} "
-            f"and {save_dir / config.save.feature_metrics_filename}"
-        )
-        plot_metrics(feature_metrics_df, save_dir, "feature_metrics")
-        print(f"Saved feature metric plots to {save_dir / 'feature_metrics'}")
+    for metrics, csv_name, npy_name, plot_dir in (
+        (mask_metrics, config.save.mask_csv_filename, config.save.mask_metrics_filename, "mask_metrics"),
+        (pixel_metrics, config.save.pixel_csv_filename, config.save.pixel_metrics_filename, "pixel_metrics"),
+        (feature_metrics, config.save.feature_csv_filename, config.save.feature_metrics_filename, "feature_metrics"),
+    ):
+        if metrics is None:
+            continue
+        df = pd.DataFrame(metrics)
+        df.to_csv(save_dir / csv_name, index=False)
+        np.save(save_dir / npy_name, metrics)
+        print(f"Saved {plot_dir} to {save_dir / csv_name} and {save_dir / npy_name}")
+        if not df.empty:
+            plot_metrics(df, save_dir, plot_dir)
+            print(f"Saved {plot_dir} plots to {save_dir / plot_dir}")
 
 
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
