@@ -1,8 +1,8 @@
 # CellDiff flow-matching: predict from checkpoint.
 # Usage: cd applications/dynacell/examples/configs && uv run dynacell predict -c sec61b/predict_celldiff.yml
 base:
-  - applications/dynacell/configs/recipes/trainer/predict_gpu.yml
-  - applications/dynacell/configs/recipes/models/celldiff_fm.yml
+  - ../../../configs/recipes/trainer/fit_1gpu.yml
+  - ../../../configs/recipes/models/celldiff_fm.yml
 
 trainer:
   callbacks:
