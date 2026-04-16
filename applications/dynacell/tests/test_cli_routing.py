@@ -45,6 +45,17 @@ class TestCliRouting:
             mock_import.assert_called_once_with("dynacell.reporting.cli")
             mock_module.generate_report.assert_called_once()
 
+    def test_precompute_gt_routes_to_hydra(self):
+        """'precompute-gt' imports and calls the precompute CLI entry point."""
+        mock_module = MagicMock()
+        with (
+            patch("sys.argv", ["dynacell", "precompute-gt", "--help"]),
+            patch("importlib.import_module", return_value=mock_module) as mock_import,
+        ):
+            main_cli()
+            mock_import.assert_called_once_with("dynacell.evaluation.precompute_cli")
+            mock_module.precompute_gt.assert_called_once()
+
     def test_missing_deps_prints_install_hint(self, capsys):
         """ModuleNotFoundError gives a helpful install message."""
         with (

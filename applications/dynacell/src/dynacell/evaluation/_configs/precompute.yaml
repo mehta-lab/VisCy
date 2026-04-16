@@ -1,0 +1,18 @@
+defaults:
+  - eval
+  - _self_
+
+io:
+  gt_cache_dir: ???  # REQUIRED for precompute-gt (overrides eval.yaml default of null)
+
+build:
+  masks: true
+  cp: true
+  dinov3: true
+  dynaclr: true
+
+# precompute-gt only fills the GT cache; no eval loop runs and no prediction
+# plate is read. These flags stay off by default so save_dir / pred_path are
+# not required fields for this CLI.
+compute_microssim: false
+compute_feature_metrics: false
