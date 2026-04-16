@@ -41,12 +41,14 @@ dependencies = [
 ]
 optional-dependencies.eval = [
   "accelerate>=1.13",
+  "aicsmlsegment",
   "aicssegmentation",
   "cellpose",
   "cubic==0.7.0a2",
   "dynaclr",
   "hydra-core>=1.2",
   "iohub",
+  "itk",
   "matplotlib",
   "microssim @ git+https://github.com/juglab/microssim.git@8bccb17d",
   "pandas",
