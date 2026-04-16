@@ -259,3 +259,44 @@ def test_deep_target_features_shape_mismatch_raises(monkeypatch) -> None:
     cell_seg = np.zeros((1, 4, 5), dtype=np.int32)
     with pytest.raises(ValueError, match="Shape mismatch"):
         metrics.deep_target_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
+
+
+# --- Golden-value regression tests for the split-feature pairing stages ---
+
+
+def test_cp_pairwise_pinned_values(monkeypatch) -> None:
+    """Regression guard: pinned CP metrics on a seeded synthetic input.
+
+    Catches drift in the column-drop, per-side z-score, and FID/KID/cosine
+    stages after the GT/pred split. If this test starts failing, either the
+    pairing pipeline changed (intentional → update the pinned values and
+    note it in the commit) or a dependency shifted numerics (investigate).
+    """
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    rng = np.random.default_rng(42)
+    n_cells, n_props = 8, 6
+    target_raw = rng.standard_normal((n_cells, n_props)).astype(np.float32)
+    pred_raw = target_raw + 0.5 * rng.standard_normal((n_cells, n_props)).astype(np.float32)
+
+    result = metrics.cp_pairwise(pred_raw, target_raw)
+    assert result["CP_Median_Cosine_Similarity"] == pytest.approx(0.93217182, rel=1e-5)
+    assert result["CP_FID"] == pytest.approx(0.19191332, rel=1e-5)
+    assert result["CP_KID"] == pytest.approx(0.10570750, rel=1e-5)
+
+
+def test_deep_pairwise_pinned_values(monkeypatch) -> None:
+    """Regression guard: pinned deep-feature metrics on a seeded synthetic input."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    rng = np.random.default_rng(42)
+    # Consume the same RNG draws as the CP test so CP and deep fixtures stay in one seed.
+    rng.standard_normal((8, 6))
+    rng.standard_normal((8, 6))
+
+    dim = 32
+    gt_deep = rng.standard_normal((5, dim)).astype(np.float32)
+    pred_deep = gt_deep + 0.1 * rng.standard_normal((5, dim)).astype(np.float32)
+
+    result = metrics.deep_pairwise(pred_deep, gt_deep, "DINOv3")
+    assert result["DINOv3_Median_Cosine_Similarity"] == pytest.approx(0.99563897, rel=1e-5)
+    assert result["DINOv3_FID"] == pytest.approx(0.29004036, rel=1e-5)
+    assert result["DINOv3_KID"] == pytest.approx(0.02735842, rel=1e-5)
