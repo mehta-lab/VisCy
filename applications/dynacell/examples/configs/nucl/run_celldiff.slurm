@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=CELLDiff_NUCL
-#SBATCH --time=20:00:00
+#SBATCH --time=4-00:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --partition=gpu
