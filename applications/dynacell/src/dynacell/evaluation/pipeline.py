@@ -6,7 +6,7 @@ import hydra
 import numpy as np
 import pandas as pd
 from iohub.ngff import open_ome_zarr
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from tqdm import tqdm
 
 from dynacell.evaluation.metrics import (
@@ -14,65 +14,46 @@ from dynacell.evaluation.metrics import (
     compute_pixel_metrics,
     cp_pairwise,
     cp_pred_regionprops,
-    cp_target_regionprops,
     deep_pairwise,
     deep_pred_features,
-    deep_target_features,
     evaluate_segmentations,
+)
+from dynacell.evaluation.pipeline_cache import (
+    flush_manifest,
+    fov_gt_cp_features,
+    fov_gt_deep_features,
+    fov_gt_masks,
+    init_cache_context,
+    resolve_dynaclr_encoder_cfg,
 )
 from dynacell.evaluation.utils import plot_metrics
 
 
-def evaluate_segmentation_metrics(
-    target,
-    predict,
-    config: DictConfig,
-    seg_model=None,
-):
-    """Segment both prediction and target, return binary mask metrics and masks."""
-    from dynacell.evaluation.segmentation import segment
-
-    segmented_predict = segment(predict, config.target_name, seg_model=seg_model)
-    segmented_target = segment(target, config.target_name, seg_model=seg_model)
-
-    mask_metrics = evaluate_segmentations(segmented_predict, segmented_target)
-
-    return mask_metrics, segmented_predict, segmented_target
-
-
-def _compute_feature_metrics_from_split(
-    predict,
-    target,
-    cell_segmentation,
+def _pair_feature_metrics(
+    predict_t: np.ndarray,
+    cell_segmentation_t: np.ndarray,
+    gt_cp_t: np.ndarray,
+    gt_dinov3_t: np.ndarray,
+    gt_dynaclr_t: np.ndarray,
     dinov3_extractor,
     dynaclr_extractor,
     spacing,
-    patch_size,
-):
-    """Run CP / DINOv3 / DynaCLR feature computation via the split GT/pred API.
-
-    Both sides are computed from scratch (no cache). Commit 3 wires the cache
-    layer on top of this by injecting precomputed target-side results.
-    """
-    gt_cp = cp_target_regionprops(target, cell_segmentation, spacing)
-    pred_cp = cp_pred_regionprops(predict, cell_segmentation, spacing)
-
-    gt_dinov3 = deep_target_features(target, cell_segmentation, dinov3_extractor, patch_size)
-    pred_dinov3 = deep_pred_features(predict, cell_segmentation, dinov3_extractor, patch_size)
-
-    gt_dynaclr = deep_target_features(target, cell_segmentation, dynaclr_extractor, patch_size)
-    pred_dynaclr = deep_pred_features(predict, cell_segmentation, dynaclr_extractor, patch_size)
-
+    patch_size: int,
+) -> dict[str, float]:
+    """Compute prediction-side features and pair them with precomputed GT features."""
+    pred_cp = cp_pred_regionprops(predict_t, cell_segmentation_t, spacing)
+    pred_dinov3 = deep_pred_features(predict_t, cell_segmentation_t, dinov3_extractor, patch_size)
+    pred_dynaclr = deep_pred_features(predict_t, cell_segmentation_t, dynaclr_extractor, patch_size)
     return {
-        **cp_pairwise(pred_cp, gt_cp),
-        **deep_pairwise(pred_dinov3, gt_dinov3, "DINOv3"),
-        **deep_pairwise(pred_dynaclr, gt_dynaclr, "DynaCLR"),
+        **cp_pairwise(pred_cp, gt_cp_t),
+        **deep_pairwise(pred_dinov3, gt_dinov3_t, "DINOv3"),
+        **deep_pairwise(pred_dynaclr, gt_dynaclr_t, "DynaCLR"),
     }
 
 
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
-    from dynacell.evaluation.segmentation import prepare_segmentation_model
+    from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
     from dynacell.evaluation.utils import DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
     all_pixel_metrics = []
@@ -87,18 +68,31 @@ def evaluate_predictions(config: DictConfig):
 
     seg_model = prepare_segmentation_model(config)
 
+    dinov3_model_name = None
+    dynaclr_ckpt_path = None
+    dynaclr_encoder_cfg = None
+    dinov3_feature_extractor = None
+    dynaclr_feature_extractor = None
+
     if config.compute_feature_metrics:
         if io_config.cell_segmentation_path is None:
             raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
-        dinov3_feature_extractor = DinoV3FeatureExtractor(config.feature_extractor.dinov3.pretrained_model_name)
+        dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
+        dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
         dynaclr_config = config.feature_extractor.dynaclr
+        dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
+        dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
         dynaclr_feature_extractor = DynaCLRFeatureExtractor(
             checkpoint=dynaclr_config.checkpoint,
-            encoder_config=OmegaConf.to_container(dynaclr_config.encoder, resolve=True),
+            encoder_config=dynaclr_encoder_cfg,
         )
-    else:
-        dinov3_feature_extractor = None
-        dynaclr_feature_extractor = None
+
+    cache_ctx = init_cache_context(
+        config,
+        dinov3_model_name=dinov3_model_name,
+        dynaclr_ckpt_path=dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+    )
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
@@ -152,23 +146,28 @@ def evaluate_predictions(config: DictConfig):
 
                 predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
                 target = np.asarray(pos_gt.data[:, gt_channel_index])  # shape: (T, D, H, W)
-                if pos_seg is not None:
-                    cell_segmentation = np.asarray(pos_seg.data[:, 0])  # shape: (T, D, H, W)
-                else:
-                    cell_segmentation = None
+                cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
 
                 T = predict.shape[0]
 
+                # Pre-fetch GT-side artifacts for this FOV (from cache or compute+write).
+                gt_mask_stack = fov_gt_masks(cache_ctx, pos_name_pred, target, seg_model)
+
+                if config.compute_feature_metrics:
+                    gt_cp_per_t = fov_gt_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
+                    gt_dinov3_per_t = fov_gt_deep_features(
+                        cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
+                    )
+                    gt_dynaclr_per_t = fov_gt_deep_features(
+                        cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+                    )
+
                 microssim_data = []
                 fov_pixel_metrics = []
-
                 segmentations = []
 
                 for t in tqdm(range(T), desc="Processing timepoints"):
-                    data_info = {
-                        "FOV": pos_name_pred,
-                        "Timepoint": t,
-                    }
+                    data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
                     pixel_metrics = compute_pixel_metrics(
                         predict[t],
@@ -178,32 +177,27 @@ def evaluate_predictions(config: DictConfig):
                         spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
                         use_gpu=config.use_gpu,
                     )
-
                     if config.compute_microssim:
-                        microssim_data.append(
-                            {
-                                "target": target[t],
-                                "predict": predict[t],
-                            }
-                        )
-
+                        microssim_data.append({"target": target[t], "predict": predict[t]})
                     fov_pixel_metrics.append({**data_info, **pixel_metrics})
 
-                    mask_metrics, segmented_predict, segmented_target = evaluate_segmentation_metrics(
-                        target[t],
-                        predict[t],
-                        config,
-                        seg_model=seg_model,
+                    # Mask: target side from cache/precompute; predict side always fresh.
+                    segmented_target = gt_mask_stack[t]
+                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
+                        bool
                     )
-
-                    all_mask_metrics.append({**data_info, **mask_metrics})
+                    all_mask_metrics.append(
+                        {**data_info, **evaluate_segmentations(segmented_predict, segmented_target)}
+                    )
                     segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
                     if config.compute_feature_metrics:
-                        feature_metrics = _compute_feature_metrics_from_split(
+                        feature_metrics = _pair_feature_metrics(
                             predict[t],
-                            target[t],
                             cell_segmentation[t],
+                            gt_cp_per_t[t],
+                            gt_dinov3_per_t[t],
+                            gt_dynaclr_per_t[t],
                             dinov3_feature_extractor,
                             dynaclr_feature_extractor,
                             config.pixel_metrics.spacing,
@@ -212,7 +206,6 @@ def evaluate_predictions(config: DictConfig):
                         all_feature_metrics.append({**data_info, **feature_metrics})
 
                 seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
-
                 row, col, fov = pos_name_pred.split("/")
                 seg_pos = segmentation_results.create_position(row, col, fov)
                 seg_pos.create_image("0", seg.astype(bool))
@@ -223,6 +216,9 @@ def evaluate_predictions(config: DictConfig):
                         fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
                 all_pixel_metrics.extend(fov_pixel_metrics)
+
+                # Flush manifest after each position so interrupted runs preserve progress.
+                flush_manifest(cache_ctx)
         finally:
             if seg_plate is not None:
                 seg_plate.close()

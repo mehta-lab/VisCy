@@ -256,9 +256,14 @@ def write_mask(
         version="0.5",
     ) as plate:
         row, col, fov = pos_name.split("/")
-        if pos_name in plate:
-            del plate[pos_name]
-        position = plate.create_position(row, col, fov)
+        try:
+            position = plate[pos_name]
+        except KeyError:
+            position = plate.create_position(row, col, fov)
+        try:
+            del position["0"]
+        except KeyError:
+            pass
         position.create_image("0", data)
 
 
