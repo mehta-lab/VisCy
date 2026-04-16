@@ -18,6 +18,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation.cache import (
     CachePaths,
+    FeatureKind,
     StaleCacheError,
     built_at_now,
     cache_paths,
@@ -25,12 +26,14 @@ from dynacell.evaluation.cache import (
     check_cache_identity,
     ckpt_sha256_12,
     encoder_config_sha256_12,
+    feature_slug,
     load_manifest,
-    read_features,
+    open_features_group,
+    read_features_from_group,
     read_mask,
     save_manifest,
     seed_cache_identity,
-    write_features,
+    write_features_to_group,
     write_mask,
 )
 from dynacell.evaluation.metrics import (
@@ -168,7 +171,7 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
     if ctx.dinov3_model_name is not None:
         dinov3_section = artifacts.get("dinov3_features", {})
         check_artifact_params(
-            dinov3_section.get(_slug(ctx.dinov3_model_name)),
+            dinov3_section.get(feature_slug(ctx.dinov3_model_name)),
             {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size},
             artifact_label=f"dinov3_features[{ctx.dinov3_model_name}]",
         )
@@ -183,11 +186,6 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
             },
             artifact_label=f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
         )
-
-
-def _slug(name: str) -> str:
-    """Mirror the slug used by :meth:`CachePaths.dinov3_features`."""
-    return name.replace("/", "__").replace(" ", "_")
 
 
 def _raise_if_require_complete(ctx: _CacheContext, artifact: str, pos_name: str, t: int | None = None) -> None:
@@ -265,6 +263,46 @@ def fov_gt_masks(
     return masks
 
 
+def _load_or_compute_feature_timepoints(
+    ctx: _CacheContext,
+    *,
+    kind: FeatureKind,
+    pos_name: str,
+    t_count: int,
+    force_key: str,
+    artifact_label: str,
+    cache_kwargs: dict[str, Any],
+    compute_fn,
+) -> tuple[list[np.ndarray], bool]:
+    """Per-timepoint load-or-compute loop for one feature family.
+
+    Opens the backing zarr group once per FOV (not per timepoint) and funnels
+    every read/write through it. Returns ``(per_t_features, manifest_updated)``.
+    ``compute_fn`` is called as ``compute_fn(t)`` on misses and must return a
+    2-D ``(n_cells_t, feature_dim)`` array.
+    """
+    per_t: list[np.ndarray] = []
+    if not ctx.enabled:
+        for t in range(t_count):
+            per_t.append(np.asarray(compute_fn(t)))
+        return per_t, False
+
+    manifest_updated = False
+    with open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group:
+        for t in range(t_count):
+            feats = None
+            if not ctx.force[force_key]:
+                feats = read_features_from_group(group, pos_name, t)
+                if feats is None:
+                    _raise_if_require_complete(ctx, artifact_label, pos_name, t)
+            if feats is None:
+                feats = np.asarray(compute_fn(t))
+                write_features_to_group(group, pos_name, t, feats)
+                manifest_updated = True
+            per_t.append(feats)
+    return per_t, manifest_updated
+
+
 def fov_gt_cp_features(
     ctx: _CacheContext,
     pos_name: str,
@@ -274,27 +312,17 @@ def fov_gt_cp_features(
     """Return target-side CP regionprops per timepoint, loading from cache or computing+writing.
 
     Result is a list of ``T`` arrays, each shape ``(n_cells_t, n_props_raw)``.
-    When the cache is disabled, features are computed fresh for every timepoint.
     """
-    t_count = target_arr.shape[0]
-    per_t: list[np.ndarray] = []
-    manifest_updated = False
-
-    for t in range(t_count):
-        feats = None
-        if ctx.enabled and not ctx.force["gt_cp"]:
-            feats = read_features(ctx.paths, "cp", pos_name, t)
-            if feats is None:
-                _raise_if_require_complete(ctx, "cp_features", pos_name, t)
-
-        if feats is None:
-            feats = cp_target_regionprops(target_arr[t], cell_segmentation_arr[t], ctx.spacing)
-            feats = np.asarray(feats)
-            if ctx.enabled:
-                write_features(ctx.paths, "cp", pos_name, t, feats)
-                manifest_updated = True
-
-        per_t.append(feats)
+    per_t, manifest_updated = _load_or_compute_feature_timepoints(
+        ctx,
+        kind="cp",
+        pos_name=pos_name,
+        t_count=target_arr.shape[0],
+        force_key="gt_cp",
+        artifact_label="cp_features",
+        cache_kwargs={},
+        compute_fn=lambda t: cp_target_regionprops(target_arr[t], cell_segmentation_arr[t], ctx.spacing),
+    )
 
     if ctx.enabled and manifest_updated:
         _update_manifest_entry(
@@ -314,7 +342,7 @@ def fov_gt_deep_features(
     target_arr: np.ndarray,
     cell_segmentation_arr: np.ndarray,
     feature_extractor,
-    kind: str,
+    kind: FeatureKind,
 ) -> list[np.ndarray]:
     """Return target-side deep embeddings per timepoint for one feature family.
 
@@ -324,10 +352,11 @@ def fov_gt_deep_features(
     if kind == "dinov3":
         force_key = "gt_dinov3"
         artifact_label = f"dinov3_features[{ctx.dinov3_model_name}]"
-        kwargs = {"model_name": ctx.dinov3_model_name}
-        manifest_keys = ["dinov3_features", _slug(ctx.dinov3_model_name)]
+        cache_kwargs = {"model_name": ctx.dinov3_model_name}
+        slug = feature_slug(ctx.dinov3_model_name)
+        manifest_keys = ["dinov3_features", slug]
         entry = {
-            "path": f"features/dinov3/{_slug(ctx.dinov3_model_name)}.zarr",
+            "path": f"features/dinov3/{slug}.zarr",
             "model_name": ctx.dinov3_model_name,
             "patch_size": ctx.patch_size,
             "built_at": built_at_now(),
@@ -335,7 +364,7 @@ def fov_gt_deep_features(
     elif kind == "dynaclr":
         force_key = "gt_dynaclr"
         artifact_label = f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]"
-        kwargs = {"ckpt_sha12": ctx.dynaclr_ckpt_sha12}
+        cache_kwargs = {"ckpt_sha12": ctx.dynaclr_ckpt_sha12}
         manifest_keys = ["dynaclr_features", ctx.dynaclr_ckpt_sha12]
         entry = {
             "path": f"features/dynaclr/{ctx.dynaclr_ckpt_sha12}.zarr",
@@ -347,25 +376,18 @@ def fov_gt_deep_features(
     else:
         raise ValueError(f"Unknown deep-feature kind: {kind!r}")
 
-    t_count = target_arr.shape[0]
-    per_t: list[np.ndarray] = []
-    manifest_updated = False
-
-    for t in range(t_count):
-        feats = None
-        if ctx.enabled and not ctx.force[force_key]:
-            feats = read_features(ctx.paths, kind, pos_name, t, **kwargs)
-            if feats is None:
-                _raise_if_require_complete(ctx, artifact_label, pos_name, t)
-
-        if feats is None:
-            feats = deep_target_features(target_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size)
-            feats = np.asarray(feats)
-            if ctx.enabled:
-                write_features(ctx.paths, kind, pos_name, t, feats, **kwargs)
-                manifest_updated = True
-
-        per_t.append(feats)
+    per_t, manifest_updated = _load_or_compute_feature_timepoints(
+        ctx,
+        kind=kind,
+        pos_name=pos_name,
+        t_count=target_arr.shape[0],
+        force_key=force_key,
+        artifact_label=artifact_label,
+        cache_kwargs=cache_kwargs,
+        compute_fn=lambda t: deep_target_features(
+            target_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
+        ),
+    )
 
     if ctx.enabled and manifest_updated:
         _update_manifest_entry(ctx.manifest, manifest_keys, entry)

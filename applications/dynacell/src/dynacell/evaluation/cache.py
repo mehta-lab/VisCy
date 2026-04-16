@@ -14,15 +14,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
+
+FeatureKind = Literal["cp", "dinov3", "dynaclr"]
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -52,8 +55,7 @@ class CachePaths:
 
     def dinov3_features(self, model_name: str) -> Path:
         """Return the zarr group path for DINOv3 features of *model_name*."""
-        slug = _safe_slug(model_name)
-        return self.features_dir / "dinov3" / f"{slug}.zarr"
+        return self.features_dir / "dinov3" / f"{feature_slug(model_name)}.zarr"
 
     def dynaclr_features(self, ckpt_sha12: str) -> Path:
         """Return the zarr group path for DynaCLR features keyed by *ckpt_sha12*."""
@@ -269,7 +271,7 @@ def write_mask(
 
 def _features_group_path(
     paths: CachePaths,
-    kind: str,
+    kind: FeatureKind,
     *,
     model_name: str | None = None,
     ckpt_sha12: str | None = None,
@@ -288,9 +290,49 @@ def _features_group_path(
     raise ValueError(f"Unknown feature kind: {kind!r}")
 
 
+def read_features_from_group(group, pos_name: str, t: int) -> np.ndarray | None:
+    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group."""
+    key = f"{pos_name}/t{t}"
+    if key not in group:
+        return None
+    return np.asarray(group[key])
+
+
+def write_features_to_group(group, pos_name: str, t: int, features: np.ndarray) -> None:
+    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group."""
+    if features.ndim != 2:
+        raise ValueError(f"features must be 2-D (n_cells, feature_dim); got shape {features.shape}")
+    key = f"{pos_name}/t{t}"
+    if key in group:
+        del group[key]
+    group.create_array(key, data=np.asarray(features))
+
+
+@contextmanager
+def open_features_group(
+    paths: CachePaths,
+    kind: FeatureKind,
+    *,
+    mode: Literal["r", "a"] = "a",
+    model_name: str | None = None,
+    ckpt_sha12: str | None = None,
+):
+    """Yield an open zarr group for one feature-cache artifact.
+
+    Use this for per-FOV batch reads/writes so the underlying store is opened
+    once per FOV instead of once per timepoint.
+    """
+    group_path = _features_group_path(paths, kind, model_name=model_name, ckpt_sha12=ckpt_sha12)
+    if mode == "r" and not group_path.exists():
+        yield None
+        return
+    group_path.parent.mkdir(parents=True, exist_ok=True)
+    yield zarr.open_group(str(group_path), mode=mode)
+
+
 def read_features(
     paths: CachePaths,
-    kind: str,
+    kind: FeatureKind,
     pos_name: str,
     t: int,
     *,
@@ -299,23 +341,19 @@ def read_features(
 ) -> np.ndarray | None:
     """Read cached target-side features for one (position, timepoint).
 
-    Returns ``None`` if the group or the specific key is absent. An empty
-    array ``(0, feature_dim)`` signals "zero cells at this timepoint" (not
-    absence).
+    Returns ``None`` if the group or the specific key is absent. Prefer
+    :func:`open_features_group` + :func:`read_features_from_group` for
+    per-FOV batch reads.
     """
-    group_path = _features_group_path(paths, kind, model_name=model_name, ckpt_sha12=ckpt_sha12)
-    if not group_path.exists():
-        return None
-    store = zarr.open_group(str(group_path), mode="r")
-    key = f"{pos_name}/t{t}"
-    if key not in store:
-        return None
-    return np.asarray(store[key])
+    with open_features_group(paths, kind, mode="r", model_name=model_name, ckpt_sha12=ckpt_sha12) as group:
+        if group is None:
+            return None
+        return read_features_from_group(group, pos_name, t)
 
 
 def write_features(
     paths: CachePaths,
-    kind: str,
+    kind: FeatureKind,
     pos_name: str,
     t: int,
     features: np.ndarray,
@@ -325,17 +363,12 @@ def write_features(
 ) -> None:
     """Write target-side features for one (position, timepoint).
 
-    Overwrites any existing entry at the same key.
+    Overwrites any existing entry at the same key. Prefer
+    :func:`open_features_group` + :func:`write_features_to_group` for
+    per-FOV batch writes.
     """
-    if features.ndim != 2:
-        raise ValueError(f"features must be 2-D (n_cells, feature_dim); got shape {features.shape}")
-    group_path = _features_group_path(paths, kind, model_name=model_name, ckpt_sha12=ckpt_sha12)
-    group_path.parent.mkdir(parents=True, exist_ok=True)
-    store = zarr.open_group(str(group_path), mode="a")
-    key = f"{pos_name}/t{t}"
-    if key in store:
-        del store[key]
-    store.create_array(key, data=np.asarray(features))
+    with open_features_group(paths, kind, mode="a", model_name=model_name, ckpt_sha12=ckpt_sha12) as group:
+        write_features_to_group(group, pos_name, t, features)
 
 
 def ckpt_sha256_12(path: Path | str) -> str:
@@ -356,6 +389,6 @@ def encoder_config_sha256_12(encoder_cfg: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()[:12]
 
 
-def _safe_slug(name: str) -> str:
+def feature_slug(name: str) -> str:
     """Replace path separators in *name* so it is safe as a filename stem."""
     return name.replace("/", "__").replace(" ", "_")

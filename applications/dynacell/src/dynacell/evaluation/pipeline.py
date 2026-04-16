@@ -150,7 +150,6 @@ def evaluate_predictions(config: DictConfig):
 
                 T = predict.shape[0]
 
-                # Pre-fetch GT-side artifacts for this FOV (from cache or compute+write).
                 gt_mask_stack = fov_gt_masks(cache_ctx, pos_name_pred, target, seg_model)
 
                 if config.compute_feature_metrics:
