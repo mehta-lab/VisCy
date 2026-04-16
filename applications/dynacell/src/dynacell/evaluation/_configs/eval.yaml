@@ -26,6 +26,7 @@ use_gpu: true
 compute_microssim: true
 compute_feature_metrics: false
 recalculate_metrics: true
+limit_positions: null  # process first N positions; null means all
 
 save:
   save_dir: ???

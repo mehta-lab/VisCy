@@ -86,6 +86,11 @@ def evaluate_predictions(config: DictConfig):
             raise ValueError(
                 f"Position count mismatch: pred={len(pred_positions)}, gt={len(gt_positions)}, seg={len(seg_positions)}"
             )
+        limit = getattr(config, "limit_positions", None)
+        if limit is not None:
+            pred_positions = pred_positions[:limit]
+            gt_positions = gt_positions[:limit]
+            seg_positions = seg_positions[:limit]
         for p1, p2, p3 in tqdm(
             zip(pred_positions, gt_positions, seg_positions),
             total=len(pred_positions),
