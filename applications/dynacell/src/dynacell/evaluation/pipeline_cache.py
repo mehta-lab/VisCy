@@ -63,6 +63,17 @@ class _CacheContext:
         """Whether cache read/write is active for this run."""
         return self.paths is not None
 
+    def mark_manifest_dirty(self) -> None:
+        """Record that the manifest has unsaved changes (next flush will persist them)."""
+        self._manifest_dirty = True
+
+    def consume_manifest_dirty(self) -> bool:
+        """Return ``True`` if there are pending writes and clear the dirty flag."""
+        if self._manifest_dirty:
+            self._manifest_dirty = False
+            return True
+        return False
+
 
 def _resolve_force(force: DictConfig) -> dict[str, bool]:
     """Flatten ``force_recompute`` into per-artifact bools, honoring ``.all``."""
@@ -258,7 +269,7 @@ def fov_gt_masks(
             },
         )
         _add_position(ctx.manifest, ["organelle_masks", ctx.target_name], pos_name)
-        ctx._manifest_dirty = True
+        ctx.mark_manifest_dirty()
 
     return masks
 
@@ -331,7 +342,7 @@ def fov_gt_cp_features(
             {"path": "features/cp.zarr", "spacing": ctx.spacing, "built_at": built_at_now()},
         )
         _add_position(ctx.manifest, ["cp_features"], pos_name)
-        ctx._manifest_dirty = True
+        ctx.mark_manifest_dirty()
 
     return per_t
 
@@ -392,22 +403,20 @@ def fov_gt_deep_features(
     if ctx.enabled and manifest_updated:
         _update_manifest_entry(ctx.manifest, manifest_keys, entry)
         _add_position(ctx.manifest, manifest_keys, pos_name)
-        ctx._manifest_dirty = True
+        ctx.mark_manifest_dirty()
 
     return per_t
 
 
 def flush_manifest(ctx: _CacheContext) -> None:
     """Persist the manifest to disk if it has been mutated since last flush."""
-    if ctx.enabled and ctx._manifest_dirty:
+    if ctx.enabled and ctx.consume_manifest_dirty():
         save_manifest(ctx.paths, ctx.manifest)
-        ctx._manifest_dirty = False
 
 
 def resolve_dynaclr_encoder_cfg(config: DictConfig) -> dict[str, Any] | None:
     """Extract and resolve the DynaCLR encoder config as a plain dict (for hashing)."""
-    try:
-        encoder = config.feature_extractor.dynaclr.encoder
-    except Exception:
+    encoder = OmegaConf.select(config, "feature_extractor.dynaclr.encoder", default=None)
+    if encoder is None:
         return None
     return OmegaConf.to_container(encoder, resolve=True)
