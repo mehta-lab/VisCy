@@ -62,11 +62,13 @@ uv run dynacell evaluate ... \
 
 ### Force recompute
 
-By default, if `pixel_metrics.npy`, `mask_metrics.npy`, and `feature_metrics.npy` all exist under `save.save_dir`, they are loaded from disk and plots are regenerated. Force a full recompute:
+By default, if `pixel_metrics.npy`, `mask_metrics.npy`, and `feature_metrics.npy` all exist under `save.save_dir`, they are loaded from disk and plots are regenerated. Force a full recompute of the saved CSVs:
 
 ```bash
-uv run dynacell evaluate ... recalculate_metrics=true
+uv run dynacell evaluate ... force_recompute.final_metrics=true
 ```
+
+Per-artifact flags (`gt_masks`, `gt_cp`, `gt_dinov3`, `gt_dynaclr`) control the GT cache wired up in later commits. `force_recompute.all=true` invalidates everything.
 
 ## Outputs
 

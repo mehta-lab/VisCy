@@ -266,164 +266,135 @@ PROPS_3D = (
 )
 
 
-def cp_feature_similarity(prediction, target, cell_segmentation, spacing):
-    """Compute CP feature metrics between prediction and target."""
-    _require_cubic()
-    if prediction.shape != target.shape:
-        raise ValueError(f"Input shape mismatch: pred {prediction.shape} vs target {target.shape}")
+def _cp_raw_regionprops(img, cell_segmentation, spacing):
+    """Compute raw per-cell regionprops and return a (n_cells, n_props) matrix.
 
-    prediction = _minmax_norm(prediction)
-    target = _minmax_norm(target)
-
+    No normalization, no column-drop, no z-score — callers are responsible for
+    supplying already-normalized ``img`` (via :func:`_minmax_norm`). Columns
+    follow the order of :data:`PROPS_3D` as flattened by ``regionprops_table``.
+    """
     if torch.cuda.is_available():
-        prediction = ascupy(prediction)
-        target = ascupy(target)
+        img = ascupy(img)
         cell_segmentation = ascupy(cell_segmentation)
-
-    pred_features = regionprops_table(cell_segmentation, prediction, spacing=spacing, properties=list(PROPS_3D))
-    target_features = regionprops_table(cell_segmentation, target, spacing=spacing, properties=list(PROPS_3D))
-
-    pred_features.pop("label", None)
-    target_features.pop("label", None)
-
+    feats = regionprops_table(cell_segmentation, img, spacing=spacing, properties=list(PROPS_3D))
+    feats.pop("label", None)
     if torch.cuda.is_available():
-        pred_mat = np.array([asnumpy(v) for v in pred_features.values()]).T
-        target_mat = np.array([asnumpy(v) for v in target_features.values()]).T
-    else:
-        pred_mat = np.array(list(pred_features.values())).T
-        target_mat = np.array(list(target_features.values())).T
+        return np.array([asnumpy(v) for v in feats.values()]).T
+    return np.array(list(feats.values())).T
 
-    # drop columns that are all zero in the target
-    non_zero_cols = ~np.all(target_mat == 0, axis=0)
-    pred_mat = pred_mat[:, non_zero_cols]
-    target_mat = target_mat[:, non_zero_cols]
 
-    if pred_mat.shape != target_mat.shape:
-        raise ValueError(f"Feature shape mismatch: pred {pred_mat.shape} vs target {target_mat.shape}")
+def cp_target_regionprops(target, cell_segmentation, spacing):
+    """GT-side raw CP regionprops, shape ``(n_cells, n_props_raw)``.
 
-    # z-score each column
+    Cacheable per ``(gt_path, cell_segmentation_path, spacing)`` since no
+    prediction data is involved.
+    """
+    _require_cubic()
+    return _cp_raw_regionprops(_minmax_norm(target), cell_segmentation, spacing)
+
+
+def cp_pred_regionprops(prediction, cell_segmentation, spacing):
+    """Prediction-side raw CP regionprops, shape ``(n_cells, n_props_raw)``."""
+    _require_cubic()
+    return _cp_raw_regionprops(_minmax_norm(prediction), cell_segmentation, spacing)
+
+
+def cp_pairwise(pred_raw, target_raw):
+    """Pair raw CP regionprops into CP_FID / CP_KID / CP_Median_Cosine_Similarity.
+
+    Applies the target-side all-zero column drop and per-matrix z-score that
+    the original monolithic ``cp_feature_similarity`` applied, then delegates
+    to :func:`_pairwise_feature_metrics`. Returns NaN metrics for empty inputs.
+    """
+    if pred_raw.shape != target_raw.shape:
+        raise ValueError(f"Feature shape mismatch: pred {pred_raw.shape} vs target {target_raw.shape}")
+    if pred_raw.size == 0:
+        return _nan_pairwise("CP")
+    non_zero_cols = ~np.all(target_raw == 0, axis=0)
+    pred_mat = pred_raw[:, non_zero_cols]
+    target_mat = target_raw[:, non_zero_cols]
     pred_mat = (pred_mat - pred_mat.mean(axis=0)) / (pred_mat.std(axis=0) + 1e-8)
     target_mat = (target_mat - target_mat.mean(axis=0)) / (target_mat.std(axis=0) + 1e-8)
-
     if pred_mat.size == 0:
-        return {
-            "CP_Median_Cosine_Similarity": float("nan"),
-            "CP_FID": float("nan"),
-            "CP_KID": float("nan"),
-        }
-
+        return _nan_pairwise("CP")
     return _pairwise_feature_metrics(pred_mat, target_mat, "CP")
 
 
-def deep_feature_similarity(
-    prediction,
-    target,
-    feature_extractor,
-    cell_segmentation,
-    patch_size,
-    feature_extractor_name,
-):
-    """Compute deep learning model feature metrics between prediction and target."""
-    if feature_extractor_name not in ("DINOv3", "DynaCLR"):
-        raise ValueError(f"Unsupported feature extractor: {feature_extractor_name}")
+def _extract_per_cell_features(img_2d, cell_segmentation_3d, feature_extractor, patch_size):
+    """Iterate cells in the shared 3-D segmentation and extract 2-D per-cell features.
 
-    if prediction.shape != target.shape or prediction.shape != cell_segmentation.shape:
-        raise ValueError(
-            f"Input shape mismatch: pred {prediction.shape} vs target {target.shape} "
-            f"vs cell_segmentation {cell_segmentation.shape}"
-        )
-
-    # max projection along z-axis to get 2D image for feature extraction, since deep learning model is 2D
-    prediction = _minmax_norm(np.max(prediction, axis=0))
-    target = _minmax_norm(np.max(target, axis=0))
-
-    pred_features = []
-    target_features = []
-
-    for idx in np.unique(cell_segmentation):
+    Iteration order is ``np.unique(cell_segmentation_3d)`` with the
+    background label ``0`` skipped. Both GT and prediction loops use the
+    same segmentation, so their returned arrays align row-by-row.
+    """
+    feats = []
+    for idx in np.unique(cell_segmentation_3d):
         if idx == 0:
-            continue  # skip background
-
-        cell_mask_2d = np.any(cell_segmentation == idx, axis=0)  # project 3D mask to 2D
+            continue
+        cell_mask_2d = np.any(cell_segmentation_3d == idx, axis=0)
         yx_coords = np.argwhere(cell_mask_2d)
         if len(yx_coords) == 0:
             continue
-
         com_y, com_x = np.mean(yx_coords, axis=0).astype(int)
         half_patch = patch_size // 2
-
         y_start, y_end = com_y - half_patch, com_y + half_patch
         x_start, x_end = com_x - half_patch, com_x + half_patch
-
         pad_y_before = max(0, -y_start)
-        pad_y_after = max(0, y_end - prediction.shape[0])
+        pad_y_after = max(0, y_end - img_2d.shape[0])
         pad_x_before = max(0, -x_start)
-        pad_x_after = max(0, x_end - prediction.shape[1])
-
-        y_slice = slice(max(0, y_start), min(prediction.shape[0], y_end))
-        x_slice = slice(max(0, x_start), min(prediction.shape[1], x_end))
-
-        prediction_cell = (prediction * cell_mask_2d)[y_slice, x_slice]
-        target_cell = (target * cell_mask_2d)[y_slice, x_slice]
-
+        pad_x_after = max(0, x_end - img_2d.shape[1])
+        y_slice = slice(max(0, y_start), min(img_2d.shape[0], y_end))
+        x_slice = slice(max(0, x_start), min(img_2d.shape[1], x_end))
+        cell_crop = (img_2d * cell_mask_2d)[y_slice, x_slice]
         if pad_y_before or pad_y_after or pad_x_before or pad_x_after:
             pad = ((pad_y_before, pad_y_after), (pad_x_before, pad_x_after))
-            prediction_cell = np.pad(prediction_cell, pad, mode="constant")
-            target_cell = np.pad(target_cell, pad, mode="constant")
-
-        pred_feature = feature_extractor.extract_features(prediction_cell).detach().cpu().numpy().reshape(-1)
-        target_feature = feature_extractor.extract_features(target_cell).detach().cpu().numpy().reshape(-1)
-
-        if pred_feature.shape != target_feature.shape:
-            raise ValueError(f"Feature shape mismatch: pred {pred_feature.shape} vs target {target_feature.shape}")
-
-        pred_features.append(pred_feature)
-        target_features.append(target_feature)
-
-    if not pred_features:
-        return {
-            f"{feature_extractor_name}_Median_Cosine_Similarity": float("nan"),
-            f"{feature_extractor_name}_FID": float("nan"),
-            f"{feature_extractor_name}_KID": float("nan"),
-        }
-
-    return _pairwise_feature_metrics(
-        np.stack(pred_features, axis=0),
-        np.stack(target_features, axis=0),
-        feature_extractor_name,
-    )
+            cell_crop = np.pad(cell_crop, pad, mode="constant")
+        feat = feature_extractor.extract_features(cell_crop).detach().cpu().numpy().reshape(-1)
+        feats.append(feat)
+    if not feats:
+        return np.empty((0, 0), dtype=np.float32)
+    return np.stack(feats, axis=0)
 
 
-def compute_feature_metrics(
-    prediction,
-    target,
-    cell_segmentation,
-    dinov3_feature_extractor,
-    dynaclr_feature_extractor,
-    spacing,
-    patch_size,
-):
-    """Compute CP, DINOv3, and DynaCLR feature similarity metrics."""
-    metrics = {}
-    metrics.update(cp_feature_similarity(prediction, target, cell_segmentation, spacing))
-    metrics.update(
-        deep_feature_similarity(
-            prediction,
-            target,
-            dinov3_feature_extractor,
-            cell_segmentation,
-            patch_size,
-            feature_extractor_name="DINOv3",
+def deep_target_features(target, cell_segmentation, feature_extractor, patch_size):
+    """GT-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
+
+    Cacheable per ``(gt_path, cell_segmentation_path, patch_size, feature_extractor_identity)``.
+    """
+    if target.shape != cell_segmentation.shape:
+        raise ValueError(f"Shape mismatch: target {target.shape} vs cell_segmentation {cell_segmentation.shape}")
+    target_2d = _minmax_norm(np.max(target, axis=0))
+    return _extract_per_cell_features(target_2d, cell_segmentation, feature_extractor, patch_size)
+
+
+def deep_pred_features(prediction, cell_segmentation, feature_extractor, patch_size):
+    """Prediction-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``."""
+    if prediction.shape != cell_segmentation.shape:
+        raise ValueError(
+            f"Shape mismatch: prediction {prediction.shape} vs cell_segmentation {cell_segmentation.shape}"
         )
-    )
-    metrics.update(
-        deep_feature_similarity(
-            prediction,
-            target,
-            dynaclr_feature_extractor,
-            cell_segmentation,
-            patch_size,
-            feature_extractor_name="DynaCLR",
-        )
-    )
-    return metrics
+    prediction_2d = _minmax_norm(np.max(prediction, axis=0))
+    return _extract_per_cell_features(prediction_2d, cell_segmentation, feature_extractor, patch_size)
+
+
+def deep_pairwise(pred_feats, target_feats, name):
+    """Pair per-cell deep features into ``{name}_FID`` / ``_KID`` / ``_Median_Cosine_Similarity``.
+
+    Empty inputs (no cells) produce NaN metrics.
+    """
+    if name not in ("DINOv3", "DynaCLR"):
+        raise ValueError(f"Unsupported feature extractor: {name}")
+    if pred_feats.shape != target_feats.shape:
+        raise ValueError(f"Feature shape mismatch: pred {pred_feats.shape} vs target {target_feats.shape}")
+    if pred_feats.size == 0:
+        return _nan_pairwise(name)
+    return _pairwise_feature_metrics(pred_feats, target_feats, name)
+
+
+def _nan_pairwise(name):
+    """Return a dict of NaN placeholders matching the pairwise-metrics schema."""
+    return {
+        f"{name}_Median_Cosine_Similarity": float("nan"),
+        f"{name}_FID": float("nan"),
+        f"{name}_KID": float("nan"),
+    }

@@ -25,7 +25,12 @@ def _import_pipeline_with_stubs(monkeypatch):
     metrics_module.calculate_microssim = lambda *args, **kwargs: []
     metrics_module.compute_pixel_metrics = lambda *args, **kwargs: {}
     metrics_module.evaluate_segmentations = lambda *args, **kwargs: {}
-    metrics_module.compute_feature_metrics = lambda *args, **kwargs: {}
+    metrics_module.cp_target_regionprops = lambda *args, **kwargs: None
+    metrics_module.cp_pred_regionprops = lambda *args, **kwargs: None
+    metrics_module.cp_pairwise = lambda *args, **kwargs: {}
+    metrics_module.deep_target_features = lambda *args, **kwargs: None
+    metrics_module.deep_pred_features = lambda *args, **kwargs: None
+    metrics_module.deep_pairwise = lambda *args, **kwargs: {}
 
     segmentation_module = types.ModuleType("dynacell.evaluation.segmentation")
     segmentation_module.segment = lambda *args, **kwargs: None
@@ -55,7 +60,14 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     config = OmegaConf.create(
         {
             "compute_feature_metrics": False,
-            "recalculate_metrics": False,
+            "force_recompute": {
+                "all": False,
+                "gt_masks": False,
+                "gt_cp": False,
+                "gt_dinov3": False,
+                "gt_dynaclr": False,
+                "final_metrics": False,
+            },
             "save": {
                 "save_dir": str(tmp_path),
                 "pixel_metrics_filename": "pixel_metrics.npy",
