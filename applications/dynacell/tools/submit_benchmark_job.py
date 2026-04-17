@@ -75,15 +75,27 @@ def _apply_override(composed: dict, path: list[str], value: Any) -> dict:
     return deep_merge(composed, nested)
 
 
+_OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint"})
+
+
 def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str:
-    """Render ordered ``#SBATCH`` lines. Order is pinned; output/error appended last."""
+    """Render ordered ``#SBATCH`` lines. Order is pinned; output/error appended last.
+
+    Optional directives (currently ``constraint``) are skipped when the
+    value is missing or null — profiles can set ``constraint: null`` to
+    express "run on any GPU."
+    """
     values = dict(sbatch)
     values.setdefault("job_name", job_name)
     lines = []
     for key, flag in _SBATCH_DIRECTIVE_ORDER:
         if key not in values:
+            if key in _OPTIONAL_SBATCH_DIRECTIVES:
+                continue
             raise SystemExit(f"hardware profile missing sbatch.{key}")
         raw = values[key]
+        if raw is None and key in _OPTIONAL_SBATCH_DIRECTIVES:
+            continue
         rendered = f'"{raw}"' if flag == "--constraint" else str(raw)
         lines.append(f"#SBATCH {flag}={rendered}")
     lines.append(f"#SBATCH --output={run_root}/slurm/%j.out")
