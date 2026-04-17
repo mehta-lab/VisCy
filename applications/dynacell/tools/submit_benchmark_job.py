@@ -99,17 +99,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--dry-run",
         action="store_true",
-        help="write resolved config + sbatch to disk but skip submission",
+        help="write resolved config + sbatch to launcher.run_root but skip submission "
+        "(requires write permission). Combine with --print-* to suppress writes.",
     )
     ap.add_argument(
         "--print-script",
         action="store_true",
-        help="preview: print rendered sbatch to stdout, do not write to disk or submit",
+        help="preview rendered sbatch to stdout. No disk writes, no submission, "
+        "safe on any run_root (overrides --dry-run's disk write).",
     )
     ap.add_argument(
         "--print-resolved-config",
         action="store_true",
-        help="preview: print resolved YAML (launcher+benchmark stripped) to stdout, do not write or submit",
+        help="preview resolved YAML (launcher+benchmark stripped) to stdout. "
+        "No disk writes, no submission (overrides --dry-run's disk write).",
     )
     ap.add_argument(
         "--override",
@@ -180,12 +183,16 @@ def submit(argv: list[str] | None = None) -> int:
     if args.dry_run and not (args.print_script or args.print_resolved_config):
         sys.stdout.write(rendered)
 
-    # --dry-run writes both files to disk (runnable via a later `sbatch` call
-    # without re-running this tool). --print-* are preview-only. Only a bare
-    # invocation submits.
-    skip_submit = args.dry_run or args.print_script or args.print_resolved_config
-    write_files = args.dry_run or not skip_submit
-    if write_files:
+    # Preview contract:
+    # - --print-* (either) = pure preview: no disk writes, no submission.
+    #   Safe against run_roots the caller can't write to.
+    # - --dry-run alone = write artifacts to run_root but don't submit.
+    #   Requires write permission on launcher.run_root.
+    # - --dry-run combined with --print-* = --print-* wins (preview).
+    # - Bare invocation = write + submit.
+    preview_only = args.print_script or args.print_resolved_config
+    skip_submit = preview_only or args.dry_run
+    if not preview_only:
         resolved_dir.mkdir(parents=True, exist_ok=True)
         slurm_dir.mkdir(parents=True, exist_ok=True)
         resolved_path.write_text(yaml.safe_dump(composed, default_flow_style=False))

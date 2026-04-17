@@ -44,19 +44,26 @@ uv run dynacell fit -c celldiff/fit.yml --data.init_args.data_path=/path/to/data
   composition order.
 - `tools/submit_benchmark_job.py` — drives one benchmark leaf end-to-end
   (compose → strip launcher metadata → render sbatch → submit). Use
-  `--dry-run` to inspect without submitting.
+  `--print-script` for a safe preview on any leaf, or `--dry-run` to
+  stage artifacts to `launcher.run_root` without submitting (requires
+  write permission on that path).
 - `tools/LEGACY/` — archived pre-schema CellDiff configs kept as the
   equivalence reference. Not for direct launch; see its README.
 
 ### Benchmark submit
 
 ```bash
-# Dry-run a CellDiff fit for ER (SEC61B) on ipsc_confocal, print the rendered sbatch:
+# Preview the rendered sbatch to stdout — safe on any leaf, no disk writes:
 uv run python applications/dynacell/tools/submit_benchmark_job.py \
     applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml \
-    --dry-run --print-script
+    --print-script
 
-# Submit for real (drops --dry-run):
+# Stage artifacts to launcher.run_root without submitting (requires write perms):
+uv run python applications/dynacell/tools/submit_benchmark_job.py \
+    applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml \
+    --dry-run
+
+# Submit:
 uv run python applications/dynacell/tools/submit_benchmark_job.py \
     applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
 ```
