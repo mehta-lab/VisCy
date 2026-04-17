@@ -5,6 +5,7 @@ Provides :class:`DynacellUNet` for supervised regression and
 """
 
 import inspect
+import itertools
 from typing import Literal, Sequence
 
 import numpy as np
@@ -155,6 +156,8 @@ class DynacellUNet(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
+        predict_method: Literal["full_image", "sliding_window"] = "full_image",
+        predict_overlap: tuple[int, int, int] = (4, 256, 256),
         ckpt_path: str | None = None,
     ) -> None:
         super().__init__()
@@ -170,6 +173,9 @@ class DynacellUNet(LightningModule):
         self.schedule = schedule
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
+        self.predict_method = predict_method
+        self.predict_overlap = predict_overlap
+
         self.training_step_outputs: list = []
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
         self.validation_losses: list[list[tuple[Tensor, int]]] = []
@@ -309,7 +315,12 @@ class DynacellUNet(LightningModule):
         source = batch["source"]
         original_shape = source.shape[2:]
         source = self._predict_pad(source)
-        prediction = self.forward(source)
+        if self.predict_method == "full_image":
+            prediction = self.forward(source)
+        elif self.predict_method == "sliding_window":
+            prediction = self.predict_sliding_window(source, overlap_size=self.predict_overlap)
+        else:
+            raise ValueError(f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image' or 'sliding_window'.")
         return _center_crop_to_shape(prediction, original_shape)
 
     def on_train_epoch_end(self):
@@ -335,6 +346,63 @@ class DynacellUNet(LightningModule):
         if not imgs or not self.trainer.is_global_zero or self.logger is None:
             return
         log_image_grid(self.logger, key, imgs, self.current_epoch)
+
+    def predict_sliding_window(self, source: Tensor, overlap_size: tuple[int, int, int] = (4, 256, 256)) -> Tensor:
+        """Run sliding-window inference over a large input volume.
+
+        Overlapping regions are averaged across all covering patches.
+
+        Parameters
+        ----------
+        source : Tensor
+            Input tensor of shape ``(B, C, D, H, W)``.
+        overlap_size : tuple of int
+            Overlap in ``(D, H, W)`` between adjacent patches.
+
+        Returns
+        -------
+        Tensor
+            Prediction with the same spatial shape as ``source``.
+        """
+        spatial = source.shape[-3:]
+        patch_spatial = tuple(self.model.input_spatial_size)
+        n_spatial = 3
+        overlap = tuple(overlap_size)
+
+        for i in range(n_spatial):
+            S, P, O = spatial[i], patch_spatial[i], overlap[i]
+            if S < P:
+                raise ValueError(f"spatial dim {i} size {S} must be >= patch size {P}")
+            if not (0 <= O < P):
+                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {O} vs {P})")
+
+        prediction_sum = torch.zeros_like(source)
+        prediction_count = torch.zeros_like(source)
+
+        start_lists = []
+        for i in range(n_spatial):
+            S, P, O = spatial[i], patch_spatial[i], overlap[i]
+            stride = P - O
+            last = S - P
+            starts = [0]
+            while starts[-1] + stride < last:
+                starts.append(starts[-1] + stride)
+            if starts[-1] != last:
+                starts.append(last)
+            start_lists.append(starts)
+
+        with torch.no_grad():
+            for starts in itertools.product(*start_lists):
+                slicer: list = [slice(None)] * source.ndim
+                for i, st in enumerate(starts):
+                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
+                patch_out = self.forward(source[tuple(slicer)])
+                prediction_sum[tuple(slicer)] += patch_out
+                prediction_count[tuple(slicer)] += 1
+
+        if not torch.all(prediction_count > 0):
+            raise RuntimeError("sliding window left uncovered voxels")
+        return prediction_sum / prediction_count
 
 
 class DynacellFlowMatching(LightningModule):
