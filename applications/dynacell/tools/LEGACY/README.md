@@ -35,12 +35,20 @@ The equivalent wandb-logged model hyperparameters
 
 ### Notes on `fit_unetvit3d.yml`
 
-The legacy file carries a latent copy-paste bug: `net_config:` nested
-under `DynacellUNet`'s `init_args`. `DynacellUNet.__init__` takes
-`model_config:`, not `net_config:`, so jsonargparse rejects that
-override — the legacy config would fail to load if run today. The
-override is also redundant with the recipe's `model_config.input_spatial_size`,
-so the new leaf drops it. Runtime-equivalent in every other field.
+The legacy file carries two copy-paste bugs from celldiff that jsonargparse
+rejects at parse time:
+
+1. `net_config:` nested under `DynacellUNet`'s `init_args`.
+   `DynacellUNet.__init__` takes `model_config:`, not `net_config:`, so
+   jsonargparse rejects that override. Also redundant with the recipe's
+   `model_config.input_spatial_size`.
+2. `num_log_steps: 10` under `DynacellUNet`'s `init_args`. That kwarg
+   belongs to `DynacellFlowMatching` (CellDiff), not `DynacellUNet`, so
+   jsonargparse rejects it with `Option 'num_log_steps' is not accepted`.
+   Confirmed by an actual fit crash on slurm job 31104787 when the new
+   overlay still carried this field over from celldiff_fit.yml.
+
+The new leaf drops both. Runtime-equivalent in every other field.
 
 ## Why kept
 

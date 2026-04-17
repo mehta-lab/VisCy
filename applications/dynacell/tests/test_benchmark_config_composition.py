@@ -238,13 +238,19 @@ def test_fnet3d_paper_leaf_matches_ran_config() -> None:
 def test_unetvit3d_train_leaf_matches_legacy() -> None:
     """New UNetViT3D train leaf reproduces Dihan's fit_unetvit3d.yml.
 
-    Dihan's legacy fit_unetvit3d.yml has a copy-paste bug: it nests
-    ``net_config.input_spatial_size`` under DynacellUNet's init_args, but
-    DynacellUNet takes ``model_config:``, not ``net_config:``. jsonargparse
-    rejects that override, so the legacy config cannot actually run as-is.
-    The override is also redundant with the recipe's
-    ``model_config.input_spatial_size``, so the new leaf drops it — this
-    test strips it from the legacy side before comparing.
+    Dihan's legacy fit_unetvit3d.yml carries two copy-paste bugs from
+    celldiff that jsonargparse rejects at parse time:
+
+    1. ``net_config.input_spatial_size`` under DynacellUNet.init_args, but
+       DynacellUNet takes ``model_config:`` — redundant with the recipe's
+       ``model_config.input_spatial_size``.
+    2. ``num_log_steps: 10`` — that kwarg belongs to DynacellFlowMatching,
+       not DynacellUNet, and is rejected by jsonargparse strict validation.
+
+    The new leaf drops both; this test strips them from the legacy side
+    before comparing. Both bugs were confirmed by an actual fit crash:
+    slurm 31104787 failed at parse time with "Option 'num_log_steps' is
+    not accepted" before the num_log_steps strip was added here.
     """
     legacy_path = EXAMPLES / "sec61b" / "fit_unetvit3d.yml"
     new_path = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "unetvit3d.yml"
@@ -252,10 +258,13 @@ def test_unetvit3d_train_leaf_matches_legacy() -> None:
     old = _strip_reserved(load_composed_config(legacy_path))
     new = _strip_reserved(load_composed_config(new_path))
 
-    # Strip the broken override. Value is a tautology against the recipe.
+    # Strip the broken overrides. Values are not carried by the new leaf.
     broken = old["model"]["init_args"].pop("net_config", None)
     assert broken == {"input_spatial_size": [8, 512, 512]}, "unexpected net_config content in legacy UNetViT3D config"
     assert new["model"]["init_args"]["model_config"]["input_spatial_size"] == [8, 512, 512]
+    stale_log_steps = old["model"]["init_args"].pop("num_log_steps", None)
+    assert stale_log_steps == 10, "expected legacy num_log_steps=10 copy-paste from celldiff"
+    assert "num_log_steps" not in new["model"]["init_args"], "new overlay should not carry num_log_steps"
 
     assert old["model"]["class_path"] == new["model"]["class_path"]
     assert old["model"]["init_args"] == new["model"]["init_args"]

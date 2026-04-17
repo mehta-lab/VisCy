@@ -13,7 +13,6 @@ model:
   init_args:
     lr: 0.0003
     schedule: WarmupCosine
-    num_log_steps: 10
 trainer:
   precision: bf16-mixed
   max_epochs: 20
