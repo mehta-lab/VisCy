@@ -4,14 +4,14 @@ from pytest import raises
 from viscy_utils.compose import deep_merge, load_composed_config
 
 
-def testdeep_merge_flat():
+def test_deep_merge_flat():
     """Override replaces base keys, new keys are added."""
     base = {"a": 1, "b": 2}
     override = {"b": 3, "c": 4}
     assert deep_merge(base, override) == {"a": 1, "b": 3, "c": 4}
 
 
-def testdeep_merge_nested():
+def test_deep_merge_nested():
     """Nested dicts are merged recursively, not replaced."""
     base = {"model": {"lr": 0.01, "layers": 3}}
     override = {"model": {"lr": 0.001}}
@@ -19,14 +19,14 @@ def testdeep_merge_nested():
     assert result == {"model": {"lr": 0.001, "layers": 3}}
 
 
-def testdeep_merge_list_replaces():
+def test_deep_merge_list_replaces():
     """Lists are replaced entirely, not appended."""
     base = {"channels": ["A", "B"]}
     override = {"channels": ["C"]}
     assert deep_merge(base, override) == {"channels": ["C"]}
 
 
-def testdeep_merge_does_not_mutate_inputs():
+def test_deep_merge_does_not_mutate_inputs():
     """Neither base nor override is modified."""
     base = {"model": {"lr": 0.01}}
     override = {"model": {"lr": 0.001}}
