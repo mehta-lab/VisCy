@@ -70,10 +70,25 @@ def test_render_env_block_preserves_order():
     ]
 
 
-def test_byte_equivalence_sec61b_train_leaf(capsys):
-    """Rendered sbatch differs from Dihan's run_celldiff.slurm only on the srun line."""
-    legacy = (EXAMPLES / "sec61b" / "run_celldiff.slurm").read_text()
-    leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "celldiff.yml"
+@pytest.mark.parametrize(
+    "leaf_subpath,legacy_slurm,expected_resolved_prefix",
+    [
+        (
+            "train/er/ipsc_confocal/celldiff.yml",
+            "sec61b/run_celldiff.slurm",
+            "/resolved/fit_CELLDiff_SEC61B_",
+        ),
+        (
+            "train/er/ipsc_confocal/unetvit3d.yml",
+            "sec61b/run_unetvit3d.slurm",
+            "/resolved/fit_UNetViT3D_SEC61B_",
+        ),
+    ],
+)
+def test_byte_equivalence_sec61b_train_leaf(capsys, leaf_subpath, legacy_slurm, expected_resolved_prefix):
+    """Rendered sbatch differs from Dihan's legacy .slurm only on the srun line."""
+    legacy = (EXAMPLES / legacy_slurm).read_text()
+    leaf = BENCHMARKS / leaf_subpath
 
     # --print-script is preview-only (no disk writes), so this is safe to run
     # against a leaf whose launcher.run_root we may not have permission to write.
@@ -98,7 +113,7 @@ def test_byte_equivalence_sec61b_train_leaf(capsys):
     rendered_srun = rendered_lines[srun_idx]
     assert legacy_srun.startswith("srun uv run python -m dynacell fit --config")
     assert rendered_srun.startswith("srun uv run python -m dynacell fit --config")
-    assert "/resolved/fit_CELLDiff_SEC61B_" in rendered_srun
+    assert expected_resolved_prefix in rendered_srun
 
 
 def test_submit_raises_on_missing_launcher(tmp_path):

@@ -1,0 +1,67 @@
+# FNet3D paper-baseline fit overlay.
+#
+# Reproduces pytorch_fnet paper defaults on DynaCell data. Reference run
+# (launched before this schema existed):
+#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/
+#
+# Diverges from shared/targets/er_sec61b.yml on two fields because the
+# paper's stats + sampling differ from the CellDiff/UNetViT conventions:
+# Structure is normalized with mean/std (not median/iqr), and 8 small
+# weighted crops per FOV replace the 2 oversized transformer crops.
+base:
+  - ../../../../recipes/models/fnet3d.yml
+  - ../../../../recipes/trainer/fit_1gpu.yml
+seed_everything: 0
+model:
+  init_args:
+    loss_function:
+      class_path: torch.nn.MSELoss
+    lr: 0.001
+    schedule: Constant
+trainer:
+  precision: 32-true
+  max_steps: 50000
+data:
+  init_args:
+    z_window_size: 32
+    batch_size: 48
+    num_workers: 8
+    yx_patch_size: [64, 64]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      # CPU: 8 patches per FOV (amortizes zarr decompression).
+      # batch_size=48 → DataLoader loads 6 FOVs, each yields 8 patches = 48.
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [source, target]
+          spatial_axes: [1]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [source, target]
+          spatial_axes: [2]
+          prob: 0.5
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          roi_size: [32, 64, 64]
