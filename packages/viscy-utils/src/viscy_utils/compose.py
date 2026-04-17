@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge *override* into *base*, returning a new dict.
 
     Dicts are merged key-by-key; all other types (including lists) are
@@ -21,7 +21,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     result = dict(base)
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
+            result[k] = deep_merge(result[k], v)
         else:
             result[k] = v
     return result
@@ -63,5 +63,5 @@ def load_composed_config(path: str | Path, _seen: frozenset[Path] | None = None)
     merged: dict = {}
     for rel in bases:
         base_cfg = load_composed_config(path.parent / rel, _seen)
-        merged = _deep_merge(merged, base_cfg)
-    return _deep_merge(merged, cfg)
+        merged = deep_merge(merged, base_cfg)
+    return deep_merge(merged, cfg)

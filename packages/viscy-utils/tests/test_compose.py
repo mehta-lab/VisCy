@@ -1,36 +1,36 @@
 import yaml
 from pytest import raises
 
-from viscy_utils.compose import _deep_merge, load_composed_config
+from viscy_utils.compose import deep_merge, load_composed_config
 
 
-def test_deep_merge_flat():
+def testdeep_merge_flat():
     """Override replaces base keys, new keys are added."""
     base = {"a": 1, "b": 2}
     override = {"b": 3, "c": 4}
-    assert _deep_merge(base, override) == {"a": 1, "b": 3, "c": 4}
+    assert deep_merge(base, override) == {"a": 1, "b": 3, "c": 4}
 
 
-def test_deep_merge_nested():
+def testdeep_merge_nested():
     """Nested dicts are merged recursively, not replaced."""
     base = {"model": {"lr": 0.01, "layers": 3}}
     override = {"model": {"lr": 0.001}}
-    result = _deep_merge(base, override)
+    result = deep_merge(base, override)
     assert result == {"model": {"lr": 0.001, "layers": 3}}
 
 
-def test_deep_merge_list_replaces():
+def testdeep_merge_list_replaces():
     """Lists are replaced entirely, not appended."""
     base = {"channels": ["A", "B"]}
     override = {"channels": ["C"]}
-    assert _deep_merge(base, override) == {"channels": ["C"]}
+    assert deep_merge(base, override) == {"channels": ["C"]}
 
 
-def test_deep_merge_does_not_mutate_inputs():
+def testdeep_merge_does_not_mutate_inputs():
     """Neither base nor override is modified."""
     base = {"model": {"lr": 0.01}}
     override = {"model": {"lr": 0.001}}
-    _deep_merge(base, override)
+    deep_merge(base, override)
     assert base == {"model": {"lr": 0.01}}
     assert override == {"model": {"lr": 0.001}}
 
