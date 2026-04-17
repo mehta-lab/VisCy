@@ -299,3 +299,87 @@ class CELLDiff3DVS(nn.Module):
                 out[tuple(slicer)] = patch_out
 
         return out
+
+    def denoise_sliding_window(
+        self,
+        phase: Tensor,
+        overlap_size: int | tuple[int, ...] = 0,
+    ) -> Tensor:
+        """Estimate the conditional mean via overlapping tiled single-step Euler updates.
+
+        Slides overlapping patches across the input.  Each patch is denoised
+        independently with fresh Gaussian noise and the results are accumulated
+        with a count tensor; overlapping regions are averaged, which reduces
+        variance and approximates the conditional mean.
+
+        Parameters
+        ----------
+        phase : Tensor
+            Phase contrast input of shape ``(..., D, H, W)``.
+        overlap_size : int or tuple of int
+            Overlap in each spatial dimension ``(od, oh, ow)``.
+            A single int applies the same overlap to all three dimensions.
+
+        Returns
+        -------
+        Tensor
+            Predicted fluorescence of shape ``(..., D, H, W)``.
+        """
+
+        if self.path_type != "Linear" or self.prediction != "velocity":
+            raise NotImplementedError(
+                "denoise_sliding_window only supports Linear path with velocity prediction, "
+                f"got path_type={self.path_type!r}, prediction={self.prediction!r}"
+            )
+
+        spatial = tuple(phase.shape[-3:])
+        patch_spatial = tuple(self.net.input_spatial_size)
+        n_spatial = 3
+
+        if isinstance(overlap_size, int):
+            overlap = (overlap_size,) * n_spatial
+        else:
+            overlap = tuple(overlap_size)
+            if len(overlap) != n_spatial:
+                raise ValueError("overlap_size must be int or a 3-tuple")
+
+        for i in range(n_spatial):
+            S, P, O = spatial[i], patch_spatial[i], overlap[i]
+            if S < P:
+                raise ValueError(f"spatial dim {i} ({S}) must be >= patch dim ({P})")
+            if not (0 <= O < P):
+                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {O} vs {P})")
+
+        in_ch = self.net.inconv.in_channels
+        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        prediction_sum = torch.zeros(out_shape, device=phase.device, dtype=phase.dtype)
+        prediction_count = torch.zeros(out_shape, device=phase.device, dtype=phase.dtype)
+
+        start_lists: list[list[int]] = []
+        for i in range(n_spatial):
+            S, P, O = spatial[i], patch_spatial[i], overlap[i]
+            stride = P - O
+            last = S - P
+            starts = [0]
+            while starts[-1] + stride < last:
+                starts.append(starts[-1] + stride)
+            if starts[-1] != last:
+                starts.append(last)
+            start_lists.append(starts)
+
+        with torch.no_grad():
+            for starts in itertools.product(*start_lists):
+                slicer = [slice(None)] * phase.dim()
+                for i, st in enumerate(starts):
+                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
+                phase_patch = phase[tuple(slicer)]
+                xt = self._noise_like_target(phase_patch)
+                t = torch.zeros(xt.shape[0], device=xt.device, dtype=xt.dtype)
+                pred = self.net(xt, phase_patch, t)
+                patch_out = pred + xt
+                prediction_sum[tuple(slicer)] += patch_out
+                prediction_count[tuple(slicer)] += 1
+
+        if not torch.all(prediction_count > 0):
+            raise RuntimeError("sliding window left uncovered voxels")
+        return prediction_sum / prediction_count
