@@ -304,7 +304,7 @@ class HCSDataModule(LightningDataModule):
         MemoryMappedTensor
             Memory-mapped tensor of shape ``(N*T, C, Z, Y, X)``.
         """
-        key = array_key or self.array_key
+        key = array_key if array_key is not None else self.array_key
         arr = positions[0][key]
         arr_shape = arr.shape
         T = arr_shape[0]

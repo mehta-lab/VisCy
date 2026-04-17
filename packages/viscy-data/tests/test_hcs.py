@@ -706,11 +706,9 @@ def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path)
     )
     dm.prepare_data()
 
-    # fixture creates fg_mask as uint8; the mmap buffer must match.
     with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
         positions = [pos for _, pos in ds.positions()]
         mask_arr0 = positions[0]["fg_mask"]
-        # 1 target channel (Fluorescence), same spatial shape as data.
         mask_shape = (len(positions) * mask_arr0.frames, 1, mask_arr0.slices, mask_arr0.height, mask_arr0.width)
         mask_buf = MemoryMappedTensor.from_filename(
             dm._mmap_cache_dir / "fg_mask.mmap",
