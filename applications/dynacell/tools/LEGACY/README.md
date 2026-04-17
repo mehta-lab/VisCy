@@ -22,6 +22,7 @@ leaves under `configs/benchmarks/virtual_staining/` via
 | `nucl/predict_celldiff.yml` | `predict/nucleus/ipsc_confocal/celldiff/ipsc_confocal.yml` | `test_predict_leaf_matches_legacy[nucleus-nucl]` |
 | `memb/predict_celldiff.yml` | `predict/membrane/ipsc_confocal/celldiff/ipsc_confocal.yml` | `test_predict_leaf_matches_legacy[membrane-memb]` |
 | `sec61b/fit_unetvit3d.yml` | `train/er/ipsc_confocal/unetvit3d.yml` | `test_unetvit3d_train_leaf_matches_legacy` |
+| `sec61b/fit_unext2.yml` | `train/er/ipsc_confocal/unext2.yml` | `test_unext2_train_leaf_matches_legacy` |
 | *(git-removed)* `sec61b/fit_fnet3d_paper.yml` | `train/er/ipsc_confocal/fnet3d_paper.yml` | `test_fnet3d_paper_leaf_matches_ran_config` |
 
 The `fnet3d_paper` leaf has no source file in LEGACY — the earlier

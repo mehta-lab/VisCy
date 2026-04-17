@@ -1,0 +1,17 @@
+# Hardware profile: 4 GPU DDP, any GPU model (no constraint).
+#
+# Matches UNeXt2 VSCyto3D paper-baseline slurm directives: 4 GPUs, DDP
+# strategy, 512G host mem (dataloader workers × ranks × mmap_preload
+# buffer need headroom), 4-day wall-time per restart.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 32
+    gpus: 4
+    mem: "512G"
+    constraint: null
+    time: "4-00:00:00"
+trainer:
+  devices: 4

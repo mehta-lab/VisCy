@@ -316,3 +316,50 @@ def test_unetvit3d_train_leaf_matches_legacy() -> None:
     new_logger = new["trainer"].get("logger", {}).get("init_args", {})
     for k in ("name", "save_dir"):
         assert old_logger.get(k) == new_logger.get(k), f"logger.{k}"
+
+
+def test_unext2_train_leaf_matches_legacy() -> None:
+    """New UNeXt2 train leaf reproduces Dihan's Run 4 fit_unext2.yml.
+
+    Archived from git commit 46e4c79 (wandb run 20260409-020023). The
+    legacy file uses ``preload: true`` which was the pre-rename kwarg
+    name for ``mmap_preload`` — this test normalizes that before
+    comparing data.init_args.
+    """
+    legacy_path = EXAMPLES / "sec61b" / "fit_unext2.yml"
+    new_path = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "unext2.yml"
+
+    old = _strip_reserved(load_composed_config(legacy_path))
+    new = _strip_reserved(load_composed_config(new_path))
+
+    # Pre-rename kwarg: legacy used `preload`, new code uses `mmap_preload`.
+    if "preload" in old["data"]["init_args"]:
+        old["data"]["init_args"]["mmap_preload"] = old["data"]["init_args"].pop("preload")
+
+    assert old["model"]["class_path"] == new["model"]["class_path"]
+    assert old["model"]["init_args"] == new["model"]["init_args"]
+    assert old["data"]["class_path"] == new["data"]["class_path"]
+
+    old_di = old["data"]["init_args"]
+    new_di = new["data"]["init_args"]
+    for k in TRAIN_DATA_INIT_KEYS:
+        if k in old_di:
+            assert k in new_di, f"missing data.init_args.{k}"
+            assert old_di[k] == new_di[k], f"data.init_args.{k} diverges"
+
+    for k in ("precision", "max_epochs", "devices"):
+        if k in old["trainer"]:
+            assert old["trainer"][k] == new["trainer"][k], f"trainer.{k}"
+    assert old.get("seed_everything") == new.get("seed_everything"), "seed_everything"
+
+    old_cbs = old["trainer"]["callbacks"]
+    new_cbs = new["trainer"]["callbacks"]
+    assert len(old_cbs) == len(new_cbs), "callbacks length"
+    for i, (a, b) in enumerate(zip(old_cbs, new_cbs)):
+        assert a["class_path"] == b["class_path"], f"callbacks[{i}] class"
+    _assert_modelckpt_core_fields_match(old_cbs, new_cbs)
+
+    old_logger = old["trainer"].get("logger", {}).get("init_args", {})
+    new_logger = new["trainer"].get("logger", {}).get("init_args", {})
+    for k in ("name", "save_dir"):
+        assert old_logger.get(k) == new_logger.get(k), f"logger.{k}"

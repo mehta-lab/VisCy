@@ -1,0 +1,39 @@
+# UNeXt2 (VSCyto3D) fit on ER (SEC61B marker) — AICS iPSC confocal.
+# Reproduces wandb run 20260409-020023_UNeXt2_iPSC_SEC61B (Dihan's Run 4,
+# commit 46e4c79): lr=0.0004, batch_size=32, z_window_size=20, 4-GPU DDP.
+# MixedLoss(L1 0.5 + DSSIM 0.5). max_epochs=200.
+base:
+  - ../../../shared/train_sets/ipsc_confocal.yml
+  - ../../../shared/targets/er_sec61b.yml
+  - ../../../shared/model_overlays/unext2_fit.yml
+  - ../../../shared/launcher_profiles/mode_fit.yml
+  - ../../../shared/launcher_profiles/hardware_4gpu.yml
+  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: unext2
+  experiment_id: er__ipsc_confocal__unext2
+
+trainer:
+  logger:
+    init_args:
+      name: UNeXt2_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2/checkpoints
+
+launcher:
+  job_name: UNeXt2_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/unext2
