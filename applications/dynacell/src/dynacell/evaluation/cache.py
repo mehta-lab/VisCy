@@ -372,12 +372,35 @@ def write_features(
 
 
 def ckpt_sha256_12(path: Path | str) -> str:
-    """Return the first 12 hex chars of the sha256 of the file at *path*."""
+    """Return the first 12 hex chars of the sha256 of the file at *path*.
+
+    On repeated calls for the same checkpoint, reads the digest from a
+    ``<path>.sha256`` sidecar file when present and newer than the
+    checkpoint, avoiding a multi-GB re-read. Writes the sidecar after a
+    fresh hash; silently tolerates read-only parent directories and NFS
+    flakes by falling back to recompute.
+    """
+    ckpt = Path(path)
+    sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
+    try:
+        if sidecar.exists() and sidecar.stat().st_mtime >= ckpt.stat().st_mtime:
+            digest = sidecar.read_text().strip()
+            if len(digest) >= 12 and all(c in "0123456789abcdef" for c in digest[:12]):
+                return digest[:12]
+    except OSError:
+        pass
     hasher = hashlib.sha256()
-    with open(path, "rb") as f:
+    with open(ckpt, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             hasher.update(chunk)
-    return hasher.hexdigest()[:12]
+    digest = hasher.hexdigest()
+    try:
+        tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
+        tmp.write_text(digest + "\n")
+        tmp.replace(sidecar)
+    except OSError:
+        pass
+    return digest[:12]
 
 
 def encoder_config_sha256_12(encoder_cfg: dict[str, Any]) -> str:
