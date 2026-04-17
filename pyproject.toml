@@ -87,6 +87,7 @@ lint.pydocstyle.convention = "numpy"
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests" ]
 addopts = [ "-ra", "-q", "--import-mode=importlib" ]
+pythonpath = [ "applications/dynacell/tools" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

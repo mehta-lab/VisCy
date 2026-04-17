@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 yaml = pytest.importorskip("yaml")
 
+# submit_benchmark_job is importable because the root pyproject.toml's
+# [tool.pytest.ini_options].pythonpath adds applications/dynacell/tools to sys.path.
+import submit_benchmark_job as sbj  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
-TOOLS_DIR = REPO_ROOT / "applications" / "dynacell" / "tools"
 EXAMPLES = REPO_ROOT / "applications" / "dynacell" / "tools" / "LEGACY" / "examples_configs"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
-
-sys.path.insert(0, str(TOOLS_DIR))
-import submit_benchmark_job as sbj  # noqa: E402
 
 
 def test_parse_override_scalar_and_nested():
@@ -71,13 +70,14 @@ def test_render_env_block_preserves_order():
     ]
 
 
-def test_byte_equivalence_sec61b_train_leaf(capsys, monkeypatch):
+def test_byte_equivalence_sec61b_train_leaf(capsys):
     """Rendered sbatch differs from Dihan's run_celldiff.slurm only on the srun line."""
     legacy = (EXAMPLES / "sec61b" / "run_celldiff.slurm").read_text()
     leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "celldiff.yml"
 
-    # Run submit with --dry-run --print-script so nothing touches disk.
-    rc = sbj.submit([str(leaf), "--dry-run", "--print-script"])
+    # --print-script is preview-only (no disk writes), so this is safe to run
+    # against a leaf whose launcher.run_root we may not have permission to write.
+    rc = sbj.submit([str(leaf), "--print-script"])
     assert rc == 0
     rendered = capsys.readouterr().out
 

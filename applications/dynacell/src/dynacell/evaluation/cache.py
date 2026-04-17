@@ -387,7 +387,7 @@ def ckpt_sha256_12(path: Path | str) -> str:
             digest = sidecar.read_text().strip()
             if len(digest) >= 12 and all(c in "0123456789abcdef" for c in digest[:12]):
                 return digest[:12]
-    except (OSError, FileNotFoundError):
+    except OSError:
         pass
     hasher = hashlib.sha256()
     with open(ckpt, "rb") as f:

@@ -96,12 +96,20 @@ def _render_env_block(env: dict | None) -> str:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("leaf", type=Path, help="path to a benchmark leaf YAML")
-    ap.add_argument("--dry-run", action="store_true", help="render both files but skip sbatch")
-    ap.add_argument("--print-script", action="store_true", help="print rendered sbatch to stdout")
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="write resolved config + sbatch to disk but skip submission",
+    )
+    ap.add_argument(
+        "--print-script",
+        action="store_true",
+        help="preview: print rendered sbatch to stdout, do not write to disk or submit",
+    )
     ap.add_argument(
         "--print-resolved-config",
         action="store_true",
-        help="print resolved YAML (launcher+benchmark stripped) to stdout",
+        help="preview: print resolved YAML (launcher+benchmark stripped) to stdout, do not write or submit",
     )
     ap.add_argument(
         "--override",
@@ -165,9 +173,6 @@ def submit(argv: list[str] | None = None) -> int:
         resolved_config=str(resolved_path),
     )
 
-    # --print-* and --dry-run all imply "do not submit"; only bare invocation submits.
-    skip_submit = args.dry_run or args.print_script or args.print_resolved_config
-
     if args.print_resolved_config:
         sys.stdout.write(yaml.safe_dump(composed, default_flow_style=False))
     if args.print_script:
@@ -175,11 +180,17 @@ def submit(argv: list[str] | None = None) -> int:
     if args.dry_run and not (args.print_script or args.print_resolved_config):
         sys.stdout.write(rendered)
 
-    if not skip_submit:
+    # --dry-run writes both files to disk (runnable via a later `sbatch` call
+    # without re-running this tool). --print-* are preview-only. Only a bare
+    # invocation submits.
+    skip_submit = args.dry_run or args.print_script or args.print_resolved_config
+    write_files = args.dry_run or not skip_submit
+    if write_files:
         resolved_dir.mkdir(parents=True, exist_ok=True)
         slurm_dir.mkdir(parents=True, exist_ok=True)
         resolved_path.write_text(yaml.safe_dump(composed, default_flow_style=False))
         sbatch_path.write_text(rendered)
+    if not skip_submit:
         subprocess.run(["sbatch", str(sbatch_path)], check=True)
 
     return 0
