@@ -61,6 +61,24 @@ def _strip_reserved(d: dict) -> dict:
     return d
 
 
+def _assert_modelckpt_core_fields_match(old_cbs: list, new_cbs: list) -> None:
+    """Compare ModelCheckpoint dirpath + save_last across two callback lists.
+
+    The checkpoint policy fields (``monitor``, ``save_top_k``,
+    ``every_n_epochs``) can diverge intentionally between a legacy leaf
+    and its migrated reproduction — for example when the new leaf adopts
+    a top-k policy that the legacy lacked. The policy-invariant fields
+    (where checkpoints land, whether ``last.ckpt`` is written) must
+    stay equal so downstream predict leaves find the same files.
+    """
+    for i, (a, b) in enumerate(zip(old_cbs, new_cbs)):
+        if a["class_path"].endswith("ModelCheckpoint"):
+            a_args = a.get("init_args", {})
+            b_args = b.get("init_args", {})
+            for k in ("dirpath", "save_last"):
+                assert a_args.get(k) == b_args.get(k), f"callbacks[{i}].{k}"
+
+
 @pytest.mark.parametrize("organelle,legacy", sorted(ORGANELLE_TO_LEGACY.items()))
 def test_train_leaf_matches_legacy(organelle: str, legacy: str) -> None:
     """Composed train leaf matches the pre-schema fit_celldiff.yml on every shared key."""
@@ -280,7 +298,19 @@ def test_unetvit3d_train_leaf_matches_legacy() -> None:
     for k in ("precision", "max_epochs", "devices"):
         if k in old["trainer"]:
             assert old["trainer"][k] == new["trainer"][k], f"trainer.{k}"
-    assert old["trainer"].get("callbacks") == new["trainer"].get("callbacks"), "trainer.callbacks"
+
+    # Callbacks diverge intentionally: Dihan replaced the legacy's
+    # save_top_k=-1 / no-monitor checkpoint policy with the same
+    # monitor=loss/validate + save_top_k=4 pattern used by fnet3d_paper
+    # when he migrated the leaf (commit ffd84d7). Assert structural
+    # equivalence (same callback classes, same dirpath/save_last) rather
+    # than byte-equivalence on checkpoint policy fields.
+    old_cbs = old["trainer"]["callbacks"]
+    new_cbs = new["trainer"]["callbacks"]
+    assert len(old_cbs) == len(new_cbs), "callbacks length"
+    for i, (a, b) in enumerate(zip(old_cbs, new_cbs)):
+        assert a["class_path"] == b["class_path"], f"callbacks[{i}] class"
+    _assert_modelckpt_core_fields_match(old_cbs, new_cbs)
 
     old_logger = old["trainer"].get("logger", {}).get("init_args", {})
     new_logger = new["trainer"].get("logger", {}).get("init_args", {})
