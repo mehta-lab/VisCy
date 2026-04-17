@@ -182,7 +182,7 @@ class SlidingWindowDataset(Dataset):
         z = tz - t * zs
         preloaded = _preloaded if _preloaded is not None else self._preloaded
         if preloaded is not None and arr_idx >= 0:
-            data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].clone()
+            data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].to(torch.float32, copy=True)
             return data.unbind(dim=1), (img.name, t, z)
         data = img.oindex[
             slice(t, t + 1),

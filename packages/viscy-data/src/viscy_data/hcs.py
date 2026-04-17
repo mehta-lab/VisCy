@@ -198,6 +198,11 @@ class HCSDataModule(LightningDataModule):
         fingerprint = hashlib.md5(path_key.encode()).hexdigest()[:12]
         return scratch / os.getenv("SLURM_JOB_ID", "viscy_cache") / f"{self.data_path.name}_{fingerprint}"
 
+    @staticmethod
+    def _torch_dtype_from_numpy(np_dtype: np.dtype | str) -> torch.dtype:
+        """Convert a numpy dtype to its matching torch dtype."""
+        return torch.from_numpy(np.empty((), dtype=np.dtype(np_dtype))).dtype
+
     def prepare_data(self):
         """Stage FOVs to a memory-mapped tensor buffer on local scratch."""
         if not self.mmap_preload:
@@ -227,13 +232,15 @@ class HCSDataModule(LightningDataModule):
                 T = arr0.frames
                 total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
                 data_path = cache_dir / "data.mmap"
-                data_buf = MemoryMappedTensor.empty(total_shape, dtype=torch.float32, filename=data_path)
+                data_buf = MemoryMappedTensor.empty(
+                    total_shape,
+                    dtype=self._torch_dtype_from_numpy(arr0.dtype),
+                    filename=data_path,
+                )
 
                 def _write_fov(i_pos):
                     i, pos = i_pos
-                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                        pos[self.array_key].oindex[:, ch_idx, :].astype(np.float32)
-                    )
+                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(pos[self.array_key].oindex[:, ch_idx, :])
 
                 n_threads = min(len(positions), 16)
                 _logger.info(f"Mmap preload: staging {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
@@ -249,14 +256,14 @@ class HCSDataModule(LightningDataModule):
                     mask_shape = (len(positions) * T, n_target, arr0.slices, arr0.height, arr0.width)
                     mask_buf = MemoryMappedTensor.empty(
                         mask_shape,
-                        dtype=torch.float32,
+                        dtype=self._torch_dtype_from_numpy(mask_arr_0.dtype),
                         filename=cache_dir / "fg_mask.mmap",
                     )
 
                     def _write_mask(i_pos):
                         i, pos = i_pos
                         mask_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                            pos[self.fg_mask_key].oindex[:, mask_ch_idx, :].astype(np.float32)
+                            pos[self.fg_mask_key].oindex[:, mask_ch_idx, :]
                         )
 
                     with ThreadPoolExecutor(max_workers=n_threads) as pool:
@@ -275,6 +282,7 @@ class HCSDataModule(LightningDataModule):
         filename: Path,
         positions: list[Position],
         n_channels: int | None = None,
+        array_key: str | None = None,
     ) -> "MemoryMappedTensor":
         """Open an existing mmap buffer created by prepare_data().
 
@@ -287,17 +295,26 @@ class HCSDataModule(LightningDataModule):
         n_channels : int or None
             Number of channels in the buffer. Defaults to
             ``len(source_channel) + len(target_channel)``.
+        array_key : str or None
+            Array key that defines the on-disk dtype and spatial shape.
+            Defaults to ``self.array_key``.
 
         Returns
         -------
         MemoryMappedTensor
             Memory-mapped tensor of shape ``(N*T, C, Z, Y, X)``.
         """
-        arr_shape = positions[0][self.array_key].shape
+        key = array_key or self.array_key
+        arr = positions[0][key]
+        arr_shape = arr.shape
         T = arr_shape[0]
         C = n_channels or (len(self.source_channel) + len(self.target_channel))
         total_shape = (len(positions) * T, C, *arr_shape[2:])
-        return MemoryMappedTensor.from_filename(filename, dtype=torch.float32, shape=total_shape)
+        return MemoryMappedTensor.from_filename(
+            filename,
+            dtype=self._torch_dtype_from_numpy(arr.dtype),
+            shape=total_shape,
+        )
 
     @staticmethod
     def _fov_views(buffer: torch.Tensor, positions: list[Position]) -> list[torch.Tensor]:
@@ -414,6 +431,7 @@ class HCSDataModule(LightningDataModule):
                     cache_dir / "fg_mask.mmap",
                     orig_positions,
                     n_channels=n_target,
+                    array_key=self.fg_mask_key,
                 ),
                 orig_positions,
             )

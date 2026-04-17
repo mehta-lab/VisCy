@@ -639,3 +639,86 @@ def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     arr0 = positions[0]["0"]
     expected_n = len(positions) * arr0.frames
     assert value[0] == expected_n
+
+
+def test_mmap_preload_preserves_native_dtype_and_casts_on_read(tmp_path):
+    """mmap_preload stores native uint16 data and casts sampled patches to float32."""
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    dataset_path = tmp_path / "uint16_preload.zarr"
+    ch_names = ["Phase", "Fluorescence"]
+    rng = np.random.default_rng(7)
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names) as ds:
+        for fov in ("0", "1"):
+            pos = ds.create_position("A", "1", fov)
+            img = rng.integers(0, 4096, size=(1, len(ch_names), 8, 32, 32), dtype=np.uint16)
+            pos.create_image("0", img, chunks=(1, 1, 1, 32, 32))
+
+    dm = HCSDataModule(
+        data_path=dataset_path,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[32, 32],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    with open_ome_zarr(dataset_path, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        arr0 = positions[0]["0"]
+        shape = (len(positions) * arr0.frames, len(ch_names), arr0.slices, arr0.height, arr0.width)
+        preload_buf = MemoryMappedTensor.from_filename(
+            dm._mmap_cache_dir / "data.mmap",
+            dtype=torch.uint16,
+            shape=shape,
+        )
+        assert preload_buf.dtype == torch.uint16
+
+    dm.setup(stage="fit")
+    batch = next(iter(dm.train_dataloader()))
+    assert batch["source"].dtype == torch.float32
+    assert batch["target"].dtype == torch.float32
+
+
+def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path):
+    """fg_mask.mmap preserves native uint8 dtype; sampled masks cast to float32."""
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        fg_mask_key="fg_mask",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[32, 32],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    # fixture creates fg_mask as uint8; the mmap buffer must match.
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        mask_arr0 = positions[0]["fg_mask"]
+        # 1 target channel (Fluorescence), same spatial shape as data.
+        mask_shape = (len(positions) * mask_arr0.frames, 1, mask_arr0.slices, mask_arr0.height, mask_arr0.width)
+        mask_buf = MemoryMappedTensor.from_filename(
+            dm._mmap_cache_dir / "fg_mask.mmap",
+            dtype=torch.uint8,
+            shape=mask_shape,
+        )
+        assert mask_buf.dtype == torch.uint8
+
+    dm.setup(stage="fit")
+    batch = next(iter(dm.train_dataloader()))
+    assert batch["fg_mask"].dtype == torch.float32
