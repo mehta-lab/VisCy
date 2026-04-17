@@ -1,0 +1,28 @@
+# Target: nucleus (multi-marker — read from combined cell.zarr, Nuclei channel).
+benchmark:
+  target: nucleus
+  target_id: nucleus
+data:
+  init_args:
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [13, 624, 624]
+          num_samples: 2

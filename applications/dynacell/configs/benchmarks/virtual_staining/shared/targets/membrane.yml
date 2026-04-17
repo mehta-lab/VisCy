@@ -1,0 +1,28 @@
+# Target: membrane (multi-marker — read from combined cell.zarr, Membrane channel).
+benchmark:
+  target: membrane
+  target_id: membrane
+data:
+  init_args:
+    target_channel: Membrane
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Membrane]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          w_key: Membrane
+          spatial_size: [13, 624, 624]
+          num_samples: 2

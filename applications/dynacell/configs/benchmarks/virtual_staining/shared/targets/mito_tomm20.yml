@@ -1,0 +1,29 @@
+# Target: mitochondria (TOMM20 marker).
+benchmark:
+  target: mito
+  gene: TOMM20
+  target_id: mito_tomm20
+data:
+  init_args:
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [13, 624, 624]
+          num_samples: 2

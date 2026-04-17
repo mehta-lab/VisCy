@@ -1,0 +1,29 @@
+# Target: ER (SEC61B marker).
+benchmark:
+  target: er
+  gene: SEC61B
+  target_id: er_sec61b
+data:
+  init_args:
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [13, 624, 624]
+          num_samples: 2

@@ -1,0 +1,9 @@
+# Runtime profile: single-GPU execution defaults.
+launcher:
+  runtime:
+    use_srun: true
+    cleanup_tmp: true
+  env:
+    PYTHONUNBUFFERED: "1"
+    NCCL_DEBUG: INFO
+    PYTHONFAULTHANDLER: "1"

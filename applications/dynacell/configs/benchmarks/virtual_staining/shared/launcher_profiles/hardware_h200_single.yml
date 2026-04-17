@@ -1,0 +1,14 @@
+# Hardware profile: single H200 GPU. Matches Dihan's run_celldiff.slurm exactly.
+# trainer.devices is paired with launcher.sbatch.gpus; keep in sync.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 32
+    gpus: 1
+    mem: "256G"
+    constraint: "h200"
+    time: "4-00:00:00"
+trainer:
+  devices: 1
