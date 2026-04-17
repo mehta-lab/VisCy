@@ -1,5 +1,4 @@
 # CellDiff fit on mitochondria (TOMM20 marker) — AICS iPSC confocal.
-# Equivalent to applications/dynacell/examples/configs/tomm20/fit_celldiff.yml.
 base:
   - ../../../shared/train_sets/ipsc_confocal.yml
   - ../../../shared/targets/mito_tomm20.yml

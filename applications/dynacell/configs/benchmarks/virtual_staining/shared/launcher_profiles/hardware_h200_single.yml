@@ -1,5 +1,5 @@
-# Hardware profile: single H200 GPU. Matches Dihan's run_celldiff.slurm exactly.
-# trainer.devices is paired with launcher.sbatch.gpus; keep in sync.
+# Hardware profile: single H200 GPU. trainer.devices pairs with
+# launcher.sbatch.gpus — the submit tool enforces they match.
 launcher:
   sbatch:
     partition: gpu

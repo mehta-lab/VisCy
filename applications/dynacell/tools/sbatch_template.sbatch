@@ -17,4 +17,4 @@ ml uv
 
 scontrol show job $SLURM_JOB_ID
 nvidia-smi
-srun uv run python -m dynacell @@mode --config @@resolved_config@@overrides
+srun uv run python -m dynacell @@mode --config @@resolved_config

@@ -1,5 +1,4 @@
 # CellDiff predict: membrane against ipsc_confocal test_cropped.
-# Equivalent to applications/dynacell/examples/configs/memb/predict_celldiff.yml.
 base:
   - ../../../../shared/predict_sets/ipsc_confocal.yml
   - ../../../../shared/targets/membrane.yml

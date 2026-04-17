@@ -1,5 +1,4 @@
 # CellDiff predict: ER (SEC61B) against ipsc_confocal test_cropped.
-# Equivalent to applications/dynacell/examples/configs/sec61b/predict_celldiff.yml.
 base:
   - ../../../../shared/predict_sets/ipsc_confocal.yml
   - ../../../../shared/targets/er_sec61b.yml

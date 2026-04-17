@@ -1,5 +1,4 @@
 # CellDiff predict: mito (TOMM20) against ipsc_confocal test_cropped.
-# Equivalent to applications/dynacell/examples/configs/tomm20/predict_celldiff.yml.
 base:
   - ../../../../shared/predict_sets/ipsc_confocal.yml
   - ../../../../shared/targets/mito_tomm20.yml

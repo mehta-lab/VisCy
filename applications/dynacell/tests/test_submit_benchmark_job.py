@@ -36,8 +36,8 @@ def test_parse_override_missing_equals():
 
 def test_apply_override_deep_merges():
     composed = {"trainer": {"max_epochs": 20, "precision": "bf16"}}
-    sbj._apply_override(composed, ["trainer", "max_epochs"], 50)
-    assert composed == {"trainer": {"max_epochs": 50, "precision": "bf16"}}
+    result = sbj._apply_override(composed, ["trainer", "max_epochs"], 50)
+    assert result == {"trainer": {"max_epochs": 50, "precision": "bf16"}}
 
 
 def test_render_sbatch_directives_matches_dihan_order():

@@ -26,25 +26,8 @@ from typing import Any
 
 import yaml
 
-from viscy_utils.compose import load_composed_config
+from viscy_utils.compose import deep_merge, load_composed_config
 
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge *override* into *base* with dict-deep, list-replace semantics.
-
-    Mirrors viscy_utils.compose._deep_merge so we don't import a private helper
-    across package boundaries.
-    """
-    result = dict(base)
-    for k, v in override.items():
-        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
-        else:
-            result[k] = v
-    return result
-
-
-# SBATCH directive order — matches Dihan's run_celldiff.slurm byte-for-byte.
 _SBATCH_DIRECTIVE_ORDER = (
     ("job_name", "--job-name"),
     ("time", "--time"),
@@ -55,7 +38,6 @@ _SBATCH_DIRECTIVE_ORDER = (
     ("gpus", "--gpus"),
     ("mem", "--mem"),
     ("constraint", "--constraint"),
-    # output and error are derived from run_root below.
 )
 
 
@@ -81,18 +63,16 @@ def _parse_override(token: str) -> tuple[list[str], Any]:
     return key.split("."), parsed
 
 
-def _apply_override(composed: dict, path: list[str], value: Any) -> None:
-    """Deep-merge a single dotlist override into *composed*."""
+def _apply_override(composed: dict, path: list[str], value: Any) -> dict:
+    """Deep-merge a single dotlist override and return the new config."""
     nested: Any = value
     for seg in reversed(path):
         nested = {seg: nested}
-    merged = _deep_merge(composed, nested)
-    composed.clear()
-    composed.update(merged)
+    return deep_merge(composed, nested)
 
 
 def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str:
-    """Render ordered ``#SBATCH`` lines matching Dihan's exact layout."""
+    """Render ordered ``#SBATCH`` lines. Order is pinned; output/error appended last."""
     values = dict(sbatch)
     values.setdefault("job_name", job_name)
     lines = []
@@ -140,7 +120,7 @@ def submit(argv: list[str] | None = None) -> int:
     composed = load_composed_config(args.leaf)
     for token in args.override:
         path, value = _parse_override(token)
-        _apply_override(composed, path, value)
+        composed = _apply_override(composed, path, value)
 
     if "launcher" not in composed:
         raise SystemExit("leaf is missing required 'launcher:' block")
@@ -177,15 +157,16 @@ def submit(argv: list[str] | None = None) -> int:
     sbatch_path = slurm_dir / f"{timestamp}_{job_name}.sbatch"
 
     template_text = (Path(__file__).parent / "sbatch_template.sbatch").read_text()
-    override_suffix = "".join(f" --override {t}" for t in args.override)
     rendered = SbatchTemplate(template_text).substitute(
         sbatch_directives=_render_sbatch_directives(job_name, str(run_root), sbatch),
         run_root=str(run_root),
         env_block=_render_env_block(env),
         mode=mode,
         resolved_config=str(resolved_path),
-        overrides=override_suffix,
     )
+
+    # --print-* and --dry-run all imply "do not submit"; only bare invocation submits.
+    skip_submit = args.dry_run or args.print_script or args.print_resolved_config
 
     if args.print_resolved_config:
         sys.stdout.write(yaml.safe_dump(composed, default_flow_style=False))
@@ -194,7 +175,7 @@ def submit(argv: list[str] | None = None) -> int:
     if args.dry_run and not (args.print_script or args.print_resolved_config):
         sys.stdout.write(rendered)
 
-    if not args.dry_run:
+    if not skip_submit:
         resolved_dir.mkdir(parents=True, exist_ok=True)
         slurm_dir.mkdir(parents=True, exist_ok=True)
         resolved_path.write_text(yaml.safe_dump(composed, default_flow_style=False))

@@ -1,5 +1,4 @@
 # CellDiff fit on membrane (Membrane channel of cell.zarr) — AICS iPSC confocal.
-# Equivalent to applications/dynacell/examples/configs/memb/fit_celldiff.yml.
 base:
   - ../../../shared/train_sets/ipsc_confocal.yml
   - ../../../shared/targets/membrane.yml

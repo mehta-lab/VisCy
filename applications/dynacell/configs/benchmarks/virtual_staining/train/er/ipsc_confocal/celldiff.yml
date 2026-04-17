@@ -1,5 +1,4 @@
 # CellDiff fit on ER (SEC61B marker) — AICS iPSC confocal.
-# Equivalent to applications/dynacell/examples/configs/sec61b/fit_celldiff.yml.
 base:
   - ../../../shared/train_sets/ipsc_confocal.yml
   - ../../../shared/targets/er_sec61b.yml
