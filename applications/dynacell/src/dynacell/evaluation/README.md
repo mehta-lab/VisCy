@@ -105,6 +105,11 @@ Set `io.gt_cache_dir` to write and read back GT-side artifacts so subsequent eva
 
 Cache identity is the tuple `(cache_schema_version, gt_path, gt_channel_name, cell_segmentation_path)`. A mismatch raises `StaleCacheError` — no silent mis-serving when you change GT channel, swap segmentations, or bump the computation-logic version.
 
+The DynaCLR checkpoint hash (`ckpt_sha256_12`) is memoized to a
+`<ckpt>.sha256` sidecar next to the checkpoint and reused across eval
+runs as long as the sidecar's mtime is ≥ the checkpoint's. Touch or
+replace the checkpoint and the hash recomputes automatically.
+
 ### Priming the cache
 
 ```bash
