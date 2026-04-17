@@ -25,8 +25,9 @@ trainer:
         logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
+        monitor: loss/validate
         every_n_epochs: 1
-        save_top_k: -1
+        save_top_k: 4
         save_last: true
         dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/unetvit3d/checkpoints
 
