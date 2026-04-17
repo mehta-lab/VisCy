@@ -333,7 +333,7 @@ data:
     data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
     source_channel: Phase3D
     split_ratio: 0.8
-    preload: true
+    mmap_preload: true
     scratch_dir: /dev/shm
     persistent_workers: true
 ```

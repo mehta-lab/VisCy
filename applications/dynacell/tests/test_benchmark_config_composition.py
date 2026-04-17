@@ -45,7 +45,7 @@ TRAIN_DATA_INIT_KEYS = (
     "batch_size",
     "num_workers",
     "yx_patch_size",
-    "preload",
+    "mmap_preload",
     "scratch_dir",
     "persistent_workers",
     "normalizations",

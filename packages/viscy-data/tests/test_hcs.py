@@ -517,8 +517,8 @@ def test_sliding_window_preloaded_returns_copy(hcs_with_fg_mask):
     assert torch.equal(sample2["source"], original_source)
 
 
-def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
-    """prepare_data() + setup() + dataloader roundtrip with preload=True."""
+def test_mmap_preload_roundtrip(hcs_with_fg_mask, tmp_path):
+    """prepare_data() + setup() + dataloader roundtrip with mmap_preload=True."""
     importorskip("tensordict")
     z_window_size = 4
     yx_patch_size = [32, 32]
@@ -531,7 +531,7 @@ def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
         num_workers=0,
         yx_patch_size=yx_patch_size,
         split_ratio=0.5,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
     dm.prepare_data()
@@ -544,8 +544,8 @@ def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
     assert (dm._mmap_cache_dir / ".done").exists()
 
 
-def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
-    """prepare_data() is idempotent: skips preload if .done marker exists."""
+def test_mmap_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
+    """prepare_data() is idempotent: skips mmap preload if .done marker exists."""
     importorskip("tensordict")
     dm = HCSDataModule(
         data_path=hcs_with_fg_mask,
@@ -554,7 +554,7 @@ def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
     dm.prepare_data()
@@ -565,7 +565,7 @@ def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
     assert mmap_file.stat().st_mtime == mtime_after_first
 
 
-def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
+def test_mmap_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
     """prepare_data() cleans up and rebuilds if a previous run was killed mid-write."""
     importorskip("tensordict")
     dm = HCSDataModule(
@@ -575,10 +575,10 @@ def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
-    # Simulate a killed preload: create the cache dir with a partial .mmap but no .done
+    # Simulate a killed mmap preload: create the cache dir with a partial .mmap but no .done
     cache_dir = dm._mmap_cache_dir
     cache_dir.mkdir(parents=True, exist_ok=True)
     (cache_dir / "data.mmap").write_bytes(b"partial garbage")
@@ -593,7 +593,7 @@ def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
         break
 
 
-def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
+def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
     import multiprocessing
 
@@ -607,7 +607,7 @@ def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
     dm.prepare_data()

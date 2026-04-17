@@ -64,9 +64,12 @@ class HCSDataModule(LightningDataModule):
     augmentations : list of MapTransform or None, optional
         MONAI dictionary transforms applied to the training set,
         defaults to None (no augmentation).
-    preload : bool, optional
-        Whether to preload all FOVs to memory-mapped tensors on local
-        scratch before training. Eliminates zarr I/O during training.
+    mmap_preload : bool, optional
+        If ``True``, stage the entire dataset to a
+        :class:`~tensordict.MemoryMappedTensor` buffer under ``scratch_dir``
+        during ``prepare_data()`` and serve training samples via mmap
+        views. Eliminates zarr reads during the training loop. Point
+        ``scratch_dir`` at tmpfs (e.g. ``/dev/shm``) for RAM-backed I/O.
         Requires ``viscy-data[mmap]`` (tensordict). Default False.
     scratch_dir : Path or None, optional
         Directory for mmap cache files. Defaults to ``/tmp``.
@@ -114,7 +117,7 @@ class HCSDataModule(LightningDataModule):
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
-        preload: bool = False,
+        mmap_preload: bool = False,
         scratch_dir: Path | None = None,
         ground_truth_masks: Path | None = None,
         persistent_workers=False,
@@ -142,7 +145,7 @@ class HCSDataModule(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.normalizations = normalizations or []
         self.augmentations = augmentations or []
-        self.preload = preload
+        self.mmap_preload = mmap_preload
         self.scratch_dir = Path(scratch_dir) if scratch_dir is not None else None
         self.ground_truth_masks = ground_truth_masks
         self.prepare_data_per_node = True
@@ -196,21 +199,23 @@ class HCSDataModule(LightningDataModule):
         return scratch / os.getenv("SLURM_JOB_ID", "viscy_cache") / f"{self.data_path.name}_{fingerprint}"
 
     def prepare_data(self):
-        """Preload FOVs to memory-mapped tensors on local scratch."""
-        if not self.preload:
+        """Stage FOVs to a memory-mapped tensor buffer on local scratch."""
+        if not self.mmap_preload:
             return
         if MemoryMappedTensor is None:
-            raise ImportError("tensordict is required for preload=True. Install with: pip install 'viscy-data[mmap]'")
+            raise ImportError(
+                "tensordict is required for mmap_preload=True. Install with: pip install 'viscy-data[mmap]'"
+            )
         cache_dir = self._mmap_cache_dir
         done_marker = cache_dir / ".done"
         if done_marker.exists():
-            _logger.info(f"Preload cache found at {cache_dir}, skipping.")
+            _logger.info(f"Mmap preload cache found at {cache_dir}, skipping.")
             return
         # Clean up partial files from a previously killed preload.
         # MemoryMappedTensor.empty() raises RuntimeError if the file exists,
         # so stale .mmap files must be removed before we can recreate them.
         if cache_dir.exists():
-            _logger.warning(f"Partial preload cache at {cache_dir} (no .done marker), rebuilding.")
+            _logger.warning(f"Partial mmap preload cache at {cache_dir} (no .done marker), rebuilding.")
             shutil.rmtree(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -231,7 +236,7 @@ class HCSDataModule(LightningDataModule):
                     )
 
                 n_threads = min(len(positions), 16)
-                _logger.info(f"Preloading {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
+                _logger.info(f"Mmap preload: staging {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
                 with ThreadPoolExecutor(max_workers=n_threads) as pool:
                     list(pool.map(_write_fov, enumerate(positions)))
                 if self.fg_mask_key:
@@ -257,7 +262,7 @@ class HCSDataModule(LightningDataModule):
                     with ThreadPoolExecutor(max_workers=n_threads) as pool:
                         list(pool.map(_write_mask, enumerate(positions)))
             done_marker.touch()
-            _logger.info("Preload complete.")
+            _logger.info("Mmap preload complete.")
         except BaseException:
             # Clean up so the next attempt starts fresh instead of hitting
             # RuntimeError from MemoryMappedTensor.empty() on existing files.
@@ -376,11 +381,11 @@ class HCSDataModule(LightningDataModule):
             expanded_z -= expanded_z % 2
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
-        # Preload mmap views — buffer stores FOVs in original plate order, so
-        # we create views from orig_positions, then reindex by shuffled_indices.
+        # Mmap views — buffer stores FOVs in original plate order, so we
+        # create views from orig_positions, then reindex by shuffled_indices.
         train_preloaded = None
         val_preloaded = None
-        if self.preload:
+        if self.mmap_preload:
             cache_dir = self._mmap_cache_dir
             all_views = self._fov_views(
                 self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions),
@@ -402,7 +407,7 @@ class HCSDataModule(LightningDataModule):
             preloaded_fovs=val_preloaded,
             **dataset_settings,
         )
-        if self.preload and self.fg_mask_key:
+        if self.mmap_preload and self.fg_mask_key:
             n_target = len(self.target_channel)
             all_mask_views = self._fov_views(
                 self._open_mmap_buffer(

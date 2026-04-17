@@ -3,8 +3,10 @@
 **Reference-only.** `base:` paths were patched post-move from
 `../../../configs/recipes/...` to `../../../../configs/recipes/...` so the
 equivalence test in `tests/test_benchmark_config_composition.py` can still
-compose them. The patched files are not intended to be launched directly —
-use the migrated leaves under `configs/benchmarks/virtual_staining/` via
+compose them, and the `preload:` kwarg was later renamed in place to
+`mmap_preload:` when `HCSDataModule` dropped the ambiguous name. The
+patched files are not intended to be launched directly — use the migrated
+leaves under `configs/benchmarks/virtual_staining/` via
 `submit_benchmark_job.py`.
 
 ## Migration map
