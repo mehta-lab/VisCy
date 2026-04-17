@@ -67,9 +67,34 @@ base:
 
 ## Running
 
+Direct LightningCLI (no sbatch):
+
 - `uv run dynacell fit -c configs/benchmarks/virtual_staining/train/<org>/<train_set>/<model>.yml`
 - `uv run dynacell predict -c configs/benchmarks/virtual_staining/predict/<org>/<train_set>/<model>/<predict_set>.yml`
-- `uv run python applications/dynacell/tools/submit_benchmark_job.py <leaf.yml>` — submits via sbatch.
+
+Via sbatch with `submit_benchmark_job.py`:
+
+```bash
+LEAF=configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
+
+# Pure preview (no disk writes, safe on any run_root):
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-script
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-resolved-config
+
+# Stage artifacts to launcher.run_root but skip submission (requires write perms):
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --dry-run
+
+# Submit:
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF
+
+# Dotlist overrides deep-merge after compose (repeatable; ${...} interpolation is rejected):
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF \
+    --override trainer.max_epochs=50 --override data.init_args.batch_size=2
+```
+
+`--dry-run` combined with `--print-*` drops the disk writes (preview
+wins). `trainer.devices` and `launcher.sbatch.gpus` must match or
+submission fails fast.
 
 ## Source channel contract
 

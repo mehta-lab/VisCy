@@ -53,25 +53,44 @@ uv run dynacell fit -c celldiff/fit.yml --data.init_args.data_path=/path/to/data
 ### Benchmark submit
 
 ```bash
+LEAF=applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
+
 # Preview the rendered sbatch to stdout — safe on any leaf, no disk writes:
-uv run python applications/dynacell/tools/submit_benchmark_job.py \
-    applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml \
-    --print-script
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-script
+
+# Preview the resolved LightningCLI config (launcher+benchmark stripped):
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-resolved-config
 
 # Stage artifacts to launcher.run_root without submitting (requires write perms):
-uv run python applications/dynacell/tools/submit_benchmark_job.py \
-    applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml \
-    --dry-run
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --dry-run
 
 # Submit:
-uv run python applications/dynacell/tools/submit_benchmark_job.py \
-    applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF
+
+# Dotlist overrides deep-merge after compose (repeatable, no ${...} interpolation):
+uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF \
+    --override trainer.max_epochs=50 \
+    --override data.init_args.batch_size=2
 ```
+
+Flag semantics:
+
+- `--print-script` / `--print-resolved-config` — pure preview: stdout
+  only, no disk writes, no submission. Safe against run_roots the caller
+  can't write to.
+- `--dry-run` alone — write resolved YAML + rendered sbatch under
+  `launcher.run_root`, but skip `sbatch`. Requires write permission on
+  that path.
+- `--dry-run` combined with any `--print-*` — preview wins (no writes).
+- Bare invocation — write artifacts **and** submit.
 
 Benchmark leaves carry two reserved top-level YAML keys (`launcher:` and
 `benchmark:`) that are stripped automatically before the config reaches
 LightningCLI, so `uv run dynacell fit -c <benchmark-leaf.yml>` also works
 without the submit tool.
+
+See `configs/benchmarks/virtual_staining/README.md` for the shared-axis
+layout, composition order, and reserved-key contract.
 
 ## Supported subcommands
 
