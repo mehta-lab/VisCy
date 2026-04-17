@@ -142,31 +142,44 @@ def _setup_environment() -> None:
     torch.set_float32_matmul_precision("high")
 
 
-def _maybe_compose_config() -> None:
-    """Compose config from ``base:`` references if present.
+_RESERVED_TOP_LEVEL_KEYS = ("launcher", "benchmark")
 
-    Scans ``sys.argv`` for ``--config`` or ``-c``, loads the YAML file,
-    and if it contains a ``base:`` key, recursively merges the referenced
-    recipe fragments via :func:`viscy_utils.compose.load_composed_config`.
-    The composed config is written to a temp file and ``sys.argv`` is
-    updated in place.  Configs without ``base:`` pass through unchanged.
-    """
-    # Match "--config path", "-c path", "--config=path", or "-c=path".
-    config_idx: int | None = None
-    config_path_str: str | None = None
+
+def _find_config_arg() -> tuple[int | None, str | None]:
+    """Scan sys.argv for --config/-c and return (index, path)."""
     for i, a in enumerate(sys.argv):
         if a in ("--config", "-c"):
             if i + 1 < len(sys.argv):
-                config_idx = i
-                config_path_str = sys.argv[i + 1]
-            break
+                return i, sys.argv[i + 1]
+            return None, None
         for prefix in ("--config=", "-c="):
             if a.startswith(prefix):
-                config_idx = i
-                config_path_str = a[len(prefix) :]
-                break
-        if config_idx is not None:
-            break
+                return i, a[len(prefix) :]
+    return None, None
+
+
+def _replace_config_path_in_argv(config_idx: int, new_path: str) -> None:
+    """Rewrite sys.argv so --config/-c points at *new_path*."""
+    if "=" in sys.argv[config_idx]:
+        prefix = sys.argv[config_idx].split("=", 1)[0]
+        sys.argv[config_idx] = f"{prefix}={new_path}"
+    else:
+        sys.argv[config_idx + 1] = new_path
+
+
+def _maybe_compose_config() -> None:
+    """Compose config from ``base:`` references and strip reserved keys.
+
+    Scans ``sys.argv`` for ``--config`` or ``-c`` and loads the YAML.
+    If the file has a ``base:`` key, the referenced recipe fragments are
+    merged via :func:`viscy_utils.compose.load_composed_config`. In all
+    cases, top-level ``launcher:`` and ``benchmark:`` keys (dynacell's
+    reserved benchmark metadata) are dropped before the composed YAML is
+    written to a temp file, since LightningCLI rejects unknown top-level
+    keys. Configs without either ``base:`` or reserved keys pass through
+    unchanged.
+    """
+    config_idx, config_path_str = _find_config_arg()
     if config_idx is None or config_path_str is None:
         return
     config_path = Path(config_path_str)
@@ -175,18 +188,19 @@ def _maybe_compose_config() -> None:
             raw = yaml.safe_load(f)
     except (OSError, yaml.YAMLError):
         return  # let LightningCLI give its own diagnostic
-    if not isinstance(raw, dict) or "base" not in raw:
+    if not isinstance(raw, dict):
         return
-    composed = load_composed_config(config_path)
+    has_base = "base" in raw
+    has_reserved = any(k in raw for k in _RESERVED_TOP_LEVEL_KEYS)
+    if not (has_base or has_reserved):
+        return
+    composed = load_composed_config(config_path) if has_base else dict(raw)
+    for k in _RESERVED_TOP_LEVEL_KEYS:
+        composed.pop(k, None)
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False, mode="w") as tmp:
         yaml.dump(composed, tmp, default_flow_style=False)
     atexit.register(lambda p=tmp.name: Path(p).unlink(missing_ok=True))
-    # Replace the path in argv, handling both "--config path" and "--config=path".
-    if "=" in sys.argv[config_idx]:
-        prefix = sys.argv[config_idx].split("=", 1)[0]
-        sys.argv[config_idx] = f"{prefix}={tmp.name}"
-    else:
-        sys.argv[config_idx + 1] = tmp.name
+    _replace_config_path_in_argv(config_idx, tmp.name)
 
 
 def main() -> None:
