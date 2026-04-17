@@ -4,8 +4,8 @@
 # read=[13, 624, 624], input=[8, 512, 512], Linear transport, velocity prediction.
 # Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/sec61b/fit_celldiff.yml
 base:
-  - ../../../configs/recipes/trainer/fit_1gpu.yml
-  - ../../../configs/recipes/models/celldiff_fm.yml
+  - ../../../../configs/recipes/trainer/fit_1gpu.yml
+  - ../../../../configs/recipes/models/celldiff_fm.yml
 
 model:
   init_args:

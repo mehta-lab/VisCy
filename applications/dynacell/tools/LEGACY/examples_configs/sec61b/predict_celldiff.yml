@@ -1,14 +1,14 @@
 # CellDiff flow-matching: predict from checkpoint.
-# Usage: cd applications/dynacell/examples/configs && uv run dynacell predict -c nucl/predict_celldiff.yml
+# Usage: cd applications/dynacell/examples/configs && uv run dynacell predict -c sec61b/predict_celldiff.yml
 base:
-  - ../../../configs/recipes/trainer/predict_gpu.yml
-  - ../../../configs/recipes/models/celldiff_fm.yml
+  - ../../../../configs/recipes/trainer/predict_gpu.yml
+  - ../../../../configs/recipes/models/celldiff_fm.yml
 
 trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/prediction/nucl_celldiff.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/prediction/sec61b_celldiff.zarr
 
 model:
   init_args:
@@ -17,14 +17,14 @@ model:
     num_generate_steps: 100
     predict_method: iterative
     predict_overlap: [4, 256, 256]
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/celldiff/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/celldiff/checkpoints/last.ckpt
 
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
     source_channel: Phase3D
-    target_channel: Nuclei
+    target_channel: Structure
     z_window_size: 40
     batch_size: 1
     yx_patch_size: [512, 512]

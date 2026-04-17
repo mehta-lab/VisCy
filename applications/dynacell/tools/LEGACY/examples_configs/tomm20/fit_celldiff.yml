@@ -1,11 +1,11 @@
-# CellDiff flow-matching on AICS iPSC MEMB (cell membrane).
-# Data pipeline aligned with VSCyto3D MEMB config (same dataset, same
+# CellDiff flow-matching on AICS iPSC TOMM20 (mitochondria).
+# Data pipeline aligned with VSCyto3D TOMM20 config (same dataset, same
 # augmentation strategy). Architecture: CELLDiffNet with ViT bottleneck,
 # read=[13, 624, 624], input=[8, 512, 512], Linear transport, velocity prediction.
-# Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/memb/fit_celldiff.yml
+# Usage: uv run python -m dynacell fit --config applications/dynacell/examples/configs/tomm20/fit_celldiff.yml
 base:
-  - ../../../configs/recipes/trainer/fit_1gpu.yml
-  - ../../../configs/recipes/models/celldiff_fm.yml
+  - ../../../../configs/recipes/trainer/fit_1gpu.yml
+  - ../../../../configs/recipes/models/celldiff_fm.yml
 
 model:
   init_args:
@@ -21,8 +21,8 @@ trainer:
   max_epochs: 20
   logger:
     init_args:
-      name: CELLDiff_iPSC_MEMB
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/celldiff
+      name: CELLDiff_iPSC_TOMM20
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -32,14 +32,14 @@ trainer:
         every_n_epochs: 1
         save_top_k: -1
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/celldiff/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff/checkpoints
 
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20.zarr
     source_channel: Phase3D
-    target_channel: Membrane
+    target_channel: Structure
     split_ratio: 0.8
     z_window_size: 13
     batch_size: 4
@@ -57,7 +57,7 @@ data:
           divisor: std
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
-          keys: [Membrane]
+          keys: [Structure]
           level: fov_statistics
           subtrahend: median
           divisor: iqr
@@ -68,8 +68,8 @@ data:
       # 624 = smallest FOV dimension, maximizes context for augmentation.
       - class_path: viscy_transforms.RandWeightedCropd
         init_args:
-          keys: [Phase3D, Membrane]
-          w_key: Membrane
+          keys: [Phase3D, Structure]
+          w_key: Structure
           spatial_size: [13, 624, 624]
           num_samples: 2
     gpu_augmentations:

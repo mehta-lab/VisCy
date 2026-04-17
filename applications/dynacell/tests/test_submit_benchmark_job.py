@@ -11,7 +11,7 @@ yaml = pytest.importorskip("yaml")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLS_DIR = REPO_ROOT / "applications" / "dynacell" / "tools"
-EXAMPLES = REPO_ROOT / "applications" / "dynacell" / "examples" / "configs"
+EXAMPLES = REPO_ROOT / "applications" / "dynacell" / "tools" / "LEGACY" / "examples_configs"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
 
 sys.path.insert(0, str(TOOLS_DIR))

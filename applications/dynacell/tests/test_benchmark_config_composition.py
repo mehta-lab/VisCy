@@ -19,7 +19,7 @@ from viscy_utils.compose import load_composed_config  # noqa: E402
 
 # Repository root (four parents up: tests/ → dynacell/ → applications/ → VisCy/).
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EXAMPLES = REPO_ROOT / "applications" / "dynacell" / "examples" / "configs"
+EXAMPLES = REPO_ROOT / "applications" / "dynacell" / "tools" / "LEGACY" / "examples_configs"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
 
 # organelle slug in the new schema → legacy dir under examples/configs/
