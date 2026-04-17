@@ -3,8 +3,12 @@
 # Matches the FNet3D paper-baseline run's actual slurm directives:
 # the paper runs were submitted without --constraint (they landed on
 # RTX A6000s) and with a 20-day wall-time budget so the job wouldn't
-# timeout across multi-day training. 32 CPUs and 256G mem are the same
-# as hardware_h200_single; only constraint and time differ.
+# timeout across multi-day training.
+#
+# mem bumped to 512G after the nucleus paper-baseline leaf OOM-killed at
+# MaxVMSize=264G under a 256G cap. The dataloader mmap_preload stages
+# cell.zarr to /dev/shm (tmpfs = RAM-backed), so the preload buffer is
+# counted against host memory alongside the training process.
 #
 # Use this profile for models that don't need H200-class memory and
 # benefit from scheduling flexibility.
@@ -15,7 +19,7 @@ launcher:
     ntasks: 1
     cpus_per_task: 32
     gpus: 1
-    mem: "256G"
+    mem: "512G"
     constraint: null
     time: "20-00:00:00"
 trainer:
