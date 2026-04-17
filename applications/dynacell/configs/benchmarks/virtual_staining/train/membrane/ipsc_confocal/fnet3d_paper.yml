@@ -1,0 +1,67 @@
+# FNet3D paper-baseline fit on membrane (Membrane channel of cell.zarr) — AICS iPSC confocal.
+# The overlay's norm/aug/val_aug are keyed on Structure (the SEC61B/TOMM20 target
+# channel). Membrane target_channel is Membrane, so we list-replace those three
+# lists here to re-key them.
+base:
+  - ../../../shared/train_sets/ipsc_confocal.yml
+  - ../../../shared/targets/membrane.yml
+  - ../../../shared/model_overlays/fnet3d_paper_fit.yml
+  - ../../../shared/launcher_profiles/mode_fit.yml
+  - ../../../shared/launcher_profiles/hardware_h200_single.yml
+  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  train_set: ipsc_confocal
+  model_name: fnet3d_paper
+  experiment_id: membrane__ipsc_confocal__fnet3d_paper
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Membrane]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          w_key: Membrane
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_iPSC_MEMB_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaper_MEMB
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper

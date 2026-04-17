@@ -1,0 +1,37 @@
+# FNet3D paper-baseline fit on mitochondria (TOMM20 marker) — AICS iPSC confocal.
+# target_channel=Structure, so the overlay's default norms/augs apply unchanged.
+base:
+  - ../../../shared/train_sets/ipsc_confocal.yml
+  - ../../../shared/targets/mito_tomm20.yml
+  - ../../../shared/model_overlays/fnet3d_paper_fit.yml
+  - ../../../shared/launcher_profiles/mode_fit.yml
+  - ../../../shared/launcher_profiles/hardware_h200_single.yml
+  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: ipsc_confocal
+  model_name: fnet3d_paper
+  experiment_id: mito__ipsc_confocal__fnet3d_paper
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_iPSC_TOMM20_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaper_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fnet3d_paper
