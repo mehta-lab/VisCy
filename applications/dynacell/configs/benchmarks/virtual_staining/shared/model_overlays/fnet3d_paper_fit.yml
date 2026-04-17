@@ -20,7 +20,7 @@ model:
     schedule: Constant
 trainer:
   precision: 32-true
-  max_steps: 50000
+  max_steps: 200000
 data:
   init_args:
     z_window_size: 32

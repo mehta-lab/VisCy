@@ -1,0 +1,22 @@
+# Hardware profile: 1 GPU, any model (no constraint), long wall-time.
+#
+# Matches the FNet3D paper-baseline run's actual slurm directives:
+# the paper runs were submitted without --constraint (they landed on
+# RTX A6000s) and with a 20-day wall-time budget so the job wouldn't
+# timeout across multi-day training. 32 CPUs and 256G mem are the same
+# as hardware_h200_single; only constraint and time differ.
+#
+# Use this profile for models that don't need H200-class memory and
+# benefit from scheduling flexibility.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 32
+    gpus: 1
+    mem: "256G"
+    constraint: null
+    time: "20-00:00:00"
+trainer:
+  devices: 1

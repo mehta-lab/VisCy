@@ -194,8 +194,10 @@ def test_fnet3d_paper_leaf_matches_ran_config() -> None:
     # trainer protocol (excluding max_steps: new=50000 original launch, ran=200000 continuation bump)
     for k in ("precision", "devices", "strategy", "num_nodes", "log_every_n_steps", "inference_mode"):
         assert new["trainer"][k] == ran["trainer"][k], f"trainer.{k}"
-    assert new["trainer"]["max_steps"] == 50000
-    assert ran["trainer"]["max_steps"] == 200000
+    # New leaf matches the ran value (200000) — what the paper training actually
+    # converged to, accounting for CLI --trainer.max_steps bumps across
+    # continuation restarts from the initial 50000 launch.
+    assert new["trainer"]["max_steps"] == ran["trainer"]["max_steps"] == 200000
 
     # callbacks — LR monitor + ModelCheckpoint
     nc_mc = new["trainer"]["callbacks"][1]["init_args"]
