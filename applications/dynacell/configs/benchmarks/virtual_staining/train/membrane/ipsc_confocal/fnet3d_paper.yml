@@ -65,3 +65,7 @@ trainer:
 launcher:
   job_name: FNet3DPaper_MEMB
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper
+  # cell.zarr-backed preload (same plate as nucleus) puts MaxVMSize over
+  # the shared 256G cap; bump to match nucleus.
+  sbatch:
+    mem: "512G"
