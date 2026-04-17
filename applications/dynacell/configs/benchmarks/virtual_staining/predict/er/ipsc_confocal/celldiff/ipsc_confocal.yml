@@ -1,0 +1,45 @@
+# CellDiff predict: ER (SEC61B) against ipsc_confocal test_cropped.
+# Equivalent to applications/dynacell/examples/configs/sec61b/predict_celldiff.yml.
+base:
+  - ../../../../shared/predict_sets/ipsc_confocal.yml
+  - ../../../../shared/targets/er_sec61b.yml
+  - ../../../../shared/model_overlays/celldiff_predict.yml
+  - ../../../../shared/launcher_profiles/mode_predict.yml
+  - ../../../../shared/launcher_profiles/hardware_h200_single.yml
+  - ../../../../shared/launcher_profiles/runtime_single_gpu.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: celldiff
+  experiment_id: er__ipsc_confocal__celldiff__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/celldiff/checkpoints/last.ckpt
+
+data:
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/prediction/sec61b_celldiff.zarr
+
+launcher:
+  job_name: CELLDiff_PRED_SEC61B
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/prediction

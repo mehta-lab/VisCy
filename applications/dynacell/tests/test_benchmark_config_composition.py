@@ -96,3 +96,53 @@ def test_train_leaf_matches_legacy(organelle: str, legacy: str) -> None:
     new_logger = new["trainer"].get("logger", {}).get("init_args", {})
     for k in ("name", "save_dir"):
         assert old_logger.get(k) == new_logger.get(k), f"{organelle}: logger.{k}"
+
+
+# Predict-specific data.init_args keys.
+PREDICT_DATA_INIT_KEYS = (
+    "source_channel",
+    "target_channel",
+    "data_path",
+    "z_window_size",
+    "batch_size",
+    "num_workers",
+    "yx_patch_size",
+    "normalizations",
+)
+
+
+@pytest.mark.parametrize("organelle,legacy", sorted(ORGANELLE_TO_LEGACY.items()))
+def test_predict_leaf_matches_legacy(organelle: str, legacy: str) -> None:
+    """Composed predict leaf matches pre-schema predict_celldiff.yml on every shared key."""
+    legacy_path = EXAMPLES / legacy / "predict_celldiff.yml"
+    new_path = BENCHMARKS / "predict" / organelle / "ipsc_confocal" / "celldiff" / "ipsc_confocal.yml"
+
+    old = _strip_reserved(load_composed_config(legacy_path))
+    new = _strip_reserved(load_composed_config(new_path))
+
+    # model.init_args: num_generate_steps, predict_method, predict_overlap,
+    # ckpt_path, net_config.
+    old_mi = old["model"]["init_args"]
+    new_mi = new["model"]["init_args"]
+    for k in ("num_generate_steps", "predict_method", "predict_overlap", "ckpt_path"):
+        assert old_mi[k] == new_mi[k], f"{organelle}: model.init_args.{k}"
+    assert old_mi["net_config"] == new_mi["net_config"], organelle
+
+    # data.init_args — intersection.
+    old_di = old["data"]["init_args"]
+    new_di = new["data"]["init_args"]
+    for k in PREDICT_DATA_INIT_KEYS:
+        assert old_di[k] == new_di[k], f"{organelle}: data.init_args.{k}"
+
+    # Guard against forgetting the predict-side data_path override.
+    assert "test_cropped" in new_di["data_path"], f"{organelle}: new data_path missing test_cropped/"
+
+    # trainer.callbacks[0] = HCSPredictionWriter with matching output_store.
+    new_cbs = new["trainer"]["callbacks"]
+    writers = [cb for cb in new_cbs if "HCSPredictionWriter" in cb["class_path"]]
+    assert len(writers) == 1, f"{organelle}: expected exactly one HCSPredictionWriter"
+    old_cbs = old["trainer"]["callbacks"]
+    old_writers = [cb for cb in old_cbs if "HCSPredictionWriter" in cb["class_path"]]
+    assert old_writers[0]["init_args"]["output_store"] == writers[0]["init_args"]["output_store"], (
+        f"{organelle}: output_store diverges"
+    )

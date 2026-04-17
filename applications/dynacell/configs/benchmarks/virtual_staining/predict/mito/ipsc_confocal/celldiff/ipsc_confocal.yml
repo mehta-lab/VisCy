@@ -1,0 +1,43 @@
+# CellDiff predict: mito (TOMM20) against ipsc_confocal test_cropped.
+# Equivalent to applications/dynacell/examples/configs/tomm20/predict_celldiff.yml.
+base:
+  - ../../../../shared/predict_sets/ipsc_confocal.yml
+  - ../../../../shared/targets/mito_tomm20.yml
+  - ../../../../shared/model_overlays/celldiff_predict.yml
+  - ../../../../shared/launcher_profiles/mode_predict.yml
+  - ../../../../shared/launcher_profiles/hardware_h200_single.yml
+  - ../../../../shared/launcher_profiles/runtime_single_gpu.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: celldiff
+  experiment_id: mito__ipsc_confocal__celldiff__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff/checkpoints/last.ckpt
+
+data:
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/prediction/tomm20_celldiff.zarr
+
+launcher:
+  job_name: CELLDiff_PRED_TOMM20
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/prediction
