@@ -17,6 +17,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import re
+import shlex
 import string
 import subprocess
 import sys
@@ -27,6 +29,8 @@ from typing import Any
 import yaml
 
 from viscy_utils.compose import deep_merge, load_composed_config
+
+_VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _SBATCH_DIRECTIVE_ORDER = (
     ("job_name", "--job-name"),
@@ -88,9 +92,15 @@ def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str
 
 
 def _render_env_block(env: dict | None) -> str:
+    """Render ``export KEY=VALUE`` lines, shlex-quoting values and validating keys."""
     if not env:
         return ""
-    return "\n".join(f"export {k}={v}" for k, v in env.items())
+    lines = []
+    for k, v in env.items():
+        if not _VALID_ENV_NAME.match(str(k)):
+            raise SystemExit(f"launcher.env key {k!r} is not a valid shell identifier")
+        lines.append(f"export {k}={shlex.quote(str(v))}")
+    return "\n".join(lines)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
