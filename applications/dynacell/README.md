@@ -34,10 +34,37 @@ uv run dynacell fit -c celldiff/fit.yml --data.init_args.data_path=/path/to/data
 
 ## Config Structure
 
-- `configs/recipes/` — Reusable fragments (model, trainer, data, modes)
-- `configs/examples/` — Generic fit/predict pair per model family
+- `configs/recipes/` — reusable fragments (model, trainer, data, modes)
+- `configs/examples/` — generic fit/predict pair per model family (stubs with
+  `#TODO` placeholders)
+- `configs/benchmarks/virtual_staining/` — runnable benchmark leaves composed
+  from shared axes. One file per (organelle, train_set, model) for fit and
+  one per (organelle, train_set, model, predict_set) for predict. See
+  `configs/benchmarks/virtual_staining/README.md` for the layout and
+  composition order.
+- `tools/submit_benchmark_job.py` — drives one benchmark leaf end-to-end
+  (compose → strip launcher metadata → render sbatch → submit). Use
+  `--dry-run` to inspect without submitting.
+- `tools/LEGACY/` — archived pre-schema CellDiff configs kept as the
+  equivalence reference. Not for direct launch; see its README.
 
-Benchmark-specific configs (SEC61B, nuclei-mix) live in the `dynacell-paper` repo.
+### Benchmark submit
+
+```bash
+# Dry-run a CellDiff fit for ER (SEC61B) on ipsc_confocal, print the rendered sbatch:
+uv run python applications/dynacell/tools/submit_benchmark_job.py \
+    applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml \
+    --dry-run --print-script
+
+# Submit for real (drops --dry-run):
+uv run python applications/dynacell/tools/submit_benchmark_job.py \
+    applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
+```
+
+Benchmark leaves carry two reserved top-level YAML keys (`launcher:` and
+`benchmark:`) that are stripped automatically before the config reaches
+LightningCLI, so `uv run dynacell fit -c <benchmark-leaf.yml>` also works
+without the submit tool.
 
 ## Supported subcommands
 
