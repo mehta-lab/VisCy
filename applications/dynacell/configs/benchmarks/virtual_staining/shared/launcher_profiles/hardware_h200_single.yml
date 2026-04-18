@@ -1,5 +1,6 @@
-# Hardware profile: single H200 GPU. trainer.devices pairs with
-# launcher.sbatch.gpus — the submit tool enforces they match.
+# Hardware profile: single H200 GPU. Topology lives in
+# recipes/topology/single_gpu.yml; pair this profile with that recipe.
+# The submit tool enforces trainer.devices == launcher.sbatch.gpus.
 launcher:
   sbatch:
     partition: gpu
@@ -10,5 +11,3 @@ launcher:
     mem: "256G"
     constraint: "h200"
     time: "4-00:00:00"
-trainer:
-  devices: 1

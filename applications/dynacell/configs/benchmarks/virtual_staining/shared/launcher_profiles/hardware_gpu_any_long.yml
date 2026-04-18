@@ -19,5 +19,3 @@ launcher:
     mem: "256G"
     constraint: null
     time: "20-00:00:00"
-trainer:
-  devices: 1

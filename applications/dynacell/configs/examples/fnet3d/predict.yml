@@ -1,7 +1,8 @@
 # FNet3D: predict from checkpoint.
 # Usage: cd applications/dynacell/configs/examples && uv run dynacell predict -c fnet3d/predict.yml
 base:
-  - ../../recipes/trainer/predict_gpu.yml
+  - ../../recipes/trainer/predict.yml
+  - ../../recipes/topology/single_gpu.yml
   - ../../recipes/data/hcs_phase_fluor_3d.yml
   - ../../recipes/models/fnet3d.yml
 

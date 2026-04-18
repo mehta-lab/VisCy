@@ -1,7 +1,8 @@
 # VSCyto2D: supervised fine-tuning from FCMAE-pretrained encoder.
 # Usage: python -m cytoland fit --config vscyto2d/finetune.yml
 base:
-  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
   - ../recipes/data/hcs_nuc_mem_2d.yml
   - ../recipes/models/fcmae_2d.yml
 
@@ -17,6 +18,10 @@ model:
     ckpt_path: #TODO pretrained FCMAE checkpoint
     lr: 0.0002
     schedule: WarmupCosine
+
+trainer:
+  precision: 16-mixed
+  max_epochs: 200
 
 data:
   init_args:

@@ -5,7 +5,8 @@
 # target-inherited values to match each organelle's test_cropped store).
 base:
   - ../../../../recipes/models/celldiff_fm.yml
-  - ../../../../recipes/trainer/predict_gpu.yml
+  - ../../../../recipes/trainer/predict.yml
+  - ../../../../recipes/topology/single_gpu.yml
 model:
   init_args:
     net_config:

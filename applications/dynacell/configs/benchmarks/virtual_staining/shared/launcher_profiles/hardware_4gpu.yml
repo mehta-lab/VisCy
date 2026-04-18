@@ -13,5 +13,3 @@ launcher:
     mem: "512G"
     constraint: null
     time: "4-00:00:00"
-trainer:
-  devices: 4

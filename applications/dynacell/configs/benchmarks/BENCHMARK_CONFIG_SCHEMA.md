@@ -465,7 +465,8 @@ base:
   - ../../../shared/launcher_profiles/mode_fit.yml
   - ../../../shared/launcher_profiles/hardware_h200_single.yml
   - ../../../shared/launcher_profiles/runtime_shared.yml
-  - ../../../../recipes/trainer/fit_fm_4gpu.yml
+  - ../../../../recipes/trainer/fit.yml
+  - ../../../../recipes/topology/single_gpu.yml
 
 benchmark:
   task: virtual_staining

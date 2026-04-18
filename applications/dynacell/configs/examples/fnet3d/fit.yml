@@ -1,7 +1,8 @@
 # FNet3D: supervised training (benchmark baseline).
 # Usage: cd applications/dynacell/configs/examples && uv run dynacell fit -c fnet3d/fit.yml
 base:
-  - ../../recipes/trainer/fit_4gpu.yml
+  - ../../recipes/trainer/fit.yml
+  - ../../recipes/topology/ddp_4gpu.yml
   - ../../recipes/data/hcs_phase_fluor_3d.yml
   - ../../recipes/models/fnet3d.yml
 
@@ -11,6 +12,8 @@ model:
     schedule: Constant
 
 trainer:
+  precision: 16-mixed
+  max_epochs: 200
   max_steps: 50000
 
 data:

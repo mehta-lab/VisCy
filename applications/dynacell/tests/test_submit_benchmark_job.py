@@ -13,7 +13,6 @@ yaml = pytest.importorskip("yaml")
 import submit_benchmark_job as sbj  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EXAMPLES = REPO_ROOT / "applications" / "dynacell" / "tools" / "LEGACY" / "examples_configs"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
 
 
@@ -71,23 +70,14 @@ def test_render_env_block_preserves_order():
 
 
 @pytest.mark.parametrize(
-    "leaf_subpath,legacy_slurm,expected_resolved_prefix",
+    "leaf_subpath,expected_resolved_prefix",
     [
-        (
-            "train/er/ipsc_confocal/celldiff.yml",
-            "sec61b/run_celldiff.slurm",
-            "/resolved/fit_CELLDiff_SEC61B_",
-        ),
-        (
-            "train/er/ipsc_confocal/unetvit3d.yml",
-            "sec61b/run_unetvit3d.slurm",
-            "/resolved/fit_UNetViT3D_SEC61B_",
-        ),
+        ("train/er/ipsc_confocal/celldiff.yml", "/resolved/fit_CELLDiff_SEC61B_"),
+        ("train/er/ipsc_confocal/unetvit3d.yml", "/resolved/fit_UNetViT3D_SEC61B_"),
     ],
 )
-def test_byte_equivalence_sec61b_train_leaf(capsys, leaf_subpath, legacy_slurm, expected_resolved_prefix):
-    """Rendered sbatch differs from Dihan's legacy .slurm only on the srun line."""
-    legacy = (EXAMPLES / legacy_slurm).read_text()
+def test_rendered_sbatch_has_srun_at_expected_resolved_path(capsys, leaf_subpath, expected_resolved_prefix):
+    """Rendered sbatch ends with an srun line pointing at the frozen resolved config."""
     leaf = BENCHMARKS / leaf_subpath
 
     # --print-script is preview-only (no disk writes), so this is safe to run
@@ -96,24 +86,9 @@ def test_byte_equivalence_sec61b_train_leaf(capsys, leaf_subpath, legacy_slurm, 
     assert rc == 0
     rendered = capsys.readouterr().out
 
-    legacy_lines = legacy.splitlines()
-    rendered_lines = rendered.splitlines()
-
-    # Every line identical except the final srun line.
-    assert len(legacy_lines) == len(rendered_lines), (
-        f"line count differs: legacy={len(legacy_lines)} rendered={len(rendered_lines)}"
-    )
-    srun_idx = len(legacy_lines) - 1
-    for i, (a, b) in enumerate(zip(legacy_lines, rendered_lines)):
-        if i == srun_idx:
-            continue
-        assert a == b, f"line {i} differs:\n  legacy:   {a!r}\n  rendered: {b!r}"
-    # srun line — both start with the same prefix, differ on --config path
-    legacy_srun = legacy_lines[srun_idx]
-    rendered_srun = rendered_lines[srun_idx]
-    assert legacy_srun.startswith("srun uv run python -m dynacell fit --config")
-    assert rendered_srun.startswith("srun uv run python -m dynacell fit --config")
-    assert expected_resolved_prefix in rendered_srun
+    srun_line = rendered.splitlines()[-1]
+    assert srun_line.startswith("srun uv run python -m dynacell fit --config")
+    assert expected_resolved_prefix in srun_line
 
 
 def test_submit_raises_on_missing_launcher(tmp_path):

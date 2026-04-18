@@ -2,7 +2,8 @@
 # yx_patch_size and z_window_size must match the model's input_spatial_size.
 # Usage: cd applications/dynacell/configs/examples && uv run dynacell predict -c unetvit3d/predict.yml
 base:
-  - ../../recipes/trainer/predict_gpu.yml
+  - ../../recipes/trainer/predict.yml
+  - ../../recipes/topology/single_gpu.yml
   - ../../recipes/data/hcs_phase_fluor_3d.yml
   - ../../recipes/models/unetvit3d.yml
 

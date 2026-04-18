@@ -5,7 +5,8 @@
 # Batch related launches with:
 #   export VISCY_WANDB_LAUNCH=20260401-augfix-r1
 base:
-  - ../recipes/trainer/fit_1gpu.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/single_gpu.yml
   - ../recipes/data/hcs_sec61b_3d.yml
   - ../recipes/models/fnet3d_z8.yml
 
@@ -20,9 +21,14 @@ model:
     schedule: WarmupCosine
 
 trainer:
+  precision: bf16-mixed
   max_epochs: 100
   logger:
     init_args:
+      # Override cytoland's default `project: cytoland`: this bridge config
+      # logs to the dynacell project because the training dataset is a
+      # dynacell benchmark (iPSC SEC61B).
+      project: dynacell
       name: FNet3D_iPSC_SEC61B
       save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/fnet3d
   callbacks:

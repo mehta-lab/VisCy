@@ -7,7 +7,8 @@
 # retuned Run 4 (20260409-020023) with lr=0.0004, bs=32, z=20.
 base:
   - ../../../../recipes/models/unext2_3d.yml
-  - ../../../../recipes/trainer/fit_4gpu.yml
+  - ../../../../recipes/trainer/fit.yml
+  - ../../../../recipes/topology/ddp_4gpu.yml
 model:
   init_args:
     loss_function:
@@ -18,6 +19,9 @@ model:
         ms_dssim_alpha: 0.5
     lr: 0.0004
     schedule: WarmupCosine
+trainer:
+  precision: 16-mixed
+  max_epochs: 200
 data:
   init_args:
     z_window_size: 20

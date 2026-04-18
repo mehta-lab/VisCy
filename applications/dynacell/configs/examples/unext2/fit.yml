@@ -1,7 +1,8 @@
 # UNeXt2 (VSCyto3D): supervised training.
 # Usage: cd applications/dynacell/configs/examples && uv run dynacell fit -c unext2/fit.yml
 base:
-  - ../../recipes/trainer/fit_4gpu.yml
+  - ../../recipes/trainer/fit.yml
+  - ../../recipes/topology/ddp_4gpu.yml
   - ../../recipes/data/hcs_phase_fluor_3d.yml
   - ../../recipes/models/unext2_3d.yml
 
@@ -11,6 +12,7 @@ model:
     schedule: WarmupCosine
 
 trainer:
+  precision: 16-mixed
   max_epochs: 200
 
 data:

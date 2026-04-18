@@ -10,7 +10,8 @@
 # weighted crops per FOV replace the 2 oversized transformer crops.
 base:
   - ../../../../recipes/models/fnet3d.yml
-  - ../../../../recipes/trainer/fit_1gpu.yml
+  - ../../../../recipes/trainer/fit.yml
+  - ../../../../recipes/topology/single_gpu.yml
 seed_everything: 0
 model:
   init_args:

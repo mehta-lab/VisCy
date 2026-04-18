@@ -3,7 +3,8 @@
 # fit-time hparams and the GPU augmentation stack on top.
 base:
   - ../../../../recipes/models/celldiff_fm.yml
-  - ../../../../recipes/trainer/fit_1gpu.yml
+  - ../../../../recipes/trainer/fit.yml
+  - ../../../../recipes/topology/single_gpu.yml
 model:
   init_args:
     net_config:

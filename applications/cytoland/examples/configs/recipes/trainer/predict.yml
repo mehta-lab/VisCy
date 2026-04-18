@@ -1,7 +1,6 @@
-# Trainer recipe: single-GPU prediction.
+# Unified predict trainer recipe.
+# Topology lives in recipes/topology/single_gpu.yml.
 trainer:
-  accelerator: gpu
-  devices: 1
   precision: 32-true
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
