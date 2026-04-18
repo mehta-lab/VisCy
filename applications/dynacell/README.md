@@ -47,8 +47,6 @@ uv run dynacell fit -c celldiff/fit.yml --data.init_args.data_path=/path/to/data
   `--print-script` for a safe preview on any leaf, or `--dry-run` to
   stage artifacts to `launcher.run_root` without submitting (requires
   write permission on that path).
-- `tools/LEGACY/` — archived pre-schema CellDiff configs kept as the
-  equivalence reference. Not for direct launch; see its README.
 
 ### Benchmark submit
 

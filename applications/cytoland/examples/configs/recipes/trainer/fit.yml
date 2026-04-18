@@ -1,5 +1,3 @@
-# Unified fit trainer recipe: mode-invariant defaults.
-#
 # Topology (accelerator / devices / strategy / num_nodes) lives in
 # recipes/topology/*.yml. Precision lives in model overlays.
 # max_epochs and max_steps also live in model overlays or leaves.

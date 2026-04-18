@@ -25,9 +25,7 @@ trainer:
   max_epochs: 100
   logger:
     init_args:
-      # Override cytoland's default `project: cytoland`: this bridge config
-      # logs to the dynacell project because the training dataset is a
-      # dynacell benchmark (iPSC SEC61B).
+      # Override cytoland's default project: this bridge trains on a dynacell dataset (iPSC SEC61B).
       project: dynacell
       name: VSCyto3D_iPSC_SEC61B
       save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell_cytoland/ipsc/sec61b/vscyto3d

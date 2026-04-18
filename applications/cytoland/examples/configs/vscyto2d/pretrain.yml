@@ -25,8 +25,7 @@ model:
     log_samples_per_batch: 1
 
 trainer:
-  # FCMAE pretraining requires `find_unused_parameters=True` (masked
-  # decoder). Scalar key overrides topology/ddp_4gpu.yml's plain `ddp`.
+  # FCMAE pretraining requires find_unused_parameters=True (masked decoder).
   strategy: ddp_find_unused_parameters_true
   precision: 16-mixed
   max_epochs: 400

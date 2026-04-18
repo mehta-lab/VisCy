@@ -1,6 +1,5 @@
-# Topology recipe: single-GPU training. strategy=auto (Lightning picks
-# single_device for devices=1) instead of plain ddp, which is dead code
-# at devices=1.
+# Single-GPU training. strategy=auto lets Lightning pick single_device;
+# plain ddp at devices=1 would add pointless process-group overhead.
 trainer:
   accelerator: gpu
   strategy: auto
