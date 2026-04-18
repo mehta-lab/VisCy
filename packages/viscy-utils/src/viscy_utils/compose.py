@@ -7,9 +7,24 @@ not append).  The final output is plain ``class_path`` / ``init_args``
 YAML compatible with LightningCLI.
 """
 
+import copy
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
+
+
+@lru_cache(maxsize=256)
+def _load_yaml_cached(resolved_path: Path) -> dict:
+    """Parse a YAML file once per resolved path within the process.
+
+    Keyed by the fully-resolved path so different symlinks to the same
+    file share a cache entry. Callers must deep-copy the returned dict
+    before mutating, since ``lru_cache`` hands out the same object on
+    every hit.
+    """
+    with open(resolved_path) as f:
+        return yaml.safe_load(f) or {}
 
 
 def deep_merge(base: dict, override: dict) -> dict:
@@ -53,8 +68,7 @@ def load_composed_config(path: str | Path, _seen: frozenset[Path] | None = None)
     if path in _seen:
         raise ValueError(f"Circular base: reference detected: {path}")
     _seen = _seen | {path}
-    with open(path) as f:
-        cfg = yaml.safe_load(f) or {}
+    cfg = copy.deepcopy(_load_yaml_cached(path))
     bases = cfg.pop("base", [])
     if bases is None:
         bases = []
