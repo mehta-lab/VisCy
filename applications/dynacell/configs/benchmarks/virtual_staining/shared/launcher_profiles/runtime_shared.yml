@@ -1,4 +1,4 @@
-# Runtime profile: single-GPU execution defaults.
+# Runtime profile: shared srun + env defaults (not topology-specific).
 launcher:
   runtime:
     use_srun: true

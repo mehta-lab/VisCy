@@ -99,7 +99,7 @@ applications/dynacell/
             hardware_h100x4.yml
             hardware_h200_single.yml
             runtime_ddp.yml
-            runtime_single_gpu.yml
+            runtime_shared.yml
             runtime_resume.yml
           predict_sets/
             ipsc_confocal.yml
@@ -464,7 +464,7 @@ base:
   - ../../../shared/model_overlays/celldiff.yml
   - ../../../shared/launcher_profiles/mode_fit.yml
   - ../../../shared/launcher_profiles/hardware_h200_single.yml
-  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+  - ../../../shared/launcher_profiles/runtime_shared.yml
   - ../../../../recipes/trainer/fit_fm_4gpu.yml
 
 benchmark:
@@ -514,7 +514,7 @@ base:
   - ../../../../shared/targets/er_sec61b.yml
   - ../../../../shared/launcher_profiles/mode_predict.yml
   - ../../../../shared/launcher_profiles/hardware_h200_single.yml
-  - ../../../../shared/launcher_profiles/runtime_single_gpu.yml
+  - ../../../../shared/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining
@@ -608,7 +608,7 @@ applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profil
 applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profiles/hardware_h100x4.yml
 applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profiles/hardware_h200_single.yml
 applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profiles/runtime_ddp.yml
-applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profiles/runtime_single_gpu.yml
+applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profiles/runtime_shared.yml
 applications/dynacell/configs/benchmarks/virtual_staining/shared/launcher_profiles/runtime_resume.yml
 
 applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/fnet3d.yml

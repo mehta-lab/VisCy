@@ -7,7 +7,7 @@ base:
   - ../../../shared/model_overlays/fnet3d_paper_fit.yml
   - ../../../shared/launcher_profiles/mode_fit.yml
   - ../../../shared/launcher_profiles/hardware_gpu_any_long.yml
-  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+  - ../../../shared/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

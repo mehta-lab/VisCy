@@ -5,7 +5,7 @@ base:
   - ../../../../shared/model_overlays/celldiff_predict.yml
   - ../../../../shared/launcher_profiles/mode_predict.yml
   - ../../../../shared/launcher_profiles/hardware_h200_single.yml
-  - ../../../../shared/launcher_profiles/runtime_single_gpu.yml
+  - ../../../../shared/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining
@@ -34,7 +34,7 @@ data:
           divisor: std
     # clear target-inherited RandWeightedCropd; predict has no CPU augs
     augmentations: []
-    z_window_size: 40 # 8 for denoise and generate, 40 for iterative and sliding_window to match training; 
+    z_window_size: 40 # 8 for denoise and generate, 40 for iterative and sliding_window to match training;
 
 trainer:
   callbacks:

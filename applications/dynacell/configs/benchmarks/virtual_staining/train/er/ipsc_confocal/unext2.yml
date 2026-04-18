@@ -8,7 +8,7 @@ base:
   - ../../../shared/model_overlays/unext2_fit.yml
   - ../../../shared/launcher_profiles/mode_fit.yml
   - ../../../shared/launcher_profiles/hardware_4gpu.yml
-  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+  - ../../../shared/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

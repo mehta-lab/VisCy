@@ -5,7 +5,7 @@ base:
   - ../../../shared/model_overlays/unetvit3d_fit.yml
   - ../../../shared/launcher_profiles/mode_fit.yml
   - ../../../shared/launcher_profiles/hardware_h200_single.yml
-  - ../../../shared/launcher_profiles/runtime_single_gpu.yml
+  - ../../../shared/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining
