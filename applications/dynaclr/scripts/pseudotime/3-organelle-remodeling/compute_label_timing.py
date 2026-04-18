@@ -261,20 +261,37 @@ def _summary_markdown(per_cell: pd.DataFrame, state_column: str, organelle_chann
     return "\n".join(lines)
 
 
-def _compare(per_cell_files: list[Path], out_stem: Path) -> None:
-    """Merge per-cell parquets across organelles, emit strips + stats."""
+def _compare(per_cell_files: list[Path], out_stem: Path, group_by: str | None = None) -> None:
+    """Merge per-cell parquets, emit strips + stats grouped by a column.
+
+    Parameters
+    ----------
+    per_cell_files : list[Path]
+        Per-cell parquets written by ``compute``.
+    out_stem : Path
+        Output path stem (no extension).
+    group_by : str or None
+        Column to group cells by in the comparison plot/stats. If ``None``
+        (default), auto-select: use ``organelle_channel`` when multiple
+        organelle values are present, otherwise fall back to ``query_set``
+        so cross-virus pools (same organelle, different query sets) split
+        correctly.
+    """
     dfs = [pd.read_parquet(p) for p in per_cell_files]
     merged = pd.concat(dfs, ignore_index=True)
 
     metrics = ["t_first_pos", "t_run_start", "t_run_end", "pos_duration", "pos_fraction", "flips"]
-    organelles = sorted(merged["organelle_channel"].unique())
+    if group_by is None:
+        n_organelles = len(merged["organelle_channel"].unique())
+        group_by = "organelle_channel" if n_organelles > 1 else "query_set"
+    organelles = sorted(merged[group_by].unique())
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(3.3 * len(metrics), 4.2), squeeze=False)
     axes = axes[0]
     colors = plt.get_cmap("tab10").colors
     for ax, metric in zip(axes, metrics):
         for i, org in enumerate(organelles):
-            vals = merged.loc[merged["organelle_channel"] == org, metric].to_numpy(dtype=float)
+            vals = merged.loc[merged[group_by] == org, metric].to_numpy(dtype=float)
             vals = vals[np.isfinite(vals)]
             if len(vals) == 0:
                 continue
@@ -302,15 +319,21 @@ def _compare(per_cell_files: list[Path], out_stem: Path) -> None:
     plt.close(fig)
     _logger.info(f"Wrote {png}")
 
-    lines = ["# Cross-organelle label-timing comparison", "", f"**Organelles**: {', '.join(organelles)}", ""]
+    lines = [
+        "# Label-timing comparison",
+        "",
+        f"**Grouped by**: `{group_by}`",
+        f"**Groups**: {', '.join(organelles)}",
+        "",
+    ]
     for metric in metrics:
         lines.append(f"## {metric}")
         lines.append("")
-        lines.append("| organelle | n | median | 95% CI |")
+        lines.append(f"| {group_by} | n | median | 95% CI |")
         lines.append("|---|---|---|---|")
         per_org = {}
         for org in organelles:
-            vals = merged.loc[merged["organelle_channel"] == org, metric].to_numpy(dtype=float)
+            vals = merged.loc[merged[group_by] == org, metric].to_numpy(dtype=float)
             vals = vals[np.isfinite(vals)]
             per_org[org] = vals
             med, lo, hi = _bootstrap_ci(vals)
@@ -359,6 +382,15 @@ def main() -> None:
     p_cmp = sub.add_parser("compare")
     p_cmp.add_argument("--per-cell", nargs="+", required=True)
     p_cmp.add_argument("--out-stem", required=True)
+    p_cmp.add_argument(
+        "--group-by",
+        default=None,
+        help=(
+            "Column to split cells by. Default auto-picks organelle_channel "
+            "if multiple organelles are present, else query_set (so cross-virus "
+            "pools with the same organelle split correctly)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -427,7 +459,7 @@ def main() -> None:
         _logger.info(f"Wrote {md_path}")
 
     elif args.cmd == "compare":
-        _compare([Path(p) for p in args.per_cell], Path(args.out_stem))
+        _compare([Path(p) for p in args.per_cell], Path(args.out_stem), group_by=args.group_by)
 
 
 if __name__ == "__main__":
