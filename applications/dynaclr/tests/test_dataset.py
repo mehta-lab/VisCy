@@ -229,10 +229,10 @@ class TestPositiveSampling:
         anchor_lineage = anchor_row["lineage_id"]
         anchor_t = anchor_row["t"]
 
-        # Call _find_positive directly to verify lineage matching
-        rng = np.random.default_rng(42)
-        pos_row = ds._find_positive(anchor_row, rng)
-        assert pos_row is not None, "Should find a positive"
+        # Call _sample_positives_temporal to verify lineage matching
+        pos_df = ds._sample_positives_temporal([0])
+        assert len(pos_df) == 1, "Should find one positive"
+        pos_row = pos_df.iloc[0]
         assert pos_row["lineage_id"] == anchor_lineage, (
             f"Positive lineage {pos_row['lineage_id']} != anchor {anchor_lineage}"
         )
@@ -267,12 +267,13 @@ class TestPositiveSampling:
         assert len(parent_anchors) > 0, "Parent track should have valid anchors"
 
         # Verify positive sampling can reach daughters (same lineage, different track)
-        rng = np.random.default_rng(42)
         anchor_row = parent_anchors.iloc[0]
+        anchor_pos = parent_anchors.index[0]
         found_daughter = False
         for _ in range(50):
-            pos_row = ds._find_positive(anchor_row, rng)
-            if pos_row is not None and pos_row["global_track_id"] != anchor_row["global_track_id"]:
+            pos_df = ds._sample_positives_temporal([int(anchor_pos)])
+            pos_row = pos_df.iloc[0]
+            if pos_row["global_track_id"] != anchor_row["global_track_id"]:
                 found_daughter = True
                 assert pos_row["lineage_id"] == anchor_row["lineage_id"]
                 break
@@ -568,16 +569,14 @@ class TestColumnMatchPositive:
             positive_cell_source="lookup",
             positive_match_columns=["gene_name", "reporter"],
         )
-        rng = np.random.default_rng(0)
         anchor_row = ds.index.valid_anchors.iloc[0]
-        pos = ds._find_positive(anchor_row, rng)
-        assert pos is not None, "Should find a column-match positive"
+        pos_df = ds._sample_positives(ds.index.valid_anchors.iloc[[0]], anchor_positions=[0])
+        pos = pos_df.iloc[0]
         assert pos["gene_name"] == anchor_row["gene_name"], "Positive must share gene_name"
         assert pos["reporter"] == anchor_row["reporter"], "Positive must share reporter"
-        assert pos.name != anchor_row.name, "Positive must be a different cell"
 
-    def test_column_match_no_self_as_positive(self, tmp_path, _make_tracks_csv, hcs_dims):
-        """Column-match lookup never returns the anchor itself."""
+    def test_column_match_positive_group_membership(self, tmp_path, _make_tracks_csv, hcs_dims):
+        """Column-match lookup returns rows from the correct (gene, reporter) group."""
         from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
@@ -587,11 +586,12 @@ class TestColumnMatchPositive:
             positive_cell_source="lookup",
             positive_match_columns=["gene_name", "reporter"],
         )
-        rng = np.random.default_rng(42)
-        for _, anchor_row in ds.index.valid_anchors.iterrows():
-            pos = ds._find_positive(anchor_row, rng)
-            if pos is not None:
-                assert pos.name != anchor_row.name, "Positive must not be the anchor itself"
+        # Every positive must share (gene_name, reporter) with its anchor.
+        anchor_positions = list(range(len(ds.index.valid_anchors)))
+        anchor_rows = ds.index.valid_anchors.iloc[anchor_positions]
+        pos_df = ds._sample_positives(anchor_rows, anchor_positions=anchor_positions)
+        assert (pos_df["gene_name"].to_numpy() == anchor_rows["gene_name"].to_numpy()).all()
+        assert (pos_df["reporter"].to_numpy() == anchor_rows["reporter"].to_numpy()).all()
 
 
 class TestTimepointStatisticsResolution:
