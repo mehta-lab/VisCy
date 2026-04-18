@@ -533,6 +533,10 @@ class MultiExperimentTripletDataset(Dataset):
     def _get_position(self, store_path: str, fov_name: str):
         """Get or create a cached Position object for the given FOV.
 
+        Cache is keyed by ``(store_path, fov_name)`` — critical for OPS
+        where the same FOV name (e.g. ``"A/3/0"``) appears across multiple
+        experiments.
+
         Parameters
         ----------
         store_path : str
@@ -544,34 +548,39 @@ class MultiExperimentTripletDataset(Dataset):
         -------
         iohub.ngff.Position
         """
-        if fov_name not in self._position_cache:
+        key = (store_path, fov_name)
+        if key not in self._position_cache:
             if store_path not in self._store_cache:
                 self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
             plate = self._store_cache[store_path]
-            self._position_cache[fov_name] = plate[fov_name]
-        return self._position_cache[fov_name]
+            self._position_cache[key] = plate[fov_name]
+        return self._position_cache[key]
 
     def _get_tensorstore(self, store_path: str, fov_name: str) -> "ts.TensorStore":
         """Get or create a cached tensorstore object for the given FOV.
+
+        Cache is keyed by ``(store_path, fov_name)`` — critical for OPS
+        where the same FOV name appears across multiple experiments.
 
         Parameters
         ----------
         store_path : str
             Path to the OME-Zarr plate store.
         fov_name : str
-            FOV name used as cache key.
+            FOV name used together with ``store_path`` as cache key.
 
         Returns
         -------
         ts.TensorStore
         """
-        if fov_name not in self._tensorstores:
+        key = (store_path, fov_name)
+        if key not in self._tensorstores:
             position = self._get_position(store_path, fov_name)
-            self._tensorstores[fov_name] = position["0"].tensorstore(
+            self._tensorstores[key] = position["0"].tensorstore(
                 context=self._ts_context,
                 recheck_cached_data="open",
             )
-        return self._tensorstores[fov_name]
+        return self._tensorstores[key]
 
     def _build_norm_meta(
         self,
