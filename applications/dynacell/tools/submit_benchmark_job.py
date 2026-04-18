@@ -202,14 +202,13 @@ def submit(argv: list[str] | None = None) -> int:
         sys.stdout.write(yaml.safe_dump(composed, default_flow_style=False))
     if args.print_script:
         sys.stdout.write(rendered)
-    if args.dry_run and not (args.print_script or args.print_resolved_config):
-        sys.stdout.write(rendered)
 
     # Preview contract:
     # - --print-* (either) = pure preview: no disk writes, no submission.
     #   Safe against run_roots the caller can't write to.
     # - --dry-run alone = write artifacts to run_root but don't submit.
-    #   Requires write permission on launcher.run_root.
+    #   Requires write permission on launcher.run_root. Use --print-script
+    #   to also see the rendered sbatch on stdout.
     # - --dry-run combined with --print-* = --print-* wins (preview).
     # - Bare invocation = write + submit.
     preview_only = args.print_script or args.print_resolved_config
