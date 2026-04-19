@@ -35,7 +35,6 @@ trainer:
         every_n_epochs: 5
         label_key: perturbation
         k: 20
-    - class_path: viscy_utils.callbacks.SaveConfigToWandb
 
 model:
   init_args:

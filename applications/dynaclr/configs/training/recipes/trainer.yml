@@ -1,6 +1,8 @@
 # Trainer recipe: DynaCLR shared trainer defaults.
 # Includes WandB logger (project/name/save_dir set by train.sh CLI overrides),
-# LR monitor, model checkpoint, and SaveConfigToWandb.
+# LR monitor, and model checkpoint. Config is saved to trainer.log_dir by
+# Lightning's default SaveConfigCallback; the wandb files tab picks it up
+# automatically when save_dir matches.
 #
 # Leaf configs override: strategy, devices, precision, max_epochs,
 # logger.init_args.project/name, and optionally re-list callbacks
@@ -30,4 +32,3 @@ trainer:
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-    - class_path: viscy_utils.callbacks.SaveConfigToWandb
