@@ -343,6 +343,15 @@ class MultiExperimentIndex:
                 )
         if "microscope" not in tracks.columns:
             tracks["microscope"] = ""
+        # Cast low-cardinality string columns to Categorical to make
+        # downstream boolean-mask slicing (train/val split) a fast int-code
+        # gather instead of a pyarrow.compute.take over Arrow string buffers.
+        # Deferred from read_cell_index because ``fov_name`` is rewritten by
+        # the prefix logic above and Categorical columns don't support string
+        # concatenation.
+        for col in ("fov_name", "well_name"):
+            if col in tracks.columns and tracks[col].dtype == object:
+                tracks[col] = tracks[col].astype("category")
         return tracks
 
     def _filter_to_registry_experiments(self, tracks: pd.DataFrame) -> pd.DataFrame:
