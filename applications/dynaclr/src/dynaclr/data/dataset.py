@@ -295,12 +295,17 @@ class MultiExperimentTripletDataset(Dataset):
 
         tracks = self.index.tracks
         if "lineage_id" in self.positive_match_columns:
-            grouped = tracks.groupby(["experiment", "lineage_id", "t"]).indices
+            # observed=True skips unobserved Categorical cross-products;
+            # without it groupby yields empty groups for every Categorical
+            # combination, exploding memory and time. Keys are coerced to
+            # str so the lookup works regardless of dtype (Categorical vs
+            # object vs ArrowString).
+            grouped = tracks.groupby(["experiment", "lineage_id", "t"], observed=True).indices
             self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(
                 lambda: defaultdict(list)
             )
             for (exp, lid, t), row_indices in grouped.items():
-                self._lineage_timepoints[(exp, lid)][int(t)] = row_indices.tolist()
+                self._lineage_timepoints[(str(exp), str(lid))][int(t)] = row_indices.tolist()
         else:
             cols = self.positive_match_columns
             grouped = tracks.groupby(cols).indices
@@ -310,25 +315,87 @@ class MultiExperimentTripletDataset(Dataset):
             }
 
     def _build_anchor_cache(self) -> None:
-        """Cache valid_anchors columns as NumPy arrays for fast per-sample access.
+        """Cache valid_anchors/tracks columns as NumPy arrays for fast per-sample access.
 
         Avoids pandas ``.iloc[idx][col]`` in the hot path, which constructs a
         Series per call (~9 ms per anchor on 81M-row indices). NumPy indexing
         is ~20 ns. Measured end-to-end speedup: ~3000× on positive-lookup.
 
+        Both ``_va_arrays`` (for anchors) and ``_tr_arrays`` (for positives)
+        cache the full set of columns needed by ``_slice_patch`` and
+        ``_build_norm_meta``: ``store_path``, ``fov_name``, ``experiment``,
+        ``t``, ``y_clamp``, ``x_clamp``, plus ``norm_*`` columns for the
+        parquet-norm fast path.
+
         Cache is in-process RAM only — rebuilt on every dataset instantiation
-        from ``self.index.valid_anchors``. Parquet remains the source of truth.
+        from ``self.index.valid_anchors`` / ``self.index.tracks``. Parquet
+        remains the source of truth.
+
+        Also precomputes per-experiment tau range (frames) to avoid a registry
+        lookup per anchor inside ``_sample_positives_temporal``.
         """
-        va = self.index.valid_anchors
-        self._va_arrays: dict[str, np.ndarray] = {col: va[col].to_numpy() for col in va.columns}
-        # Also cache tracks columns used for temporal positive lookup
-        # (marker filtering hits `tracks.iloc[idx].get("marker")` per candidate).
-        tr = self.index.tracks
-        self._tr_arrays: dict[str, np.ndarray] = {
-            col: tr[col].to_numpy()
-            for col in ("marker", "channel_name", "experiment", "t", "lineage_id")
-            if col in tr.columns
+
+        # High-cardinality string columns (store_path, fov_name, experiment,
+        # marker, channel_name, lineage_id) have few unique values relative to
+        # row count, so cache them as category codes + categories lookup instead
+        # of object arrays. Object arrays of strings are ~40-80 bytes/entry; a
+        # categorical code is 4-8 bytes. On 81M rows this is the difference
+        # between an OOM and a healthy init.
+        #
+        # Access pattern: array[idx] still works if array is a pandas Categorical
+        # (returns the underlying string); downstream code doesn't care.
+        def _cache_columns(df: pd.DataFrame, columns: list[str]) -> dict:
+            out = {}
+            for col in columns:
+                if col not in df.columns:
+                    continue
+                s = df[col]
+                if s.dtype == object or pd.api.types.is_string_dtype(s):
+                    out[col] = s.astype("category").array  # pd.Categorical
+                else:
+                    out[col] = s.to_numpy()
+            return out
+
+        # Whitelist columns actually read in the hot path. Caching every
+        # column of valid_anchors (81M+ rows × ~20 cols × 4 DDP ranks) blows
+        # the node memory budget; holding only the read set keeps per-rank
+        # RSS in the low tens of GiB. `positive_match_columns` (user-defined)
+        # and label column values must also be cached because they drive the
+        # SupCon key construction and per-sample label lookup respectively.
+        hot_cols: set[str] = {
+            "channel_name",
+            "experiment",
+            "lineage_id",
+            "t",
+            "marker",
+            "store_path",
+            "fov_name",
+            "y_clamp",
+            "x_clamp",
+            "norm_mean",
+            "norm_std",
+            "norm_median",
+            "norm_iqr",
         }
+        if self.positive_match_columns:
+            hot_cols.update(self.positive_match_columns)
+        if getattr(self, "_label_encoders", None):
+            for col, _encoder in self._label_encoders.values():
+                hot_cols.add(col)
+
+        self._va_arrays: dict = _cache_columns(self.index.valid_anchors, sorted(hot_cols))
+        self._tr_arrays: dict = _cache_columns(self.index.tracks, sorted(hot_cols))
+
+        # Precompute per-experiment tau range in frames to avoid a per-anchor
+        # registry call inside _sample_positive_indices_temporal. Skip
+        # experiments with interval_minutes == 0 (static/snapshot datasets like
+        # OPS) — they never go through the temporal path (positive_match_columns
+        # wouldn't include lineage_id), so missing entries are harmless and
+        # computing tau_range_frames for them would ZeroDivisionError.
+        self._tau_range_frames_cache: dict[str, tuple[int, int]] = {}
+        for name, exp in self.index.registry._name_map.items():
+            if getattr(exp, "interval_minutes", 0):
+                self._tau_range_frames_cache[name] = self.index.registry.tau_range_frames(name, self.tau_range_hours)
 
     # ------------------------------------------------------------------
     # Dataset protocol
@@ -372,7 +439,7 @@ class MultiExperimentTripletDataset(Dataset):
         else:
             forced_channel_names = None
 
-        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_names)
+        anchor_patches, anchor_norms = self._slice_patches(self._va_arrays, indices, forced_channel_names)
         sample: dict = {
             "anchor": anchor_patches,
             "anchor_norm_meta": anchor_norms,
@@ -392,15 +459,16 @@ class MultiExperimentTripletDataset(Dataset):
                 sample["positive_norm_meta"] = sample["anchor_norm_meta"]
                 sample["positive_meta"] = sample["anchor_meta"]
             else:
-                positive_rows = self._sample_positives(anchor_rows, anchor_positions=indices)
+                pos_track_indices = self._sample_positive_indices(anchor_positions=indices)
                 if self._channel_mode == "from_index":
-                    # Positive rows come from tracks DataFrame; this is a batched
-                    # .iloc gather so .iterrows is fine here (small cost relative
-                    # to the anchor-side hot path we just optimized).
-                    pos_forced_channel_names = [[ch] for ch in positive_rows["channel_name"].to_numpy()]
+                    tr_chan_arr = self._tr_arrays["channel_name"]
+                    pos_forced_channel_names = [[tr_chan_arr[i]] for i in pos_track_indices]
                 else:
                     pos_forced_channel_names = forced_channel_names
-                positive_patches, positive_norms = self._slice_patches(positive_rows, pos_forced_channel_names)
+                positive_patches, positive_norms = self._slice_patches(
+                    self._tr_arrays, pos_track_indices, pos_forced_channel_names
+                )
+                positive_rows = self.index.tracks.iloc[pos_track_indices].reset_index(drop=True)
                 sample["positive"] = positive_patches
                 sample["positive_norm_meta"] = positive_norms
                 sample["positive_meta"] = self._extract_meta(positive_rows)
@@ -460,52 +528,36 @@ class MultiExperimentTripletDataset(Dataset):
     # Positive sampling
     # ------------------------------------------------------------------
 
-    def _sample_positives(
+    def _sample_positive_indices(
         self,
-        anchor_rows: pd.DataFrame,
-        anchor_positions: list[int] | None = None,
-    ) -> pd.DataFrame:
-        """Sample one positive for each anchor.
+        anchor_positions: list[int],
+    ) -> np.ndarray:
+        """Sample one positive tracks-index for each anchor.
 
-        When ``positive_cell_source="self"``, returns a copy of ``anchor_rows``
-        (same crop; augmentation creates two views).  Otherwise uses a
-        vectorized lookup against the pre-computed NumPy column cache +
-        ``_match_lookup`` to avoid pandas Series construction per row.
+        Returns positional indices into ``self.index.tracks`` / ``self._tr_arrays``
+        — callers can slice patches directly from the cached NumPy arrays without
+        materializing a DataFrame. The DataFrame is still constructed downstream
+        for metadata extraction.
 
         Parameters
         ----------
-        anchor_rows : pd.DataFrame
-            Rows from ``valid_anchors`` for the current batch.
-        anchor_positions : list[int] or None
-            Positional indices into ``valid_anchors`` (same as the sampler
-            output). When provided, enables the vectorized NumPy fast path.
-            When ``None``, falls back to the per-row pandas path for
-            callers that don't have positional indices.
+        anchor_positions : list[int]
+            Positional indices into ``valid_anchors`` (same as the sampler output).
 
         Returns
         -------
-        pd.DataFrame
-            One row per anchor from ``self.index.tracks``.
+        np.ndarray
+            One tracks-positional-index per anchor, shape ``(len(anchor_positions),)``.
         """
-        if self.positive_cell_source == "self":
-            return anchor_rows.copy().reset_index(drop=True)
-
         # Temporal lineage mode — vectorized NumPy fast path
         # (used by DynaCLR-2D-MIP, DynaCLR-3D-BagOfChannels).
         if "lineage_id" in self.positive_match_columns:
-            if anchor_positions is None:
-                anchor_positions = anchor_rows.index.tolist()
-            return self._sample_positives_temporal(anchor_positions)
+            return self._sample_positive_indices_temporal(anchor_positions)
 
-        # Column-match mode (SupCon) — vectorized NumPy fast path when we have
-        # the positional anchor indices from the sampler.
-        if anchor_positions is None:
-            anchor_positions = anchor_rows.index.tolist()
-
+        # Column-match mode (SupCon) — vectorized NumPy fast path.
         cols = self.positive_match_columns
         va_col_arrs = [self._va_arrays[c] for c in cols]
 
-        # Build (col1, col2, ...) tuple keys via NumPy indexing (no Series).
         pos_track_indices = np.empty(len(anchor_positions), dtype=np.int64)
         match_lookup = self._match_lookup
         rng = self._rng
@@ -526,14 +578,13 @@ class MultiExperimentTripletDataset(Dataset):
             # is <1% — functionally equivalent to `positive_cell_source="self"`.
             pos_track_indices[i] = cands[rng.integers(len(cands))]
 
-        return self.index.tracks.iloc[pos_track_indices].reset_index(drop=True)
+        return pos_track_indices
 
-    def _sample_positives_temporal(self, anchor_positions: list[int]) -> pd.DataFrame:
+    def _sample_positive_indices_temporal(self, anchor_positions: list[int]) -> np.ndarray:
         """Vectorized temporal positive lookup (lineage + tau range).
 
         Uses pre-computed NumPy caches instead of per-row pandas ``.iloc``.
-        Mirrors :meth:`_find_temporal_positive` behavior but avoids Series
-        construction per anchor and per candidate.
+        Uses ``self._tau_range_frames_cache`` to avoid a registry call per anchor.
 
         Parameters
         ----------
@@ -542,13 +593,14 @@ class MultiExperimentTripletDataset(Dataset):
 
         Returns
         -------
-        pd.DataFrame
-            One row per anchor from ``self.index.tracks``.
+        np.ndarray
+            Positional indices into ``self.index.tracks``, one per anchor.
         """
         rng = self._rng
         exp_arr = self._va_arrays["experiment"]
         lid_arr = self._va_arrays["lineage_id"]
         t_arr = self._va_arrays["t"]
+        tau_cache = self._tau_range_frames_cache
 
         # In from_index mode (flat parquet), we filter candidates to same marker.
         marker_filter = self._channel_mode == "from_index"
@@ -560,11 +612,14 @@ class MultiExperimentTripletDataset(Dataset):
         lt_map = self._lineage_timepoints
 
         for i, ai in enumerate(anchor_positions):
-            exp_name = exp_arr[ai]
-            lineage_id = lid_arr[ai]
+            # Coerce to str: _va_arrays columns come back as Categorical
+            # scalars after _materialize_strings, which hash differently
+            # from the str keys in _lineage_timepoints / _tau_range_frames_cache.
+            exp_name = str(exp_arr[ai])
+            lineage_id = str(lid_arr[ai])
             anchor_t = int(t_arr[ai])
 
-            tau_min, tau_max = self.index.registry.tau_range_frames(exp_name, self.tau_range_hours)
+            tau_min, tau_max = tau_cache[exp_name]
             timepoints = lt_map.get((exp_name, lineage_id))
             if timepoints is None:
                 raise RuntimeError(
@@ -592,7 +647,7 @@ class MultiExperimentTripletDataset(Dataset):
                 )
             pos_track_indices[i] = chosen
 
-        return self.index.tracks.iloc[pos_track_indices].reset_index(drop=True)
+        return pos_track_indices
 
     # ------------------------------------------------------------------
     # Patch extraction (tensorstore I/O)
@@ -652,19 +707,23 @@ class MultiExperimentTripletDataset(Dataset):
 
     def _build_norm_meta(
         self,
-        track_row: pd.Series,
+        arrays: dict[str, np.ndarray],
+        idx: int,
         forced_channel_names: list[str] | None,
     ) -> NormMeta | None:
         """Build per-sample normalization metadata from parquet columns.
 
         When the parquet has ``norm_mean`` / ``norm_std`` columns (written by
-        ``preprocess-cell-index``), reads stats directly from the row — no
-        zarr zattrs access needed. Falls back to zarr zattrs for old parquets.
+        ``preprocess-cell-index``), reads stats directly from the cached
+        NumPy arrays — no zarr zattrs access and no pandas Series construction.
+        Falls back to zarr zattrs for old parquets.
 
         Parameters
         ----------
-        track_row : pd.Series
-            A single row from ``tracks`` or ``valid_anchors``.
+        arrays : dict[str, np.ndarray]
+            Pre-cached NumPy column arrays (``_va_arrays`` or ``_tr_arrays``).
+        idx : int
+            Positional row index into ``arrays``.
         forced_channel_names : list[str] or None
             Zarr channel names being read for this sample.
 
@@ -672,24 +731,28 @@ class MultiExperimentTripletDataset(Dataset):
         -------
         NormMeta or None
         """
-        # Parquet path: norm columns present
-        if "norm_mean" in track_row.index and pd.notna(track_row.get("norm_mean")):
-            tp_stats = {
-                "mean": torch.tensor(track_row["norm_mean"], dtype=torch.float32),
-                "std": torch.tensor(track_row["norm_std"], dtype=torch.float32),
-                "median": torch.tensor(track_row["norm_median"], dtype=torch.float32),
-                "iqr": torch.tensor(track_row["norm_iqr"], dtype=torch.float32),
-            }
-            if self._channel_mode == "from_index":
-                return {"channel_0": {"timepoint_statistics": tp_stats}}
-            else:
-                ch_name = track_row.get("channel_name", "channel_0")
-                return {ch_name: {"timepoint_statistics": tp_stats}}
+        # Parquet path: norm columns present and value is not NA
+        norm_mean_arr = arrays.get("norm_mean")
+        if norm_mean_arr is not None:
+            norm_mean = norm_mean_arr[idx]
+            if norm_mean is not None and not (isinstance(norm_mean, float) and np.isnan(norm_mean)):
+                tp_stats = {
+                    "mean": torch.tensor(norm_mean, dtype=torch.float32),
+                    "std": torch.tensor(arrays["norm_std"][idx], dtype=torch.float32),
+                    "median": torch.tensor(arrays["norm_median"][idx], dtype=torch.float32),
+                    "iqr": torch.tensor(arrays["norm_iqr"][idx], dtype=torch.float32),
+                }
+                if self._channel_mode == "from_index":
+                    return {"channel_0": {"timepoint_statistics": tp_stats}}
+                else:
+                    ch_arr = arrays.get("channel_name")
+                    ch_name = ch_arr[idx] if ch_arr is not None else "channel_0"
+                    return {ch_name: {"timepoint_statistics": tp_stats}}
 
         # Fallback: read from zarr zattrs (old parquets without norm columns)
-        store_path = track_row["store_path"]
-        fov_name = track_row["fov_name"]
-        t = track_row["t"]
+        store_path = arrays["store_path"][idx]
+        fov_name = arrays["fov_name"][idx]
+        t = arrays["t"][idx]
         cache_key = (store_path, fov_name)
         if cache_key not in self._norm_meta_cache:
             position = self._get_position(store_path, fov_name)
@@ -717,7 +780,10 @@ class MultiExperimentTripletDataset(Dataset):
         return raw_norm_meta
 
     def _slice_patch(
-        self, track_row: pd.Series, forced_channel_names: list[str] | None = None
+        self,
+        arrays: dict[str, np.ndarray],
+        idx: int,
+        forced_channel_names: list[str] | None = None,
     ) -> tuple[
         "ts.TensorStore",
         NormMeta | None,
@@ -732,8 +798,10 @@ class MultiExperimentTripletDataset(Dataset):
 
         Parameters
         ----------
-        track_row : pd.Series
-            A single row from ``tracks`` or ``valid_anchors``.
+        arrays : dict[str, np.ndarray]
+            Pre-cached NumPy column arrays (``_va_arrays`` or ``_tr_arrays``).
+        idx : int
+            Positional row index into ``arrays``.
         forced_channel_names : list[str] or None
             Zarr channel names to read. When provided, only these channels
             are sliced from the zarr. None reads all channels.
@@ -745,15 +813,15 @@ class MultiExperimentTripletDataset(Dataset):
             scale factors ``(scale_z, scale_y, scale_x)``, and target size
             ``(z_window, patch_h, patch_w)``.
         """
-        store_path = track_row["store_path"]
-        fov_name = track_row["fov_name"]
-        exp_name = track_row["experiment"]
+        store_path = arrays["store_path"][idx]
+        fov_name = arrays["fov_name"][idx]
+        exp_name = arrays["experiment"][idx]
 
         image = self._get_tensorstore(store_path, fov_name)
 
-        t = track_row["t"]
-        y_center = int(track_row["y_clamp"])
-        x_center = int(track_row["x_clamp"])
+        t = int(arrays["t"][idx])
+        y_center = int(arrays["y_clamp"][idx])
+        x_center = int(arrays["x_clamp"][idx])
 
         # Per-experiment scale factors for physical-space normalization
         scale_z, scale_y, scale_x = self.index.registry.scale_factors[exp_name]
@@ -784,7 +852,7 @@ class MultiExperimentTripletDataset(Dataset):
         ]
 
         # Build norm_meta from parquet columns (preferred) or zarr zattrs (fallback).
-        raw_norm_meta = self._build_norm_meta(track_row, forced_channel_names)
+        raw_norm_meta = self._build_norm_meta(arrays, idx, forced_channel_names)
 
         # Use the configured extraction window as uniform target Z,
         # not the per-experiment capped range. This ensures all patches
@@ -801,15 +869,18 @@ class MultiExperimentTripletDataset(Dataset):
 
     def _slice_patches(
         self,
-        track_rows: pd.DataFrame,
+        arrays: dict[str, np.ndarray],
+        indices: list[int] | np.ndarray,
         forced_channel_names: list[list[str]] | None = None,
     ) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
         Parameters
         ----------
-        track_rows : pd.DataFrame
-            Multiple rows from ``tracks`` / ``valid_anchors``.
+        arrays : dict[str, np.ndarray]
+            Pre-cached NumPy column arrays (``_va_arrays`` or ``_tr_arrays``).
+        indices : list[int] or np.ndarray
+            Positional row indices into ``arrays``.
         forced_channel_names : list[list[str]] or None
             Per-sample zarr channel names to read. Each inner list
             contains the channel names for that sample.
@@ -824,9 +895,9 @@ class MultiExperimentTripletDataset(Dataset):
         norms = []
         scales = []
         targets = []
-        for i, (_, row) in enumerate(track_rows.iterrows()):
+        for i, idx in enumerate(indices):
             forced = forced_channel_names[i] if forced_channel_names is not None else None
-            patch, norm, scale, target = self._slice_patch(row, forced_channel_names=forced)
+            patch, norm, scale, target = self._slice_patch(arrays, int(idx), forced_channel_names=forced)
             patches.append(patch)
             norms.append(norm)
             scales.append(scale)
