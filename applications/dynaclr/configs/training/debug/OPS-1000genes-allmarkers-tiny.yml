@@ -1,0 +1,32 @@
+# Local fast_dev_run override for OPS-1000genes-allmarkers on a tiny slice.
+# Purpose: reproduce the full-config hang on a single GPU locally, where
+# iteration is ~60 sec/test instead of ~10 min/SLURM-cycle.
+#
+# Run:
+#   uv run viscy fit \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers.yml \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers-tiny.yml
+
+trainer:
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  fast_dev_run: 5
+  logger: null
+  callbacks: []
+  max_epochs: 1
+
+data:
+  init_args:
+    # 346k-row slice: 2 experiments × 5 markers × 20 genes
+    # Preserves [gene_name, marker] SupCon pairing and batch_group_by=marker.
+    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/tmp/ops_tiny.parquet
+    batch_size: 8
+    num_workers: 0
+    prefetch_factor: null
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null

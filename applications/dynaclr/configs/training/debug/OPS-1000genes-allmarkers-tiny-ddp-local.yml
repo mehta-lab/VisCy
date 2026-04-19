@@ -1,0 +1,33 @@
+# Local single-GPU "DDP" reproducer: strategy=ddp, devices=1.
+# Exercises the DDP wrap path without needing 2 GPUs. Keeps wandb ENABLED
+# (inherited from the parent OPS config) so we can test whether DDP-wrap
+# + wandb is the hang, without SLURM.
+#
+# Run:
+#   uv run viscy fit \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers.yml \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers-tiny-ddp-local.yml
+
+trainer:
+  strategy: ddp
+  devices: 1
+  num_nodes: 1
+  max_epochs: 1
+  limit_train_batches: 10
+  limit_val_batches: 5
+  val_check_interval: 0.5
+  num_sanity_val_steps: 0
+  callbacks: []
+
+data:
+  init_args:
+    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/tmp/ops_tiny.parquet
+    batch_size: 8
+    num_workers: 0
+    prefetch_factor: null
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null
