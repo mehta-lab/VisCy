@@ -1,0 +1,10 @@
+# Override: single-marker batches for DynaCLR-2D-MIP-BoC.
+# Matches the OPS strategy — every batch is one marker, forcing the model
+# to learn cellular features instead of channel-filter shortcuts.
+
+data:
+  init_args:
+    batch_group_by: marker
+    stratify_by: null
+    # Equal weighting across markers as a first pass. Switch to
+    # sqrt(cell_count) weights after measuring marker distribution.
