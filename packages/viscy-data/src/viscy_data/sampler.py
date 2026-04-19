@@ -153,14 +153,35 @@ class FlexibleBatchSampler(Sampler[list[int]]):
     # Precomputation
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _indices_by_key(keys: pd.Series) -> dict[str, np.ndarray]:
+        """Return ``{key_str: row_index_array}`` for every unique value in *keys*.
+
+        Fast path for Categorical keys uses NumPy ``cat.codes`` directly —
+        avoids materializing a pandas groupby iterator, which on large
+        (~16M row) Arrow-backed DataFrames routes every group slice
+        through ``pyarrow.compute.take`` and can take tens of minutes.
+
+        For non-Categorical keys, falls back to the pandas groupby.
+        """
+        # Categorical fast path — O(N) single vectorized pass per group.
+        if isinstance(keys.dtype, pd.CategoricalDtype):
+            codes = keys.cat.codes.to_numpy()
+            categories = list(keys.cat.categories)
+            out: dict[str, np.ndarray] = {}
+            for c, name in enumerate(categories):
+                rows = np.flatnonzero(codes == c)
+                if len(rows) > 0:
+                    out[str(name)] = rows
+            return out
+        # Generic fallback.
+        return {str(name): group.to_numpy() for name, group in keys.groupby(keys).groups.items()}
+
     def _precompute_groups(self) -> None:
         """Build index lookup tables from valid_anchors columns."""
-        # Per-group indices
         if self.batch_group_by is not None:
             group_keys = self._compute_strat_keys(self.valid_anchors, self.batch_group_by)
-            self._group_indices: dict[str, np.ndarray] = {
-                str(name): group.index.to_numpy() for name, group in self.valid_anchors.groupby(group_keys)
-            }
+            self._group_indices: dict[str, np.ndarray] = self._indices_by_key(group_keys)
             self._group_names: list[str] = list(self._group_indices.keys())
         else:
             self._group_indices = {}
@@ -174,16 +195,19 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         if self.stratify_by is not None:
             strat_keys = self._compute_strat_keys(self.valid_anchors, self.stratify_by)
 
-            # Global stratification indices
-            for key in strat_keys.unique():
-                self._strat_indices[key] = self.valid_anchors.index[strat_keys == key].to_numpy()
+            # Global stratification indices — NumPy fast path for Categorical.
+            self._strat_indices = self._indices_by_key(strat_keys)
             self._strat_names = list(self._strat_indices.keys())
 
-            # Per-group stratification indices
+            # Per-group × per-stratum indices. Using np.intersect1d between
+            # pre-built group and strat index arrays stays NumPy-native
+            # instead of reinvoking pandas groupby on the full 16M-row frame.
             if self.batch_group_by is not None:
-                group_keys = self._compute_strat_keys(self.valid_anchors, self.batch_group_by)
-                for (grp, strat_key), group in self.valid_anchors.groupby([group_keys, strat_keys]):
-                    self._group_strat_indices[(str(grp), str(strat_key))] = group.index.to_numpy()
+                for grp, g_idx in self._group_indices.items():
+                    for strat_key, s_idx in self._strat_indices.items():
+                        common = np.intersect1d(g_idx, s_idx, assume_unique=True)
+                        if len(common) > 0:
+                            self._group_strat_indices[(grp, strat_key)] = common
 
         # All indices
         self._all_indices = np.arange(len(self.valid_anchors))
@@ -212,23 +236,18 @@ class FlexibleBatchSampler(Sampler[list[int]]):
 
     @staticmethod
     def _compute_strat_keys(df: pd.DataFrame, columns: list[str]) -> pd.Series:
-        """Compute a single string key per row for grouping.
+        """Compute a single key per row for grouping.
 
-        Parameters
-        ----------
-        df : pd.DataFrame
-            DataFrame to compute keys for.
-        columns : list[str]
-            Column names to combine into group keys.
+        For a single column, returns the raw Series — pandas ``groupby``
+        handles Categorical / string / numeric dtypes directly, and
+        ``df.col.astype(str)`` over an 80M-row Categorical allocates a
+        Python-object array that can spike 5-8 GiB transient RAM per call.
 
-        Returns
-        -------
-        pd.Series
-            String keys, one per row. Single-column uses values directly;
-            multi-column joins with ``"|"``.
+        For multi-column keys, falls back to the ``"|"``-joined string form
+        which is unavoidable with pandas groupby today.
         """
         if len(columns) == 1:
-            return df[columns[0]].astype(str)
+            return df[columns[0]]
         return df[columns].astype(str).agg("|".join, axis=1)
 
     # ------------------------------------------------------------------
@@ -249,13 +268,29 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         return math.ceil(total_batches / self.num_replicas)
 
     def __iter__(self) -> Iterator[list[int]]:
-        """Yield batch-sized lists of integer indices."""
+        """Yield batch-sized lists of integer indices.
+
+        Builds batches lazily so the first batch is ready in milliseconds
+        instead of blocking on a full-epoch materialization. Every rank
+        still calls ``_build_one_batch`` on every index so the RNG draws
+        stay identical to the list-based implementation — only the
+        *yield* is rank-filtered, not the sampling. DDP correctness is
+        therefore bit-identical to the previous implementation; the only
+        change is that the main thread sees batch 0 after one
+        ``_build_one_batch`` call instead of ``total_batches`` calls.
+
+        ``limit_train_batches`` interacts with this: Lightning stops
+        pulling from the generator after its cap, so we never pay for
+        the unused suffix of the epoch.
+        """
         rng = np.random.default_rng(self.seed + self.epoch)
         total_batches = len(self.valid_anchors) // self.batch_size
-        all_batches = [self._build_one_batch(rng) for _ in range(total_batches)]
-        # DDP: each rank takes its interleaved slice
-        my_batches = all_batches[self.rank :: self.num_replicas]
-        yield from my_batches
+        rank = self.rank
+        replicas = self.num_replicas
+        for i in range(total_batches):
+            batch = self._build_one_batch(rng)
+            if i % replicas == rank:
+                yield batch
 
     # ------------------------------------------------------------------
     # Batch construction
