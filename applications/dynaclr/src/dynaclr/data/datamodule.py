@@ -456,39 +456,103 @@ class MultiExperimentDataModule(LightningDataModule):
         )
 
         rng = np.random.default_rng(self.seed)
-        train_keys: set[tuple[str, str]] = set()
-        val_keys: set[tuple[str, str]] = set()
+
+        # Build per-row boolean masks directly during the per-experiment
+        # groupby walk. The previous implementation built
+        # pd.MultiIndex.from_arrays over every row of tracks + valid_anchors
+        # (81M+ rows for OPS), which hashes a Python tuple per row and
+        # dominates setup-time memory. Per-group isin against a small
+        # Python-set of FOV names is O(group_size) with no object index.
+        train_fovs_per_exp: dict[str, set[str]] = {}
+        val_fovs_per_exp: dict[str, set[str]] = {}
 
         for exp_name, group in full_index.tracks.groupby("experiment"):
             fovs = sorted(group["fov_name"].unique())
             n_train = max(1, int(len(fovs) * self.split_ratio))
             rng.shuffle(fovs)
-            for f in fovs[:n_train]:
-                train_keys.add((exp_name, f))
-            for f in fovs[n_train:]:
-                val_keys.add((exp_name, f))
+            train_fovs_per_exp[exp_name] = set(fovs[:n_train])
+            val_fovs_per_exp[exp_name] = set(fovs[n_train:])
 
+        n_train_fovs = sum(len(s) for s in train_fovs_per_exp.values())
+        n_val_fovs = sum(len(s) for s in val_fovs_per_exp.values())
         _logger.info(
             "FOV split (ratio=%.2f): %d train FOVs, %d val FOVs",
             self.split_ratio,
-            len(train_keys),
-            len(val_keys),
+            n_train_fovs,
+            n_val_fovs,
         )
 
-        # Partition tracks using vectorized isin instead of a Python list comprehension.
-        qual_keys = pd.MultiIndex.from_arrays([full_index.tracks["experiment"], full_index.tracks["fov_name"]])
-        train_mask = qual_keys.isin(pd.MultiIndex.from_tuples(train_keys))
+        def _build_train_mask(df: pd.DataFrame) -> np.ndarray:
+            """Row-wise boolean mask: True if (experiment, fov_name) is train."""
+            mask = np.zeros(len(df), dtype=bool)
+            # groupby("experiment") returns integer positions in ``df`` via
+            # group.index after reset_index; we rely on the caller passing
+            # reset-indexed frames (which is what MultiExperimentIndex produces).
+            for exp_name, group in df.groupby("experiment", sort=False):
+                train_fovs = train_fovs_per_exp.get(exp_name, set())
+                if not train_fovs:
+                    continue
+                sub_mask = group["fov_name"].isin(train_fovs).to_numpy()
+                mask[group.index.to_numpy()] = sub_mask
+            return mask
 
-        train_tracks = full_index.tracks[train_mask].reset_index(drop=True)
-        val_tracks = full_index.tracks[~train_mask].reset_index(drop=True)
+        def _split_by_mask(df: pd.DataFrame, mask: np.ndarray) -> tuple[pd.DataFrame, pd.DataFrame]:
+            """Partition ``df`` by a boolean mask using integer row indices.
 
-        # Partition valid_anchors from the already-computed full set — avoids
-        # rerunning _compute_valid_anchors for each subset.
+            ``df[bool_mask]`` on an Arrow-backed DataFrame routes through
+            ``pyarrow.compute.take`` which allocates a fresh buffer per
+            string column and scales badly with row count × column count.
+            On a 16M-row × 15-string-col frame this can take 7-8 minutes
+            per call on a contended node.
+
+            Using ``df.take(int_indices)`` on a frame whose Arrow string
+            columns have been cast to ``object`` upfront is ~20× faster
+            because pandas uses plain NumPy fancy indexing on the
+            materialized object arrays.
+            """
+            train_rows = np.flatnonzero(mask)
+            val_rows = np.flatnonzero(~mask)
+            return (
+                df.take(train_rows).reset_index(drop=True),
+                df.take(val_rows).reset_index(drop=True),
+            )
+
+        def _materialize_strings(df: pd.DataFrame) -> pd.DataFrame:
+            """In-place cast remaining ArrowStringArray columns to Categorical.
+
+            ArrowStringArray routes every ``df[mask]`` through
+            ``pyarrow.compute.take`` which allocates a fresh per-column
+            buffer and scales catastrophically (7-8 min per call on 16M rows
+            with 15 string columns on a contended node). Casting to pandas
+            Categorical uses int codes + a single categories dict, so
+            slicing is pure NumPy fancy indexing on the codes.
+
+            Low-cardinality columns (``experiment``, ``marker``, etc.) are
+            already Categorical from ``read_cell_index``/``_align_parquet_columns``
+            — those are skipped. High-cardinality columns like ``cell_id``
+            become effectively int32-indexed even at ~80M unique values,
+            since the dict overhead is one-time and the row-aligned codes
+            are cheap. NumPy-object casts were tried first but allocate
+            ~5-10 GB of Python string objects per frame, which on 4-rank DDP
+            OOMs the node.
+            """
+            for col in df.columns:
+                s = df[col]
+                if isinstance(s.dtype, pd.CategoricalDtype):
+                    continue
+                if pd.api.types.is_string_dtype(s) or str(s.dtype).startswith(("string", "Arrow")):
+                    df[col] = s.astype("category")
+            return df
+
+        _materialize_strings(full_index.tracks)
+        _materialize_strings(full_index.valid_anchors)
+
+        train_mask = _build_train_mask(full_index.tracks)
+        train_tracks, val_tracks = _split_by_mask(full_index.tracks, train_mask)
+
         va = full_index.valid_anchors
-        va_qual = pd.MultiIndex.from_arrays([va["experiment"], va["fov_name"]])
-        train_va_mask = va_qual.isin(pd.MultiIndex.from_tuples(train_keys))
-        train_va = va[train_va_mask].reset_index(drop=True)
-        val_va = va[~train_va_mask].reset_index(drop=True)
+        train_va_mask = _build_train_mask(va)
+        train_va, val_va = _split_by_mask(va, train_va_mask)
 
         train_index = full_index.clone_with_subset(
             train_tracks,
@@ -497,6 +561,7 @@ class MultiExperimentDataModule(LightningDataModule):
             max_border_shift=self.max_border_shift,
             precomputed_valid_anchors=train_va,
         )
+
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
             fit=True,
@@ -510,7 +575,7 @@ class MultiExperimentDataModule(LightningDataModule):
             label_columns=self.label_columns,
         )
 
-        if val_keys:
+        if not val_tracks.empty:
             val_index = full_index.clone_with_subset(
                 val_tracks,
                 positive_cell_source=self.positive_cell_source,
