@@ -184,6 +184,13 @@ def write_cell_index(
 def read_cell_index(path: str | Path) -> pd.DataFrame:
     """Read a cell index parquet into a pandas DataFrame.
 
+    String columns are materialized as NumPy ``object`` arrays instead of
+    ``ArrowStringArray``. ArrowStringArray-backed columns route every
+    boolean mask slice through ``pyarrow.compute.take``, which allocates
+    a fresh buffer per string column and can spike peak RSS by 50+ GiB
+    on 80M-row indices during train/val FOV partitioning. NumPy object
+    columns make ``df[mask]`` a cheap gather.
+
     Parameters
     ----------
     path : str | Path
@@ -195,7 +202,31 @@ def read_cell_index(path: str | Path) -> pd.DataFrame:
         Cell index with correct dtypes.
     """
     table = pq.read_table(str(path), schema=CELL_INDEX_SCHEMA)
-    return table.to_pandas()
+    df = table.to_pandas(use_threads=True)
+    # ArrowStringArray columns with low cardinality (experiment, fov_name,
+    # marker, store_path, well, microscope, organelle, reporter) become
+    # Categorical to make ``df[mask]`` a fast int-code gather. Other string
+    # columns (cell_id, tracks_path, global_track_id, lineage_id, etc.) are
+    # high cardinality and are already read via the NumPy column cache in
+    # the dataset, so leave them as ArrowStringArray to avoid allocating
+    # millions of Python string objects here.
+    # NB: ``fov`` and ``well`` are NOT cast here because ``_align_parquet_columns``
+    # downstream rewrites ``fov_name`` via string concatenation, which pandas
+    # does not support on Categorical. We cast ``fov_name`` later, after the
+    # prefix rewrite, in the runtime index layer.
+    _categorical_cols = (
+        "experiment",
+        "marker",
+        "store_path",
+        "microscope",
+        "organelle",
+        "reporter",
+        "channel_name",
+    )
+    for col in _categorical_cols:
+        if col in df.columns:
+            df[col] = df[col].astype("category")
+    return df
 
 
 # ---------------------------------------------------------------------------
