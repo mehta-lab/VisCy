@@ -235,7 +235,7 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
         (pixel_metrics, config.save.pixel_csv_filename, config.save.pixel_metrics_filename, "pixel_metrics"),
         (feature_metrics, config.save.feature_csv_filename, config.save.feature_metrics_filename, "feature_metrics"),
     ):
-        if metrics is None:
+        if not metrics:
             continue
         df = pd.DataFrame(metrics)
         df.to_csv(save_dir / csv_name, index=False)
