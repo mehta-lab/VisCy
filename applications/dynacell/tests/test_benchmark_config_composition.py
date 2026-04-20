@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ TRAIN_LEAVES = [
     ("er", "fnet3d_paper"),
     ("er", "unetvit3d"),
     ("er", "unext2"),
+    ("er", "fcmae_vscyto3d_scratch"),
+    ("er", "fcmae_vscyto3d_pretrained"),
     ("mito", "celldiff"),
     ("mito", "fnet3d_paper"),
     ("nucleus", "celldiff"),
@@ -66,6 +69,50 @@ def test_unext2_train_leaf_inherits_topology_and_logger() -> None:
     assert t["logger"]["class_path"] == "lightning.pytorch.loggers.WandbLogger"
     assert t["logger"]["init_args"]["project"] == "dynacell"
     assert t["logger"]["init_args"]["name"] == "UNeXt2_iPSC_SEC61B"
+
+
+def _strip_run_identity(cfg: dict) -> dict:
+    """Remove fields expected to differ between scratch and pretrained leaves.
+
+    Returns a deep-copied config with ``encoder_only``, ``ckpt_path``, and
+    all per-leaf identifier/path fields removed. What remains must be
+    byte-equal between the scratch and pretrained FCMAE leaves.
+    """
+    cfg = copy.deepcopy(cfg)
+    init = cfg["model"]["init_args"]
+    init.pop("encoder_only", None)
+    init.pop("ckpt_path", None)
+    cfg.pop("benchmark", None)
+    cfg.pop("launcher", None)
+    logger_init = cfg["trainer"]["logger"]["init_args"]
+    logger_init.pop("name", None)
+    logger_init.pop("save_dir", None)
+    for cb in cfg["trainer"].get("callbacks", []):
+        if cb.get("class_path", "").endswith("ModelCheckpoint"):
+            cb["init_args"].pop("dirpath", None)
+    return cfg
+
+
+def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init() -> None:
+    """Scientific invariant: pretrained leaf equals scratch leaf modulo init.
+
+    Guards against silent drift in lr / loss / crop / augs / model_config /
+    trainer / epochs between the two FCMAE leaves — such drift would
+    invalidate the pretrained-vs-scratch comparison.
+    """
+    scratch_leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "fcmae_vscyto3d_scratch.yml"
+    pretrained_leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "fcmae_vscyto3d_pretrained.yml"
+    cfg_scratch = load_composed_config(scratch_leaf)
+    cfg_pretrained = load_composed_config(pretrained_leaf)
+
+    pt_init = cfg_pretrained["model"]["init_args"]
+    assert pt_init.get("encoder_only") is True
+    assert pt_init.get("ckpt_path") == ("/hpc/projects/virtual_staining/models/mehta-lab/VSCyto3D/fcmae.ckpt")
+    sc_init = cfg_scratch["model"]["init_args"]
+    assert not sc_init.get("encoder_only")
+    assert sc_init.get("ckpt_path") is None
+
+    assert _strip_run_identity(cfg_scratch) == _strip_run_identity(cfg_pretrained)
 
 
 def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:
