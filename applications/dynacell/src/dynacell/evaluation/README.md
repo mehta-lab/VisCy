@@ -43,6 +43,7 @@ right group and point at the prediction / output paths.
 | `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. |
 | `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. |
 | `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. |
+| `benchmark` | `<org>/<train_set>/<model>/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. |
 
 Selecting a group on the CLI: `<group>=<option>` (no `+` prefix needed — groups are
 declared as `optional` in `eval.yaml`).
