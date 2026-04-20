@@ -183,16 +183,8 @@ def _maybe_compose_config() -> None:
     if config_idx is None or config_path_str is None:
         return
     config_path = Path(config_path_str)
-    try:
-        with open(config_path) as f:
-            raw = yaml.safe_load(f)
-    except (OSError, yaml.YAMLError) as e:
-        logging.getLogger(__name__).warning(
-            "viscy_utils._maybe_compose_config: failed to read %s (%s); falling through to LightningCLI",
-            config_path,
-            e,
-        )
-        return
+    with open(config_path) as f:
+        raw = yaml.safe_load(f)
     if not isinstance(raw, dict):
         return
     has_base = "base" in raw
