@@ -31,7 +31,18 @@ def _require_microssim():
 
 def _require_cubic():
     if ascupy is None:
-        raise ImportError("cubic is required for resolution and feature metrics. Install it with: pip install cubic-s2")
+        raise ImportError(
+            "cubic is required for resolution and feature metrics. "
+            "Install via the `eval` extra: `uv sync --extra eval`."
+        )
+    try:
+        import cucim  # noqa: F401
+        import cupy  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            f"{e.name} is required for GPU-backed metrics. Install cupy-cuda12x "
+            "and cucim-cu12 via the `eval_gpu` extra: `uv sync --extra eval_gpu`."
+        ) from e
 
 
 @torch.inference_mode()
