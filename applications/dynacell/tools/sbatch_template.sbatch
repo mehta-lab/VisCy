@@ -2,6 +2,11 @@
 
 @@sbatch_directives
 
+# Shared-group writes: make every dir/file created by this job (mkdirs below,
+# wandb run folders, Lightning ModelCheckpoint, HCSPredictionWriter) g+w.
+# Compute-node login umask is not reliably 0002, so set it explicitly.
+umask 0002
+
 mkdir -p -m 775 @@run_root/slurm
 mkdir -p -m 775 @@run_root/checkpoints
 

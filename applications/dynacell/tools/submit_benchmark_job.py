@@ -17,6 +17,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shlex
 import string
@@ -148,6 +149,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def submit(argv: list[str] | None = None) -> int:
     """Render and submit the leaf; return process exit code."""
+    # Shared-group writes: resolved/ and slurm/ artifacts land on a shared
+    # project path (`launcher.run_root`), so guarantee g+w regardless of the
+    # caller's login umask. The sbatch template re-asserts umask 0002 on the
+    # compute node for wandb/checkpoint/prediction outputs.
+    os.umask(0o002)
     args = _parse_args(argv)
 
     composed = load_composed_config(args.leaf)
