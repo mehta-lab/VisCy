@@ -1,0 +1,16 @@
+# @package _global_
+# Benchmark eval leaf: Membrane predicted by CellDiff on iPSC confocal.
+defaults:
+  - override /target: membrane
+  - override /predict_set: ipsc_confocal
+  - override /feature_extractor/dinov3: lvd1689m
+  - override /feature_extractor/dynaclr: default
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_sliding_window.zarr
+  gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/membrane
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_memb_celldiff_sliding_window

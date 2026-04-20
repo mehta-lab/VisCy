@@ -106,6 +106,28 @@ uv run dynacell evaluate … feature_extractor/dynaclr=default \
 Omitting the feature-extractor groups (or their required fields) when
 `compute_feature_metrics=true` raises `MissingMandatoryValue` at access time.
 
+### Benchmark eval leaves
+
+Canonical evaluations for the virtual-staining benchmarks are checked in under
+`_configs/benchmark/<organelle>/<train_set>/<model>/<predict_set>.yaml`. Each
+leaf pins every group selection, paths, and the save directory — run one by
+selecting it as the `benchmark` group:
+
+```bash
+uv run dynacell evaluate benchmark=er/ipsc_confocal/celldiff/ipsc_confocal
+```
+
+The current set mirrors the predict benchmark tree one-to-one:
+`(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides still
+apply on top (e.g. `limit_positions=1`, `compute_feature_metrics=false`,
+`save.save_dir=/tmp/…` for smoke tests).
+
+Leaves live inside the package (under `_configs/`) rather than alongside the
+predict/train leaves at `configs/benchmarks/virtual_staining/` — Hydra needs
+every referenced group file on a single search path, and
+`@hydra.main(config_path='_configs')` pins that path at the package. See the
+top-level benchmarks README for the predict/train counterparts.
+
 ### Force recompute
 
 The `force_recompute` block has one flag per cacheable artifact plus a shortcut:

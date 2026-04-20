@@ -36,6 +36,13 @@ virtual_staining/
   predict/<org>/<train_set>/<model>/<predict_set>.yml
 ```
 
+**Eval leaves live elsewhere.** Evaluation uses Hydra (not LightningCLI), and
+Hydra needs every group file on a single search path anchored at the package.
+Canonical eval leaves therefore sit inside the dynacell package at
+`applications/dynacell/src/dynacell/evaluation/_configs/benchmark/<org>/<train_set>/<model>/<predict_set>.yaml`
+and are invoked via `dynacell evaluate benchmark=<path>`. See
+`applications/dynacell/src/dynacell/evaluation/README.md` for details.
+
 ## Composition order
 
 Last wins via deep-merge. Lists replace wholesale — layers that own list
