@@ -625,17 +625,40 @@ class MultiExperimentDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> ThreadDataLoader | None:
-        """Return validation data loader."""
+        """Return validation data loader.
+
+        Uses the same ``FlexibleBatchSampler`` as training so ``loss/val``
+        is measured on batches whose composition matches the training
+        regime — e.g. single-marker batches when ``batch_group_by="marker"``,
+        or perturbation-stratified batches when ``stratify_by`` is set.
+
+        Without this, val was a plain sequential DataLoader that served
+        one experiment/marker at a time (all 4 example batches end up as
+        the same marker), and DDP sync of ``loss/val`` silently desynced
+        across ranks because each rank's shard had a different set of
+        markers.
+
+        Temporal enrichment is disabled for val (we want a deterministic
+        representative sample, not oversampled biology-of-interest windows).
+        """
         if self.val_dataset is None:
             return None
+        sampler = FlexibleBatchSampler(
+            valid_anchors=self.val_dataset.index.valid_anchors,
+            batch_size=self.batch_size,
+            batch_group_by=self.batch_group_by,
+            leaky=self.leaky,
+            group_weights=self.group_weights,
+            stratify_by=self.stratify_by,
+            temporal_enrichment=False,
+            seed=self.seed,
+        )
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
             buffer_size=self.buffer_size,
-            batch_size=self.batch_size,
+            batch_sampler=sampler,
             num_workers=self.num_workers,
-            shuffle=self.shuffle_val,
-            drop_last=False,
             pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor,
             collate_fn=lambda x: x,

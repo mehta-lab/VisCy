@@ -21,7 +21,7 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from scipy.stats import spearmanr
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 
 from viscy_data._typing import TripletSample
@@ -48,8 +48,24 @@ def effective_rank(features: np.ndarray) -> float:
     float
         Effective rank (scalar >= 1).
     """
+    # Guard against NaN/Inf in features — np.linalg.svd raises
+    # "SVD did not converge" on non-finite input, which crashes the whole
+    # run from inside a validation callback. Drop affected rows and return
+    # NaN when no finite rows remain.
+    finite_mask = np.isfinite(features).all(axis=1)
+    if not finite_mask.all():
+        _logger.warning(
+            "effective_rank: %d/%d rows contain NaN/Inf; skipping those",
+            (~finite_mask).sum(),
+            len(features),
+        )
+        features = features[finite_mask]
+    if features.shape[0] < 2:
+        return float("nan")
     _, s, _ = np.linalg.svd(features, full_matrices=False)
     s = s[s > 1e-10]
+    if s.size == 0:
+        return float("nan")
     p = s / s.sum()
     entropy = -(p * np.log(p)).sum()
     return float(np.exp(entropy))
@@ -114,7 +130,8 @@ class OnlineEvalCallback(Callback):
     Accumulates validation embeddings every ``every_n_epochs`` epochs
     and computes three metrics:
 
-    - ``metrics/knn_acc/{label_key}/val`` — k-NN accuracy (5-fold CV)
+    - ``metrics/knn_acc/{label_key}/val`` — k-NN accuracy (5-fold CV or
+      stratified holdout, configurable via ``knn_eval_mode``)
     - ``metrics/effective_rank/val`` — effective rank of covariance
     - ``metrics/temporal_smoothness/val`` — Spearman rho (distance vs dt)
 
@@ -133,6 +150,15 @@ class OnlineEvalCallback(Callback):
         Metadata key for track identity (temporal smoothness).
     timepoint_key : str
         Metadata key for timepoint (temporal smoothness).
+    knn_eval_mode : {"cv", "holdout"}
+        How to score the k-NN probe. ``"cv"`` runs 5-fold stratified CV
+        (default; good for few-class probes like 40 markers). ``"holdout"``
+        runs a single stratified 80/20 train/test split — ~5x cheaper and
+        tolerates classes with only 2 samples, which is the right choice
+        for many-class probes (e.g. 1001-gene perturbation).
+    holdout_test_size : float
+        Fraction of samples held out for scoring when
+        ``knn_eval_mode="holdout"``. Ignored in CV mode.
     """
 
     def __init__(
@@ -142,6 +168,8 @@ class OnlineEvalCallback(Callback):
         k: int = 20,
         track_id_key: str = "global_track_id",
         timepoint_key: str = "t",
+        knn_eval_mode: Literal["cv", "holdout"] = "cv",
+        holdout_test_size: float = 0.2,
     ):
         super().__init__()
         self.every_n_epochs = every_n_epochs
@@ -149,6 +177,8 @@ class OnlineEvalCallback(Callback):
         self.k = k
         self.track_id_key = track_id_key
         self.timepoint_key = timepoint_key
+        self.knn_eval_mode = knn_eval_mode
+        self.holdout_test_size = holdout_test_size
         self._collecting = False
         self._features: list[torch.Tensor] = []
         self._meta: list[dict] = []
@@ -212,10 +242,36 @@ class OnlineEvalCallback(Callback):
         if labels is not None and len(np.unique(labels)) >= 2:
             k = min(self.k, n_samples - 1)
             knn = KNeighborsClassifier(n_neighbors=k, metric="cosine")
-            cv_folds = min(5, min(np.bincount(labels)))
-            if cv_folds >= 2:
+            min_class_count = int(min(np.bincount(labels)))
+            mode = self.knn_eval_mode
+            # Auto-degrade CV -> holdout when the smallest class has < 2
+            # samples (CV would skip silently). Holdout mode still requires
+            # >= 2 per class for stratified splitting.
+            if mode == "cv" and min_class_count < 2:
+                mode = "holdout"
+            if mode == "cv":
+                cv_folds = min(5, min_class_count)
                 scores = cross_val_score(knn, features_np, labels, cv=cv_folds)
                 knn_acc = float(scores.mean())
+                eval_desc = f"cv={cv_folds}"
+            elif mode == "holdout" and min_class_count >= 2:
+                x_train, x_test, y_train, y_test = train_test_split(
+                    features_np,
+                    labels,
+                    test_size=self.holdout_test_size,
+                    stratify=labels,
+                    random_state=0,
+                )
+                knn.fit(x_train, y_train)
+                knn_acc = float(knn.score(x_test, y_test))
+                eval_desc = f"holdout={self.holdout_test_size:.2f}"
+            else:
+                knn_acc = None
+                _logger.debug(
+                    f"[OnlineEval epoch {epoch}] Skipping k-NN: "
+                    f"smallest class has {min_class_count} samples (need >=2)."
+                )
+            if knn_acc is not None:
                 pl_module.log(
                     f"metrics/knn_acc/{self.label_key}/val",
                     knn_acc,
@@ -223,14 +279,7 @@ class OnlineEvalCallback(Callback):
                     logger=True,
                     rank_zero_only=True,
                 )
-                _logger.info(
-                    f"[OnlineEval epoch {epoch}] knn_acc({self.label_key}, k={k})={knn_acc:.3f} (cv={cv_folds})"
-                )
-            else:
-                _logger.debug(
-                    f"[OnlineEval epoch {epoch}] Skipping k-NN: "
-                    f"smallest class has {min(np.bincount(labels))} samples (need >=2)."
-                )
+                _logger.info(f"[OnlineEval epoch {epoch}] knn_acc({self.label_key}, k={k})={knn_acc:.3f} ({eval_desc})")
 
         # --- Temporal smoothness (requires track_id + timepoint) ---
         track_ids = self._extract_array(self.track_id_key, source="meta")

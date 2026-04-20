@@ -67,9 +67,7 @@ from viscy_transforms import (
 
 # %%
 # --- Data source ---
-CELL_INDEX_PATH = (
-    "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/DynaCLR-3D-BagOfChannels-v2.parquet"
-)
+CELL_INDEX_PATH = "/hpc/projects/organelle_phenotyping/models/collections/DynaCLR-3D-BagOfChannels-v4.parquet"
 
 # --- Patch extraction ---
 Z_WINDOW = 32
@@ -310,6 +308,15 @@ dm = MultiExperimentDataModule(
     augmentations=AUGMENTATIONS,
 )
 dm.setup("fit")
+
+
+# Fake a minimal trainer so on_after_batch_transfer can check .predicting
+class _FakeTrainer:
+    predicting = False
+    training = True
+
+
+dm.trainer = _FakeTrainer()
 print("DataModule ready.\n")
 
 va = dm.train_dataset.index.valid_anchors
@@ -353,7 +360,7 @@ for batch_idx in range(N_BATCHES):
     raw_batch = copy.deepcopy(batch)
     aug_batch = dm.on_after_batch_transfer(batch, dataloader_idx=0) if SHOW_AUGMENTED else None
 
-    save_path = OUTPUT_DIR / f"batch_{batch_idx}.png" if OUTPUT_DIR else None
+    save_path = OUTPUT_DIR / f"train_batch_{batch_idx}.png" if OUTPUT_DIR else None
     plot_batch(
         raw_batch=raw_batch,
         aug_batch=aug_batch,
@@ -367,32 +374,70 @@ for batch_idx in range(N_BATCHES):
 print("\nDone.")
 
 # %% [markdown]
+# ## Validation dataloader
+#
+# The val dataloader uses the same dataset class but a different subset
+# (train/val FOV split). Worth inspecting because DDP validation-epoch-end
+# syncs `loss/val` across ranks — a bad val batch on any rank can stall
+# the whole sync, or produce NaN features that poison metrics aggregation.
+#
+# We also scan the raw val batch for NaN/Inf before and after normalization,
+# to catch any rows the preprocess step failed to filter.
+
+# %%
+val_dl = dm.val_dataloader()
+val_iter = iter(val_dl)
+
+nan_batches_raw = 0
+nan_batches_norm = 0
+for batch_idx in range(N_BATCHES):
+    print(f"\n--- Val batch {batch_idx} ---")
+    batch = next(val_iter)
+
+    meta = batch["anchor_meta"]
+    n = len(meta)
+    markers = Counter(m.get("marker", "?") for m in meta)
+    perts = Counter(m.get("perturbation", "?") for m in meta)
+    print(f"  {n} samples, markers={dict(markers)}, perturbations={dict(perts)}")
+
+    raw_anchor = batch["anchor"]
+    raw_pos = batch.get("positive")
+    raw_bad = raw_anchor.isnan().any() or raw_anchor.isinf().any()
+    if raw_pos is not None:
+        raw_bad = raw_bad or raw_pos.isnan().any() or raw_pos.isinf().any()
+    if raw_bad:
+        nan_batches_raw += 1
+        print("  ⚠ raw val batch contains NaN/Inf")
+
+    raw_batch = copy.deepcopy(batch)
+    aug_batch = dm.on_after_batch_transfer(batch, dataloader_idx=1) if SHOW_AUGMENTED else None
+
+    if aug_batch is not None:
+        aa = aug_batch["anchor"]
+        ap = aug_batch.get("positive")
+        norm_bad = aa.isnan().any() or aa.isinf().any()
+        if ap is not None:
+            norm_bad = norm_bad or ap.isnan().any() or ap.isinf().any()
+        if norm_bad and not raw_bad:
+            nan_batches_norm += 1
+            print("  ⚠ post-normalize val batch contains NaN/Inf")
+
+    save_path = OUTPUT_DIR / f"val_batch_{batch_idx}.png" if OUTPUT_DIR else None
+    plot_batch(
+        raw_batch=raw_batch,
+        aug_batch=aug_batch,
+        batch_idx=batch_idx,
+        n_show=N_SHOW,
+        show_augmented=SHOW_AUGMENTED,
+        save_path=save_path,
+    )
+
+print(f"\nVal scan over {N_BATCHES} batches: raw NaN/Inf={nan_batches_raw}, post-norm NaN/Inf={nan_batches_norm}")
+
+# %% [markdown]
 # ## Re-run additional batches
 #
 # Edit ``batch_idx`` and re-run this cell to inspect more batches
 # without restarting the dataloader iterator.
-
-# %%
-batch_idx = 9
-batch = next(dl_iter)
-
-meta = batch["anchor_meta"]
-n = len(meta)
-markers = Counter(m.get("marker", "?") for m in meta)
-perts = Counter(m.get("perturbation", "?") for m in meta)
-print(f"  {n} samples, markers={dict(markers)}, perturbations={dict(perts)}")
-
-raw_batch = copy.deepcopy(batch)
-aug_batch = dm.on_after_batch_transfer(batch, dataloader_idx=0) if SHOW_AUGMENTED else None
-
-save_path = OUTPUT_DIR / f"batch_{batch_idx}.png" if OUTPUT_DIR else None
-plot_batch(
-    raw_batch=raw_batch,
-    aug_batch=aug_batch,
-    batch_idx=batch_idx,
-    n_show=N_SHOW,
-    show_augmented=SHOW_AUGMENTED,
-    save_path=save_path,
-)
 
 # %%
