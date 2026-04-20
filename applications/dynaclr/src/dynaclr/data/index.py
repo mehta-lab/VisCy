@@ -559,32 +559,42 @@ class MultiExperimentIndex:
 
         # Temporal mode: keep only anchors that have a positive at t+tau.
         # For each experiment, check whether (lineage_id, t+tau) exists
-        # for any tau in [min_f, max_f] (excluding 0).
+        # for any tau in [min_f, max_f] (excluding 0). In flat-parquet
+        # mode (one row per cell × channel), the dataset restricts
+        # candidates to the same marker at t+tau, so ``marker`` must be
+        # part of the match key here. Otherwise an anchor at (lid, marker=A, t)
+        # could pass validation because (lid, marker=B, t+1) exists, but
+        # fail at sample time because no (lid, marker=A, t+1) exists.
+        filter_by_marker = "marker" in self.tracks.columns
+        key_cols = ["lineage_id", "marker", "t"] if filter_by_marker else ["lineage_id", "t"]
         valid_mask = np.zeros(len(self.tracks), dtype=bool)
 
         for exp in self.registry.experiments:
             min_f, max_f = self.registry.tau_range_frames(exp.name, tau_range_hours)
             exp_mask = self.tracks["experiment"] == exp.name
-            exp_df = self.tracks.loc[exp_mask, ["lineage_id", "t"]]
+            exp_df = self.tracks.loc[exp_mask, key_cols]
             if exp_df.empty:
                 continue
 
             taus = [tau for tau in range(min_f, max_f + 1) if tau != 0]
 
-            # Unique (lineage_id, t) pairs as a MultiIndex for O(1) isin checks.
-            existing = exp_df[["lineage_id", "t"]].drop_duplicates()
+            # Unique key tuples as a MultiIndex for O(1) isin checks.
+            existing = exp_df.drop_duplicates()
             existing_mi = pd.MultiIndex.from_frame(existing)
 
-            # For each unique anchor (lid, t), check if (lid, t+tau) exists for any tau.
-            # Iterate over ~15 tau values instead of millions of cells.
+            # For each unique anchor key, check if the shifted key (same
+            # lineage_id/marker, t+tau) exists for any tau.
             found_any = np.zeros(len(existing), dtype=bool)
+            t_vals = existing["t"].to_numpy()
+            non_t_arrays = [existing[c].to_numpy() for c in key_cols if c != "t"]
             for tau in taus:
-                targets = pd.MultiIndex.from_arrays([existing["lineage_id"].to_numpy(), existing["t"].to_numpy() + tau])
+                shifted_arrays = non_t_arrays + [t_vals + tau]
+                targets = pd.MultiIndex.from_arrays(shifted_arrays)
                 found_any |= targets.isin(existing_mi)
 
             # Map valid unique pairs back to all rows in the experiment.
             valid_pairs_mi = pd.MultiIndex.from_frame(existing[found_any])
-            row_keys = pd.MultiIndex.from_frame(exp_df[["lineage_id", "t"]])
+            row_keys = pd.MultiIndex.from_frame(exp_df)
             valid_mask[exp_mask.to_numpy()] = row_keys.isin(valid_pairs_mi)
 
         return self.tracks[valid_mask].reset_index(drop=True)
