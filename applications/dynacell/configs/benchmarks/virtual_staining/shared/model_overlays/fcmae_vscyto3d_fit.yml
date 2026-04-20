@@ -1,8 +1,12 @@
 # Shared FCMAE-class (FullyConvolutionalMAE with pretraining=False) fit
-# overlay. Mirrors the canonical vs_test/finetune_3d.py:load_model recipe.
-# Used by both fcmae_vscyto3d_scratch.yml and fcmae_vscyto3d_pretrained.yml
-# — encoder_only + ckpt_path are set only in the pretrained leaf so init
-# is the only difference.
+# overlay. Model/loss/schedule come from the canonical
+# vs_test/finetune_3d.py:load_model recipe; data pipeline (bs=32, z=20,
+# yx=384) and lr=0.0004 match the retuned unext2_fit.yml Run 4 baseline
+# so the FCMAE runs are directly comparable to the timm-backed unext2
+# job on the same data throughput. Used by both
+# fcmae_vscyto3d_scratch.yml and fcmae_vscyto3d_pretrained.yml —
+# encoder_only + ckpt_path are set only in the pretrained leaf so init
+# is the only difference between the two.
 base:
   - ../../../../recipes/trainer/fit.yml
   - ../../../../recipes/topology/ddp_4gpu.yml
@@ -26,7 +30,7 @@ model:
         l1_alpha: 0.5
         l2_alpha: 0.0
         ms_dssim_alpha: 0.5
-    lr: 0.0002
+    lr: 0.0004
     schedule: WarmupCosine
 trainer:
   precision: 16-mixed
