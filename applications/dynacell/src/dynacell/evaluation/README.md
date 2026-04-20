@@ -53,15 +53,20 @@ uv run dynacell evaluate ... limit_positions=10
 
 ### Enable feature metrics (DINOv3 + DynaCLR)
 
-Feature metrics require additional config:
+Feature metrics require all three `feature_extractor` fields to be set.
+`feature_extractor.dynaclr.encoder` is a dict of kwargs for
+`viscy_models.contrastive_encoder.ContrastiveEncoder` — inline on the CLI:
 
 ```bash
 uv run dynacell evaluate ... \
   compute_feature_metrics=true \
   feature_extractor.dinov3.pretrained_model_name=facebook/dinov3-vitl16-pretrain-lvd1689m \
   feature_extractor.dynaclr.checkpoint=/path/to/dynaclr.ckpt \
-  +feature_extractor.dynaclr.encoder=@configs/recipes/models/dynaclr_encoder.yml
+  'feature_extractor.dynaclr.encoder={backbone: resnet50, in_channels: 1, in_stack_depth: 15, stem_kernel_size: [5,4,4], embedding_dim: 256, projection_dim: 32, drop_path_rate: 0.0}'
 ```
+
+Omitting any of the three when `compute_feature_metrics=true` raises
+`MissingMandatoryValue` at access time.
 
 ### Force recompute
 
@@ -121,7 +126,7 @@ uv run dynacell precompute-gt \
   pixel_metrics.spacing=[0.29,0.108,0.108] \
   feature_extractor.dinov3.pretrained_model_name=facebook/dinov3-vitl16-pretrain-lvd1689m \
   feature_extractor.dynaclr.checkpoint=/path/to/dynaclr.ckpt \
-  +feature_extractor.dynaclr.encoder=... \
+  'feature_extractor.dynaclr.encoder={backbone: resnet50, in_channels: 1, ...}' \
   build.masks=true build.cp=true build.dinov3=true build.dynaclr=true
 ```
 

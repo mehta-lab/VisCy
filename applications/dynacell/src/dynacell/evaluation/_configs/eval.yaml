@@ -24,6 +24,20 @@ pixel_metrics:
 feature_metrics:
   patch_size: 256
 
+# Feature extractor configuration — required only when compute_feature_metrics=true
+# (or when the corresponding precompute-gt build.* flag is set). Fields stay ???
+# (MISSING) until then; OmegaConf resolves them lazily, so runs with feature metrics
+# disabled pass right through.
+feature_extractor:
+  dinov3:
+    pretrained_model_name: ???
+  dynaclr:
+    checkpoint: ???
+    # Mapping of kwargs for ContrastiveEncoder (backbone, in_channels, ...).
+    # No file-loading shorthand in CLI overrides today — pass an inline dict
+    # or set via a Hydra config group (planned in Phase 2 of the eval refactor).
+    encoder: ???
+
 use_gpu: true
 compute_microssim: true
 compute_feature_metrics: false
