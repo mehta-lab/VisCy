@@ -1,7 +1,7 @@
-# UNetViT3D predict: mito (TOMM20) against ipsc_confocal test_cropped.
+# UNetViT3D predict: membrane against ipsc_confocal test_cropped.
 base:
   - ../../../../shared/predict_sets/ipsc_confocal.yml
-  - ../../../../shared/targets/mito_tomm20.yml
+  - ../../../../shared/targets/membrane.yml
   - ../../../../shared/model_overlays/unetvit3d_predict.yml
   - ../../../../shared/launcher_profiles/mode_predict.yml
   - ../../../../shared/launcher_profiles/hardware_h200_single.yml
@@ -9,19 +9,19 @@ base:
 
 benchmark:
   task: virtual_staining
-  organelle: mito
+  organelle: membrane
   trained_on: ipsc_confocal
   predict_set: ipsc_confocal
   model_name: unetvit3d
-  experiment_id: mito__ipsc_confocal__unetvit3d__ipsc_confocal
+  experiment_id: membrane__ipsc_confocal__unetvit3d__ipsc_confocal
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/unetvit3d/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/unetvit3d/checkpoints/last.ckpt
 
 data:
   init_args:
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
     # override target-inherited normalizations: predict only reads source
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
@@ -37,8 +37,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_unetvit3d.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_unetvit3d.zarr
 
 launcher:
-  job_name: UNetViT3D_PRED_TOMM20
+  job_name: UNetViT3D_PRED_MEMB
   run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
