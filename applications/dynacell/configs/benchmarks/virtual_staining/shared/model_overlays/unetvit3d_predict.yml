@@ -1,0 +1,18 @@
+# UNetViT3D predict overlay.
+# Binds the UNetViT3D model recipe + predict trainer recipe, then layers
+# predict-time model hparams and data-loader settings.
+# Predict-time normalizations and data_path are leaf-owned (leaf overrides
+# target-inherited values to match each organelle's test_cropped store).
+base:
+  - ../../../../recipes/models/unetvit3d.yml
+  - ../../../../recipes/trainer/predict_gpu.yml
+model:
+  init_args:
+    predict_method: full_image
+    predict_overlap: [4, 256, 256]
+data:
+  init_args:
+    z_window_size: 8
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]
