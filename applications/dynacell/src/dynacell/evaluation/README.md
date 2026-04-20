@@ -91,12 +91,11 @@ uv run dynacell evaluate \
   feature_extractor/dynaclr=default \
   compute_feature_metrics=true \
   io.pred_path=/hpc/.../fnet3d_sec61b.zarr \
-  io.cell_segmentation_path=/hpc/.../SEC61B_segmented_cleaned.zarr \
   save.save_dir=/hpc/.../eval_fnet3d_sec61b
 ```
 
-(The `target` group already sets `io.cell_segmentation_path`, but the pipeline
-requires it to be non-null when feature metrics are on — any group value will do.)
+`io.cell_segmentation_path` comes from the `target` group; the pipeline requires
+it to be non-null when feature metrics are on.
 
 To use a non-canonical DynaCLR checkpoint, override the group's value on the CLI:
 ```bash
