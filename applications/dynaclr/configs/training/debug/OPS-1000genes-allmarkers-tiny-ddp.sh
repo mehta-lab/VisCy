@@ -21,5 +21,5 @@ export NCCL_DEBUG=WARN
 cd /hpc/mydata/eduardo.hirata/repos/viscy
 
 srun uv run --project . viscy fit \
-  --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers.yml \
+  --config applications/dynaclr/configs/training/OPS/OPS-1000genes-allmarkers.yml \
   --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers-tiny-ddp.yml

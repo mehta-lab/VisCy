@@ -1,7 +1,7 @@
 #!/bin/bash
 # DynaCLR-3D-BagOfChannels-v2 SINGLE-MARKER variant (fresh, no resume).
 #
-#   sbatch applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2-single-marker.sh
+#   sbatch applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2-single-marker.sh
 
 #SBATCH --job-name=dynaclr_3d_sm
 #SBATCH --nodes=1
@@ -15,6 +15,6 @@
 
 export PROJECT="DynaCLR-3D-BagOfChannels-v2"
 export RUN_NAME="3d-z32-256to228to160-ntxent-t0p2-single-marker"
-export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2.yml applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2-single-marker.yml"
+export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2.yml applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2-single-marker.yml"
 
 source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh

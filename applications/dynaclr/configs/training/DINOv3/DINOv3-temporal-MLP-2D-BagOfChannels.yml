@@ -1,32 +1,28 @@
-# DynaCLR-3D-BagOfChannels-v2
-# ============================
-# 3D bag-of-channels contrastive learning.
-# One random fluorescence channel per sample, 32-slice Z window.
-# Temporal positive pairs (same lineage at t+tau), stratified by perturbation.
-#
-# Augmentation pipeline:
-#   extract (45,256,256) → normalize → affine → RandCrop (40,228,228)
-#   → flip/contrast/noise → CenterCrop (32,160,160) [auto-appended]
+# DINOv3-temporal-MLP-2D-BagOfChannels
+# =========================================
+# Frozen DINOv3 backbone + trainable MLP projection head.
+# 2D bag-of-channels with MIP z-reduction (same data pipeline as
+# DynaCLR-2D-MIP-BagOfChannels).
 #
 # Launch:
-#   sbatch applications/dynaclr/configs/training/DynaCLR-3D-BagOfChannels-v2.sh
+#   sbatch applications/dynaclr/configs/training/DINOv3/DINOv3-temporal-MLP-2D-BagOfChannels.sh
 #
 # Resume:
-#   CKPT_PATH=.../last.ckpt sbatch .../DynaCLR-3D-BagOfChannels-v2.sh
+#   CKPT_PATH=.../last.ckpt sbatch .../DINOv3-temporal-MLP-2D-BagOfChannels.sh
 
 base:
-  - recipes/trainer.yml
-  - recipes/model/contrastive_encoder_convnext_tiny.yml
+  - ../recipes/trainer.yml
+  - ../recipes/model/dinov3_frozen_mlp.yml
 
 trainer:
   strategy: ddp
   devices: 2
   precision: bf16-mixed
-  max_epochs: 150
+  max_epochs: 100
   logger:
     init_args:
-      project: DynaCLR-3D-BagOfChannels-v2
-      name: 3d-z32-256to228to160-ntxent-t0p2
+      project: DINOv3-temporal-MLP-2D-BagOfChannels-v1
+      name: null
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -47,31 +43,19 @@ trainer:
 
 model:
   init_args:
-    encoder:
-      init_args:
-        in_stack_depth: 32
-        stem_kernel_size: [4, 4, 4]
-        stem_stride: [4, 4, 4]
-        projection_dim: 32
-        drop_path_rate: 0.1
-    loss_function:
-      init_args:
-        temperature: 0.2
-    lr: 0.00002
-    pca_color_keys: "[perturbation,hours_post_perturbation,experiment,marker]"
+    pca_color_keys: [perturbation, hours_post_perturbation, experiment, marker]
     log_negative_metrics_every_n_epochs: 2
-    example_input_array_shape: [1, 1, 32, 160, 160]
+    example_input_array_shape: [1, 1, 1, 160, 160]
 
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-3D-BagOfChannels-v4.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-MultiCell.parquet
     focus_channel: Phase3D
     reference_pixel_size_xy_um: 0.1494
-    reference_pixel_size_z_um: 0.174
-    z_window: 32
-    z_extraction_window: 45
-    z_focus_offset: 0.3
+    z_window: 1
+    z_extraction_window: 11
+    z_focus_offset: 0.5
     yx_patch_size: [256, 256]
     final_yx_patch_size: [160, 160]
     channels_per_sample: 1
@@ -80,10 +64,10 @@ data:
     positive_channel_source: same
     tau_range: [0.5, 2.0]
     tau_decay_rate: 2.0
-    stratify_by: [perturbation]
+    stratify_by: [perturbation, marker]
     split_ratio: 0.8
-    batch_size: 256
-    num_workers: 4
+    batch_size: 512
+    num_workers: 2
     seed: 42
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
@@ -100,13 +84,6 @@ data:
           scale_range: [[0.9, 1.1], [0.9, 1.1], [0.9, 1.1]]
           rotate_range: [3.14, 0.0, 0.0]
           shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
-      # Random crop: Z for focus invariance + YX for translation augmentation.
-      # The datamodule auto-appends a CenterCrop to [32, 160, 160] after this
-      # to remove rotation zero-fill artifacts at the edges.
-      - class_path: viscy_transforms.BatchedRandSpatialCropd
-        init_args:
-          keys: [channel_0]
-          roi_size: [40, 228, 228]
       - class_path: viscy_transforms.BatchedRandFlipd
         init_args:
           keys: [channel_0]
@@ -116,7 +93,7 @@ data:
         init_args:
           keys: [channel_0]
           prob: 0.5
-          gamma: [0.6, 1.6]
+          gamma: [0.8, 1.3]
       - class_path: viscy_transforms.BatchedRandScaleIntensityd
         init_args:
           keys: [channel_0]
@@ -128,10 +105,16 @@ data:
           prob: 0.5
           sigma_x: [0.25, 0.50]
           sigma_y: [0.25, 0.50]
-          sigma_z: [0.0, 0.2]
+          sigma_z: [0.0, 0.0]
       - class_path: viscy_transforms.BatchedRandGaussianNoised
         init_args:
           keys: [channel_0]
           prob: 0.5
           mean: 0.0
-          std: 0.1
+          std: 0.08
+      # Z-reduction: MIP for fluorescence, center-slice for label-free.
+      # Must be LAST augmentation (before implicit final spatial crop).
+      - class_path: viscy_transforms.BatchedChannelWiseZReductiond
+        init_args:
+          keys: [channel_0]
+          allow_missing_keys: true

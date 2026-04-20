@@ -1,0 +1,12 @@
+# Single-GPU A40 override for DynaCLR-2D-MIP-BagOfChannels single-marker.
+# Chains on top of the 4-GPU base + single-marker override; strips DDP and
+# halves batch size to fit the A40's 48 GB VRAM.
+
+trainer:
+  strategy: auto
+  devices: 1
+
+data:
+  init_args:
+    batch_size: 128
+    num_workers: 1

@@ -5,11 +5,11 @@
 # Reproduces legacy Phase contrastive timeaware ablations.
 #
 # Launch:
-#   sbatch applications/dynaclr/configs/training/Phase-contrastive-timeaware.sh
+#   sbatch applications/dynaclr/configs/training/Phase-contrastive/Phase-contrastive-timeaware.sh
 
 base:
-  - recipes/trainer.yml
-  - recipes/model/dinov3_frozen_mlp.yml
+  - ../recipes/trainer.yml
+  - ../recipes/model/dinov3_frozen_mlp.yml
 
 trainer:
   strategy: auto
@@ -31,7 +31,6 @@ trainer:
         every_n_epochs: 5
         label_key: perturbation
         k: 20
-    - class_path: viscy_utils.callbacks.SaveConfigToWandb
 
 model:
   init_args:

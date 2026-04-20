@@ -7,14 +7,14 @@
 # Multi-cell-type: A549 infectomics, microglia dynamorph, ALFI mitosis.
 #
 # Launch:
-#   sbatch applications/dynaclr/configs/training/DynaCLR-2D-MIP-BagOfChannels.sh
+#   sbatch applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.sh
 #
 # Resume:
 #   CKPT_PATH=.../last.ckpt sbatch .../DynaCLR-2D-MIP-BagOfChannels.sh
 
 base:
-  - recipes/trainer.yml
-  - recipes/model/contrastive_encoder_convnext_tiny.yml
+  - ../recipes/trainer.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
 
 trainer:
   strategy: ddp

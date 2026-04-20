@@ -19,5 +19,5 @@ export NCCL_DEBUG=WARN
 cd /hpc/mydata/eduardo.hirata/repos/viscy
 
 srun uv run --project . viscy fit \
-  --config applications/dynaclr/configs/training/DynaCLR-2D-MIP-BagOfChannels.yml \
+  --config applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.yml \
   --config applications/dynaclr/configs/training/DynaCLR-2D-MIP-BagOfChannels-fastdev-ddp.yml
