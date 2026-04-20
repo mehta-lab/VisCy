@@ -364,11 +364,17 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
     ancestor.  Tracks without a ``parent_track_id`` (or whose parent is not
     present in the data) are their own root.
 
+    The lineage walk is scoped per ``(experiment, well, fov)`` when the
+    ``well`` column is available. Scoping on ``(experiment, fov)`` alone
+    collapses cells across wells that share an FOV number (e.g. B/2/002001
+    and C/2/002001), producing cross-well lineage_id aliasing that later
+    crashes the temporal positive lookup with "No positive found".
+
     Parameters
     ----------
     tracks : pd.DataFrame
         Must contain ``global_track_id``, ``experiment``, ``fov``, ``track_id``.
-        Optionally ``parent_track_id``.
+        Optionally ``parent_track_id`` and ``well``.
 
     Returns
     -------
@@ -386,8 +392,9 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
 
     lineage_series = tracks["lineage_id"].copy()
 
-    groups = list(tracks.groupby(["experiment", "fov"]))
-    for (exp, fov), group in tqdm(groups, desc="Reconstructing lineages", unit="fov"):
+    group_keys = ["experiment", "well", "fov"] if "well" in tracks.columns else ["experiment", "fov"]
+    groups = list(tracks.groupby(group_keys))
+    for _key, group in tqdm(groups, desc="Reconstructing lineages", unit="fov"):
         tid_to_gtid: dict[int, str] = dict(zip(group["track_id"], group["global_track_id"]))
 
         parent_map: dict[str, str] = {}

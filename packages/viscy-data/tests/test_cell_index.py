@@ -23,6 +23,7 @@ from viscy_data.cell_index import (
     CELL_INDEX_SCHEMA,
     _parse_bbox_min_size,
     _parse_bbox_to_centroid,
+    _reconstruct_lineage,
     build_timelapse_cell_index,
     convert_ops_parquet,
     read_cell_index,
@@ -298,6 +299,104 @@ class TestTimelapseBuilder:
         df = build_timelapse_cell_index(yaml_path, output)
 
         assert not df["cell_id"].duplicated().any()
+
+
+class TestReconstructLineage:
+    """Unit tests for ``_reconstruct_lineage`` — scoped directly, no zarr I/O."""
+
+    def test_cross_well_same_fov_does_not_collapse(self):
+        """
+        Two wells (B/2 and C/2) that share the same FOV number ("002001") and
+        contain tracks with the same numeric ``track_id`` / ``parent_track_id``
+        must NOT have their lineages fused. Prior to the fix, the groupby was
+        scoped by (experiment, fov) and the two wells were walked as if they
+        were one, aliasing their lineage_ids.
+        """
+        rows = []
+        # Well B/2, fov 002001: track_id 88 whose parent is 35; root is 35.
+        rows.append(
+            {
+                "experiment": "exp",
+                "well": "B/2",
+                "fov": "002001",
+                "track_id": 35,
+                "parent_track_id": -1,
+                "global_track_id": "exp_B/2/002001_35",
+            }
+        )
+        rows.append(
+            {
+                "experiment": "exp",
+                "well": "B/2",
+                "fov": "002001",
+                "track_id": 88,
+                "parent_track_id": 35,
+                "global_track_id": "exp_B/2/002001_88",
+            }
+        )
+        # Well C/2, fov 002001: independent track_id 86 whose parent is 34.
+        # Without the fix, the (exp, fov="002001") group sees BOTH wells'
+        # tracks, and the parent_track_id=34 lookup in the B/2-derived map
+        # fails, so track 86 becomes its own root — but track 35 from B/2
+        # appears inside the same group, potentially misrouting.
+        rows.append(
+            {
+                "experiment": "exp",
+                "well": "C/2",
+                "fov": "002001",
+                "track_id": 34,
+                "parent_track_id": -1,
+                "global_track_id": "exp_C/2/002001_34",
+            }
+        )
+        rows.append(
+            {
+                "experiment": "exp",
+                "well": "C/2",
+                "fov": "002001",
+                "track_id": 86,
+                "parent_track_id": 34,
+                "global_track_id": "exp_C/2/002001_86",
+            }
+        )
+        tracks = pd.DataFrame(rows)
+
+        result = _reconstruct_lineage(tracks.copy())
+
+        # B/2 rows must resolve to B/2 root; C/2 rows must resolve to C/2 root.
+        b2_rows = result[result["well"] == "B/2"]
+        c2_rows = result[result["well"] == "C/2"]
+        assert set(b2_rows["lineage_id"].unique()) == {"exp_B/2/002001_35"}
+        assert set(c2_rows["lineage_id"].unique()) == {"exp_C/2/002001_34"}
+
+    def test_no_parent_track_id_column(self):
+        """If `parent_track_id` is missing, lineage_id falls back to global_track_id."""
+        tracks = pd.DataFrame(
+            {
+                "experiment": ["exp"] * 2,
+                "well": ["A/1"] * 2,
+                "fov": ["0"] * 2,
+                "track_id": [0, 1],
+                "global_track_id": ["exp_A/1/0_0", "exp_A/1/0_1"],
+            }
+        )
+        result = _reconstruct_lineage(tracks.copy())
+        assert (result["lineage_id"] == result["global_track_id"]).all()
+
+    def test_single_well_chain_resolves_to_root(self):
+        """Basic sanity: a parent → daughter chain resolves daughters to root."""
+        tracks = pd.DataFrame(
+            {
+                "experiment": ["exp"] * 3,
+                "well": ["A/1"] * 3,
+                "fov": ["0"] * 3,
+                "track_id": [0, 1, 2],
+                "parent_track_id": [-1, 0, 1],
+                "global_track_id": ["exp_A/1/0_0", "exp_A/1/0_1", "exp_A/1/0_2"],
+            }
+        )
+        result = _reconstruct_lineage(tracks.copy())
+        assert (result["lineage_id"] == "exp_A/1/0_0").all()
 
 
 # ---------------------------------------------------------------------------
