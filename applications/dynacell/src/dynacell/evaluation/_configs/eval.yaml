@@ -1,5 +1,10 @@
 defaults:
   - _self_
+  - optional target: null
+  - optional predict_set: null
+  - optional feature_extractor/dinov3: null
+  - optional feature_extractor/dynaclr: null
+  - optional benchmark: null
 
 target_name: ???
 io:

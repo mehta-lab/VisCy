@@ -31,19 +31,45 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 
 `dynacell evaluate` is a Hydra entrypoint. Override any field on the CLI with `key=value`.
 
+Paths and settings that belong to a (target, marker, dataset) combination live in
+named config groups under `_configs/`, so most invocations only need to select the
+right group and point at the prediction / output paths.
+
+### Config groups
+
+| Group | Options | What it sets |
+|---|---|---|
+| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. |
+| `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. |
+| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. |
+| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. |
+
+Selecting a group on the CLI: `<group>=<option>` (no `+` prefix needed — groups are
+declared as `optional` in `eval.yaml`).
+
+`target_name` ∈ {`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`} — selects the `aicssegmentation` workflow. The first four map 1:1 with the `target` group's
+`target_name` field; `nucleoli` and `lysosomes` have no ready-made target group yet
+and must be set directly (`target_name=…`).
+
 ### Minimal example — pixel + mask metrics only
 
 ```bash
 uv run dynacell evaluate \
-  target_name=er \
+  target=er_sec61b \
+  predict_set=ipsc_confocal \
   io.pred_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/fnet3d_sec61b.zarr \
-  io.gt_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr \
-  io.cell_segmentation_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B_segmented_cleaned.zarr \
-  pixel_metrics.spacing=[0.29,0.108,0.108] \
   save.save_dir=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_fnet3d_sec61b
 ```
 
-`target_name` ∈ {`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`} — selects the `aicssegmentation` workflow.
+The older field-by-field form still works and composes cleanly with groups; any
+field set directly on the CLI overrides the group:
+
+```bash
+uv run dynacell evaluate \
+  target=er_sec61b \
+  io.gt_path=/some/other/SEC61B.zarr \   # leaf wins over group
+  io.pred_path=… save.save_dir=… pixel_metrics.spacing=[0.29,0.108,0.108]
+```
 
 ### Smoke test on a subset
 
@@ -53,20 +79,33 @@ uv run dynacell evaluate ... limit_positions=10
 
 ### Enable feature metrics (DINOv3 + DynaCLR)
 
-Feature metrics require all three `feature_extractor` fields to be set.
-`feature_extractor.dynaclr.encoder` is a dict of kwargs for
-`viscy_models.contrastive_encoder.ContrastiveEncoder` — inline on the CLI:
+Select the feature-extractor groups; they pin the model names, checkpoint, and
+encoder kwargs. Turn `compute_feature_metrics=true` to enable the feature-metrics
+branch of the pipeline:
 
 ```bash
-uv run dynacell evaluate ... \
+uv run dynacell evaluate \
+  target=er_sec61b \
+  predict_set=ipsc_confocal \
+  feature_extractor/dinov3=lvd1689m \
+  feature_extractor/dynaclr=default \
   compute_feature_metrics=true \
-  feature_extractor.dinov3.pretrained_model_name=facebook/dinov3-vitl16-pretrain-lvd1689m \
-  feature_extractor.dynaclr.checkpoint=/path/to/dynaclr.ckpt \
-  'feature_extractor.dynaclr.encoder={backbone: resnet50, in_channels: 1, in_stack_depth: 15, stem_kernel_size: [5,4,4], embedding_dim: 256, projection_dim: 32, drop_path_rate: 0.0}'
+  io.pred_path=/hpc/.../fnet3d_sec61b.zarr \
+  io.cell_segmentation_path=/hpc/.../SEC61B_segmented_cleaned.zarr \
+  save.save_dir=/hpc/.../eval_fnet3d_sec61b
 ```
 
-Omitting any of the three when `compute_feature_metrics=true` raises
-`MissingMandatoryValue` at access time.
+(The `target` group already sets `io.cell_segmentation_path`, but the pipeline
+requires it to be non-null when feature metrics are on — any group value will do.)
+
+To use a non-canonical DynaCLR checkpoint, override the group's value on the CLI:
+```bash
+uv run dynacell evaluate … feature_extractor/dynaclr=default \
+  feature_extractor.dynaclr.checkpoint=/hpc/.../other.ckpt
+```
+
+Omitting the feature-extractor groups (or their required fields) when
+`compute_feature_metrics=true` raises `MissingMandatoryValue` at access time.
 
 ### Force recompute
 

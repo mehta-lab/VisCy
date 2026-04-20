@@ -1,0 +1,8 @@
+# @package _global_
+# Target group: mitochondria marked by TOMM20, iPSC dataset v4 test split.
+target_name: mitochondria
+io:
+  gt_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
+  cell_segmentation_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20_segmented_cleaned.zarr
+  gt_channel_name: Structure
+  pred_channel_name: Structure_prediction

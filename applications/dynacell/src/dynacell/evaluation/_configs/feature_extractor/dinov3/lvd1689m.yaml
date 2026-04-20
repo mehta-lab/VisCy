@@ -1,0 +1,2 @@
+# DINOv3 ViT-L/16 pretrained on LVD-1689M.
+pretrained_model_name: facebook/dinov3-vitl16-pretrain-lvd1689m

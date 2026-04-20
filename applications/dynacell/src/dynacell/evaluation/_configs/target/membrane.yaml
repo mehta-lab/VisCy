@@ -1,0 +1,8 @@
+# @package _global_
+# Target group: membrane channel of the multi-marker cell.zarr, iPSC dataset v4 test split.
+target_name: membrane
+io:
+  gt_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+  cell_segmentation_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
+  gt_channel_name: Membrane
+  pred_channel_name: Membrane_prediction

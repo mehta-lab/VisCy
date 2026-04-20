@@ -1,0 +1,8 @@
+# @package _global_
+# Target group: ER marked by SEC61B, iPSC dataset v4 test split.
+target_name: er
+io:
+  gt_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+  cell_segmentation_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B_segmented_cleaned.zarr
+  gt_channel_name: Structure
+  pred_channel_name: Structure_prediction

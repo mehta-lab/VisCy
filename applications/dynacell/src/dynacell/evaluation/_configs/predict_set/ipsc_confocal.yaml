@@ -1,0 +1,6 @@
+# @package _global_
+# Predict set group: AICS iPSC confocal (imaging modality defaults).
+# pred_channel_name lives in target/*.yaml (it's <target_channel>_prediction,
+# set by the predict pipeline's HCSPredictionWriter callback).
+pixel_metrics:
+  spacing: [0.29, 0.108, 0.108]
