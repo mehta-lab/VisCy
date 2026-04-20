@@ -44,7 +44,6 @@ trainer:
         k: 20
         track_id_key: global_track_id
         timepoint_key: t
-    - class_path: viscy_utils.callbacks.SaveConfigToWandb
 
 model:
   init_args:
@@ -66,7 +65,7 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-3D-BagOfChannels-v2.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-3D-BagOfChannels-v4.parquet
     focus_channel: Phase3D
     reference_pixel_size_xy_um: 0.1494
     reference_pixel_size_z_um: 0.174
