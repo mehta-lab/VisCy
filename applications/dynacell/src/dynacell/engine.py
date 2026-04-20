@@ -320,7 +320,9 @@ class DynacellUNet(LightningModule):
         elif self.predict_method == "sliding_window":
             prediction = self.predict_sliding_window(source, overlap_size=self.predict_overlap)
         else:
-            raise ValueError(f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image' or 'sliding_window'.")
+            raise ValueError(
+                f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image' or 'sliding_window'."
+            )
         return _center_crop_to_shape(prediction, original_shape)
 
     def on_train_epoch_end(self):
@@ -370,19 +372,19 @@ class DynacellUNet(LightningModule):
         overlap = tuple(overlap_size)
 
         for i in range(n_spatial):
-            S, P, O = spatial[i], patch_spatial[i], overlap[i]
+            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
             if S < P:
                 raise ValueError(f"spatial dim {i} size {S} must be >= patch size {P}")
-            if not (0 <= O < P):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {O} vs {P})")
+            if not (0 <= ov < P):
+                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {P})")
 
         prediction_sum = torch.zeros_like(source)
         prediction_count = torch.zeros_like(source)
 
         start_lists = []
         for i in range(n_spatial):
-            S, P, O = spatial[i], patch_spatial[i], overlap[i]
-            stride = P - O
+            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
+            stride = P - ov
             last = S - P
             starts = [0]
             while starts[-1] + stride < last:
@@ -609,7 +611,8 @@ class DynacellFlowMatching(LightningModule):
             )
         else:
             raise ValueError(
-                f"Unknown predict_method: {self.predict_method!r}. Choose 'denoise', 'generate', 'sliding_window', or 'iterative'."
+                f"Unknown predict_method: {self.predict_method!r}. "
+                "Choose 'denoise', 'generate', 'sliding_window', or 'iterative'."
             )
 
         return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
