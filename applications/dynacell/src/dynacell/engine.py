@@ -6,6 +6,7 @@ Provides :class:`DynacellUNet` for supervised regression and
 
 import inspect
 import itertools
+import logging
 from typing import Literal, Sequence
 
 import numpy as np
@@ -21,12 +22,16 @@ from dynacell.celldiff_wrapper import CELLDiff3DVS
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
+from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
+
+_logger = logging.getLogger("lightning.pytorch")
 
 _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNetViT3D": UNetViT3D,
     "FNet3D": Unet3d,
     "UNeXt2": UNeXt2,
+    "fcmae": FullyConvolutionalMAE,
 }
 
 
@@ -122,7 +127,7 @@ class DynacellUNet(LightningModule):
 
     Parameters
     ----------
-    architecture : {"UNetViT3D", "FNet3D", "UNeXt2"}
+    architecture : {"UNetViT3D", "FNet3D", "UNeXt2", "fcmae"}
         Architecture key selecting the backbone.
     model_config : dict | None
         Keyword arguments forwarded to the backbone constructor.
@@ -144,11 +149,22 @@ class DynacellUNet(LightningModule):
         Intended for inference (predict/test), not training resumption —
         optimizer state, epoch counters, and scheduler state are not
         restored.
+    encoder_only : bool, default False
+        When True, ``ckpt_path`` must be set, and only the
+        ``model.encoder.*`` weights are loaded (decoder/head stay at fresh
+        init). Intended for finetuning from an FCMAE-pretrained encoder.
+        Only supported for ``architecture='fcmae'``.
+
+        Note: on resumed runs (via trainer-level ``--ckpt_path``), this
+        pre-load still fires in ``__init__`` before Lightning restores
+        the resume checkpoint, and the resume state overwrites it. The
+        file at ``ckpt_path`` must therefore remain accessible for the
+        lifetime of any run based on a pretrained leaf.
     """
 
     def __init__(
         self,
-        architecture: Literal["UNetViT3D", "FNet3D", "UNeXt2"] = "UNetViT3D",
+        architecture: Literal["UNetViT3D", "FNet3D", "UNeXt2", "fcmae"] = "UNetViT3D",
         model_config: dict | None = None,
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,
@@ -159,9 +175,10 @@ class DynacellUNet(LightningModule):
         predict_method: Literal["full_image", "sliding_window"] = "full_image",
         predict_overlap: tuple[int, int, int] = (4, 256, 256),
         ckpt_path: str | None = None,
+        encoder_only: bool = False,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["loss_function", "ckpt_path"])
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path", "encoder_only"])
         if model_config is None:
             model_config = {}
         net_class = _ARCHITECTURE.get(architecture)
@@ -198,7 +215,17 @@ class DynacellUNet(LightningModule):
             h, w = example_input_yx_shape
         self.example_input_array = torch.rand(1, in_channels, d, h, w)
 
-        if ckpt_path is not None:
+        if encoder_only:
+            if ckpt_path is None:
+                raise ValueError("DynacellUNet(encoder_only=True) requires ckpt_path to be set")
+            if not isinstance(self.model, FullyConvolutionalMAE):
+                raise ValueError(f"encoder_only is only supported for architecture='fcmae', got {architecture!r}")
+            state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            prefix = "model.encoder."
+            encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
+            self.model.encoder.load_state_dict(encoder_weights, strict=True)
+            _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
+        elif ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
     def forward(self, x: Tensor) -> Tensor:
