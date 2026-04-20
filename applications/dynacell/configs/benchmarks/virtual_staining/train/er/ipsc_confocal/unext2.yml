@@ -1,4 +1,11 @@
-# UNeXt2 (VSCyto3D) fit on ER (SEC61B marker) — AICS iPSC confocal.
+# Timm-backed UNeXt2 (viscy_models.unet.unext2:UNeXt2) supervised scratch
+# baseline on ER/SEC61B — i.e. NOT FullyConvolutionalMAE(pretraining=False).
+# This answers "how does the dynacell UNeXt2 recipe train at all?" — it is
+# NOT the apples-to-apples scratch control for FCMAE-pretrained init. The
+# FCMAE paper-adjacent scratch baseline lives at fcmae_vscyto3d_scratch.yml
+# and uses a different model class. See
+# applications/dynacell/configs/benchmarks/UNEXT2_VS_FCMAE_CLASSES.md.
+#
 # Reproduces wandb run 20260409-020023_UNeXt2_iPSC_SEC61B (Dihan's Run 4,
 # commit 46e4c79): lr=0.0004, batch_size=32, z_window_size=20, 4-GPU DDP.
 # MixedLoss(L1 0.5 + DSSIM 0.5). max_epochs=200.
@@ -14,8 +21,8 @@ benchmark:
   task: virtual_staining
   organelle: er
   train_set: ipsc_confocal
-  model_name: unext2
-  experiment_id: er__ipsc_confocal__unext2
+  model_name: unext2_timm_scratch
+  experiment_id: er__ipsc_confocal__unext2_timm_scratch
 
 trainer:
   logger:

@@ -1,0 +1,40 @@
+# FCMAE-class (FullyConvolutionalMAE, pretraining=False) random-init
+# baseline on ER/SEC61B. Scratch control for the pretrained counterpart —
+# the two leaves are identical except this one does NOT load pretrained
+# encoder weights. See UNEXT2_VS_FCMAE_CLASSES.md for why this is the
+# paper-adjacent scratch baseline (and not unext2.yml).
+base:
+  - ../../../shared/train_sets/ipsc_confocal.yml
+  - ../../../shared/targets/er_sec61b.yml
+  - ../../../shared/model_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../shared/launcher_profiles/mode_fit.yml
+  - ../../../shared/launcher_profiles/hardware_4gpu.yml
+  - ../../../shared/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: er__ipsc_confocal__fcmae_vscyto3d_scratch
+
+trainer:
+  logger:
+    init_args:
+      name: FCMAE_VSCyto3D_Scratch_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch/checkpoints
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch

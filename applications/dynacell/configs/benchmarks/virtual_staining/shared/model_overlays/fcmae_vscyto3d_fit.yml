@@ -1,0 +1,86 @@
+# Shared FCMAE-class (FullyConvolutionalMAE with pretraining=False) fit
+# overlay. Mirrors the canonical vs_test/finetune_3d.py:load_model recipe.
+# Used by both fcmae_vscyto3d_scratch.yml and fcmae_vscyto3d_pretrained.yml
+# — encoder_only + ckpt_path are set only in the pretrained leaf so init
+# is the only difference.
+base:
+  - ../../../../recipes/trainer/fit.yml
+  - ../../../../recipes/topology/ddp_4gpu.yml
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0002
+    schedule: WarmupCosine
+trainer:
+  precision: 16-mixed
+  max_epochs: 200
+data:
+  init_args:
+    z_window_size: 20
+    batch_size: 32
+    num_workers: 8
+    yx_patch_size: [384, 384]
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [20, 600, 600]
+          num_samples: 4
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.8
+          rotate_range: [3.14, 0, 0]
+          shear_range: [0.0, 0.05, 0.05]
+          scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [15, 384, 384]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 0.3
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0.25, 0.75]
+    val_gpu_augmentations:
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [15, 384, 384]
