@@ -7,3 +7,8 @@ launcher:
     PYTHONUNBUFFERED: "1"
     NCCL_DEBUG: INFO
     PYTHONFAULTHANDLER: "1"
+    # Shared Hugging Face cache on project storage: the first user with
+    # gated-repo access downloads each model (e.g. DINOv3) once into this
+    # dir, and every subsequent job on any dynacell team account reuses
+    # those weights instead of re-downloading to per-user ~/.cache/.
+    HF_HOME: /hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache

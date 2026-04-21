@@ -102,6 +102,21 @@ uv run dynacell evaluate \
 uv run dynacell evaluate ... limit_positions=10
 ```
 
+### Shared Hugging Face cache (DINOv3 weights)
+
+`dynacell evaluate` and `dynacell precompute-gt` default `HF_HOME` to
+`/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache/`
+when they detect a repo checkout, so gated HF models (DINOv3) are
+downloaded once per team instead of once per user to per-home
+`~/.cache/huggingface/`. If you already export `HF_HOME` yourself the
+auto-setter backs off. Wheel-install users fall through to the normal
+per-user HF default.
+
+First-time setup is one-time per team: one member with gated-repo
+access (see `https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m`)
+runs any eval command that triggers the DINOv3 download; everyone else
+thereafter reuses the shared weights.
+
 ### Enable feature metrics (DINOv3 + DynaCLR)
 
 Select the feature-extractor groups; they pin the model names, checkpoint, and

@@ -13,6 +13,7 @@ uv run dynacell report results_dirs.ModelA=/path/to/results
 """
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -32,6 +33,12 @@ _EXTERNAL_SEARCHPATHS: tuple[str, ...] = (
     "configs/benchmarks/virtual_staining/_internal/shared/eval",
 )
 
+# Team-shared Hugging Face cache on project storage. Repo-checkout
+# invocations of `dynacell evaluate` / `precompute-gt` default HF_HOME
+# here so gated models (DINOv3) download once per team instead of once
+# per user to per-home ~/.cache/huggingface/.
+_SHARED_HF_CACHE = Path("/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache")
+
 
 def _external_configs_dirs() -> list[Path]:
     """Return existing repo-checkout searchpath roots for Hydra eval groups.
@@ -46,6 +53,24 @@ def _external_configs_dirs() -> list[Path]:
         if (parent / "pyproject.toml").exists():
             return [p for sub in _EXTERNAL_SEARCHPATHS if (p := parent / sub).is_dir()]
     return []
+
+
+def _maybe_set_shared_hf_cache() -> None:
+    """Point HF_HOME at the team-shared cache on a repo checkout.
+
+    Only fires when (a) ``HF_HOME`` is not already set by the caller,
+    (b) we're running from a repo checkout (``_external_configs_dirs``
+    resolves), and (c) the shared cache dir exists on this machine.
+    Wheel installs and non-HPC environments fall through to the normal
+    per-user ``~/.cache/huggingface`` default.
+    """
+    if "HF_HOME" in os.environ:
+        return
+    if not _external_configs_dirs():
+        return
+    if not _SHARED_HF_CACHE.is_dir():
+        return
+    os.environ["HF_HOME"] = str(_SHARED_HF_CACHE)
 
 
 def _inject_external_configs(argv: list[str]) -> list[str]:
@@ -77,6 +102,7 @@ def main_cli():
         module_path, func_name, extra = _HYDRA_COMMANDS[command]
         sys.argv = [sys.argv[0]] + sys.argv[2:]  # strip subcommand for Hydra
         sys.argv = _inject_external_configs(sys.argv)
+        _maybe_set_shared_hf_cache()
         try:
             module = importlib.import_module(module_path)
         except ModuleNotFoundError as e:
