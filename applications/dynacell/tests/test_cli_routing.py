@@ -89,7 +89,7 @@ class TestCliRouting:
 class TestInjectExternalConfigs:
     """Tests for ``_inject_external_configs``."""
 
-    def test_appends_searchpath_when_external_dirs_present(self, tmp_path: Path):
+    def test_injects_searchpath_when_external_dirs_present(self, tmp_path: Path):
         """When external configs dirs exist, inject a hydra.searchpath override
         encoding all roots as comma-separated file:// URIs in one token."""
         a = tmp_path / "a"
@@ -99,8 +99,9 @@ class TestInjectExternalConfigs:
         with patch("dynacell.__main__._external_configs_dirs", return_value=[a, b]):
             argv = ["dynacell", "leaf=er/ipsc_confocal/celldiff/eval/ipsc_confocal"]
             result = _inject_external_configs(argv)
-        assert result[:-1] == argv
-        assert result[-1] == f"hydra.searchpath=[file://{a},file://{b}]"
+        expected_token = f"hydra.searchpath=[file://{a},file://{b}]"
+        assert expected_token in result
+        assert len(result) == len(argv) + 1
 
     def test_noop_when_external_dirs_absent(self):
         """Wheel installs without the repo have no external dirs — argv stays unchanged."""
@@ -109,11 +110,30 @@ class TestInjectExternalConfigs:
             result = _inject_external_configs(argv)
         assert result == argv
 
-    def test_appended_not_prepended(self, tmp_path: Path):
-        """Injection goes at the end so Hydra's argparse doesn't misread it as a
-        positional before diagnostic flags like ``-c job``."""
+    def test_inserts_adjacent_to_positional_when_flag_leads(self, tmp_path: Path):
+        """Flag-first layout: token inserts among positionals so argparse sees
+        all ``overrides`` contiguous."""
         with patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]):
             result = _inject_external_configs(["dynacell", "-c", "job", "leaf=x"])
+        # Token must land next to `leaf=x` (the only existing positional),
+        # not after `-c job` which would scatter positionals across a flag.
         assert result[0] == "dynacell"
-        assert result[1:4] == ["-c", "job", "leaf=x"]
-        assert result[4].startswith("hydra.searchpath=[file://")
+        assert result[1:3] == ["-c", "job"]
+        assert result[3].startswith("hydra.searchpath=[file://")
+        assert result[4] == "leaf=x"
+
+    def test_inserts_adjacent_to_positional_when_flag_trails(self, tmp_path: Path):
+        """Flag-trailing layout: token inserts before the first positional so
+        argparse's ``overrides`` nargs="*" collects everything in one run."""
+        with patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]):
+            result = _inject_external_configs(["dynacell", "leaf=x", "-c", "job"])
+        assert result[0] == "dynacell"
+        assert result[1].startswith("hydra.searchpath=[file://")
+        assert result[2:] == ["leaf=x", "-c", "job"]
+
+    def test_appends_when_no_positional_overrides(self, tmp_path: Path):
+        """With only flags (e.g. ``--help``), append at the end."""
+        with patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]):
+            result = _inject_external_configs(["dynacell", "--help"])
+        assert result[:2] == ["dynacell", "--help"]
+        assert result[2].startswith("hydra.searchpath=[file://")

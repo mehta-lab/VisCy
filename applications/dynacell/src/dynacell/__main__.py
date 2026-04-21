@@ -49,16 +49,25 @@ def _external_configs_dirs() -> list[Path]:
 
 
 def _inject_external_configs(argv: list[str]) -> list[str]:
-    """Append a hydra.searchpath override so external configs are discoverable.
+    """Inject a hydra.searchpath override so external configs are discoverable.
 
-    Appended (not prepended) so Hydra's argparse-based CLI doesn't treat the
-    override as a positional placed before diagnostic flags like ``-c job``.
+    Hydra's argparse uses a single ``overrides`` positional with
+    ``nargs="*"``, which means the first contiguous run of positional args
+    is greedily consumed and any later positional (after a flag like
+    ``-c job``) is reported as an unrecognized argument. To keep both
+    ``dynacell evaluate -c job leaf=x`` and
+    ``dynacell evaluate leaf=x -c job`` working, insert the token
+    adjacent to an existing positional override when one is present;
+    otherwise append.
     """
     dirs = _external_configs_dirs()
     if not dirs:
         return argv
-    paths = ",".join(f"file://{d}" for d in dirs)
-    return argv + [f"hydra.searchpath=[{paths}]"]
+    token = f"hydra.searchpath=[{','.join(f'file://{d}' for d in dirs)}]"
+    for i, arg in enumerate(argv[1:], start=1):
+        if not arg.startswith("-") and "=" in arg:
+            return argv[:i] + [token] + argv[i:]
+    return argv + [token]
 
 
 def main_cli():
