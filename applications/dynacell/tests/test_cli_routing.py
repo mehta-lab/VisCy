@@ -99,7 +99,7 @@ class TestInjectExternalConfigs:
         a.mkdir()
         b.mkdir()
         with patch("dynacell.__main__._external_configs_dirs", return_value=[a, b]):
-            argv = ["dynacell", "leaf=er/ipsc_confocal/celldiff/eval/ipsc_confocal"]
+            argv = ["dynacell", "leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal"]
             result = _inject_external_configs(argv)
         expected_token = f"hydra.searchpath=[file://{a},file://{b}]"
         assert expected_token in result

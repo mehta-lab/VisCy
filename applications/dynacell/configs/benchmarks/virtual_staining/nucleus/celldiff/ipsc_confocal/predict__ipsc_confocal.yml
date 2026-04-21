@@ -1,0 +1,45 @@
+# CellDiff predict: nucleus against ipsc_confocal test_cropped.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: celldiff
+  experiment_id: nucleus__ipsc_confocal__celldiff__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/celldiff/checkpoints/last.ckpt
+    predict_method: denoise # denoise, generate, sliding_window, or iterative
+    predict_overlap: [4, 256, 256]
+
+data:
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+    z_window_size: 8 # 8 for denoise and generate, 40 for iterative and sliding_window.
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_celldiff_denoise.zarr
+
+launcher:
+  job_name: CELLDiff_PRED_NUCL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

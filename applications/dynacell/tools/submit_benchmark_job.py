@@ -10,7 +10,7 @@ and ``{run_root}/slurm/``, and submits via ``sbatch`` (unless
 Usage::
 
     uv run python applications/dynacell/tools/submit_benchmark_job.py \
-        applications/dynacell/configs/benchmarks/virtual_staining/er/ipsc_confocal/celldiff/train.yml \
+        applications/dynacell/configs/benchmarks/virtual_staining/er/celldiff/ipsc_confocal/train.yml \
         --dry-run
 """
 

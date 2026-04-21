@@ -47,7 +47,7 @@ exposes through two injected `hydra.searchpath` roots. See the table below.
 | `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. | in-package (`_configs/predict_set/`) |
 | `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package (`_configs/feature_extractor/dinov3/`) |
 | `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | `configs/benchmarks/virtual_staining/_internal/shared/eval/feature_extractor/dynaclr/` |
-| `leaf` | `<org>/<train_set>/<model>/eval/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/_internal/leaf/` (symlink tree) |
+| `leaf` | `<org>/<model>/<train_set>/eval__<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/_internal/leaf/` (symlink tree) |
 
 - **In-package** groups (`predict_set`, `feature_extractor/dinov3`,
   `spectral_pcc/*`) ship in the wheel: schema and path-free reference
@@ -64,8 +64,8 @@ exposes through two injected `hydra.searchpath` roots. See the table below.
   external users supply their own via `--config-dir`.
 - **Hydra only discovers `.yaml` files for group resolution**, so eval
   group files under `_internal/shared/eval/`, the canonical eval leaves
-  at `<cell>/eval/<predset>.yaml`, and the `_internal/leaf/` symlinks
-  all use `.yaml`.
+  at `<org>/<model>/<train_set>/eval__<predict_set>.yaml`, and the
+  `_internal/leaf/` symlinks all use `.yaml`.
   Lightning-side train and predict leaves stay `.yml` (they compose
   through `viscy_utils.compose`, which is extension-agnostic).
 
@@ -205,13 +205,13 @@ dynacell evaluate --config-dir /absolute/path/to/my_configs \
 
 Canonical evaluations for the virtual-staining benchmarks are checked in
 under
-`applications/dynacell/configs/benchmarks/virtual_staining/<organelle>/<train_set>/<model>/eval/<predict_set>.yaml`,
-next to the matching train and predict leaves. Each leaf pins every
-group selection, paths, and the save directory — run one by selecting
-it as the `leaf` group:
+`applications/dynacell/configs/benchmarks/virtual_staining/<organelle>/<model>/<train_set>/eval__<predict_set>.yaml`,
+next to the matching train and predict leaves for the same training run.
+Each leaf pins every group selection, paths, and the save directory — run
+one by selecting it as the `leaf` group:
 
 ```bash
-uv run dynacell evaluate leaf=er/ipsc_confocal/celldiff/eval/ipsc_confocal
+uv run dynacell evaluate leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal
 ```
 
 The current set mirrors the predict benchmark tree one-to-one:

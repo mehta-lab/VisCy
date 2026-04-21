@@ -43,7 +43,7 @@ PREDICT_LEAVES = [
 
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
 def test_train_leaf_composes(organelle: str, model: str) -> None:
-    leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "train.yml"
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml"
     cfg = load_composed_config(leaf)
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
@@ -56,7 +56,7 @@ def test_train_leaf_composes(organelle: str, model: str) -> None:
 
 @pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
 def test_predict_leaf_composes(organelle: str, model: str) -> None:
-    leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "predict" / "ipsc_confocal.yml"
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
     cfg = load_composed_config(leaf)
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
@@ -67,11 +67,11 @@ def test_predict_leaf_composes(organelle: str, model: str) -> None:
 
 @pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
 def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
-    """Every canonical eval leaf at <org>/<train>/<model>/eval/<predset>.yaml
+    """Every canonical eval leaf at <org>/<model>/<train_set>/eval__<predict_set>.yaml
     has a corresponding symlink under _internal/leaf/ so Hydra can resolve
     ``leaf=<path>`` from the _internal searchpath."""
-    real = BENCHMARKS / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
-    link = BENCHMARKS / "_internal" / "leaf" / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
+    real = BENCHMARKS / organelle / model / "ipsc_confocal" / "eval__ipsc_confocal.yaml"
+    link = BENCHMARKS / "_internal" / "leaf" / organelle / model / "ipsc_confocal" / "eval__ipsc_confocal.yaml"
     assert real.is_file(), f"missing canonical eval leaf: {real}"
     assert link.is_symlink(), f"missing symlink: {link}"
     assert link.resolve() == real.resolve()
@@ -79,7 +79,7 @@ def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
 
 def test_unext2_train_leaf_inherits_topology_and_logger() -> None:
     """Regression guard: unified fit.yml pins WandbLogger for a leaf that previously had no class_path."""
-    leaf = BENCHMARKS / "er" / "ipsc_confocal" / "unext2" / "train.yml"
+    leaf = BENCHMARKS / "er" / "unext2" / "ipsc_confocal" / "train.yml"
     cfg = load_composed_config(leaf)
     t = cfg["trainer"]
     assert t["devices"] == 4
@@ -121,8 +121,8 @@ def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init(organelle: s
     trainer / epochs between the two FCMAE leaves — such drift would
     invalidate the pretrained-vs-scratch comparison.
     """
-    scratch_leaf = BENCHMARKS / organelle / "ipsc_confocal" / "fcmae_vscyto3d_scratch" / "train.yml"
-    pretrained_leaf = BENCHMARKS / organelle / "ipsc_confocal" / "fcmae_vscyto3d_pretrained" / "train.yml"
+    scratch_leaf = BENCHMARKS / organelle / "fcmae_vscyto3d_scratch" / "ipsc_confocal" / "train.yml"
+    pretrained_leaf = BENCHMARKS / organelle / "fcmae_vscyto3d_pretrained" / "ipsc_confocal" / "train.yml"
     cfg_scratch = load_composed_config(scratch_leaf)
     cfg_pretrained = load_composed_config(pretrained_leaf)
 
@@ -145,7 +145,7 @@ def test_train_leaf_topology_consistency(organelle: str, model: str) -> None:
     Invariant: ``ntasks_per_node == devices`` and
     ``gpus == nodes × devices``.
     """
-    leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "train.yml"
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml"
     cfg = load_composed_config(leaf)
     devices = cfg["trainer"]["devices"]
     sbatch = cfg["launcher"]["sbatch"]
@@ -160,7 +160,7 @@ def test_train_leaf_topology_consistency(organelle: str, model: str) -> None:
 
 def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:
     """FNet3D paper reproduction keeps precision=32-true (the unified fit recipe defaults to nothing)."""
-    leaf = BENCHMARKS / "er" / "ipsc_confocal" / "fnet3d_paper" / "train.yml"
+    leaf = BENCHMARKS / "er" / "fnet3d_paper" / "ipsc_confocal" / "train.yml"
     cfg = load_composed_config(leaf)
     assert cfg["trainer"]["precision"] == "32-true"
     assert cfg["trainer"]["max_steps"] == 200000

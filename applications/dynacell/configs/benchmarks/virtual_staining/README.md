@@ -1,8 +1,10 @@
 # Virtual Staining Benchmark Configs
 
 Composable leaf-per-experiment configs for dynacell virtual-staining
-benchmarks. Train, predict, and eval leaves for the same benchmark cell
-live side-by-side under `<org>/<train_set>/<model>/`.
+benchmarks. Train, predict, and eval leaves for one training run live
+side-by-side under `<org>/<model>/<train_set>/` — one subdir per training
+experiment so a trained model, its predictions, and its evaluations
+form one coherent unit.
 
 ## Reserved top-level keys
 
@@ -29,29 +31,37 @@ a source of confusion and the eval selector has been renamed.
 ```
 virtual_staining/
   README.md
-  <org>/<train_set>/<model>/
-    train.yml                       # LightningCLI fit leaf
-    predict/<predict_set>.yml       # LightningCLI predict leaf
-    eval/<predict_set>.yaml         # Hydra eval leaf (canonical location)
-  _internal/                        # hidden support tree — not for browsing
+  <org>/<model>/<train_set>/
+    train.yml                             # LightningCLI fit leaf
+    predict__<predict_set>.yml            # LightningCLI predict leaf
+    eval__<predict_set>.yaml              # Hydra eval leaf (canonical location)
+  _internal/                              # hidden support tree — not for browsing
     shared/
       model/
-        train_sets/<name>.yml       # imaging modality + source_channel defaults
-        predict_sets/<name>.yml     # predict_set metadata + source_channel
-        targets/<target>.yml        # target_channel, train data_path, norms, CPU augs
+        train_sets/<name>.yml             # imaging modality + source_channel defaults
+        predict_sets/<name>.yml           # predict_set metadata + source_channel
+        targets/<target>.yml              # target_channel, train data_path, norms, CPU augs
         model_overlays/
-          <model>_fit.yml           # model + fit trainer + train data hparams
-          <model>_predict.yml       # model + predict trainer + predict data hparams
+          <model>_fit.yml                 # model + fit trainer + train data hparams
+          <model>_predict.yml             # model + predict trainer + predict data hparams
         launcher_profiles/
-          mode_<fit|predict>.yml    # launcher.mode
-          hardware_<hw>.yml         # sbatch directives + trainer.devices
-          runtime_shared.yml        # launcher.runtime + launcher.env
+          mode_<fit|predict>.yml          # launcher.mode
+          hardware_<hw>.yml               # sbatch directives + trainer.devices
+          runtime_shared.yml              # launcher.runtime + launcher.env
       eval/
-        target/<target>.yaml        # GT paths, segmentation paths, GT/pred channel names
-        feature_extractor/dynaclr/  # DynaCLR checkpoint + encoder kwargs
-    leaf/                           # symlink tree aliasing canonical eval leaves
-      <org>/<train_set>/<model>/eval/<predict_set>.yaml -> ../../../.../eval/<predict_set>.yaml
+        target/<target>.yaml              # GT paths, segmentation paths, GT/pred channel names
+        feature_extractor/dynaclr/        # DynaCLR checkpoint + encoder kwargs
+    leaf/                                 # symlink tree aliasing canonical eval leaves
+      <org>/<model>/<train_set>/eval__<predict_set>.yaml -> ../../../../../<org>/<model>/<train_set>/eval__<predict_set>.yaml
 ```
+
+Leaves are grouped by **train set** inside each `<org>/<model>/` cell so
+that a training experiment (train + the predict/eval variants fed by its
+checkpoint) lives in one directory. Adding a new training run — e.g. the
+planned `joint_ipsc_confocal_a549_mantis` mix — means creating one new
+subdir; deleting one is `rm -r`. Each train-set dir holds one `train.yml`
+plus one `predict__<predict_set>.yml` and `eval__<predict_set>.yaml` per
+held-out split the model is evaluated on.
 
 The top level of `virtual_staining/` shows only biology (`er/`, `membrane/`,
 `mito/`, `nucleus/`) plus `_internal/` — a hidden support tree whose
@@ -78,7 +88,7 @@ the HPC-bound groups and external users provide their own via
 Last wins via deep-merge. Lists replace wholesale — layers that own list
 fields (`callbacks`, `augmentations`, etc.) own the **full** list.
 
-**Train leaf** (at `<org>/<train_set>/<model>/train.yml`):
+**Train leaf** (at `<org>/<model>/<train_set>/train.yml`):
 
 ```yaml
 base:
@@ -90,19 +100,19 @@ base:
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
 
-**Predict leaf** (at `<org>/<train_set>/<model>/predict/<predict_set>.yml`):
+**Predict leaf** (at `<org>/<model>/<train_set>/predict__<predict_set>.yml`):
 
 ```yaml
 base:
-  - ../../../../_internal/shared/model/predict_sets/<predict_set>.yml
-  - ../../../../_internal/shared/model/targets/<target>.yml
-  - ../../../../_internal/shared/model/model_overlays/<model>_predict.yml
-  - ../../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
-  - ../../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../_internal/shared/model/predict_sets/<predict_set>.yml
+  - ../../../_internal/shared/model/targets/<target>.yml
+  - ../../../_internal/shared/model/model_overlays/<model>_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
 
-**Eval leaf** (at `<org>/<train_set>/<model>/eval/<predict_set>.yaml`):
+**Eval leaf** (at `<org>/<model>/<train_set>/eval__<predict_set>.yaml`):
 
 ```yaml
 # @package _global_
@@ -126,17 +136,17 @@ save:
 
 Direct LightningCLI (no sbatch):
 
-- `uv run dynacell fit -c configs/benchmarks/virtual_staining/<org>/<train_set>/<model>/train.yml`
-- `uv run dynacell predict -c configs/benchmarks/virtual_staining/<org>/<train_set>/<model>/predict/<predict_set>.yml`
+- `uv run dynacell fit -c configs/benchmarks/virtual_staining/<org>/<model>/<train_set>/train.yml`
+- `uv run dynacell predict -c configs/benchmarks/virtual_staining/<org>/<model>/<train_set>/predict__<predict_set>.yml`
 
 Hydra eval:
 
-- `uv run dynacell evaluate leaf=<org>/<train_set>/<model>/eval/<predict_set>`
+- `uv run dynacell evaluate leaf=<org>/<model>/<train_set>/eval__<predict_set>`
 
 Via sbatch with `submit_benchmark_job.py`:
 
 ```bash
-LEAF=configs/benchmarks/virtual_staining/er/ipsc_confocal/celldiff/train.yml
+LEAF=configs/benchmarks/virtual_staining/er/celldiff/ipsc_confocal/train.yml
 
 # Pure preview (no disk writes, safe on any run_root):
 uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-script
