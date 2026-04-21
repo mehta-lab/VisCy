@@ -119,16 +119,16 @@ thereafter reuses the shared weights.
 
 ### Enable feature metrics (DINOv3 + DynaCLR)
 
-Select the feature-extractor groups; they pin the model names, checkpoint, and
-encoder kwargs. Turn `compute_feature_metrics=true` to enable the feature-metrics
-branch of the pipeline:
+The `feature_extractor/dinov3=lvd1689m` and
+`feature_extractor/dynaclr=default` groups are auto-selected in
+`eval.yaml`'s defaults list on a repo checkout, so you don't need to
+pass them unless you're swapping variants. Turn
+`compute_feature_metrics=true` to enable the feature-metrics branch:
 
 ```bash
 uv run dynacell evaluate \
   target=er_sec61b \
   predict_set=ipsc_confocal \
-  feature_extractor/dinov3=lvd1689m \
-  feature_extractor/dynaclr=default \
   compute_feature_metrics=true \
   io.pred_path=/hpc/.../fnet3d_sec61b.zarr \
   save.save_dir=/hpc/.../eval_fnet3d_sec61b
@@ -137,14 +137,17 @@ uv run dynacell evaluate \
 `io.cell_segmentation_path` comes from the `target` group; the pipeline requires
 it to be non-null when feature metrics are on.
 
-To use a non-canonical DynaCLR checkpoint, override the group's value on the CLI:
+To use a non-canonical DynaCLR checkpoint, override the field directly:
 ```bash
-uv run dynacell evaluate … feature_extractor/dynaclr=default \
+uv run dynacell evaluate … \
   feature_extractor.dynaclr.checkpoint=/hpc/.../other.ckpt
 ```
 
-Omitting the feature-extractor groups (or their required fields) when
-`compute_feature_metrics=true` raises `MissingMandatoryValue` at access time.
+To disable DINOv3 or DynaCLR on a repo checkout (e.g. to isolate one
+feature family), pin the group back to `null`:
+```bash
+uv run dynacell evaluate … feature_extractor/dinov3=null
+```
 
 ### External users: authoring your own groups
 
@@ -265,6 +268,20 @@ replace the checkpoint and the hash recomputes automatically.
 
 ### Priming the cache
 
+All four cache families (`masks`, `cp`, `dinov3`, `dynaclr`) build by
+default, and `feature_extractor/dinov3=lvd1689m` and
+`feature_extractor/dynaclr=default` are auto-selected via
+`eval.yaml`'s defaults list on a repo checkout. `io.gt_cache_dir` lives
+in the `target` group too. So a full prime needs only the target and
+predict-set selectors:
+
+```bash
+uv run dynacell precompute-gt target=er_sec61b predict_set=ipsc_confocal
+```
+
+For an ad-hoc prime without the HPC groups, set the equivalent fields
+directly:
+
 ```bash
 uv run dynacell precompute-gt \
   target_name=er \
@@ -274,14 +291,14 @@ uv run dynacell precompute-gt \
   pixel_metrics.spacing=[0.29,0.108,0.108] \
   feature_extractor.dinov3.pretrained_model_name=facebook/dinov3-vitl16-pretrain-lvd1689m \
   feature_extractor.dynaclr.checkpoint=/path/to/dynaclr.ckpt \
-  'feature_extractor.dynaclr.encoder={backbone: resnet50, in_channels: 1, ...}' \
-  build.masks=true build.cp=true build.dinov3=true build.dynaclr=true
+  'feature_extractor.dynaclr.encoder={backbone: resnet50, in_channels: 1, ...}'
 ```
 
-`build.*` toggles control which artifact families get built (all true by default). Skip families you don't need — for example, mask-only:
+`build.*` toggles let you skip families you don't need — for example,
+mask-only:
 
 ```bash
-uv run dynacell precompute-gt ... build.masks=true build.cp=false build.dinov3=false build.dynaclr=false
+uv run dynacell precompute-gt ... build.cp=false build.dinov3=false build.dynaclr=false
 ```
 
 ### Parallel sweeps

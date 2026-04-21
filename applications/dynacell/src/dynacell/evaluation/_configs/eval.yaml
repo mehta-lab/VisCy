@@ -2,8 +2,12 @@ defaults:
   - _self_
   - optional target: null
   - optional predict_set: null
-  - optional feature_extractor/dinov3: null
-  - optional feature_extractor/dynaclr: null
+  # Default to the canonical DINOv3 checkpoint and team DynaCLR encoder.
+  # `optional` means wheel installs that don't ship dynaclr=default (it lives
+  # in the repo's shared/eval/ tree) silently skip the default — users there
+  # supply their own via --config-dir.
+  - optional feature_extractor/dinov3: lvd1689m
+  - optional feature_extractor/dynaclr: default
   - optional leaf: null
 
 target_name: ???

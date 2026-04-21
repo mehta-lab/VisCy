@@ -6,3 +6,4 @@ io:
   cell_segmentation_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
   gt_channel_name: Nuclei
   pred_channel_name: Nuclei_prediction
+  gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/nucleus
