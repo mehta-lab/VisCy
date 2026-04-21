@@ -178,13 +178,21 @@ def submit(argv: list[str] | None = None) -> int:
     if not run_root or not str(run_root).startswith("/"):
         raise SystemExit(f"launcher.run_root must be an absolute path (got {run_root!r})")
 
-    # Consistency: hardware profile's gpu count must match trainer.devices.
-    trainer_devices = composed.get("trainer", {}).get("devices")
-    sbatch_gpus = sbatch.get("gpus")
-    if trainer_devices != sbatch_gpus:
+    # Consistency: under SLURM, Lightning's SLURMEnvironment derives
+    # world_size from SLURM_NTASKS — not from trainer.devices. If ntasks
+    # ≠ nodes × devices, DDP silently runs with the wrong world_size and
+    # only one GPU actually trains. So ntasks, gpus, and devices must all
+    # agree (scaled by nodes).
+    trainer = composed.get("trainer", {})
+    trainer_devices = trainer.get("devices")
+    nodes = sbatch.get("nodes", 1)
+    expected = trainer_devices * nodes if isinstance(trainer_devices, int) else None
+    mismatches = [(name, sbatch.get(name)) for name in ("gpus", "ntasks") if sbatch.get(name) != expected]
+    if expected is None or mismatches:
+        detail = ", ".join(f"sbatch.{n}={v!r}" for n, v in mismatches)
         raise SystemExit(
-            f"trainer.devices={trainer_devices!r} does not match "
-            f"launcher.sbatch.gpus={sbatch_gpus!r}. "
+            f"topology mismatch: trainer.devices={trainer_devices!r} × "
+            f"sbatch.nodes={nodes!r} (expected {expected!r}) does not match {detail}. "
             f"Check --override values or hardware profile."
         )
 

@@ -115,6 +115,23 @@ def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init() -> None:
     assert _strip_run_identity(cfg_scratch) == _strip_run_identity(cfg_pretrained)
 
 
+@pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
+def test_train_leaf_topology_consistency(organelle: str, model: str) -> None:
+    """Regression guard: under SLURM, Lightning's SLURMEnvironment reads
+    world_size from SLURM_NTASKS, not from trainer.devices. If ntasks
+    mismatches devices, DDP silently runs with world_size=ntasks and
+    only that many GPUs train — the rest sit idle. All three must agree:
+    ``sbatch.ntasks == sbatch.gpus == sbatch.nodes × trainer.devices``.
+    """
+    leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / f"{model}.yml"
+    cfg = load_composed_config(leaf)
+    devices = cfg["trainer"]["devices"]
+    sbatch = cfg["launcher"]["sbatch"]
+    expected = devices * sbatch.get("nodes", 1)
+    assert sbatch["gpus"] == expected, f"{organelle}/{model}: sbatch.gpus={sbatch['gpus']} ≠ {expected}"
+    assert sbatch["ntasks"] == expected, f"{organelle}/{model}: sbatch.ntasks={sbatch['ntasks']} ≠ {expected}"
+
+
 def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:
     """FNet3D paper reproduction keeps precision=32-true (the unified fit recipe defaults to nothing)."""
     leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "fnet3d_paper.yml"
