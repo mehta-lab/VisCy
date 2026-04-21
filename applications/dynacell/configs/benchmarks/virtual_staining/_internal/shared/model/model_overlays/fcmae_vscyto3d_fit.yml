@@ -44,7 +44,7 @@ data:
   init_args:
     z_window_size: 20
     batch_size: 32
-    num_workers: 8
+    num_workers: 4
     yx_patch_size: [384, 384]
     augmentations:
       - class_path: viscy_transforms.RandWeightedCropd
