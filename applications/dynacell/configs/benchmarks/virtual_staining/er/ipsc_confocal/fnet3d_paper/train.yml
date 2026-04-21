@@ -2,12 +2,12 @@
 # Reproduces the trained run at
 # /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/.
 base:
-  - ../../../shared/model/train_sets/ipsc_confocal.yml
-  - ../../../shared/model/targets/er_sec61b.yml
-  - ../../../shared/model/model_overlays/fnet3d_paper_fit.yml
-  - ../../../shared/model/launcher_profiles/mode_fit.yml
-  - ../../../shared/model/launcher_profiles/hardware_gpu_any_long.yml
-  - ../../../shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

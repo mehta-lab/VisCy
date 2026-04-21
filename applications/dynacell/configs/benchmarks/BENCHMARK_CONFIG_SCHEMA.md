@@ -85,41 +85,44 @@ applications/dynacell/
       UNEXT2_VS_FCMAE_CLASSES.md
       virtual_staining/
         README.md
-        shared/
-          model/
-            train_sets/
-              ipsc_confocal.yml
-            predict_sets/
-              ipsc_confocal.yml
-            targets/
-              er_sec61b.yml
-              mito_tomm20.yml
-              membrane.yml
-              nucleus.yml
-            model_overlays/
-              celldiff_fit.yml
-              celldiff_predict.yml
-              fcmae_vscyto3d_fit.yml
-              fnet3d_paper_fit.yml
-              unetvit3d_fit.yml
-              unetvit3d_predict.yml
-              unext2_fit.yml
-            launcher_profiles/
-              mode_fit.yml
-              mode_predict.yml
-              hardware_4gpu.yml
-              hardware_gpu_any_long.yml
-              hardware_h200_single.yml
-              runtime_shared.yml
-          eval/
-            target/
-              er_sec61b.yml
-              mito_tomm20.yml
-              membrane.yml
-              nucleus.yml
-            feature_extractor/
-              dynaclr/
-                default.yml
+        _internal/                          # hidden support tree
+          shared/
+            model/
+              train_sets/
+                ipsc_confocal.yml
+              predict_sets/
+                ipsc_confocal.yml
+              targets/
+                er_sec61b.yml
+                mito_tomm20.yml
+                membrane.yml
+                nucleus.yml
+              model_overlays/
+                celldiff_fit.yml
+                celldiff_predict.yml
+                fcmae_vscyto3d_fit.yml
+                fnet3d_paper_fit.yml
+                unetvit3d_fit.yml
+                unetvit3d_predict.yml
+                unext2_fit.yml
+              launcher_profiles/
+                mode_fit.yml
+                mode_predict.yml
+                hardware_4gpu.yml
+                hardware_gpu_any_long.yml
+                hardware_h200_single.yml
+                runtime_shared.yml
+            eval/
+              target/
+                er_sec61b.yaml
+                mito_tomm20.yaml
+                membrane.yaml
+                nucleus.yaml
+              feature_extractor/
+                dynaclr/
+                  default.yaml
+          leaf/                             # symlink tree for Hydra group resolution
+            <org>/<train_set>/<model>/eval/<predict_set>.yaml
         er/
           ipsc_confocal/
             celldiff/
@@ -168,7 +171,14 @@ applications/dynacell/
 
 ## Ownership by Subtree
 
-### `shared/model/`
+### `_internal/`
+
+Hidden support tree whose leading underscore signals "implementation
+detail." Keeps the top level of `virtual_staining/` biology-only. Holds
+every non-canonical file: the `shared/` building blocks and the `leaf/`
+symlink adapter Hydra needs.
+
+### `_internal/shared/model/`
 
 Owns internal benchmark building blocks used by Lightning train and predict
 leaves:
@@ -180,12 +190,20 @@ leaves:
 - `model_overlays/`: model-family defaults
 - `launcher_profiles/`: launcher mode, hardware, and runtime policy
 
-### `shared/eval/`
+### `_internal/shared/eval/`
 
 Owns internal benchmark building blocks used only by eval:
 
 - `target/`: GT paths, segmentation paths, GT and prediction channel names
 - `feature_extractor/dynaclr/`: internal DynaCLR checkpoint and encoder config
+
+### `_internal/leaf/`
+
+Symlink tree aliasing the canonical eval leaves so Hydra's `leaf=<path>`
+selector can discover them (Hydra group resolution requires a physical
+`leaf/` directory in the searchpath). Each symlink points back at
+`<org>/<train_set>/<model>/eval/<predset>.yaml` — the canonical location
+where train + predict + eval for one benchmark cell sit side by side.
 
 ### `<org>/<train_set>/<model>/`
 
@@ -244,14 +262,20 @@ uv run dynacell predict -c applications/dynacell/configs/benchmarks/virtual_stai
 Path:
 
 ```text
-configs/benchmarks/virtual_staining/<org>/<train_set>/<model>/eval/<predict_set>.yml
+configs/benchmarks/virtual_staining/<org>/<train_set>/<model>/eval/<predict_set>.yaml
 ```
 
 Example:
 
 ```text
-applications/dynacell/configs/benchmarks/virtual_staining/er/ipsc_confocal/celldiff/eval/ipsc_confocal.yml
+applications/dynacell/configs/benchmarks/virtual_staining/er/ipsc_confocal/celldiff/eval/ipsc_confocal.yaml
 ```
+
+Eval leaves keep the `.yaml` extension — Hydra's group resolver only
+discovers `.yaml` files, so renaming to `.yml` makes `leaf=<path>`,
+`target=<name>`, and `feature_extractor/dynaclr=<name>` all fail with
+`MissingConfigException`. Lightning-side train/predict leaves stay
+`.yml` because `viscy_utils.compose` is extension-agnostic.
 
 Hydra selector:
 
@@ -279,12 +303,12 @@ Canonical shape:
 
 ```yaml
 base:
-  - ../../../shared/model/train_sets/<train_set>.yml
-  - ../../../shared/model/targets/<target>.yml
-  - ../../../shared/model/model_overlays/<model>_fit.yml
-  - ../../../shared/model/launcher_profiles/mode_fit.yml
-  - ../../../shared/model/launcher_profiles/hardware_<hw>.yml
-  - ../../../shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../_internal/shared/model/train_sets/<train_set>.yml
+  - ../../../_internal/shared/model/targets/<target>.yml
+  - ../../../_internal/shared/model/model_overlays/<model>_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
 
 ### Predict leaf
@@ -293,12 +317,12 @@ Canonical shape:
 
 ```yaml
 base:
-  - ../../../../shared/model/predict_sets/<predict_set>.yml
-  - ../../../../shared/model/targets/<target>.yml
-  - ../../../../shared/model/model_overlays/<model>_predict.yml
-  - ../../../../shared/model/launcher_profiles/mode_predict.yml
-  - ../../../../shared/model/launcher_profiles/hardware_<hw>.yml
-  - ../../../../shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../../_internal/shared/model/predict_sets/<predict_set>.yml
+  - ../../../../_internal/shared/model/targets/<target>.yml
+  - ../../../../_internal/shared/model/model_overlays/<model>_predict.yml
+  - ../../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
 
 ### Eval leaf
@@ -327,10 +351,11 @@ save:
 
 Hydra resolves:
 
-- `target` from `shared/eval/target/`
-- `feature_extractor/dynaclr` from `shared/eval/feature_extractor/dynaclr/`
+- `target` from `_internal/shared/eval/target/`
+- `feature_extractor/dynaclr` from `_internal/shared/eval/feature_extractor/dynaclr/`
 - `predict_set` from the in-package public group
-- `leaf` from the benchmark tree itself
+- `leaf` from `_internal/leaf/` (symlinks back to the canonical eval leaves
+  at `<org>/<train_set>/<model>/eval/<predict_set>.yaml`)
 
 ## Hydra Search-Path Contract
 
@@ -338,8 +363,10 @@ The eval runtime uses:
 
 - packaged schema under `src/dynacell/evaluation/_configs/`
 - repo-local benchmark groups under:
-  - `configs/benchmarks/virtual_staining/shared/eval/`
-  - `configs/benchmarks/virtual_staining/`
+  - `configs/benchmarks/virtual_staining/_internal/` (holds the `leaf/`
+    symlink tree)
+  - `configs/benchmarks/virtual_staining/_internal/shared/eval/` (holds
+    `target/` and `feature_extractor/dynaclr/`)
 
 `dynacell.__main__` injects those two roots through
 `hydra.searchpath=[file://...]` when running from a repo checkout.
@@ -349,9 +376,12 @@ searchpath so that `leaf=<org>/<train_set>/<model>/eval/<predset>`
 resolves to `<searchpath>/leaf/<path>.yaml`. The canonical eval leaves
 live next to their train/predict siblings at
 `<org>/<train_set>/<model>/eval/<predset>.yaml`; a parallel symlink tree
-under `virtual_staining/leaf/` mirrors the benchmark structure and
-points each symlink back at the canonical file, so the schema's
-"one directory per benchmark" goal stays intact.
+under `_internal/leaf/` mirrors the benchmark structure and points each
+symlink back at the canonical file. Keeping the whole support tree under
+a single leading-underscore dir (`_internal/`) means the top level of
+`virtual_staining/` shows only biology + README — no exposed service
+dirs — while the "one directory per benchmark" goal for
+`<org>/<train_set>/<model>/` stays intact.
 
 Wheel installs do not see those internal benchmark groups. External users get:
 
@@ -366,22 +396,22 @@ Wheel installs do not see those internal benchmark groups. External users get:
 
 Move:
 
-- `shared/train_sets/*` -> `shared/model/train_sets/*`
-- `shared/predict_sets/*` -> `shared/model/predict_sets/*`
-- `shared/targets/*` -> `shared/model/targets/*`
-- `shared/model_overlays/*` -> `shared/model/model_overlays/*`
-- `shared/launcher_profiles/*` -> `shared/model/launcher_profiles/*`
+- `shared/train_sets/*` -> `_internal/shared/model/train_sets/*`
+- `shared/predict_sets/*` -> `_internal/shared/model/predict_sets/*`
+- `shared/targets/*` -> `_internal/shared/model/targets/*`
+- `shared/model_overlays/*` -> `_internal/shared/model/model_overlays/*`
+- `shared/launcher_profiles/*` -> `_internal/shared/model/launcher_profiles/*`
 
 ### Eval shared files
 
 Move:
 
-- `configs/evaluation/target/er_sec61b.yaml` -> `shared/eval/target/er_sec61b.yml`
-- `configs/evaluation/target/mito_tomm20.yaml` -> `shared/eval/target/mito_tomm20.yml`
-- `configs/evaluation/target/membrane.yaml` -> `shared/eval/target/membrane.yml`
-- `configs/evaluation/target/nucleus.yaml` -> `shared/eval/target/nucleus.yml`
+- `configs/evaluation/target/er_sec61b.yaml` -> `_internal/shared/eval/target/er_sec61b.yaml`
+- `configs/evaluation/target/mito_tomm20.yaml` -> `_internal/shared/eval/target/mito_tomm20.yaml`
+- `configs/evaluation/target/membrane.yaml` -> `_internal/shared/eval/target/membrane.yaml`
+- `configs/evaluation/target/nucleus.yaml` -> `_internal/shared/eval/target/nucleus.yaml`
 - `configs/evaluation/feature_extractor/dynaclr/default.yaml` ->
-  `shared/eval/feature_extractor/dynaclr/default.yml`
+  `_internal/shared/eval/feature_extractor/dynaclr/default.yaml`
 
 ### Train leaves
 
@@ -417,9 +447,9 @@ Apply the same pattern for `membrane`, `mito`, and `nucleus`.
 Move:
 
 - `configs/evaluation/benchmark/er/ipsc_confocal/celldiff/ipsc_confocal.yaml` ->
-  `er/ipsc_confocal/celldiff/eval/ipsc_confocal.yml`
+  `er/ipsc_confocal/celldiff/eval/ipsc_confocal.yaml`
 - `configs/evaluation/benchmark/er/ipsc_confocal/unetvit3d/ipsc_confocal.yaml` ->
-  `er/ipsc_confocal/unetvit3d/eval/ipsc_confocal.yml`
+  `er/ipsc_confocal/unetvit3d/eval/ipsc_confocal.yaml`
 
 Apply the same pattern for `membrane`, `mito`, and `nucleus`.
 

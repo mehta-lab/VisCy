@@ -3,12 +3,12 @@
 # channel). Nucleus target_channel is Nuclei, so we list-replace those three lists
 # here to re-key them.
 base:
-  - ../../../shared/model/train_sets/ipsc_confocal.yml
-  - ../../../shared/model/targets/nucleus.yml
-  - ../../../shared/model/model_overlays/fnet3d_paper_fit.yml
-  - ../../../shared/model/launcher_profiles/mode_fit.yml
-  - ../../../shared/model/launcher_profiles/hardware_gpu_any_long.yml
-  - ../../../shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

@@ -28,37 +28,46 @@ a source of confusion and the eval selector has been renamed.
 
 ```
 virtual_staining/
-  shared/
-    model/
-      train_sets/<name>.yml         # imaging modality + source_channel defaults
-      predict_sets/<name>.yml       # predict_set metadata + source_channel
-      targets/<target>.yml          # target_channel, train data_path, norms, CPU augs
-      model_overlays/
-        <model>_fit.yml             # model + fit trainer + train data hparams
-        <model>_predict.yml         # model + predict trainer + predict data hparams
-      launcher_profiles/
-        mode_<fit|predict>.yml      # launcher.mode
-        hardware_<hw>.yml           # sbatch directives + trainer.devices
-        runtime_shared.yml          # launcher.runtime + launcher.env
-    eval/
-      target/<target>.yaml          # GT paths, segmentation paths, GT/pred channel names
-      feature_extractor/dynaclr/    # DynaCLR checkpoint + encoder kwargs
+  README.md
   <org>/<train_set>/<model>/
     train.yml                       # LightningCLI fit leaf
     predict/<predict_set>.yml       # LightningCLI predict leaf
-    eval/<predict_set>.yaml         # Hydra eval leaf
-  leaf/
-    <org>/<train_set>/<model>/eval/<predict_set>.yaml -> ../../.../eval/<predict_set>.yaml
+    eval/<predict_set>.yaml         # Hydra eval leaf (canonical location)
+  _internal/                        # hidden support tree — not for browsing
+    shared/
+      model/
+        train_sets/<name>.yml       # imaging modality + source_channel defaults
+        predict_sets/<name>.yml     # predict_set metadata + source_channel
+        targets/<target>.yml        # target_channel, train data_path, norms, CPU augs
+        model_overlays/
+          <model>_fit.yml           # model + fit trainer + train data hparams
+          <model>_predict.yml       # model + predict trainer + predict data hparams
+        launcher_profiles/
+          mode_<fit|predict>.yml    # launcher.mode
+          hardware_<hw>.yml         # sbatch directives + trainer.devices
+          runtime_shared.yml        # launcher.runtime + launcher.env
+      eval/
+        target/<target>.yaml        # GT paths, segmentation paths, GT/pred channel names
+        feature_extractor/dynaclr/  # DynaCLR checkpoint + encoder kwargs
+    leaf/                           # symlink tree aliasing canonical eval leaves
+      <org>/<train_set>/<model>/eval/<predict_set>.yaml -> ../../../.../eval/<predict_set>.yaml
 ```
+
+The top level of `virtual_staining/` shows only biology (`er/`, `membrane/`,
+`mito/`, `nucleus/`) plus `_internal/` — a hidden support tree whose
+leading underscore signals "implementation detail; don't browse here for
+science." All Hydra group files, all shared composition building blocks,
+and the `leaf/` symlink adapter live under `_internal/`.
 
 Train/predict leaves use LightningCLI (`.yml`). Eval leaves use Hydra and
 keep `.yaml` because Hydra's group resolution only discovers `.yaml` files.
-The `leaf/` symlink tree aliases each eval leaf so Hydra's `leaf=<path>`
-selector can discover them at `<searchpath>/leaf/<path>.yaml`.
+The `_internal/leaf/` symlink tree aliases each canonical eval leaf so
+Hydra's `leaf=<path>` selector can discover them at
+`<searchpath>/leaf/<path>.yaml`.
 
 Eval runtime uses two search paths injected by `dynacell.__main__`:
-`virtual_staining/` (for the `leaf/` tree) and
-`virtual_staining/shared/eval/` (for the `target/` and
+`virtual_staining/_internal/` (for the `leaf/` tree) and
+`virtual_staining/_internal/shared/eval/` (for the `target/` and
 `feature_extractor/dynaclr/` groups). Schema-only eval configs ship
 inside the dynacell package; wheel installs without the repo don't see
 the HPC-bound groups and external users provide their own via
@@ -73,24 +82,24 @@ fields (`callbacks`, `augmentations`, etc.) own the **full** list.
 
 ```yaml
 base:
-  - ../../../shared/model/train_sets/<train_set>.yml
-  - ../../../shared/model/targets/<target>.yml
-  - ../../../shared/model/model_overlays/<model>_fit.yml
-  - ../../../shared/model/launcher_profiles/mode_fit.yml
-  - ../../../shared/model/launcher_profiles/hardware_<hw>.yml
-  - ../../../shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../_internal/shared/model/train_sets/<train_set>.yml
+  - ../../../_internal/shared/model/targets/<target>.yml
+  - ../../../_internal/shared/model/model_overlays/<model>_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
 
 **Predict leaf** (at `<org>/<train_set>/<model>/predict/<predict_set>.yml`):
 
 ```yaml
 base:
-  - ../../../../shared/model/predict_sets/<predict_set>.yml
-  - ../../../../shared/model/targets/<target>.yml
-  - ../../../../shared/model/model_overlays/<model>_predict.yml
-  - ../../../../shared/model/launcher_profiles/mode_predict.yml
-  - ../../../../shared/model/launcher_profiles/hardware_<hw>.yml
-  - ../../../../shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../../_internal/shared/model/predict_sets/<predict_set>.yml
+  - ../../../../_internal/shared/model/targets/<target>.yml
+  - ../../../../_internal/shared/model/model_overlays/<model>_predict.yml
+  - ../../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
 
 **Eval leaf** (at `<org>/<train_set>/<model>/eval/<predict_set>.yaml`):
@@ -150,8 +159,9 @@ submission fails fast.
 
 ## Source channel contract
 
-`data.init_args.source_channel` lives in `shared/model/train_sets/` and
-`shared/model/predict_sets/` (duplicated — must be kept in sync) because
-it's a property of the imaging modality, not the target. Predict leaves
-don't compose train_sets, so the predict_set file has to own its own
-`source_channel`.
+`data.init_args.source_channel` lives in
+`_internal/shared/model/train_sets/` and
+`_internal/shared/model/predict_sets/` (duplicated — must be kept in
+sync) because it's a property of the imaging modality, not the target.
+Predict leaves don't compose train_sets, so the predict_set file has to
+own its own `source_channel`.

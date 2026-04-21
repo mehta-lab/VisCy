@@ -67,12 +67,13 @@ def test_predict_leaf_composes(organelle: str, model: str) -> None:
 
 @pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
 def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
-    """Every eval leaf at <org>/<train>/<model>/eval/<predset>.yaml has a
-    corresponding symlink under leaf/ so Hydra can resolve leaf=<path>."""
+    """Every canonical eval leaf at <org>/<train>/<model>/eval/<predset>.yaml
+    has a corresponding symlink under _internal/leaf/ so Hydra can resolve
+    ``leaf=<path>`` from the _internal searchpath."""
     real = BENCHMARKS / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
-    link = BENCHMARKS / "leaf" / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
+    link = BENCHMARKS / "_internal" / "leaf" / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
     assert real.is_file(), f"missing canonical eval leaf: {real}"
-    assert link.is_symlink(), f"missing leaf/ symlink: {link}"
+    assert link.is_symlink(), f"missing symlink: {link}"
     assert link.resolve() == real.resolve()
 
 

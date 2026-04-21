@@ -28,8 +28,8 @@ _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
 # hydra.searchpath; wheel installs without the repo simply don't see them, and
 # external users provide their own groups via --config-dir.
 _EXTERNAL_SEARCHPATHS: tuple[str, ...] = (
-    "configs/benchmarks/virtual_staining",
-    "configs/benchmarks/virtual_staining/shared/eval",
+    "configs/benchmarks/virtual_staining/_internal",
+    "configs/benchmarks/virtual_staining/_internal/shared/eval",
 )
 
 

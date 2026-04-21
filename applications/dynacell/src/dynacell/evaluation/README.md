@@ -43,25 +43,29 @@ through `hydra.searchpath`. See the table below.
 
 | Group | Options | What it sets | Source |
 |---|---|---|---|
-| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. | `configs/benchmarks/virtual_staining/shared/eval/target/` |
+| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. | `configs/benchmarks/virtual_staining/_internal/shared/eval/target/` |
 | `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. | in-package (`_configs/predict_set/`) |
 | `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package (`_configs/feature_extractor/dinov3/`) |
-| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | `configs/benchmarks/virtual_staining/shared/eval/feature_extractor/dynaclr/` |
-| `leaf` | `<org>/<train_set>/<model>/eval/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/leaf/` (symlink tree) |
+| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | `configs/benchmarks/virtual_staining/_internal/shared/eval/feature_extractor/dynaclr/` |
+| `leaf` | `<org>/<train_set>/<model>/eval/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/_internal/leaf/` (symlink tree) |
 
 - **In-package** groups (`predict_set`, `feature_extractor/dinov3`,
   `spectral_pcc/*`) ship in the wheel: schema and path-free reference
   values only.
 - **Repo-checkout** groups (`target`, `feature_extractor/dynaclr`, `leaf`)
-  live under `configs/benchmarks/virtual_staining/` and contain HPC paths,
-  our DynaCLR checkpoint, and benchmark-instance values — useless to
-  external users. `dynacell.__main__` injects two `hydra.searchpath` roots
-  (`virtual_staining/` and `virtual_staining/shared/eval/`) when running
-  from a repo checkout. Wheel installs without the repo silently omit
-  these, and external users supply their own via `--config-dir`.
+  all live under `configs/benchmarks/virtual_staining/_internal/` — the
+  hidden support tree that keeps the top level of `virtual_staining/`
+  biology-only. They contain HPC paths, our DynaCLR checkpoint, and
+  benchmark-instance values — useless to external users.
+  `dynacell.__main__` injects two `hydra.searchpath` roots
+  (`_internal/` for the `leaf/` tree and `_internal/shared/eval/` for
+  `target/` and `feature_extractor/dynaclr/`) when running from a repo
+  checkout. Wheel installs without the repo silently omit these, and
+  external users supply their own via `--config-dir`.
 - **Hydra only discovers `.yaml` files for group resolution**, so eval
-  group files under `shared/eval/`, the canonical eval leaves at
-  `<cell>/eval/<predset>.yaml`, and the `leaf/` symlinks all use `.yaml`.
+  group files under `_internal/shared/eval/`, the canonical eval leaves
+  at `<cell>/eval/<predset>.yaml`, and the `_internal/leaf/` symlinks
+  all use `.yaml`.
   Lightning-side train and predict leaves stay `.yml` (they compose
   through `viscy_utils.compose`, which is extension-agnostic).
 
@@ -132,10 +136,10 @@ Omitting the feature-extractor groups (or their required fields) when
 `pip install dynacell` ships only the schema and path-free reference groups
 (eval.yaml, precompute.yaml, feature_extractor/dinov3/lvd1689m, predict_set/ipsc_confocal,
 spectral_pcc/*). Our HPC-bound groups (the `target/*` files,
-`feature_extractor/dynaclr/default`, and the `leaf/` eval leaves) live
-under `configs/benchmarks/virtual_staining/` in the repo checkout and
-won't be present in a wheel-only install — they point at paths and
-checkpoints external users don't have.
+`feature_extractor/dynaclr/default`, and the `leaf/` eval-leaf symlinks)
+live under `configs/benchmarks/virtual_staining/_internal/` in the repo
+checkout and won't be present in a wheel-only install — they point at
+paths and checkpoints external users don't have.
 
 To evaluate your own predictions, write your own group files and point Hydra at
 them with `--config-dir`. A minimal target file:
@@ -189,12 +193,13 @@ apply on top (e.g. `limit_positions=1`, `compute_feature_metrics=false`,
 `save.save_dir=/tmp/…` for smoke tests).
 
 Hydra resolves `leaf=<path>` through a symlink tree at
-`configs/benchmarks/virtual_staining/leaf/<path>.yaml` that aliases the
-canonical eval leaves. Two `hydra.searchpath` roots are injected by
-`dynacell.__main__` — one for the `leaf/` tree, one for the
-`shared/eval/` groups (`target/`, `feature_extractor/dynaclr/`). Wheel-only
-installs without the repo checkout won't see any of these — see
-"External users" above for authoring your own.
+`configs/benchmarks/virtual_staining/_internal/leaf/<path>.yaml` that
+aliases the canonical eval leaves. Two `hydra.searchpath` roots are
+injected by `dynacell.__main__`: `_internal/` (for the `leaf/` tree)
+and `_internal/shared/eval/` (for `target/` and
+`feature_extractor/dynaclr/`). Wheel-only installs without the repo
+checkout won't see any of these — see "External users" above for
+authoring your own.
 
 ### Force recompute
 
