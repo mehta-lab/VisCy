@@ -13,7 +13,7 @@ launcher:
   sbatch:
     partition: gpu
     nodes: 1
-    ntasks: 1
+    ntasks_per_node: 1
     cpus_per_task: 32
     gpus: 1
     mem: "256G"

@@ -37,7 +37,7 @@ _SBATCH_DIRECTIVE_ORDER = (
     ("job_name", "--job-name"),
     ("time", "--time"),
     ("nodes", "--nodes"),
-    ("ntasks", "--ntasks"),
+    ("ntasks_per_node", "--ntasks-per-node"),
     ("partition", "--partition"),
     ("cpus_per_task", "--cpus-per-task"),
     ("gpus", "--gpus"),
@@ -179,20 +179,22 @@ def submit(argv: list[str] | None = None) -> int:
         raise SystemExit(f"launcher.run_root must be an absolute path (got {run_root!r})")
 
     # Consistency: under SLURM, Lightning's SLURMEnvironment derives
-    # world_size from SLURM_NTASKS — not from trainer.devices. If ntasks
-    # ≠ nodes × devices, DDP silently runs with the wrong world_size and
-    # only one GPU actually trains. So ntasks, gpus, and devices must all
-    # agree (scaled by nodes).
+    # world_size from SLURM_NTASKS — not from trainer.devices — and
+    # rejects bare `--ntasks`, demanding `--ntasks-per-node` (see
+    # SLURMEnvironment._validate_srun_variables). If ntasks_per_node
+    # ≠ devices, DDP silently runs with the wrong world_size and only
+    # some GPUs train. Invariant: trainer.devices == sbatch.ntasks_per_node,
+    # and sbatch.gpus == sbatch.nodes × trainer.devices.
     trainer = composed.get("trainer", {})
-    trainer_devices = trainer.get("devices")
+    devices = trainer.get("devices")
     nodes = sbatch.get("nodes", 1)
-    expected = trainer_devices * nodes if isinstance(trainer_devices, int) else None
-    mismatches = [(name, sbatch.get(name)) for name in ("gpus", "ntasks") if sbatch.get(name) != expected]
-    if expected is None or mismatches:
-        detail = ", ".join(f"sbatch.{n}={v!r}" for n, v in mismatches)
+    ntasks_per_node = sbatch.get("ntasks_per_node")
+    gpus = sbatch.get("gpus")
+    if not isinstance(devices, int) or ntasks_per_node != devices or gpus != nodes * devices:
         raise SystemExit(
-            f"topology mismatch: trainer.devices={trainer_devices!r} × "
-            f"sbatch.nodes={nodes!r} (expected {expected!r}) does not match {detail}. "
+            f"topology mismatch: trainer.devices={devices!r}, sbatch.nodes={nodes!r}, "
+            f"sbatch.ntasks_per_node={ntasks_per_node!r}, sbatch.gpus={gpus!r}. "
+            f"Must satisfy devices == ntasks_per_node and gpus == nodes × devices. "
             f"Check --override values or hardware profile."
         )
 

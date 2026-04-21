@@ -139,18 +139,23 @@ def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init(organelle: s
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
 def test_train_leaf_topology_consistency(organelle: str, model: str) -> None:
     """Regression guard: under SLURM, Lightning's SLURMEnvironment reads
-    world_size from SLURM_NTASKS, not from trainer.devices. If ntasks
-    mismatches devices, DDP silently runs with world_size=ntasks and
-    only that many GPUs train — the rest sit idle. All three must agree:
-    ``sbatch.ntasks == sbatch.gpus == sbatch.nodes × trainer.devices``.
+    world_size from SLURM_NTASKS and rejects bare ``--ntasks`` in favor
+    of ``--ntasks-per-node``. If ntasks_per_node ≠ devices, DDP silently
+    runs with the wrong world_size and only some GPUs train.
+    Invariant: ``ntasks_per_node == devices`` and
+    ``gpus == nodes × devices``.
     """
     leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "train.yml"
     cfg = load_composed_config(leaf)
     devices = cfg["trainer"]["devices"]
     sbatch = cfg["launcher"]["sbatch"]
-    expected = devices * sbatch.get("nodes", 1)
-    assert sbatch["gpus"] == expected, f"{organelle}/{model}: sbatch.gpus={sbatch['gpus']} ≠ {expected}"
-    assert sbatch["ntasks"] == expected, f"{organelle}/{model}: sbatch.ntasks={sbatch['ntasks']} ≠ {expected}"
+    nodes = sbatch.get("nodes", 1)
+    assert sbatch["ntasks_per_node"] == devices, (
+        f"{organelle}/{model}: ntasks_per_node={sbatch['ntasks_per_node']} ≠ devices={devices}"
+    )
+    assert sbatch["gpus"] == nodes * devices, (
+        f"{organelle}/{model}: gpus={sbatch['gpus']} ≠ nodes×devices={nodes * devices}"
+    )
 
 
 def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:

@@ -42,7 +42,7 @@ def test_render_sbatch_directives_matches_dihan_order():
     sbatch = {
         "partition": "gpu",
         "nodes": 1,
-        "ntasks": 1,
+        "ntasks_per_node": 1,
         "cpus_per_task": 32,
         "gpus": 1,
         "mem": "256G",
@@ -129,7 +129,7 @@ def test_submit_rejects_devices_gpus_mismatch(tmp_path):
                     "sbatch": {
                         "partition": "gpu",
                         "nodes": 1,
-                        "ntasks": 1,
+                        "ntasks_per_node": 1,
                         "cpus_per_task": 1,
                         "gpus": 1,
                         "mem": "1G",
@@ -141,5 +141,5 @@ def test_submit_rejects_devices_gpus_mismatch(tmp_path):
             }
         )
     )
-    with pytest.raises(SystemExit, match="does not match"):
+    with pytest.raises(SystemExit, match="topology mismatch"):
         sbj.submit([str(leaf), "--dry-run"])
