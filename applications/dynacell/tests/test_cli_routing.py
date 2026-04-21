@@ -87,8 +87,7 @@ class TestCliRouting:
 
 
 class TestInjectExternalConfigs:
-    """Tests for the hydra.searchpath injection that exposes HPC-specific config
-    instances living outside the Python package."""
+    """Tests for ``_inject_external_configs``."""
 
     def test_appends_searchpath_when_external_dirs_present(self, tmp_path: Path):
         """When external configs dirs exist, inject a hydra.searchpath override

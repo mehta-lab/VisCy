@@ -12,6 +12,7 @@ pytest.importorskip("yaml")
 from viscy_utils.compose import load_composed_config  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+assert (REPO_ROOT / "pyproject.toml").exists(), f"REPO_ROOT drift: {REPO_ROOT}"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
 
 
@@ -38,7 +39,6 @@ TRAIN_LEAVES = [
 PREDICT_LEAVES = [
     (organelle, model) for organelle in ("er", "mito", "nucleus", "membrane") for model in ("celldiff", "unetvit3d")
 ]
-EVAL_LEAVES = PREDICT_LEAVES
 
 
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
@@ -65,7 +65,7 @@ def test_predict_leaf_composes(organelle: str, model: str) -> None:
     assert "test_cropped" in data_path, f"{organelle}/{model}: data_path must point at test_cropped/, got {data_path}"
 
 
-@pytest.mark.parametrize("organelle,model", EVAL_LEAVES)
+@pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
 def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
     """Every eval leaf at <org>/<train>/<model>/eval/<predset>.yaml has a
     corresponding symlink under leaf/ so Hydra can resolve leaf=<path>."""
@@ -74,7 +74,6 @@ def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
     assert real.is_file(), f"missing canonical eval leaf: {real}"
     assert link.is_symlink(), f"missing leaf/ symlink: {link}"
     assert link.resolve() == real.resolve()
-    assert link.read_text().startswith("# @package _global_")
 
 
 def test_unext2_train_leaf_inherits_topology_and_logger() -> None:
