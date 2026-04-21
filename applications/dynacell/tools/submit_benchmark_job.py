@@ -29,6 +29,7 @@ from typing import Any
 
 import yaml
 
+from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -156,7 +157,7 @@ def submit(argv: list[str] | None = None) -> int:
     os.umask(0o002)
     args = _parse_args(argv)
 
-    composed = load_composed_config(args.leaf)
+    composed = load_composed_config(args.leaf, resolver=_dynacell_ref_resolver)
     for token in args.override:
         path, value = _parse_override(token)
         composed = _apply_override(composed, path, value)

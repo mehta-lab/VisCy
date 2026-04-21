@@ -1,0 +1,184 @@
+"""Manifest-driven dataset reference resolution for the DynaCell benchmark.
+
+Turns a :class:`DatasetRef` (``{dataset, target}``) into concrete paths and
+channel names by reading a Pydantic :class:`DatasetManifest` YAML discovered
+via manifest roots. Callers compose this with the config pipeline via
+:mod:`dynacell._compose_hook`.
+
+Manifest root precedence (highest wins):
+
+1. ``cli_roots`` argument.
+2. ``DYNACELL_MANIFEST_ROOTS`` env var (colon-separated absolute paths).
+3. Python entry points under group ``dynacell.manifest_roots``.
+
+For each root (in order), the resolver looks for
+``<root>/<dataset>/manifest.yaml``. First hit wins. No recursion, no
+globbing.
+"""
+
+from __future__ import annotations
+
+import os
+from importlib import resources
+from importlib.metadata import entry_points
+from pathlib import Path
+
+from pydantic import BaseModel
+
+from dynacell.data.manifests import (
+    DatasetManifest,
+    DatasetRef,
+    VoxelSpacing,
+    load_manifest,
+)
+
+
+class NoManifestRootsError(RuntimeError):
+    """No manifest roots could be discovered from CLI, env, or entry points."""
+
+
+class ManifestNotFoundError(LookupError):
+    """Dataset slug not found under any configured manifest root."""
+
+
+class TargetNotFoundError(LookupError):
+    """Target slug not present in the located dataset manifest."""
+
+
+class ResolvedDataset(BaseModel):
+    """Flat view of the manifest fields a composed config needs."""
+
+    manifest_path: Path
+    data_path_train: Path
+    data_path_test: Path
+    source_channel: str
+    target_channel: str
+    spacing: VoxelSpacing
+
+
+_ENV_VAR = "DYNACELL_MANIFEST_ROOTS"
+_ENTRY_POINT_GROUP = "dynacell.manifest_roots"
+
+
+def _entry_point_roots() -> list[Path]:
+    """Resolve entry-point-registered manifest roots to package resource dirs."""
+    roots: list[Path] = []
+    for ep in entry_points(group=_ENTRY_POINT_GROUP):
+        module = ep.load()
+        resource_dir = resources.files(module)
+        roots.append(Path(str(resource_dir)))
+    return roots
+
+
+def discover_manifest_roots(cli_roots: list[Path] | None = None) -> list[Path]:
+    """Return manifest roots in precedence order (CLI → env var → entry points).
+
+    Parameters
+    ----------
+    cli_roots : list[Path] or None
+        Explicit roots provided by the caller. If given, they take
+        precedence over environment and entry points but do not replace
+        them — lower-precedence roots still contribute.
+
+    Returns
+    -------
+    list[Path]
+        Non-empty list of roots to scan.
+
+    Raises
+    ------
+    NoManifestRootsError
+        If no roots are configured at any precedence level.
+    """
+    roots: list[Path] = []
+    if cli_roots:
+        roots.extend(Path(p) for p in cli_roots)
+    env_value = os.environ.get(_ENV_VAR)
+    if env_value:
+        roots.extend(Path(p) for p in env_value.split(":") if p)
+    roots.extend(_entry_point_roots())
+    if not roots:
+        raise NoManifestRootsError(
+            "No dynacell manifest roots configured.\n\n"
+            "Configure via one of:\n"
+            f"  - Env var:        export {_ENV_VAR}=/path/to/datasets\n"
+            "  - Install a provider:  pip install dynacell-paper\n"
+        )
+    return roots
+
+
+def _find_manifest(dataset: str, roots: list[Path]) -> Path:
+    """Return the first ``<root>/<dataset>/manifest.yaml`` that exists."""
+    searched: list[Path] = []
+    for root in roots:
+        candidate = root / dataset / "manifest.yaml"
+        searched.append(candidate)
+        if candidate.is_file():
+            return candidate
+    lines = "\n".join(f"  - {p}" for p in searched)
+    raise ManifestNotFoundError(f"dataset {dataset!r} not found.\n\nSearched:\n{lines}\n")
+
+
+def _resolve_source_channel(manifest: DatasetManifest) -> str:
+    """Extract the single source channel name from a manifest.
+
+    The ``channels`` field allows ``str | list[str]``. For source-target
+    datasets, ``source`` is a single channel; tolerate a length-1 list
+    but reject multi-element lists (the data pipeline currently passes
+    one channel name into ``HCSDataModule``).
+    """
+    source = manifest.channels["source"]
+    if isinstance(source, str):
+        return source
+    if isinstance(source, list) and len(source) == 1:
+        return source[0]
+    raise ValueError(f"Manifest source channel must be a string or single-element list, got {source!r}.")
+
+
+def resolve_dataset_ref(
+    ref: DatasetRef,
+    roots: list[Path] | None = None,
+) -> ResolvedDataset:
+    """Resolve a :class:`DatasetRef` against the manifest registry.
+
+    Parameters
+    ----------
+    ref : DatasetRef
+        The reference to resolve.
+    roots : list[Path] or None
+        Optional explicit roots (CLI-provided). Falls back to env var and
+        entry points per :func:`discover_manifest_roots`.
+
+    Returns
+    -------
+    ResolvedDataset
+        Flat view of the fields the composed config needs.
+
+    Raises
+    ------
+    NoManifestRootsError
+        If no manifest roots are configured.
+    ManifestNotFoundError
+        If the dataset slug is not found under any root.
+    TargetNotFoundError
+        If the target slug is not defined in the located manifest.
+    """
+    all_roots = discover_manifest_roots(roots)
+    manifest_path = _find_manifest(ref.dataset, all_roots)
+    manifest = load_manifest(manifest_path)
+    if ref.target not in manifest.targets:
+        available = ", ".join(sorted(manifest.targets)) or "(none)"
+        raise TargetNotFoundError(
+            f"target {ref.target!r} not found in dataset {ref.dataset!r}.\n\n"
+            f"Manifest: {manifest_path}\n"
+            f"Available targets: {available}\n"
+        )
+    target = manifest.targets[ref.target]
+    return ResolvedDataset(
+        manifest_path=manifest_path,
+        data_path_train=target.stores.train,
+        data_path_test=target.stores.test,
+        source_channel=_resolve_source_channel(manifest),
+        target_channel=target.target_channel,
+        spacing=manifest.spacing,
+    )

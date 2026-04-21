@@ -8,6 +8,7 @@ YAML compatible with LightningCLI.
 """
 
 import copy
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -42,7 +43,12 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_composed_config(path: str | Path, _seen: frozenset[Path] | None = None) -> dict:
+def load_composed_config(
+    path: str | Path,
+    _seen: frozenset[Path] | None = None,
+    *,
+    resolver: Callable[[dict], dict] | None = None,
+) -> dict:
     """Load a YAML config, recursively resolving ``base:`` references.
 
     Parameters
@@ -51,11 +57,18 @@ def load_composed_config(path: str | Path, _seen: frozenset[Path] | None = None)
         Path to the YAML config file.  May contain a ``base:`` key with
         a list of relative paths to recipe fragments that are merged
         before the file's own keys.
+    resolver : callable, optional
+        Post-composition hook ``dict -> dict`` invoked once on the final
+        merged dict at the top-level call. Recursive calls that resolve
+        ``base:`` fragments pass ``resolver=None``, so each fragment is
+        merged raw and only the outermost composed dict is transformed.
 
     Returns
     -------
     dict
-        Fully composed config dict with ``base:`` key removed.
+        Fully composed config dict with ``base:`` key removed. If
+        ``resolver`` is provided, the returned dict is the resolver's
+        output.
 
     Raises
     ------
@@ -78,4 +91,7 @@ def load_composed_config(path: str | Path, _seen: frozenset[Path] | None = None)
     for rel in bases:
         base_cfg = load_composed_config(path.parent / rel, _seen)
         merged = deep_merge(merged, base_cfg)
-    return deep_merge(merged, cfg)
+    result = deep_merge(merged, cfg)
+    if resolver is not None:
+        result = resolver(result)
+    return result

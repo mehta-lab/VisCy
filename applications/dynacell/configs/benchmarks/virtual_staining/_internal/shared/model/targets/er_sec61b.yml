@@ -1,12 +1,15 @@
 # Target: ER (SEC61B marker).
+# data_path and target_channel come from the manifest via dataset_ref;
+# dataset_ref.target lives here because the organelle is target-scoped,
+# while dataset_ref.dataset lives in the train_set / predict_set fragment.
 benchmark:
   target: er
   gene: SEC61B
   target_id: er_sec61b
+  dataset_ref:
+    target: sec61b
 data:
   init_args:
-    target_channel: Structure
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:

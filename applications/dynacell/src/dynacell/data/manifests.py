@@ -13,6 +13,19 @@ from pydantic import BaseModel, field_validator, model_validator
 from dynacell.data._yaml import load_yaml
 
 
+class DatasetRef(BaseModel):
+    """Reference to a dataset target, resolved against a manifest registry.
+
+    Carried under ``benchmark.dataset_ref`` in benchmark leaf configs.
+    The composition-time resolver reads this reference and splices
+    ``data_path``, ``source_channel``, and ``target_channel`` into the
+    composed Lightning config.
+    """
+
+    dataset: str
+    target: str
+
+
 class VoxelSpacing(BaseModel):
     """Physical voxel spacing in micrometers."""
 

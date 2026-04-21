@@ -6,14 +6,23 @@ import copy
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytest.importorskip("yaml")
 
+from dynacell._compose_hook import _dynacell_ref_resolver  # noqa: E402
 from viscy_utils.compose import load_composed_config  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 assert (REPO_ROOT / "pyproject.toml").exists(), f"REPO_ROOT drift: {REPO_ROOT}"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
+FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
+
+
+@pytest.fixture(autouse=True)
+def _fixture_manifest_root(monkeypatch):
+    """Point the resolver at the on-disk fixture manifest for every test."""
+    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
 
 
 TRAIN_LEAVES = [
@@ -55,9 +64,11 @@ def test_train_leaf_composes(organelle: str, model: str) -> None:
 
 
 @pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
-def test_predict_leaf_composes(organelle: str, model: str) -> None:
+def test_predict_leaf_composes(organelle: str, model: str, monkeypatch) -> None:
+    """ER leaves resolve data_path via dataset_ref; other organelles inherit hardcoded paths."""
+    monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
     leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
-    cfg = load_composed_config(leaf)
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
     assert t["devices"] == 1
@@ -165,3 +176,81 @@ def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:
     assert cfg["trainer"]["precision"] == "32-true"
     assert cfg["trainer"]["max_steps"] == 200000
     assert cfg["trainer"]["devices"] == 1
+
+
+# -- dataset_ref resolver integration tests -------------------------------
+
+
+def test_migrated_er_train_resolves_to_manifest_paths(monkeypatch) -> None:
+    """Full dataset_ref on ER fit leaf splices train store + channels from fixture."""
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+    leaf = BENCHMARKS / "er" / "celldiff" / "ipsc_confocal" / "train.yml"
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    ia = cfg["data"]["init_args"]
+    assert ia["data_path"].endswith("train/SEC61B.zarr")
+    assert ia["source_channel"] == "Phase3D"
+    assert ia["target_channel"] == "Structure"
+    assert cfg["benchmark"]["spacing"] == [0.29, 0.108, 0.108]
+
+
+def test_migrated_er_predict_resolves_to_test_store(monkeypatch) -> None:
+    """Full dataset_ref on ER predict leaf splices test_cropped store + channels."""
+    monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
+    leaf = BENCHMARKS / "er" / "celldiff" / "ipsc_confocal" / "predict__ipsc_confocal.yml"
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    ia = cfg["data"]["init_args"]
+    assert ia["data_path"].endswith("test_cropped/SEC61B.zarr")
+    assert ia["source_channel"] == "Phase3D"
+    assert ia["target_channel"] == "Structure"
+
+
+def test_collision_raises_with_both_paths_in_message(tmp_path, monkeypatch) -> None:
+    """Leaf with full dataset_ref + conflicting explicit data_path raises ValueError."""
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+    leaf_content = {
+        "benchmark": {"dataset_ref": {"dataset": "aics-hipsc", "target": "sec61b"}},
+        "data": {
+            "class_path": "viscy_data.hcs.HCSDataModule",
+            "init_args": {"data_path": "/tmp/some/other/path.zarr"},
+        },
+    }
+    leaf = tmp_path / "collide.yml"
+    leaf.write_text(yaml.dump(leaf_content))
+    with pytest.raises(ValueError) as exc:
+        load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    msg = str(exc.value)
+    assert "/tmp/some/other/path.zarr" in msg
+    assert "SEC61B.zarr" in msg
+
+
+@pytest.mark.parametrize("organelle,model", [("mito", "celldiff"), ("mito", "unetvit3d")])
+def test_mito_partial_ref_noop_parity(organelle: str, model: str, monkeypatch) -> None:
+    """Mito leaves inherit partial dataset_ref; resolver must leave the composed dict unchanged."""
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml"
+    without = load_composed_config(leaf)
+    with_resolver = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    assert without == with_resolver
+    assert with_resolver["data"]["init_args"]["data_path"].endswith("TOMM20.zarr")
+
+
+@pytest.mark.parametrize("organelle,model", [("mito", "celldiff"), ("mito", "unetvit3d")])
+def test_mito_predict_partial_ref_noop_parity(organelle: str, model: str, monkeypatch) -> None:
+    """Mito predict leaves also inherit partial dataset_ref from predict_sets; resolver is no-op."""
+    monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
+    without = load_composed_config(leaf)
+    with_resolver = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    assert without == with_resolver
+
+
+def test_synthetic_target_only_partial_ref_is_noop(tmp_path) -> None:
+    """Target-only dataset_ref (no dataset) composes without touching data fields."""
+    leaf_content = {
+        "benchmark": {"dataset_ref": {"target": "sec61b"}},
+        "data": {"init_args": {"data_path": "/kept.zarr"}},
+    }
+    leaf = tmp_path / "partial.yml"
+    leaf.write_text(yaml.dump(leaf_content))
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    assert cfg["data"]["init_args"]["data_path"] == "/kept.zarr"

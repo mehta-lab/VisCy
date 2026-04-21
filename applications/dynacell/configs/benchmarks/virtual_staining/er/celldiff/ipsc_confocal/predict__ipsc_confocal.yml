@@ -23,7 +23,7 @@ model:
 
 data:
   init_args:
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+    # data_path provided by the dataset_ref resolver (test store in predict mode)
     # override target-inherited normalizations: predict only reads source
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled

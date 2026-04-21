@@ -186,3 +186,45 @@ class TestMaybeSetSharedHfCache:
         ):
             _maybe_set_shared_hf_cache()
         assert os.environ["HF_HUB_CACHE"] == str(tmp_path)
+
+
+class TestResolverThreading:
+    """main_cli() → viscy_utils.cli.main(resolver=...) → _maybe_compose_config(resolver=...)."""
+
+    def test_resolver_threaded_to_maybe_compose(self, monkeypatch, tmp_path):
+        """Full wiring: dynacell main_cli passes the ref resolver to viscy_utils.cli.main."""
+        import sys
+
+        import yaml as _yaml
+
+        from dynacell._compose_hook import _dynacell_ref_resolver
+
+        fixture_root = Path(__file__).resolve().parent / "fixtures" / "manifests"
+        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(fixture_root))
+        repo_root = Path(__file__).resolve().parents[3]
+        leaf = (
+            repo_root / "applications/dynacell/configs/benchmarks/virtual_staining/er/celldiff/ipsc_confocal/train.yml"
+        )
+        monkeypatch.setattr(sys, "argv", ["dynacell", "fit", "-c", str(leaf)])
+
+        captured: dict = {}
+
+        def fake_main(*, resolver=None):
+            # Confirm the dynacell resolver was injected, not None.
+            captured["resolver"] = resolver
+            # Reproduce the viscy_utils composition step so the temp file is written.
+            from viscy_utils.cli import _maybe_compose_config
+
+            _maybe_compose_config(resolver=resolver)
+            # sys.argv[-1] now points at the rewritten temp YAML.
+            captured["temp_path"] = sys.argv[-1]
+
+        monkeypatch.setattr("viscy_utils.cli.main", fake_main)
+        main_cli()
+
+        assert captured["resolver"] is _dynacell_ref_resolver
+        composed = _yaml.safe_load(Path(captured["temp_path"]).read_text())
+        ia = composed["data"]["init_args"]
+        assert ia["data_path"].endswith("train/SEC61B.zarr")
+        assert ia["source_channel"] == "Phase3D"
+        assert ia["target_channel"] == "Structure"

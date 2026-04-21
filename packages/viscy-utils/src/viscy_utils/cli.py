@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -167,17 +168,18 @@ def _replace_config_path_in_argv(config_idx: int, new_path: str) -> None:
         sys.argv[config_idx + 1] = new_path
 
 
-def _maybe_compose_config() -> None:
+def _maybe_compose_config(resolver: Callable[[dict], dict] | None = None) -> None:
     """Compose config from ``base:`` references and strip reserved keys.
 
     Scans ``sys.argv`` for ``--config`` or ``-c`` and loads the YAML.
-    If the file has a ``base:`` key, the referenced recipe fragments are
-    merged via :func:`viscy_utils.compose.load_composed_config`. In all
-    cases, top-level ``launcher:`` and ``benchmark:`` keys (dynacell's
-    reserved benchmark metadata) are dropped before the composed YAML is
-    written to a temp file, since LightningCLI rejects unknown top-level
-    keys. Configs without either ``base:`` or reserved keys pass through
-    unchanged.
+    When the file has a ``base:`` key or a reserved top-level key
+    (``launcher`` / ``benchmark``), it is passed through
+    :func:`viscy_utils.compose.load_composed_config` with the optional
+    ``resolver`` — applications (e.g. dynacell) inject a callable here
+    to transform the composed dict before LightningCLI consumes it.
+    Reserved top-level keys are then stripped because LightningCLI
+    rejects unknown top-level keys. Configs without either ``base:`` or
+    reserved keys pass through unchanged.
     """
     config_idx, config_path_str = _find_config_arg()
     if config_idx is None or config_path_str is None:
@@ -191,7 +193,7 @@ def _maybe_compose_config() -> None:
     has_reserved = any(k in raw for k in _RESERVED_TOP_LEVEL_KEYS)
     if not (has_base or has_reserved):
         return
-    composed = load_composed_config(config_path) if has_base else dict(raw)
+    composed = load_composed_config(config_path, resolver=resolver)
     for k in _RESERVED_TOP_LEVEL_KEYS:
         composed.pop(k, None)
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False, mode="w") as tmp:
@@ -200,14 +202,17 @@ def _maybe_compose_config() -> None:
     _replace_config_path_in_argv(config_idx, tmp.name)
 
 
-def main() -> None:
+def main(*, resolver: Callable[[dict], dict] | None = None) -> None:
     """Run the Lightning CLI with VisCy defaults.
 
     Set log level, TF32 precision, and default random seed to 42.
-    Compose config from ``base:`` references if present.
+    Compose config from ``base:`` references if present. The optional
+    ``resolver`` is threaded into
+    :func:`viscy_utils.compose.load_composed_config` so callers can
+    transform the composed dict before LightningCLI parses it.
     """
     _setup_environment()
-    _maybe_compose_config()
+    _maybe_compose_config(resolver=resolver)
     require_model = {
         "preprocess",
         "precompute",

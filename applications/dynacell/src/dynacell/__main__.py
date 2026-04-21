@@ -119,9 +119,19 @@ def main_cli():
             raise SystemExit(1) from e
         getattr(module, func_name)()
     else:
+        from dynacell._compose_hook import _dynacell_ref_resolver
+        from dynacell.data.resolver import (
+            ManifestNotFoundError,
+            NoManifestRootsError,
+            TargetNotFoundError,
+        )
         from viscy_utils.cli import main
 
-        main()
+        try:
+            main(resolver=_dynacell_ref_resolver)
+        except (NoManifestRootsError, ManifestNotFoundError, TargetNotFoundError) as e:
+            print(str(e), file=sys.stderr)
+            raise SystemExit(2) from e
 
 
 if __name__ == "__main__":

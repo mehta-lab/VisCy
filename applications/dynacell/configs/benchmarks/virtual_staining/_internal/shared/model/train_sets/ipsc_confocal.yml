@@ -1,9 +1,15 @@
 # Train set: AICS iPSC confocal.
-# Imaging modality defaults. data_path lives in the per-target file because
-# each organelle reads from a different zarr store.
+# data_path and target_channel come from the manifest via dataset_ref;
+# dataset_ref.dataset lives here because dataset identity is
+# train_set-scoped, while dataset_ref.target is target-scoped.
+# source_channel stays here as a shared ipsc_confocal default. The
+# resolver validates it matches the manifest (aics-hipsc → Phase3D) and
+# raises if a leaf declares a conflicting value.
 benchmark:
   train_set: ipsc_confocal
   dataset_group: aics-hipsc
+  dataset_ref:
+    dataset: aics-hipsc
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
