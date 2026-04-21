@@ -27,14 +27,23 @@ _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
 # schema + path-free references. Editable installs / repo checkouts expose these
 # through hydra.searchpath; wheel installs without the repo simply don't see them,
 # and external users provide their own groups via --config-dir.
-_EXTERNAL_CONFIGS_SUBPATH = ("configs", "evaluation")
+_EXTERNAL_CONFIGS_SUBPATH = "configs/evaluation"
 
 
 def _external_configs_dir() -> Path | None:
-    """Return the external eval configs dir if it sits next to this checkout."""
-    root = Path(__file__).resolve().parent.parent.parent  # applications/dynacell
-    candidate = root.joinpath(*_EXTERNAL_CONFIGS_SUBPATH)
-    return candidate if candidate.is_dir() else None
+    """Return the external eval configs dir if it sits next to this checkout.
+
+    Walks up from this module until it finds the ``applications/dynacell``
+    package root (marked by ``pyproject.toml``); returns ``<root>/configs/
+    evaluation`` if that directory exists, else ``None``. Using the marker
+    file rather than a fixed ``.parent`` count keeps this working across
+    module reorganisations (e.g. moving ``__main__.py`` into a subpackage).
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").exists():
+            candidate = parent / _EXTERNAL_CONFIGS_SUBPATH
+            return candidate if candidate.is_dir() else None
+    return None
 
 
 def _inject_external_configs(argv: list[str]) -> list[str]:
