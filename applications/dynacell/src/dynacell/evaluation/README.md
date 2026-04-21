@@ -31,32 +31,39 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 
 `dynacell evaluate` is a Hydra entrypoint. Override any field on the CLI with `key=value`.
 
-Paths and settings that belong to a (target, marker, dataset) combination live in
-named config groups under `_configs/`, so most invocations only need to select the
-right group and point at the prediction / output paths.
+Paths and settings that belong to a (target, marker, dataset) combination
+live in named Hydra config groups, so most invocations only need to select
+the right group and point at the prediction / output paths. Groups come from
+two sources: the packaged schema under `src/dynacell/evaluation/_configs/`
+and — on a repo checkout — HPC-bound groups under
+`configs/benchmarks/virtual_staining/` that `dynacell.__main__` exposes
+through `hydra.searchpath`. See the table below.
 
 ### Config groups
 
-| Group | Options | What it sets | Location |
+| Group | Options | What it sets | Source |
 |---|---|---|---|
-| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. | repo checkout |
-| `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. | in-package |
-| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package |
-| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | repo checkout |
-| `leaf` | `<org>/<train_set>/<model>/eval/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | repo checkout |
+| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. | `configs/benchmarks/virtual_staining/shared/eval/target/` |
+| `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. | in-package (`_configs/predict_set/`) |
+| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package (`_configs/feature_extractor/dinov3/`) |
+| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | `configs/benchmarks/virtual_staining/shared/eval/feature_extractor/dynaclr/` |
+| `leaf` | `<org>/<train_set>/<model>/eval/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/leaf/` (symlink tree) |
 
-- **In-package** groups (`predict_set`, `feature_extractor/dinov3`) ship in the
-  wheel: schema + path-free reference values only.
-- **Repo checkout** groups (`target`, `feature_extractor/dynaclr`, `leaf`)
-  live under `applications/dynacell/configs/benchmarks/virtual_staining/` —
-  they contain HPC paths, our DynaCLR checkpoint, and benchmark-instance
-  values, which are useless to external users. `target` and
-  `feature_extractor/dynaclr` live at `virtual_staining/shared/eval/`; `leaf`
-  is a symlink tree at `virtual_staining/leaf/` aliasing the canonical eval
-  leaves at `<org>/<train_set>/<model>/eval/<predset>.yaml`. When running
-  from the repo they are discoverable via two `hydra.searchpath` roots
-  injected by `dynacell.__main__`; running from a wheel install without the
-  repo transparently omits them.
+- **In-package** groups (`predict_set`, `feature_extractor/dinov3`,
+  `spectral_pcc/*`) ship in the wheel: schema and path-free reference
+  values only.
+- **Repo-checkout** groups (`target`, `feature_extractor/dynaclr`, `leaf`)
+  live under `configs/benchmarks/virtual_staining/` and contain HPC paths,
+  our DynaCLR checkpoint, and benchmark-instance values — useless to
+  external users. `dynacell.__main__` injects two `hydra.searchpath` roots
+  (`virtual_staining/` and `virtual_staining/shared/eval/`) when running
+  from a repo checkout. Wheel installs without the repo silently omit
+  these, and external users supply their own via `--config-dir`.
+- **Hydra only discovers `.yaml` files for group resolution**, so eval
+  group files under `shared/eval/`, the canonical eval leaves at
+  `<cell>/eval/<predset>.yaml`, and the `leaf/` symlinks all use `.yaml`.
+  Lightning-side train and predict leaves stay `.yml` (they compose
+  through `viscy_utils.compose`, which is extension-agnostic).
 
 Selecting a group on the CLI: `<group>=<option>` (no `+` prefix needed — groups are
 declared as `optional` in `eval.yaml`).
@@ -152,10 +159,16 @@ dynacell evaluate --config-dir /absolute/path/to/my_configs \
   save.save_dir=/path/to/out
 ```
 
-**Common footgun:** omitting the `# @package _global_` directive on line 1
-makes the file's contents land at `cfg.target.target_name` instead of
-`cfg.target_name`; the schema fields (`target_name`, `io.*`) stay `???` and the
-pipeline fails with `MissingMandatoryValue` — not an obviously-linked error.
+**Common footguns:**
+
+- Omitting the `# @package _global_` directive on line 1 makes the file's
+  contents land at `cfg.target.target_name` instead of `cfg.target_name`;
+  the schema fields (`target_name`, `io.*`) stay `???` and the pipeline
+  fails with `MissingMandatoryValue` — not an obviously-linked error.
+- Saving your group file as `.yml` instead of `.yaml`. Hydra's group
+  resolver looks for `.yaml` specifically, so the group is silently
+  undiscoverable and the `target=mine` selector raises
+  `MissingConfigException`.
 
 ### Benchmark eval leaves
 
