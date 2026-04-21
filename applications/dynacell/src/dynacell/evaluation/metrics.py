@@ -64,6 +64,17 @@ def _normalize_to_target_scale(
 
     return (y_true - target_min) / denom, (y_pred - target_min) / denom
 
+@torch.inference_mode()
+def _min_max_normalize(
+    x: torch.Tensor,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Min-max normalize a tensor to [0, 1] range."""
+
+    x = x.float()
+    x = (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
+
+    return x
 
 @torch.inference_mode()
 def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -98,7 +109,8 @@ def nrmse(y_true: torch.Tensor, y_pred: torch.Tensor, eps: float = 1e-8) -> torc
     torch.Tensor
         A scalar tensor containing the NRMSE.
     """
-    y_true_norm, y_pred_norm = _normalize_to_target_scale(y_true, y_pred, eps=eps)
+    y_true_norm = _min_max_normalize(y_true, eps=eps)
+    y_pred_norm = _min_max_normalize(y_pred, eps=eps)
     mse = torch.mean((y_true_norm - y_pred_norm) ** 2)
     rmse = torch.sqrt(mse)
 
@@ -126,7 +138,8 @@ def psnr(image_true: torch.Tensor, image_test: torch.Tensor, eps: float = 1e-8) 
     torch.Tensor
         A scalar tensor containing the PSNR value in dB.
     """
-    image_true, image_test = _normalize_to_target_scale(image_true, image_test, eps=eps)
+    image_true = _min_max_normalize(image_true, eps=eps)
+    image_test = _min_max_normalize(image_test, eps=eps)
     mse = torch.mean((image_true - image_test) ** 2)
 
     if mse <= eps:
@@ -139,7 +152,8 @@ def psnr(image_true: torch.Tensor, image_test: torch.Tensor, eps: float = 1e-8) 
 @torch.inference_mode()
 def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """Compute mean structural similarity index (SSIM)."""
-    img1, img2 = _normalize_to_target_scale(img1, img2, eps=eps)
+    img1 = _min_max_normalize(img1, eps=eps)
+    img2 = _min_max_normalize(img2, eps=eps)
 
     img1 = img1.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
     img2 = img2.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]

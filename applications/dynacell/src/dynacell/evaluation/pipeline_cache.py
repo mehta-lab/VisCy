@@ -117,6 +117,10 @@ def init_cache_context(
     if io.gt_cache_dir is None:
         if require_complete:
             raise ValueError("io.require_complete_cache=true requires io.gt_cache_dir to be set")
+        dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
+        dynaclr_encoder_sha12 = (
+            encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
+        )
         return _CacheContext(
             paths=None,
             manifest={},
@@ -125,6 +129,9 @@ def init_cache_context(
             target_name=config.target_name,
             spacing=spacing,
             patch_size=patch_size,
+            dinov3_model_name=dinov3_model_name,
+            dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
+            dynaclr_encoder_sha12=dynaclr_encoder_sha12,
         )
 
     paths = cache_paths(Path(io.gt_cache_dir))
