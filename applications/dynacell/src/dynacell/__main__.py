@@ -33,11 +33,13 @@ _EXTERNAL_SEARCHPATHS: tuple[str, ...] = (
     "configs/benchmarks/virtual_staining/_internal/shared/eval",
 )
 
-# Team-shared Hugging Face cache on project storage. Repo-checkout
-# invocations of `dynacell evaluate` / `precompute-gt` default HF_HOME
-# here so gated models (DINOv3) download once per team instead of once
-# per user to per-home ~/.cache/huggingface/.
-_SHARED_HF_CACHE = Path("/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache")
+# Team-shared Hugging Face cache on project storage. CZ Biohub-specific
+# default path; other sites override via the ``DYNACELL_SHARED_HF_CACHE``
+# environment variable. Repo-checkout invocations of the Hydra
+# subcommands default HF_HOME here so gated models (e.g. DINOv3)
+# download once per team instead of once per user to ~/.cache/huggingface.
+_DEFAULT_SHARED_HF_CACHE = "/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache"
+_SHARED_HF_CACHE = Path(os.environ.get("DYNACELL_SHARED_HF_CACHE", _DEFAULT_SHARED_HF_CACHE))
 
 
 def _external_configs_dirs() -> list[Path]:
@@ -59,8 +61,8 @@ def _maybe_set_shared_hf_cache() -> None:
     """Point HF_HOME at the team-shared cache on a repo checkout.
 
     Only fires when (a) ``HF_HOME`` is not already set by the caller,
-    (b) we're running from a repo checkout (``_external_configs_dirs``
-    resolves), and (c) the shared cache dir exists on this machine.
+    (b) we're running from a repo checkout (external Hydra searchpaths
+    resolve), and (c) the shared cache dir exists on this machine.
     Wheel installs and non-HPC environments fall through to the normal
     per-user ``~/.cache/huggingface`` default.
     """

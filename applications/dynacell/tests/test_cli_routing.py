@@ -1,5 +1,6 @@
 """Tests for dynacell CLI subcommand routing."""
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -153,8 +154,6 @@ class TestMaybeSetSharedHfCache:
             patch("dynacell.__main__._SHARED_HF_CACHE", tmp_path),
         ):
             _maybe_set_shared_hf_cache()
-        import os
-
         assert os.environ["HF_HOME"] == "/user/chose/this"
 
     def test_noop_in_wheel_install(self, tmp_path: Path, monkeypatch):
@@ -165,8 +164,6 @@ class TestMaybeSetSharedHfCache:
             patch("dynacell.__main__._SHARED_HF_CACHE", tmp_path),
         ):
             _maybe_set_shared_hf_cache()
-        import os
-
         assert "HF_HOME" not in os.environ
 
     def test_noop_when_shared_dir_missing(self, tmp_path: Path, monkeypatch):
@@ -178,8 +175,6 @@ class TestMaybeSetSharedHfCache:
             patch("dynacell.__main__._SHARED_HF_CACHE", missing),
         ):
             _maybe_set_shared_hf_cache()
-        import os
-
         assert "HF_HOME" not in os.environ
 
     def test_sets_on_repo_checkout_when_dir_exists(self, tmp_path: Path, monkeypatch):
@@ -190,7 +185,4 @@ class TestMaybeSetSharedHfCache:
             patch("dynacell.__main__._SHARED_HF_CACHE", tmp_path),
         ):
             _maybe_set_shared_hf_cache()
-        import os
-
         assert os.environ["HF_HOME"] == str(tmp_path)
-        monkeypatch.delenv("HF_HOME", raising=False)  # cleanup
