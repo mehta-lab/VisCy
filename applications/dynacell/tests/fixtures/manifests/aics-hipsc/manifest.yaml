@@ -38,3 +38,25 @@ targets:
       test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
       cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20_segmented_cleaned.zarr
     splits: splits/tomm20_train_val_test.yaml
+
+  nucleus:
+    gene: Nuclei
+    organelle: nucleus
+    display_name: "Nucleus"
+    target_channel: Nuclei
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
+    splits: splits/nucleus_train_val_test.yaml
+
+  membrane:
+    gene: Membrane
+    organelle: membrane
+    display_name: "Membrane"
+    target_channel: Membrane
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
+    splits: splits/membrane_train_val_test.yaml
