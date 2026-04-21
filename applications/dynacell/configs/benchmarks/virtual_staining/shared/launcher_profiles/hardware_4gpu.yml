@@ -7,8 +7,8 @@ launcher:
   sbatch:
     partition: gpu
     nodes: 1
-    ntasks: 1
-    cpus_per_task: 32
+    ntasks: 4
+    cpus_per_task: 8
     gpus: 4
     mem: "512G"
     constraint: null
