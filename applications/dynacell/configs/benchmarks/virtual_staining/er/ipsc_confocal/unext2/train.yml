@@ -10,12 +10,12 @@
 # commit 46e4c79): lr=0.0004, batch_size=32, z_window_size=20, 4-GPU DDP.
 # MixedLoss(L1 0.5 + DSSIM 0.5). max_epochs=200.
 base:
-  - ../../../shared/train_sets/ipsc_confocal.yml
-  - ../../../shared/targets/er_sec61b.yml
-  - ../../../shared/model_overlays/unext2_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_4gpu.yml
-  - ../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../shared/model/train_sets/ipsc_confocal.yml
+  - ../../../shared/model/targets/er_sec61b.yml
+  - ../../../shared/model/model_overlays/unext2_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

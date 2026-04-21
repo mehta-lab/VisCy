@@ -4,7 +4,7 @@
 # (launched before this schema existed):
 #   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/
 #
-# Diverges from shared/targets/er_sec61b.yml on two fields because the
+# Diverges from shared/model/targets/er_sec61b.yml on two fields because the
 # paper's stats + sampling differ from the CellDiff/UNetViT conventions:
 # Structure is normalized with mean/std (not median/iqr), and 8 small
 # weighted crops per FOV replace the 2 oversized transformer crops.

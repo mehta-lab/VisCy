@@ -4,12 +4,12 @@
 # encoder weights. See UNEXT2_VS_FCMAE_CLASSES.md for why this is the
 # paper-adjacent scratch baseline (and not unext2.yml).
 base:
-  - ../../../shared/train_sets/ipsc_confocal.yml
-  - ../../../shared/targets/er_sec61b.yml
-  - ../../../shared/model_overlays/fcmae_vscyto3d_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_4gpu.yml
-  - ../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../shared/model/train_sets/ipsc_confocal.yml
+  - ../../../shared/model/targets/er_sec61b.yml
+  - ../../../shared/model/model_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

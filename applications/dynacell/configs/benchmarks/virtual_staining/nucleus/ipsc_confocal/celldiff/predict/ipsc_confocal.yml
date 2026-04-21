@@ -1,11 +1,11 @@
 # CellDiff predict: nucleus against ipsc_confocal test_cropped.
 base:
-  - ../../../../shared/predict_sets/ipsc_confocal.yml
-  - ../../../../shared/targets/nucleus.yml
-  - ../../../../shared/model_overlays/celldiff_predict.yml
-  - ../../../../shared/launcher_profiles/mode_predict.yml
-  - ../../../../shared/launcher_profiles/hardware_h200_single.yml
-  - ../../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../../shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../../shared/model/targets/nucleus.yml
+  - ../../../../shared/model/model_overlays/celldiff_predict.yml
+  - ../../../../shared/model/launcher_profiles/mode_predict.yml
+  - ../../../../shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

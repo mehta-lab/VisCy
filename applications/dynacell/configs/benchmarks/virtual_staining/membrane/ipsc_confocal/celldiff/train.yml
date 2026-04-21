@@ -1,11 +1,11 @@
 # CellDiff fit on membrane (Membrane channel of cell.zarr) — AICS iPSC confocal.
 base:
-  - ../../../shared/train_sets/ipsc_confocal.yml
-  - ../../../shared/targets/membrane.yml
-  - ../../../shared/model_overlays/celldiff_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_h200_single.yml
-  - ../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../shared/model/train_sets/ipsc_confocal.yml
+  - ../../../shared/model/targets/membrane.yml
+  - ../../../shared/model/model_overlays/celldiff_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

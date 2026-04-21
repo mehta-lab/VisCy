@@ -1,12 +1,12 @@
 # FNet3D paper-baseline fit on mitochondria (TOMM20 marker) — AICS iPSC confocal.
 # target_channel=Structure, so the overlay's default norms/augs apply unchanged.
 base:
-  - ../../../shared/train_sets/ipsc_confocal.yml
-  - ../../../shared/targets/mito_tomm20.yml
-  - ../../../shared/model_overlays/fnet3d_paper_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_gpu_any_long.yml
-  - ../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../shared/model/train_sets/ipsc_confocal.yml
+  - ../../../shared/model/targets/mito_tomm20.yml
+  - ../../../shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

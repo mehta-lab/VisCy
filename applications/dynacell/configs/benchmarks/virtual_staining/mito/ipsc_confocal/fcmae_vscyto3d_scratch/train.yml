@@ -3,12 +3,12 @@
 # the two leaves are identical except this one does NOT load pretrained
 # encoder weights. Mirrors er/ipsc_confocal/fcmae_vscyto3d_scratch.yml.
 base:
-  - ../../../shared/train_sets/ipsc_confocal.yml
-  - ../../../shared/targets/mito_tomm20.yml
-  - ../../../shared/model_overlays/fcmae_vscyto3d_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_4gpu.yml
-  - ../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../shared/model/train_sets/ipsc_confocal.yml
+  - ../../../shared/model/targets/mito_tomm20.yml
+  - ../../../shared/model/model_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining

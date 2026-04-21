@@ -3,12 +3,12 @@
 # channel). Membrane target_channel is Membrane, so we list-replace those three
 # lists here to re-key them.
 base:
-  - ../../../shared/train_sets/ipsc_confocal.yml
-  - ../../../shared/targets/membrane.yml
-  - ../../../shared/model_overlays/fnet3d_paper_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_gpu_any_long.yml
-  - ../../../shared/launcher_profiles/runtime_shared.yml
+  - ../../../shared/model/train_sets/ipsc_confocal.yml
+  - ../../../shared/model/targets/membrane.yml
+  - ../../../shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
   task: virtual_staining
