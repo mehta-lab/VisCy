@@ -10,7 +10,7 @@ model:
   init_args:
     num_generate_steps: 100
 #    predict_method: generate
-    predict_method: sliding_window
+    predict_method: iterative  # denoise, generate, sliding_window (non-overlapping), or iterative (overlapping)
     predict_overlap: [4, 256, 256]
     ckpt_path: #TODO checkpoint path
 

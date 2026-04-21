@@ -405,8 +405,11 @@ class DynacellUNet(LightningModule):
             if not (0 <= ov < P):
                 raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {P})")
 
-        prediction_sum = torch.zeros_like(source)
-        prediction_count = torch.zeros_like(source)
+        # Accumulators are allocated lazily from the first patch output so
+        # their channel dimension matches the model's out_channels (which can
+        # differ from source's in_channels, e.g. 1 phase in -> 2 target out).
+        prediction_sum: Tensor | None = None
+        prediction_count: Tensor | None = None
 
         start_lists = []
         for i in range(n_spatial):
@@ -426,9 +429,16 @@ class DynacellUNet(LightningModule):
                 for i, st in enumerate(starts):
                     slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
                 patch_out = self.forward(source[tuple(slicer)])
+                if prediction_sum is None:
+                    out_shape = list(source.shape)
+                    out_shape[1] = patch_out.shape[1]
+                    prediction_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
+                    prediction_count = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
                 prediction_sum[tuple(slicer)] += patch_out
                 prediction_count[tuple(slicer)] += 1
 
+        if prediction_sum is None:
+            raise RuntimeError("sliding window produced no patches")
         if not torch.all(prediction_count > 0):
             raise RuntimeError("sliding window left uncovered voxels")
         return prediction_sum / prediction_count
@@ -468,10 +478,18 @@ class DynacellFlowMatching(LightningModule):
         validation loader. Disabled by default to preserve the previous
         cheaper validation behavior.
     predict_method : {"denoise", "generate", "sliding_window", "iterative"}
-        Prediction generation method.  ``"generate"`` runs single-patch ODE
-        (default, matches standard HCS tile workflow).
+        Prediction generation method. ``"generate"`` runs single-patch ODE
+        (default, matches standard HCS tile workflow). ``"sliding_window"``
+        partitions the volume into **non-overlapping** tiles (ignores
+        ``predict_overlap``; passing a non-zero overlap raises so users
+        aren't silently misled). ``"iterative"`` slides overlapping tiles
+        with velocity anchoring — use this when you want
+        ``predict_overlap`` to apply. ``"denoise"`` uses the noise-space
+        overlap tiler.
     predict_overlap : int or tuple of int
-        Overlap for sliding-window prediction.
+        Overlap for ``denoise`` and ``iterative``. Ignored by
+        ``sliding_window``; must be ``0`` or ``[0, 0, 0]`` when
+        ``predict_method='sliding_window'``.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -629,6 +647,19 @@ class DynacellFlowMatching(LightningModule):
         elif self.predict_method == "generate":
             prediction = self.model.generate(source, num_steps=self.num_generate_steps)
         elif self.predict_method == "sliding_window":
+            # generate_sliding_window partitions into non-overlapping tiles
+            # and does NOT consume predict_overlap. A non-zero overlap means
+            # the user wants overlapping tiled inference — route them to
+            # `iterative`, which anchors overlapping regions via velocity.
+            overlap = self.predict_overlap
+            overlap_values = (overlap,) * 3 if isinstance(overlap, int) else tuple(overlap)
+            if any(o > 0 for o in overlap_values):
+                raise ValueError(
+                    "predict_method='sliding_window' uses non-overlapping tiles and "
+                    f"ignores predict_overlap (got {overlap_values}). "
+                    "Use predict_method='iterative' for overlap-anchored tiled inference, "
+                    "or set predict_overlap=[0, 0, 0] to acknowledge the non-overlapping behavior."
+                )
             prediction = self.model.generate_sliding_window(source, num_steps=self.num_generate_steps)
         elif self.predict_method == "iterative":
             prediction = self.model.generate_iterative(

@@ -334,3 +334,41 @@ def test_flow_matching_predict_step_pad_crop(synth_celldiff_batch):
     with torch.no_grad():
         prediction = model.predict_step(batch, batch_idx=0)
     assert prediction.shape == small_source.shape
+
+
+def test_flow_matching_sliding_window_rejects_nonzero_overlap():
+    """``sliding_window`` doesn't honor predict_overlap; non-zero overlap must
+    raise so users aren't silently given a non-overlapping result when they
+    asked for overlapping tiling. They should use ``iterative`` instead."""
+    model = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        num_generate_steps=2,
+        predict_method="sliding_window",
+        predict_overlap=[4, 16, 16],
+    )
+    model.eval()
+    batch = {"source": torch.randn(1, 1, 8, 32, 32)}
+    with pytest.raises(ValueError, match="non-overlapping tiles and ignores predict_overlap"):
+        with torch.no_grad():
+            model.predict_step(batch, batch_idx=0)
+
+
+def test_unetvit3d_sliding_window_supports_multi_channel_output():
+    """Sliding-window accumulators must be sized to the model's out_channels,
+    not the source's in_channels — otherwise multi-channel heads (e.g. 1
+    phase in -> 2 target out) break at the first += broadcast."""
+    multi_out_config = {**VIT_TEST_CONFIG, "out_channels": 2}
+    model = DynacellUNet(
+        architecture="UNetViT3D",
+        model_config=multi_out_config,
+        predict_method="sliding_window",
+        predict_overlap=(2, 8, 8),
+    )
+    model.eval()
+    model.on_predict_start()
+    # Spatial dims larger than patch to force multiple sliding tiles.
+    source = MetaTensor(torch.randn(1, 1, 16, 48, 48))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 2, 16, 48, 48)

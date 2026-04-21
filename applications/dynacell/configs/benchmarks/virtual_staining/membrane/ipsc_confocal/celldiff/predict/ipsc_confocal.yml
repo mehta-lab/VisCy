@@ -18,7 +18,7 @@ benchmark:
 model:
   init_args:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/celldiff/checkpoints/last.ckpt
-    predict_method: sliding_window # denoise, generate, sliding_window, or iterative
+    predict_method: iterative # denoise, generate, sliding_window, or iterative
     predict_overlap: [4, 256, 256]
 
 data:
