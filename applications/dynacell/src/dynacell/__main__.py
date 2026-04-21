@@ -33,11 +33,18 @@ _EXTERNAL_SEARCHPATHS: tuple[str, ...] = (
     "configs/benchmarks/virtual_staining/_internal/shared/eval",
 )
 
-# Team-shared Hugging Face cache on project storage. CZ Biohub-specific
+# Team-shared Hugging Face hub cache on project storage. CZ Biohub-specific
 # default path; other sites override via the ``DYNACELL_SHARED_HF_CACHE``
-# environment variable. Repo-checkout invocations of the Hydra
-# subcommands default HF_HOME here so gated models (e.g. DINOv3)
-# download once per team instead of once per user to ~/.cache/huggingface.
+# environment variable. Repo-checkout invocations of the Hydra subcommands
+# default ``HF_HUB_CACHE`` here so gated models (e.g. DINOv3) download once
+# per team instead of once per user.
+#
+# We set ``HF_HUB_CACHE`` rather than ``HF_HOME``: ``HF_HOME`` relocates
+# the entire HF directory including the auth token file, so a shared
+# ``HF_HOME`` blocks HF from finding each user's personal ``~/.cache/
+# huggingface/token``. That breaks per-user gated-repo ACLs (HF returns
+# 401 because the request goes out unauthenticated). ``HF_HUB_CACHE``
+# only relocates weights/datasets; tokens stay at the per-user default.
 _DEFAULT_SHARED_HF_CACHE = "/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache"
 _SHARED_HF_CACHE = Path(os.environ.get("DYNACELL_SHARED_HF_CACHE", _DEFAULT_SHARED_HF_CACHE))
 
@@ -58,21 +65,21 @@ def _external_configs_dirs() -> list[Path]:
 
 
 def _maybe_set_shared_hf_cache() -> None:
-    """Point HF_HOME at the team-shared cache on a repo checkout.
+    """Point HF_HUB_CACHE at the team-shared cache on a repo checkout.
 
-    Only fires when (a) ``HF_HOME`` is not already set by the caller,
-    (b) we're running from a repo checkout (external Hydra searchpaths
-    resolve), and (c) the shared cache dir exists on this machine.
-    Wheel installs and non-HPC environments fall through to the normal
-    per-user ``~/.cache/huggingface`` default.
+    Only fires when (a) ``HF_HUB_CACHE`` is not already set by the
+    caller, (b) we're running from a repo checkout (external Hydra
+    searchpaths resolve), and (c) the shared cache dir exists on this
+    machine. Wheel installs and non-HPC environments fall through to
+    the normal per-user ``~/.cache/huggingface/hub`` default.
     """
-    if "HF_HOME" in os.environ:
+    if "HF_HUB_CACHE" in os.environ:
         return
     if not _external_configs_dirs():
         return
     if not _SHARED_HF_CACHE.is_dir():
         return
-    os.environ["HF_HOME"] = str(_SHARED_HF_CACHE)
+    os.environ["HF_HUB_CACHE"] = str(_SHARED_HF_CACHE)
 
 
 def _inject_external_configs(argv: list[str]) -> list[str]:

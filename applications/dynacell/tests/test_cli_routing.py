@@ -142,47 +142,47 @@ class TestInjectExternalConfigs:
 
 
 class TestMaybeSetSharedHfCache:
-    """Tests for the HF_HOME auto-setter that points repo-checkout jobs at
+    """Tests for the HF_HUB_CACHE auto-setter that points repo-checkout jobs at
     the team-shared Hugging Face cache so gated models (DINOv3) download
     once per team instead of once per user."""
 
     def test_user_set_wins(self, tmp_path: Path, monkeypatch):
-        """An existing HF_HOME in env takes precedence."""
-        monkeypatch.setenv("HF_HOME", "/user/chose/this")
+        """An existing HF_HUB_CACHE in env takes precedence."""
+        monkeypatch.setenv("HF_HUB_CACHE", "/user/chose/this")
         with (
             patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]),
             patch("dynacell.__main__._SHARED_HF_CACHE", tmp_path),
         ):
             _maybe_set_shared_hf_cache()
-        assert os.environ["HF_HOME"] == "/user/chose/this"
+        assert os.environ["HF_HUB_CACHE"] == "/user/chose/this"
 
     def test_noop_in_wheel_install(self, tmp_path: Path, monkeypatch):
-        """Wheel installs (no external config dirs) don't set HF_HOME."""
-        monkeypatch.delenv("HF_HOME", raising=False)
+        """Wheel installs (no external config dirs) don't set HF_HUB_CACHE."""
+        monkeypatch.delenv("HF_HUB_CACHE", raising=False)
         with (
             patch("dynacell.__main__._external_configs_dirs", return_value=[]),
             patch("dynacell.__main__._SHARED_HF_CACHE", tmp_path),
         ):
             _maybe_set_shared_hf_cache()
-        assert "HF_HOME" not in os.environ
+        assert "HF_HUB_CACHE" not in os.environ
 
     def test_noop_when_shared_dir_missing(self, tmp_path: Path, monkeypatch):
         """If the shared cache dir doesn't exist on this machine, skip."""
-        monkeypatch.delenv("HF_HOME", raising=False)
+        monkeypatch.delenv("HF_HUB_CACHE", raising=False)
         missing = tmp_path / "does_not_exist"
         with (
             patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]),
             patch("dynacell.__main__._SHARED_HF_CACHE", missing),
         ):
             _maybe_set_shared_hf_cache()
-        assert "HF_HOME" not in os.environ
+        assert "HF_HUB_CACHE" not in os.environ
 
     def test_sets_on_repo_checkout_when_dir_exists(self, tmp_path: Path, monkeypatch):
-        """Repo checkout + shared dir present + user hasn't set HF_HOME ⇒ set it."""
-        monkeypatch.delenv("HF_HOME", raising=False)
+        """Repo checkout + shared dir present + user hasn't set HF_HUB_CACHE ⇒ set it."""
+        monkeypatch.delenv("HF_HUB_CACHE", raising=False)
         with (
             patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]),
             patch("dynacell.__main__._SHARED_HF_CACHE", tmp_path),
         ):
             _maybe_set_shared_hf_cache()
-        assert os.environ["HF_HOME"] == str(tmp_path)
+        assert os.environ["HF_HUB_CACHE"] == str(tmp_path)

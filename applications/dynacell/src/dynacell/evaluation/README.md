@@ -102,20 +102,29 @@ uv run dynacell evaluate \
 uv run dynacell evaluate ... limit_positions=10
 ```
 
-### Shared Hugging Face cache (DINOv3 weights)
+### Shared Hugging Face hub cache (DINOv3 weights)
 
-`dynacell evaluate` and `dynacell precompute-gt` default `HF_HOME` to
+`dynacell evaluate` and `dynacell precompute-gt` default `HF_HUB_CACHE`
+to
 `/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache/`
 when they detect a repo checkout, so gated HF models (DINOv3) are
 downloaded once per team instead of once per user to per-home
-`~/.cache/huggingface/`. If you already export `HF_HOME` yourself the
-auto-setter backs off. Wheel-install users fall through to the normal
-per-user HF default.
+`~/.cache/huggingface/hub/`. If you already export `HF_HUB_CACHE`
+yourself the auto-setter backs off. Wheel-install users fall through to
+the normal per-user HF default.
+
+**HF_HUB_CACHE, not HF_HOME.** `HF_HOME` relocates the whole HF
+directory including the auth token file, which would break per-user
+gated-repo ACLs (HF returns 401 because the token at
+`~/.cache/huggingface/token` is no longer where HF looks for it).
+`HF_HUB_CACHE` only relocates weights/datasets; tokens stay per-user
+and each user's gate access is enforced separately.
 
 First-time setup is one-time per team: one member with gated-repo
 access (see `https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m`)
 runs any eval command that triggers the DINOv3 download; everyone else
-thereafter reuses the shared weights.
+thereafter reuses the shared weights on disk — those reads don't hit HF
+and don't need a token.
 
 ### Enable feature metrics (DINOv3 + DynaCLR)
 
