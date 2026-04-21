@@ -33,6 +33,11 @@ model:
     lr: 0.0004
     schedule: WarmupCosine
 trainer:
+  # FullyConvolutionalMAE(pretraining=False) has decoder/head params that
+  # only receive gradients on some forward paths; default ddp with
+  # find_unused_parameters=False errors at step 1. Matches the canonical
+  # vs_test/finetune_3d.py:215 recipe.
+  strategy: ddp_find_unused_parameters_true
   precision: 16-mixed
   max_epochs: 200
 data:
