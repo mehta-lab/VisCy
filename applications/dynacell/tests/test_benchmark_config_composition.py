@@ -24,6 +24,8 @@ TRAIN_LEAVES = [
     ("er", "fcmae_vscyto3d_pretrained"),
     ("mito", "celldiff"),
     ("mito", "fnet3d_paper"),
+    ("mito", "fcmae_vscyto3d_scratch"),
+    ("mito", "fcmae_vscyto3d_pretrained"),
     ("nucleus", "celldiff"),
     ("nucleus", "fnet3d_paper"),
     ("membrane", "celldiff"),
@@ -93,15 +95,16 @@ def _strip_run_identity(cfg: dict) -> dict:
     return cfg
 
 
-def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init() -> None:
+@pytest.mark.parametrize("organelle", ["er", "mito"])
+def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init(organelle: str) -> None:
     """Scientific invariant: pretrained leaf equals scratch leaf modulo init.
 
     Guards against silent drift in lr / loss / crop / augs / model_config /
     trainer / epochs between the two FCMAE leaves — such drift would
     invalidate the pretrained-vs-scratch comparison.
     """
-    scratch_leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "fcmae_vscyto3d_scratch.yml"
-    pretrained_leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "fcmae_vscyto3d_pretrained.yml"
+    scratch_leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / "fcmae_vscyto3d_scratch.yml"
+    pretrained_leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / "fcmae_vscyto3d_pretrained.yml"
     cfg_scratch = load_composed_config(scratch_leaf)
     cfg_pretrained = load_composed_config(pretrained_leaf)
 
