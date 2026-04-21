@@ -36,8 +36,8 @@ live in named Hydra config groups, so most invocations only need to select
 the right group and point at the prediction / output paths. Groups come from
 two sources: the packaged schema under `src/dynacell/evaluation/_configs/`
 and — on a repo checkout — HPC-bound groups under
-`configs/benchmarks/virtual_staining/` that `dynacell.__main__` exposes
-through `hydra.searchpath`. See the table below.
+`configs/benchmarks/virtual_staining/_internal/` that `dynacell.__main__`
+exposes through two injected `hydra.searchpath` roots. See the table below.
 
 ### Config groups
 
