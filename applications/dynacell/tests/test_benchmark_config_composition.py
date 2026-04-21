@@ -24,20 +24,26 @@ TRAIN_LEAVES = [
     ("er", "fcmae_vscyto3d_pretrained"),
     ("mito", "celldiff"),
     ("mito", "fnet3d_paper"),
+    ("mito", "unetvit3d"),
     ("mito", "fcmae_vscyto3d_scratch"),
     ("mito", "fcmae_vscyto3d_pretrained"),
     ("nucleus", "celldiff"),
     ("nucleus", "fnet3d_paper"),
+    ("nucleus", "unetvit3d"),
     ("membrane", "celldiff"),
     ("membrane", "fnet3d_paper"),
+    ("membrane", "unetvit3d"),
 ]
 
-PREDICT_ORGANELLES = ["er", "mito", "nucleus", "membrane"]
+PREDICT_LEAVES = [
+    (organelle, model) for organelle in ("er", "mito", "nucleus", "membrane") for model in ("celldiff", "unetvit3d")
+]
+EVAL_LEAVES = PREDICT_LEAVES
 
 
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
 def test_train_leaf_composes(organelle: str, model: str) -> None:
-    leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / f"{model}.yml"
+    leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "train.yml"
     cfg = load_composed_config(leaf)
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
@@ -48,20 +54,32 @@ def test_train_leaf_composes(organelle: str, model: str) -> None:
     assert "precision" in t
 
 
-@pytest.mark.parametrize("organelle", PREDICT_ORGANELLES)
-def test_predict_leaf_composes(organelle: str) -> None:
-    leaf = BENCHMARKS / "predict" / organelle / "ipsc_confocal" / "celldiff" / "ipsc_confocal.yml"
+@pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
+def test_predict_leaf_composes(organelle: str, model: str) -> None:
+    leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "predict" / "ipsc_confocal.yml"
     cfg = load_composed_config(leaf)
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
     assert t["devices"] == 1
     data_path = cfg["data"]["init_args"]["data_path"]
-    assert "test_cropped" in data_path, f"{organelle}: data_path must point at test_cropped/, got {data_path}"
+    assert "test_cropped" in data_path, f"{organelle}/{model}: data_path must point at test_cropped/, got {data_path}"
+
+
+@pytest.mark.parametrize("organelle,model", EVAL_LEAVES)
+def test_eval_leaf_symlink_resolves(organelle: str, model: str) -> None:
+    """Every eval leaf at <org>/<train>/<model>/eval/<predset>.yaml has a
+    corresponding symlink under leaf/ so Hydra can resolve leaf=<path>."""
+    real = BENCHMARKS / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
+    link = BENCHMARKS / "leaf" / organelle / "ipsc_confocal" / model / "eval" / "ipsc_confocal.yaml"
+    assert real.is_file(), f"missing canonical eval leaf: {real}"
+    assert link.is_symlink(), f"missing leaf/ symlink: {link}"
+    assert link.resolve() == real.resolve()
+    assert link.read_text().startswith("# @package _global_")
 
 
 def test_unext2_train_leaf_inherits_topology_and_logger() -> None:
     """Regression guard: unified fit.yml pins WandbLogger for a leaf that previously had no class_path."""
-    leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "unext2.yml"
+    leaf = BENCHMARKS / "er" / "ipsc_confocal" / "unext2" / "train.yml"
     cfg = load_composed_config(leaf)
     t = cfg["trainer"]
     assert t["devices"] == 4
@@ -103,8 +121,8 @@ def test_fcmae_pretrained_differs_from_scratch_only_in_encoder_init(organelle: s
     trainer / epochs between the two FCMAE leaves — such drift would
     invalidate the pretrained-vs-scratch comparison.
     """
-    scratch_leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / "fcmae_vscyto3d_scratch.yml"
-    pretrained_leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / "fcmae_vscyto3d_pretrained.yml"
+    scratch_leaf = BENCHMARKS / organelle / "ipsc_confocal" / "fcmae_vscyto3d_scratch" / "train.yml"
+    pretrained_leaf = BENCHMARKS / organelle / "ipsc_confocal" / "fcmae_vscyto3d_pretrained" / "train.yml"
     cfg_scratch = load_composed_config(scratch_leaf)
     cfg_pretrained = load_composed_config(pretrained_leaf)
 
@@ -126,7 +144,7 @@ def test_train_leaf_topology_consistency(organelle: str, model: str) -> None:
     only that many GPUs train — the rest sit idle. All three must agree:
     ``sbatch.ntasks == sbatch.gpus == sbatch.nodes × trainer.devices``.
     """
-    leaf = BENCHMARKS / "train" / organelle / "ipsc_confocal" / f"{model}.yml"
+    leaf = BENCHMARKS / organelle / "ipsc_confocal" / model / "train.yml"
     cfg = load_composed_config(leaf)
     devices = cfg["trainer"]["devices"]
     sbatch = cfg["launcher"]["sbatch"]
@@ -137,7 +155,7 @@ def test_train_leaf_topology_consistency(organelle: str, model: str) -> None:
 
 def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:
     """FNet3D paper reproduction keeps precision=32-true (the unified fit recipe defaults to nothing)."""
-    leaf = BENCHMARKS / "train" / "er" / "ipsc_confocal" / "fnet3d_paper.yml"
+    leaf = BENCHMARKS / "er" / "ipsc_confocal" / "fnet3d_paper" / "train.yml"
     cfg = load_composed_config(leaf)
     assert cfg["trainer"]["precision"] == "32-true"
     assert cfg["trainer"]["max_steps"] == 200000

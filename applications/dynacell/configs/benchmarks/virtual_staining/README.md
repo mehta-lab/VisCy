@@ -1,6 +1,8 @@
 # Virtual Staining Benchmark Configs
 
-Composable leaf-per-experiment configs for dynacell virtual-staining benchmarks.
+Composable leaf-per-experiment configs for dynacell virtual-staining
+benchmarks. Train, predict, and eval leaves for the same benchmark cell
+live side-by-side under `<org>/<train_set>/<model>/`.
 
 ## Reserved top-level keys
 
@@ -17,76 +19,115 @@ The strip happens inside `viscy_utils.cli._maybe_compose_config`. This
 means `uv run dynacell fit -c <leaf.yml>` works for any benchmark leaf
 without the dedicated submit tool.
 
+The reserved top-level YAML key `benchmark:` (above) is unrelated to the
+Hydra `leaf=<path>` selector used for eval. The Hydra selector was
+previously named `benchmark=`; both names referring to "benchmark" were
+a source of confusion and the eval selector has been renamed.
+
 ## Layout
 
 ```
 virtual_staining/
   shared/
-    train_sets/<name>.yml         # imaging modality + source_channel defaults
-    targets/<target>.yml          # target_channel, train data_path, norms, CPU augs
-    model_overlays/
-      celldiff_fit.yml            # model + fit trainer + train data hparams
-      celldiff_predict.yml        # model + predict trainer + predict data hparams
-    launcher_profiles/
-      mode_<fit|predict>.yml      # launcher.mode
-      hardware_<hw>.yml           # sbatch directives + trainer.devices
-      runtime_<rt>.yml            # launcher.runtime + launcher.env
-    predict_sets/<name>.yml       # predict_set metadata + source_channel
-  train/<org>/<train_set>/<model>.yml
-  predict/<org>/<train_set>/<model>/<predict_set>.yml
+    model/
+      train_sets/<name>.yml         # imaging modality + source_channel defaults
+      predict_sets/<name>.yml       # predict_set metadata + source_channel
+      targets/<target>.yml          # target_channel, train data_path, norms, CPU augs
+      model_overlays/
+        <model>_fit.yml             # model + fit trainer + train data hparams
+        <model>_predict.yml         # model + predict trainer + predict data hparams
+      launcher_profiles/
+        mode_<fit|predict>.yml      # launcher.mode
+        hardware_<hw>.yml           # sbatch directives + trainer.devices
+        runtime_shared.yml          # launcher.runtime + launcher.env
+    eval/
+      target/<target>.yaml          # GT paths, segmentation paths, GT/pred channel names
+      feature_extractor/dynaclr/    # DynaCLR checkpoint + encoder kwargs
+  <org>/<train_set>/<model>/
+    train.yml                       # LightningCLI fit leaf
+    predict/<predict_set>.yml       # LightningCLI predict leaf
+    eval/<predict_set>.yaml         # Hydra eval leaf
+  leaf/
+    <org>/<train_set>/<model>/eval/<predict_set>.yaml -> ../../.../eval/<predict_set>.yaml
 ```
 
-**Eval leaves live in a sibling tree.** Evaluation uses Hydra (not LightningCLI),
-so eval configs compose through a different mechanism. Canonical eval benchmark
-leaves live at
-`applications/dynacell/configs/evaluation/benchmark/<org>/<train_set>/<model>/<predict_set>.yaml`
-(alongside this tree, not under `virtual_staining/`). The HPC-bound target groups
-and the DynaCLR checkpoint config share that directory. A `hydra.searchpath`
-injection in `dynacell.__main__` makes them discoverable when running from a repo
-checkout; schema-only configs ship inside the dynacell package (wheel installs see
-only those). Invoke via `dynacell evaluate benchmark=<path>`; see
-`applications/dynacell/src/dynacell/evaluation/README.md` for details.
+Train/predict leaves use LightningCLI (`.yml`). Eval leaves use Hydra and
+keep `.yaml` because Hydra's group resolution only discovers `.yaml` files.
+The `leaf/` symlink tree aliases each eval leaf so Hydra's `leaf=<path>`
+selector can discover them at `<searchpath>/leaf/<path>.yaml`.
+
+Eval runtime uses two search paths injected by `dynacell.__main__`:
+`virtual_staining/` (for the `leaf/` tree) and
+`virtual_staining/shared/eval/` (for the `target/` and
+`feature_extractor/dynaclr/` groups). Schema-only eval configs ship
+inside the dynacell package; wheel installs without the repo don't see
+the HPC-bound groups and external users provide their own via
+`--config-dir`. See `applications/dynacell/src/dynacell/evaluation/README.md`.
 
 ## Composition order
 
 Last wins via deep-merge. Lists replace wholesale — layers that own list
 fields (`callbacks`, `augmentations`, etc.) own the **full** list.
 
-**Train leaf** (at `train/<org>/<train_set>/<model>.yml`):
+**Train leaf** (at `<org>/<train_set>/<model>/train.yml`):
 
 ```yaml
 base:
-  - ../../../shared/train_sets/<train_set>.yml
-  - ../../../shared/targets/<target>.yml
-  - ../../../shared/model_overlays/<model>_fit.yml
-  - ../../../shared/launcher_profiles/mode_fit.yml
-  - ../../../shared/launcher_profiles/hardware_<hw>.yml
-  - ../../../shared/launcher_profiles/runtime_<rt>.yml
+  - ../../../shared/model/train_sets/<train_set>.yml
+  - ../../../shared/model/targets/<target>.yml
+  - ../../../shared/model/model_overlays/<model>_fit.yml
+  - ../../../shared/model/launcher_profiles/mode_fit.yml
+  - ../../../shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../shared/model/launcher_profiles/runtime_shared.yml
 ```
 
-**Predict leaf** (at `predict/<org>/<train_set>/<model>/<predict_set>.yml`):
+**Predict leaf** (at `<org>/<train_set>/<model>/predict/<predict_set>.yml`):
 
 ```yaml
 base:
-  - ../../../../shared/predict_sets/<predict_set>.yml
-  - ../../../../shared/targets/<target>.yml
-  - ../../../../shared/model_overlays/<model>_predict.yml
-  - ../../../../shared/launcher_profiles/mode_predict.yml
-  - ../../../../shared/launcher_profiles/hardware_<hw>.yml
-  - ../../../../shared/launcher_profiles/runtime_<rt>.yml
+  - ../../../../shared/model/predict_sets/<predict_set>.yml
+  - ../../../../shared/model/targets/<target>.yml
+  - ../../../../shared/model/model_overlays/<model>_predict.yml
+  - ../../../../shared/model/launcher_profiles/mode_predict.yml
+  - ../../../../shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../../shared/model/launcher_profiles/runtime_shared.yml
+```
+
+**Eval leaf** (at `<org>/<train_set>/<model>/eval/<predict_set>.yaml`):
+
+```yaml
+# @package _global_
+defaults:
+  - override /target: <target>
+  - override /predict_set: <predict_set>
+  - override /feature_extractor/dinov3: lvd1689m
+  - override /feature_extractor/dynaclr: default
+
+io:
+  pred_path: /hpc/.../predictions.zarr
+  gt_cache_dir: /hpc/.../cache
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/.../eval_results
 ```
 
 ## Running
 
 Direct LightningCLI (no sbatch):
 
-- `uv run dynacell fit -c configs/benchmarks/virtual_staining/train/<org>/<train_set>/<model>.yml`
-- `uv run dynacell predict -c configs/benchmarks/virtual_staining/predict/<org>/<train_set>/<model>/<predict_set>.yml`
+- `uv run dynacell fit -c configs/benchmarks/virtual_staining/<org>/<train_set>/<model>/train.yml`
+- `uv run dynacell predict -c configs/benchmarks/virtual_staining/<org>/<train_set>/<model>/predict/<predict_set>.yml`
+
+Hydra eval:
+
+- `uv run dynacell evaluate leaf=<org>/<train_set>/<model>/eval/<predict_set>`
 
 Via sbatch with `submit_benchmark_job.py`:
 
 ```bash
-LEAF=configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
+LEAF=configs/benchmarks/virtual_staining/er/ipsc_confocal/celldiff/train.yml
 
 # Pure preview (no disk writes, safe on any run_root):
 uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-script
@@ -109,7 +150,8 @@ submission fails fast.
 
 ## Source channel contract
 
-`data.init_args.source_channel` lives in `train_sets/` and `predict_sets/`
-(duplicated — must be kept in sync) because it's a property of the
-imaging modality, not the target. Predict leaves don't compose train_sets,
-so the predict_set file has to own its own `source_channel`.
+`data.init_args.source_channel` lives in `shared/model/train_sets/` and
+`shared/model/predict_sets/` (duplicated — must be kept in sync) because
+it's a property of the imaging modality, not the target. Predict leaves
+don't compose train_sets, so the predict_set file has to own its own
+`source_channel`.

@@ -51,7 +51,7 @@ uv run dynacell fit -c celldiff/fit.yml --data.init_args.data_path=/path/to/data
 ### Benchmark submit
 
 ```bash
-LEAF=applications/dynacell/configs/benchmarks/virtual_staining/train/er/ipsc_confocal/celldiff.yml
+LEAF=applications/dynacell/configs/benchmarks/virtual_staining/er/ipsc_confocal/celldiff/train.yml
 
 # Preview the rendered sbatch to stdout — safe on any leaf, no disk writes:
 uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF --print-script

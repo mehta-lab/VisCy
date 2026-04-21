@@ -72,8 +72,8 @@ def test_render_env_block_preserves_order():
 @pytest.mark.parametrize(
     "leaf_subpath,expected_resolved_prefix",
     [
-        ("train/er/ipsc_confocal/celldiff.yml", "/resolved/fit_CELLDiff_SEC61B_"),
-        ("train/er/ipsc_confocal/unetvit3d.yml", "/resolved/fit_UNetViT3D_SEC61B_"),
+        ("er/ipsc_confocal/celldiff/train.yml", "/resolved/fit_CELLDiff_SEC61B_"),
+        ("er/ipsc_confocal/unetvit3d/train.yml", "/resolved/fit_UNetViT3D_SEC61B_"),
     ],
 )
 def test_rendered_sbatch_has_srun_at_expected_resolved_path(capsys, leaf_subpath, expected_resolved_prefix):

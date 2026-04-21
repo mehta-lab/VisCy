@@ -90,17 +90,22 @@ class TestInjectExternalConfigs:
     """Tests for the hydra.searchpath injection that exposes HPC-specific config
     instances living outside the Python package."""
 
-    def test_appends_searchpath_when_external_dir_present(self, tmp_path: Path):
-        """When the external configs dir exists, inject a hydra.searchpath override."""
-        with patch("dynacell.__main__._external_configs_dir", return_value=tmp_path):
-            argv = ["dynacell", "benchmark=er/ipsc_confocal/celldiff/ipsc_confocal"]
+    def test_appends_searchpath_when_external_dirs_present(self, tmp_path: Path):
+        """When external configs dirs exist, inject a hydra.searchpath override
+        encoding all roots as comma-separated file:// URIs in one token."""
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        with patch("dynacell.__main__._external_configs_dirs", return_value=[a, b]):
+            argv = ["dynacell", "leaf=er/ipsc_confocal/celldiff/eval/ipsc_confocal"]
             result = _inject_external_configs(argv)
         assert result[:-1] == argv
-        assert result[-1] == f"hydra.searchpath=[file://{tmp_path}]"
+        assert result[-1] == f"hydra.searchpath=[file://{a},file://{b}]"
 
-    def test_noop_when_external_dir_absent(self):
-        """Wheel installs without the repo have no external dir — argv stays unchanged."""
-        with patch("dynacell.__main__._external_configs_dir", return_value=None):
+    def test_noop_when_external_dirs_absent(self):
+        """Wheel installs without the repo have no external dirs — argv stays unchanged."""
+        with patch("dynacell.__main__._external_configs_dirs", return_value=[]):
             argv = ["dynacell", "target_name=er", "io.pred_path=/x", "save.save_dir=/y"]
             result = _inject_external_configs(argv)
         assert result == argv
@@ -108,8 +113,8 @@ class TestInjectExternalConfigs:
     def test_appended_not_prepended(self, tmp_path: Path):
         """Injection goes at the end so Hydra's argparse doesn't misread it as a
         positional before diagnostic flags like ``-c job``."""
-        with patch("dynacell.__main__._external_configs_dir", return_value=tmp_path):
-            result = _inject_external_configs(["dynacell", "-c", "job", "benchmark=x"])
+        with patch("dynacell.__main__._external_configs_dirs", return_value=[tmp_path]):
+            result = _inject_external_configs(["dynacell", "-c", "job", "leaf=x"])
         assert result[0] == "dynacell"
-        assert result[1:4] == ["-c", "job", "benchmark=x"]
+        assert result[1:4] == ["-c", "job", "leaf=x"]
         assert result[4].startswith("hydra.searchpath=[file://")

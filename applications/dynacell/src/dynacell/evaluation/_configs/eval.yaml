@@ -4,7 +4,7 @@ defaults:
   - optional predict_set: null
   - optional feature_extractor/dinov3: null
   - optional feature_extractor/dynaclr: null
-  - optional benchmark: null
+  - optional leaf: null
 
 target_name: ???
 io:

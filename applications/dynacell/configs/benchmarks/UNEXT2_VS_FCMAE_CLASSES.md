@@ -241,7 +241,7 @@ benchmark — not on main, not on this branch, not in the published
 artifacts.
 
 Dynacell's currently-running from-scratch job
-(`benchmarks/virtual_staining/train/er/ipsc_confocal/unext2.yml`, SLURM
+(`benchmarks/virtual_staining/er/ipsc_confocal/unext2/train.yml`, SLURM
 31122607) uses `DynacellUNet(architecture="UNeXt2")` — the timm-backed
 class. That's a valid "from-scratch baseline with a timm ConvNeXtV2-tiny
 encoder," but it trains a structurally different model (stem without

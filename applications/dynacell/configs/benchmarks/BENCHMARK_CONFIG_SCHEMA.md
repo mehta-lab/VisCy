@@ -344,6 +344,15 @@ The eval runtime uses:
 `dynacell.__main__` injects those two roots through
 `hydra.searchpath=[file://...]` when running from a repo checkout.
 
+Hydra group resolution requires a physical `leaf/` directory in the
+searchpath so that `leaf=<org>/<train_set>/<model>/eval/<predset>`
+resolves to `<searchpath>/leaf/<path>.yaml`. The canonical eval leaves
+live next to their train/predict siblings at
+`<org>/<train_set>/<model>/eval/<predset>.yaml`; a parallel symlink tree
+under `virtual_staining/leaf/` mirrors the benchmark structure and
+points each symlink back at the canonical file, so the schema's
+"one directory per benchmark" goal stays intact.
+
 Wheel installs do not see those internal benchmark groups. External users get:
 
 - `eval.yaml`

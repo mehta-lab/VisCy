@@ -22,28 +22,32 @@ _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
     "report": ("dynacell.reporting.cli", "generate_report", "report"),
 }
 
-# Config-group instances with HPC-specific paths (target/predict_set/feature_extractor
-# values, benchmark leaves) live outside the Python package so the wheel ships only
-# schema + path-free references. Editable installs / repo checkouts expose these
-# through hydra.searchpath; wheel installs without the repo simply don't see them,
-# and external users provide their own groups via --config-dir.
-_EXTERNAL_CONFIGS_SUBPATH = "configs/evaluation"
+# HPC-specific config groups (target, feature_extractor/dynaclr, benchmark eval
+# leaves) live outside the Python package so the wheel ships only schema + path-
+# free references. Editable installs / repo checkouts expose these through
+# hydra.searchpath; wheel installs without the repo simply don't see them, and
+# external users provide their own groups via --config-dir. Two roots are
+# injected: the benchmark tree (for the `leaf/` symlink tree) and the shared
+# eval dir (for `target/` and `feature_extractor/dynaclr/` groups).
+_EXTERNAL_SEARCHPATHS: tuple[str, ...] = (
+    "configs/benchmarks/virtual_staining",
+    "configs/benchmarks/virtual_staining/shared/eval",
+)
 
 
-def _external_configs_dir() -> Path | None:
-    """Return the external eval configs dir if it sits next to this checkout.
+def _external_configs_dirs() -> list[Path]:
+    """Return existing repo-checkout searchpath roots for Hydra eval groups.
 
-    Walks up from this module until it finds the ``applications/dynacell``
-    package root (marked by ``pyproject.toml``); returns ``<root>/configs/
-    evaluation`` if that directory exists, else ``None``. Using the marker
-    file rather than a fixed ``.parent`` count keeps this working across
-    module reorganisations (e.g. moving ``__main__.py`` into a subpackage).
+    Walks up from this module until it finds the repo root (marked by
+    ``pyproject.toml``); returns every configured subpath that exists on
+    disk. Missing paths are silently skipped so wheel installs (with no
+    repo) behave identically to repo checkouts where the dirs were
+    removed.
     """
     for parent in Path(__file__).resolve().parents:
         if (parent / "pyproject.toml").exists():
-            candidate = parent / _EXTERNAL_CONFIGS_SUBPATH
-            return candidate if candidate.is_dir() else None
-    return None
+            return [parent / sub for sub in _EXTERNAL_SEARCHPATHS if (parent / sub).is_dir()]
+    return []
 
 
 def _inject_external_configs(argv: list[str]) -> list[str]:
@@ -51,11 +55,13 @@ def _inject_external_configs(argv: list[str]) -> list[str]:
 
     Appended (not prepended) so Hydra's argparse-based CLI doesn't treat the
     override as a positional placed before diagnostic flags like ``-c job``.
+    Multiple roots are joined with commas inside a single YAML-list token.
     """
-    ext = _external_configs_dir()
-    if ext is None:
+    dirs = _external_configs_dirs()
+    if not dirs:
         return argv
-    return argv + [f"hydra.searchpath=[file://{ext}]"]
+    paths = ",".join(f"file://{d}" for d in dirs)
+    return argv + [f"hydra.searchpath=[{paths}]"]
 
 
 def main_cli():
