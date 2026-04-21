@@ -77,10 +77,17 @@ remaining 16 train leaves + 8 predict leaves + 8 eval leaves untouched.
 ### Stage 2 — Migrate remaining train/predict targets
 
 `mito_tomm20`, `membrane`, `nucleus` move onto `dataset_ref` in the
-train/predict overlays. Each is a small follow-up PR touching one target
-group file + one train_set file (if applicable) + any corresponding
-leaves that referenced them. Behavior stays identical; test suite
-verifies no drift.
+train/predict overlays — bundled in **one VisCy PR** (each target is
+a two-line fragment change; splitting fragments the test delta and
+buys nothing). Scope: three target fragments, six predict leaves
+that drop their explicit `data_path`, a fixture manifest update
+adding `nucleus` + `membrane` entries, and a companion
+`dynacell-paper` manifest PR that adds the same two entries to the
+canonical manifest (required for production runs; VisCy tests pass
+against the repo-local fixture). Behavior stays identical; integration
+tests parametrize across every model in `TRAIN_LEAVES` /
+`PREDICT_LEAVES` that composes a migrated fragment to guard against
+drift.
 
 ### Stage 3 — Extend resolver to Hydra / eval side
 

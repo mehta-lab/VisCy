@@ -21,7 +21,6 @@ model:
 
 data:
   init_args:
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
     # override target-inherited normalizations: predict only reads source
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled

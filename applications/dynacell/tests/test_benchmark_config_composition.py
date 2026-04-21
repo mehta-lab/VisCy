@@ -216,25 +216,57 @@ def test_collision_raises_with_both_paths_in_message(tmp_path, monkeypatch) -> N
     assert "SEC61B.zarr" in msg
 
 
-@pytest.mark.parametrize("organelle,model", [("mito", "celldiff"), ("mito", "unetvit3d")])
-def test_mito_partial_ref_noop_parity(organelle: str, model: str, monkeypatch) -> None:
-    """Mito leaves inherit partial dataset_ref; resolver must leave the composed dict unchanged."""
+_MIGRATED_TARGET_PARAMS = [
+    # (organelle, train_store, test_store, target_channel)
+    ("mito", "train/TOMM20.zarr", "test_cropped/TOMM20.zarr", "Structure"),
+    ("nucleus", "train/cell.zarr", "test_cropped/cell.zarr", "Nuclei"),
+    ("membrane", "train/cell.zarr", "test_cropped/cell.zarr", "Membrane"),
+]
+
+
+@pytest.mark.parametrize("organelle,train_store,_test_store,target_channel", _MIGRATED_TARGET_PARAMS)
+@pytest.mark.parametrize(
+    "model",
+    ["celldiff", "unetvit3d", "fnet3d_paper", "fcmae_vscyto3d_scratch", "fcmae_vscyto3d_pretrained"],
+)
+def test_migrated_target_train_resolves_to_manifest_paths(
+    organelle: str,
+    train_store: str,
+    _test_store: str,
+    target_channel: str,
+    model: str,
+    monkeypatch,
+) -> None:
+    """Full dataset_ref on a non-ER fit leaf splices train store + channels from fixture."""
     monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
     leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml"
-    without = load_composed_config(leaf)
-    with_resolver = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
-    assert without == with_resolver
-    assert with_resolver["data"]["init_args"]["data_path"].endswith("TOMM20.zarr")
+    if not leaf.exists():
+        pytest.skip(f"no {model} train leaf for {organelle}")
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    ia = cfg["data"]["init_args"]
+    assert ia["data_path"].endswith(train_store)
+    assert ia["source_channel"] == "Phase3D"
+    assert ia["target_channel"] == target_channel
 
 
-@pytest.mark.parametrize("organelle,model", [("mito", "celldiff"), ("mito", "unetvit3d")])
-def test_mito_predict_partial_ref_noop_parity(organelle: str, model: str, monkeypatch) -> None:
-    """Mito predict leaves also inherit partial dataset_ref from predict_sets; resolver is no-op."""
+@pytest.mark.parametrize("organelle,_train_store,test_store,target_channel", _MIGRATED_TARGET_PARAMS)
+@pytest.mark.parametrize("model", ["celldiff", "unetvit3d"])
+def test_migrated_target_predict_resolves_to_test_store(
+    organelle: str,
+    _train_store: str,
+    test_store: str,
+    target_channel: str,
+    model: str,
+    monkeypatch,
+) -> None:
+    """Full dataset_ref on a non-ER predict leaf splices test store + channels."""
     monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
     leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
-    without = load_composed_config(leaf)
-    with_resolver = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
-    assert without == with_resolver
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+    ia = cfg["data"]["init_args"]
+    assert ia["data_path"].endswith(test_store)
+    assert ia["source_channel"] == "Phase3D"
+    assert ia["target_channel"] == target_channel
 
 
 def test_synthetic_target_only_partial_ref_is_noop(tmp_path) -> None:

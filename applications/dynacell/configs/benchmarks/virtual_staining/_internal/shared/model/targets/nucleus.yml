@@ -1,12 +1,13 @@
-# Target: nucleus (multi-marker — read from combined cell.zarr, Nuclei channel).
+# Target: nucleus (Nuclei channel of the multi-marker cell.zarr). data_path /
+# source_channel / target_channel resolved from the manifest via dataset_ref.
 benchmark:
   target: nucleus
+  gene: Nuclei
   target_id: nucleus
+  dataset_ref:
+    target: nucleus
 data:
   init_args:
-    source_channel: Phase3D
-    target_channel: Nuclei
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:

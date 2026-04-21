@@ -1,12 +1,13 @@
-# Target: membrane (multi-marker — read from combined cell.zarr, Membrane channel).
+# Target: membrane (Membrane channel of the multi-marker cell.zarr). data_path /
+# source_channel / target_channel resolved from the manifest via dataset_ref.
 benchmark:
   target: membrane
+  gene: Membrane
   target_id: membrane
+  dataset_ref:
+    target: membrane
 data:
   init_args:
-    source_channel: Phase3D
-    target_channel: Membrane
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:

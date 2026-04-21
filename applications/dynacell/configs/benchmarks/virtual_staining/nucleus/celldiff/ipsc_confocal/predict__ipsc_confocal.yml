@@ -23,7 +23,6 @@ model:
 
 data:
   init_args:
-    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
         init_args:
