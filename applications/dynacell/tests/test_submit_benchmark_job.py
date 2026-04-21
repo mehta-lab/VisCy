@@ -14,17 +14,6 @@ import submit_benchmark_job as sbj  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
-FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
-
-
-@pytest.fixture(autouse=True)
-def _fixture_manifest_root(monkeypatch):
-    """Point the resolver at the on-disk fixture manifest for every test.
-
-    Benchmark leaves with full dataset_ref (e.g. migrated ER leaves)
-    now call the resolver during ``submit_benchmark_job.submit()``.
-    """
-    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
 
 
 def test_parse_override_scalar_and_nested():

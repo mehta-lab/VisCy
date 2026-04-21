@@ -1,7 +1,5 @@
-# Target: ER (SEC61B marker).
-# data_path and target_channel come from the manifest via dataset_ref;
-# dataset_ref.target lives here because the organelle is target-scoped,
-# while dataset_ref.dataset lives in the train_set / predict_set fragment.
+# Target: ER (SEC61B marker). data_path / source_channel / target_channel
+# resolved from the manifest via dataset_ref.
 benchmark:
   target: er
   gene: SEC61B

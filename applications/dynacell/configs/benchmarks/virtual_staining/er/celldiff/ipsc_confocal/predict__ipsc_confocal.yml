@@ -23,7 +23,6 @@ model:
 
 data:
   init_args:
-    # data_path provided by the dataset_ref resolver (test store in predict mode)
     # override target-inherited normalizations: predict only reads source
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled

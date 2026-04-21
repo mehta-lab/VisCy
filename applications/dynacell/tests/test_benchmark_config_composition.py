@@ -16,13 +16,6 @@ from viscy_utils.compose import load_composed_config  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[3]
 assert (REPO_ROOT / "pyproject.toml").exists(), f"REPO_ROOT drift: {REPO_ROOT}"
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
-FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
-
-
-@pytest.fixture(autouse=True)
-def _fixture_manifest_root(monkeypatch):
-    """Point the resolver at the on-disk fixture manifest for every test."""
-    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
 
 
 TRAIN_LEAVES = [
@@ -65,7 +58,7 @@ def test_train_leaf_composes(organelle: str, model: str) -> None:
 
 @pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
 def test_predict_leaf_composes(organelle: str, model: str, monkeypatch) -> None:
-    """ER leaves resolve data_path via dataset_ref; other organelles inherit hardcoded paths."""
+    """Predict leaves compose and point at the test_cropped store."""
     monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
     leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
     cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)

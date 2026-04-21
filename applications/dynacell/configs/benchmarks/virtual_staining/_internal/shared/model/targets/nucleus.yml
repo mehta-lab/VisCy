@@ -4,6 +4,7 @@ benchmark:
   target_id: nucleus
 data:
   init_args:
+    source_channel: Phase3D
     target_channel: Nuclei
     data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
     normalizations:

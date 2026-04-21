@@ -5,6 +5,7 @@ benchmark:
   target_id: mito_tomm20
 data:
   init_args:
+    source_channel: Phase3D
     target_channel: Structure
     data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20.zarr
     normalizations:

@@ -1,11 +1,32 @@
 """Test fixtures for dynacell application tests."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
 from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
+
+FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
+
+
+@pytest.fixture
+def fixture_manifest_root() -> Path:
+    """Path to the on-disk manifest fixtures (``aics-hipsc`` etc.)."""
+    return FIXTURE_MANIFEST_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _dynacell_manifest_root_env(monkeypatch):
+    """Point the resolver at the on-disk fixture manifest for every test.
+
+    Individual tests override this via ``monkeypatch.setenv`` or
+    ``monkeypatch.delenv`` to exercise discovery-precedence logic.
+    """
+    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
+
 
 # UNetViT3D test spatial sizes.
 # With dims=[32,64,128], num_res_block=[2,2], stride (1,2,2):

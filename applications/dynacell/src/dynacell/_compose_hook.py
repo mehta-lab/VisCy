@@ -20,7 +20,6 @@ import sys
 from dynacell.data import DatasetRef, ResolvedDataset, resolve_dataset_ref
 
 _REQUIRED_REF_KEYS = ("dataset", "target")
-_DATA_FIELDS = ("data_path", "source_channel", "target_channel")
 
 
 def _infer_mode(composed: dict) -> str:
@@ -37,11 +36,10 @@ def _infer_mode(composed: dict) -> str:
 def _splice_resolved(composed: dict, resolved: ResolvedDataset, mode: str, ref: DatasetRef) -> dict:
     """Return a deep-copied composed dict with resolved fields spliced in.
 
-    Raises ``ValueError`` if the composed dict already declares one of
-    the data fields with a value different from the manifest's. Matching
-    values are tolerated — shared fragments (e.g.
-    ``train_sets/ipsc_confocal.yml``) may declare defaults that happen
-    to agree with the manifest during the staged rollout.
+    Raises ``ValueError`` if the composed dict already declares any of
+    the resolved data fields. A full ``dataset_ref`` is the single
+    source of truth — composed fragments must not co-declare
+    ``data_path``, ``source_channel``, or ``target_channel``.
     """
     out = copy.deepcopy(composed)
     data = out.setdefault("data", {})
@@ -51,14 +49,11 @@ def _splice_resolved(composed: dict, resolved: ResolvedDataset, mode: str, ref: 
         "source_channel": resolved.source_channel,
         "target_channel": resolved.target_channel,
     }
-    conflicts: dict[str, tuple[object, object]] = {}
-    for field, value in resolved_values.items():
-        existing = init_args.get(field)
-        if existing is not None and existing != value:
-            conflicts[field] = (existing, value)
+    conflicts = {field: (init_args[field], value) for field, value in resolved_values.items() if field in init_args}
     if conflicts:
         details = "; ".join(
-            f"{k}: composed={existing!r} vs manifest={resolved!r}" for k, (existing, resolved) in conflicts.items()
+            f"{k}: composed={composed_value!r} vs manifest={manifest_value!r}"
+            for k, (composed_value, manifest_value) in conflicts.items()
         )
         raise ValueError(
             f"benchmark.dataset_ref={{dataset: {ref.dataset}, target: {ref.target}}} "

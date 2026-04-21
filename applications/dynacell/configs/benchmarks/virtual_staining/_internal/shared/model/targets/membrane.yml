@@ -4,6 +4,7 @@ benchmark:
   target_id: membrane
 data:
   init_args:
+    source_channel: Phase3D
     target_channel: Membrane
     data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
     normalizations:

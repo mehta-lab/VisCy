@@ -1,10 +1,6 @@
-# Train set: AICS iPSC confocal.
-# data_path and target_channel come from the manifest via dataset_ref;
-# dataset_ref.dataset lives here because dataset identity is
-# train_set-scoped, while dataset_ref.target is target-scoped.
-# source_channel stays here as a shared ipsc_confocal default. The
-# resolver validates it matches the manifest (aics-hipsc → Phase3D) and
-# raises if a leaf declares a conflicting value.
+# Train set: AICS iPSC confocal. dataset_ref.dataset lives here (dataset
+# identity is train_set-scoped); target fragments carry dataset_ref.target
+# and declare source_channel themselves.
 benchmark:
   train_set: ipsc_confocal
   dataset_group: aics-hipsc
@@ -13,7 +9,6 @@ benchmark:
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
-    source_channel: Phase3D
     split_ratio: 0.8
     mmap_preload: true
     scratch_dir: /dev/shm

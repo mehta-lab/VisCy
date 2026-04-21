@@ -1,13 +1,9 @@
 # Predict set: AICS iPSC confocal, self-predict against test_cropped/.
-# data_path and target_channel come from the manifest via dataset_ref
-# (resolves to the test store in predict mode). source_channel stays
-# here as a shared ipsc_confocal default; the resolver validates it
-# matches the manifest and raises on mismatch.
+# data_path resolves to the test store in predict mode via dataset_ref.
 benchmark:
   predict_set: ipsc_confocal
   dataset_ref:
     dataset: aics-hipsc
 data:
   class_path: viscy_data.hcs.HCSDataModule
-  init_args:
-    source_channel: Phase3D
+  init_args: {}

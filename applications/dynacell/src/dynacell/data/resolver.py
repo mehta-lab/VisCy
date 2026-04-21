@@ -8,7 +8,7 @@ via manifest roots. Callers compose this with the config pipeline via
 Manifest root precedence (highest wins):
 
 1. ``cli_roots`` argument.
-2. ``DYNACELL_MANIFEST_ROOTS`` env var (colon-separated absolute paths).
+2. ``DYNACELL_MANIFEST_ROOTS`` env var (``os.pathsep``-separated paths).
 3. Python entry points under group ``dynacell.manifest_roots``.
 
 For each root (in order), the resolver looks for
@@ -26,7 +26,6 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from dynacell.data.manifests import (
-    DatasetManifest,
     DatasetRef,
     VoxelSpacing,
     load_manifest,
@@ -95,7 +94,7 @@ def discover_manifest_roots(cli_roots: list[Path] | None = None) -> list[Path]:
         roots.extend(Path(p) for p in cli_roots)
     env_value = os.environ.get(_ENV_VAR)
     if env_value:
-        roots.extend(Path(p) for p in env_value.split(":") if p)
+        roots.extend(Path(p) for p in env_value.split(os.pathsep) if p)
     roots.extend(_entry_point_roots())
     if not roots:
         raise NoManifestRootsError(
@@ -117,22 +116,6 @@ def _find_manifest(dataset: str, roots: list[Path]) -> Path:
             return candidate
     lines = "\n".join(f"  - {p}" for p in searched)
     raise ManifestNotFoundError(f"dataset {dataset!r} not found.\n\nSearched:\n{lines}\n")
-
-
-def _resolve_source_channel(manifest: DatasetManifest) -> str:
-    """Extract the single source channel name from a manifest.
-
-    The ``channels`` field allows ``str | list[str]``. For source-target
-    datasets, ``source`` is a single channel; tolerate a length-1 list
-    but reject multi-element lists (the data pipeline currently passes
-    one channel name into ``HCSDataModule``).
-    """
-    source = manifest.channels["source"]
-    if isinstance(source, str):
-        return source
-    if isinstance(source, list) and len(source) == 1:
-        return source[0]
-    raise ValueError(f"Manifest source channel must be a string or single-element list, got {source!r}.")
 
 
 def resolve_dataset_ref(
@@ -178,7 +161,7 @@ def resolve_dataset_ref(
         manifest_path=manifest_path,
         data_path_train=target.stores.train,
         data_path_test=target.stores.test,
-        source_channel=_resolve_source_channel(manifest),
+        source_channel=manifest.source_channel,
         target_channel=target.target_channel,
         spacing=manifest.spacing,
     )

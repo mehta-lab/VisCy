@@ -6,6 +6,7 @@ explicit file paths — no import-time registry or hardcoded config roots.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -77,6 +78,21 @@ class DatasetManifest(BaseModel):
             raise ValueError("Manifest must define at least one target.")
         return v
 
+    @property
+    def source_channel(self) -> str:
+        """Return the single source channel name for source-target datasets.
+
+        ``channels["source"]`` may be a string or a single-element list; a
+        multi-element list is rejected since downstream ``HCSDataModule``
+        takes one channel name.
+        """
+        source = self.channels["source"]
+        if isinstance(source, str):
+            return source
+        if isinstance(source, list) and len(source) == 1:
+            return source[0]
+        raise ValueError(f"Manifest source channel must be a string or single-element list, got {source!r}.")
+
 
 class SplitDefinition(BaseModel):
     """Train/val/test FOV split for one organelle."""
@@ -103,8 +119,12 @@ class SplitDefinition(BaseModel):
         return self
 
 
+@lru_cache(maxsize=64)
 def load_manifest(manifest_path: Path) -> DatasetManifest:
     """Load and validate a dataset manifest from a YAML file.
+
+    Cached by resolved path; manifests are treated as immutable within a
+    process (same policy as :func:`viscy_utils.compose._load_yaml_cached`).
 
     Parameters
     ----------
