@@ -14,12 +14,39 @@ uv run dynacell report results_dirs.ModelA=/path/to/results
 
 import importlib
 import sys
+from pathlib import Path
 
 _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
     "evaluate": ("dynacell.evaluation.pipeline", "evaluate_model", "eval"),
     "precompute-gt": ("dynacell.evaluation.precompute_cli", "precompute_gt", "eval"),
     "report": ("dynacell.reporting.cli", "generate_report", "report"),
 }
+
+# Config-group instances with HPC-specific paths (target/predict_set/feature_extractor
+# values, benchmark leaves) live outside the Python package so the wheel ships only
+# schema + path-free references. Editable installs / repo checkouts expose these
+# through hydra.searchpath; wheel installs without the repo simply don't see them,
+# and external users provide their own groups via --config-dir.
+_EXTERNAL_CONFIGS_SUBPATH = ("configs", "evaluation")
+
+
+def _external_configs_dir() -> Path | None:
+    """Return the external eval configs dir if it sits next to this checkout."""
+    root = Path(__file__).resolve().parent.parent.parent  # applications/dynacell
+    candidate = root.joinpath(*_EXTERNAL_CONFIGS_SUBPATH)
+    return candidate if candidate.is_dir() else None
+
+
+def _inject_external_configs(argv: list[str]) -> list[str]:
+    """Append a hydra.searchpath override so external configs are discoverable.
+
+    Appended (not prepended) so Hydra's argparse-based CLI doesn't treat the
+    override as a positional placed before diagnostic flags like ``-c job``.
+    """
+    ext = _external_configs_dir()
+    if ext is None:
+        return argv
+    return argv + [f"hydra.searchpath=[file://{ext}]"]
 
 
 def main_cli():
@@ -28,6 +55,7 @@ def main_cli():
         command = sys.argv[1]
         module_path, func_name, extra = _HYDRA_COMMANDS[command]
         sys.argv = [sys.argv[0]] + sys.argv[2:]  # strip subcommand for Hydra
+        sys.argv = _inject_external_configs(sys.argv)
         try:
             module = importlib.import_module(module_path)
         except ModuleNotFoundError as e:

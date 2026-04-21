@@ -36,11 +36,15 @@ virtual_staining/
   predict/<org>/<train_set>/<model>/<predict_set>.yml
 ```
 
-**Eval leaves live elsewhere.** Evaluation uses Hydra (not LightningCLI), and
-Hydra needs every group file on a single search path anchored at the package.
-Canonical eval leaves therefore sit inside the dynacell package at
-`applications/dynacell/src/dynacell/evaluation/_configs/benchmark/<org>/<train_set>/<model>/<predict_set>.yaml`
-and are invoked via `dynacell evaluate benchmark=<path>`. See
+**Eval leaves live in a sibling tree.** Evaluation uses Hydra (not LightningCLI),
+so eval configs compose through a different mechanism. Canonical eval benchmark
+leaves live at
+`applications/dynacell/configs/evaluation/benchmark/<org>/<train_set>/<model>/<predict_set>.yaml`
+(alongside this tree, not under `virtual_staining/`). The HPC-bound target groups
+and the DynaCLR checkpoint config share that directory. A `hydra.searchpath`
+injection in `dynacell.__main__` makes them discoverable when running from a repo
+checkout; schema-only configs ship inside the dynacell package (wheel installs see
+only those). Invoke via `dynacell evaluate benchmark=<path>`; see
 `applications/dynacell/src/dynacell/evaluation/README.md` for details.
 
 ## Composition order

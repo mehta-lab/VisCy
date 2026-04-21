@@ -37,13 +37,22 @@ right group and point at the prediction / output paths.
 
 ### Config groups
 
-| Group | Options | What it sets |
-|---|---|---|
-| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. |
-| `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. |
-| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. |
-| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. |
-| `benchmark` | `<org>/<train_set>/<model>/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. |
+| Group | Options | What it sets | Location |
+|---|---|---|---|
+| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. | repo checkout |
+| `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. | in-package |
+| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package |
+| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | repo checkout |
+| `benchmark` | `<org>/<train_set>/<model>/<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | repo checkout |
+
+- **In-package** groups (`predict_set`, `feature_extractor/dinov3`) ship in the
+  wheel: schema + path-free reference values only.
+- **Repo checkout** groups (`target`, `feature_extractor/dynaclr`, `benchmark`)
+  live at `applications/dynacell/configs/evaluation/` — they contain HPC paths,
+  our DynaCLR checkpoint, and benchmark-instance values, which are useless to
+  external users. When running from the repo they are discoverable via a
+  `hydra.searchpath` injection done by `dynacell.__main__`; running from a
+  wheel install without the repo transparently omits them.
 
 Selecting a group on the CLI: `<group>=<option>` (no `+` prefix needed — groups are
 declared as `optional` in `eval.yaml`).
@@ -107,11 +116,46 @@ uv run dynacell evaluate … feature_extractor/dynaclr=default \
 Omitting the feature-extractor groups (or their required fields) when
 `compute_feature_metrics=true` raises `MissingMandatoryValue` at access time.
 
+### External users: authoring your own groups
+
+`pip install dynacell` ships only the schema and path-free reference groups
+(eval.yaml, precompute.yaml, feature_extractor/dinov3/lvd1689m, predict_set/ipsc_confocal,
+spectral_pcc/*). Our HPC-bound groups (the `target/*` files, `feature_extractor/dynaclr/default`,
+and the `benchmark/*` leaves) live in the repo checkout and won't be present in a
+wheel-only install — they point at paths and checkpoints external users don't have.
+
+To evaluate your own predictions, write your own group files and point Hydra at
+them with `--config-dir`. A minimal target file:
+
+```yaml
+# File: my_configs/target/mine.yaml
+# @package _global_         # REQUIRED: writes into root, not under 'target.*'
+target_name: er             # one of: nucleus, membrane, nucleoli, lysosomes, er, mitochondria
+io:
+  gt_path: /data/mine/gt.zarr
+  cell_segmentation_path: /data/mine/seg.zarr
+  gt_channel_name: MyGroundTruthChannel
+  pred_channel_name: MyPredictionChannel
+```
+
+Run with:
+```bash
+dynacell evaluate --config-dir /absolute/path/to/my_configs \
+  target=mine predict_set=ipsc_confocal \
+  io.pred_path=/path/to/predictions.zarr \
+  save.save_dir=/path/to/out
+```
+
+**Common footgun:** omitting the `# @package _global_` directive on line 1
+makes the file's contents land at `cfg.target.target_name` instead of
+`cfg.target_name`; the schema fields (`target_name`, `io.*`) stay `???` and the
+pipeline fails with `MissingMandatoryValue` — not an obviously-linked error.
+
 ### Benchmark eval leaves
 
 Canonical evaluations for the virtual-staining benchmarks are checked in under
-`_configs/benchmark/<organelle>/<train_set>/<model>/<predict_set>.yaml`. Each
-leaf pins every group selection, paths, and the save directory — run one by
+`applications/dynacell/configs/evaluation/benchmark/<organelle>/<train_set>/<model>/<predict_set>.yaml`.
+Each leaf pins every group selection, paths, and the save directory — run one by
 selecting it as the `benchmark` group:
 
 ```bash
@@ -123,11 +167,10 @@ The current set mirrors the predict benchmark tree one-to-one:
 apply on top (e.g. `limit_positions=1`, `compute_feature_metrics=false`,
 `save.save_dir=/tmp/…` for smoke tests).
 
-Leaves live inside the package (under `_configs/`) rather than alongside the
-predict/train leaves at `configs/benchmarks/virtual_staining/` — Hydra needs
-every referenced group file on a single search path, and
-`@hydra.main(config_path='_configs')` pins that path at the package. See the
-top-level benchmarks README for the predict/train counterparts.
+Leaves live in the repo's `configs/evaluation/` directory (not inside the
+Python package); a `hydra.searchpath` injection in `dynacell.__main__` exposes
+them at compose time. Wheel-only installs without the repo checkout won't see
+these leaves — see "External users" above for authoring your own.
 
 ### Force recompute
 
