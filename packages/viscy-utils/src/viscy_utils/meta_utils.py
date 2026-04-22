@@ -2,7 +2,7 @@
 
 import iohub.ngff as ngff
 import numpy as np
-import tensorstore
+from iohub.core.config import TensorStoreConfig
 from scipy.ndimage import median_filter
 from skimage.filters import threshold_otsu
 from tqdm import tqdm
@@ -47,16 +47,15 @@ def write_meta_field(position, metadata, field_name, subfield_name):
         position.zattrs[field_name] = field_metadata
 
 
-def _grid_sample(position, grid_spacing, channel_index, num_workers):
-    """Sample a position using grid sampling across all timepoints."""
-    return (
-        position["0"]
-        .tensorstore(context=tensorstore.Context({"data_copy_concurrency": {"limit": num_workers}}))[
-            :, channel_index, :, ::grid_spacing, ::grid_spacing
-        ]
-        .read()
-        .result()
-    )
+def _grid_sample(position, grid_spacing, channel_index):
+    """Sample a position using grid sampling across all timepoints.
+
+    The underlying plate must be opened with ``implementation="tensorstore"``
+    (see :func:`generate_normalization_metadata`) so ``.native`` returns a
+    ``tensorstore.TensorStore`` handle with the configured
+    ``data_copy_concurrency``.
+    """
+    return position["0"].native[:, channel_index, :, ::grid_spacing, ::grid_spacing].read().result()
 
 
 def generate_normalization_metadata(
@@ -85,7 +84,12 @@ def generate_normalization_metadata(
         default ``grid_spacing=32`` to capture inter-cell gaps. A median
         filter is applied before thresholding to smooth noise.
     """
-    plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
+    plate = ngff.open_ome_zarr(
+        zarr_dir,
+        mode="r+",
+        implementation="tensorstore",
+        implementation_config=TensorStoreConfig(data_copy_concurrency=num_workers),
+    )
     position_map = list(plate.positions())
 
     if channel_ids == -1:
@@ -105,11 +109,11 @@ def generate_normalization_metadata(
         position_and_statistics = []
 
         for _, pos in tqdm(position_map, desc="Positions"):
-            samples = _grid_sample(pos, grid_spacing, channel_index, num_workers)
+            samples = _grid_sample(pos, grid_spacing, channel_index)
             dataset_sample_values.append(samples)
             fov_stats = get_val_stats(samples)
             if compute_otsu:
-                otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index, num_workers)
+                otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index)
                 smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
                 flat = smoothed.ravel()
                 # Otsu's method is undefined for constant-valued inputs.

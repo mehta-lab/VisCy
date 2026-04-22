@@ -17,7 +17,6 @@ Produces the exact batch format expected by
 from __future__ import annotations
 
 import logging
-import os
 from collections import defaultdict
 
 import numpy as np
@@ -113,7 +112,10 @@ class MultiExperimentTripletDataset(Dataset):
         Reserved for future use.  Currently unused (NTXentLoss uses
         in-batch negatives).
     cache_pool_bytes : int
-        Tensorstore cache pool size in bytes.
+        Unused; kept for backwards compatibility. Tensorstore cache-pool
+        size is now set on :class:`MultiExperimentIndex` and attached to
+        the plate at ``open_ome_zarr`` time via
+        :class:`iohub.core.config.TensorStoreConfig`.
     channels_per_sample : int | list[str] | None
         Controls how many source channels to read per sample.
         ``None`` (default) — read all source channels, output ``(B, C, Z, Y, X)``.
@@ -205,25 +207,9 @@ class MultiExperimentTripletDataset(Dataset):
                 _logger.info("Label encoder '%s' (%s): %d classes", batch_key, col, len(encoder))
 
         self._rng = np.random.default_rng()
-        self._setup_tensorstore_context(cache_pool_bytes)
-        self._build_match_lookup()
-
-    # ------------------------------------------------------------------
-    # Initialization helpers
-    # ------------------------------------------------------------------
-
-    def _setup_tensorstore_context(self, cache_pool_bytes: int) -> None:
-        """Configure tensorstore context with CPU limits based on SLURM env."""
-        cpus = os.environ.get("SLURM_CPUS_PER_TASK")
-        cpus = int(cpus) if cpus is not None else (os.cpu_count() or 4)
-        self._ts_context = ts.Context(
-            {
-                "data_copy_concurrency": {"limit": cpus},
-                "cache_pool": {"total_bytes_limit": cache_pool_bytes},
-            }
-        )
         self._tensorstores: dict[str, ts.TensorStore] = {}
         self._norm_meta_cache: dict[str, NormMeta | None] = {}
+        self._build_match_lookup()
 
     def _build_match_lookup(self) -> None:
         """Build lookup structures for O(1) positive candidate lookup.
@@ -531,10 +517,7 @@ class MultiExperimentTripletDataset(Dataset):
         ts.TensorStore
         """
         if fov_name not in self._tensorstores:
-            self._tensorstores[fov_name] = position["0"].tensorstore(
-                context=self._ts_context,
-                recheck_cached_data="open",
-            )
+            self._tensorstores[fov_name] = position["0"].native
         return self._tensorstores[fov_name]
 
     def _slice_patch(

@@ -22,6 +22,7 @@ except ImportError:
     ts = None
 
 import torch
+from iohub.core.config import TensorStoreConfig
 from iohub.ngff import ImageArray, Position, open_ome_zarr
 from monai.data.thread_buffer import ThreadDataLoader
 from monai.transforms import Compose, MapTransform
@@ -37,6 +38,16 @@ from viscy_data.hcs import HCSDataModule
 from viscy_data.select import _filter_fovs, _filter_wells
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def _default_tensorstore_config(cache_pool_bytes: int = 0) -> TensorStoreConfig:
+    """Build a TensorStoreConfig with SLURM-aware concurrency."""
+    cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    cpus = int(cpus) if cpus is not None else (os.cpu_count() or 4)
+    return TensorStoreConfig(
+        data_copy_concurrency=cpus,
+        cache_pool_bytes=cache_pool_bytes or None,
+    )
 
 
 class TripletDataset(Dataset):
@@ -90,7 +101,10 @@ class TripletDataset(Dataset):
             (can be set to False when using a loss function like NT-Xent),
             by default True
         cache_pool_bytes : int, optional
-            Size of the tensorstore cache pool in bytes, by default 0
+            Unused; kept for backwards compatibility. Set the tensorstore
+            cache-pool size on the *DataModule* now — the pool is attached
+            to the plate at ``open_ome_zarr`` time via
+            :class:`iohub.core.config.TensorStoreConfig`, not per-dataset.
         """
         if pd is None:
             raise ImportError("pandas is required for TripletDataset. Install with: pip install 'viscy-data[triplet]'")
@@ -112,32 +126,19 @@ class TripletDataset(Dataset):
         self.tracks = self._specific_cells(self.tracks) if self.predict_cells else self.tracks
         self.valid_anchors = self._filter_anchors(self.tracks)
         self.return_negative = return_negative
-        self._setup_tensorstore_context(cache_pool_bytes)
-
-    def _setup_tensorstore_context(self, cache_pool_bytes: int):
-        """Configure tensorstore context with CPU limits based on SLURM environment."""
-        cpus_per_task = os.environ.get("SLURM_CPUS_PER_TASK")
-        if cpus_per_task is not None:
-            cpus_per_task = int(cpus_per_task)
-        else:
-            cpus_per_task = os.cpu_count() or 4
-        self.tensorstore_context = ts.Context(
-            {
-                "data_copy_concurrency": {"limit": cpus_per_task},
-                "cache_pool": {"total_bytes_limit": cache_pool_bytes},
-            }
-        )
-        self._tensorstores = {}
+        self._tensorstores: dict[str, "ts.TensorStore"] = {}
 
     def _get_tensorstore(self, position: Position) -> "ts.TensorStore":
-        """Get cached tensorstore object or create and cache new one."""
+        """Get cached tensorstore handle, opening via iohub's tensorstore impl on miss.
+
+        The plate the position was taken from must have been opened with
+        ``implementation="tensorstore"`` so ``.native`` returns a
+        ``tensorstore.TensorStore`` (see
+        :func:`TripletDataModule._align_tracks_tables_with_positions`).
+        """
         fov_name = position.zgroup.name
         if fov_name not in self._tensorstores:
-            self._tensorstores[fov_name] = position["0"].tensorstore(
-                context=self.tensorstore_context,
-                # assume immutable data to reduce metadata access
-                recheck_cached_data="open",
-            )
+            self._tensorstores[fov_name] = position["0"].native
         return self._tensorstores[fov_name]
 
     def _filter_tracks(self, tracks_tables: "list[pd.DataFrame]") -> "pd.DataFrame":
@@ -431,7 +432,11 @@ class TripletDataModule(HCSDataModule):
             )
         positions = []
         tracks_tables = []
-        images_plate = open_ome_zarr(self.data_path)
+        images_plate = open_ome_zarr(
+            self.data_path,
+            implementation="tensorstore",
+            implementation_config=_default_tensorstore_config(self._cache_pool_bytes),
+        )
         for well in _filter_wells(images_plate, include_wells=self._include_wells):
             for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
                 positions.append(fov)

@@ -4,6 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 
 import iohub.ngff as ngff
+from iohub.core.config import TensorStoreConfig
 from tqdm import tqdm
 
 from viscy_utils.meta_utils import write_meta_field
@@ -83,7 +84,12 @@ def generate_qc_metadata(
     num_workers : int
         Number of workers for data loading.
     """
-    plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
+    plate = ngff.open_ome_zarr(
+        zarr_dir,
+        mode="r+",
+        implementation="tensorstore",
+        implementation_config=TensorStoreConfig(data_copy_concurrency=num_workers),
+    )
     position_map = list(plate.positions())
 
     for metric in metrics:
