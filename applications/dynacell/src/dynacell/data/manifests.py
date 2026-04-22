@@ -45,6 +45,7 @@ class StoreLocations(BaseModel):
     train: Path
     test: Path
     cell_segmentation: Path | None = None
+    gt_cache_dir: Path | None = None
 
 
 class TargetConfig(BaseModel):

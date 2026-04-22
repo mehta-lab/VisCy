@@ -53,6 +53,8 @@ class ResolvedDataset(BaseModel):
     source_channel: str
     target_channel: str
     spacing: VoxelSpacing
+    cell_segmentation_path: Path | None = None
+    gt_cache_dir: Path | None = None
 
 
 _ENV_VAR = "DYNACELL_MANIFEST_ROOTS"
@@ -164,4 +166,6 @@ def resolve_dataset_ref(
         source_channel=manifest.source_channel,
         target_channel=target.target_channel,
         spacing=manifest.spacing,
+        cell_segmentation_path=target.stores.cell_segmentation,
+        gt_cache_dir=target.stores.gt_cache_dir,
     )

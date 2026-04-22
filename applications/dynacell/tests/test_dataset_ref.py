@@ -64,6 +64,46 @@ def test_resolve_happy_path_against_fixture(monkeypatch):
     assert resolved.spacing.as_list() == [0.29, 0.108, 0.108]
     assert str(resolved.data_path_train).endswith("train/SEC61B.zarr")
     assert str(resolved.data_path_test).endswith("test_cropped/SEC61B.zarr")
+    assert str(resolved.cell_segmentation_path).endswith("SEC61B_segmented_cleaned.zarr")
+    assert str(resolved.gt_cache_dir).endswith("eval_cache/SEC61B")
+
+
+_FIXTURE_TARGET_EXPECTATIONS = [
+    ("sec61b", "SEC61B.zarr", "SEC61B_segmented_cleaned.zarr", "eval_cache/SEC61B", "Structure"),
+    ("tomm20", "TOMM20.zarr", "TOMM20_segmented_cleaned.zarr", "eval_cache/TOMM20", "Structure"),
+    ("nucleus", "cell.zarr", "cell_segmented_cleaned.zarr", "eval_cache/nucleus", "Nuclei"),
+    ("membrane", "cell.zarr", "cell_segmented_cleaned.zarr", "eval_cache/membrane", "Membrane"),
+]
+
+
+@pytest.mark.parametrize(
+    "target,test_store,seg_store,cache_suffix,target_channel",
+    _FIXTURE_TARGET_EXPECTATIONS,
+)
+def test_resolve_each_fixture_target(
+    monkeypatch,
+    target: str,
+    test_store: str,
+    seg_store: str,
+    cache_suffix: str,
+    target_channel: str,
+):
+    """All four fixture targets resolve to distinct test store / cache / channel tuples."""
+    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(_FIXTURE_ROOT))
+    resolved = resolve_dataset_ref(DatasetRef(dataset="aics-hipsc", target=target))
+    assert str(resolved.data_path_test).endswith(f"test_cropped/{test_store}")
+    assert str(resolved.cell_segmentation_path).endswith(seg_store)
+    assert str(resolved.gt_cache_dir).endswith(cache_suffix)
+    assert resolved.target_channel == target_channel
+
+
+def test_gt_cache_dir_none_when_missing_from_manifest(monkeypatch, tmp_path):
+    """Manifest target without gt_cache_dir → ResolvedDataset.gt_cache_dir is None."""
+    _write_manifest(tmp_path, "my-dataset", _make_manifest_dict())
+    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(tmp_path))
+    resolved = resolve_dataset_ref(DatasetRef(dataset="my-dataset", target="sec61b"))
+    assert resolved.gt_cache_dir is None
+    assert resolved.cell_segmentation_path is None
 
 
 def test_unknown_dataset_raises_manifest_not_found(monkeypatch, tmp_path):
