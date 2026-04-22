@@ -129,7 +129,7 @@ class SlidingWindowDataset(Dataset):
                 raise IndexError(
                     f"Z window size {self.z_window_size} "
                     f"is larger than the number of Z slices ({img_arr.slices}) "
-                    f"for FOV {img_arr.path}."
+                    f"for FOV /{img_arr.path}."
                 )
             w += ts * zs
             self.window_keys.append(w)
@@ -175,7 +175,7 @@ class SlidingWindowDataset(Dataset):
         -------
         list[Tensor], HCSStackIndex
             List of (C=1, Z, Y, X) image tensors,
-            tuple of image name, time index, and Z index.
+            tuple of image path, time index, and Z index.
         """
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
