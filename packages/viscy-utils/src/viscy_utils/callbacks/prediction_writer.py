@@ -60,7 +60,7 @@ def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
         Z-slice range for the incoming data.
     """
     if image.shape[0] <= t_index or image.shape[2] < z_slice.stop:
-        _logger.debug(f"Resizing image '{image.name}' {image.shape} for T={t_index}, Z-sclice={z_slice}.")
+        _logger.debug(f"Resizing image '{image.path}' {image.shape} for T={t_index}, Z-sclice={z_slice}.")
         image.resize(
             (
                 max(t_index + 1, image.shape[0]),

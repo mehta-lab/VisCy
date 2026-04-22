@@ -129,7 +129,7 @@ class SlidingWindowDataset(Dataset):
                 raise IndexError(
                     f"Z window size {self.z_window_size} "
                     f"is larger than the number of Z slices ({img_arr.slices}) "
-                    f"for FOV {img_arr.name}."
+                    f"for FOV {img_arr.path}."
                 )
             w += ts * zs
             self.window_keys.append(w)
@@ -183,13 +183,13 @@ class SlidingWindowDataset(Dataset):
         preloaded = _preloaded if _preloaded is not None else self._preloaded
         if preloaded is not None and arr_idx >= 0:
             data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].clone()
-            return data.unbind(dim=1), (img.name, t, z)
+            return data.unbind(dim=1), (f"/{img.path}", t, z)
         data = img.oindex[
             slice(t, t + 1),
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
         ].astype(np.float32)
-        return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
+        return torch.from_numpy(data).unbind(dim=1), (f"/{img.path}", t, z)
 
     def __len__(self) -> int:
         """Return total number of windows."""
