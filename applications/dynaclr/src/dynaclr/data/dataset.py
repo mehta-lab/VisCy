@@ -111,11 +111,6 @@ class MultiExperimentTripletDataset(Dataset):
     return_negative : bool
         Reserved for future use.  Currently unused (NTXentLoss uses
         in-batch negatives).
-    cache_pool_bytes : int
-        Unused; kept for backwards compatibility. Tensorstore cache-pool
-        size is now set on :class:`MultiExperimentIndex` and attached to
-        the plate at ``open_ome_zarr`` time via
-        :class:`iohub.core.config.TensorStoreConfig`.
     channels_per_sample : int | list[str] | None
         Controls how many source channels to read per sample.
         ``None`` (default) — read all source channels, output ``(B, C, Z, Y, X)``.
@@ -150,7 +145,6 @@ class MultiExperimentTripletDataset(Dataset):
         tau_range_hours: tuple[float, float] = (0.5, 2.0),
         tau_decay_rate: float = 2.0,
         return_negative: bool = False,
-        cache_pool_bytes: int = 0,
         channels_per_sample: int | list[str] | None = None,
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,

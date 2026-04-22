@@ -66,7 +66,6 @@ class TripletDataset(Dataset):
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
-        cache_pool_bytes: int = 0,
     ) -> None:
         """Dataset for triplet sampling of cells based on tracking.
 
@@ -100,11 +99,6 @@ class TripletDataset(Dataset):
             Whether to return the negative sample during the fit stage
             (can be set to False when using a loss function like NT-Xent),
             by default True
-        cache_pool_bytes : int, optional
-            Unused; kept for backwards compatibility. Set the tensorstore
-            cache-pool size on the *DataModule* now — the pool is attached
-            to the plate at ``open_ome_zarr`` time via
-            :class:`iohub.core.config.TensorStoreConfig`, not per-dataset.
         """
         if pd is None:
             raise ImportError("pandas is required for TripletDataset. Install with: pip install 'viscy-data[triplet]'")
@@ -381,7 +375,9 @@ class TripletDataModule(HCSDataModule):
         z_window_size : int, optional
             Size of the final Z window, by default None (inferred from z_range)
         cache_pool_bytes : int, optional
-            Size of the per-process tensorstore cache pool in bytes, by default 0
+            Size of the tensorstore cache pool in bytes, attached to the
+            plate at ``open_ome_zarr`` time via
+            :class:`iohub.core.config.TensorStoreConfig`, by default 0.
         """
         if num_workers > 1:
             warnings.warn("Using more than 1 thread worker will likely degrade performance.")
@@ -452,7 +448,6 @@ class TripletDataModule(HCSDataModule):
             "channel_names": self.source_channel,
             "z_range": self.z_range,
             "time_interval": self.time_interval,
-            "cache_pool_bytes": self._cache_pool_bytes,
         }
 
     def _setup_fit(self, dataset_settings: dict):
