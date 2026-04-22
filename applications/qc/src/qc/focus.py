@@ -51,8 +51,8 @@ class FocusSliceMetric(QCMetric):
     def __call__(self, position, channel_name, channel_index, num_workers=4):
         """Compute focus-slice index per timepoint for one channel of ``position``."""
         # Tensorstore concurrency is configured on the plate at
-        # open-time (see qc_metrics.run_qc_metrics); num_workers is
-        # retained here only to match the QCMetric abstract interface.
+        # open-time (see qc_metrics.generate_qc_metadata); num_workers
+        # is retained here only to match the QCMetric abstract interface.
         del num_workers
         tzyx = position["0"].native[:, channel_index].read().result()
 
