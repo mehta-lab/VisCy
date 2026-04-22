@@ -1,7 +1,5 @@
 # @package _global_
 # Predict set group: AICS iPSC confocal.
-# dataset_ref.dataset identifies the data source; the post-compose hook in
-# _ref_hook.py splices io.* and pixel_metrics.spacing from the manifest.
 benchmark:
   dataset_ref:
     dataset: aics-hipsc

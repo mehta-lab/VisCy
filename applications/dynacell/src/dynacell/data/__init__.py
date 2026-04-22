@@ -23,6 +23,7 @@ from dynacell.data.resolver import (
     NoManifestRootsError,
     ResolvedDataset,
     TargetNotFoundError,
+    dataset_ref_from_dict,
     discover_manifest_roots,
     resolve_dataset_ref,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "TargetConfig",
     "TargetNotFoundError",
     "VoxelSpacing",
+    "dataset_ref_from_dict",
     "discover_manifest_roots",
     "get_target",
     "load_benchmark_spec",

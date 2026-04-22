@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from omegaconf import OmegaConf
+from pydantic import ValidationError
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-
-_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "manifests"
 
 _EXPECTED_SPACING = [0.29, 0.108, 0.108]
 
@@ -105,9 +102,9 @@ def test_null_benchmark_is_noop() -> None:
 
 
 def test_dataset_present_but_null_raises() -> None:
-    """Both keys present but ``dataset: null`` raises ValueError via pydantic."""
+    """Both keys present but ``dataset: null`` raises pydantic ValidationError."""
     cfg = OmegaConf.create({"benchmark": {"dataset_ref": {"dataset": None, "target": "sec61b"}}})
-    with pytest.raises(ValueError, match="Invalid benchmark.dataset_ref"):
+    with pytest.raises(ValidationError):
         apply_dataset_ref(cfg)
 
 

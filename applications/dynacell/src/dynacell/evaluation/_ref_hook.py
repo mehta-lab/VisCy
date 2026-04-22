@@ -16,12 +16,12 @@ from __future__ import annotations
 from typing import Final
 
 from omegaconf import DictConfig, OmegaConf
-from pydantic import ValidationError
 
-from dynacell.data.manifests import DatasetRef
-from dynacell.data.resolver import ResolvedDataset, resolve_dataset_ref
-
-_REQUIRED_REF_KEYS: Final = ("dataset", "target")
+from dynacell.data.resolver import (
+    ResolvedDataset,
+    dataset_ref_from_dict,
+    resolve_dataset_ref,
+)
 
 _RESOLVED_FIELDS: Final = (
     ("io.gt_path", "data_path_test"),
@@ -42,26 +42,24 @@ def apply_dataset_ref(config: DictConfig) -> None:
     Parameters
     ----------
     config : DictConfig
-        The composed Hydra config. Must be mutable (``struct`` mode is
-        disabled as needed to write new keys).
+        The composed Hydra config. Must be mutable; struct mode is
+        toggled off for the splice and restored to its prior state.
 
     Raises
     ------
     ValueError
-        If ``benchmark.dataset_ref`` is malformed, or if any resolved
-        field is already explicitly set to a value that disagrees with
-        the manifest.
+        If any resolved field is already explicitly set to a value that
+        disagrees with the manifest.
+    pydantic.ValidationError
+        If ``benchmark.dataset_ref`` is present with both required keys
+        but malformed.
     """
     ref_node = OmegaConf.select(config, "benchmark.dataset_ref", default=None)
     if ref_node is None:
         return
-    ref_dict = OmegaConf.to_container(ref_node, resolve=True)
-    if not isinstance(ref_dict, dict) or not all(k in ref_dict for k in _REQUIRED_REF_KEYS):
+    ref = dataset_ref_from_dict(OmegaConf.to_container(ref_node, resolve=True))
+    if ref is None:
         return
-    try:
-        ref = DatasetRef.model_validate(ref_dict)
-    except ValidationError as e:
-        raise ValueError(f"Invalid benchmark.dataset_ref: {ref_dict}") from e
     resolved = resolve_dataset_ref(ref)
     _check_collisions(config, resolved)
     _splice(config, resolved)
@@ -117,9 +115,9 @@ def _check_collisions(config: DictConfig, resolved: ResolvedDataset) -> None:
 def _splice(config: DictConfig, resolved: ResolvedDataset) -> None:
     """Write manifest-derived fields into *config* in place.
 
-    Disables struct mode on *config* so that new keys can be written to
-    paths that may not pre-exist. Callers who need struct-mode checks
-    after splicing should re-enable it.
+    Temporarily disables struct mode so new keys can be written to
+    paths that may not pre-exist, then restores the prior struct state
+    so downstream readers still get typo protection.
 
     Parameters
     ----------
@@ -128,11 +126,15 @@ def _splice(config: DictConfig, resolved: ResolvedDataset) -> None:
     resolved : ResolvedDataset
         Manifest-resolved dataset fields.
     """
+    prev_struct = OmegaConf.is_struct(config)
     OmegaConf.set_struct(config, False)
-    for cfg_path, attr in _RESOLVED_FIELDS:
-        val = getattr(resolved, attr)
-        if val is None:
-            continue
-        OmegaConf.update(config, cfg_path, str(val), merge=False)
-    OmegaConf.update(config, "io.pred_channel_name", f"{resolved.target_channel}_prediction", merge=False)
-    OmegaConf.update(config, "pixel_metrics.spacing", resolved.spacing.as_list(), merge=False)
+    try:
+        for cfg_path, attr in _RESOLVED_FIELDS:
+            val = getattr(resolved, attr)
+            if val is None:
+                continue
+            OmegaConf.update(config, cfg_path, str(val), merge=False)
+        OmegaConf.update(config, "io.pred_channel_name", f"{resolved.target_channel}_prediction", merge=False)
+        OmegaConf.update(config, "pixel_metrics.spacing", resolved.spacing.as_list(), merge=False)
+    finally:
+        OmegaConf.set_struct(config, prev_struct)

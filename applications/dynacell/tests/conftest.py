@@ -28,6 +28,20 @@ def _dynacell_manifest_root_env(monkeypatch):
     monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
 
 
+@pytest.fixture
+def clear_global_hydra():
+    """Reset Hydra's global singleton before and after the test.
+
+    Opt-in rather than autouse: Hydra tests need this, non-Hydra tests
+    don't, and an autouse clear runs for every test in the suite.
+    """
+    from hydra.core.global_hydra import GlobalHydra
+
+    GlobalHydra.instance().clear()
+    yield
+    GlobalHydra.instance().clear()
+
+
 # UNetViT3D test spatial sizes.
 # With dims=[32,64,128], num_res_block=[2,2], stride (1,2,2):
 #   latent = [8, 8, 8], patch_size=4 → 8 tokens.

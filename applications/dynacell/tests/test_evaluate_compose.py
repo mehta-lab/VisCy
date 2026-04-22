@@ -19,14 +19,11 @@ CLI calls by passing ``hydra.searchpath`` overrides to ``compose``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 from hydra import compose, initialize_config_module
-from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, OmegaConf
 
-from dynacell.data.manifests import load_manifest
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 
 _DYNACELL_ROOT = Path(__file__).resolve().parents[1]
@@ -66,21 +63,8 @@ _LEAF_MATRIX = [(organelle, model) for organelle in _ORGANELLE_EXPECTATIONS for 
 
 
 @pytest.fixture(autouse=True)
-def _clear_manifest_cache() -> Iterator[None]:
-    """Clear the ``load_manifest`` LRU cache so tests don't leak state."""
-    load_manifest.cache_clear()
-    yield
-    load_manifest.cache_clear()
-
-
-@pytest.fixture(autouse=True)
-def _clear_global_hydra() -> Iterator[None]:
-    """Ensure Hydra's global state is pristine before and after each test."""
-    if GlobalHydra.instance().is_initialized():
-        GlobalHydra.instance().clear()
-    yield
-    if GlobalHydra.instance().is_initialized():
-        GlobalHydra.instance().clear()
+def _clear_global_hydra(clear_global_hydra):
+    """Inherit the shared Hydra reset fixture from conftest."""
 
 
 def _searchpath_override() -> str:

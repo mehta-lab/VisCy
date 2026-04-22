@@ -232,22 +232,6 @@ class TestResolverThreading:
         assert ia["target_channel"] == "Structure"
 
 
-@pytest.fixture
-def _clear_hydra():
-    """Reset Hydra's GlobalHydra singleton around each test.
-
-    Hydra's @hydra.main decorator registers per-invocation state in
-    a process-wide singleton; without this, consecutive tests that
-    invoke main_cli() see stale state and throw
-    ``ValueError: GlobalHydra is already initialized``.
-    """
-    from hydra.core.global_hydra import GlobalHydra
-
-    GlobalHydra.instance().clear()
-    yield
-    GlobalHydra.instance().clear()
-
-
 class TestHydraResolverErrorCatch:
     """main_cli() catches dataset-resolver errors raised inside Hydra entry
     points and converts them to a clean ``SystemExit(2)`` with a message on
@@ -255,8 +239,6 @@ class TestHydraResolverErrorCatch:
     any future refactor that accidentally breaks the catch (e.g. removes
     ``HYDRA_FULL_ERROR=1`` or the try/except) gets caught.
     """
-
-    _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
 
     @staticmethod
     def _base_overrides(tmp_path: Path) -> list[str]:
@@ -271,7 +253,7 @@ class TestHydraResolverErrorCatch:
             "hydra.output_subdir=null",
         ]
 
-    def test_evaluate_no_manifest_roots_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+    def test_evaluate_no_manifest_roots_exits_cleanly(self, monkeypatch, capsys, tmp_path, clear_global_hydra):
         """``dynacell evaluate`` with no roots configured ⇒ exit 2, clean stderr."""
         monkeypatch.delenv("DYNACELL_MANIFEST_ROOTS", raising=False)
         # Stub entry-point-registered roots so this test is independent
@@ -289,9 +271,8 @@ class TestHydraResolverErrorCatch:
         assert "DYNACELL_MANIFEST_ROOTS" in captured.err
         assert "Traceback" not in captured.err
 
-    def test_evaluate_manifest_not_found_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+    def test_evaluate_manifest_not_found_exits_cleanly(self, monkeypatch, capsys, tmp_path, clear_global_hydra):
         """Unknown ``dataset_ref.dataset`` slug ⇒ exit 2, stderr lists searched paths."""
-        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(self._FIXTURE_ROOT))
         monkeypatch.setattr(
             "sys.argv",
             [
@@ -310,9 +291,8 @@ class TestHydraResolverErrorCatch:
         assert "nonexistent/manifest.yaml" in captured.err
         assert "Traceback" not in captured.err
 
-    def test_evaluate_target_not_found_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+    def test_evaluate_target_not_found_exits_cleanly(self, monkeypatch, capsys, tmp_path, clear_global_hydra):
         """Unknown ``dataset_ref.target`` slug ⇒ exit 2, stderr lists available targets."""
-        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(self._FIXTURE_ROOT))
         monkeypatch.setattr(
             "sys.argv",
             [
@@ -330,7 +310,7 @@ class TestHydraResolverErrorCatch:
         assert "Available targets:" in captured.err
         assert "Traceback" not in captured.err
 
-    def test_precompute_gt_no_manifest_roots_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+    def test_precompute_gt_no_manifest_roots_exits_cleanly(self, monkeypatch, capsys, tmp_path, clear_global_hydra):
         """Symmetry check: same catch fires on ``dynacell precompute-gt``."""
         monkeypatch.delenv("DYNACELL_MANIFEST_ROOTS", raising=False)
         monkeypatch.setattr("dynacell.data.resolver._entry_point_roots", lambda: [])

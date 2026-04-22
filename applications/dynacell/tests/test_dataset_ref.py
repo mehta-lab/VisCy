@@ -18,8 +18,6 @@ from dynacell.data.resolver import (
     resolve_dataset_ref,
 )
 
-_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "manifests"
-
 
 def _make_manifest_dict(name: str = "toy", target: str = "sec61b") -> dict:
     """Build a minimal valid manifest dict for on-disk tests."""
@@ -55,9 +53,8 @@ def _write_manifest(root: Path, dataset: str, content: dict) -> Path:
     return path
 
 
-def test_resolve_happy_path_against_fixture(monkeypatch):
+def test_resolve_happy_path_against_fixture():
     """Happy path: fixture manifest resolves to real zarr paths."""
-    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(_FIXTURE_ROOT))
     resolved = resolve_dataset_ref(DatasetRef(dataset="aics-hipsc", target="sec61b"))
     assert resolved.source_channel == "Phase3D"
     assert resolved.target_channel == "Structure"
@@ -81,7 +78,6 @@ _FIXTURE_TARGET_EXPECTATIONS = [
     _FIXTURE_TARGET_EXPECTATIONS,
 )
 def test_resolve_each_fixture_target(
-    monkeypatch,
     target: str,
     test_store: str,
     seg_store: str,
@@ -89,7 +85,6 @@ def test_resolve_each_fixture_target(
     target_channel: str,
 ):
     """All four fixture targets resolve to distinct test store / cache / channel tuples."""
-    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(_FIXTURE_ROOT))
     resolved = resolve_dataset_ref(DatasetRef(dataset="aics-hipsc", target=target))
     assert str(resolved.data_path_test).endswith(f"test_cropped/{test_store}")
     assert str(resolved.cell_segmentation_path).endswith(seg_store)

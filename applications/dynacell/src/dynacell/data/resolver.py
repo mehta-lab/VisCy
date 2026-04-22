@@ -60,6 +60,26 @@ class ResolvedDataset(BaseModel):
 _ENV_VAR = "DYNACELL_MANIFEST_ROOTS"
 _ENTRY_POINT_GROUP = "dynacell.manifest_roots"
 
+REQUIRED_REF_KEYS: tuple[str, ...] = ("dataset", "target")
+
+
+def dataset_ref_from_dict(ref_dict: object) -> DatasetRef | None:
+    """Validate a ``benchmark.dataset_ref`` dict, returning ``None`` for partial refs.
+
+    Shared between the Lightning-side compose hook and the Hydra-side
+    eval hook so the "full ref vs partial ref vs no ref" policy stays
+    identical across surfaces. A missing dict, non-dict value, or
+    partial dict (either ``dataset`` or ``target`` missing) is treated
+    as a no-op signal (returns ``None``). A dict with both keys present
+    is validated via Pydantic — malformed values surface as the usual
+    :class:`pydantic.ValidationError`.
+    """
+    if not isinstance(ref_dict, dict):
+        return None
+    if not all(k in ref_dict for k in REQUIRED_REF_KEYS):
+        return None
+    return DatasetRef.model_validate(ref_dict)
+
 
 def _entry_point_roots() -> list[Path]:
     """Resolve entry-point-registered manifest roots to package resource dirs."""

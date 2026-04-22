@@ -1,7 +1,5 @@
 # @package _global_
 # Target group: nuclei channel of the multi-marker cell.zarr, iPSC dataset v4 test split.
-# Manifest (benchmark.dataset_ref) owns io.gt_path, io.cell_segmentation_path,
-# io.gt_channel_name, io.gt_cache_dir, io.pred_channel_name (derived).
 target_name: nucleus
 benchmark:
   dataset_ref:

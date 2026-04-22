@@ -22,8 +22,8 @@ io:
   gt_path: ???
   cell_segmentation_path: null  # required iff compute_feature_metrics=true
   gt_cache_dir: null  # required for precompute-gt and require_complete_cache=true
-  pred_channel_name: ???  # derived from target_channel; spliced by _ref_hook.py
-  gt_channel_name: ???    # target-specific (e.g. Structure / Membrane / Nuclei); spliced by _ref_hook.py
+  pred_channel_name: ???  # e.g. Structure_prediction
+  gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
   require_complete_cache: false  # if true, eval raises on any cache miss instead of filling
 
 pixel_metrics:

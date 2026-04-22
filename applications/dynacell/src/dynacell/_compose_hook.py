@@ -17,9 +17,12 @@ from __future__ import annotations
 import copy
 import sys
 
-from dynacell.data import DatasetRef, ResolvedDataset, resolve_dataset_ref
-
-_REQUIRED_REF_KEYS = ("dataset", "target")
+from dynacell.data import (
+    DatasetRef,
+    ResolvedDataset,
+    dataset_ref_from_dict,
+    resolve_dataset_ref,
+)
 
 
 def _infer_mode(composed: dict) -> str:
@@ -73,11 +76,8 @@ def _dynacell_ref_resolver(composed: dict) -> dict:
     both ``dataset`` and ``target`` keys are present under
     ``benchmark.dataset_ref``.
     """
-    ref_dict = composed.get("benchmark", {}).get("dataset_ref")
-    if not isinstance(ref_dict, dict):
+    ref = dataset_ref_from_dict(composed.get("benchmark", {}).get("dataset_ref"))
+    if ref is None:
         return composed
-    if not all(k in ref_dict for k in _REQUIRED_REF_KEYS):
-        return composed
-    ref = DatasetRef.model_validate(ref_dict)
     resolved = resolve_dataset_ref(ref)
     return _splice_resolved(composed, resolved, _infer_mode(composed), ref)
