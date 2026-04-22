@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from dynacell.__main__ import (
     _HYDRA_COMMANDS,
     _inject_external_configs,
@@ -228,3 +230,131 @@ class TestResolverThreading:
         assert ia["data_path"].endswith("train/SEC61B.zarr")
         assert ia["source_channel"] == "Phase3D"
         assert ia["target_channel"] == "Structure"
+
+
+@pytest.fixture
+def _clear_hydra():
+    """Reset Hydra's GlobalHydra singleton around each test.
+
+    Hydra's @hydra.main decorator registers per-invocation state in
+    a process-wide singleton; without this, consecutive tests that
+    invoke main_cli() see stale state and throw
+    ``ValueError: GlobalHydra is already initialized``.
+    """
+    from hydra.core.global_hydra import GlobalHydra
+
+    GlobalHydra.instance().clear()
+    yield
+    GlobalHydra.instance().clear()
+
+
+class TestHydraResolverErrorCatch:
+    """main_cli() catches dataset-resolver errors raised inside Hydra entry
+    points and converts them to a clean ``SystemExit(2)`` with a message on
+    stderr (no traceback). These tests drive the Hydra branch end-to-end so
+    any future refactor that accidentally breaks the catch (e.g. removes
+    ``HYDRA_FULL_ERROR=1`` or the try/except) gets caught.
+    """
+
+    _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
+
+    @staticmethod
+    def _base_overrides(tmp_path: Path) -> list[str]:
+        """Minimal overrides so Hydra can compose ``eval.yaml`` to a leaf where
+        the ``apply_dataset_ref`` hook fires."""
+        return [
+            "target=er_sec61b",
+            "predict_set=ipsc_confocal",
+            "io.pred_path=/tmp/fake",
+            f"save.save_dir={tmp_path}",
+            "hydra.run.dir=.",
+            "hydra.output_subdir=null",
+        ]
+
+    def test_evaluate_no_manifest_roots_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+        """``dynacell evaluate`` with no roots configured ⇒ exit 2, clean stderr."""
+        monkeypatch.delenv("DYNACELL_MANIFEST_ROOTS", raising=False)
+        # Stub entry-point-registered roots so this test is independent
+        # of whichever providers happen to be installed in the dev env.
+        monkeypatch.setattr("dynacell.data.resolver._entry_point_roots", lambda: [])
+        monkeypatch.setattr(
+            "sys.argv",
+            ["dynacell", "evaluate", *self._base_overrides(tmp_path)],
+        )
+        with pytest.raises(SystemExit) as exc:
+            main_cli()
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "No dynacell manifest roots configured" in captured.err
+        assert "DYNACELL_MANIFEST_ROOTS" in captured.err
+        assert "Traceback" not in captured.err
+
+    def test_evaluate_manifest_not_found_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+        """Unknown ``dataset_ref.dataset`` slug ⇒ exit 2, stderr lists searched paths."""
+        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(self._FIXTURE_ROOT))
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "dynacell",
+                "evaluate",
+                *self._base_overrides(tmp_path),
+                "benchmark.dataset_ref.dataset=nonexistent",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            main_cli()
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "dataset 'nonexistent' not found" in captured.err
+        assert "Searched:" in captured.err
+        assert "nonexistent/manifest.yaml" in captured.err
+        assert "Traceback" not in captured.err
+
+    def test_evaluate_target_not_found_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+        """Unknown ``dataset_ref.target`` slug ⇒ exit 2, stderr lists available targets."""
+        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(self._FIXTURE_ROOT))
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "dynacell",
+                "evaluate",
+                *self._base_overrides(tmp_path),
+                "benchmark.dataset_ref.target=bogus_target",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            main_cli()
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "target 'bogus_target' not found in dataset 'aics-hipsc'" in captured.err
+        assert "Available targets:" in captured.err
+        assert "Traceback" not in captured.err
+
+    def test_precompute_gt_no_manifest_roots_exits_cleanly(self, monkeypatch, capsys, tmp_path, _clear_hydra):
+        """Symmetry check: same catch fires on ``dynacell precompute-gt``."""
+        monkeypatch.delenv("DYNACELL_MANIFEST_ROOTS", raising=False)
+        monkeypatch.setattr("dynacell.data.resolver._entry_point_roots", lambda: [])
+        # precompute-gt requires gt_cache_dir instead of save_dir; the
+        # resolver error fires before either is validated, but Hydra still
+        # demands required fields be present for struct-mode composition.
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "dynacell",
+                "precompute-gt",
+                "target=er_sec61b",
+                "predict_set=ipsc_confocal",
+                "io.pred_path=/tmp/fake",
+                f"save.save_dir={tmp_path}",
+                f"io.gt_cache_dir={tmp_path}/cache",
+                "hydra.run.dir=.",
+                "hydra.output_subdir=null",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            main_cli()
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "No dynacell manifest roots configured" in captured.err
+        assert "DYNACELL_MANIFEST_ROOTS" in captured.err
+        assert "Traceback" not in captured.err

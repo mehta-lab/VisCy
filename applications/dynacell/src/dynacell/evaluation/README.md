@@ -43,11 +43,18 @@ exposes through two injected `hydra.searchpath` roots. See the table below.
 
 | Group | Options | What it sets | Source |
 |---|---|---|---|
-| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`, `io.pred_channel_name`. | `configs/benchmarks/virtual_staining/_internal/shared/eval/target/` |
-| `predict_set` | `ipsc_confocal` | `pixel_metrics.spacing`. | in-package (`_configs/predict_set/`) |
+| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `benchmark.dataset_ref.target`. | `configs/benchmarks/virtual_staining/_internal/shared/eval/target/` |
+| `predict_set` | `ipsc_confocal` | `benchmark.dataset_ref.dataset`. | in-package (`_configs/predict_set/`) |
 | `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package (`_configs/feature_extractor/dinov3/`) |
 | `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | `configs/benchmarks/virtual_staining/_internal/shared/eval/feature_extractor/dynaclr/` |
 | `leaf` | `<org>/<model>/<train_set>/eval__<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/_internal/leaf/` (symlink tree) |
+
+`io.*` fields (`gt_path`, `cell_segmentation_path`, `gt_channel_name`,
+`pred_channel_name`, `gt_cache_dir`) and `pixel_metrics.spacing` are now
+owned by the dataset manifest (`dynacell/data/manifests.py`) and
+spliced into the composed config by a post-compose hook in
+`_ref_hook.py`. `pred_channel_name` is derived as
+`{target_channel}_prediction`.
 
 - **In-package** groups (`predict_set`, `feature_extractor/dinov3`,
   `spectral_pcc/*`) ship in the wheel: schema and path-free reference
@@ -182,6 +189,11 @@ io:
   pred_channel_name: MyPredictionChannel
 ```
 
+Wheel-only users: either author a dynacell manifest YAML and set
+`DYNACELL_MANIFEST_ROOTS` (so `benchmark.dataset_ref` resolves through
+the hook in `_ref_hook.py`), or set `io.*` fields directly on the CLI
+as in the minimal example above.
+
 Run with:
 ```bash
 dynacell evaluate --config-dir /absolute/path/to/my_configs \
@@ -275,14 +287,27 @@ The DynaCLR checkpoint hash (`ckpt_sha256_12`) is memoized to a
 runs as long as the sidecar's mtime is ≥ the checkpoint's. Touch or
 replace the checkpoint and the hash recomputes automatically.
 
+### Shared `gt_cache_dir` race
+
+Resolving `io.gt_cache_dir` from the manifest means the default workflow writes to a shared location like `/hpc/projects/.../eval_cache/SEC61B`. `flush_manifest` and the per-artifact writers in `pipeline_cache.py` are not lock-protected, so two concurrent `dynacell precompute-gt` runs on the same target will race on the manifest.
+
+Workarounds:
+- Serialize your precompute runs manually per target (the current paper workflow).
+- Override `io.gt_cache_dir=/scratch/me/cache/X` at the CLI to write to a private directory. The hook's strict collision check accepts this override as long as no conflicting value from the manifest is in play.
+
+Adding an `flock` on the manifest is a follow-up, not blocking for the paper workflow.
+
 ### Priming the cache
 
 All four cache families (`masks`, `cp`, `dinov3`, `dynaclr`) build by
 default, and `feature_extractor/dinov3=lvd1689m` and
 `feature_extractor/dynaclr=default` are auto-selected via
-`eval.yaml`'s defaults list on a repo checkout. `io.gt_cache_dir` lives
-in the `target` group too. So a full prime needs only the target and
-predict-set selectors:
+`eval.yaml`'s defaults list on a repo checkout. `io.gt_cache_dir` now
+comes from the manifest via `benchmark.dataset_ref` — both the
+`target` group (contributing `dataset_ref.target`) and the
+`predict_set` group (contributing `dataset_ref.dataset`) are needed
+for the hook to resolve the manifest entry. So a full prime still
+needs only the target and predict-set selectors:
 
 ```bash
 uv run dynacell precompute-gt target=er_sec61b predict_set=ipsc_confocal

@@ -1,9 +1,8 @@
 # @package _global_
 # Target group: nuclei channel of the multi-marker cell.zarr, iPSC dataset v4 test split.
+# Manifest (benchmark.dataset_ref) owns io.gt_path, io.cell_segmentation_path,
+# io.gt_channel_name, io.gt_cache_dir, io.pred_channel_name (derived).
 target_name: nucleus
-io:
-  gt_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
-  cell_segmentation_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
-  gt_channel_name: Nuclei
-  pred_channel_name: Nuclei_prediction
-  gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/nucleus
+benchmark:
+  dataset_ref:
+    target: nucleus

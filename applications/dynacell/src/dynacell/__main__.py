@@ -117,7 +117,23 @@ def main_cli():
         except ModuleNotFoundError as e:
             print(f"Missing dependencies for 'dynacell {command}': {e}\nInstall with: pip install 'dynacell[{extra}]'")
             raise SystemExit(1) from e
-        getattr(module, func_name)()
+        from dynacell.data.resolver import (
+            ManifestNotFoundError,
+            NoManifestRootsError,
+            TargetNotFoundError,
+        )
+
+        # Hydra's @hydra.main decorator wraps exceptions in a generic
+        # "Error executing job" banner and calls sys.exit(1) unless
+        # HYDRA_FULL_ERROR=1 is set. Force the full-error path so our
+        # dataset-resolver errors propagate here and we can print a
+        # clean message + SystemExit(2) instead of a cryptic banner.
+        os.environ.setdefault("HYDRA_FULL_ERROR", "1")
+        try:
+            getattr(module, func_name)()
+        except (NoManifestRootsError, ManifestNotFoundError, TargetNotFoundError) as e:
+            print(str(e), file=sys.stderr)
+            raise SystemExit(2) from e
     else:
         from dynacell._compose_hook import _dynacell_ref_resolver
         from dynacell.data.resolver import (

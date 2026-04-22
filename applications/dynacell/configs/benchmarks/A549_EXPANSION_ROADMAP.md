@@ -89,36 +89,54 @@ tests parametrize across every model in `TRAIN_LEAVES` /
 `PREDICT_LEAVES` that composes a migrated fragment to guard against
 drift.
 
-### Stage 3 — Extend resolver to Hydra / eval side
+### Stage 3 — Hydra-side hook + migrate all four eval target YAMLs
 
-The spec defers eval-side resolution. This stage closes it:
+Extend `dataset_ref` resolver to the Hydra/eval side. Add post-compose
+hook (`_ref_hook.py`) at `evaluate_model` / `precompute_gt` entry
+points. Migrate all four eval target YAMLs (`er_sec61b`, `mito_tomm20`,
+`nucleus`, `membrane`) + `predict_set/ipsc_confocal.yaml` together so
+`io.*` and `pixel_metrics.spacing` come from the manifest. Add
+`gt_cache_dir` to `StoreLocations`.
 
-- Extend the Pydantic manifest schema (or add a sibling) to cover
-  eval-specific fields: `gt_path`, `cell_segmentation_path`,
-  `gt_cache_dir`, `gt_channel_name`. These are dataset-specific, so the
-  manifest is the right owner.
-- Add a Hydra-side resolver hook. Options:
-  - A custom OmegaConf resolver that reads the manifest at compose
-    time, or
-  - A `dynacell.evaluation` pre-compose step that splices the manifest
-    fields into the composed dict before `pipeline.py` consumes it.
-- Update `pipeline_cache.py` and any callers so manifest access goes
-  through the same registry the train-side resolver uses.
+Deliverables:
 
-This is the architectural precondition for clean a549 eval leaves.
-Scope is contained (eval-side only) but requires Hydra + Pydantic + the
-resolver lib to agree on a single manifest shape.
+- New `applications/dynacell/src/dynacell/evaluation/_ref_hook.py`.
+  The hook fires inside the `evaluate_model()` and `precompute_gt()`
+  entry-point function bodies (not during Hydra compose), reads
+  `composed["benchmark"]["dataset_ref"]`, and splices the manifest
+  fields into the composed config before `pipeline.py` consumes it.
+- `ResolvedDataset` extended with `cell_segmentation_path` and
+  `gt_cache_dir` fields.
+- Four migrated eval target YAMLs (`_internal/shared/eval/target/*.yaml`):
+  each keeps only `target_name` and `benchmark.dataset_ref.target`;
+  `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`,
+  `io.pred_channel_name`, `io.gt_cache_dir` all come from the manifest.
+  `pred_channel_name` is derived in the hook as
+  `f"{target_channel}_prediction"` and is not stored in the manifest.
+- Migrated `_configs/predict_set/ipsc_confocal.yaml`: contributes only
+  `benchmark.dataset_ref.dataset`; `pixel_metrics.spacing` comes from
+  the manifest.
+- `benchmark: null` placeholder added to `_configs/eval.yaml` so the
+  node exists for the hook to populate.
+- Hydra-branch error catch wired into `dynacell/__main__.py` so hook
+  errors surface as user-facing messages.
+- Integration tests extended with Layer 2 entry-point wiring coverage
+  (the hook actually runs through `evaluate_model` / `precompute_gt`,
+  not just called directly).
 
-### Stage 4 — Migrate eval target YAMLs
+The `gt_cache_dir` addition to `StoreLocations` requires a companion
+bump to the canonical `dynacell-paper` manifest — see the planned
+spec at `~/.claude/plans/dynacell-paper-stage3-gt-cache-dir.md` (or a
+companion spec if the path hasn't been published yet). Pydantic's
+default `extra="ignore"` on `StoreLocations` makes the ordering
+constraint an auditing preference, not a schema-parsing requirement —
+older manifests without `gt_cache_dir` still parse.
 
-Strip `io.gt_path`, `io.cell_segmentation_path`, `io.gt_cache_dir`,
-`io.gt_channel_name` out of `_internal/shared/eval/target/*.yaml`.
-Those YAMLs keep only channel-name and organelle identity; paths come
-from the manifest via `benchmark.dataset_ref`.
+### Stage 4 — Merged into Stage 3
 
-Existing eval leaves become thinner (they inherit `dataset_ref` from
-the training cell or declare their own), and the current 8 eval leaves
-continue to compose identically.
+Stage 4 (migrate eval target YAMLs) has been folded into Stage 3 and
+lands in the same PR. See Stage 3 above. Any downstream references to
+"after Stage 4" now mean "after the combined Stage 3".
 
 ### Stage 5 — Add a549 manifest
 
@@ -175,17 +193,17 @@ Sub-scope to decide when we get here (question A from earlier):
 ```
 Stage 1 (resolver core + 1 migration)
   └─> Stage 2 (migrate other train/predict targets)
-  └─> Stage 3 (eval-side resolver)
-          └─> Stage 4 (migrate eval target YAMLs)
-                  └─> Stage 6 (a549 leaf expansion)
-                          ^
-                          │
-                Stage 5 (a549 manifest) ─┘
+  └─> Stage 3 (Hydra-side hook + migrate all four eval target YAMLs)
+          └─> Stage 6 (a549 leaf expansion)
+                  ^
+                  │
+        Stage 5 (a549 manifest) ─┘
 ```
 
-Stages 1 → 2 → 3 → 4 → 6 are strictly sequential on the VisCy side.
-Stage 5 is independent and can proceed in parallel with Stages 1–3, as
-long as it lands before Stage 6.
+Stages 1 → 2 → 3 → 6 are strictly sequential on the VisCy side
+(Stage 4 has been merged into Stage 3). Stage 5 is independent and
+can proceed in parallel with Stages 1–3, as long as it lands before
+Stage 6.
 
 ## Why not expand a549 first
 

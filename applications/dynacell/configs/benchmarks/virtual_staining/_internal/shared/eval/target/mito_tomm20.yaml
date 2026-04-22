@@ -1,9 +1,8 @@
 # @package _global_
 # Target group: mitochondria marked by TOMM20, iPSC dataset v4 test split.
+# Manifest (benchmark.dataset_ref) owns io.gt_path, io.cell_segmentation_path,
+# io.gt_channel_name, io.gt_cache_dir, io.pred_channel_name (derived).
 target_name: mitochondria
-io:
-  gt_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
-  cell_segmentation_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20_segmented_cleaned.zarr
-  gt_channel_name: Structure
-  pred_channel_name: Structure_prediction
-  gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/TOMM20
+benchmark:
+  dataset_ref:
+    target: tomm20

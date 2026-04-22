@@ -9,6 +9,7 @@ from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig
 from tqdm import tqdm
 
+from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.metrics import (
     calculate_microssim,
     compute_pixel_metrics,
@@ -261,6 +262,7 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
+    apply_dataset_ref(config)
     save_dir = Path(config.save.save_dir)
     pixel_metrics_path = save_dir / config.save.pixel_metrics_filename
     mask_metrics_path = save_dir / config.save.mask_metrics_filename

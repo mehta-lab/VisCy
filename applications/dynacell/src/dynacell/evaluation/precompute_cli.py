@@ -19,6 +19,7 @@ from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig
 from tqdm import tqdm
 
+from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
     fov_gt_cp_features,
@@ -125,6 +126,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
 @hydra.main(version_base="1.2", config_path="_configs", config_name="precompute")
 def precompute_gt(config: DictConfig) -> None:
     """Hydra entry point for ``dynacell precompute-gt``."""
+    apply_dataset_ref(config)
     precompute_gt_artifacts(config)
 
 
