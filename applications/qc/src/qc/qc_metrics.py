@@ -84,47 +84,45 @@ def generate_qc_metadata(
     num_workers : int
         Number of workers for data loading.
     """
-    plate = ngff.open_ome_zarr(
+    with ngff.open_ome_zarr(
         zarr_dir,
         mode="r+",
         implementation="tensorstore",
         implementation_config=TensorStoreConfig(data_copy_concurrency=num_workers),
-    )
-    position_map = list(plate.positions())
+    ) as plate:
+        position_map = list(plate.positions())
 
-    for metric in metrics:
-        channel_list = metric.channels()
+        for metric in metrics:
+            channel_list = metric.channels()
 
-        for channel_name in channel_list:
-            channel_index = plate.channel_names.index(channel_name)
-            _logger.info(f"Computing {metric.field_name} for channel '{channel_name}'")
+            for channel_name in channel_list:
+                channel_index = plate.channel_names.index(channel_name)
+                _logger.info(f"Computing {metric.field_name} for channel '{channel_name}'")
 
-            position_results = []
+                position_results = []
 
-            for _, pos in tqdm(position_map, desc="Positions"):
-                result = metric(pos, channel_name, channel_index, num_workers)
-                position_results.append((pos, result))
+                for _, pos in tqdm(position_map, desc="Positions"):
+                    result = metric(pos, channel_name, channel_index, num_workers)
+                    position_results.append((pos, result))
 
-            all_results = [r for _, r in position_results]
-            dataset_stats = metric.aggregate_dataset(all_results)
+                all_results = [r for _, r in position_results]
+                dataset_stats = metric.aggregate_dataset(all_results)
 
-            if dataset_stats:
-                write_meta_field(
-                    position=plate,
-                    metadata={"dataset_statistics": dataset_stats},
-                    field_name=metric.field_name,
-                    subfield_name=channel_name,
-                )
-
-            for pos, result in position_results:
-                metadata = {**result}
                 if dataset_stats:
-                    metadata["dataset_statistics"] = dataset_stats
-                write_meta_field(
-                    position=pos,
-                    metadata=metadata,
-                    field_name=metric.field_name,
-                    subfield_name=channel_name,
-                )
+                    write_meta_field(
+                        position=plate,
+                        metadata={"dataset_statistics": dataset_stats},
+                        field_name=metric.field_name,
+                        subfield_name=channel_name,
+                    )
 
-    plate.close()
+                for pos, result in position_results:
+                    metadata = {**result}
+                    if dataset_stats:
+                        metadata["dataset_statistics"] = dataset_stats
+                    write_meta_field(
+                        position=pos,
+                        metadata=metadata,
+                        field_name=metric.field_name,
+                        subfield_name=channel_name,
+                    )

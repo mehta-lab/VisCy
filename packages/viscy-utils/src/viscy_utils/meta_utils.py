@@ -84,78 +84,76 @@ def generate_normalization_metadata(
         default ``grid_spacing=32`` to capture inter-cell gaps. A median
         filter is applied before thresholding to smooth noise.
     """
-    plate = ngff.open_ome_zarr(
+    with ngff.open_ome_zarr(
         zarr_dir,
         mode="r+",
         implementation="tensorstore",
         implementation_config=TensorStoreConfig(data_copy_concurrency=num_workers),
-    )
-    position_map = list(plate.positions())
+    ) as plate:
+        position_map = list(plate.positions())
 
-    if channel_ids == -1:
-        channel_ids = range(len(plate.channel_names))
-    elif isinstance(channel_ids, int):
-        channel_ids = [channel_ids]
+        if channel_ids == -1:
+            channel_ids = range(len(plate.channel_names))
+        elif isinstance(channel_ids, int):
+            channel_ids = [channel_ids]
 
-    _, first_position = position_map[0]
-    num_timepoints = first_position["0"].shape[0]
-    print(f"Detected {num_timepoints} timepoints in dataset")
+        _, first_position = position_map[0]
+        num_timepoints = first_position["0"].shape[0]
+        print(f"Detected {num_timepoints} timepoints in dataset")
 
-    for i, channel_index in enumerate(channel_ids):
-        print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
+        for i, channel_index in enumerate(channel_ids):
+            print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
-        channel_name = plate.channel_names[channel_index]
-        dataset_sample_values = []
-        position_and_statistics = []
+            channel_name = plate.channel_names[channel_index]
+            dataset_sample_values = []
+            position_and_statistics = []
 
-        for _, pos in tqdm(position_map, desc="Positions"):
-            samples = _grid_sample(pos, grid_spacing, channel_index)
-            dataset_sample_values.append(samples)
-            fov_stats = get_val_stats(samples)
-            if compute_otsu:
-                otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index)
-                smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
-                flat = smoothed.ravel()
-                # Otsu's method is undefined for constant-valued inputs.
-                # Use the constant value itself so generate_fg_masks marks
-                # nothing as foreground (no meaningful structure to supervise).
-                if flat.min() == flat.max():
-                    fov_stats["otsu_threshold"] = float(flat.min())
-                else:
-                    fov_stats["otsu_threshold"] = float(threshold_otsu(flat))
-            fov_statistics = {"fov_statistics": fov_stats}
-            fov_timepoint_statistics = {}
-            for t in range(num_timepoints):
-                fov_timepoint_statistics[str(t)] = get_val_stats(samples[t])
-            fov_statistics["timepoint_statistics"] = fov_timepoint_statistics
-            position_and_statistics.append((pos, fov_statistics))
+            for _, pos in tqdm(position_map, desc="Positions"):
+                samples = _grid_sample(pos, grid_spacing, channel_index)
+                dataset_sample_values.append(samples)
+                fov_stats = get_val_stats(samples)
+                if compute_otsu:
+                    otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index)
+                    smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
+                    flat = smoothed.ravel()
+                    # Otsu's method is undefined for constant-valued inputs.
+                    # Use the constant value itself so generate_fg_masks marks
+                    # nothing as foreground (no meaningful structure to supervise).
+                    if flat.min() == flat.max():
+                        fov_stats["otsu_threshold"] = float(flat.min())
+                    else:
+                        fov_stats["otsu_threshold"] = float(threshold_otsu(flat))
+                fov_statistics = {"fov_statistics": fov_stats}
+                fov_timepoint_statistics = {}
+                for t in range(num_timepoints):
+                    fov_timepoint_statistics[str(t)] = get_val_stats(samples[t])
+                fov_statistics["timepoint_statistics"] = fov_timepoint_statistics
+                position_and_statistics.append((pos, fov_statistics))
 
-        dataset_statistics = {
-            "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
-        }
+            dataset_statistics = {
+                "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
+            }
 
-        print(f"Computing per-timepoint statistics for channel {channel_name}")
-        dataset_timepoint_statistics = {}
-        for t in tqdm(range(num_timepoints), desc="Timepoints"):
-            all_fov_samples_at_t = np.stack([samples[t] for samples in dataset_sample_values])
-            dataset_timepoint_statistics[str(t)] = get_val_stats(all_fov_samples_at_t)
+            print(f"Computing per-timepoint statistics for channel {channel_name}")
+            dataset_timepoint_statistics = {}
+            for t in tqdm(range(num_timepoints), desc="Timepoints"):
+                all_fov_samples_at_t = np.stack([samples[t] for samples in dataset_sample_values])
+                dataset_timepoint_statistics[str(t)] = get_val_stats(all_fov_samples_at_t)
 
-        write_meta_field(
-            position=plate,
-            metadata=dataset_statistics | {"timepoint_statistics": dataset_timepoint_statistics},
-            field_name="normalization",
-            subfield_name=channel_name,
-        )
-
-        for pos, position_statistics in position_and_statistics:
             write_meta_field(
-                position=pos,
-                metadata=dataset_statistics | position_statistics,
+                position=plate,
+                metadata=dataset_statistics | {"timepoint_statistics": dataset_timepoint_statistics},
                 field_name="normalization",
                 subfield_name=channel_name,
             )
 
-    plate.close()
+            for pos, position_statistics in position_and_statistics:
+                write_meta_field(
+                    position=pos,
+                    metadata=dataset_statistics | position_statistics,
+                    field_name="normalization",
+                    subfield_name=channel_name,
+                )
 
 
 def generate_fg_masks(
