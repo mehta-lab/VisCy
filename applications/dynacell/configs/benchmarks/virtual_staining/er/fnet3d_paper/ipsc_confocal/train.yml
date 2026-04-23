@@ -4,6 +4,7 @@
 base:
   - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
   - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
   - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml

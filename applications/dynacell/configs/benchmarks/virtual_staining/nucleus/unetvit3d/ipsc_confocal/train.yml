@@ -2,6 +2,7 @@
 base:
   - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
   - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
   - ../../../_internal/shared/model/model_overlays/unetvit3d_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml

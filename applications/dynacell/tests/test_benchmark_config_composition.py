@@ -171,6 +171,42 @@ def test_fnet3d_paper_leaf_preserves_32true_precision() -> None:
     assert cfg["trainer"]["devices"] == 1
 
 
+# Per-model HCS data hparams that must still compose after splitting
+# model_overlays/<model>_fit.yml into model+trainer + data_overlays/<model>_fit.yml.
+# Guards against silent key drops or moves between the two halves.
+_EXPECTED_DATA_HPARAMS = {
+    "celldiff": {"batch_size": 4, "z_window_size": 13, "yx_patch_size": [512, 512], "num_workers": 4},
+    "unetvit3d": {"batch_size": 4, "z_window_size": 13, "yx_patch_size": [512, 512], "num_workers": 4},
+    "fcmae_vscyto3d_scratch": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 4},
+    "fcmae_vscyto3d_pretrained": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 4},
+    "fnet3d_paper": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
+    "unext2": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 8},
+}
+
+
+@pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
+def test_data_overlay_split_preserves_hparams(organelle: str, model: str) -> None:
+    """Every train leaf still composes its model's expected data hparams.
+
+    After moving ``data.init_args.*`` out of ``model_overlays/<model>_fit.yml``
+    into ``data_overlays/<model>_fit.yml``, each single-store train leaf
+    must compose to the same (batch_size, z_window_size, yx_patch_size,
+    num_workers) as before — otherwise the split silently dropped or
+    moved a field.
+    """
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml"
+    cfg = load_composed_config(leaf)
+    ia = cfg["data"]["init_args"]
+    expected = _EXPECTED_DATA_HPARAMS[model]
+    for key, value in expected.items():
+        assert ia[key] == value, f"{organelle}/{model}: data.init_args.{key} = {ia[key]!r}, expected {value!r}"
+    # GPU augmentations must land on every model (the list-replacement path
+    # for unext2 and the straight copy for the others). fnet3d_paper has
+    # BatchedRandFlipd pair (no val_gpu_augmentations); the others have a
+    # longer affine+intensity stack.
+    assert ia["gpu_augmentations"], f"{organelle}/{model}: gpu_augmentations missing after split"
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 
