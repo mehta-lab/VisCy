@@ -599,8 +599,27 @@ class MultiExperimentDataModule(LightningDataModule):
     # Dataloaders
     # ------------------------------------------------------------------
 
+    def _ddp_topology(self) -> tuple[int, int]:
+        """Return ``(num_replicas, rank)`` for the current trainer.
+
+        Returns ``(1, 0)`` when no trainer is attached (e.g. bare
+        dataloader construction in tests). This is safe because
+        single-process runs still produce the full batch sequence.
+        """
+        trainer = getattr(self, "trainer", None)
+        if trainer is None:
+            return 1, 0
+        return trainer.world_size, trainer.global_rank
+
     def train_dataloader(self) -> ThreadDataLoader:
         """Return training data loader with FlexibleBatchSampler."""
+        # Why: Lightning's auto-wrap hook (which would pass world_size/rank)
+        # only targets ``sampler``, not ``batch_sampler``. With
+        # ``use_distributed_sampler: false`` and a batch sampler, we must
+        # pass the DDP topology ourselves. Without this, every rank
+        # iterates the full sequence and yields identical batches, turning
+        # 4-GPU DDP into 4× redundant compute on the same data.
+        num_replicas, rank = self._ddp_topology()
         sampler = FlexibleBatchSampler(
             valid_anchors=self.train_dataset.index.valid_anchors,
             batch_size=self.batch_size,
@@ -611,6 +630,8 @@ class MultiExperimentDataModule(LightningDataModule):
             temporal_enrichment=self.temporal_enrichment,
             temporal_window_hours=self.temporal_window_hours,
             temporal_global_fraction=self.temporal_global_fraction,
+            num_replicas=num_replicas,
+            rank=rank,
             seed=self.seed,
         )
         return ThreadDataLoader(
@@ -643,6 +664,7 @@ class MultiExperimentDataModule(LightningDataModule):
         """
         if self.val_dataset is None:
             return None
+        num_replicas, rank = self._ddp_topology()
         sampler = FlexibleBatchSampler(
             valid_anchors=self.val_dataset.index.valid_anchors,
             batch_size=self.batch_size,
@@ -651,6 +673,8 @@ class MultiExperimentDataModule(LightningDataModule):
             group_weights=self.group_weights,
             stratify_by=self.stratify_by,
             temporal_enrichment=False,
+            num_replicas=num_replicas,
+            rank=rank,
             seed=self.seed,
         )
         return ThreadDataLoader(
