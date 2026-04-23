@@ -282,8 +282,31 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         ``limit_train_batches`` interacts with this: Lightning stops
         pulling from the generator after its cap, so we never pay for
         the unused suffix of the epoch.
+
+        The epoch counter auto-advances at the start of each iteration
+        so that the next ``__iter__`` call reseeds the RNG with a fresh
+        ``seed + epoch`` and yields a different batch sequence. Advancing
+        at the start (not the end) is robust against early generator
+        termination from ``limit_train_batches``: Lightning stops pulling
+        after its cap and garbage-collects the generator, which would
+        skip any end-of-iter bookkeeping.
+
+        PyTorch Lightning does not call ``set_epoch`` on custom
+        ``batch_sampler`` instances (``use_distributed_sampler: false``
+        with a batch sampler means Lightning's auto-wrap skips us), so
+        we self-advance. ``set_epoch`` still works if a caller wants
+        deterministic resume from a specific epoch — call it before the
+        iteration and the advance will take the resumed epoch as its
+        starting point.
         """
-        rng = np.random.default_rng(self.seed + self.epoch)
+        # Why: Lightning does not call ``set_epoch`` on ``batch_sampler``
+        # instances. Without self-advancement every epoch replays the
+        # same sequence, freezing the dataset at 0.5% coverage. Advance
+        # BEFORE iteration so the seed changes even when Lightning cuts
+        # the generator short via ``limit_train_batches``.
+        seed_offset = self.epoch
+        self.epoch += 1
+        rng = np.random.default_rng(self.seed + seed_offset)
         total_batches = len(self.valid_anchors) // self.batch_size
         rank = self.rank
         replicas = self.num_replicas
