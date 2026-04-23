@@ -18,7 +18,7 @@ model:
     schedule: WarmupCosine
 
 trainer:
-  precision: 16-mixed
+  precision: bf16-mixed
   max_epochs: 200
 
 data:
