@@ -419,6 +419,70 @@ class TestChannelSelection:
             )
 
 
+class TestMixedChannelCountErrors:
+    """``channels_per_sample=None`` on a parquet whose experiments have different
+    channel counts must raise a clear error instead of a cryptic torch.stack
+    failure deep in a dataloader thread."""
+
+    def test_raises_when_experiments_have_different_channel_counts(self, tmp_path, _make_tracks_csv, hcs_dims):
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.experiment import ExperimentRegistry
+        from dynaclr.data.index import MultiExperimentIndex
+        from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
+
+        # exp_a: 2 channels; exp_b: 1 channel.
+        zarr_a, tracks_a = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_a",
+            channel_names=["Phase", "GFP"],
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        zarr_b, tracks_b = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_b",
+            channel_names=["Phase"],
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        registry = ExperimentRegistry(
+            collection=Collection(
+                name="test",
+                experiments=[
+                    ExperimentEntry(
+                        name="exp_a",
+                        data_path=str(zarr_a),
+                        tracks_path=str(tracks_a),
+                        channels=[ChannelEntry(name="Phase", marker="Phase"), ChannelEntry(name="GFP", marker="GFP")],
+                        channel_names=["Phase", "GFP"],
+                        perturbation_wells={"c": ["A/1"]},
+                        interval_minutes=30.0,
+                    ),
+                    ExperimentEntry(
+                        name="exp_b",
+                        data_path=str(zarr_b),
+                        tracks_path=str(tracks_b),
+                        channels=[ChannelEntry(name="Phase", marker="Phase")],
+                        channel_names=["Phase"],
+                        perturbation_wells={"c": ["A/1"]},
+                        interval_minutes=30.0,
+                    ),
+                ],
+            ),
+            z_window=1,
+        )
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH, tau_range_hours=(0.5, 2.0))
+        ds = MultiExperimentTripletDataset(index=index, fit=True, channels_per_sample=None)
+
+        va = index.valid_anchors
+        idx_a = int(va.index[va["experiment"] == "exp_a"][0])
+        idx_b = int(va.index[va["experiment"] == "exp_b"][0])
+        with pytest.raises(RuntimeError, match="different channel counts"):
+            ds.__getitems__([idx_a, idx_b])
+
+
 class TestDatasetLength:
     """Test dataset length matches valid_anchors."""
 
