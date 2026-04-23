@@ -146,6 +146,25 @@ class BatchedConcatDataset(ConcatDataset):
             sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return dataset_idx, sample_idx
 
+    @staticmethod
+    def _batched_get(dataset: Dataset, indices: list[int]) -> dict[str, torch.Tensor]:
+        """Return a batched sample dict from *dataset* for the given indices.
+
+        Fast path: delegate to ``dataset.__getitems__`` when implemented
+        (e.g. :class:`viscy_data.triplet.TripletDataset`, which amortizes
+        zarr/tensorstore I/O across a batch).
+
+        Fallback: call ``__getitem__`` per index and collate with
+        :func:`_collate_samples`. This lets datasets with single-sample
+        semantics (e.g. :class:`viscy_data.sliding_window.SlidingWindowDataset`,
+        which runs per-sample retry logic for nonzero-fraction filtering)
+        participate in :class:`BatchedConcatDataModule` without having to
+        duplicate their read path as a batched method.
+        """
+        if hasattr(dataset, "__getitems__"):
+            return dataset.__getitems__(indices)
+        return _collate_samples([dataset[i] for i in indices])
+
     def __getitems__(self, indices: list[int]) -> list[dict[str, torch.Tensor]]:
         """Return micro-batches grouped by constituent dataset."""
         grouped_indices = defaultdict(list)
@@ -156,7 +175,7 @@ class BatchedConcatDataset(ConcatDataset):
 
         micro_batches = []
         for dataset_idx, sample_indices in grouped_indices.items():
-            micro_batch = self.datasets[dataset_idx].__getitems__(sample_indices)
+            micro_batch = self._batched_get(self.datasets[dataset_idx], sample_indices)
             micro_batch["_dataset_idx"] = dataset_idx
             micro_batches.append(micro_batch)
 

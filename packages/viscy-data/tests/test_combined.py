@@ -3,7 +3,13 @@
 import pytest
 from iohub import open_ome_zarr
 
-from viscy_data import CombinedDataModule, CombineMode, ConcatDataModule, HCSDataModule
+from viscy_data import (
+    BatchedConcatDataModule,
+    CombinedDataModule,
+    CombineMode,
+    ConcatDataModule,
+    HCSDataModule,
+)
 
 
 def _make_dm(data_path, batch_size=4, num_workers=0):
@@ -99,3 +105,28 @@ def test_concat_datamodule_only_fit_supported(preprocessed_hcs_dataset):
     concat = ConcatDataModule(data_modules=[dm1, dm2])
     with pytest.raises(NotImplementedError):
         concat.setup(stage="predict")
+
+
+def test_batched_concat_datamodule_with_hcs_children(preprocessed_hcs_dataset):
+    """BatchedConcatDataModule iterates HCS children via the __getitem__ fallback.
+
+    SlidingWindowDataset only defines ``__getitem__`` (per-sample retry
+    logic). Prior to the shim in ``BatchedConcatDataset._batched_get``,
+    this combination raised ``AttributeError: __getitems__`` at first
+    iteration.
+    """
+    dm1 = _make_dm(preprocessed_hcs_dataset)
+    dm2 = _make_dm(preprocessed_hcs_dataset)
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+    batched.setup(stage="fit")
+
+    loader = batched.train_dataloader()
+    batch = next(iter(loader))
+
+    assert isinstance(batch, list)
+    assert len(batch) >= 1
+    for micro_batch in batch:
+        assert isinstance(micro_batch, dict)
+        assert "_dataset_idx" in micro_batch
+        assert "source" in micro_batch
+        assert micro_batch["source"].ndim == 5  # (B, C, Z, Y, X)
