@@ -9,7 +9,21 @@ from viscy_data import (
     CombineMode,
     ConcatDataModule,
     HCSDataModule,
+    ShardedDistributedSampler,
 )
+
+
+def _fake_ddp(monkeypatch, world_size: int = 2, rank: int = 0) -> None:
+    """Monkeypatch ``torch.distributed`` entry points to simulate DDP.
+
+    ``DistributedSampler.__init__`` reads ``is_available``,
+    ``is_initialized``, ``get_world_size``, and ``get_rank``. Faking these
+    is enough to construct the sampler without a real process group.
+    """
+    monkeypatch.setattr("torch.distributed.is_available", lambda: True)
+    monkeypatch.setattr("torch.distributed.is_initialized", lambda: True)
+    monkeypatch.setattr("torch.distributed.get_world_size", lambda: world_size)
+    monkeypatch.setattr("torch.distributed.get_rank", lambda: rank)
 
 
 def _make_dm(data_path, batch_size=4, num_workers=0):
@@ -132,3 +146,60 @@ def test_batched_concat_datamodule_with_hcs_children(preprocessed_hcs_dataset):
         assert micro_batch["source"].ndim == 5  # (B, C, Z, Y, X)
     # Grouping must be lossless: total batch dim equals _make_dm batch_size=4.
     assert sum(mb["source"].shape[0] for mb in batch) == 4
+
+
+def test_batched_concat_ddp_attaches_sharded_sampler(preprocessed_hcs_dataset, monkeypatch):
+    """Under DDP, train/val dataloaders attach ShardedDistributedSampler."""
+    dm1 = _make_dm(preprocessed_hcs_dataset)
+    dm2 = _make_dm(preprocessed_hcs_dataset)
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+    batched.setup(stage="fit")
+
+    _fake_ddp(monkeypatch, world_size=2, rank=0)
+
+    train_loader = batched.train_dataloader()
+    assert isinstance(train_loader.sampler, ShardedDistributedSampler)
+    assert train_loader.sampler.shuffle is True
+
+    val_loader = batched.val_dataloader()
+    assert isinstance(val_loader.sampler, ShardedDistributedSampler)
+    assert val_loader.sampler.shuffle is False
+
+
+def test_batched_concat_ddp_batch_contract_preserved(preprocessed_hcs_dataset, monkeypatch):
+    """Under DDP, train and val loaders still yield the micro-batch contract."""
+    dm1 = _make_dm(preprocessed_hcs_dataset)
+    dm2 = _make_dm(preprocessed_hcs_dataset)
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+    batched.setup(stage="fit")
+
+    _fake_ddp(monkeypatch, world_size=2, rank=0)
+
+    for loader in (batched.train_dataloader(), batched.val_dataloader()):
+        batch = next(iter(loader))
+        assert isinstance(batch, list)
+        assert len(batch) >= 1
+        for micro_batch in batch:
+            assert isinstance(micro_batch, dict)
+            assert "_dataset_idx" in micro_batch
+            assert "source" in micro_batch
+            assert micro_batch["source"].ndim == 5
+        assert sum(mb["source"].shape[0] for mb in batch) == 4  # _make_dm batch_size=4
+
+
+def test_batched_concat_ddp_rank_disjointness(preprocessed_hcs_dataset, monkeypatch):
+    """Rank 0 and rank 1 train samplers yield disjoint index sets."""
+    dm1 = _make_dm(preprocessed_hcs_dataset)
+    dm2 = _make_dm(preprocessed_hcs_dataset)
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+    batched.setup(stage="fit")
+
+    _fake_ddp(monkeypatch, world_size=2, rank=0)
+    rank0_indices = set(iter(batched.train_dataloader().sampler))
+
+    _fake_ddp(monkeypatch, world_size=2, rank=1)
+    rank1_indices = set(iter(batched.train_dataloader().sampler))
+
+    assert rank0_indices.isdisjoint(rank1_indices)
+    # Together ranks cover the full concatenated dataset (no gaps).
+    assert rank0_indices | rank1_indices == set(range(len(batched.train_dataset)))

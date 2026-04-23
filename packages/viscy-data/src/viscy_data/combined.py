@@ -265,29 +265,42 @@ class ConcatDataModule(LightningDataModule):
 
 
 class BatchedConcatDataModule(ConcatDataModule):
-    """Concatenated data module with batched micro-batch GPU transforms."""
+    """Concatenated data module with batched micro-batch GPU transforms.
+
+    Under DDP, attaches ``ShardedDistributedSampler`` so each rank
+    iterates a disjoint shard while preserving the existing
+    micro-batch-to-single-batch contract.
+    """
 
     _ConcatDataset = BatchedConcatDataset
 
+    def _maybe_sampler(self, dataset: Dataset, shuffle: bool) -> ShardedDistributedSampler | None:
+        """Return a distributed sampler if DDP is initialized, else None."""
+        return ShardedDistributedSampler(dataset, shuffle=shuffle) if torch.distributed.is_initialized() else None
+
     def train_dataloader(self):
-        """Return batched concatenated training data loader."""
+        """Return batched concatenated training data loader with optional DDP sampling."""
+        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False if sampler else True,
+            sampler=sampler,
             drop_last=True,
             collate_fn=lambda x: x,
             **self._dataloader_kwargs(),
         )
 
     def val_dataloader(self):
-        """Return batched concatenated validation data loader."""
+        """Return batched concatenated validation data loader with optional DDP sampling."""
+        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False,
+            sampler=sampler,
             drop_last=False,
             collate_fn=lambda x: x,
             **self._dataloader_kwargs(),
