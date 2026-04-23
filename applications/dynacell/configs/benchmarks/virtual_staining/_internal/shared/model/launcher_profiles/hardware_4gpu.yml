@@ -1,8 +1,11 @@
 # Hardware profile: 4 GPU DDP, any GPU model (no constraint).
 #
-# Matches UNeXt2 VSCyto3D paper-baseline slurm directives: 4 GPUs, DDP
-# strategy, 512G host mem (dataloader workers × ranks × mmap_preload
-# buffer need headroom), 4-day wall-time per restart.
+# 4 GPUs, DDP strategy, 1024G host mem, 4-day wall-time per restart.
+# Bumped from 512G after OOM on jobs 31287777 (ER scratch, died at 26h)
+# and 31297033 (mito scratch, died at 23h): ~80 GiB /dev/shm mmap_preload
+# + 4 × 58 GiB rank RSS + persistent-worker headroom was tight against
+# 512G and tipped over on validation-time transients. 1024G on a 2 TB
+# H200 node gives ~700 GiB of headroom for the same workload.
 launcher:
   sbatch:
     partition: gpu
@@ -10,6 +13,6 @@ launcher:
     ntasks_per_node: 4
     cpus_per_task: 8
     gpus: 4
-    mem: "512G"
+    mem: "1024G"
     constraint: null
     time: "4-00:00:00"
