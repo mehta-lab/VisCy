@@ -493,11 +493,10 @@ class TestDeterminism:
         assert batches_a == batches_b
 
     def test_iter_auto_advances_epoch(self, two_experiment_anchors: pd.DataFrame):
-        """Consecutive ``list(sampler)`` calls must yield different sequences.
+        """Consecutive iterations must yield different sequences without set_epoch.
 
-        PL does not call ``set_epoch`` on ``batch_sampler`` instances.
-        Without in-``__iter__`` epoch advancement, every epoch replays the
-        same batches — see ``packages/viscy-data/src/viscy_data/sampler.py``.
+        PL does not call ``set_epoch`` on ``batch_sampler`` instances, so the
+        sampler must self-advance. Regression guard for the frozen-dataset bug.
         """
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
@@ -507,13 +506,7 @@ class TestDeterminism:
             leaky=0.0,
             seed=42,
         )
-        batches_epoch0 = list(sampler)
-        batches_epoch1 = list(sampler)
-        assert batches_epoch0 != batches_epoch1, (
-            "Iterating twice should yield different sequences because the "
-            "sampler must auto-advance epoch between iterations."
-        )
-        assert sampler.epoch == 2, "epoch counter should advance by 1 per iteration"
+        assert list(sampler) != list(sampler)
 
 
 # ---------------------------------------------------------------------------

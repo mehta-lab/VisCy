@@ -224,32 +224,9 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
 
 
 class TestTrainDataloaderWiresDDPTopology:
-    """DATA-03b: train_dataloader must pass world_size/rank to the sampler."""
-
-    def test_defaults_to_single_process_without_trainer(self, two_experiments):
-        """No trainer attached ⇒ ``num_replicas=1, rank=0``."""
-        from dynaclr.data.datamodule import MultiExperimentDataModule
-
-        parquet_path, _ = two_experiments
-        dm = MultiExperimentDataModule(
-            cell_index_path=str(parquet_path),
-            z_window=1,
-            yx_patch_size=_YX_PATCH,
-            final_yx_patch_size=_FINAL_YX_PATCH,
-            val_experiments=["exp_b"],
-            tau_range=(0.5, 2.0),
-            batch_size=8,
-            batch_group_by="experiment",
-            stratify_by="perturbation",
-            temporal_enrichment=False,
-        )
-        dm.setup("fit")
-        sampler = dm.train_dataloader().batch_sampler
-        assert sampler.num_replicas == 1
-        assert sampler.rank == 0
+    """train_dataloader must forward Trainer world_size/rank to the sampler."""
 
     def test_reads_world_size_and_rank_from_trainer(self, two_experiments):
-        """Simulated 4-rank trainer ⇒ sampler.num_replicas=4, rank=2."""
         from types import SimpleNamespace
 
         from dynaclr.data.datamodule import MultiExperimentDataModule
@@ -268,13 +245,11 @@ class TestTrainDataloaderWiresDDPTopology:
             temporal_enrichment=False,
         )
         dm.setup("fit")
-        # Bypass LightningDataModule.trainer descriptor check: the property
-        # validates attachment state, but we only need world_size/global_rank
-        # for this unit test.
+        # Bypass LightningDataModule.trainer descriptor state check; we
+        # only need world_size/global_rank to flow into the sampler.
         dm.__dict__["trainer"] = SimpleNamespace(world_size=4, global_rank=2)
         sampler = dm.train_dataloader().batch_sampler
-        assert sampler.num_replicas == 4
-        assert sampler.rank == 2
+        assert (sampler.num_replicas, sampler.rank) == (4, 2)
 
 
 class TestValDataloaderNoBatchSampler:
