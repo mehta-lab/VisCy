@@ -1,0 +1,43 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "viscy-phenotyping"
+description = "Image-based phenotyping via nuclear morphology for VisCy"
+readme = "README.md"
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.11"
+dynamic = [ "version" ]
+dependencies = [
+  "click",
+  "iohub>=0.3a2",
+  "numpy>=2.4.1",
+  "pandas",
+  "scikit-image",
+  "scipy",
+  "viscy-data",
+]
+
+[project.scripts]
+viscy-phenotyping = "viscy_phenotyping.cli:main"
+
+[project.optional-dependencies]
+analysis = [ "anndata", "scikit-learn", "seaborn" ]
+
+[dependency-groups]
+dev = [ { include-group = "test" } ]
+test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/viscy_phenotyping" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "viscy-phenotyping-"
+fallback-version = "0.0.0"
