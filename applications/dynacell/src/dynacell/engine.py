@@ -13,10 +13,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
-from torch.optim.lr_scheduler import ConstantLR
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
 from viscy_data import Sample
@@ -24,6 +22,7 @@ from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
 from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
+from viscy_utils.optimizers import configure_adamw_scheduler
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -33,32 +32,6 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNeXt2": UNeXt2,
     "fcmae": FullyConvolutionalMAE,
 }
-
-
-def _configure_adamw_scheduler(
-    module: LightningModule,
-    model: nn.Module,
-    lr: float,
-    schedule: str,
-) -> tuple[list, list]:
-    """Build AdamW optimizer with WarmupCosine or Constant LR schedule.
-
-    Shared by :class:`DynacellUNet` and :class:`DynacellFlowMatching`.
-    """
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    if schedule == "WarmupCosine":
-        scheduler = WarmupCosineSchedule(
-            optimizer,
-            warmup_steps=3,
-            t_total=module.trainer.estimated_stepping_batches,
-            warmup_multiplier=1e-3,
-        )
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
-    elif schedule == "Constant":
-        scheduler = ConstantLR(optimizer, factor=1, total_iters=module.trainer.max_epochs)
-    else:
-        raise ValueError(f"Unknown schedule {schedule!r}, expected 'WarmupCosine' or 'Constant'")
-    return [optimizer], [scheduler]
 
 
 def _aggregate_validation_losses(
@@ -169,6 +142,8 @@ class DynacellUNet(LightningModule):
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        warmup_steps: int = 3,
+        warmup_multiplier: float = 1e-3,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
@@ -188,6 +163,8 @@ class DynacellUNet(LightningModule):
         self.loss_function = loss_function if loss_function is not None else nn.MSELoss()
         self.lr = lr
         self.schedule = schedule
+        self.warmup_steps = warmup_steps
+        self.warmup_multiplier = warmup_multiplier
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.predict_method = predict_method
@@ -368,7 +345,14 @@ class DynacellUNet(LightningModule):
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
-        return _configure_adamw_scheduler(self, self.model, self.lr, self.schedule)
+        return configure_adamw_scheduler(
+            self,
+            self.model,
+            self.lr,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         """Log image grid to the active logger."""
@@ -505,6 +489,8 @@ class DynacellFlowMatching(LightningModule):
         transport_config: dict | None = None,
         lr: float = 1e-4,
         schedule: Literal["WarmupCosine", "Constant"] = "WarmupCosine",
+        warmup_steps: int = 3,
+        warmup_multiplier: float = 1e-3,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         num_generate_steps: int = 100,
@@ -522,6 +508,8 @@ class DynacellFlowMatching(LightningModule):
         self.model = CELLDiff3DVS(net, **(transport_config or {}))
         self.lr = lr
         self.schedule = schedule
+        self.warmup_steps = warmup_steps
+        self.warmup_multiplier = warmup_multiplier
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.num_generate_steps = num_generate_steps
@@ -677,7 +665,14 @@ class DynacellFlowMatching(LightningModule):
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
-        return _configure_adamw_scheduler(self, self.model, self.lr, self.schedule)
+        return configure_adamw_scheduler(
+            self,
+            self.model,
+            self.lr,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
         """Log image grid to the active logger."""

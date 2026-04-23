@@ -32,6 +32,8 @@ model:
         ms_dssim_alpha: 0.5
     lr: 0.0004
     schedule: WarmupCosine
+    warmup_steps: 8500   # ~1 epoch for FCMAE at bs=32, 4 GPUs
+    warmup_multiplier: 1e-3
 trainer:
   # FullyConvolutionalMAE(pretraining=False) has decoder/head params that
   # only receive gradients on some forward paths; default ddp with
