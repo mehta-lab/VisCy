@@ -1,7 +1,6 @@
 """In-focus z-slice detection using midband spatial frequency power."""
 
 import numpy as np
-import tensorstore
 import torch
 from waveorder.focus import focus_from_transverse_band
 
@@ -46,17 +45,16 @@ class FocusSliceMetric(QCMetric):
         self.device = torch.device(device)
 
     def channels(self) -> list[str]:
+        """Return the channels this metric is configured for."""
         return self.channel_names
 
     def __call__(self, position, channel_name, channel_index, num_workers=4):
-        tzyx = (
-            position["0"]
-            .tensorstore(context=tensorstore.Context({"data_copy_concurrency": {"limit": num_workers}}))[
-                :, channel_index
-            ]
-            .read()
-            .result()
-        )
+        """Compute focus-slice index per timepoint for one channel of ``position``."""
+        # Tensorstore concurrency is configured on the plate at
+        # open-time (see qc_metrics.generate_qc_metadata); num_workers
+        # is retained here only to match the QCMetric abstract interface.
+        del num_workers
+        tzyx = position["0"].native[:, channel_index].read().result()
 
         T = tzyx.shape[0]
         focus_indices = np.empty(T, dtype=int)

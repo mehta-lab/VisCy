@@ -88,7 +88,7 @@ NormMeta = dict[str, ChannelNormStats]
 class HCSStackIndex(NamedTuple):
     """HCS stack index."""
 
-    # name of the image array, e.g. "A/1/0/0"
+    # path of the image array, e.g. "/A/1/0/0"
     image: str
     time: int
     z: int
