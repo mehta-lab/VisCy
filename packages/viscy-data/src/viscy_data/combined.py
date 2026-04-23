@@ -151,15 +151,15 @@ class BatchedConcatDataset(ConcatDataset):
         """Return a batched sample dict from *dataset* for the given indices.
 
         Fast path: delegate to ``dataset.__getitems__`` when implemented
-        (e.g. :class:`viscy_data.triplet.TripletDataset`, which amortizes
-        zarr/tensorstore I/O across a batch).
+        (e.g. ``TripletDataset``, which amortizes zarr/tensorstore I/O
+        across a batch).
 
         Fallback: call ``__getitem__`` per index and collate with
-        :func:`_collate_samples`. This lets datasets with single-sample
-        semantics (e.g. :class:`viscy_data.sliding_window.SlidingWindowDataset`,
-        which runs per-sample retry logic for nonzero-fraction filtering)
-        participate in :class:`BatchedConcatDataModule` without having to
-        duplicate their read path as a batched method.
+        ``_collate_samples``. This lets datasets with single-sample
+        semantics (e.g. ``SlidingWindowDataset``, whose per-sample retry
+        logic for nonzero-fraction filtering doesn't map cleanly to a
+        batched read) participate in ``BatchedConcatDataModule`` without
+        having to duplicate their read path as a batched method.
         """
         if hasattr(dataset, "__getitems__"):
             return dataset.__getitems__(indices)

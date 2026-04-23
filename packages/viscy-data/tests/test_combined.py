@@ -130,3 +130,5 @@ def test_batched_concat_datamodule_with_hcs_children(preprocessed_hcs_dataset):
         assert "_dataset_idx" in micro_batch
         assert "source" in micro_batch
         assert micro_batch["source"].ndim == 5  # (B, C, Z, Y, X)
+    # Grouping must be lossless: total batch dim equals _make_dm batch_size=4.
+    assert sum(mb["source"].shape[0] for mb in batch) == 4
