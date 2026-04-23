@@ -1,0 +1,34 @@
+# CellDiff flow-matching: fit from scratch.
+# Usage: cd applications/dynacell/configs/examples && uv run dynacell fit -c celldiff/fit.yml
+base:
+  - ../../recipes/trainer/fit.yml
+  - ../../recipes/topology/ddp_4gpu.yml
+  - ../../recipes/data/hcs_phase_fluor_3d.yml
+  - ../../recipes/models/celldiff_fm.yml
+
+model:
+  init_args:
+    lr: 0.0002
+    schedule: WarmupCosine
+    num_log_steps: 10
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 200
+  # Flow-matching training checkpoints by epoch count, not validation loss.
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 10
+        save_top_k: -1
+        save_last: true
+
+data:
+  init_args:
+    data_path: #TODO
+    z_window_size: 8
+    batch_size: 4
+    yx_patch_size: [512, 512]

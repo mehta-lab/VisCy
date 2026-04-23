@@ -1,0 +1,13 @@
+# @package _global_
+# Benchmark eval leaf: ER (SEC61B) predicted by CellDiff on iPSC confocal.
+defaults:
+  - override /target: er_sec61b
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_iterative.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_sec61b_celldiff_iterative

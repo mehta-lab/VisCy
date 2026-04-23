@@ -1,0 +1,20 @@
+# UNetViT3D fit overlay — model + trainer only.
+# HCS data hparams live in data_overlays/unetvit3d_fit.yml; single-store
+# train leaves compose both, joint (BatchedConcatDataModule) leaves
+# compose only this one and author data: themselves.
+#
+# Hparams (lr, schedule, epochs) match celldiff_fit.yml — the only
+# functional difference here is the model class.
+base:
+  - ../../../../../../recipes/models/unetvit3d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    lr: 0.0003
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+trainer:
+  precision: bf16-mixed
+  max_epochs: 20

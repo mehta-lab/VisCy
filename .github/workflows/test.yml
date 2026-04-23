@@ -118,10 +118,33 @@ jobs:
         run: uv run --frozen pytest
         working-directory: applications/${{ matrix.application }}
 
+  test-dynacell-configs:
+    name: Test dynacell benchmark configs (Python 3.13, ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python 3.13
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ubuntu-latest-3.13
+
+      - name: Install minimal dynacell (base deps + test group)
+        run: uv sync --frozen --group test
+        working-directory: applications/dynacell
+
+      - name: Run benchmark-schema + submit-tool tests
+        run: uv run --frozen pytest tests/test_benchmark_config_composition.py tests/test_submit_benchmark_job.py -v
+        working-directory: applications/dynacell
+
   check:
     name: All tests pass
     if: always()
-    needs: [test, test-data, test-data-extras, test-applications]
+    needs: [test, test-data, test-data-extras, test-applications, test-dynacell-configs]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all test jobs succeeded

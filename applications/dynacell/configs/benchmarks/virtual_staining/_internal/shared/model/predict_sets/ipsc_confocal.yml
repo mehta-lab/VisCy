@@ -1,0 +1,9 @@
+# Predict set: AICS iPSC confocal, self-predict against test_cropped/.
+# data_path resolves to the test store in predict mode via dataset_ref.
+benchmark:
+  predict_set: ipsc_confocal
+  dataset_ref:
+    dataset: aics-hipsc
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args: {}

@@ -1,0 +1,89 @@
+defaults:
+  - _self_
+  - optional target: null
+  - optional predict_set: null
+  # Default to the canonical DINOv3 checkpoint and team DynaCLR encoder.
+  # `optional` means wheel installs that don't ship dynaclr=default (it lives
+  # in the repo's shared/eval/ tree) silently skip the default — users there
+  # supply their own via --config-dir.
+  - optional feature_extractor/dinov3: lvd1689m
+  - optional feature_extractor/dynaclr: default
+  - optional leaf: null
+
+# Placeholder so struct-mode merges accept benchmark.dataset_ref contributions
+# from target / predict_set groups. The post-compose hook in _ref_hook.py
+# reads benchmark.dataset_ref and splices io.* and pixel_metrics.spacing from
+# the manifest.
+benchmark: null
+
+target_name: ???
+io:
+  pred_path: ???
+  gt_path: ???
+  cell_segmentation_path: null  # required iff compute_feature_metrics=true
+  gt_cache_dir: null  # required for precompute-gt and require_complete_cache=true
+  pred_channel_name: ???  # e.g. Structure_prediction
+  gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
+  require_complete_cache: false  # if true, eval raises on any cache miss instead of filling
+
+pixel_metrics:
+  spacing: ???
+  fsc:
+    bin_delta: 5
+  spectral_pcc:
+    bin_delta: 1.0
+    tail_fraction: 0.2
+    apodization: tukey
+    nbins_low: 3
+
+feature_metrics:
+  patch_size: 256
+
+# Feature extractor configuration — required only when compute_feature_metrics=true
+# (or when the corresponding precompute-gt build.* flag is set). Fields stay ???
+# (MISSING) until then; OmegaConf resolves them lazily, so runs with feature metrics
+# disabled pass right through.
+feature_extractor:
+  dinov3:
+    pretrained_model_name: facebook/dinov3-convnext-base-pretrain-lvd1689m
+  dynaclr:
+    checkpoint: ???
+    # Mapping of kwargs for ContrastiveEncoder (backbone, in_channels, ...).
+    # No file-loading shorthand in CLI overrides today — pass an inline dict
+    # or set via a Hydra config group (planned in Phase 2 of the eval refactor).
+    encoder:
+      backbone: convnext_tiny
+      in_channels: 1
+      in_stack_depth: 1
+      stem_kernel_size: [1, 4, 4]
+      stem_stride: [1, 4, 4]
+      embedding_dim: 768
+      projection_dim: 32
+      drop_path_rate: 0.0
+
+use_gpu: true
+compute_microssim: true
+compute_feature_metrics: false
+limit_positions: null  # process first N positions; null means all
+
+force_recompute:
+  all: false
+  gt_masks: false
+  gt_cp: false
+  gt_dinov3: false
+  gt_dynaclr: false
+  final_metrics: false
+
+save:
+  save_dir: ???
+  pixel_csv_filename: pixel_metrics.csv
+  pixel_metrics_filename: pixel_metrics.npy
+  mask_csv_filename: mask_metrics.csv
+  mask_metrics_filename: mask_metrics.npy
+  feature_csv_filename: feature_metrics.csv
+  feature_metrics_filename: feature_metrics.npy
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

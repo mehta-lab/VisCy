@@ -1,0 +1,36 @@
+# CellDiff fit on mitochondria (TOMM20 marker) — AICS iPSC confocal.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/data_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: ipsc_confocal
+  model_name: celldiff
+  experiment_id: mito__ipsc_confocal__celldiff
+
+trainer:
+  logger:
+    init_args:
+      name: CELLDiff_iPSC_TOMM20
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff/checkpoints
+
+launcher:
+  job_name: CELLDiff_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff

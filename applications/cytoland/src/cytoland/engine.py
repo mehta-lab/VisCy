@@ -10,10 +10,8 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from torch import Tensor, nn
-from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
     cosine_similarity,
@@ -31,6 +29,7 @@ from viscy_models import FullyConvolutionalMAE, Unet2d, Unet3d, Unet25d, UNeXt2
 from viscy_utils.callbacks.prediction_writer import _blend_in
 from viscy_utils.evaluation.metrics import mean_average_precision
 from viscy_utils.log_images import detach_sample, log_image_grid
+from viscy_utils.optimizers import configure_adamw_scheduler
 from viscy_utils.tensor_utils import to_numpy
 
 _UNET_ARCHITECTURE = {
@@ -141,6 +140,8 @@ class VSUNet(LightningModule):
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        warmup_steps: int = 3,
+        warmup_multiplier: float = 1e-3,
         freeze_encoder: bool = False,
         ckpt_path: str | None = None,
         log_batches_per_epoch: int = 8,
@@ -153,7 +154,7 @@ class VSUNet(LightningModule):
         tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["loss_function"])
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path"])
         if model_config is None:
             model_config = {}
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -165,6 +166,8 @@ class VSUNet(LightningModule):
         self.loss_function = loss_function if loss_function else nn.MSELoss()
         self.lr = lr
         self.schedule = schedule
+        self.warmup_steps = warmup_steps
+        self.warmup_multiplier = warmup_multiplier
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.training_step_outputs = []
@@ -510,18 +513,14 @@ class VSUNet(LightningModule):
                     f"(e.g. FullyConvolutionalMAE), got {type(self.model).__name__}"
                 )
             self.model.encoder.requires_grad_(False)
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
-        if self.schedule == "WarmupCosine":
-            scheduler = WarmupCosineSchedule(
-                optimizer,
-                warmup_steps=3,
-                t_total=self.trainer.estimated_stepping_batches,
-                warmup_multiplier=1e-3,
-            )
-            return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
-        elif self.schedule == "Constant":
-            scheduler = ConstantLR(optimizer, factor=1, total_iters=self.trainer.max_epochs)
-        return [optimizer], [scheduler]
+        return configure_adamw_scheduler(
+            self,
+            self.model,
+            self.lr,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         """Log image sample grid to the active logger (TensorBoard or W&B)."""

@@ -1,0 +1,13 @@
+# @package _global_
+# Benchmark eval leaf: Membrane predicted by UNetViT3D on iPSC confocal.
+defaults:
+  - override /target: membrane
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_unetvit3d.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_memb_unetvit3d

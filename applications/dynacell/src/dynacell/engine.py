@@ -5,54 +5,61 @@ Provides :class:`DynacellUNet` for supervised regression and
 """
 
 import inspect
+import itertools
+import logging
 from typing import Literal, Sequence
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
-from torch.optim.lr_scheduler import ConstantLR
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
+from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
+from viscy_utils.optimizers import configure_adamw_scheduler
+
+_logger = logging.getLogger("lightning.pytorch")
 
 _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNetViT3D": UNetViT3D,
     "FNet3D": Unet3d,
     "UNeXt2": UNeXt2,
+    "fcmae": FullyConvolutionalMAE,
 }
 
 
-def _configure_adamw_scheduler(
-    module: LightningModule,
-    model: nn.Module,
-    lr: float,
-    schedule: str,
-) -> tuple[list, list]:
-    """Build AdamW optimizer with WarmupCosine or Constant LR schedule.
+def _aggregate_validation_losses(
+    validation_losses: list[list[tuple[Tensor, int]]],
+) -> Tensor:
+    """Compute sample-weighted mean loss across dataloaders.
 
-    Shared by :class:`DynacellUNet` and :class:`DynacellFlowMatching`.
+    Parameters
+    ----------
+    validation_losses : list of list of (Tensor, int)
+        Per-dataloader list of ``(scalar_loss, batch_size)`` tuples
+        accumulated during validation.
+
+    Returns
+    -------
+    Tensor
+        Scalar weighted mean loss.
     """
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    if schedule == "WarmupCosine":
-        scheduler = WarmupCosineSchedule(
-            optimizer,
-            warmup_steps=3,
-            t_total=module.trainer.estimated_stepping_batches,
-            warmup_multiplier=1e-3,
-        )
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
-    elif schedule == "Constant":
-        scheduler = ConstantLR(optimizer, factor=1, total_iters=module.trainer.max_epochs)
-    else:
-        raise ValueError(f"Unknown schedule {schedule!r}, expected 'WarmupCosine' or 'Constant'")
-    return [optimizer], [scheduler]
+    dl_means: list[Tensor] = []
+    dl_totals: list[Tensor] = []
+    for dl_batches in validation_losses:
+        losses, sizes = zip(*dl_batches)
+        sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
+        dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
+        dl_totals.append(sizes_t.sum())
+    total_n = torch.stack(dl_totals).sum()
+    weighted = torch.stack([m * n for m, n in zip(dl_means, dl_totals)]).sum()
+    return weighted / total_n
 
 
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
@@ -93,7 +100,7 @@ class DynacellUNet(LightningModule):
 
     Parameters
     ----------
-    architecture : {"UNetViT3D", "FNet3D", "UNeXt2"}
+    architecture : {"UNetViT3D", "FNet3D", "UNeXt2", "fcmae"}
         Architecture key selecting the backbone.
     model_config : dict | None
         Keyword arguments forwarded to the backbone constructor.
@@ -111,23 +118,42 @@ class DynacellUNet(LightningModule):
         YX shape for example input (used by FNet3D for graph logging).
         Ignored when the model provides ``input_spatial_size``.
     ckpt_path : str | None
-        Checkpoint path to load model weights.
+        Path to a checkpoint to load **weights only** at construction time.
+        Intended for inference (predict/test), not training resumption —
+        optimizer state, epoch counters, and scheduler state are not
+        restored.
+    encoder_only : bool, default False
+        When True, ``ckpt_path`` must be set, and only the
+        ``model.encoder.*`` weights are loaded (decoder/head stay at fresh
+        init). Intended for finetuning from an FCMAE-pretrained encoder.
+        Only supported for ``architecture='fcmae'``.
+
+        Note: on resumed runs (via trainer-level ``--ckpt_path``), this
+        pre-load still fires in ``__init__`` before Lightning restores
+        the resume checkpoint, and the resume state overwrites it. The
+        file at ``ckpt_path`` must therefore remain accessible for the
+        lifetime of any run based on a pretrained leaf.
     """
 
     def __init__(
         self,
-        architecture: Literal["UNetViT3D", "FNet3D", "UNeXt2"] = "UNetViT3D",
+        architecture: Literal["UNetViT3D", "FNet3D", "UNeXt2", "fcmae"] = "UNetViT3D",
         model_config: dict | None = None,
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        warmup_steps: int = 3,
+        warmup_multiplier: float = 1e-3,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
+        predict_method: Literal["full_image", "sliding_window"] = "full_image",
+        predict_overlap: tuple[int, int, int] = (4, 256, 256),
         ckpt_path: str | None = None,
+        encoder_only: bool = False,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["loss_function", "ckpt_path"])
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path", "encoder_only"])
         if model_config is None:
             model_config = {}
         net_class = _ARCHITECTURE.get(architecture)
@@ -137,8 +163,13 @@ class DynacellUNet(LightningModule):
         self.loss_function = loss_function if loss_function is not None else nn.MSELoss()
         self.lr = lr
         self.schedule = schedule
+        self.warmup_steps = warmup_steps
+        self.warmup_multiplier = warmup_multiplier
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
+        self.predict_method = predict_method
+        self.predict_overlap = predict_overlap
+
         self.training_step_outputs: list = []
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
         self.validation_losses: list[list[tuple[Tensor, int]]] = []
@@ -161,7 +192,17 @@ class DynacellUNet(LightningModule):
             h, w = example_input_yx_shape
         self.example_input_array = torch.rand(1, in_channels, d, h, w)
 
-        if ckpt_path is not None:
+        if encoder_only:
+            if ckpt_path is None:
+                raise ValueError("DynacellUNet(encoder_only=True) requires ckpt_path to be set")
+            if not isinstance(self.model, FullyConvolutionalMAE):
+                raise ValueError(f"encoder_only is only supported for architecture='fcmae', got {architecture!r}")
+            state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            prefix = "model.encoder."
+            encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
+            self.model.encoder.load_state_dict(encoder_weights, strict=True)
+            _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
+        elif ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
     def forward(self, x: Tensor) -> Tensor:
@@ -278,7 +319,14 @@ class DynacellUNet(LightningModule):
         source = batch["source"]
         original_shape = source.shape[2:]
         source = self._predict_pad(source)
-        prediction = self.forward(source)
+        if self.predict_method == "full_image":
+            prediction = self.forward(source)
+        elif self.predict_method == "sliding_window":
+            prediction = self.predict_sliding_window(source, overlap_size=self.predict_overlap)
+        else:
+            raise ValueError(
+                f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image' or 'sliding_window'."
+            )
         return _center_crop_to_shape(prediction, original_shape)
 
     def on_train_epoch_end(self):
@@ -291,30 +339,93 @@ class DynacellUNet(LightningModule):
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
         if self.validation_losses:
-            # Compute per-dataloader weighted mean, then weight dataloaders by sample count.
-            dl_means, dl_totals = [], []
-            for dl_batches in self.validation_losses:
-                losses, sizes = zip(*dl_batches)
-                # Create sizes on the same device as the losses to avoid device
-                # mismatch on GPU/DDP where losses are on the model device.
-                sizes_t = torch.tensor(sizes, dtype=torch.float, device=losses[0].device)
-                dl_means.append((torch.stack(losses) * sizes_t).sum() / sizes_t.sum())
-                dl_totals.append(sizes_t.sum())
-            total_n = torch.stack(dl_totals).sum()
-            weighted = sum(m * n for m, n in zip(dl_means, dl_totals))
-            self.log("loss/validate", weighted / total_n, sync_dist=True)
+            self.log("loss/validate", _aggregate_validation_losses(self.validation_losses), sync_dist=True)
         self.validation_step_outputs.clear()
         self.validation_losses.clear()
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
-        return _configure_adamw_scheduler(self, self.model, self.lr, self.schedule)
+        return configure_adamw_scheduler(
+            self,
+            self.model,
+            self.lr,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         """Log image grid to the active logger."""
         if not imgs or not self.trainer.is_global_zero or self.logger is None:
             return
         log_image_grid(self.logger, key, imgs, self.current_epoch)
+
+    def predict_sliding_window(self, source: Tensor, overlap_size: tuple[int, int, int] = (4, 256, 256)) -> Tensor:
+        """Run sliding-window inference over a large input volume.
+
+        Overlapping regions are averaged across all covering patches.
+
+        Parameters
+        ----------
+        source : Tensor
+            Input tensor of shape ``(B, C, D, H, W)``.
+        overlap_size : tuple of int
+            Overlap in ``(D, H, W)`` between adjacent patches.
+
+        Returns
+        -------
+        Tensor
+            Prediction with the same spatial shape as ``source``.
+        """
+        spatial = source.shape[-3:]
+        patch_spatial = tuple(self.model.input_spatial_size)
+        n_spatial = 3
+        overlap = tuple(overlap_size)
+
+        for i in range(n_spatial):
+            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
+            if S < P:
+                raise ValueError(f"spatial dim {i} size {S} must be >= patch size {P}")
+            if not (0 <= ov < P):
+                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {P})")
+
+        # Accumulators are allocated lazily from the first patch output so
+        # their channel dimension matches the model's out_channels (which can
+        # differ from source's in_channels, e.g. 1 phase in -> 2 target out).
+        prediction_sum: Tensor | None = None
+        prediction_count: Tensor | None = None
+
+        start_lists = []
+        for i in range(n_spatial):
+            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
+            stride = P - ov
+            last = S - P
+            starts = [0]
+            while starts[-1] + stride < last:
+                starts.append(starts[-1] + stride)
+            if starts[-1] != last:
+                starts.append(last)
+            start_lists.append(starts)
+
+        with torch.no_grad():
+            for starts in itertools.product(*start_lists):
+                slicer: list = [slice(None)] * source.ndim
+                for i, st in enumerate(starts):
+                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
+                patch_out = self.forward(source[tuple(slicer)])
+                if prediction_sum is None:
+                    out_shape = list(source.shape)
+                    out_shape[1] = patch_out.shape[1]
+                    prediction_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
+                    prediction_count = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
+                prediction_sum[tuple(slicer)] += patch_out
+                prediction_count[tuple(slicer)] += 1
+
+        if prediction_sum is None:
+            raise RuntimeError("sliding window produced no patches")
+        if not torch.all(prediction_count > 0):
+            raise RuntimeError("sliding window left uncovered voxels")
+        return prediction_sum / prediction_count
 
 
 class DynacellFlowMatching(LightningModule):
@@ -346,11 +457,30 @@ class DynacellFlowMatching(LightningModule):
     num_log_steps : int
         Number of ODE steps for validation image generation (cheaper than
         ``num_generate_steps``).
-    predict_method : {"generate", "non_overlapping", "sliding_window"}
-        Prediction generation method.  ``"generate"`` runs single-patch ODE
-        (default, matches standard HCS tile workflow).
+    compute_validation_loss : bool
+        Whether to compute and log flow-matching validation loss on the
+        validation loader. Disabled by default to preserve the previous
+        cheaper validation behavior.
+    predict_method : {"denoise", "generate", "sliding_window", "iterative"}
+        Prediction generation method. ``"generate"`` runs single-patch ODE
+        (default, matches standard HCS tile workflow). ``"sliding_window"``
+        partitions the volume into **non-overlapping** tiles (ignores
+        ``predict_overlap``; passing a non-zero overlap raises so users
+        aren't silently misled). ``"iterative"`` slides overlapping tiles
+        with velocity anchoring — use this when you want
+        ``predict_overlap`` to apply. ``"denoise"`` uses the noise-space
+        overlap tiler.
     predict_overlap : int or tuple of int
-        Overlap for sliding-window prediction.
+        Overlap for ``denoise`` and ``iterative``. Ignored by
+        ``sliding_window``; must be ``0`` or ``[0, 0, 0]`` when
+        ``predict_method='sliding_window'``.
+    ckpt_path : str | None
+        Path to a checkpoint to load **weights only** at construction time.
+        Intended for inference (predict/test), not training resumption —
+        optimizer state, epoch counters, and scheduler state are not
+        restored.  Bypasses LightningCLI's checkpoint hparam merging, so
+        predict-time settings (``predict_method``, ``predict_overlap``,
+        etc.) are taken from the config rather than the checkpoint.
     """
 
     def __init__(
@@ -359,27 +489,39 @@ class DynacellFlowMatching(LightningModule):
         transport_config: dict | None = None,
         lr: float = 1e-4,
         schedule: Literal["WarmupCosine", "Constant"] = "WarmupCosine",
+        warmup_steps: int = 3,
+        warmup_multiplier: float = 1e-3,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         num_generate_steps: int = 100,
         num_log_steps: int = 10,
-        predict_method: Literal["generate", "non_overlapping", "sliding_window"] = "generate",
+        compute_validation_loss: bool = False,
+        predict_method: Literal["denoise", "generate", "sliding_window", "iterative"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
+        ckpt_path: str | None = None,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(
+            ignore=["predict_method", "predict_overlap", "num_generate_steps", "num_log_steps", "ckpt_path"]
+        )
         net = CELLDiffNet(**(net_config or {}))
         self.model = CELLDiff3DVS(net, **(transport_config or {}))
         self.lr = lr
         self.schedule = schedule
+        self.warmup_steps = warmup_steps
+        self.warmup_multiplier = warmup_multiplier
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.num_generate_steps = num_generate_steps
         self.num_log_steps = num_log_steps
+        self.compute_validation_loss = compute_validation_loss
         self.predict_method = predict_method
         self.predict_overlap = predict_overlap
         self._training_step_outputs: list = []
+        self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
+        if ckpt_path is not None:
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
     def training_step(self, batch: dict, batch_idx: int) -> Tensor:
         """Compute flow-matching training loss for one batch.
@@ -414,16 +556,27 @@ class DynacellFlowMatching(LightningModule):
         return loss
 
     def validation_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> None:
-        """Capture one validation batch for epoch-end generation logging.
-
-        Flow-matching does not compute a validation loss.
-        """
+        """Capture validation samples and optionally compute loss."""
         if batch_idx == 0 and self._val_log_batch is None:
             n = self.log_samples_per_batch
             self._val_log_batch = (
                 batch["source"][:n].clone(),
                 batch["target"][:n].clone(),
             )
+        if not self.compute_validation_loss:
+            return
+        phase: Tensor = batch["source"]
+        target: Tensor = batch["target"]
+        loss = self.model(phase, target)
+        if dataloader_idx + 1 > len(self._validation_losses):
+            self._validation_losses.append([])
+        self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
+        self.log(
+            f"loss/val/{dataloader_idx}",
+            loss,
+            sync_dist=True,
+            batch_size=phase.shape[0],
+        )
 
     def on_train_epoch_end(self) -> None:
         """Log training image samples at end of epoch."""
@@ -433,13 +586,17 @@ class DynacellFlowMatching(LightningModule):
     def on_validation_epoch_end(self) -> None:
         """Generate ODE samples from captured validation batch and log."""
         super().on_validation_epoch_end()
-        if self._val_log_batch is not None and self.logger is not None:
-            phase_log, target_log = self._val_log_batch
-            n = min(self.log_samples_per_batch, phase_log.shape[0])
-            generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
-            gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
-            self._log_samples("val_generated_samples", gen_samples)
+        if self._val_log_batch is not None:
+            if self.logger is not None:
+                phase_log, target_log = self._val_log_batch
+                n = min(self.log_samples_per_batch, phase_log.shape[0])
+                generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
+                gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
+                self._log_samples("val_generated_samples", gen_samples)
             self._val_log_batch = None
+        if self._validation_losses:
+            self.log("loss/validate", _aggregate_validation_losses(self._validation_losses), sync_dist=True)
+        self._validation_losses.clear()
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
@@ -473,12 +630,27 @@ class DynacellFlowMatching(LightningModule):
                 pad.extend([0, max(0, p - s)])
             source = F.pad(source, pad, mode="replicate")
 
-        if self.predict_method == "generate":
+        if self.predict_method == "denoise":
+            prediction = self.model.denoise_sliding_window(source, overlap_size=self.predict_overlap)
+        elif self.predict_method == "generate":
             prediction = self.model.generate(source, num_steps=self.num_generate_steps)
-        elif self.predict_method == "non_overlapping":
-            prediction = self.model.generate_non_overlapping(source, num_steps=self.num_generate_steps)
         elif self.predict_method == "sliding_window":
-            prediction = self.model.generate_sliding_window(
+            # generate_sliding_window partitions into non-overlapping tiles
+            # and does NOT consume predict_overlap. A non-zero overlap means
+            # the user wants overlapping tiled inference — route them to
+            # `iterative`, which anchors overlapping regions via velocity.
+            overlap = self.predict_overlap
+            overlap_values = (overlap,) * 3 if isinstance(overlap, int) else tuple(overlap)
+            if any(o > 0 for o in overlap_values):
+                raise ValueError(
+                    "predict_method='sliding_window' uses non-overlapping tiles and "
+                    f"ignores predict_overlap (got {overlap_values}). "
+                    "Use predict_method='iterative' for overlap-anchored tiled inference, "
+                    "or set predict_overlap=[0, 0, 0] to acknowledge the non-overlapping behavior."
+                )
+            prediction = self.model.generate_sliding_window(source, num_steps=self.num_generate_steps)
+        elif self.predict_method == "iterative":
+            prediction = self.model.generate_iterative(
                 source,
                 num_steps=self.num_generate_steps,
                 overlap_size=self.predict_overlap,
@@ -486,14 +658,21 @@ class DynacellFlowMatching(LightningModule):
         else:
             raise ValueError(
                 f"Unknown predict_method: {self.predict_method!r}. "
-                "Choose 'generate', 'non_overlapping', or 'sliding_window'."
+                "Choose 'denoise', 'generate', 'sliding_window', or 'iterative'."
             )
 
         return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
-        return _configure_adamw_scheduler(self, self.model, self.lr, self.schedule)
+        return configure_adamw_scheduler(
+            self,
+            self.model,
+            self.lr,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
         """Log image grid to the active logger."""

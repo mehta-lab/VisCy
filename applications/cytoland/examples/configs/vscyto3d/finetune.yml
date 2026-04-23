@@ -1,7 +1,8 @@
 # VSCyto3D: supervised fine-tuning from FCMAE-pretrained encoder.
 # Usage: python -m cytoland fit --config vscyto3d/finetune.yml
 base:
-  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
   - ../recipes/data/hcs_nuc_mem_3d.yml
   - ../recipes/models/unext2_3d.yml
 
@@ -15,6 +16,10 @@ model:
         ms_dssim_alpha: 0.5
     lr: 0.0002
     schedule: WarmupCosine
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 200
 
 data:
   init_args:

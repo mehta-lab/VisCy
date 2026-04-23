@@ -1,0 +1,19 @@
+# Base reporting config.
+# Specify results directories and output location.
+
+# Mapping of model name -> results directory path.
+# Override via: '+results_dirs={model_a: /path/to/results}'
+# or: results_dirs.model_a=/path/to/results
+results_dirs: {}
+output_dir: ./report_output
+
+metrics:
+  pixel: [PCC, SSIM, NRMSE, PSNR]
+  mask: [Dice, IoU]
+
+figure_format: pdf
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

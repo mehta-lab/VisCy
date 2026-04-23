@@ -7,6 +7,7 @@ import importlib
 from pathlib import Path
 
 import pytest
+import torch
 from iohub.ngff import open_ome_zarr
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -365,6 +366,45 @@ def test_celldiff_fm_constant_schedule_fast_dev_run(tmp_path, _SyntheticDataModu
     assert trainer.state.status == "finished"
 
 
+def test_celldiff_fm_validation_loss_keeps_generation(tmp_path, _SyntheticDataModule, monkeypatch):
+    """Validation loss can be enabled without disabling validation sample generation."""
+    seed_everything(42)
+    module = DynacellFlowMatching(
+        net_config=CELLDIFF_TEST_NET_CONFIG,
+        transport_config=CELLDIFF_TEST_TRANSPORT_CONFIG,
+        lr=1e-4,
+        schedule="Constant",
+        log_batches_per_epoch=1,
+        log_samples_per_batch=1,
+        num_log_steps=2,
+        compute_validation_loss=True,
+    )
+    generate_calls: list[tuple[tuple[int, ...], int]] = []
+
+    def fake_generate(phase, num_steps=100):
+        generate_calls.append((tuple(phase.shape), num_steps))
+        return phase.new_zeros(phase.shape)
+
+    monkeypatch.setattr(module.model, "generate", fake_generate)
+
+    trainer = Trainer(
+        accelerator="cpu",
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=_SyntheticDataModule(depth=8, height=32, width=32))
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+    assert "loss/validate" in trainer.callback_metrics
+    assert torch.isfinite(trainer.callback_metrics["loss/validate"])
+    assert generate_calls == [((1, 1, 8, 32, 32), 2)]
+
+
 def test_celldiff_fm_predict_integration(tmp_path, tiny_hcs_zarr):
     """DynacellFlowMatching runs predict and writes predictions to OME-Zarr."""
     seed_everything(42)
@@ -427,7 +467,7 @@ def _resolve_class_path(class_path: str):
 
 def _discover_leaf_configs():
     """Discover leaf configs (skip recipes/ directory)."""
-    configs_dir = Path(__file__).resolve().parents[1] / "examples" / "configs"
+    configs_dir = Path(__file__).resolve().parents[1] / "configs" / "examples"
     leaf_configs = []
     for yml in sorted(configs_dir.rglob("*.yml")):
         if "recipes" not in yml.parts:

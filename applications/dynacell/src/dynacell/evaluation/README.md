@@ -1,0 +1,370 @@
+# dynacell.evaluation
+
+End-to-end evaluation pipeline for virtual staining predictions against fluorescence ground truth.
+
+## Components
+
+| Module | Purpose |
+|---|---|
+| `pipeline.py` | Hydra-driven orchestrator. Loads prediction/GT OME-Zarr plates, computes per-FOV per-timepoint metrics, saves CSVs + NPYs + plots. CLI entrypoint: `dynacell evaluate`. |
+| `metrics.py` | Pixel metrics (PCC, SSIM, NRMSE, PSNR, FSC resolution, spectral PCC, MicroMS3IM), mask metrics (Dice, IoU, precision, recall, accuracy, TP/FP/FN/TN), feature metrics split into `*_target_*` / `*_pred_*` / `*_pairwise` so GT-side work can be cached separately from predictions. |
+| `segmentation.py` | Organelle-specific classical-CV segmentation via `aicssegmentation` workflows (`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`). Used for mask metrics. |
+| `cache.py` | GT artifact cache: on-disk layout, manifest I/O, read/write helpers, staleness check. Keyed by `(cache_schema_version, gt_path, gt_channel_name, cell_segmentation_path)`. |
+| `pipeline_cache.py` | Per-FOV load-or-compute wrappers (`fov_gt_masks`, `fov_gt_cp_features`, `fov_gt_deep_features`). Honor `force_recompute.*` flags and the `io.require_complete_cache` contract. |
+| `precompute_cli.py` | Hydra entrypoint for `dynacell precompute-gt`. Iterates GT positions and fills the cache; no eval loop. |
+| `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, pairwise feature-similarity helpers, `plot_metrics()` bar/violin plots. |
+| `io.py` | OME-Zarr / tiff readers and writers, prediction preprocessing transforms. |
+| `torch_ssim.py` | GPU-friendly PyTorch SSIM. |
+| `formatting.py` | Metric table formatting helpers. |
+| `spectral_pcc/` | Bandlimited spectral PCC diagnostics and bead simulations. |
+| `_configs/eval.yaml` | Hydra config for `dynacell evaluate`, with `???` MISSING markers for dataset-specific fields. |
+| `_configs/precompute.yaml` | Hydra config for `dynacell precompute-gt`; inherits eval, requires `io.gt_cache_dir`. |
+
+## Inputs
+
+- `io.pred_path` — model predictions, HCS OME-Zarr (channel: `io.pred_channel_name`)
+- `io.gt_path` — fluorescence ground truth, HCS OME-Zarr (channel: `io.gt_channel_name`)
+- `io.cell_segmentation_path` — *optional* precomputed cell segmentation, HCS OME-Zarr. Required only when `compute_feature_metrics=true` or when building CP/DINOv3/DynaCLR cache entries. Position layout must match GT/pred 1:1.
+- `io.gt_cache_dir` — *optional* directory for the GT artifact cache. `null` (default) disables caching; set to a writable path to opt in. Required for `dynacell precompute-gt` and for `io.require_complete_cache=true`.
+
+## Running an evaluation
+
+`dynacell evaluate` is a Hydra entrypoint. Override any field on the CLI with `key=value`.
+
+Paths and settings that belong to a (target, marker, dataset) combination
+live in named Hydra config groups, so most invocations only need to select
+the right group and point at the prediction / output paths. Groups come from
+two sources: the packaged schema under `src/dynacell/evaluation/_configs/`
+and — on a repo checkout — HPC-bound groups under
+`configs/benchmarks/virtual_staining/_internal/` that `dynacell.__main__`
+exposes through two injected `hydra.searchpath` roots. See the table below.
+
+### Config groups
+
+| Group | Options | What it sets | Source |
+|---|---|---|---|
+| `target` | `er_sec61b`, `mito_tomm20`, `membrane`, `nucleus` | `target_name`, `benchmark.dataset_ref.target`. | `configs/benchmarks/virtual_staining/_internal/shared/eval/target/` |
+| `predict_set` | `ipsc_confocal` | `benchmark.dataset_ref.dataset`. | in-package (`_configs/predict_set/`) |
+| `feature_extractor/dinov3` | `lvd1689m` | `feature_extractor.dinov3.pretrained_model_name`. | in-package (`_configs/feature_extractor/dinov3/`) |
+| `feature_extractor/dynaclr` | `default` | `feature_extractor.dynaclr.checkpoint` and 8-field `encoder` dict. | `configs/benchmarks/virtual_staining/_internal/shared/eval/feature_extractor/dynaclr/` |
+| `leaf` | `<org>/<model>/<train_set>/eval__<predict_set>` (8 canonical leaves) | Composes all of the above for a canonical benchmark run; see "Benchmark eval leaves" below. | `configs/benchmarks/virtual_staining/_internal/leaf/` (symlink tree) |
+
+`io.*` fields (`gt_path`, `cell_segmentation_path`, `gt_channel_name`,
+`pred_channel_name`, `gt_cache_dir`) and `pixel_metrics.spacing` are now
+owned by the dataset manifest (`dynacell/data/manifests.py`) and
+spliced into the composed config by a post-compose hook in
+`_ref_hook.py`. `pred_channel_name` is derived as
+`{target_channel}_prediction`.
+
+- **In-package** groups (`predict_set`, `feature_extractor/dinov3`,
+  `spectral_pcc/*`) ship in the wheel: schema and path-free reference
+  values only.
+- **Repo-checkout** groups (`target`, `feature_extractor/dynaclr`, `leaf`)
+  all live under `configs/benchmarks/virtual_staining/_internal/` — the
+  hidden support tree that keeps the top level of `virtual_staining/`
+  biology-only. They contain HPC paths, our DynaCLR checkpoint, and
+  benchmark-instance values — useless to external users.
+  `dynacell.__main__` injects two `hydra.searchpath` roots
+  (`_internal/` for the `leaf/` tree and `_internal/shared/eval/` for
+  `target/` and `feature_extractor/dynaclr/`) when running from a repo
+  checkout. Wheel installs without the repo silently omit these, and
+  external users supply their own via `--config-dir`.
+- **Hydra only discovers `.yaml` files for group resolution**, so eval
+  group files under `_internal/shared/eval/`, the canonical eval leaves
+  at `<org>/<model>/<train_set>/eval__<predict_set>.yaml`, and the
+  `_internal/leaf/` symlinks all use `.yaml`.
+  Lightning-side train and predict leaves stay `.yml` (they compose
+  through `viscy_utils.compose`, which is extension-agnostic).
+
+Selecting a group on the CLI: `<group>=<option>` (no `+` prefix needed — groups are
+declared as `optional` in `eval.yaml`).
+
+`target_name` ∈ {`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`} — selects the `aicssegmentation` workflow. The first four map 1:1 with the `target` group's
+`target_name` field; `nucleoli` and `lysosomes` have no ready-made target group yet
+and must be set directly (`target_name=…`).
+
+### Minimal example — pixel + mask metrics only
+
+```bash
+uv run dynacell evaluate \
+  target=er_sec61b \
+  predict_set=ipsc_confocal \
+  io.pred_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/fnet3d_sec61b.zarr \
+  save.save_dir=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_fnet3d_sec61b
+```
+
+The older field-by-field form still works and composes cleanly with groups; any
+field set directly on the CLI overrides the group:
+
+```bash
+uv run dynacell evaluate \
+  target=er_sec61b \
+  io.gt_path=/some/other/SEC61B.zarr \   # leaf wins over group
+  io.pred_path=… save.save_dir=… pixel_metrics.spacing=[0.29,0.108,0.108]
+```
+
+### Smoke test on a subset
+
+```bash
+uv run dynacell evaluate ... limit_positions=10
+```
+
+### Shared Hugging Face hub cache (DINOv3 weights)
+
+`dynacell evaluate` and `dynacell precompute-gt` default `HF_HUB_CACHE`
+to
+`/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache/`
+when they detect a repo checkout, so gated HF models (DINOv3) are
+downloaded once per team instead of once per user to per-home
+`~/.cache/huggingface/hub/`. If you already export `HF_HUB_CACHE`
+yourself the auto-setter backs off. Wheel-install users fall through to
+the normal per-user HF default.
+
+**HF_HUB_CACHE, not HF_HOME.** `HF_HOME` relocates the whole HF
+directory including the auth token file, which would break per-user
+gated-repo ACLs (HF returns 401 because the token at
+`~/.cache/huggingface/token` is no longer where HF looks for it).
+`HF_HUB_CACHE` only relocates weights/datasets; tokens stay per-user
+and each user's gate access is enforced separately.
+
+First-time setup is one-time per team: one member with gated-repo
+access (see `https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m`)
+runs any eval command that triggers the DINOv3 download; everyone else
+thereafter reuses the shared weights on disk — those reads don't hit HF
+and don't need a token.
+
+### Enable feature metrics (DINOv3 + DynaCLR)
+
+The `feature_extractor/dinov3=lvd1689m` and
+`feature_extractor/dynaclr=default` groups are auto-selected in
+`eval.yaml`'s defaults list on a repo checkout, so you don't need to
+pass them unless you're swapping variants. Turn
+`compute_feature_metrics=true` to enable the feature-metrics branch:
+
+```bash
+uv run dynacell evaluate \
+  target=er_sec61b \
+  predict_set=ipsc_confocal \
+  compute_feature_metrics=true \
+  io.pred_path=/hpc/.../fnet3d_sec61b.zarr \
+  save.save_dir=/hpc/.../eval_fnet3d_sec61b
+```
+
+`io.cell_segmentation_path` comes from the `target` group; the pipeline requires
+it to be non-null when feature metrics are on.
+
+To use a non-canonical DynaCLR checkpoint, override the field directly:
+```bash
+uv run dynacell evaluate … \
+  feature_extractor.dynaclr.checkpoint=/hpc/.../other.ckpt
+```
+
+To disable DINOv3 or DynaCLR on a repo checkout (e.g. to isolate one
+feature family), pin the group back to `null`:
+```bash
+uv run dynacell evaluate … feature_extractor/dinov3=null
+```
+
+### External users: authoring your own groups
+
+`pip install dynacell` ships only the schema and path-free reference groups
+(eval.yaml, precompute.yaml, feature_extractor/dinov3/lvd1689m, predict_set/ipsc_confocal,
+spectral_pcc/*). Our HPC-bound groups (the `target/*` files,
+`feature_extractor/dynaclr/default`, and the `leaf/` eval-leaf symlinks)
+live under `configs/benchmarks/virtual_staining/_internal/` in the repo
+checkout and won't be present in a wheel-only install — they point at
+paths and checkpoints external users don't have.
+
+To evaluate your own predictions, write your own group files and point Hydra at
+them with `--config-dir`. A minimal target file:
+
+```yaml
+# File: my_configs/target/mine.yaml
+# @package _global_         # REQUIRED: writes into root, not under 'target.*'
+target_name: er             # one of: nucleus, membrane, nucleoli, lysosomes, er, mitochondria
+io:
+  gt_path: /data/mine/gt.zarr
+  cell_segmentation_path: /data/mine/seg.zarr
+  gt_channel_name: MyGroundTruthChannel
+  pred_channel_name: MyPredictionChannel
+```
+
+Wheel-only users: either author a dynacell manifest YAML and set
+`DYNACELL_MANIFEST_ROOTS` (so `benchmark.dataset_ref` resolves through
+the hook in `_ref_hook.py`), or set `io.*` fields directly on the CLI
+as in the minimal example above.
+
+Run with:
+```bash
+dynacell evaluate --config-dir /absolute/path/to/my_configs \
+  target=mine predict_set=ipsc_confocal \
+  io.pred_path=/path/to/predictions.zarr \
+  save.save_dir=/path/to/out
+```
+
+**Common footguns:**
+
+- Omitting the `# @package _global_` directive on line 1 makes the file's
+  contents land at `cfg.target.target_name` instead of `cfg.target_name`;
+  the schema fields (`target_name`, `io.*`) stay `???` and the pipeline
+  fails with `MissingMandatoryValue` — not an obviously-linked error.
+- Saving your group file as `.yml` instead of `.yaml`. Hydra's group
+  resolver looks for `.yaml` specifically, so the group is silently
+  undiscoverable and the `target=mine` selector raises
+  `MissingConfigException`.
+
+### Benchmark eval leaves
+
+Canonical evaluations for the virtual-staining benchmarks are checked in
+under
+`applications/dynacell/configs/benchmarks/virtual_staining/<organelle>/<model>/<train_set>/eval__<predict_set>.yaml`,
+next to the matching train and predict leaves for the same training run.
+Each leaf pins every group selection, paths, and the save directory — run
+one by selecting it as the `leaf` group:
+
+```bash
+uv run dynacell evaluate leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal
+```
+
+The current set mirrors the predict benchmark tree one-to-one:
+`(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides still
+apply on top (e.g. `limit_positions=1`, `compute_feature_metrics=false`,
+`save.save_dir=/tmp/…` for smoke tests).
+
+Hydra resolves `leaf=<path>` through a symlink tree at
+`configs/benchmarks/virtual_staining/_internal/leaf/<path>.yaml` that
+aliases the canonical eval leaves. Two `hydra.searchpath` roots are
+injected by `dynacell.__main__`: `_internal/` (for the `leaf/` tree)
+and `_internal/shared/eval/` (for `target/` and
+`feature_extractor/dynaclr/`). Wheel-only installs without the repo
+checkout won't see any of these — see "External users" above for
+authoring your own.
+
+### Force recompute
+
+The `force_recompute` block has one flag per cacheable artifact plus a shortcut:
+
+| Flag | What it invalidates |
+|---|---|
+| `force_recompute.final_metrics` | Saved CSV/NPY under `save.save_dir` — forces a full re-run of the eval loop. |
+| `force_recompute.gt_masks` | Cached target-side organelle masks for `target_name`. |
+| `force_recompute.gt_cp` | Cached target-side CP regionprops features. |
+| `force_recompute.gt_dinov3` | Cached target-side DINOv3 features for the current model name. |
+| `force_recompute.gt_dynaclr` | Cached target-side DynaCLR features for the current `(ckpt_sha256, encoder_config_sha256)`. |
+| `force_recompute.all` | All of the above. |
+
+Examples:
+
+```bash
+# Regenerate only DINOv3 features, keep everything else cached:
+uv run dynacell evaluate ... io.gt_cache_dir=/path/to/cache force_recompute.gt_dinov3=true
+
+# Nuke everything and rebuild:
+uv run dynacell evaluate ... io.gt_cache_dir=/path/to/cache force_recompute.all=true
+```
+
+Without `io.gt_cache_dir`, the cache layer is a no-op (same behavior as before the cache landed), and only `force_recompute.final_metrics` / `.all` have any effect — they control whether the saved CSVs are rebuilt.
+
+## GT artifact cache
+
+Set `io.gt_cache_dir` to write and read back GT-side artifacts so subsequent eval runs skip the expensive per-FOV segmentation and per-cell feature extraction. Typical speedup on SEC61B: ~2× on the second eval run, and scaling with the number of evaluations against the same GT.
+
+### Layout
+
+```
+{gt_cache_dir}/
+  manifest.yaml                          # built_at, params, positions per artifact
+  organelle_masks/{target_name}.zarr     # HCS plate; channel target_seg (bool)
+  features/cp.zarr                       # zarr group, arrays at {row}/{col}/{fov}/t{t}
+  features/dinov3/{model_slug}.zarr      # one plate per model name
+  features/dynaclr/{ckpt_sha12}.zarr     # one plate per (checkpoint, encoder_config)
+```
+
+Cache identity is the tuple `(cache_schema_version, gt_path, gt_channel_name, cell_segmentation_path)`. A mismatch raises `StaleCacheError` — no silent mis-serving when you change GT channel, swap segmentations, or bump the computation-logic version.
+
+The DynaCLR checkpoint hash (`ckpt_sha256_12`) is memoized to a
+`<ckpt>.sha256` sidecar next to the checkpoint and reused across eval
+runs as long as the sidecar's mtime is ≥ the checkpoint's. Touch or
+replace the checkpoint and the hash recomputes automatically.
+
+### Shared `gt_cache_dir` race
+
+Resolving `io.gt_cache_dir` from the manifest means the default workflow writes to a shared location like `/hpc/projects/.../eval_cache/SEC61B`. `flush_manifest` and the per-artifact writers in `pipeline_cache.py` are not lock-protected, so two concurrent `dynacell precompute-gt` runs on the same target will race on the manifest.
+
+Workarounds:
+- Serialize your precompute runs manually per target (the current paper workflow).
+- Override `io.gt_cache_dir=/scratch/me/cache/X` at the CLI to write to a private directory. The hook's strict collision check accepts this override as long as no conflicting value from the manifest is in play.
+
+Adding an `flock` on the manifest is a follow-up, not blocking for the paper workflow.
+
+### Priming the cache
+
+All four cache families (`masks`, `cp`, `dinov3`, `dynaclr`) build by
+default, and `feature_extractor/dinov3=lvd1689m` and
+`feature_extractor/dynaclr=default` are auto-selected via
+`eval.yaml`'s defaults list on a repo checkout. `io.gt_cache_dir` now
+comes from the manifest via `benchmark.dataset_ref` — both the
+`target` group (contributing `dataset_ref.target`) and the
+`predict_set` group (contributing `dataset_ref.dataset`) are needed
+for the hook to resolve the manifest entry. So a full prime still
+needs only the target and predict-set selectors:
+
+```bash
+uv run dynacell precompute-gt target=er_sec61b predict_set=ipsc_confocal
+```
+
+For an ad-hoc prime without the HPC groups, set the equivalent fields
+directly:
+
+```bash
+uv run dynacell precompute-gt \
+  target_name=er \
+  io.gt_path=/hpc/.../SEC61B.zarr \
+  io.cell_segmentation_path=/hpc/.../SEC61B_segmented_cleaned.zarr \
+  io.gt_cache_dir=/hpc/.../cache/SEC61B \
+  pixel_metrics.spacing=[0.29,0.108,0.108] \
+  feature_extractor.dinov3.pretrained_model_name=facebook/dinov3-vitl16-pretrain-lvd1689m \
+  feature_extractor.dynaclr.checkpoint=/path/to/dynaclr.ckpt \
+  'feature_extractor.dynaclr.encoder={backbone: resnet50, in_channels: 1, ...}'
+```
+
+`build.*` toggles let you skip families you don't need — for example,
+mask-only:
+
+```bash
+uv run dynacell precompute-gt ... build.cp=false build.dinov3=false build.dynaclr=false
+```
+
+### Parallel sweeps
+
+After a full precompute, launch many `dynacell evaluate` jobs in parallel against the same cache with `io.require_complete_cache=true`. Missing entries now raise `StaleCacheError` instead of triggering concurrent writes (zarr `mode="a"` is not safe under concurrent write).
+
+```bash
+uv run dynacell evaluate ... io.gt_cache_dir=/hpc/.../cache/SEC61B io.require_complete_cache=true
+```
+
+### Cache invalidation
+
+We deliberately do **not** fingerprint the GT or cell_segmentation zarr *contents*. If you modify them in place, either bump `cache_schema_version` in `cache.py`, set the appropriate `force_recompute.*` flag, or delete `{gt_cache_dir}/`.
+
+## Outputs
+
+Under `save.save_dir`:
+
+```
+pixel_metrics.csv / .npy        # per-FOV per-timepoint pixel metrics
+mask_metrics.csv / .npy         # per-FOV per-timepoint mask metrics
+feature_metrics.csv / .npy      # per-FOV per-timepoint feature metrics (if enabled)
+segmentation_results.zarr       # HCS plate, channels: [prediction_seg, target_seg]
+pixel_metrics/*.png             # bar/violin plots per metric
+mask_metrics/*.png
+feature_metrics/*.png
+```
+
+## Installation
+
+Evaluation pulls heavy optional deps (`aicssegmentation`, `segmenter-model-zoo`, `cubic`, `microssim`, `transformers`, `dynaclr`). Install them with the `eval` extra:
+
+```bash
+uv pip install -e "applications/dynacell[eval]"
+```

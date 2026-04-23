@@ -1,0 +1,24 @@
+# FNet3D paper-baseline fit overlay — model + trainer only.
+# HCS data hparams (including the mean/std Structure normalization and
+# the 8-crops-per-FOV sampling that diverge from the CellDiff/UNetViT
+# conventions) live in data_overlays/fnet3d_paper_fit.yml; single-store
+# train leaves compose both, joint (BatchedConcatDataModule) leaves
+# compose only this one and author data: themselves.
+#
+# Reproduces pytorch_fnet paper defaults on DynaCell data. Reference run
+# (launched before this schema existed):
+#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/
+base:
+  - ../../../../../../recipes/models/fnet3d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+seed_everything: 0
+model:
+  init_args:
+    loss_function:
+      class_path: torch.nn.MSELoss
+    lr: 0.001
+    schedule: Constant
+trainer:
+  precision: 32-true
+  max_steps: 200000

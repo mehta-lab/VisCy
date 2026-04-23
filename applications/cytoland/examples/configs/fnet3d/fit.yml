@@ -3,7 +3,8 @@
 # FNet3D: supervised training (Ounkomol et al. 2018).
 # Usage: python -m cytoland fit --config fnet3d/fit.yml
 base:
-  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
   - ../recipes/data/hcs_nuc_mem_3d.yml
   - ../recipes/models/fnet3d.yml
 
@@ -13,6 +14,8 @@ model:
     schedule: Constant
 
 trainer:
+  precision: 16-mixed
+  max_epochs: 200
   max_steps: 50000
 
 data:

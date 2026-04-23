@@ -1,0 +1,37 @@
+# UNetViT3D fit on membrane (Membrane channel of cell.zarr) — AICS iPSC confocal.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  train_set: ipsc_confocal
+  model_name: unetvit3d
+  experiment_id: membrane__ipsc_confocal__unetvit3d
+
+trainer:
+  logger:
+    init_args:
+      name: UNetViT3D_iPSC_MEMB
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb_temp/unetvit3d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb_temp/unetvit3d/checkpoints
+
+launcher:
+  job_name: UNetViT3D_MEMB
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb_temp/unetvit3d

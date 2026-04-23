@@ -118,6 +118,9 @@ class HCSPredictionWriter(BasePredictionWriter):
     ----------
     output_store : str
         Path to the zarr store to store output.
+    overwrite : bool, optional
+        When True, overwrite existing prediction channels in the output
+        store instead of raising an error. Default False.
     write_input : bool, optional
         Write the source and target channels too
         (must be writing to a new store), by default False.
@@ -128,11 +131,13 @@ class HCSPredictionWriter(BasePredictionWriter):
     def __init__(
         self,
         output_store: str,
+        overwrite: bool = False,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
     ) -> None:
         super().__init__(write_interval)
         self.output_store = output_store
+        self.overwrite = overwrite
         self.write_input = write_input
         self._dataset_scale = None
 
@@ -175,11 +180,31 @@ class HCSPredictionWriter(BasePredictionWriter):
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
-                with open_ome_zarr(self.output_store, mode="r+") as plate:
-                    for _, pos in plate.positions():
-                        for ch in prediction_channel:
-                            pos.append_channel(ch, resize_arrays=True)
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
+                # Validate all positions before mutating any.
+                needs_append: list[tuple[Position, list[str]]] = []
+                for _, pos in self.plate.positions():
+                    existing = set(pos.channel_names)
+                    missing = [ch for ch in prediction_channel if ch not in existing]
+                    for ch in prediction_channel:
+                        if ch in existing and not self.overwrite:
+                            self.plate.close()
+                            raise FileExistsError(
+                                f"Channel '{ch}' already exists in "
+                                f"'{self.output_store}'. "
+                                f"Set overwrite=True to replace."
+                            )
+                        elif ch in existing and self.overwrite:
+                            _logger.info(
+                                "Overwriting existing channel '%s' in '%s'.",
+                                ch,
+                                self.output_store,
+                            )
+                    if missing:
+                        needs_append.append((pos, missing))
+                for pos, channels in needs_append:
+                    for ch in channels:
+                        pos.append_channel(ch, resize_arrays=True)
         else:
             channel_names = prediction_channel
             if self.write_input:

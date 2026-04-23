@@ -1,0 +1,14 @@
+# Canonical DynaCLR encoder for organelle-sensor virtual-staining eval.
+# Encoder kwargs sourced from the pre-refactor dynaclr repo
+# (github.com/czbiohub-sf/dynacell @ a9d5c5a76f25dd15d701ab720b62f93f3511ee51,
+# dynacell/evaluation/utils.py DynaCLRFeatureExtractor.__init__).
+checkpoint: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt
+encoder:
+  backbone: convnext_tiny
+  in_channels: 1
+  in_stack_depth: 1
+  stem_kernel_size: [1, 4, 4]
+  stem_stride: [1, 4, 4]
+  embedding_dim: 768
+  projection_dim: 32
+  drop_path_rate: 0.0

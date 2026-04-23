@@ -1,0 +1,30 @@
+# Target: mitochondria (TOMM20 marker). data_path / source_channel /
+# target_channel resolved from the manifest via dataset_ref.
+benchmark:
+  target: mito
+  gene: TOMM20
+  target_id: mito_tomm20
+  dataset_ref:
+    target: tomm20
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [13, 624, 624]
+          num_samples: 2

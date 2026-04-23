@@ -1,21 +1,21 @@
 import yaml
 from pytest import raises
 
-from viscy_utils.compose import _deep_merge, load_composed_config
+from viscy_utils.compose import deep_merge, load_composed_config
 
 
 def test_deep_merge_flat():
     """Override replaces base keys, new keys are added."""
     base = {"a": 1, "b": 2}
     override = {"b": 3, "c": 4}
-    assert _deep_merge(base, override) == {"a": 1, "b": 3, "c": 4}
+    assert deep_merge(base, override) == {"a": 1, "b": 3, "c": 4}
 
 
 def test_deep_merge_nested():
     """Nested dicts are merged recursively, not replaced."""
     base = {"model": {"lr": 0.01, "layers": 3}}
     override = {"model": {"lr": 0.001}}
-    result = _deep_merge(base, override)
+    result = deep_merge(base, override)
     assert result == {"model": {"lr": 0.001, "layers": 3}}
 
 
@@ -23,14 +23,14 @@ def test_deep_merge_list_replaces():
     """Lists are replaced entirely, not appended."""
     base = {"channels": ["A", "B"]}
     override = {"channels": ["C"]}
-    assert _deep_merge(base, override) == {"channels": ["C"]}
+    assert deep_merge(base, override) == {"channels": ["C"]}
 
 
 def test_deep_merge_does_not_mutate_inputs():
     """Neither base nor override is modified."""
     base = {"model": {"lr": 0.01}}
     override = {"model": {"lr": 0.001}}
-    _deep_merge(base, override)
+    deep_merge(base, override)
     assert base == {"model": {"lr": 0.01}}
     assert override == {"model": {"lr": 0.001}}
 
@@ -105,3 +105,56 @@ def test_load_composed_config_later_base_wins(tmp_path):
     (tmp_path / "train.yml").write_text(yaml.dump(leaf))
     result = load_composed_config(tmp_path / "train.yml")
     assert result == {"model": {"lr": 0.1}}
+
+
+def test_load_composed_config_resolver_none_identical(tmp_path):
+    """resolver=None returns the same dict as omitting the kwarg."""
+    (tmp_path / "recipe.yml").write_text(yaml.dump({"model": {"lr": 0.01, "n": 3}}))
+    leaf = {"base": ["recipe.yml"], "model": {"lr": 0.001}}
+    (tmp_path / "train.yml").write_text(yaml.dump(leaf))
+    without = load_composed_config(tmp_path / "train.yml")
+    with_none = load_composed_config(tmp_path / "train.yml", resolver=None)
+    assert without == with_none
+
+
+def test_load_composed_config_resolver_identity_roundtrip(tmp_path):
+    """resolver=lambda d: d leaves the composed dict untouched."""
+    (tmp_path / "recipe.yml").write_text(yaml.dump({"model": {"lr": 0.01}}))
+    leaf = {"base": ["recipe.yml"], "data": {"batch_size": 4}}
+    (tmp_path / "train.yml").write_text(yaml.dump(leaf))
+    expected = {"model": {"lr": 0.01}, "data": {"batch_size": 4}}
+    result = load_composed_config(tmp_path / "train.yml", resolver=lambda d: d)
+    assert result == expected
+
+
+def test_load_composed_config_resolver_sees_post_merge(tmp_path):
+    """The resolver receives the fully merged dict with base: already stripped."""
+    (tmp_path / "recipe.yml").write_text(yaml.dump({"model": {"lr": 0.01}}))
+    leaf = {"base": ["recipe.yml"], "data": {"batch_size": 4}}
+    (tmp_path / "train.yml").write_text(yaml.dump(leaf))
+
+    captured: list[dict] = []
+
+    def capture(d: dict) -> dict:
+        captured.append(d)
+        return d
+
+    load_composed_config(tmp_path / "train.yml", resolver=capture)
+    assert captured == [{"model": {"lr": 0.01}, "data": {"batch_size": 4}}]
+    assert "base" not in captured[0]
+
+
+def test_load_composed_config_resolver_runs_once_nested_base(tmp_path):
+    """Nested base: resolution must invoke the resolver exactly once."""
+    (tmp_path / "grandparent.yml").write_text(yaml.dump({"a": 1}))
+    (tmp_path / "parent.yml").write_text(yaml.dump({"base": ["grandparent.yml"], "b": 2}))
+    (tmp_path / "child.yml").write_text(yaml.dump({"base": ["parent.yml"], "c": 3}))
+
+    counter = {"n": 0}
+
+    def count(d: dict) -> dict:
+        counter["n"] += 1
+        return d
+
+    load_composed_config(tmp_path / "child.yml", resolver=count)
+    assert counter["n"] == 1

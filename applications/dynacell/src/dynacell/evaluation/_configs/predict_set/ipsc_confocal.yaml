@@ -1,0 +1,5 @@
+# @package _global_
+# Predict set group: AICS iPSC confocal.
+benchmark:
+  dataset_ref:
+    dataset: aics-hipsc

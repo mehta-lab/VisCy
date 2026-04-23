@@ -1,0 +1,15 @@
+# Train set: AICS iPSC confocal. dataset_ref.dataset lives here (dataset
+# identity is train_set-scoped); target fragments carry dataset_ref.target
+# and declare source_channel themselves.
+benchmark:
+  train_set: ipsc_confocal
+  dataset_group: aics-hipsc
+  dataset_ref:
+    dataset: aics-hipsc
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    split_ratio: 0.8
+    mmap_preload: true
+    scratch_dir: /dev/shm
+    persistent_workers: true

@@ -1,0 +1,6 @@
+# @package _global_
+# Target group: mitochondria marked by TOMM20, iPSC dataset v4 test split.
+target_name: mitochondria
+benchmark:
+  dataset_ref:
+    target: tomm20

@@ -146,6 +146,25 @@ class BatchedConcatDataset(ConcatDataset):
             sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return dataset_idx, sample_idx
 
+    @staticmethod
+    def _batched_get(dataset: Dataset, indices: list[int]) -> dict[str, torch.Tensor]:
+        """Return a batched sample dict from *dataset* for the given indices.
+
+        Fast path: delegate to ``dataset.__getitems__`` when implemented
+        (e.g. ``TripletDataset``, which amortizes zarr/tensorstore I/O
+        across a batch).
+
+        Fallback: call ``__getitem__`` per index and collate with
+        ``_collate_samples``. This lets datasets with single-sample
+        semantics (e.g. ``SlidingWindowDataset``, whose per-sample retry
+        logic for nonzero-fraction filtering doesn't map cleanly to a
+        batched read) participate in ``BatchedConcatDataModule`` without
+        having to duplicate their read path as a batched method.
+        """
+        if hasattr(dataset, "__getitems__"):
+            return dataset.__getitems__(indices)
+        return _collate_samples([dataset[i] for i in indices])
+
     def __getitems__(self, indices: list[int]) -> list[dict[str, torch.Tensor]]:
         """Return micro-batches grouped by constituent dataset."""
         grouped_indices = defaultdict(list)
@@ -156,7 +175,7 @@ class BatchedConcatDataset(ConcatDataset):
 
         micro_batches = []
         for dataset_idx, sample_indices in grouped_indices.items():
-            micro_batch = self.datasets[dataset_idx].__getitems__(sample_indices)
+            micro_batch = self._batched_get(self.datasets[dataset_idx], sample_indices)
             micro_batch["_dataset_idx"] = dataset_idx
             micro_batches.append(micro_batch)
 
@@ -246,29 +265,42 @@ class ConcatDataModule(LightningDataModule):
 
 
 class BatchedConcatDataModule(ConcatDataModule):
-    """Concatenated data module with batched micro-batch GPU transforms."""
+    """Concatenated data module with batched micro-batch GPU transforms.
+
+    Under DDP, attaches ``ShardedDistributedSampler`` so each rank
+    iterates a disjoint shard while preserving the existing
+    micro-batch-to-single-batch contract.
+    """
 
     _ConcatDataset = BatchedConcatDataset
 
+    def _maybe_sampler(self, dataset: Dataset, shuffle: bool) -> ShardedDistributedSampler | None:
+        """Return a distributed sampler if DDP is initialized, else None."""
+        return ShardedDistributedSampler(dataset, shuffle=shuffle) if torch.distributed.is_initialized() else None
+
     def train_dataloader(self):
-        """Return batched concatenated training data loader."""
+        """Return batched concatenated training data loader with optional DDP sampling."""
+        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False if sampler else True,
+            sampler=sampler,
             drop_last=True,
             collate_fn=lambda x: x,
             **self._dataloader_kwargs(),
         )
 
     def val_dataloader(self):
-        """Return batched concatenated validation data loader."""
+        """Return batched concatenated validation data loader with optional DDP sampling."""
+        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False,
+            sampler=sampler,
             drop_last=False,
             collate_fn=lambda x: x,
             **self._dataloader_kwargs(),

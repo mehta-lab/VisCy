@@ -1,0 +1,7 @@
+# Single-GPU training. strategy=auto lets Lightning pick single_device;
+# plain ddp at devices=1 would add pointless process-group overhead.
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1

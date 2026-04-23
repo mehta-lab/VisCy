@@ -32,15 +32,49 @@ dynamic = [ "version" ]
 dependencies = [
   "lightning>=2.3",
   "monai",
+  "omegaconf",
+  "pydantic>=2",
   "viscy-data",
   "viscy-models[celldiff]",
   "viscy-transforms",
   "viscy-utils",
 ]
-
+optional-dependencies.eval = [
+  "accelerate>=1.13",
+  "aicsmlsegment",
+  "aicssegmentation",
+  "cellpose",
+  "cubic==0.7.0a2",
+  "dynaclr",
+  "hydra-core>=1.2",
+  "iohub",
+  "itk",
+  "matplotlib",
+  "microssim @ git+https://github.com/juglab/microssim.git@8bccb17d",
+  "pandas",
+  "scikit-image",
+  "scipy",
+  "segmenter-model-zoo",
+  "tqdm",
+  "transformers",
+]
+optional-dependencies.eval_gpu = [
+  "cucim-cu12",
+  "cupy-cuda12x",
+]
+optional-dependencies.preprocess = [
+  "iohub",
+  "tqdm",
+]
+optional-dependencies.report = [
+  "hydra-core>=1.2",
+  "matplotlib",
+  "pandas",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
+
 scripts.dynacell = "dynacell.__main__:main_cli"
 
 [dependency-groups]
@@ -50,6 +84,9 @@ test = [
   "pytest-cov>=7",
   "tensorboard",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

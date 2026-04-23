@@ -1,0 +1,13 @@
+# Hardware profile: single H200 GPU. Pair with recipes/topology/single_gpu.yml.
+# launcher.sbatch.gpus must match the topology recipe's trainer.devices
+# (enforced by submit_benchmark_job).
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 32
+    gpus: 1
+    mem: "256G"
+    constraint: "h200"
+    time: "4-00:00:00"

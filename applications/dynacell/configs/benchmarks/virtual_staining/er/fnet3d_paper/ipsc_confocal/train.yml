@@ -1,0 +1,39 @@
+# FNet3D paper-baseline fit on ER (SEC61B marker) — AICS iPSC confocal.
+# Reproduces the trained run at
+# /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: fnet3d_paper
+  experiment_id: er__ipsc_confocal__fnet3d_paper
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_iPSC_SEC61B_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaper_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper
