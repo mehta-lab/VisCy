@@ -223,6 +223,33 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         assert sampler.temporal_enrichment is False
 
 
+class TestTrainDataloaderWiresDDPTopology:
+    """train_dataloader must forward Trainer world_size/rank to the sampler."""
+
+    def test_reads_world_size_and_rank_from_trainer(self, two_experiments):
+        from types import SimpleNamespace
+
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        parquet_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            cell_index_path=str(parquet_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=["exp_b"],
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            batch_group_by="experiment",
+            stratify_by="perturbation",
+            temporal_enrichment=False,
+        )
+        dm.setup("fit")
+        dm.__dict__["trainer"] = SimpleNamespace(world_size=4, global_rank=2)
+        sampler = dm.train_dataloader().batch_sampler
+        assert (sampler.num_replicas, sampler.rank) == (4, 2)
+
+
 class TestValDataloaderNoBatchSampler:
     """Validation should be deterministic without FlexibleBatchSampler."""
 

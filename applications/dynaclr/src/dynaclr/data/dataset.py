@@ -918,4 +918,12 @@ class MultiExperimentTripletDataset(Dataset):
         rescaled = []
         for i in range(len(patches)):
             rescaled.append(_rescale_patch(read_tensors[i], scales[i], targets[i]))
+        channel_counts = {t.shape[0] for t in rescaled}
+        if len(channel_counts) > 1:
+            raise RuntimeError(
+                f"Batch mixes samples with different channel counts: {sorted(channel_counts)}. "
+                "This happens with channels_per_sample=None across experiments that have "
+                "different channel counts. Set channels_per_sample=1 (bag-of-channels) "
+                "or channels_per_sample=[...] (fixed channel list)."
+            )
         return torch.stack(rescaled), norms
