@@ -245,8 +245,6 @@ class TestTrainDataloaderWiresDDPTopology:
             temporal_enrichment=False,
         )
         dm.setup("fit")
-        # Bypass LightningDataModule.trainer descriptor state check; we
-        # only need world_size/global_rank to flow into the sampler.
         dm.__dict__["trainer"] = SimpleNamespace(world_size=4, global_rank=2)
         sampler = dm.train_dataloader().batch_sampler
         assert (sampler.num_replicas, sampler.rank) == (4, 2)

@@ -602,9 +602,14 @@ class MultiExperimentDataModule(LightningDataModule):
     def _ddp_topology(self) -> tuple[int, int]:
         """Return ``(num_replicas, rank)`` for the current trainer.
 
+        Lightning's auto-wrap hook only passes ``world_size``/``rank`` to
+        ``sampler``, not ``batch_sampler``. With ``use_distributed_sampler:
+        false`` and a batch sampler, the datamodule must read them from the
+        trainer itself and forward them; otherwise every rank iterates the
+        full sequence and yields identical batches.
+
         Returns ``(1, 0)`` when no trainer is attached (e.g. bare
-        dataloader construction in tests). This is safe because
-        single-process runs still produce the full batch sequence.
+        dataloader construction in tests).
         """
         trainer = getattr(self, "trainer", None)
         if trainer is None:
@@ -613,12 +618,6 @@ class MultiExperimentDataModule(LightningDataModule):
 
     def train_dataloader(self) -> ThreadDataLoader:
         """Return training data loader with FlexibleBatchSampler."""
-        # Why: Lightning's auto-wrap hook (which would pass world_size/rank)
-        # only targets ``sampler``, not ``batch_sampler``. With
-        # ``use_distributed_sampler: false`` and a batch sampler, we must
-        # pass the DDP topology ourselves. Without this, every rank
-        # iterates the full sequence and yields identical batches, turning
-        # 4-GPU DDP into 4× redundant compute on the same data.
         num_replicas, rank = self._ddp_topology()
         sampler = FlexibleBatchSampler(
             valid_anchors=self.train_dataset.index.valid_anchors,

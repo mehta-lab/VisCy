@@ -299,11 +299,6 @@ class FlexibleBatchSampler(Sampler[list[int]]):
         iteration and the advance will take the resumed epoch as its
         starting point.
         """
-        # Why: Lightning does not call ``set_epoch`` on ``batch_sampler``
-        # instances. Without self-advancement every epoch replays the
-        # same sequence, freezing the dataset at 0.5% coverage. Advance
-        # BEFORE iteration so the seed changes even when Lightning cuts
-        # the generator short via ``limit_train_batches``.
         seed_offset = self.epoch
         self.epoch += 1
         rng = np.random.default_rng(self.seed + seed_offset)

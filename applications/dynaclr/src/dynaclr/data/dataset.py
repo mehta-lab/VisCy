@@ -918,13 +918,6 @@ class MultiExperimentTripletDataset(Dataset):
         rescaled = []
         for i in range(len(patches)):
             rescaled.append(_rescale_patch(read_tensors[i], scales[i], targets[i]))
-        # _rescale_patch brings Z/Y/X to target, but channel count is fixed
-        # by the upstream channel-selection path. If batches mix samples
-        # with different C (e.g. channels_per_sample=None on a parquet
-        # whose experiments have different channel counts), torch.stack
-        # silently fails with a cryptic "tensors not equal size" error
-        # deep in a dataloader thread. Catch it here with an actionable
-        # message.
         channel_counts = {t.shape[0] for t in rescaled}
         if len(channel_counts) > 1:
             raise RuntimeError(
