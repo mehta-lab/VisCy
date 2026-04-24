@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,31 @@ import submit_benchmark_job as sbj  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
+
+
+FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
+
+
+@pytest.fixture(scope="module")
+def rendered_celldiff_sbatch():
+    """Render the celldiff leaf once per module; tests below share the output.
+
+    Module-scoped fixtures run before conftest's function-scoped autouse
+    monkeypatch, so ``DYNACELL_MANIFEST_ROOTS`` must be set here via a
+    module-scoped ``MonkeyPatch``. ``capsys`` is also function-scoped —
+    use ``contextlib.redirect_stdout`` instead.
+    """
+    mp = pytest.MonkeyPatch()
+    mp.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
+    try:
+        leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = sbj.submit([str(leaf), "--print-script"])
+        assert rc == 0
+        yield buf.getvalue()
+    finally:
+        mp.undo()
 
 
 def test_parse_override_scalar_and_nested():
@@ -91,42 +118,27 @@ def test_rendered_sbatch_has_srun_at_expected_resolved_path(capsys, leaf_subpath
     assert expected_resolved_prefix in srun_line
 
 
-def test_rendered_sbatch_has_preflight_srun_absolute_path(capsys):
+def test_rendered_sbatch_has_preflight_srun_absolute_path(rendered_celldiff_sbatch):
     """Preflight srun invokes nccl_smoke_test.py by absolute path (no bare ``applications/...``)."""
-    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
-    rc = sbj.submit([str(leaf), "--print-script"])
-    assert rc == 0
-    rendered = capsys.readouterr().out
-
-    preflight_line = next(line for line in rendered.splitlines() if "nccl_smoke_test.py" in line and "srun" in line)
-    # Absolute path: the token after the python interpreter starts with ``/``.
+    preflight_line = next(
+        line for line in rendered_celldiff_sbatch.splitlines() if "nccl_smoke_test.py" in line and "srun" in line
+    )
     script_token = preflight_line.split()[-1]
     assert script_token.startswith("/"), f"preflight srun used relative path: {preflight_line!r}"
     assert script_token.endswith("/applications/dynacell/tools/nccl_smoke_test.py")
 
 
-def test_repo_root_substituted_in_preflight_path(capsys):
+def test_repo_root_substituted_in_preflight_path(rendered_celldiff_sbatch):
     """``@@repo_root`` resolves to the actual VisCy repo root (not left unsubstituted)."""
-    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
-    rc = sbj.submit([str(leaf), "--print-script"])
-    assert rc == 0
-    rendered = capsys.readouterr().out
-
-    assert "@@repo_root" not in rendered
-    # The rendered path must point at the real file on disk.
+    assert "@@repo_root" not in rendered_celldiff_sbatch
     expected_path = str(REPO_ROOT / "applications" / "dynacell" / "tools" / "nccl_smoke_test.py")
-    assert expected_path in rendered
+    assert expected_path in rendered_celldiff_sbatch
 
 
-def test_preflight_failure_exits_before_main_srun(capsys):
+def test_preflight_failure_exits_before_main_srun(rendered_celldiff_sbatch):
     """``exit $SMOKE_RC`` appears ahead of the main dynacell srun line."""
-    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
-    rc = sbj.submit([str(leaf), "--print-script"])
-    assert rc == 0
-    rendered = capsys.readouterr().out
-
-    exit_idx = rendered.index("exit $SMOKE_RC")
-    main_srun_idx = rendered.index("srun uv run python -m dynacell")
+    exit_idx = rendered_celldiff_sbatch.index("exit $SMOKE_RC")
+    main_srun_idx = rendered_celldiff_sbatch.index("srun uv run python -m dynacell")
     assert exit_idx < main_srun_idx
 
 

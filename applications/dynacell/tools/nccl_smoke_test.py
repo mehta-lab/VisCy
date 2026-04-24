@@ -19,10 +19,15 @@ import torch.distributed as dist
 
 
 def main() -> int:
-    """Initialize NCCL, ``all_reduce`` a ones tensor, ``barrier``, and exit."""
-    os.environ.setdefault("RANK", os.environ["SLURM_PROCID"])
-    os.environ.setdefault("WORLD_SIZE", os.environ["SLURM_NTASKS"])
-    os.environ.setdefault("LOCAL_RANK", os.environ["SLURM_LOCALID"])
+    """Return 0 on successful NCCL init + all_reduce; raise on hang or NCCL error.
+
+    Non-zero exit (via unhandled exception) signals the calling sbatch script
+    to abort before the main training srun, skipping the 30-minute watchdog
+    wait on a bad node.
+    """
+    os.environ["RANK"] = os.environ["SLURM_PROCID"]
+    os.environ["WORLD_SIZE"] = os.environ["SLURM_NTASKS"]
+    os.environ["LOCAL_RANK"] = os.environ["SLURM_LOCALID"]
 
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)

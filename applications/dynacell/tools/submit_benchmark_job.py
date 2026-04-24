@@ -34,6 +34,8 @@ from viscy_utils.compose import deep_merge, load_composed_config
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 _SBATCH_DIRECTIVE_ORDER = (
     ("job_name", "--job-name"),
     ("time", "--time"),
@@ -208,19 +210,17 @@ def submit(argv: list[str] | None = None) -> int:
     resolved_path = resolved_dir / f"{mode}_{job_name}_{timestamp}.yml"
     sbatch_path = slurm_dir / f"{timestamp}_{job_name}.sbatch"
 
-    # repo_root is injected so the template can invoke the NCCL preflight
-    # script by absolute path. The rendered sbatch does not ``cd`` and is
-    # submitted from arbitrary CWDs, so a relative path would break.
-    repo_root = Path(__file__).resolve().parents[3]
-
     template_text = (Path(__file__).parent / "sbatch_template.sbatch").read_text()
+    # ``repo_root`` is substituted so the template invokes the NCCL preflight
+    # script by absolute path — the rendered sbatch does not ``cd`` and is
+    # submitted from arbitrary CWDs, so a relative path would break.
     rendered = SbatchTemplate(template_text).substitute(
         sbatch_directives=_render_sbatch_directives(job_name, str(run_root), sbatch),
         run_root=str(run_root),
         env_block=_render_env_block(env),
         mode=mode,
         resolved_config=str(resolved_path),
-        repo_root=str(repo_root),
+        repo_root=str(_REPO_ROOT),
     )
 
     if args.print_resolved_config:
