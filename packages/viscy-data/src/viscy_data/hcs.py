@@ -251,12 +251,7 @@ class HCSDataModule(LightningDataModule):
                 # Honor include/exclude_fov_names: cache only the positions
                 # that will actually be iterated during fit, so the buffer
                 # layout matches what _setup_fit's orig_positions expects.
-                positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
-                if not positions:
-                    raise ValueError(
-                        f"No positions left in {self.data_path} after applying "
-                        "include_fov_names / exclude_fov_names filters"
-                    )
+                positions = self._filtered_positions(plate)
                 ch_idx = [positions[0].get_channel_index(c) for c in all_ch]
                 arr0 = positions[0][self.array_key]
                 T = arr0.frames
@@ -415,16 +410,21 @@ class HCSDataModule(LightningDataModule):
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions)
 
+    def _filtered_positions(self, plate) -> list[Position]:
+        """Return plate positions kept by include/exclude_fov_names, raising if empty."""
+        positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
+        if not positions:
+            raise ValueError(
+                f"No positions left in {self.data_path} after applying include_fov_names / exclude_fov_names filters"
+            )
+        return positions
+
     def _setup_fit(self, dataset_settings: dict):
         """Set up the training and validation datasets."""
         train_transform, val_transform = self._fit_transform()
         dataset_settings["channels"]["target"] = self.target_channel
         with open_ome_zarr(self.data_path, mode="r") as plate:
-            orig_positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
-        if not orig_positions:
-            raise ValueError(
-                f"No positions left in {self.data_path} after applying include_fov_names / exclude_fov_names filters"
-            )
+            orig_positions = self._filtered_positions(plate)
 
         # shuffle positions, randomness is handled globally
         shuffled_indices = self._set_fit_global_state(len(orig_positions))
