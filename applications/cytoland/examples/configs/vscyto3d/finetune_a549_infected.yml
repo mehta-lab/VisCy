@@ -1,0 +1,168 @@
+# VSCyto3D: warm-start finetune on A549 infected-cell data from three microscopes.
+#
+# Sources:
+#   D1 = Hummingbird 2026-01-29, DAPI_Density3D + TXR_Density3D
+#   D2 = Hummingbird 2026-03-10, DAPI_Density3D + TXR_Density3D
+#   D3 = Mantis      2026-03-26, raw mCherry + raw Cy5 (27 FOVs held out for test)
+#
+# The three sub-DMs keep their native channel names; CombinedDataModule
+# (MAX_SIZE_CYCLE) pulls one sub-batch from each per step so every
+# microscope contributes equally to each gradient step regardless of
+# dataset size.
+#
+# Run D3 preprocess first to populate normalization_metadata:
+#   uv run viscy preprocess --data_path <D3_zarr> \
+#     --channel_names+ "Phase3D" \
+#     --channel_names+ "raw mCherry EX561 EM600-37" \
+#     --channel_names+ "raw Cy5 EX639 EM698-70"
+#
+# Usage:
+#   uv run python -m cytoland fit --config vscyto3d/finetune_a549_infected.yml
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
+  - ../recipes/models/unext2_3d.yml
+
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        ms_dssim_alpha: 0.5
+    lr: 0.0002
+    schedule: WarmupCosine
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/fcmae-cyto3d-sensor/vscyto3d-logs/hek-a549-ipsc-finetune/checkpoints/last.ckpt
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 50
+  logger:
+    init_args:
+      project: cytoland
+      name: VSCyto3D_ft_A549_infected
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cytoland/a549_infected/vscyto3d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cytoland/a549_infected/vscyto3d/checkpoints
+
+data:
+  class_path: viscy_data.combined.CombinedDataModule
+  init_args:
+    train_mode: MAX_SIZE_CYCLE
+    val_mode: SEQUENTIAL
+    data_modules:
+      # D1 — Hummingbird 2026-01-29
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          data_path: /hpc/projects/intracellular_dashboard/virtual_stain_ft_infected/2026_01_29_A549_H2B_CAAX_DAPI_DENV_ZIKV/2-concatenate_zarrv3/2026_01_29_A549_H2B_CAAX_DAPI_DENV_ZIKV.zarr
+          source_channel: Phase3D
+          target_channel: [DAPI_Density3D, TXR_Density3D]
+          z_window_size: 5
+          split_ratio: 0.8
+          batch_size: 16
+          num_workers: 8
+          yx_patch_size: [384, 384]
+          normalizations:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: timepoint_statistics
+                subtrahend: mean
+                divisor: std
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [DAPI_Density3D, TXR_Density3D]
+                level: timepoint_statistics
+                subtrahend: median
+                divisor: iqr
+
+      # D2 — Hummingbird 2026-03-10
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          data_path: /hpc/projects/intracellular_dashboard/virtual_stain_ft_infected/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV/3-VS_train_test/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV.zarr
+          source_channel: Phase3D
+          target_channel: [DAPI_Density3D, TXR_Density3D]
+          z_window_size: 5
+          split_ratio: 0.8
+          batch_size: 16
+          num_workers: 8
+          yx_patch_size: [384, 384]
+          normalizations:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: timepoint_statistics
+                subtrahend: mean
+                divisor: std
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [DAPI_Density3D, TXR_Density3D]
+                level: timepoint_statistics
+                subtrahend: median
+                divisor: iqr
+
+      # D3 — Mantis 2026-03-26 (27 FOVs held out for test)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/2-assemble/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
+          source_channel: Phase3D
+          target_channel:
+            - "raw mCherry EX561 EM600-37"
+            - "raw Cy5 EX639 EM698-70"
+          z_window_size: 5
+          split_ratio: 0.8
+          batch_size: 16
+          num_workers: 8
+          yx_patch_size: [384, 384]
+          exclude_fov_names:
+            - B/2/000000
+            - B/2/000001
+            - B/2/000002
+            - B/2/000003
+            - B/2/000004
+            - B/2/000005
+            - B/2/000006
+            - B/2/000007
+            - B/2/000008
+            - B/3/000004
+            - B/3/000005
+            - B/3/000006
+            - B/3/000007
+            - B/3/000008
+            - B/3/001000
+            - B/3/001001
+            - B/3/001002
+            - B/3/001003
+            - B/4/000000
+            - B/4/000001
+            - B/4/000002
+            - B/4/000003
+            - B/4/000006
+            - B/4/000007
+            - B/4/000008
+            - B/4/001000
+            - B/4/002000
+          normalizations:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: timepoint_statistics
+                subtrahend: mean
+                divisor: std
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys:
+                  - "raw mCherry EX561 EM600-37"
+                  - "raw Cy5 EX639 EM698-70"
+                level: timepoint_statistics
+                subtrahend: median
+                divisor: iqr

@@ -1,0 +1,60 @@
+# Data recipe: A549 infection finetune — Mantis, 2026-03-26 (D3).
+# Phase3D -> raw mCherry (nucleus H2B) + raw Cy5 (membrane CAAX). Per-timepoint normalization.
+# Excludes 27 FOVs held out as the Mantis test set (see 2026-02 Viral infection wiki).
+# Run `uv run viscy preprocess` on the zarr first to populate normalization_metadata.
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/2-assemble/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
+    source_channel: Phase3D
+    target_channel:
+      - "raw mCherry EX561 EM600-37"
+      - "raw Cy5 EX639 EM698-70"
+    z_window_size: 5
+    split_ratio: 0.8
+    batch_size: 16
+    num_workers: 8
+    yx_patch_size: [384, 384]
+    exclude_fov_names:
+      - B/2/000000
+      - B/2/000001
+      - B/2/000002
+      - B/2/000003
+      - B/2/000004
+      - B/2/000005
+      - B/2/000006
+      - B/2/000007
+      - B/2/000008
+      - B/3/000004
+      - B/3/000005
+      - B/3/000006
+      - B/3/000007
+      - B/3/000008
+      - B/3/001000
+      - B/3/001001
+      - B/3/001002
+      - B/3/001003
+      - B/4/000000
+      - B/4/000001
+      - B/4/000002
+      - B/4/000003
+      - B/4/000006
+      - B/4/000007
+      - B/4/000008
+      - B/4/001000
+      - B/4/002000
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys:
+            - "raw mCherry EX561 EM600-37"
+            - "raw Cy5 EX639 EM698-70"
+          level: timepoint_statistics
+          subtrahend: median
+          divisor: iqr

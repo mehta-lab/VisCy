@@ -1,0 +1,26 @@
+# Data recipe: A549 infection finetune — Hummingbird, 2026-03-10 (D2).
+# Phase3D -> DAPI (nucleus) + TXR (membrane). Per-timepoint normalization.
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/intracellular_dashboard/virtual_stain_ft_infected/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV/3-VS_train_test/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV.zarr
+    source_channel: Phase3D
+    target_channel: [DAPI_Density3D, TXR_Density3D]
+    z_window_size: 5
+    split_ratio: 0.8
+    batch_size: 16
+    num_workers: 8
+    yx_patch_size: [384, 384]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [DAPI_Density3D, TXR_Density3D]
+          level: timepoint_statistics
+          subtrahend: median
+          divisor: iqr
