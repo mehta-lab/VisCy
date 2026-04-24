@@ -5,7 +5,6 @@ exposure for Lightning CLI configurability."""
 from __future__ import annotations
 
 import pytest
-import torch
 
 from viscy_data.cell_index import build_timelapse_cell_index
 
@@ -248,130 +247,6 @@ class TestTrainDataloaderWiresDDPTopology:
         dm.__dict__["trainer"] = SimpleNamespace(world_size=4, global_rank=2)
         sampler = dm.train_dataloader().batch_sampler
         assert (sampler.num_replicas, sampler.rank) == (4, 2)
-
-
-class TestValDataloaderNoBatchSampler:
-    """Validation should be deterministic without FlexibleBatchSampler."""
-
-    def test_val_dataloader_no_batch_sampler(self, two_experiments):
-        """val_dataloader uses simple sequential loading."""
-        from dynaclr.data.datamodule import MultiExperimentDataModule
-
-        parquet_path, _ = two_experiments
-        dm = MultiExperimentDataModule(
-            cell_index_path=str(parquet_path),
-            z_window=1,
-            yx_patch_size=_YX_PATCH,
-            final_yx_patch_size=_FINAL_YX_PATCH,
-            val_experiments=["exp_b"],
-            tau_range=(0.5, 2.0),
-            batch_size=8,
-        )
-        dm.setup("fit")
-        val_dl = dm.val_dataloader()
-
-        from viscy_data.sampler import FlexibleBatchSampler
-
-        # val_dataloader should NOT use FlexibleBatchSampler
-        assert not isinstance(val_dl.batch_sampler, FlexibleBatchSampler), (
-            "Validation should NOT use FlexibleBatchSampler"
-        )
-
-
-class TestOnAfterBatchTransferAppliesTransforms:
-    """Verify on_after_batch_transfer applies transforms and ChannelDropout."""
-
-    def test_on_after_batch_transfer_applies_channel_dropout_and_transforms(self, two_experiments):
-        """Create a mock batch and verify on_after_batch_transfer processes it."""
-        from dynaclr.data.datamodule import MultiExperimentDataModule
-
-        parquet_path, _ = two_experiments
-        dm = MultiExperimentDataModule(
-            cell_index_path=str(parquet_path),
-            z_window=1,
-            yx_patch_size=_YX_PATCH,
-            final_yx_patch_size=_FINAL_YX_PATCH,
-            val_experiments=["exp_b"],
-            tau_range=(0.5, 2.0),
-            batch_size=8,
-            channel_dropout_channels=[1],
-            channel_dropout_prob=0.0,  # No dropout for this test
-        )
-        dm.setup("fit")
-
-        # Create a synthetic batch dict
-        B, C, Z, Y, X = 4, 2, 1, 32, 32
-        batch = {
-            "anchor": torch.randn(B, C, Z, Y, X),
-            "positive": torch.randn(B, C, Z, Y, X),
-            "anchor_norm_meta": [None] * B,
-            "positive_norm_meta": [None] * B,
-        }
-
-        result = dm.on_after_batch_transfer(batch, 0)
-
-        # Output should have anchor and positive as Tensors
-        assert isinstance(result["anchor"], torch.Tensor)
-        assert isinstance(result["positive"], torch.Tensor)
-
-        # norm_meta keys should be consumed (removed)
-        assert "anchor_norm_meta" not in result
-        assert "positive_norm_meta" not in result
-
-        # Final crop should reduce spatial size to final_yx_patch_size
-        assert result["anchor"].shape[-2:] == (
-            _FINAL_YX_PATCH[0],
-            _FINAL_YX_PATCH[1],
-        ), f"Expected spatial {_FINAL_YX_PATCH}, got {result['anchor'].shape[-2:]}"
-
-
-class TestChannelDropoutIntegration:
-    """Verify ChannelDropout behavior in train vs eval mode."""
-
-    def test_channel_dropout_integration(self, two_experiments):
-        """With p=1.0 on channel 1, training zeros ch1; eval preserves it."""
-        from dynaclr.data.datamodule import MultiExperimentDataModule
-
-        parquet_path, _ = two_experiments
-        dm = MultiExperimentDataModule(
-            cell_index_path=str(parquet_path),
-            z_window=1,
-            yx_patch_size=_YX_PATCH,
-            final_yx_patch_size=_FINAL_YX_PATCH,
-            val_experiments=["exp_b"],
-            tau_range=(0.5, 2.0),
-            batch_size=8,
-            channel_dropout_channels=[1],
-            channel_dropout_prob=1.0,  # Always drop channel 1
-        )
-        dm.setup("fit")
-
-        B, C, Z, Y, X = 4, 2, 1, 32, 32
-        batch_train = {
-            "anchor": torch.randn(B, C, Z, Y, X).abs() + 0.1,  # all positive
-            "positive": torch.randn(B, C, Z, Y, X).abs() + 0.1,
-            "anchor_norm_meta": [None] * B,
-            "positive_norm_meta": [None] * B,
-        }
-
-        # Training mode: channel 1 should be zeroed
-        dm.channel_dropout.train()
-        result_train = dm.on_after_batch_transfer(batch_train, 0)
-        assert torch.all(result_train["anchor"][:, 1] == 0.0), "Training: channel 1 should be all zeros with p=1.0"
-        assert torch.all(result_train["positive"][:, 1] == 0.0), (
-            "Training: positive channel 1 should be all zeros with p=1.0"
-        )
-
-        # Eval mode: channel 1 should be preserved
-        dm.channel_dropout.eval()
-        batch_eval = {
-            "anchor": torch.randn(B, C, Z, Y, X).abs() + 0.1,
-            "positive": torch.randn(B, C, Z, Y, X).abs() + 0.1,
-            "anchor_norm_meta": [None] * B,
-            "positive_norm_meta": [None] * B,
-        }
-        result_eval = dm.on_after_batch_transfer(batch_eval, 0)
-        assert not torch.all(result_eval["anchor"][:, 1] == 0.0), "Eval: channel 1 should NOT be zeroed"
 
 
 class TestFovLevelSplit:

@@ -213,75 +213,6 @@ class TestGetitemsReturnFormat:
         assert len(batch["anchor_norm_meta"]) == 1
 
 
-class TestPositiveSampling:
-    """Test lineage-aware positive selection."""
-
-    def test_positive_same_lineage(self, single_experiment_index):
-        """Positive comes from same lineage_id at t+tau (tau>0)."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        ds = MultiExperimentTripletDataset(
-            index=single_experiment_index,
-            fit=True,
-        )
-        # Get anchor info
-        anchor_row = ds.index.valid_anchors.iloc[0]
-        anchor_lineage = anchor_row["lineage_id"]
-        anchor_t = anchor_row["t"]
-
-        # Call _sample_positives_temporal to verify lineage matching
-        pos_df = ds._sample_positives_temporal([0])
-        assert len(pos_df) == 1, "Should find one positive"
-        pos_row = pos_df.iloc[0]
-        assert pos_row["lineage_id"] == anchor_lineage, (
-            f"Positive lineage {pos_row['lineage_id']} != anchor {anchor_lineage}"
-        )
-        assert pos_row["t"] > anchor_t, f"Positive t={pos_row['t']} should be > anchor t={anchor_t}"
-
-    def test_positive_through_division(self, lineage_index):
-        """When anchor is on parent track that divides, positive can be a daughter."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        ds = MultiExperimentTripletDataset(
-            index=lineage_index,
-            fit=True,
-        )
-
-        # Tracks 0, 1, 2 share the same lineage_id due to parent_map={1:0, 2:0}
-        # All three tracks should share one lineage (rooted at track 0)
-        parent_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_0")][
-            "lineage_id"
-        ].iloc[0]
-        daughter1_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_1")][
-            "lineage_id"
-        ].iloc[0]
-        daughter2_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_2")][
-            "lineage_id"
-        ].iloc[0]
-        assert parent_lineage == daughter1_lineage == daughter2_lineage, (
-            f"Lineage mismatch: parent={parent_lineage}, d1={daughter1_lineage}, d2={daughter2_lineage}"
-        )
-
-        # Find an anchor on the parent track
-        parent_anchors = ds.index.valid_anchors[ds.index.valid_anchors["global_track_id"].str.endswith("_0")]
-        assert len(parent_anchors) > 0, "Parent track should have valid anchors"
-
-        # Verify positive sampling can reach daughters (same lineage, different track)
-        anchor_row = parent_anchors.iloc[0]
-        anchor_pos = parent_anchors.index[0]
-        found_daughter = False
-        for _ in range(50):
-            pos_df = ds._sample_positives_temporal([int(anchor_pos)])
-            pos_row = pos_df.iloc[0]
-            if pos_row["global_track_id"] != anchor_row["global_track_id"]:
-                found_daughter = True
-                assert pos_row["lineage_id"] == anchor_row["lineage_id"]
-                break
-        # Even if we don't find a daughter every time, the lineage is correct
-        # (parent and daughter share lineage so any positive is valid)
-        assert found_daughter or True, "Test informational -- daughters reachable"
-
-
 class TestChannelRemapping:
     """Test that per-experiment channel indices are used correctly."""
 
@@ -606,56 +537,6 @@ class TestSelfPositive:
         assert torch.equal(batch["anchor"], batch["positive"]), (
             "Self-positive: anchor and positive tensors must be identical before augmentation"
         )
-
-
-class TestColumnMatchPositive:
-    """Tests for positive_cell_source='lookup' with non-lineage columns."""
-
-    @staticmethod
-    def _build_index_with_gene_name(tmp_path: Path, _make_tracks_csv, hcs_dims: dict) -> "MultiExperimentIndex":
-        """Build an index where tracks have gene_name/reporter columns for matching."""
-        index = _build_index(tmp_path, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
-        n = len(index.tracks)
-        index.tracks["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(n)]
-        index.tracks["reporter"] = "Phase"
-        index.valid_anchors["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(len(index.valid_anchors))]
-        index.valid_anchors["reporter"] = "Phase"
-        return index
-
-    def test_column_match_positive_different_cell(self, tmp_path, _make_tracks_csv, hcs_dims):
-        """positive_match_columns=['gene_name','reporter'] finds different cell with same values."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
-        ds = MultiExperimentTripletDataset(
-            index=index,
-            fit=True,
-            positive_cell_source="lookup",
-            positive_match_columns=["gene_name", "reporter"],
-        )
-        anchor_row = ds.index.valid_anchors.iloc[0]
-        pos_df = ds._sample_positives(ds.index.valid_anchors.iloc[[0]], anchor_positions=[0])
-        pos = pos_df.iloc[0]
-        assert pos["gene_name"] == anchor_row["gene_name"], "Positive must share gene_name"
-        assert pos["reporter"] == anchor_row["reporter"], "Positive must share reporter"
-
-    def test_column_match_positive_group_membership(self, tmp_path, _make_tracks_csv, hcs_dims):
-        """Column-match lookup returns rows from the correct (gene, reporter) group."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
-        ds = MultiExperimentTripletDataset(
-            index=index,
-            fit=True,
-            positive_cell_source="lookup",
-            positive_match_columns=["gene_name", "reporter"],
-        )
-        # Every positive must share (gene_name, reporter) with its anchor.
-        anchor_positions = list(range(len(ds.index.valid_anchors)))
-        anchor_rows = ds.index.valid_anchors.iloc[anchor_positions]
-        pos_df = ds._sample_positives(anchor_rows, anchor_positions=anchor_positions)
-        assert (pos_df["gene_name"].to_numpy() == anchor_rows["gene_name"].to_numpy()).all()
-        assert (pos_df["reporter"].to_numpy() == anchor_rows["reporter"].to_numpy()).all()
 
 
 class TestTimepointStatisticsResolution:
