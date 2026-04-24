@@ -49,6 +49,7 @@ uv pip install --python "$PY" -e "$MONOREPO_ROOT/applications/cytoland[metrics]"
 uv pip install --python "$PY" \
     cellpose \
     torchview \
+    microssim \
     jupyter \
     ipykernel \
     ipywidgets \

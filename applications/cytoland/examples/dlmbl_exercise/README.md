@@ -53,7 +53,8 @@ The script will:
 - Install [`uv`](https://docs.astral.sh/uv/) if it isn't already on your PATH.
 - Create a Python 3.11 virtual environment at `./.venv`.
 - Install `cytoland` (editable) plus the tutorial extras:
-  `cellpose`, `torchview`, `jupyter`, `ipykernel`, `ipywidgets`, `jupytext`.
+  `cellpose`, `torchview`, `microssim`, `jupyter`, `ipykernel`,
+  `ipywidgets`, `jupytext`.
 - Register the venv as a Jupyter kernel named **`06_image_translation`**
   (display name: *Python (06_image_translation)*).
 - Download the training / test OME-Zarr datasets and the VSCyto2D
