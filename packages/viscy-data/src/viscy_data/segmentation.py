@@ -57,7 +57,7 @@ class SegmentationDataset(Dataset):
     def __getitem__(self, idx: int) -> SegmentationSample:
         """Return prediction and target tensors for a given index."""
         pred_img, target_img, p, t = self._indices[idx]
-        _logger.debug(f"Target image: {target_img.name}")
+        _logger.debug(f"Target image: {target_img.path}")
         pred = torch.from_numpy(pred_img[t, self.pred_channel, self.pred_z_slice].astype(np.int16))
         target = torch.from_numpy(target_img[t, self.target_channel, self.target_z_slice].astype(np.int16))
         return {"pred": pred, "target": target, "position_idx": p, "time_idx": t}

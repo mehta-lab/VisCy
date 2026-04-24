@@ -17,7 +17,6 @@ Produces the exact batch format expected by
 from __future__ import annotations
 
 import logging
-import os
 from collections import defaultdict
 
 import numpy as np
@@ -161,8 +160,6 @@ class MultiExperimentTripletDataset(Dataset):
     return_negative : bool
         Reserved for future use.  Currently unused (NTXentLoss uses
         in-batch negatives).
-    cache_pool_bytes : int
-        Tensorstore cache pool size in bytes.
     channels_per_sample : int | list[str] | None
         Controls how many source channels to read per sample.
         ``None`` (default) — read all source channels, output ``(B, C, Z, Y, X)``.
@@ -197,7 +194,6 @@ class MultiExperimentTripletDataset(Dataset):
         tau_range_hours: tuple[float, float] = (0.5, 2.0),
         tau_decay_rate: float = 2.0,
         return_negative: bool = False,
-        cache_pool_bytes: int = 0,
         channels_per_sample: int | list[str] | None = None,
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
@@ -254,7 +250,10 @@ class MultiExperimentTripletDataset(Dataset):
                 _logger.info("Label encoder '%s' (%s): %d classes", batch_key, col, len(encoder))
 
         self._rng = np.random.default_rng()
-        self._setup_tensorstore_context(cache_pool_bytes)
+        self._tensorstores: dict[str, ts.TensorStore] = {}
+        self._store_cache: dict[str, object] = {}  # store_path -> Plate
+        self._position_cache: dict[str, object] = {}  # fov_name -> Position
+        self._norm_meta_cache: dict[str, NormMeta | None] = {}
         if self.fit:
             self._build_match_lookup()
         self._build_anchor_cache()
@@ -262,21 +261,6 @@ class MultiExperimentTripletDataset(Dataset):
     # ------------------------------------------------------------------
     # Initialization helpers
     # ------------------------------------------------------------------
-
-    def _setup_tensorstore_context(self, cache_pool_bytes: int) -> None:
-        """Configure tensorstore context with CPU limits based on SLURM env."""
-        cpus = os.environ.get("SLURM_CPUS_PER_TASK")
-        cpus = int(cpus) if cpus is not None else (os.cpu_count() or 4)
-        self._ts_context = ts.Context(
-            {
-                "data_copy_concurrency": {"limit": cpus},
-                "cache_pool": {"total_bytes_limit": cache_pool_bytes},
-            }
-        )
-        self._tensorstores: dict[str, ts.TensorStore] = {}
-        self._store_cache: dict[str, object] = {}  # store_path -> Plate
-        self._position_cache: dict[str, object] = {}  # fov_name -> Position
-        self._norm_meta_cache: dict[str, NormMeta | None] = {}
 
     def _build_match_lookup(self) -> None:
         """Build lookup structures for O(1) positive candidate lookup.
@@ -674,7 +658,12 @@ class MultiExperimentTripletDataset(Dataset):
         key = (store_path, fov_name)
         if key not in self._position_cache:
             if store_path not in self._store_cache:
-                self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
+                self._store_cache[store_path] = open_ome_zarr(
+                    store_path,
+                    mode="r",
+                    implementation="tensorstore",
+                    implementation_config=self.index.tensorstore_config,
+                )
             plate = self._store_cache[store_path]
             self._position_cache[key] = plate[fov_name]
         return self._position_cache[key]
@@ -699,10 +688,7 @@ class MultiExperimentTripletDataset(Dataset):
         key = (store_path, fov_name)
         if key not in self._tensorstores:
             position = self._get_position(store_path, fov_name)
-            self._tensorstores[key] = position["0"].tensorstore(
-                context=self._ts_context,
-                recheck_cached_data="open",
-            )
+            self._tensorstores[key] = position["0"].native
         return self._tensorstores[key]
 
     def _build_norm_meta(

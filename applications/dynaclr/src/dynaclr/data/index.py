@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from iohub.core.config import TensorStoreConfig
 from iohub.ngff import Plate, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
@@ -190,6 +191,7 @@ class MultiExperimentIndex:
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
         fit: bool = True,
+        tensorstore_config: TensorStoreConfig | None = None,
     ) -> None:
         self.registry = registry
         self.yx_patch_size = yx_patch_size
@@ -199,6 +201,11 @@ class MultiExperimentIndex:
         if max_border_shift < 0:
             max_border_shift = max(yx_patch_size[0] // 4, yx_patch_size[1] // 4)
         self.max_border_shift = max_border_shift
+        # Plates cached here feed Position objects whose arrays the dataset reads
+        # via ``position["0"].native`` (tensorstore handle). The tensorstore impl
+        # must be configured at open-time — default zarr would return a
+        # ``zarr.Array`` that has no ``.read().result()`` method.
+        self.tensorstore_config = tensorstore_config or TensorStoreConfig()
         self._store_cache: dict[str, Plate] = {}
 
         # Merge collection-level exclude_fovs with runtime exclude_fovs
@@ -214,7 +221,10 @@ class MultiExperimentIndex:
 
         if cell_index_df is not None or cell_index_path is not None:
             if cell_index_df is not None:
-                _logger.info("Using pre-loaded cell index DataFrame (%d rows)", len(cell_index_df))
+                _logger.info(
+                    "Using pre-loaded cell index DataFrame (%d rows)",
+                    len(cell_index_df),
+                )
                 tracks = self._align_parquet_columns(cell_index_df.copy())
             else:
                 _logger.info("Loading cell index from parquet: %s", cell_index_path)
@@ -230,7 +240,9 @@ class MultiExperimentIndex:
             # Empty frames already filtered at parquet build time — skip _filter_empty_frames
         else:
             all_tracks = self._load_all_experiments(
-                include_wells=include_wells, exclude_fovs=all_exclude_fovs, num_workers=num_workers
+                include_wells=include_wells,
+                exclude_fovs=all_exclude_fovs,
+                num_workers=num_workers,
             )
             tracks = pd.concat(all_tracks, ignore_index=True) if all_tracks else pd.DataFrame()
             tracks = self._reconstruct_lineage(tracks)
@@ -385,7 +397,12 @@ class MultiExperimentIndex:
         dim_lookup: dict[tuple[str, str], tuple[int, int]] = {}
         for (store_path, well_name, fov_name), _group in tracks.groupby(["store_path", "well_name", "fov_name"]):
             if store_path not in self._store_cache:
-                self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
+                self._store_cache[store_path] = open_ome_zarr(
+                    store_path,
+                    mode="r",
+                    implementation="tensorstore",
+                    implementation_config=self.tensorstore_config,
+                )
             plate = self._store_cache[store_path]
             if "/" in fov_name:
                 position_path = fov_name
@@ -506,7 +523,11 @@ class MultiExperimentIndex:
 
         n_dropped = n_before - len(tracks)
         if n_dropped > 0:
-            _logger.info("Excluded %d border cells (%.1f%%)", n_dropped, 100 * n_dropped / n_before)
+            _logger.info(
+                "Excluded %d border cells (%.1f%%)",
+                n_dropped,
+                100 * n_dropped / n_before,
+            )
 
         tracks = tracks.drop(columns=["_img_height", "_img_width"])
 

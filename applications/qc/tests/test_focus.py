@@ -2,6 +2,7 @@
 
 import pytest
 from iohub import open_ome_zarr
+from iohub.core.config import TensorStoreConfig
 
 from qc.focus import FocusSliceMetric
 from qc.qc_metrics import generate_qc_metadata
@@ -28,7 +29,12 @@ def focus_metric_all_channels():
 
 
 def test_focus_slice_metric_call(temporal_hcs_dataset, focus_metric):
-    with open_ome_zarr(temporal_hcs_dataset, mode="r") as plate:
+    with open_ome_zarr(
+        temporal_hcs_dataset,
+        mode="r",
+        implementation="tensorstore",
+        implementation_config=TensorStoreConfig(data_copy_concurrency=1),
+    ) as plate:
         channel_index = plate.channel_names.index("Phase")
         _, pos = next(iter(plate.positions()))
         result = focus_metric(pos, "Phase", channel_index, num_workers=1)
