@@ -31,7 +31,7 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "imageio",
-  "iohub>=0.3.2",
+  "iohub>=0.3.3",
   "lightning>=2.3",
   "monai>=1.5.2",
   "numpy>=2.4.1",
