@@ -678,6 +678,7 @@ class MultiExperimentIndex:
         clone.yx_patch_size = self.yx_patch_size
         clone.tau_range_hours = self.tau_range_hours
         clone._store_cache = self._store_cache
+        clone.tensorstore_config = self.tensorstore_config
         clone.max_border_shift = self.max_border_shift if max_border_shift < 0 else max_border_shift
         clone.tracks = tracks_subset.reset_index(drop=True)
         if precomputed_valid_anchors is not None:
