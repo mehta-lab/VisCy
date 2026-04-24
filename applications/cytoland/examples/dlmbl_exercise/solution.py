@@ -71,6 +71,38 @@
 # <div class="alert alert-danger">
 # Set your python kernel to <span style="color:black;">06_image_translation</span>
 # </div>
+
+# %% [markdown] tags=[]
+# ## PyTorch Lightning in one minute
+#
+# If you've used plain PyTorch you already know the pattern: write a model, write a
+# `for batch in dataloader` loop, move tensors to `cuda`, call `loss.backward()`, step
+# the optimizer, remember to `zero_grad()`, log every N steps, save a checkpoint, and
+# repeat for validation. That boilerplate is the same in every project — so
+# [PyTorch Lightning](https://lightning.ai) factors it out into **three objects** and
+# owns the training loop for you.
+#
+# | Lightning object | What it holds | In this exercise |
+# | --- | --- | --- |
+# | `LightningDataModule` | How to load, split, augment, and batch your data (`train/val/test/predict_dataloader`) | `HCSDataModule` — reads OME-Zarr and yields `{"source": ..., "target": ...}` dicts |
+# | `LightningModule` | The network, the loss, and what happens in `training_step` / `validation_step` (one batch at a time) | `VSUNet` — wraps the UNeXt2 architecture and the virtual-staining loss |
+# | `Trainer` | The loop: device placement, mixed precision, logging, checkpointing, multi-GPU | `VisCyTrainer` — a thin subclass with VisCy-friendly defaults |
+#
+# You don't write a `for` loop. You call **`trainer.fit(model, datamodule)`** and
+# Lightning drives everything. The trainer handles:
+#
+# - moving batches to the right device (`accelerator="gpu"`, `devices=[0]`)
+# - mixed-precision training (`precision="16-mixed"`) so you use less GPU memory
+# - when to log metrics / images (`log_every_n_steps`) and where (`logger=TensorBoardLogger(...)`)
+# - saving checkpoints automatically under the logger's directory
+# - running a sanity check on a single batch before real training (`fast_dev_run=True`)
+#
+# VisCy builds on top of Lightning and provides the `HCSDataModule` and `VSUNet`
+# classes so you don't have to subclass `LightningDataModule` / `LightningModule`
+# yourself — you configure them via constructor arguments and let Lightning run.
+# When you see `trainer.fit(...)` below, that single call replaces a ~50-line hand-
+# written training loop.
+
 # %% [markdown]
 # # Part 1: Log training data to tensorboard, start training a model.
 # ---------
@@ -271,13 +303,23 @@ plt.tight_layout()
 
 # %% [markdown] tags=[]
 # ## Explore the effects of augmentation on batch.
-
-# VisCy builds on top of PyTorch Lightning. PyTorch Lightning is a thin wrapper around PyTorch that allows rapid experimentation. It provides a [DataModule](https://lightning.ai/docs/pytorch/stable/data/datamodule.html) to handle loading and processing of data during training. VisCy provides a child class, `HCSDataModule` to make it intuitve to access data stored in the HCS layout.
-
-# The dataloader in `HCSDataModule` returns a batch of samples. A `batch` is a list of dictionaries. The length of the list is equal to the batch size. Each dictionary consists of following key-value pairs.
-# - `source`: the input image, a tensor of size `(1, 1, Y, X)`
-# - `target`: the target image, a tensor of size `(2, 1, Y, X)`
-# - `index` : the tuple of (location of field in HCS layout, time, and z-slice) of the sample.
+#
+# Time to meet the first of the three Lightning objects from the primer above: the
+# **DataModule**. `HCSDataModule` is VisCy's `LightningDataModule` — it knows how
+# to read an OME-Zarr store, split FOVs into train/val, apply normalization and
+# augmentations, and hand the Trainer a PyTorch `DataLoader`. You configure it
+# once; Lightning calls the right method (`train_dataloader()`,
+# `val_dataloader()`, etc.) at the right time.
+#
+# Every sample `HCSDataModule` yields is a Python `dict` (not a tuple) with:
+#
+# - `source`: the input image, a tensor of shape `(1, 1, Y, X)` → `(C, Z, Y, X)`
+# - `target`: the target image, a tensor of shape `(2, 1, Y, X)` → `(C, Z, Y, X)`
+# - `index` : the tuple `(HCS location, time, z-slice)` identifying the sample
+#
+# A `batch` is a dict of the same keys with an extra leading batch dimension, e.g.
+# `batch["source"].shape == (B, 1, 1, Y, X)`. The `training_step` method inside
+# `VSUNet` receives this dict directly — no unpacking required.
 
 # %% [markdown] tags=[]
 # <div class="alert alert-info">
@@ -647,6 +689,23 @@ log_batch_jupyter(augmented_batch)
 # %% [markdown] tags=[]
 # ## Train a 2D U-Net model to predict nuclei and membrane from phase.
 # ### Constructing a 2D UNeXt2 using VisCy
+#
+# Now we meet the second Lightning object: the **`LightningModule`**. `VSUNet` is
+# VisCy's `LightningModule` and it bundles three things that plain PyTorch keeps
+# separate:
+#
+# 1. **The network** — a UNeXt2 architecture, configured through `model_config`.
+# 2. **The loss** — passed in as `loss_function=MixedLoss(...)`.
+# 3. **The per-batch logic** — `training_step` and `validation_step` methods that
+#    take one `{"source", "target"}` batch, run the forward pass, compute the
+#    loss, and return it. You don't see these methods here because they're
+#    defined once inside `VSUNet`; Lightning calls them for you.
+#
+# Other constructor arguments you'll recognize from plain PyTorch training:
+# `lr` is the learning rate, `schedule="WarmupCosine"` picks the LR schedule,
+# and `freeze_encoder=False` lets gradients flow through the whole network.
+# `log_batches_per_epoch` is a VisCy extra — it tells the module how many image
+# samples to push to TensorBoard each epoch.
 # %% [markdown]
 # <div class="alert alert-info">
 #
@@ -782,10 +841,29 @@ phase2fluor_2D_data = HCSDataModule(
 # ##### SOLUTION ########
 # #######################
 phase2fluor_2D_data.setup("fit")
-# fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VisCyTrainer(accelerator="gpu", devices=[GPU_ID], precision="16-mixed", fast_dev_run=True)
 
-# trainer class takes the model and the data module as inputs.
+# --- The third Lightning object: the Trainer ---
+#
+# This is the object that replaces the hand-written training loop. Each kwarg
+# controls one piece of the boilerplate Lightning is handling for you:
+#
+# - accelerator="gpu", devices=[GPU_ID]
+#       Pick the device. No more ".to(device)" sprinkled through your code —
+#       Lightning moves model + every batch for you.
+# - precision="16-mixed"
+#       Automatic mixed-precision training (fp16 activations, fp32 master
+#       weights). Cuts GPU memory roughly in half and speeds up matmuls on
+#       modern GPUs — no autocast() context managers needed.
+# - fast_dev_run=True
+#       Sanity check: run ONE training batch + ONE validation batch and exit.
+#       Use this on every new pipeline to catch shape bugs, NaN losses, or
+#       bad paths *before* you commit to a multi-hour training job.
+#
+# trainer.fit(model, datamodule=...) then drives the whole thing: it calls
+# datamodule.setup(), pulls batches from train_dataloader(), invokes
+# model.training_step(batch), runs loss.backward() + optimizer.step() +
+# zero_grad(), runs validation, logs to TensorBoard, and saves checkpoints.
+trainer = VisCyTrainer(accelerator="gpu", devices=[GPU_ID], precision="16-mixed", fast_dev_run=True)
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 
 # %% [markdown] tags=[]
@@ -834,6 +912,25 @@ model_graph_phase2fluor.visual_graph
 # <h3> Task 1.6 </h3>
 # Start training by running the following cell. Check the new logs on the tensorboard.
 # </div>
+
+# %% [markdown]
+# Now that `fast_dev_run` confirmed the pipeline works end-to-end, we switch
+# to a "real" Trainer configured for an actual multi-epoch run. New Lightning
+# knobs appearing here:
+#
+# - `max_epochs=n_epochs` — run this many passes over the training set, then stop.
+# - `log_every_n_steps=steps_per_epoch // 2` — how often Lightning flushes
+#   scalars (loss, learning rate) to the logger. Setting it to half an epoch
+#   gives us two data points per epoch without spamming TensorBoard.
+# - `logger=TensorBoardLogger(save_dir=log_dir, name="phase2fluor", log_graph=True)`
+#   — Lightning writes TensorBoard event files *and* model checkpoints under
+#   `{save_dir}/{name}/version_N/`. You don't call `torch.save` yourself; the
+#   trainer persists checkpoints automatically, and `log_graph=True` adds the
+#   network architecture to the Graphs tab.
+#
+# Calling `trainer.fit` again below runs the full training loop — forward,
+# loss, backward, optimizer step, validation every epoch, checkpoint at the
+# end — across `max_epochs` epochs.
 
 # %%
 # Check if GPU is available
