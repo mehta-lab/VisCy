@@ -615,12 +615,15 @@ class MultiExperimentDataModule(LightningDataModule):
         full sequence and yields identical batches.
 
         Returns ``(1, 0)`` when no trainer is attached (e.g. bare
-        dataloader construction in tests).
+        dataloader construction in tests) or when the trainer stub lacks
+        DDP attributes (e.g. the ``_FakeTrainer`` in demo scripts).
         """
         trainer = getattr(self, "trainer", None)
-        if trainer is None:
+        world_size = getattr(trainer, "world_size", None)
+        global_rank = getattr(trainer, "global_rank", None)
+        if world_size is None or global_rank is None:
             return 1, 0
-        return trainer.world_size, trainer.global_rank
+        return world_size, global_rank
 
     def train_dataloader(self) -> ThreadDataLoader:
         """Return training data loader with FlexibleBatchSampler."""
