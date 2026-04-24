@@ -172,8 +172,6 @@ class HCSDataModule(LightningDataModule):
         self.val_augmentations = val_augmentations or []
         self.include_fov_names = set(include_fov_names) if include_fov_names is not None else None
         self.exclude_fov_names = set(exclude_fov_names) if exclude_fov_names is not None else None
-        if mmap_preload and (include_fov_names is not None or exclude_fov_names is not None):
-            raise ValueError("include_fov_names / exclude_fov_names is not yet supported with mmap_preload=True")
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         if val_gpu_augmentations and self.fg_mask_key is not None:
@@ -206,10 +204,19 @@ class HCSDataModule(LightningDataModule):
 
     @property
     def _mmap_cache_dir(self) -> Path:
-        """Return path to the mmap cache directory for this dataset + channel config."""
+        """Return path to the mmap cache directory for this dataset + channel config.
+
+        The fingerprint includes include/exclude FOV filters so runs with
+        different filter specs do not share an mmap buffer (the buffer
+        layout is indexed by the filtered position list, so differing
+        filters would alias wrong FOVs).
+        """
         scratch = self.scratch_dir or Path(tempfile.gettempdir())
         ch_key = "|".join(self.source_channel) + "||" + "|".join(self.target_channel) + f"||{self.array_key}"
-        path_key = str(self.data_path.resolve()) + "||" + ch_key
+        include_key = "|".join(sorted(self.include_fov_names)) if self.include_fov_names else ""
+        exclude_key = "|".join(sorted(self.exclude_fov_names)) if self.exclude_fov_names else ""
+        filter_key = f"||incl={include_key}||excl={exclude_key}"
+        path_key = str(self.data_path.resolve()) + "||" + ch_key + filter_key
         fingerprint = hashlib.md5(path_key.encode()).hexdigest()[:12]
         return scratch / os.getenv("SLURM_JOB_ID", "viscy_cache") / f"{self.data_path.name}_{fingerprint}"
 
@@ -241,7 +248,15 @@ class HCSDataModule(LightningDataModule):
         try:
             all_ch = list(self.source_channel) + list(self.target_channel)
             with open_ome_zarr(self.data_path, mode="r") as plate:
-                positions = [pos for _, pos in plate.positions()]
+                # Honor include/exclude_fov_names: cache only the positions
+                # that will actually be iterated during fit, so the buffer
+                # layout matches what _setup_fit's orig_positions expects.
+                positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
+                if not positions:
+                    raise ValueError(
+                        f"No positions left in {self.data_path} after applying "
+                        "include_fov_names / exclude_fov_names filters"
+                    )
                 ch_idx = [positions[0].get_channel_index(c) for c in all_ch]
                 arr0 = positions[0][self.array_key]
                 T = arr0.frames
