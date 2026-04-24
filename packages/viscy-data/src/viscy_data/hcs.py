@@ -410,7 +410,7 @@ class HCSDataModule(LightningDataModule):
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions)
 
-    def _filtered_positions(self, plate) -> list[Position]:
+    def _filtered_positions(self, plate: Plate) -> list[Position]:
         """Return plate positions kept by include/exclude_fov_names, raising if empty."""
         positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
         if not positions:
