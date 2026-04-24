@@ -91,6 +91,45 @@ def test_rendered_sbatch_has_srun_at_expected_resolved_path(capsys, leaf_subpath
     assert expected_resolved_prefix in srun_line
 
 
+def test_rendered_sbatch_has_preflight_srun_absolute_path(capsys):
+    """Preflight srun invokes nccl_smoke_test.py by absolute path (no bare ``applications/...``)."""
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    rc = sbj.submit([str(leaf), "--print-script"])
+    assert rc == 0
+    rendered = capsys.readouterr().out
+
+    preflight_line = next(line for line in rendered.splitlines() if "nccl_smoke_test.py" in line and "srun" in line)
+    # Absolute path: the token after the python interpreter starts with ``/``.
+    script_token = preflight_line.split()[-1]
+    assert script_token.startswith("/"), f"preflight srun used relative path: {preflight_line!r}"
+    assert script_token.endswith("/applications/dynacell/tools/nccl_smoke_test.py")
+
+
+def test_repo_root_substituted_in_preflight_path(capsys):
+    """``@@repo_root`` resolves to the actual VisCy repo root (not left unsubstituted)."""
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    rc = sbj.submit([str(leaf), "--print-script"])
+    assert rc == 0
+    rendered = capsys.readouterr().out
+
+    assert "@@repo_root" not in rendered
+    # The rendered path must point at the real file on disk.
+    expected_path = str(REPO_ROOT / "applications" / "dynacell" / "tools" / "nccl_smoke_test.py")
+    assert expected_path in rendered
+
+
+def test_preflight_failure_exits_before_main_srun(capsys):
+    """``exit $SMOKE_RC`` appears ahead of the main dynacell srun line."""
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    rc = sbj.submit([str(leaf), "--print-script"])
+    assert rc == 0
+    rendered = capsys.readouterr().out
+
+    exit_idx = rendered.index("exit $SMOKE_RC")
+    main_srun_idx = rendered.index("srun uv run python -m dynacell")
+    assert exit_idx < main_srun_idx
+
+
 def test_submit_raises_on_missing_launcher(tmp_path):
     leaf = tmp_path / "leaf.yml"
     leaf.write_text(yaml.safe_dump({"model": {}, "data": {}}))

@@ -208,6 +208,11 @@ def submit(argv: list[str] | None = None) -> int:
     resolved_path = resolved_dir / f"{mode}_{job_name}_{timestamp}.yml"
     sbatch_path = slurm_dir / f"{timestamp}_{job_name}.sbatch"
 
+    # repo_root is injected so the template can invoke the NCCL preflight
+    # script by absolute path. The rendered sbatch does not ``cd`` and is
+    # submitted from arbitrary CWDs, so a relative path would break.
+    repo_root = Path(__file__).resolve().parents[3]
+
     template_text = (Path(__file__).parent / "sbatch_template.sbatch").read_text()
     rendered = SbatchTemplate(template_text).substitute(
         sbatch_directives=_render_sbatch_directives(job_name, str(run_root), sbatch),
@@ -215,6 +220,7 @@ def submit(argv: list[str] | None = None) -> int:
         env_block=_render_env_block(env),
         mode=mode,
         resolved_config=str(resolved_path),
+        repo_root=str(repo_root),
     )
 
     if args.print_resolved_config:
