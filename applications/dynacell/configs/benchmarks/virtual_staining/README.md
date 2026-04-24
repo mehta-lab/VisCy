@@ -38,18 +38,21 @@ virtual_staining/
   _internal/                              # hidden support tree — not for browsing
     shared/
       model/
-        train_sets/<name>.yml             # imaging modality + source_channel defaults
-        predict_sets/<name>.yml           # predict_set metadata + source_channel
-        targets/<target>.yml              # target_channel, train data_path, norms, CPU augs
+        train_sets/<name>.yml             # train-set metadata + benchmark.dataset_ref.dataset + HCS defaults
+        predict_sets/<name>.yml           # predict-set metadata + benchmark.dataset_ref.dataset
+        targets/<target>.yml              # benchmark.dataset_ref.target + target-specific norms / CPU augs
+        data_overlays/
+          <model>_fit.yml                 # per-model HCS data hparams (batch_size, z_window, gpu_augs)
         model_overlays/
-          <model>_fit.yml                 # model + fit trainer + train data hparams
+          <model>_fit.yml                 # model + fit trainer (no data: block — joint leaves compose
+                                          #   only this half and author their own data: block)
           <model>_predict.yml             # model + predict trainer + predict data hparams
         launcher_profiles/
           mode_<fit|predict>.yml          # launcher.mode
           hardware_<hw>.yml               # sbatch directives + trainer.devices
           runtime_shared.yml              # launcher.runtime + launcher.env
       eval/
-        target/<target>.yaml              # GT paths, segmentation paths, GT/pred channel names
+        target/<target>.yaml              # target_name + benchmark.dataset_ref.target
         feature_extractor/dynaclr/        # DynaCLR checkpoint + encoder kwargs
     leaf/                                 # symlink tree aliasing canonical eval leaves
       <org>/<model>/<train_set>/eval__<predict_set>.yaml -> ../../../../../<org>/<model>/<train_set>/eval__<predict_set>.yaml
@@ -88,17 +91,27 @@ the HPC-bound groups and external users provide their own via
 Last wins via deep-merge. Lists replace wholesale — layers that own list
 fields (`callbacks`, `augmentations`, etc.) own the **full** list.
 
-**Train leaf** (at `<org>/<model>/<train_set>/train.yml`):
+**Single-store train leaf** (at `<org>/<model>/<train_set>/train.yml`):
 
 ```yaml
 base:
   - ../../../_internal/shared/model/train_sets/<train_set>.yml
   - ../../../_internal/shared/model/targets/<target>.yml
+  - ../../../_internal/shared/model/data_overlays/<model>_fit.yml
   - ../../../_internal/shared/model/model_overlays/<model>_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
+
+**Joint train leaf** (e.g. `er/celldiff/joint_ipsc_confocal_a549_mantis/train.yml`):
+
+Joint leaves (multi-dataset fit) bypass the single-dataset `dataset_ref`
+resolver and use `viscy_data.BatchedConcatDataModule` with explicit
+child `viscy_data.HCSDataModule` blocks per zarr / experiment. They
+compose only `model_overlays/<model>_fit.yml` + launcher profiles —
+the `data:` block is authored inline because joint hparams live on the
+children. See `MULTI_DATASET_TRAINING_RECOMMENDATION.md` for rationale.
 
 **Predict leaf** (at `<org>/<model>/<train_set>/predict__<predict_set>.yml`):
 
@@ -124,7 +137,6 @@ defaults:
 
 io:
   pred_path: /hpc/.../predictions.zarr
-  gt_cache_dir: /hpc/.../cache
 
 compute_feature_metrics: true
 
@@ -167,11 +179,24 @@ uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF \
 wins). `trainer.devices` and `launcher.sbatch.gpus` must match or
 submission fails fast.
 
-## Source channel contract
+## Dataset reference contract
 
-`data.init_args.source_channel` lives in
-`_internal/shared/model/train_sets/` and
-`_internal/shared/model/predict_sets/` (duplicated — must be kept in
-sync) because it's a property of the imaging modality, not the target.
-Predict leaves don't compose train_sets, so the predict_set file has to
-own its own `source_channel`.
+Single-dataset train/predict leaves split `benchmark.dataset_ref` across
+shared fragments:
+
+- `train_sets/<name>.yml` and `predict_sets/<name>.yml` contribute
+  `benchmark.dataset_ref.dataset` plus HCS defaults for that split.
+- `targets/<target>.yml` contributes `benchmark.dataset_ref.target`
+  plus target-specific normalizations and augmentations.
+- The compose-time resolver fills `data.init_args.data_path`,
+  `source_channel`, and `target_channel` from the manifest, so those
+  fields are no longer duplicated across train/predict leaves.
+
+Eval leaves follow the same split on the Hydra side:
+
+- `target/<target>.yaml` contributes `benchmark.dataset_ref.target`.
+- `predict_set/<name>.yaml` contributes `benchmark.dataset_ref.dataset`.
+- `dynacell.evaluation._ref_hook.apply_dataset_ref()` fills
+  `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`,
+  `io.pred_channel_name`, `io.gt_cache_dir`, and
+  `pixel_metrics.spacing` from the manifest.
