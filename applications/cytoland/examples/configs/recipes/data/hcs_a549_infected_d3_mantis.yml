@@ -10,11 +10,21 @@ data:
     target_channel:
       - "raw mCherry EX561 EM600-37"
       - "raw Cy5 EX639 EM698-70"
-    z_window_size: 5
+    z_window_size: 20
     split_ratio: 0.8
     batch_size: 16
     num_workers: 8
     yx_patch_size: [384, 384]
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys:
+            - Phase3D
+            - "raw mCherry EX561 EM600-37"
+            - "raw Cy5 EX639 EM698-70"
+          w_key: "raw mCherry EX561 EM600-37"
+          spatial_size: [20, 600, 600]
+          num_samples: 4
     exclude_fov_names:
       - B/2/000000
       - B/2/000001
@@ -58,3 +68,43 @@ data:
           level: timepoint_statistics
           subtrahend: median
           divisor: iqr
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.8
+          rotate_range: [3.14, 0, 0]
+          shear_range: [0.0, 0.05, 0.05]
+          scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [15, 384, 384]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 0.3
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0.25, 0.75]
+    val_gpu_augmentations:
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [15, 384, 384]

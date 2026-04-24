@@ -21,22 +21,55 @@
 base:
   - ../recipes/trainer/fit.yml
   - ../recipes/topology/ddp_4gpu.yml
-  - ../recipes/models/unext2_3d.yml
 
+# The published VSCyto3D is FullyConvolutionalMAE (architecture='fcmae') in
+# supervised mode (pretraining=False), not UNeXt2 despite the dataset/model
+# card nickname. VSUNet(architecture='fcmae') lets us warm-start from the
+# published ckpt without the extra FCMAE pretraining validators on
+# FcmaeUNet (which require a GPUTransformDataModule that HCSDataModule
+# does not subclass).
 model:
+  class_path: cytoland.engine.VSUNet
   init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
     loss_function:
       class_path: viscy_utils.losses.MixedLoss
       init_args:
         l1_alpha: 0.5
+        l2_alpha: 0.0
         ms_dssim_alpha: 0.5
+    # lr=2e-4 matches the canonical vs_test/finetune_3d.py recipe that
+    # produced the published VSCyto3D ckpt we warm-start from.
+    # (Dynacell's fcmae_vscyto3d_fit.yml uses lr=4e-4 as a retune vs. a
+    # UNeXt2 throughput baseline — not the right anchor for this finetune.)
     lr: 0.0002
     schedule: WarmupCosine
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/fcmae-cyto3d-sensor/vscyto3d-logs/hek-a549-ipsc-finetune/checkpoints/last.ckpt
+    # D3 drives step count in MAX_SIZE_CYCLE: ~ (243-27) * 0.8 * 11 T / batch_size
+    # ~= 120 steps/epoch at batch_size=16 across 4 GPUs. One-epoch warmup.
+    warmup_steps: 120
+    warmup_multiplier: 1e-3
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/fcmae-cyto3d-sensor/vscyto3d-logs/hek-a549-ipsc-finetune/checkpoints/epoch=83-step=14532-loss=0.492.ckpt
 
 trainer:
-  precision: bf16-mixed
-  max_epochs: 50
+  # FullyConvolutionalMAE(pretraining=False) has decoder/head params that
+  # only receive gradients on some forward paths; default ddp with
+  # find_unused_parameters=False errors at step 1. Matches dynacell
+  # fcmae_vscyto3d_fit.yml and vs_test/finetune_3d.py:215.
+  strategy: ddp_find_unused_parameters_true
+  precision: 16-mixed
+  # Matches the canonical vs_test finetune budget that produced the
+  # published VSCyto3D ckpt (stopped at epoch 83 on val loss).
+  max_epochs: 100
   logger:
     init_args:
       project: cytoland
@@ -66,11 +99,18 @@ data:
           data_path: /hpc/projects/intracellular_dashboard/virtual_stain_ft_infected/2026_01_29_A549_H2B_CAAX_DAPI_DENV_ZIKV/2-concatenate_zarrv3/2026_01_29_A549_H2B_CAAX_DAPI_DENV_ZIKV.zarr
           source_channel: Phase3D
           target_channel: [DAPI_Density3D, TXR_Density3D]
-          z_window_size: 5
+          z_window_size: 20
           split_ratio: 0.8
           batch_size: 16
           num_workers: 8
           yx_patch_size: [384, 384]
+          augmentations:
+            - class_path: viscy_transforms.RandWeightedCropd
+              init_args:
+                keys: [Phase3D, DAPI_Density3D, TXR_Density3D]
+                w_key: DAPI_Density3D
+                spatial_size: [20, 600, 600]
+                num_samples: 4
           normalizations:
             - class_path: viscy_transforms.NormalizeSampled
               init_args:
@@ -84,6 +124,46 @@ data:
                 level: timepoint_statistics
                 subtrahend: median
                 divisor: iqr
+          gpu_augmentations:
+            - class_path: viscy_transforms.BatchedRandAffined
+              init_args:
+                keys: [source, target]
+                prob: 0.8
+                rotate_range: [3.14, 0, 0]
+                shear_range: [0.0, 0.05, 0.05]
+                scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+            - class_path: viscy_transforms.BatchedCenterSpatialCropd
+              init_args:
+                keys: [source, target]
+                roi_size: [15, 384, 384]
+            - class_path: viscy_transforms.BatchedRandAdjustContrastd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                gamma: [0.8, 1.2]
+            - class_path: viscy_transforms.BatchedRandScaleIntensityd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                factors: 0.5
+            - class_path: viscy_transforms.BatchedRandGaussianNoised
+              init_args:
+                keys: [source]
+                prob: 0.5
+                mean: 0.0
+                std: 0.3
+            - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                sigma_x: [0.25, 0.75]
+                sigma_y: [0.25, 0.75]
+                sigma_z: [0.25, 0.75]
+          val_gpu_augmentations:
+            - class_path: viscy_transforms.BatchedCenterSpatialCropd
+              init_args:
+                keys: [source, target]
+                roi_size: [15, 384, 384]
 
       # D2 — Hummingbird 2026-03-10
       - class_path: viscy_data.hcs.HCSDataModule
@@ -91,11 +171,18 @@ data:
           data_path: /hpc/projects/intracellular_dashboard/virtual_stain_ft_infected/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV/3-VS_train_test/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV.zarr
           source_channel: Phase3D
           target_channel: [DAPI_Density3D, TXR_Density3D]
-          z_window_size: 5
+          z_window_size: 20
           split_ratio: 0.8
           batch_size: 16
           num_workers: 8
           yx_patch_size: [384, 384]
+          augmentations:
+            - class_path: viscy_transforms.RandWeightedCropd
+              init_args:
+                keys: [Phase3D, DAPI_Density3D, TXR_Density3D]
+                w_key: DAPI_Density3D
+                spatial_size: [20, 600, 600]
+                num_samples: 4
           normalizations:
             - class_path: viscy_transforms.NormalizeSampled
               init_args:
@@ -109,6 +196,46 @@ data:
                 level: timepoint_statistics
                 subtrahend: median
                 divisor: iqr
+          gpu_augmentations:
+            - class_path: viscy_transforms.BatchedRandAffined
+              init_args:
+                keys: [source, target]
+                prob: 0.8
+                rotate_range: [3.14, 0, 0]
+                shear_range: [0.0, 0.05, 0.05]
+                scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+            - class_path: viscy_transforms.BatchedCenterSpatialCropd
+              init_args:
+                keys: [source, target]
+                roi_size: [15, 384, 384]
+            - class_path: viscy_transforms.BatchedRandAdjustContrastd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                gamma: [0.8, 1.2]
+            - class_path: viscy_transforms.BatchedRandScaleIntensityd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                factors: 0.5
+            - class_path: viscy_transforms.BatchedRandGaussianNoised
+              init_args:
+                keys: [source]
+                prob: 0.5
+                mean: 0.0
+                std: 0.3
+            - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                sigma_x: [0.25, 0.75]
+                sigma_y: [0.25, 0.75]
+                sigma_z: [0.25, 0.75]
+          val_gpu_augmentations:
+            - class_path: viscy_transforms.BatchedCenterSpatialCropd
+              init_args:
+                keys: [source, target]
+                roi_size: [15, 384, 384]
 
       # D3 — Mantis 2026-03-26 (27 FOVs held out for test)
       - class_path: viscy_data.hcs.HCSDataModule
@@ -118,11 +245,21 @@ data:
           target_channel:
             - "raw mCherry EX561 EM600-37"
             - "raw Cy5 EX639 EM698-70"
-          z_window_size: 5
+          z_window_size: 20
           split_ratio: 0.8
           batch_size: 16
           num_workers: 8
           yx_patch_size: [384, 384]
+          augmentations:
+            - class_path: viscy_transforms.RandWeightedCropd
+              init_args:
+                keys:
+                  - Phase3D
+                  - "raw mCherry EX561 EM600-37"
+                  - "raw Cy5 EX639 EM698-70"
+                w_key: "raw mCherry EX561 EM600-37"
+                spatial_size: [20, 600, 600]
+                num_samples: 4
           exclude_fov_names:
             - B/2/000000
             - B/2/000001
@@ -166,3 +303,43 @@ data:
                 level: timepoint_statistics
                 subtrahend: median
                 divisor: iqr
+          gpu_augmentations:
+            - class_path: viscy_transforms.BatchedRandAffined
+              init_args:
+                keys: [source, target]
+                prob: 0.8
+                rotate_range: [3.14, 0, 0]
+                shear_range: [0.0, 0.05, 0.05]
+                scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+            - class_path: viscy_transforms.BatchedCenterSpatialCropd
+              init_args:
+                keys: [source, target]
+                roi_size: [15, 384, 384]
+            - class_path: viscy_transforms.BatchedRandAdjustContrastd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                gamma: [0.8, 1.2]
+            - class_path: viscy_transforms.BatchedRandScaleIntensityd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                factors: 0.5
+            - class_path: viscy_transforms.BatchedRandGaussianNoised
+              init_args:
+                keys: [source]
+                prob: 0.5
+                mean: 0.0
+                std: 0.3
+            - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+              init_args:
+                keys: [source]
+                prob: 0.5
+                sigma_x: [0.25, 0.75]
+                sigma_y: [0.25, 0.75]
+                sigma_z: [0.25, 0.75]
+          val_gpu_augmentations:
+            - class_path: viscy_transforms.BatchedCenterSpatialCropd
+              init_args:
+                keys: [source, target]
+                roi_size: [15, 384, 384]

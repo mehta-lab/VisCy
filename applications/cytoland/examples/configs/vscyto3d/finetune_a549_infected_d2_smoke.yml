@@ -1,0 +1,57 @@
+# Smoke-test leaf: warm-start VSCyto3D on D2 alone (Hummingbird 2026-03-10)
+# — single HCSDataModule, tiny batch, limited steps. Purpose: verify model
+# load / forward / backward / val on the simplest subset of the full
+# finetune_a549_infected.yml stack before scaling up.
+#
+# Model + the D2 recipe's gpu_augmentations mirror the dynacell
+# FCMAE-VSCyto3D warm-start recipe
+# (applications/dynacell/configs/benchmarks/.../fcmae_vscyto3d_fit.yml)
+# so this smoke exercises the same code paths the main leaf runs at scale.
+#
+# Usage:
+#   uv run python -m cytoland fit --config vscyto3d/finetune_a549_infected_d2_smoke.yml
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/data/hcs_a549_infected_d2_hummingbird.yml
+
+model:
+  class_path: cytoland.engine.VSUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0002
+    schedule: Constant
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/fcmae-cyto3d-sensor/vscyto3d-logs/hek-a549-ipsc-finetune/checkpoints/epoch=83-step=14532-loss=0.492.ckpt
+
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  precision: 16-mixed
+  max_epochs: 1
+  limit_train_batches: 2
+  limit_val_batches: 2
+  num_sanity_val_steps: 0
+  logger: null
+  callbacks: []
+
+data:
+  init_args:
+    # batch_size must be divisible by augmentations.RandWeightedCropd.num_samples (4).
+    batch_size: 4
+    num_workers: 2
