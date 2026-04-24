@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Callable, Iterable, Literal, Sequence
 
 import numpy as np
 import torch
@@ -102,14 +102,15 @@ class HCSDataModule(LightningDataModule):
         ``on_after_batch_transfer``. Use for validation-time spatial
         crops (e.g. ``BatchedDivisibleCropd``) when the FOV is not
         compatible with the model's downsampling factor.
-    include_fov_names : list[str] or None, optional
+    include_fov_names : Iterable[str] or None, optional
         If given, only positions whose plate-relative name (e.g.
-        ``"B/2/000000"``) is in this list are used. Applied before
-        the train/val split.
-    exclude_fov_names : list[str] or None, optional
-        If given, positions whose plate-relative name is in this list
-        are skipped. Useful to hold out test FOVs from a plate that
-        also contains training FOVs. Applied after ``include_fov_names``.
+        ``"B/2/000000"``) is in this collection are used. Applied before
+        the train/val split. Stored as a ``set`` for O(1) lookup.
+    exclude_fov_names : Iterable[str] or None, optional
+        If given, positions whose plate-relative name is in this
+        collection are skipped. Useful to hold out test FOVs from a plate
+        that also contains training FOVs. Applied after
+        ``include_fov_names``. Stored as a ``set`` for O(1) lookup.
     """
 
     def __init__(
@@ -140,8 +141,8 @@ class HCSDataModule(LightningDataModule):
         gpu_augmentations: list[MapTransform] | None = None,
         val_augmentations: list[MapTransform] | None = None,
         val_gpu_augmentations: list[MapTransform] | None = None,
-        include_fov_names: list[str] | None = None,
-        exclude_fov_names: list[str] | None = None,
+        include_fov_names: Iterable[str] | None = None,
+        exclude_fov_names: Iterable[str] | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -169,8 +170,8 @@ class HCSDataModule(LightningDataModule):
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
         self.val_augmentations = val_augmentations or []
-        self.include_fov_names = include_fov_names
-        self.exclude_fov_names = exclude_fov_names
+        self.include_fov_names = set(include_fov_names) if include_fov_names is not None else None
+        self.exclude_fov_names = set(exclude_fov_names) if exclude_fov_names is not None else None
         if mmap_preload and (include_fov_names is not None or exclude_fov_names is not None):
             raise ValueError("include_fov_names / exclude_fov_names is not yet supported with mmap_preload=True")
         if gpu_augmentations and self.fg_mask_key is not None:
