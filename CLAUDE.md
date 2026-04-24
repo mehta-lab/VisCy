@@ -47,6 +47,14 @@ mkdir -p /hpc/mydata/firstname.lastname/.cache/uv && ln -s /hpc/mydata/firstname
 
 For full setup instructions (installing uv, creating a venv, syncing dependencies), see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+### SLURM scripts for Lightning DDP jobs
+
+When hand-writing `.slurm` scripts that launch Lightning via `srun`, always use `--ntasks-per-node=N` (not `--ntasks=N`). Lightning's `SLURMEnvironment` validates `SLURM_NTASKS_PER_NODE` at trainer init and raises `RuntimeError: You set --ntasks=N in your SLURM bash script, but this variable is not supported. HINT: Use --ntasks-per-node=N instead.` — the job then dies seconds into the allocation.
+
+Invariant: `#SBATCH --ntasks-per-node=N` must equal `trainer.devices` in the YAML config and `#SBATCH --gpus=N` (single-node) or `#SBATCH --gpus-per-node=N` (multi-node).
+
+The dynacell launcher (`applications/dynacell/tools/submit_benchmark_job.py`) already emits `--ntasks-per-node` correctly; this note is for hand-written scripts (e.g., `applications/cytoland/examples/configs/*/run_*.slurm`).
+
 ### Common Commands
 
 ```sh
