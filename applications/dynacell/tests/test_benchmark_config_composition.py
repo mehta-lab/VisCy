@@ -287,3 +287,60 @@ def test_synthetic_target_only_partial_ref_is_noop(tmp_path) -> None:
     leaf.write_text(yaml.dump(leaf_content))
     cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
     assert cfg["data"]["init_args"]["data_path"] == "/kept.zarr"
+
+
+# -- joint train leaf (Stage 7) ------------------------------------------
+
+
+def test_joint_train_leaf_composes() -> None:
+    """First joint train leaf — BatchedConcatDataModule wrapping two
+    HCSDataModule children (ipsc SEC61B + a549_mantis_2024_11_07 SEC61B).
+
+    Joint leaves bypass the single-dataset resolver: no benchmark.dataset_ref.
+    The data block is authored inline; the base chain composes only model
+    + launcher overlays. Topology is overridden to 4-GPU DDP because the
+    BatchedConcatDataModule sharded-sampler path is the whole point.
+    """
+    leaf = BENCHMARKS / "er" / "celldiff" / "joint_ipsc_confocal_a549_mantis" / "train.yml"
+    assert leaf.is_file(), f"joint leaf missing: {leaf}"
+    cfg = load_composed_config(leaf)
+
+    # Topology: DDP 4-GPU overrides the single_gpu.yml pulled in by model_overlays.
+    t = cfg["trainer"]
+    assert t["accelerator"] == "gpu"
+    assert t["strategy"] == "ddp"
+    assert t["devices"] == 4
+    assert t["num_nodes"] == 1
+    assert t["precision"] == "bf16-mixed"
+
+    # Joint leaves must not carry dataset_ref (the resolver is scalar).
+    assert "dataset_ref" not in cfg.get("benchmark", {})
+
+    # Data: BatchedConcatDataModule with two HCSDataModule children.
+    data = cfg["data"]
+    assert data["class_path"] == "viscy_data.BatchedConcatDataModule"
+    children = data["init_args"]["data_modules"]
+    assert len(children) == 2
+    for child in children:
+        assert child["class_path"] == "viscy_data.hcs.HCSDataModule"
+        ia = child["init_args"]
+        # Anchor-shared hparams reach each child.
+        assert ia["source_channel"] == ["Phase3D"]
+        assert ia["target_channel"] == ["Structure"]
+        assert ia["z_window_size"] == 13
+        assert ia["batch_size"] == 4
+        assert ia["yx_patch_size"] == [512, 512]
+        assert ia["gpu_augmentations"], "gpu_augmentations missing"
+        assert ia["normalizations"], "normalizations missing"
+        assert ia["augmentations"], "augmentations missing"
+
+    # Child ordering + paths.
+    assert children[0]["init_args"]["data_path"].endswith("ipsc/dataset_v4/train/SEC61B.zarr")
+    assert children[1]["init_args"]["data_path"].endswith("2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr")
+
+    # Launcher: 4 GPUs matches topology, SLURM invariant holds.
+    assert cfg["launcher"]["mode"] == "fit"
+    sbatch = cfg["launcher"]["sbatch"]
+    nodes = sbatch.get("nodes", 1)
+    assert sbatch["ntasks_per_node"] == t["devices"]
+    assert sbatch["gpus"] == nodes * t["devices"]
