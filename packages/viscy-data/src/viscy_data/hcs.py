@@ -102,6 +102,14 @@ class HCSDataModule(LightningDataModule):
         ``on_after_batch_transfer``. Use for validation-time spatial
         crops (e.g. ``BatchedDivisibleCropd``) when the FOV is not
         compatible with the model's downsampling factor.
+    include_fov_names : list[str] or None, optional
+        If given, only positions whose plate-relative name (e.g.
+        ``"B/2/000000"``) is in this list are used. Applied before
+        the train/val split.
+    exclude_fov_names : list[str] or None, optional
+        If given, positions whose plate-relative name is in this list
+        are skipped. Useful to hold out test FOVs from a plate that
+        also contains training FOVs. Applied after ``include_fov_names``.
     """
 
     def __init__(
@@ -132,6 +140,8 @@ class HCSDataModule(LightningDataModule):
         gpu_augmentations: list[MapTransform] | None = None,
         val_augmentations: list[MapTransform] | None = None,
         val_gpu_augmentations: list[MapTransform] | None = None,
+        include_fov_names: list[str] | None = None,
+        exclude_fov_names: list[str] | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -159,6 +169,10 @@ class HCSDataModule(LightningDataModule):
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
         self.val_augmentations = val_augmentations or []
+        self.include_fov_names = include_fov_names
+        self.exclude_fov_names = exclude_fov_names
+        if mmap_preload and (include_fov_names is not None or exclude_fov_names is not None):
+            raise ValueError("include_fov_names / exclude_fov_names is not yet supported with mmap_preload=True")
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         if val_gpu_augmentations and self.fg_mask_key is not None:
@@ -347,6 +361,14 @@ class HCSDataModule(LightningDataModule):
             settings["fg_mask_key"] = self.fg_mask_key
         return settings
 
+    def _keep_position(self, name: str) -> bool:
+        """Apply include/exclude FOV filters to a plate-relative position name."""
+        if self.include_fov_names is not None and name not in self.include_fov_names:
+            return False
+        if self.exclude_fov_names is not None and name in self.exclude_fov_names:
+            return False
+        return True
+
     @property
     def _train_filter_settings(self) -> dict:
         """Return nonzero fraction filtering settings (training only)."""
@@ -382,7 +404,11 @@ class HCSDataModule(LightningDataModule):
         train_transform, val_transform = self._fit_transform()
         dataset_settings["channels"]["target"] = self.target_channel
         with open_ome_zarr(self.data_path, mode="r") as plate:
-            orig_positions = [pos for _, pos in plate.positions()]
+            orig_positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
+        if not orig_positions:
+            raise ValueError(
+                f"No positions left in {self.data_path} after applying include_fov_names / exclude_fov_names filters"
+            )
 
         # shuffle positions, randomness is handled globally
         shuffled_indices = self._set_fit_global_state(len(orig_positions))

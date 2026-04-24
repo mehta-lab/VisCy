@@ -65,6 +65,87 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
         )
 
 
+def _fov_names(dataset_path: Path) -> list[str]:
+    with open_ome_zarr(dataset_path) as plate:
+        return [name for name, _ in plate.positions()]
+
+
+def test_fov_name_filters_applied(preprocessed_hcs_dataset):
+    """include_fov_names keeps only listed positions; exclude_fov_names drops them."""
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+
+    kept = all_fovs[:4]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        split_ratio=0.5,
+        yx_patch_size=[16, 16],
+        include_fov_names=kept,
+    )
+    dm.setup(stage="fit")
+    selected = {str(p.zgroup.path) for p in dm.train_dataset.positions} | {
+        str(p.zgroup.path) for p in dm.val_dataset.positions
+    }
+    assert all(any(name.endswith(f) for name in selected) for f in kept)
+    assert len(selected) == len(kept)
+
+    dropped = all_fovs[:2]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        split_ratio=0.5,
+        yx_patch_size=[16, 16],
+        exclude_fov_names=dropped,
+    )
+    dm.setup(stage="fit")
+    n_positions = len(dm.train_dataset.positions) + len(dm.val_dataset.positions)
+    assert n_positions == len(all_fovs) - len(dropped)
+
+
+def test_fov_name_filters_raise_when_empty(preprocessed_hcs_dataset):
+    """Filtering to zero positions raises a clear ValueError."""
+    data_path = preprocessed_hcs_dataset
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        include_fov_names=["does/not/exist"],
+    )
+    with raises(ValueError, match="No positions"):
+        dm.setup(stage="fit")
+
+
+def test_fov_name_filters_reject_mmap_preload(preprocessed_hcs_dataset):
+    """Combining FOV filters with mmap_preload is not supported and raises."""
+    with raises(ValueError, match="mmap_preload"):
+        HCSDataModule(
+            data_path=preprocessed_hcs_dataset,
+            source_channel="DAPI",
+            target_channel="GFP",
+            z_window_size=5,
+            yx_patch_size=[16, 16],
+            mmap_preload=True,
+            include_fov_names=["A/1/0"],
+        )
+
+
 def test_on_after_batch_transfer_shape_mismatch_raises(preprocessed_hcs_dataset):
     """Shape mismatch between source and yx_patch_size raises ValueError."""
     data_path = preprocessed_hcs_dataset
