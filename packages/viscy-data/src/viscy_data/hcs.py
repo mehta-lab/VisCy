@@ -19,6 +19,7 @@ try:
 except ImportError:
     MemoryMappedTensor = None
 from lightning.pytorch import LightningDataModule
+from lightning.pytorch.trainer.states import TrainerFn
 from monai.data import set_track_meta
 from monai.transforms import Compose, MapTransform, MultiSampleTrait, RandAffined
 from torch import Tensor
@@ -71,6 +72,8 @@ class HCSDataModule(LightningDataModule):
         views. Eliminates zarr reads during the training loop. Point
         ``scratch_dir`` at tmpfs (e.g. ``/dev/shm``) for RAM-backed I/O.
         Requires ``viscy-data[mmap]`` (tensordict). Default False.
+        Only effective during fit/validate runs; predict and test
+        stages silently ignore this flag and read from zarr directly.
     scratch_dir : Path or None, optional
         Directory for mmap cache files. Defaults to ``/tmp``.
         On SLURM, uses ``/tmp/$SLURM_JOB_ID/``.
@@ -106,11 +109,15 @@ class HCSDataModule(LightningDataModule):
         If given, only positions whose plate-relative name (e.g.
         ``"B/2/000000"``) is in this collection are used. Applied before
         the train/val split. Stored as a ``set`` for O(1) lookup.
+        Honored during fit/validate (including mmap staging). Predict
+        and test stages use all plate positions.
     exclude_fov_names : Iterable[str] or None, optional
         If given, positions whose plate-relative name is in this
         collection are skipped. Useful to hold out test FOVs from a plate
         that also contains training FOVs. Applied after
         ``include_fov_names``. Stored as a ``set`` for O(1) lookup.
+        Honored during fit/validate (including mmap staging). Predict
+        and test stages use all plate positions.
     """
 
     def __init__(
@@ -226,8 +233,18 @@ class HCSDataModule(LightningDataModule):
         return torch.from_numpy(np.empty((), dtype=np.dtype(np_dtype))).dtype
 
     def prepare_data(self):
-        """Stage FOVs to a memory-mapped tensor buffer on local scratch."""
+        """Stage FOVs to a memory-mapped tensor buffer on local scratch.
+
+        Runs only when the current stage is fit or validate. Predict
+        and test stages skip mmap staging entirely (they read from
+        zarr directly and ignore FOV filters). Manual
+        ``dm.prepare_data()`` calls without a trainer attached (or
+        with a trainer whose ``state.fn`` is ``None``) also run —
+        preserving existing standalone usage.
+        """
         if not self.mmap_preload:
+            return
+        if not self._should_run_mmap_preload():
             return
         if MemoryMappedTensor is None:
             raise ImportError(
@@ -410,6 +427,60 @@ class HCSDataModule(LightningDataModule):
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions)
 
+    def _should_run_mmap_preload(self) -> bool:
+        """Return True when mmap preload should run for the current stage.
+
+        ``prepare_data`` is stage-agnostic in Lightning's contract, but
+        ``mmap_preload`` is a fit/validate-only optimization:
+        ``_setup_predict`` and ``_setup_test`` bypass the buffer
+        entirely. Skip the staging work (and its strict
+        ``_filtered_positions`` check) for predict/test runs.
+
+        Defaults to True when no trainer is attached or ``state.fn``
+        is ``None`` (a trainer constructed but not yet driving a
+        subcommand) so manual pipelines and pre-subcommand attach
+        orders behave as before.
+        """
+        if self.trainer is None:
+            return True
+        return self.trainer.state.fn in (None, TrainerFn.FITTING, TrainerFn.VALIDATING)
+
+    def _check_mmap_cache_ready(self, cache_dir: Path) -> None:
+        """Raise with an actionable message if the mmap cache isn't consumable.
+
+        Turns three opaque failure modes of ``_open_mmap_buffer`` into
+        explicit errors before the buffer is re-opened in ``_setup_fit``:
+
+        1. tensordict not installed (``MemoryMappedTensor is None``) —
+           manual ``dm.setup("fit")`` bypasses ``prepare_data``'s import
+           check, so the missing-extra case would otherwise surface as
+           an ``AttributeError`` on ``None.from_filename(...)``.
+        2. ``.done`` marker missing — ``prepare_data`` was never called
+           or was interrupted before the marker was written.
+        3. ``.done`` present but ``data.mmap`` (or ``fg_mask.mmap`` when
+           ``fg_mask_key`` is set) missing — partial cleanup of the
+           cache dir (e.g. interrupted ``rm -rf``).
+        """
+        if MemoryMappedTensor is None:
+            raise ImportError(
+                "tensordict is required for mmap_preload=True. Install with: pip install 'viscy-data[mmap]'"
+            )
+        if not (cache_dir / ".done").exists():
+            raise RuntimeError(
+                f"mmap_preload=True but cache not ready at {cache_dir}. "
+                "Call dm.prepare_data() before dm.setup('fit'), or set mmap_preload=False."
+            )
+        required = [cache_dir / "data.mmap"]
+        if self.fg_mask_key is not None:
+            required.append(cache_dir / "fg_mask.mmap")
+        missing = [p.name for p in required if not p.exists()]
+        if missing:
+            raise RuntimeError(
+                f"mmap_preload cache corrupted at {cache_dir}: "
+                f"expected files missing ({missing}). "
+                "Delete the cache dir and re-run dm.prepare_data()."
+            )
+
     def _filtered_positions(self, plate: Plate) -> list[Position]:
         """Return plate positions kept by include/exclude_fov_names, raising if empty."""
         positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
@@ -440,12 +511,13 @@ class HCSDataModule(LightningDataModule):
             expanded_z -= expanded_z % 2
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
-        # Mmap views — buffer stores FOVs in original plate order, so we
+        # Mmap views — buffer stores FOVs in filtered plate order, so we
         # create views from orig_positions, then reindex by shuffled_indices.
         train_preloaded = None
         val_preloaded = None
         if self.mmap_preload:
             cache_dir = self._mmap_cache_dir
+            self._check_mmap_cache_ready(cache_dir)
             all_views = self._fov_views(
                 self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions),
                 orig_positions,
