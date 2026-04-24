@@ -288,14 +288,13 @@ print(f"data shape: {image.shape}, FOV: {field}, pyramid level: {pyaramid_level}
 figure, axes = plt.subplots(1, n_channels, figsize=(9, 3))
 
 for i in range(n_channels):
-    for i in range(n_channels):
-        channel_image = image[0, i, 0]
-        # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
-        p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
-        channel_image = np.clip(channel_image, p_low, p_high)
-        axes[i].imshow(channel_image, cmap="gray")
-        axes[i].axis("off")
-        axes[i].set_title(dataset.channel_names[i])
+    channel_image = image[0, i, 0]
+    # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
+    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+    channel_image = np.clip(channel_image, p_low, p_high)
+    axes[i].imshow(channel_image, cmap="gray")
+    axes[i].axis("off")
+    axes[i].set_title(dataset.channel_names[i])
 plt.tight_layout()
 
 # %% [markdown] tags=[]
@@ -546,10 +545,13 @@ log_batch_jupyter(batch)
 # shearing of 1% in (y,x), and no padding with zeros with a probablity of 80%.
 # - Add a Gaussian noise with a mean of 0.0 and standard deviation of 0.3 with a probability of 50%.
 #
-# HINT: `RandAffined()` and `RandGaussianNoised()` are from
-# `viscy.transforms` [here](https://github.com/mehta-lab/VisCy/blob/main/viscy/transforms.py). You can look at the docs by running `RandAffined?`.<br><br>
-# *Note these are MONAI transforms that have been redefined for VisCy.*
-# [Compare your choice of augmentations by dowloading the pretrained models and config files](https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip).
+# HINT: `RandAffined()` and `RandGaussianNoised()` are MONAI dictionary
+# transforms re-exported from `viscy_transforms`. See the MONAI docs for
+# arguments and probability semantics:
+# [RandAffined](https://docs.monai.io/en/stable/transforms.html#randaffined),
+# [RandGaussianNoised](https://docs.monai.io/en/stable/transforms.html#randgaussiannoised).
+# You can also inspect any transform in a cell with `RandAffined?`.<br><br>
+# [Compare your choice of augmentations against the pretrained models and config files](https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip).
 # </div>
 # %% tags=["task"]
 # Here we turn on data augmentation and rerun setup
@@ -943,6 +945,16 @@ model_graph_phase2fluor.visual_graph
 # </div>
 
 # %% [markdown]
+# <div class="alert alert-warning">
+# <b>Before re-running training:</b> if a previous training cell is still
+# holding the GPU (you'll see <code>CUDA out of memory</code>), restart the
+# Jupyter kernel (<b>Kernel → Restart</b> in Jupyter, or <b>Restart</b> in
+# VSCode) to release the previous model and optimizer state. The dataset and
+# augmentations will rebuild quickly; only the trained weights need to be
+# re-loaded via <code>load_from_checkpoint</code> if you want to resume.
+# </div>
+
+# %% [markdown]
 # Now that `fast_dev_run` confirmed the pipeline works end-to-end, we switch
 # to a "real" Trainer configured for an actual multi-epoch run. New Lightning
 # knobs appearing here:
@@ -1050,6 +1062,12 @@ phase2fluor_model.to(device)
 #   `[0, 1]` after rescaling). Captures local contrast and texture — it
 #   penalizes blurring that Pearson misses. For image translation, SSIM is the
 #   closer match to perceptual quality.
+#
+# > **Note**: classic SSIM assumes natural-image dynamic range. For fluorescence
+# > microscopy, [MicroSSIM](https://github.com/juglab/MicroSSIM) is a
+# > drop-in replacement that rescales to the low-signal, sparse-foreground
+# > regime microscopy data actually lives in — worth trying if SSIM scores
+# > look oddly compressed.
 
 # %% [markdown] tags=[]
 # ### Let's compute metrics directly and plot below.
@@ -1221,8 +1239,12 @@ for i, sample in enumerate(test_data.test_dataloader()):
 # Here we will compare your model with the VSCyto2D pretrained model by computing the pixel-based metrics and segmentation-based metrics.
 #
 # <ul>
-# <li>When you ran the `setup.sh` you also downloaded the models in `/06_image_translation/pretrained_models/VSCyto2D/*.ckpt`</li>
-# <li>Load the <b>VSCyto2 model</b> model checkpoint and the configuration file</li>
+# <li>The pretrained checkpoint was downloaded by <code>setup.sh</code> to
+#   <code>~/data/06_image_translation/pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt</code>
+#   — if missing, download it directly from
+#   <a href="https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt">public.czbiohub.org</a>.
+#   Check with <code>ls ~/data/06_image_translation/pretrained_models/VSCyto2D/</code>.</li>
+# <li>Load the <b>VSCyto2D</b> model checkpoint and the configuration file</li>
 # <li>Compute the pixel-based metrics and segmentation-based metrics between the model you trained and the pretrained model</li>
 # </ul>
 # <br>
@@ -2176,9 +2198,9 @@ ax[1, 0].set_title("No perturbation")
 
 # Select a sigma for the Gaussian filtering
 # ########## TODO ##############
-# Tensor dimensions (B,C,D,H,W).
+# Tensor dimensions (B, C, Z, Y, X).
 # Hint: Use the GaussianFilter layer to blur the phase image. Provide the  num spatial dimensions and sigmas
-# Hint: Spatial (D,H,W)
+# Hint: Spatial (Z, Y, X)
 gaussian_blur = GaussianFilter(...)
 # #############################
 with torch.inference_mode():
@@ -2222,9 +2244,9 @@ ax[1, 0].set_title("No perturbation")
 
 # Select a sigma for the Gaussian filtering
 # ########## SOLUTION ##############
-# Tensor dimensions (B,C,D,H,W).
+# Tensor dimensions (B, C, Z, Y, X).
 # Hint: Use the GaussianFilter layer to blur the phase image. Provide the  num spatial dimensions and sigma
-# Hint: Spatial (D,H,W). Apply the same sigma to H,W
+# Hint: Spatial (Z, Y, X). Apply the same sigma to Y, X
 gaussian_blur = GaussianFilter(spatial_dims=3, sigma=(0, 2, 2))
 # #############################
 with torch.inference_mode():
