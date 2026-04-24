@@ -10,7 +10,7 @@ from pytest import TempPathFactory, fixture, importorskip, mark, raises
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_transforms import BatchedRandFlipd, RandSpatialCropd
+from viscy_transforms import BatchedRandFlipd, NormalizeSampled, RandSpatialCropd
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
@@ -400,6 +400,87 @@ def test_fg_mask_key_missing_errors(tmp_path):
                 z_window_size=4,
                 fg_mask_key="fg_mask",
             )
+
+
+# ---------------------------------------------------------------------------
+# timepoint_statistics normalization
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_timepoint_norm_meta_flattens_requested_index():
+    """Helper flattens timepoint_statistics to the t-th entry; other levels pass through."""
+    meta = {
+        "Phase": {
+            "fov_statistics": {"mean": torch.tensor(0.5), "std": torch.tensor(0.1)},
+            "timepoint_statistics": {
+                "0": {"mean": torch.tensor(10.0), "std": torch.tensor(1.0)},
+                "1": {"mean": torch.tensor(1000.0), "std": torch.tensor(100.0)},
+            },
+        },
+    }
+    resolved = SlidingWindowDataset._resolve_timepoint_norm_meta(meta, t=1)
+    assert resolved["Phase"]["fov_statistics"]["mean"].item() == 0.5
+    assert resolved["Phase"]["timepoint_statistics"]["mean"].item() == 1000.0
+    assert resolved["Phase"]["timepoint_statistics"]["std"].item() == 100.0
+    assert SlidingWindowDataset._resolve_timepoint_norm_meta(None, t=0) is None
+
+
+@fixture(scope="function")
+def hcs_with_timepoint_stats(tmp_path):
+    """Two-timepoint HCS with per-timepoint normalization stats written to zattrs."""
+    dataset_path = tmp_path / "tp_stats.zarr"
+    ch_names = ["Phase", "Fluor"]
+    num_t = 2
+    rng = np.random.default_rng(0)
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names) as ds:
+        for fov_name in ("0", "1"):
+            pos = ds.create_position("A", "1", fov_name)
+            img = rng.random((num_t, len(ch_names), 4, 16, 16)).astype(np.float32)
+            pos.create_image("0", img, chunks=(1, 1, 1, 16, 16))
+    # Per-timepoint stats chosen to be very different so mis-selection is obvious.
+    tp_stats = {
+        "0": {"mean": 10.0, "std": 1.0},
+        "1": {"mean": 1000.0, "std": 100.0},
+    }
+    norm = {ch: {"timepoint_statistics": tp_stats} for ch in ch_names}
+    with open_ome_zarr(dataset_path, mode="r+") as ds:
+        for _, fov in ds.positions():
+            fov.zattrs["normalization"] = norm
+    return dataset_path
+
+
+def test_sliding_window_timepoint_statistics_normalize(hcs_with_timepoint_stats):
+    """NormalizeSampled(level='timepoint_statistics') uses the sample's timepoint stats."""
+    z_window = 4
+    tp_stats = {0: (10.0, 1.0), 1: (1000.0, 100.0)}
+    with open_ome_zarr(hcs_with_timepoint_stats, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        normalized = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluor"]},
+            z_window_size=z_window,
+            transform=NormalizeSampled(keys=["Phase"], level="timepoint_statistics"),
+        )
+        raw = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluor"]},
+            z_window_size=z_window,
+        )
+        assert len(normalized) == 4  # 2 FOVs * 2 timepoints * 1 z-window
+        seen_t = set()
+        for idx in range(len(normalized)):
+            norm_sample = normalized[idx]
+            raw_sample = raw[idx]
+            t = norm_sample["index"][1]
+            seen_t.add(t)
+            mean, std = tp_stats[t]
+            expected = (raw_sample["source"] - mean) / (std + 1e-8)
+            assert torch.allclose(norm_sample["source"], expected, atol=1e-6), (
+                f"Timepoint {t} (idx={idx}) normalization mismatch: "
+                f"expected ({mean}, {std}), got source range "
+                f"[{norm_sample['source'].min():.3f}, {norm_sample['source'].max():.3f}]"
+            )
+        assert seen_t == {0, 1}, f"Test did not exercise both timepoints (saw {seen_t})"
 
 
 # ---------------------------------------------------------------------------
