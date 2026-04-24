@@ -28,7 +28,7 @@
 #
 #   - Explore OME-Zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html)
 #   and the high-content-screen (HCS) format.
-#   - Use our `viscy.data.HCSDataloader()` dataloader and explore the  3 channel (phase, fluoresecence nuclei and cell membrane)
+#   - Use our `viscy.data.HCSDataloader()` dataloader and explore the  3 channel (phase, fluorescence nuclei and cell membrane)
 #   A549 cell dataset.
 #   - Implement data augmentations [MONAI](https://monai.io/) to train a robust model to imaging parameters and conditions.
 #   - Use tensorboard to log the augmentations, training and validation losses and batches
@@ -39,7 +39,7 @@
 #   - Evaluate the model using pixel-level and instance-level metrics.
 #
 # #### Part 3: Visualize the image transforms learned by the model and explore the model's regime of validity
-#   - Visualize the first 3 principal componets mapped to a color space in each encoder and decoder block.
+#   - Visualize the first 3 principal components mapped to a color space in each encoder and decoder block.
 #   - Explore the model's regime of validity by applying blurring and scaling transforms to the input phase image.
 #
 # #### For more information:
@@ -236,18 +236,15 @@ tensorboard_process = launch_tensorboard(log_dir)
 
 # %% [markdown] tags=[]
 # ## Load OME-Zarr Dataset
-
-# There should be 34 FOVs in the dataset.
 #
-# Each FOV consists of 3 channels of 2048x2048 images,
-# saved in the [High-Content Screening (HCS) layout](https://ngff.openmicroscopy.org/latest/#hcs-layout)
-# specified by the Open Microscopy Environment Next Generation File Format
-# (OME-NGFF).
+# **OME-Zarr** is a chunked, cloud-friendly microscopy format; **HCS layout**
+# nests the zarr store like a physical plate — `row/col/field/level/T/C/Z/Y/X` —
+# so each FOV is addressable by `dataset[f"{row}/{col}/{field}/{level}"]` and
+# returns an `(T, C, Z, Y, X)` array.
 #
-# The 3 channels correspond to the QPI, nuclei, and cell membrane. The nuclei were stained with DAPI and the cell membrane with Cellmask.
-#
-# - The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
-# - These datasets only have 1 level in the pyramid (highest resolution) which is '0'.
+# This dataset has 34 FOVs of 2048×2048 images across 3 channels (QPI, nuclei
+# stained with DAPI, membrane stained with Cellmask), a single pyramid level
+# `0`, and a single time point.
 
 # %% [markdown] tags=[]
 # <div class="alert alert-warning">
@@ -529,6 +526,18 @@ log_batch_jupyter(batch)
 # without having to acquire data for every possible condition? <br>
 # </div>
 # %% [markdown] tags=[]
+# Each augmentation simulates a real-world source of microscope-to-microscope
+# variation so the model doesn't overfit to the training conditions:
+#
+# | Transform | Simulates |
+# | --- | --- |
+# | `RandWeightedCropd` | random crops biased toward signal-dense regions (foreground oversampling) |
+# | `RandAffined` | stage rotation, scale drift, slight shear between acquisitions |
+# | `RandAdjustContrastd` | illumination / exposure differences |
+# | `RandScaleIntensityd` | gain / brightness differences between cameras |
+# | `RandGaussianNoised` | shot and read noise at different detector settings |
+# | `RandGaussianSmoothd` | small focus drift / defocus |
+# %% [markdown] tags=[]
 # <div class="alert alert-info">
 #
 # ### Task 1.3
@@ -706,6 +715,26 @@ log_batch_jupyter(augmented_batch)
 # and `freeze_encoder=False` lets gradients flow through the whole network.
 # `log_batches_per_epoch` is a VisCy extra — it tells the module how many image
 # samples to push to TensorBoard each epoch.
+# %% [markdown]
+# **Architecture config** — UNeXt2 is a U-Net with ConvNeXt-style blocks:
+#
+# - `encoder_blocks=[3, 3, 9, 3]` and `dims=[96, 192, 384, 768]` — 4 downsampling
+#   stages with that many blocks and feature channels per stage (last stage is
+#   the bottleneck). More blocks / dims = more capacity and more compute.
+# - `decoder_conv_blocks=2` — conv blocks after each upsampling step.
+# - `stem_kernel_size=(1, 2, 2)` and `in_stack_depth=1` — this is a 2D model,
+#   so we use 1 z-slice and a stem that doesn't convolve across z.
+#
+# **Loss** — `MixedLoss(l1_alpha=0.5, ms_dssim_alpha=0.5)` combines per-pixel
+# L1 (penalizes intensity error) with multi-scale SSIM (penalizes structural
+# error — edges, texture, shape). L1 alone produces blurry outputs; MS-SSIM
+# alone ignores absolute intensity. The 0.5/0.5 mix balances both.
+#
+# **Schedule** — `schedule="WarmupCosine"`, `lr=6e-4`: the learning rate ramps
+# up from 0 over the first few epochs (warmup), then follows a cosine decay
+# toward 0. Warmup avoids early gradient blow-up with AdamW; cosine decay is a
+# strong default for vision transformer / ConvNeXt-style encoders.
+
 # %% [markdown]
 # <div class="alert alert-info">
 #
@@ -979,16 +1008,19 @@ phase2fluor_model.to(device)
 # </div>
 # %% [markdown] tags=[]
 # # Part 2: Assess your trained model
-
-# Now we will look at some metrics of performance of previous model.
-# We typically evaluate the model performance on a held out test data.
-# We will use the following metrics to evaluate the accuracy of regression of the model:
-
-# - [Person Correlation](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient).
-# - [Structural similarity](https://en.wikipedia.org/wiki/Structural_similarity) (SSIM).
-
-# You should also look at the validation samples on tensorboard
-# (hint: the experimental data in nuclei channel is imperfect.)
+#
+# We evaluate on a held-out test set using two complementary families of metrics:
+#
+# - **Regression / pixel-level** (Pearson, SSIM): are predicted intensities
+#   close to ground truth, per pixel? Cheap, but can hide topological errors —
+#   a model that merges two nuclei may still score well pixel-wise.
+# - **Segmentation / instance-level** (Jaccard/IoU, Dice, mAP over IoU
+#   thresholds): run Cellpose on both predicted and measured fluorescence,
+#   then compare instance masks. This is what ultimately matters for
+#   downstream analysis (counting cells, tracking, phenotyping).
+#
+# Also inspect the validation samples on TensorBoard — the experimental
+# nuclei channel is noisy, so "ground truth" is itself imperfect.
 
 # %% [markdown]
 # <div class="alert alert-info">
@@ -1003,14 +1035,21 @@ phase2fluor_model.to(device)
 # %% [markdown] tags=[]
 # ```
 # #######################
-# ##### Todo ############
+# ##### Solution ########
 # #######################
-#
 # ```
 #
-# - Pearson Correlation:
+# - **Pearson Correlation**: linear correlation between predicted and target
+#   intensities across all pixels, in `[-1, 1]`. `1` means the prediction is a
+#   perfect affine rescaling of the target; invariant to mean / contrast
+#   offsets. Good at flagging "the pattern is right" but blind to structural
+#   errors that preserve correlation (e.g. a uniformly blurred prediction).
 #
-# - Structural similarity:
+# - **Structural similarity (SSIM)**: patch-wise comparison of local mean,
+#   variance, and covariance between prediction and target, in `[-1, 1]` (or
+#   `[0, 1]` after rescaling). Captures local contrast and texture — it
+#   penalizes blurring that Pearson misses. For image translation, SSIM is the
+#   closer match to perceptual quality.
 
 # %% [markdown] tags=[]
 # ### Let's compute metrics directly and plot below.
