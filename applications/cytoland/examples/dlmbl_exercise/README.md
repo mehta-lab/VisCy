@@ -41,45 +41,51 @@ VisCy exploits recent advances in data and metadata formats
 
 ## Setup
 
-Make sure that you are inside of the `image_translation` folder by using the `cd` command to change directories if needed.
-
-Make sure that you can use conda to switch environments.
+From the exercise folder, run:
 
 ```bash
-conda init
+cd applications/cytoland/examples/dlmbl_exercise
+bash setup.sh
 ```
 
-**Close your shell, and login again.**
+The script will:
 
-Run the setup script to create the environment for this exercise and download the dataset.
-```bash
-sh setup.sh
-```
-Activate your environment
-```bash
-conda activate 06_image_translation
-```
+- Install [`uv`](https://docs.astral.sh/uv/) if it isn't already on your PATH.
+- Create a Python 3.11 virtual environment at `./.venv`.
+- Install `cytoland` (editable) plus the tutorial extras:
+  `cellpose`, `torchview`, `jupyter`, `ipykernel`, `ipywidgets`, `jupytext`.
+- Register the venv as a Jupyter kernel named **`06_image_translation`**
+  (display name: *Python (06_image_translation)*).
+- Download the training / test OME-Zarr datasets and the VSCyto2D
+  pretrained checkpoint into `~/data/06_image_translation/`.
 
-## Use vscode
+Everything is self-contained inside this folder — no conda required.
 
-Install vscode, install jupyter extension inside vscode, and setup [cell mode](https://code.visualstudio.com/docs/python/jupyter-support-py). Open [solution.py](solution.py) and run the script interactively.
+## Use VSCode
+
+Install VSCode and the Python + Jupyter extensions, then open
+[`solution.py`](solution.py) and pick the **Python (06_image_translation)**
+kernel from the top-right kernel selector. The script uses
+[cell mode](https://code.visualstudio.com/docs/python/jupyter-support-py), so
+you can execute each `# %%` block interactively.
 
 ## Use Jupyter Notebook
 
-The matching exercise and solution notebooks can be found [here](https://github.com/dlmbl/image_translation/tree/28e0e515b4a8ad3f392a69c8341e105f730d204f) on the course repository.
+Generate a notebook from the solution script and launch Jupyter:
 
-Launch a jupyter environment
-
+```bash
+./.venv/bin/jupytext --to ipynb solution.py
+./.venv/bin/jupyter notebook solution.ipynb
 ```
-jupyter notebook
-```
 
-...and continue with the instructions in the notebook.
+Pick **Python (06_image_translation)** as the kernel.
 
-If `06_image_translation` is not available as a kernel in jupyter, run:
+If the kernel is missing (e.g. you reinstalled the venv), re-register it:
 
-```
-python -m ipykernel install --user --name=06_image_translation
+```bash
+./.venv/bin/python -m ipykernel install --user \
+    --name 06_image_translation \
+    --display-name "Python (06_image_translation)"
 ```
 
 ### References
