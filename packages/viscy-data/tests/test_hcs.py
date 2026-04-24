@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from imageio import imwrite
 from iohub import open_ome_zarr
+from lightning.pytorch.trainer.states import TrainerFn
 from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandFlipd, RandSpatialCropSamplesd
 from pytest import TempPathFactory, fixture, importorskip, mark, raises
 
@@ -132,18 +133,154 @@ def test_fov_name_filters_raise_when_empty(preprocessed_hcs_dataset):
         dm.setup(stage="fit")
 
 
-def test_fov_name_filters_reject_mmap_preload(preprocessed_hcs_dataset):
-    """Combining FOV filters with mmap_preload is not supported and raises."""
-    with raises(ValueError, match="mmap_preload"):
-        HCSDataModule(
-            data_path=preprocessed_hcs_dataset,
-            source_channel="DAPI",
-            target_channel="GFP",
-            z_window_size=5,
-            yx_patch_size=[16, 16],
-            mmap_preload=True,
-            include_fov_names=["A/1/0"],
-        )
+def test_fov_name_filters_with_mmap_preload(preprocessed_hcs_dataset, tmp_path):
+    """include/exclude_fov_names is honored during mmap_preload staging.
+
+    The mmap buffer is sized and indexed by the filtered position list, so
+    the buffer must contain only the kept FOVs — otherwise _setup_fit's
+    filtered orig_positions would alias the wrong entries.
+    """
+    importorskip("tensordict")
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    dropped = all_fovs[:2]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+        exclude_fov_names=dropped,
+    )
+    dm.prepare_data()
+    dm.setup(stage="fit")
+    selected = {str(p.zgroup.path) for p in dm.train_dataset.positions} | {
+        str(p.zgroup.path) for p in dm.val_dataset.positions
+    }
+    assert len(selected) == len(all_fovs) - len(dropped)
+    assert not any(name.endswith(d) for name in selected for d in dropped)
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape[1] == 1
+        assert batch["target"].shape[1] == 1
+        break
+    assert (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_fov_name_filters_with_mmap_preload_cache_fingerprint(preprocessed_hcs_dataset, tmp_path):
+    """Different FOV filters must produce different mmap cache dirs.
+
+    Sharing a cache across filter configs would alias wrong FOVs because
+    the buffer layout is filter-dependent.
+    """
+    importorskip("tensordict")
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    base_kwargs = dict(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm_no_filter = HCSDataModule(**base_kwargs)
+    dm_exclude = HCSDataModule(exclude_fov_names=all_fovs[:1], **base_kwargs)
+    dm_include = HCSDataModule(include_fov_names=all_fovs[:2], **base_kwargs)
+    dirs = {dm_no_filter._mmap_cache_dir, dm_exclude._mmap_cache_dir, dm_include._mmap_cache_dir}
+    assert len(dirs) == 3
+
+
+def _bad_filter_dm(data_path: Path, scratch_dir: Path) -> HCSDataModule:
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    return HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        mmap_preload=True,
+        scratch_dir=scratch_dir,
+        include_fov_names=["does/not/exist"],
+    )
+
+
+def test_mmap_preload_raises_for_fit_with_bad_filter(preprocessed_hcs_dataset, tmp_path):
+    """Fit-stage prepare_data() keeps the strict empty-filter signal.
+
+    Guards the stage gate: if a broken helper ever returned False for
+    FITTING, prepare_data() would silently skip and a ValueError on
+    config typos would only surface later in setup('fit').
+    """
+    importorskip("tensordict")
+    dm = _bad_filter_dm(preprocessed_hcs_dataset, tmp_path)
+    dm.trainer = MagicMock(state=MagicMock(fn=TrainerFn.FITTING))
+    with raises(ValueError, match="No positions left"):
+        dm.prepare_data()
+    assert not (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_mmap_preload_skipped_for_predict_with_bad_filter(preprocessed_hcs_dataset, tmp_path):
+    """Predict-only runs don't consume the mmap buffer, so prepare_data() skips.
+
+    Before this change, a bad include_fov_names filter would kill a
+    predict-only job even though _setup_predict ignores FOV filters
+    entirely and never opens the mmap cache.
+    """
+    importorskip("tensordict")
+    dm = _bad_filter_dm(preprocessed_hcs_dataset, tmp_path)
+    dm.trainer = MagicMock(state=MagicMock(fn=TrainerFn.PREDICTING))
+    dm.prepare_data()
+    assert not (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_mmap_preload_skipped_for_test_with_bad_filter(preprocessed_hcs_dataset, tmp_path):
+    """Test-only runs also skip mmap staging; mirror of predict."""
+    importorskip("tensordict")
+    dm = _bad_filter_dm(preprocessed_hcs_dataset, tmp_path)
+    dm.trainer = MagicMock(state=MagicMock(fn=TrainerFn.TESTING))
+    dm.prepare_data()
+    assert not (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_setup_fit_raises_when_mmap_cache_missing(preprocessed_hcs_dataset, tmp_path):
+    """setup('fit') without a prior prepare_data() raises an actionable error.
+
+    Previously this failed inside MemoryMappedTensor.from_filename with
+    an opaque FileNotFoundError / RuntimeError. The pre-check in
+    _setup_fit now surfaces the missing-cache case with a clear hint.
+    """
+    importorskip("tensordict")
+    with open_ome_zarr(preprocessed_hcs_dataset) as ds:
+        channel_names = ds.channel_names
+    dm = HCSDataModule(
+        data_path=preprocessed_hcs_dataset,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    with raises(RuntimeError, match="cache not ready"):
+        dm.setup(stage="fit")
 
 
 def test_on_after_batch_transfer_shape_mismatch_raises(preprocessed_hcs_dataset):

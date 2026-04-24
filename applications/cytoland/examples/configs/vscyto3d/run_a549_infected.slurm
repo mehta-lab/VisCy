@@ -5,7 +5,7 @@
 #SBATCH --job-name=VSCyto3D_A549_infected
 #SBATCH --time=5-00:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=4
+#SBATCH --ntasks-per-node=4
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus=4
