@@ -117,6 +117,46 @@ def test_submit_rejects_non_absolute_run_root(tmp_path):
         sbj.submit([str(leaf), "--dry-run"])
 
 
+def test_exclude_directive_rendered_when_set():
+    """When launcher.sbatch.exclude is set, render a bare ``#SBATCH --exclude=<hostlist>`` line."""
+    sbatch = {
+        "partition": "gpu",
+        "nodes": 1,
+        "ntasks_per_node": 1,
+        "cpus_per_task": 8,
+        "gpus": 1,
+        "mem": "64G",
+        "constraint": "h200",
+        "time": "1:00:00",
+        "exclude": "gpu-d-1",
+    }
+    rendered = sbj._render_sbatch_directives("JOB", "/run", sbatch)
+    assert "#SBATCH --exclude=gpu-d-1" in rendered
+    exclude_idx = rendered.index("#SBATCH --exclude=gpu-d-1")
+    constraint_idx = rendered.index("#SBATCH --constraint=")
+    output_idx = rendered.index("#SBATCH --output=")
+    assert constraint_idx < exclude_idx < output_idx
+
+
+def test_exclude_directive_skipped_when_absent():
+    """Absent or None ``exclude`` renders no ``--exclude`` line."""
+    sbatch = {
+        "partition": "gpu",
+        "nodes": 1,
+        "ntasks_per_node": 1,
+        "cpus_per_task": 8,
+        "gpus": 1,
+        "mem": "64G",
+        "constraint": "h200",
+        "time": "1:00:00",
+    }
+    rendered_absent = sbj._render_sbatch_directives("JOB", "/run", sbatch)
+    assert "--exclude" not in rendered_absent
+
+    rendered_none = sbj._render_sbatch_directives("JOB", "/run", {**sbatch, "exclude": None})
+    assert "--exclude" not in rendered_none
+
+
 def test_submit_rejects_devices_gpus_mismatch(tmp_path):
     leaf = tmp_path / "leaf.yml"
     leaf.write_text(

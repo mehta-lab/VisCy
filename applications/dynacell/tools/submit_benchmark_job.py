@@ -44,6 +44,7 @@ _SBATCH_DIRECTIVE_ORDER = (
     ("gpus", "--gpus"),
     ("mem", "--mem"),
     ("constraint", "--constraint"),
+    ("exclude", "--exclude"),
 )
 
 
@@ -77,15 +78,16 @@ def _apply_override(composed: dict, path: list[str], value: Any) -> dict:
     return deep_merge(composed, nested)
 
 
-_OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint"})
+_OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
 
 
 def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str:
     """Render ordered ``#SBATCH`` lines. Order is pinned; output/error appended last.
 
-    Optional directives (currently ``constraint``) are skipped when the
+    Optional directives (``constraint``, ``exclude``) are skipped when the
     value is missing or null — profiles can set ``constraint: null`` to
-    express "run on any GPU."
+    express "run on any GPU", and ``exclude`` can be set via ``--override
+    launcher.sbatch.exclude=<hostlist>`` to steer around bad nodes.
     """
     values = dict(sbatch)
     values.setdefault("job_name", job_name)
