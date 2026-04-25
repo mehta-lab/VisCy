@@ -23,10 +23,26 @@ from sklearn.preprocessing import normalize
 
 _logger = logging.getLogger(__name__)
 
-POSITIVE_CLASSES: dict[str, str] = {
+DEFAULT_POSITIVE_CLASSES: dict[str, str] = {
     "infection_state": "infected",
     "organelle_state": "remodel",
 }
+"""Default mapping of label column to positive class.
+
+Used when the caller does not pass ``positive_classes`` explicitly. Keys
+are ``obs`` columns whose entries are categorical strings; values are
+the entry that should be treated as the positive class for downstream
+binarization. Override per call when working with non-infection labels
+(e.g. ``{"cell_division_state": "mitosis"}`` for ALFI).
+"""
+"""Default mapping of label column to positive class.
+
+Used when the caller does not pass ``positive_classes`` explicitly. Keys
+are ``obs`` columns whose entries are categorical strings; values are
+the entry that should be treated as the positive class for downstream
+binarization. Override per call when working with non-infection labels
+(e.g. ``{"cell_division_state": "mitosis"}`` for ALFI).
+"""
 
 
 class TemplateResult(NamedTuple):
@@ -114,6 +130,7 @@ def _extract_track_trajectories(
     min_track_timepoints: int = 3,
     crop_window: int | None = None,
     label_cols: list[str] | None = None,
+    positive_classes: dict[str, str] | None = None,
 ) -> list[tuple[str, int, np.ndarray, np.ndarray, dict[str, np.ndarray] | None]]:
     """Extract per-track embedding trajectories from AnnData.
 
@@ -131,7 +148,10 @@ def _extract_track_trajectories(
         Requires t_perturb column in df. None = use full track.
     label_cols : list[str] or None
         Label columns to extract (e.g., ["infection_state", "organelle_state"]).
-        Each is binarized using POSITIVE_CLASSES mapping.
+        Each is binarized using ``positive_classes``.
+    positive_classes : dict[str, str] or None
+        Mapping from label column name to its positive class value.
+        Required when ``label_cols`` is provided.
 
     Returns
     -------
@@ -153,10 +173,14 @@ def _extract_track_trajectories(
     # Build label lookups per column
     label_lookups: dict[str, dict[tuple, int]] = {}
     if label_cols:
+        if positive_classes is None:
+            raise ValueError("positive_classes is required when label_cols is set")
         for col in label_cols:
             if col not in df.columns:
                 continue
-            positive_val = POSITIVE_CLASSES[col]
+            if col not in positive_classes:
+                raise KeyError(f"positive_classes is missing entry for label column {col!r}")
+            positive_val = positive_classes[col]
             lookup: dict[tuple, int] = {}
             for _, row in df.iterrows():
                 val = row[col]
@@ -175,18 +199,18 @@ def _extract_track_trajectories(
         # Crop around t_perturb if requested
         if crop_window is not None and (fov_name, track_id) in t_perturb_lookup:
             tp = t_perturb_lookup[(fov_name, track_id)]
-            t_vals = sorted_group["t"].values
+            t_vals = sorted_group["t"].to_numpy()
             mask = (t_vals >= tp - crop_window) & (t_vals <= tp + crop_window)
             sorted_group = sorted_group.iloc[mask]
 
         if len(sorted_group) < min_track_timepoints:
             continue
 
-        iloc_indices = sorted_group["_iloc"].values
+        iloc_indices = sorted_group["_iloc"].to_numpy()
         emb = adata.X[iloc_indices]
         if hasattr(emb, "toarray"):
             emb = emb.toarray()
-        timepoints = sorted_group["t"].values.astype(int)
+        timepoints = sorted_group["t"].to_numpy().astype(int)
 
         labels = None
         if label_lookups:
@@ -206,6 +230,7 @@ def _dba(
     max_iter: int = 30,
     tol: float = 1e-5,
     init: str = "medoid",
+    random_state: int = 42,
 ) -> np.ndarray:
     """DTW Barycenter Averaging (DBA).
 
@@ -220,6 +245,8 @@ def _dba(
     init : str
         Initialization method. "medoid" selects the sequence with
         lowest total DTW cost to all others.
+    random_state : int
+        Seed for medoid candidate subsampling. Default 42.
 
     Returns
     -------
@@ -234,7 +261,7 @@ def _dba(
         # Subsample for medoid if too many sequences (O(n²) DTW calls)
         max_medoid_candidates = 50
         if n > max_medoid_candidates:
-            rng = np.random.default_rng(42)
+            rng = np.random.default_rng(random_state)
             candidate_idx = rng.choice(n, max_medoid_candidates, replace=False)
             _logger.info("DBA medoid init: subsampling %d/%d candidates", max_medoid_candidates, n)
         else:
@@ -275,7 +302,7 @@ def _dba(
     return avg
 
 
-def build_infection_template(
+def build_template(
     adata_dict: dict[str, ad.AnnData],
     aligned_df_dict: dict[str, pd.DataFrame],
     pca_n_components: int | None = 20,
@@ -285,13 +312,21 @@ def build_infection_template(
     dba_init: str = "medoid",
     control_adata_dict: dict[str, ad.AnnData] | None = None,
     crop_window: int | dict[str, int] | None = None,
+    positive_classes: dict[str, str] | None = None,
+    random_state: int = 42,
 ) -> TemplateResult:
-    """Build an infection response template from annotated datasets.
+    """Build a DTW pseudotime template from annotated single-cell trajectories.
+
+    Generic over the underlying biology — what was previously called
+    ``build_infection_template`` works for any anchored event (infection
+    onset, mitotic entry, immune activation) provided the caller supplies
+    the appropriate label-to-positive-class mapping via ``positive_classes``.
 
     Parameters
     ----------
     adata_dict : dict[str, ad.AnnData]
-        {dataset_id: adata} with embeddings for infected cells.
+        {dataset_id: adata} with embeddings for the cells used to build
+        the template.
     aligned_df_dict : dict[str, pd.DataFrame]
         {dataset_id: aligned_df} with t_perturb assigned.
     pca_n_components : int or None
@@ -308,16 +343,26 @@ def build_infection_template(
         Control embeddings per dataset, included in PCA fitting.
     crop_window : int or dict[str, int] or None
         If set, crop each track to [t_perturb - crop_window, t_perturb + crop_window]
-        before DBA. Produces a shorter template centered on the infection transition.
-        Pass a dict to use per-dataset crop windows (e.g. when datasets have different
-        frame intervals and crop_window was derived from a fixed duration in minutes).
-        None = use full tracks (variable length).
+        before DBA. Produces a shorter template centered on the anchored
+        event. Pass a dict to use per-dataset crop windows (e.g. when
+        datasets have different frame intervals and crop_window was
+        derived from a fixed duration in minutes). None = use full
+        tracks (variable length).
+    positive_classes : dict[str, str] or None
+        Mapping from label column name to its positive-class value.
+        Defaults to :data:`DEFAULT_POSITIVE_CLASSES` (infection labels).
+        Pass ``{"cell_division_state": "mitosis"}`` for ALFI division
+        templates.
+    random_state : int
+        Seed for reproducible PCA / medoid subsampling. Default 42.
 
     Returns
     -------
     TemplateResult
         Template array, PCA model, z-score params, and metadata.
     """
+    if positive_classes is None:
+        positive_classes = DEFAULT_POSITIVE_CLASSES
     raw_embeddings = {}
     for dataset_id, adata in adata_dict.items():
         emb = adata.X
@@ -342,10 +387,10 @@ def build_infection_template(
 
     if use_pca:
         if pca_variance_threshold is not None:
-            pca = PCA(n_components=pca_variance_threshold, svd_solver="full")
+            pca = PCA(n_components=pca_variance_threshold, svd_solver="full", random_state=random_state)
         else:
             n_comp = min(pca_n_components, all_zscored.shape[1], all_zscored.shape[0])
-            pca = PCA(n_components=n_comp)
+            pca = PCA(n_components=n_comp, random_state=random_state)
         pca.fit(all_zscored)
         explained_variance = float(np.sum(pca.explained_variance_ratio_))
         _logger.info(f"PCA: {pca.n_components_} components explain {explained_variance:.1%} variance")
@@ -358,7 +403,7 @@ def build_infection_template(
     cell_ids: list[tuple[str, str, int]] = []
 
     # Detect which label columns are available across all datasets
-    label_cols = [col for col in POSITIVE_CLASSES if any(col in df.columns for df in aligned_df_dict.values())]
+    label_cols = [col for col in positive_classes if any(col in df.columns for df in aligned_df_dict.values())]
     label_cols_or_none = label_cols if label_cols else None
 
     for dataset_id, adata in adata_dict.items():
@@ -383,6 +428,7 @@ def build_infection_template(
             min_track_timepoints=1,
             crop_window=ds_crop_window,
             label_cols=label_cols_or_none,
+            positive_classes=positive_classes,
         )
         for fov_name, track_id, emb, timepoints, labels in tracks:
             processed = _preprocess_embeddings(emb, pca=pca)
@@ -396,7 +442,7 @@ def build_infection_template(
         raise ValueError("No valid trajectories found for template building.")
 
     _logger.info(f"Building template from {len(trajectories)} trajectories")
-    template = _dba(trajectories, max_iter=dba_max_iter, tol=dba_tol, init=dba_init)
+    template = _dba(trajectories, max_iter=dba_max_iter, tol=dba_tol, init=dba_init, random_state=random_state)
     template = normalize(template, norm="l2", axis=1)
 
     # Compute template labels and time calibration via DTW alignment back to template.
@@ -491,7 +537,7 @@ def dtw_align_tracks(
     df : pd.DataFrame
         Tracking DataFrame (optionally with t_perturb).
     template_result : TemplateResult
-        Template from build_infection_template.
+        Template from :func:`build_template`.
     dataset_id : str
         Identifier for this dataset.
     min_track_timepoints : int
@@ -729,7 +775,7 @@ def classify_response_groups(
         elif speed_clustering_method == "kmeans":
             from sklearn.cluster import KMeans
 
-            speeds = responders["mean_warping_speed"].values.reshape(-1, 1)
+            speeds = responders["mean_warping_speed"].to_numpy().reshape(-1, 1)
             if len(speeds) >= 2:
                 km = KMeans(n_clusters=2, random_state=42, n_init=10)
                 labels = km.fit_predict(speeds)
@@ -802,7 +848,7 @@ def alignment_results_to_dataframe(
     if time_calibration is not None and len(df) > 0:
         T = len(time_calibration)
         df["estimated_t_rel_minutes"] = np.interp(
-            df["pseudotime"].values * (T - 1),
+            df["pseudotime"].to_numpy() * (T - 1),
             np.arange(T),
             time_calibration,
         )
@@ -820,7 +866,7 @@ def extract_dtw_pseudotime(
     speed_quantile: float = 0.5,
     psi: int | None = None,
 ) -> pd.DataFrame:
-    """Convenience wrapper: align + classify + flatten.
+    """Run align + classify + flatten in one call (convenience wrapper).
 
     Parameters
     ----------

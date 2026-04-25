@@ -110,7 +110,7 @@ def aggregate_population(
                     }
                 )
             else:
-                vals = bin_data[signal_col].values
+                vals = bin_data[signal_col].to_numpy()
                 results.append(
                     {
                         "time_minutes": bin_start,
@@ -280,8 +280,8 @@ def find_peak_metrics(
     # AUC (area under curve from baseline)
     valid_mask = post_infection[signal_col].notna()
     if valid_mask.sum() > 1:
-        times = post_infection.loc[valid_mask, "time_minutes"].values
-        values = post_infection.loc[valid_mask, signal_col].values - baseline_mean
+        times = post_infection.loc[valid_mask, "time_minutes"].to_numpy()
+        values = post_infection.loc[valid_mask, signal_col].to_numpy() - baseline_mean
         auc = float(np.trapezoid(values, times))
     else:
         auc = np.nan

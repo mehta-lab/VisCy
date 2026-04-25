@@ -187,12 +187,12 @@ def plot_cell_heatmap(
 
     fig, ax = plt.subplots(figsize=(14, max(4, len(pivot) * 0.06)))
 
-    bin_centers = pivot.columns.values
+    bin_centers = pivot.columns.to_numpy()
     bin_width = time_bins[1] - time_bins[0]
     bin_edges_hours = np.append(bin_centers, bin_centers[-1] + bin_width) / 60
 
     if signal_type == "fraction":
-        plot_data = pivot.values.copy()
+        plot_data = pivot.to_numpy().copy()
         plot_data = np.where(np.isnan(plot_data), -1, plot_data)
         cmap = ListedColormap(["#ffffff", "#c6dbef", "#08519c"])
         im = ax.pcolormesh(
@@ -206,7 +206,7 @@ def plot_cell_heatmap(
         cbar = plt.colorbar(im, ax=ax, ticks=[-1, 0, 1])
         cbar.ax.set_yticklabels(["No data", "No remodel", "Remodel"])
     else:
-        plot_data = pivot.values.copy()
+        plot_data = pivot.to_numpy().copy()
         im = ax.pcolormesh(
             bin_edges_hours,
             np.arange(len(pivot) + 1),
@@ -316,7 +316,7 @@ def plot_onset_comparison(
     """
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    organelles = timing_metrics["marker"].values
+    organelles = timing_metrics["marker"].to_numpy()
     x = np.arange(len(organelles))
     width = 0.25
 
@@ -332,7 +332,7 @@ def plot_onset_comparison(
             labels.append(label)
 
     for i, (col, label) in enumerate(zip(metrics_to_plot, labels)):
-        values_hours = timing_metrics[col].values / 60
+        values_hours = timing_metrics[col].to_numpy() / 60
         offset = (i - len(metrics_to_plot) / 2 + 0.5) * width
         ax.bar(x + offset, values_hours, width, label=label, alpha=0.8)
 

@@ -46,8 +46,8 @@ def pseudotime_vs_annotation_auc(
     if len(valid) == 0:
         return np.nan
 
-    y_true = (valid[annotation_col] == positive_value).astype(int).values
-    y_score = valid[pseudotime_col].values
+    y_true = (valid[annotation_col] == positive_value).astype(int).to_numpy()
+    y_score = valid[pseudotime_col].to_numpy()
 
     if len(np.unique(y_true)) < 2:
         return np.nan
@@ -104,7 +104,7 @@ def onset_concordance(
         ann_onset_t = ann_positive["t"].iloc[0]
 
         # DTW onset: first timepoint where pseudotime exceeds median of track
-        pt = track[pseudotime_col].values
+        pt = track[pseudotime_col].to_numpy()
         threshold = np.median(pt)
         above = track[track[pseudotime_col] > threshold]
         if len(above) == 0:
@@ -153,8 +153,8 @@ def per_timepoint_auc(
 
     rows = []
     for t_val, group in valid.groupby(time_col):
-        y_true = (group[annotation_col] == positive_value).astype(int).values
-        y_score = group[pseudotime_col].values
+        y_true = (group[annotation_col] == positive_value).astype(int).to_numpy()
+        y_score = group[pseudotime_col].to_numpy()
         n_pos = int(y_true.sum())
 
         if len(np.unique(y_true)) < 2:
@@ -196,8 +196,8 @@ def _pseudotime_ap(
     if len(valid) == 0:
         return np.nan
 
-    y_true = (valid[annotation_col] == positive_value).astype(int).values
-    y_score = valid[pseudotime_col].values
+    y_true = (valid[annotation_col] == positive_value).astype(int).to_numpy()
+    y_score = valid[pseudotime_col].to_numpy()
 
     if len(np.unique(y_true)) < 2:
         return np.nan

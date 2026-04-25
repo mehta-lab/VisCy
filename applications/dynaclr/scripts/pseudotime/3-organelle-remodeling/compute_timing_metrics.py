@@ -56,8 +56,13 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import zarr
 from scipy import stats
+
+from dynaclr.pseudotime import (
+    date_prefix_from_dataset_id,
+    find_embedding_zarr,
+    read_time_calibration,
+)
 
 matplotlib.use("Agg")
 
@@ -67,9 +72,10 @@ ALIGNMENTS_DIR = SCRIPT_DIR.parent / "2-align_cells" / "alignments"
 OUT_DIR = SCRIPT_DIR / "timing"
 
 sys.path.insert(0, str(SCRIPT_DIR.parent))
-sys.path.insert(0, str(SCRIPT_DIR.parent / "1-build_template"))
-from evaluate_template import _date_prefix_from_dataset_id, _find_zarr  # noqa: E402
 from utils import load_stage_config  # noqa: E402
+
+_date_prefix_from_dataset_id = date_prefix_from_dataset_id
+_find_zarr = find_embedding_zarr
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 _logger = logging.getLogger(__name__)
@@ -418,8 +424,10 @@ def main() -> None:
         selected["frame_interval"] = selected["dataset_id"].map(frame_interval_by_ds)
 
         template_path = TEMPLATES_DIR / f"template_{args.template}.zarr"
-        tc_grp = zarr.open(str(template_path), mode="r")[args.flavor]
-        tc = np.asarray(tc_grp["time_calibration"]) if "time_calibration" in tc_grp else None
+        try:
+            tc = read_time_calibration(template_path, args.flavor)
+        except KeyError:
+            tc = None
 
         def _extrapolate_minutes(row: pd.Series) -> float:
             if row["alignment_region"] == "aligned":

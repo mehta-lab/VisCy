@@ -119,14 +119,14 @@ def extract_prediction_signal(
         obs_lookup = obs.set_index(["fov_name", "track_id", "t"])["_proba_positive"]
         result["signal"] = np.nan
         matched = result_key.index.isin(common_idx)
-        result.loc[matched, "signal"] = obs_lookup.reindex(result_key.index[matched]).values
+        result.loc[matched, "signal"] = obs_lookup.reindex(result_key.index[matched]).to_numpy()
     else:
         obs_lookup = obs.set_index(["fov_name", "track_id", "t"])[pred_col]
         predictions = obs_lookup.reindex(result_key.index)
         result["signal"] = np.where(
-            predictions.isna().values,
+            predictions.isna().to_numpy(),
             np.nan,
-            (predictions.values == positive_value).astype(float),
+            (predictions.to_numpy() == positive_value).astype(float),
         )
 
     return result
@@ -181,7 +181,7 @@ def extract_embedding_distance(
     result_key = result.set_index(["fov_name", "track_id", "t"])
     common_idx = result_key.index.intersection(obs_lookup.index)
 
-    adata_indices = obs_lookup.reindex(common_idx).values.astype(int)
+    adata_indices = obs_lookup.reindex(common_idx).to_numpy().astype(int)
     result_row_mask = result_key.index.isin(common_idx)
     result_rows = np.where(result_row_mask)[0]
 
@@ -197,7 +197,7 @@ def extract_embedding_distance(
     if baseline_method == "control_well" or pca_n_components is not None:
         if control_fov_pattern is not None:
             ctrl_mask = adata.obs["fov_name"].astype(str).str.contains(control_fov_pattern, regex=True)
-            ctrl_emb = adata.X[ctrl_mask.values]
+            ctrl_emb = adata.X[ctrl_mask.to_numpy()]
             if not isinstance(ctrl_emb, np.ndarray):
                 ctrl_emb = np.asarray(ctrl_emb)
             if len(ctrl_emb) > 0:
@@ -233,7 +233,7 @@ def extract_embedding_distance(
 
     elif baseline_method == "per_track":
         for _, group in local_df.groupby(["fov_name", "track_id"]):
-            group_emb_idx = group["_emb_idx"].values
+            group_emb_idx = group["_emb_idx"].to_numpy()
 
             # Find baseline frames
             bl_mask = (group["t_relative_minutes"] >= baseline_window_minutes[0]) & (
@@ -247,7 +247,7 @@ def extract_embedding_distance(
                 else:
                     continue
             else:
-                bl_idx = group.loc[bl_mask, "_emb_idx"].values
+                bl_idx = group.loc[bl_mask, "_emb_idx"].to_numpy()
                 baseline = embeddings[bl_idx].mean(axis=0, keepdims=True)
 
             track_emb = embeddings[group_emb_idx]

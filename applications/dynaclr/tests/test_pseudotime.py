@@ -10,18 +10,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dynaclr.evaluation.pseudotime.alignment import (
+from dynaclr.pseudotime.alignment import (
     align_tracks,
     assign_t_perturb,
     filter_tracks,
     identify_lineages,
 )
-from dynaclr.evaluation.pseudotime.dtw_alignment import (
+from dynaclr.pseudotime.dtw_alignment import (
     alignment_results_to_dataframe,
-    build_infection_template,
+    build_template,
     dtw_align_tracks,
 )
-from dynaclr.evaluation.pseudotime.metrics import (
+from dynaclr.pseudotime.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -29,13 +29,13 @@ from dynaclr.evaluation.pseudotime.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from dynaclr.evaluation.pseudotime.plotting import (
+from dynaclr.pseudotime.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from dynaclr.evaluation.pseudotime.signals import (
+from dynaclr.pseudotime.signals import (
     extract_annotation_signal,
     extract_embedding_distance,
     extract_prediction_signal,
@@ -436,7 +436,7 @@ class TestTimeCalibration:
 
     def test_build_template_has_time_calibration(self, simple_template_inputs):
         adata_dict, aligned_df_dict = simple_template_inputs
-        result = build_infection_template(adata_dict, aligned_df_dict, pca_n_components=None)
+        result = build_template(adata_dict, aligned_df_dict, pca_n_components=None)
         assert result.time_calibration is not None
         T = result.template.shape[0]
         assert result.time_calibration.shape == (T,)
@@ -446,7 +446,7 @@ class TestTimeCalibration:
 
     def test_time_calibration_monotonically_increasing(self, simple_template_inputs):
         adata_dict, aligned_df_dict = simple_template_inputs
-        result = build_infection_template(adata_dict, aligned_df_dict, pca_n_components=None)
+        result = build_template(adata_dict, aligned_df_dict, pca_n_components=None)
         cal = result.time_calibration
         # After gap interpolation, calibration should be non-decreasing
         diffs = np.diff(cal)
@@ -454,7 +454,7 @@ class TestTimeCalibration:
 
     def test_estimated_t_rel_in_alignment_output(self, simple_template_inputs):
         adata_dict, aligned_df_dict = simple_template_inputs
-        template = build_infection_template(adata_dict, aligned_df_dict, pca_n_components=None)
+        template = build_template(adata_dict, aligned_df_dict, pca_n_components=None)
         assert template.time_calibration is not None
 
         # Align one dataset against the template

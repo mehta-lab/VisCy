@@ -244,7 +244,7 @@ def align_tracks(
     min_track_timepoints: int = 3,
     fov_pattern: str | list[str] | None = None,
 ) -> pd.DataFrame:
-    """Convenience wrapper: filter_tracks + assign_t_perturb in one call.
+    """Run filter_tracks + assign_t_perturb in one call (convenience wrapper).
 
     Parameters
     ----------

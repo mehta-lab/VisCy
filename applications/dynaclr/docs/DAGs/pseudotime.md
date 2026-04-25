@@ -30,6 +30,11 @@ applications/dynaclr/
 │   ├── build_template.yaml                          # Stage 1 recipe: candidate_sets + templates
 │   └── align_cells.yaml                             # Stage 2 recipe: query_sets
 ├── docs/DAGs/pseudotime.md                          # this file
+├── src/dynaclr/pseudotime/                          # library: DBA, DTW, IO, label/embedding metrics
+│   ├── __init__.py                                  # curated public API (build_template, dtw_align_tracks, …)
+│   ├── dtw_alignment.py                             # template fit + warp solver (dtaidistance under the hood)
+│   ├── io.py                                        # template-zarr layout + dataset routing + version stamping
+│   ├── alignment.py · signals.py · metrics.py · plotting.py · evaluation.py  # legacy modules (still importable)
 └── scripts/pseudotime/
     ├── utils.py                                     # shared helpers (load_stage_config, read_focus_slice)
     ├── sweep_pcs.py                                 # PCA sweep — build × align × compare for multiple n_components
@@ -107,7 +112,8 @@ applications/dynaclr/
         ├── pca/explained_variance_ratio (N,)
         ├── zscore_params/{ds_id}/*   (D,)      only if zscore=per_dataset
         ├── t_key_event               (N_cells,)  per-cell anchor frame
-        └── attrs: template_cell_ids, l2_normalize, metric, aggregator
+        └── attrs: template_cell_ids, aggregator,
+                   viscy_git_sha, dtaidistance_version, scikit_learn_version, numpy_version
                    │
                    ▼
         1-build_template/evaluate_template.py --template {name} --flavor {raw|pca}
@@ -323,6 +329,7 @@ What it does:
 2. Loads the query set's embedding zarr(s), restricted to the template's channel.
 3. For each query track, calls `dtw_align_tracks(..., subsequence=True, frame_interval_minutes=..., max_psi_minutes=...)` so psi is frame-rate invariant — same wall-clock freedom on 10 min/frame and 30 min/frame tracks. The template (length T) must match fully while the query (length Q ≥ T) floats; returns a warp path, best-match window `[q_start, q_end]`, cost, and `path_skew`.
 4. Applies guards (see "Guards and frame-rate invariance" below) and writes one row per `(dataset_id, fov_name, track_id, t)`.
+5. Writes a sidecar `{template}_{flavor}_on_{query_set}.drop_log.json` next to the parquet recording per-filter drop counts (`n_input_tracks`, `n_dropped_non_finite_cost`, `n_dropped_min_match_minutes` / `n_dropped_min_match_ratio`, `n_dropped_max_skew`, `n_dropped_pre_post_headroom`, `n_kept`). Lets a reviewer audit the funnel without grepping stderr.
 
 #### 2b — Rank cells by DTW cost (`rank_by_cost.py`)
 
@@ -594,14 +601,14 @@ templates:
       zscore: none                                   # {none, per_dataset}
       pca:
         n_components: 20                             # pca/ flavor; raw/ always built. Use sweep_pcs.py to pick.
-      l2_normalize: true                             # applied last — on both flavors
 
-    aggregator: dba                                  # {dba, median}
+    aggregator: dba                                  # {dba} — median path is reserved for future use
     dba:
       max_iter: 30
       tol: 1.0e-5
       init: medoid
-    metric: cosine                                   # {cosine, euclidean}
+    # Distance metric is fixed: cosine via L2-normalize at preprocess + squared-Euclidean DTW.
+    # The previous `metric` and `l2_normalize` keys were write-only attrs and were dropped.
 ```
 
 `track_filter`, `min_track_minutes`, `crop_window_minutes`, per-template `datasets` are all **gone** — they're baked into the annotations CSV by Stage 0.
@@ -670,11 +677,13 @@ Every build produces **both flavors** from the same input cells.
 | `zscore_params/{ds_id}/std` | (D,) array | only present when `zscore=per_dataset` |
 | `t_key_event` | (N_cells,) array | per-cell anchor frame |
 | attrs `template_cell_ids` | list | `[dataset_id, fov_name, track_id]` per input cell |
-| attrs `l2_normalize` | bool | whether L2 was applied before DTW |
-| attrs `metric` | str | `"cosine"` — downstream alignment must match |
-| attrs `aggregator` | str | `"dba"` or `"median"` |
+| attrs `aggregator` | str | `"dba"` — the only path implemented today |
 | attrs `template_duration_minutes` | float | `time_calibration[-1] - time_calibration[0]`; used by Stage 2 to default `max_psi_minutes = template_duration_minutes / 2` |
 | attrs `build_frame_intervals_minutes` | dict | `{dataset_id: frame_interval_minutes}` — records the real-time scale of each build dataset |
+| attrs `viscy_git_sha` | str | short SHA of viscy at build time (provenance) |
+| attrs `dtaidistance_version` | str | installed dtaidistance version (provenance) |
+| attrs `scikit_learn_version` | str | installed scikit-learn version (provenance) |
+| attrs `numpy_version` | str | installed numpy version (provenance) |
 
 The `pca/` entries are the **build-time** PCA that maps raw embeddings into the `pca/` flavor's feature space. This is distinct from the Stage 2d diagnostic PCA (`plot_pcs_aligned.py`), which is fit post-hoc on the aligned-region frames of query cells for plotting only and is not stored in the template zarr.
 
@@ -721,11 +730,9 @@ templates:
     preprocessing:
       pca:
         n_components: 20
-      l2_normalize: true
     dba:
       max_iter: 30
       init: medoid
-    metric: cosine
 ```
 
 ## Cross-dataset results (reference — refined 20-cell template, Apr 2026)
