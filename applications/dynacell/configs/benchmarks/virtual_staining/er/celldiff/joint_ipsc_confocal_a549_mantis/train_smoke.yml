@@ -27,14 +27,13 @@ benchmark:
   experiment_id: er__joint_ipsc_confocal_a549_mantis__celldiff__smoke
 
 trainer:
-  logger:
-    init_args:
-      name: CELLDiff_JOINT_SEC61B_SMOKE
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/sec61b/celldiff/smoke
+  # Smoke runs don't need a logger. `false` disables the recipe's WandbLogger
+  # so consumers don't have to remember --override trainer.logger=false.
+  # LearningRateMonitor (recipe default) raises without a logger, so the
+  # callbacks list is replaced with only ModelCheckpoint (lists replace
+  # wholesale under deep_merge).
+  logger: false
   callbacks:
-    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-      init_args:
-        logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         every_n_epochs: 1

@@ -373,6 +373,12 @@ def test_joint_train_smoke_leaf_composes() -> None:
     assert t.get("strategy", "auto") != "ddp"
     assert t["precision"] == "bf16-mixed"
 
+    # Logger disabled at the leaf level; consumers don't need --override.
+    # LearningRateMonitor (recipe default) is dropped because it requires a logger.
+    assert t["logger"] is False
+    callback_classes = [c["class_path"] for c in t["callbacks"]]
+    assert "lightning.pytorch.callbacks.LearningRateMonitor" not in callback_classes
+
     # Joint leaves bypass dataset_ref.
     assert "dataset_ref" not in cfg.get("benchmark", {})
 
