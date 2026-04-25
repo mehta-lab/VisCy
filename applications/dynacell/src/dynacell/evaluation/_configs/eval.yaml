@@ -44,8 +44,11 @@ feature_metrics:
 # (MISSING) until then; OmegaConf resolves them lazily, so runs with feature metrics
 # disabled pass right through.
 feature_extractor:
-  dinov3:
-    pretrained_model_name: facebook/dinov3-convnext-base-pretrain-lvd1689m
+  # dinov3.pretrained_model_name comes from the feature_extractor/dinov3
+  # group selected via Hydra defaults above (lvd1689m -> ConvNext-Base).
+  # Keep this single source of truth: do not set pretrained_model_name
+  # inline here.
+  dinov3: {}
   dynaclr:
     checkpoint: ???
     # Mapping of kwargs for ContrastiveEncoder (backbone, in_channels, ...).
