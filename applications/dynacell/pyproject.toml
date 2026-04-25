@@ -71,6 +71,13 @@ optional-dependencies.report = [
   "matplotlib",
   "pandas",
 ]
+# Default fit/predict trainer logger in configs/recipes/trainer/fit.yml is
+# WandbLogger. Install with `pip install dynacell[wandb]` to satisfy that
+# default, or override `trainer.logger=null` (or supply your own logger
+# block) in the leaf / via `--override` to opt out of W&B entirely.
+optional-dependencies.wandb = [
+  "wandb",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"

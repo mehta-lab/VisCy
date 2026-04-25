@@ -146,6 +146,15 @@ save:
 
 ## Running
 
+The default `trainer.logger` in `configs/recipes/trainer/fit.yml` is
+`lightning.pytorch.loggers.WandbLogger`. Install dynacell with the
+`wandb` extra to satisfy this default (`uv add 'dynacell[wandb]'` /
+`pip install 'dynacell[wandb]'`). Without `wandb` installed,
+LightningCLI / jsonargparse rejects the leaf at schema-validation
+time. To opt out of W&B without installing it, override the logger
+in the leaf or via `--override trainer.logger.class_path=...` to a
+different Lightning logger (e.g. `lightning.pytorch.loggers.CSVLogger`).
+
 Direct LightningCLI (no sbatch):
 
 - `uv run dynacell fit -c configs/benchmarks/virtual_staining/<org>/<model>/<train_set>/train.yml`
