@@ -18,16 +18,20 @@
 #SBATCH --time=3-00:00:00
 
 # ── Run identity ──────────────────────────────────────────────────────
-# Fresh retrain after FOV cache collision fix (commit 1435f493) and
-# dataloader vectorization. Prior run 2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11
-# trained on 157 collided samples that silently read from the wrong zarr;
-# retraining from scratch is cleaner than warm-starting a partially-corrupt
-# encoder.
+# Warm-started from prior mixed-markers run (s1f8kgtp/last.ckpt, Apr 22)
+# at epoch 0. Picks up the FlexibleBatchSampler reshuffle fix
+# (commit f4f40c38) and the profiling-pass defaults (nw=4, ts.Batch
+# overlap, file_io_concurrency=128, z_extraction_window=16, cuDNN
+# benchmark, TF32 matmul). Optimizer state and epoch counter reset so
+# AdamW moments don't carry over biased gradients from the broken sampler.
 export PROJECT="DynaCLR-2D-MIP-BagOfChannels"
-export RUN_NAME="2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers"
+export RUN_NAME="2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler"
 export CONFIGS="applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.yml"
 
-# ── Resume (uncomment to continue from checkpoint) ────────────────────
+# ── Warm-start at epoch 0 (state_dict only — not Lightning's full resume) ──
+export EXTRA_ARGS="--model.init_args.ckpt_path=/hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers/DynaCLR-2D-MIP-BagOfChannels/s1f8kgtp/checkpoints/last.ckpt"
+
+# ── Resume (Lightning full state, NOT what we want here) ──────────────
 # export CKPT_PATH="/path/to/last.ckpt"
 # export WANDB_RUN_ID="<timestamp>"
 
