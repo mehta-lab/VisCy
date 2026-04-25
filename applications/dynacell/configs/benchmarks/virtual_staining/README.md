@@ -113,6 +113,22 @@ compose only `model_overlays/<model>_fit.yml` + launcher profiles —
 the `data:` block is authored inline because joint hparams live on the
 children. See `MULTI_DATASET_TRAINING_RECOMMENDATION.md` for rationale.
 
+**Joint smoke sibling** (e.g. `er/celldiff/joint_ipsc_confocal_a549_mantis/train_smoke.yml`):
+
+A `train_smoke.yml` lives next to the production `train.yml` for any
+joint leaf that needs a smoke runner. The smoke sibling pre-swaps each
+child's `data_path` to its colocated `<NAME>_test48.zarr` debug variant
+(or keeps the path when the train split is already small) and uses a
+single-GPU launcher profile (`hardware_h200_single`) instead of
+multi-GPU DDP. The reason it's a sibling leaf rather than `--override`
+flags at submit time: `submit_benchmark_job.py`'s dotlist override
+parser does not index into list elements
+(`data.init_args.data_modules.0.init_args.data_path=...` is parsed as
+a dict-with-string-key, not a list index), so swapping a single
+child's zarr at submit time is not supported. Pair the smoke leaf
+with `--override trainer.fast_dev_run=true` (or `trainer.max_steps=N`)
+to bound the run.
+
 **Predict leaf** (at `<org>/<model>/<train_set>/predict__<predict_set>.yml`):
 
 ```yaml
