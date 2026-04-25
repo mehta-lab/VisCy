@@ -83,11 +83,18 @@ def metric_comparison_barplot(
         offsets = [xi + i * width - (n_models - 1) * width / 2 for xi in x]
         means = stats["mean"].reindex(plot_metrics)
         stds = stats["std"].reindex(plot_metrics)
+        # Reindex introduces NaN for metrics this model didn't report; drop
+        # those bars rather than passing NaN to ax.bar/yerr (matplotlib
+        # behavior on NaN yerr is version-dependent and noisy).
+        valid = means.notna()
+        if not valid.any():
+            continue
+        valid_offsets = [offset for offset, ok in zip(offsets, valid) if ok]
         ax.bar(
-            offsets,
-            means.values,
+            valid_offsets,
+            means[valid].values,
             width,
-            yerr=stds.values,
+            yerr=stds[valid].fillna(0).values,
             label=name,
             capsize=3,
         )
