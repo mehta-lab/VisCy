@@ -21,6 +21,11 @@ trainer:
   devices: 4
   precision: bf16-mixed
   max_epochs: 150
+  # 2.7M train anchors × bs=256 = ~10.5k full-epoch batches → 85 min/epoch
+  # at current ~132 samples/s. Cap epoch length so wall time stays bounded
+  # and the val signal lands often. Matches the pattern used by OPS-1000genes.
+  limit_train_batches: 800
+  limit_val_batches: 200
   logger:
     init_args:
       project: DynaCLR-2D-MIP-BagOfChannels
