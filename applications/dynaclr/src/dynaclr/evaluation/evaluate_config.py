@@ -276,6 +276,24 @@ class AppendPredictionsStepConfig(BaseModel):
     pipelines_dir: Optional[str] = None
 
 
+class AppendAnnotationsStepConfig(BaseModel):
+    """Configuration for the append-annotations step.
+
+    Used by Wave-2 evaluations that have annotation CSVs but do not train
+    linear classifiers (e.g., alfi). Wave-1 evaluations historically
+    sourced annotations from ``linear_classifiers.annotations``; this
+    field lets datasets carry annotations independently of LC training.
+    When both are set, this field takes precedence.
+
+    Parameters
+    ----------
+    annotations : list[AnnotationSource]
+        Per-experiment annotation CSVs to merge into per-experiment zarrs.
+    """
+
+    annotations: list[AnnotationSource] = []
+
+
 class EvaluationConfig(BaseModel):
     """Top-level configuration for the DynaCLR evaluation orchestrator.
 
@@ -327,6 +345,7 @@ class EvaluationConfig(BaseModel):
     smoothness: SmoothnessStepConfig = SmoothnessStepConfig()
     plot: PlotStepConfig = PlotStepConfig()
     linear_classifiers: Optional[LinearClassifiersStepConfig] = None
+    append_annotations: Optional[AppendAnnotationsStepConfig] = None
     append_predictions: Optional[AppendPredictionsStepConfig] = None
     mmd: list[MMDStepConfig] = []
 

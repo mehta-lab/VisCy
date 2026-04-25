@@ -241,12 +241,27 @@ def _generate_plot_combined_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -
 
 
 def _generate_append_annotations_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -> Path:
-    """Generate append-annotations config YAML."""
-    lc = eval_cfg.linear_classifiers
+    """Generate append-annotations config YAML.
+
+    Sources annotations from ``eval_cfg.append_annotations`` when present
+    (Wave-2 datasets that have ground truth but do not train LCs), else
+    falls back to ``eval_cfg.linear_classifiers.annotations`` (Wave-1
+    legacy path where annotations live alongside LC training config).
+    """
+    if eval_cfg.append_annotations is not None and eval_cfg.append_annotations.annotations:
+        annotations = eval_cfg.append_annotations.annotations
+        # Tasks list is informational for the writer; when running standalone
+        # we emit an empty list (annotation columns are inferred from CSV).
+        tasks: list[dict] = []
+    else:
+        lc = eval_cfg.linear_classifiers
+        annotations = lc.annotations
+        tasks = [{"task": t.task, "marker_filters": t.marker_filters} for t in lc.tasks]
+
     cfg_dict = {
         "embeddings_path": str(output_dir / "embeddings"),
-        "annotations": [{"experiment": a.experiment, "path": a.path} for a in lc.annotations],
-        "tasks": [{"task": t.task, "marker_filters": t.marker_filters} for t in lc.tasks],
+        "annotations": [{"experiment": a.experiment, "path": a.path} for a in annotations],
+        "tasks": tasks,
     }
     out_path = output_dir / "configs" / "append_annotations.yaml"
     with open(out_path, "w") as f:
@@ -486,13 +501,20 @@ def prepare_configs(config: Path) -> None:
             click.echo(f"[lc]       {lc_yaml}", err=True)
 
         elif step == "append_annotations":
-            if eval_cfg.linear_classifiers is None:
+            # Annotations may live in either:
+            #  (a) eval_cfg.append_annotations.annotations  — Wave-2 datasets
+            #      that have ground truth but do not train LCs (alfi).
+            #  (b) eval_cfg.linear_classifiers.annotations  — Wave-1 legacy
+            #      path where annotations are colocated with LC training.
+            has_aa = eval_cfg.append_annotations is not None and eval_cfg.append_annotations.annotations
+            has_lc = eval_cfg.linear_classifiers is not None and eval_cfg.linear_classifiers.annotations
+            if not (has_aa or has_lc):
                 click.echo(
-                    "[append_annotations] skipped: no linear_classifiers config (annotations come from there)", err=True
+                    "[append_annotations] skipped: no annotations configured "
+                    "(set append_annotations.annotations or linear_classifiers.annotations)",
+                    err=True,
                 )
                 continue
-            if not eval_cfg.linear_classifiers.annotations:
-                click.echo("[append_annotations] Warning: annotations list is empty, nothing to append", err=True)
             aa_yaml = _generate_append_annotations_yaml(eval_cfg, output_dir)
             manifest["append_annotations"] = str(aa_yaml)
             click.echo(f"[append_ann] {aa_yaml}", err=True)

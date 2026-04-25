@@ -33,8 +33,13 @@ def append_annotations(
     """Append annotation columns to per-experiment zarr obs.
 
     For each experiment in ``annotations``, loads the matching per-experiment
-    zarr, joins all task columns from the annotation CSV, and persists the
+    zarr, joins task columns from the annotation CSV, and persists the
     updated obs back to zarr.
+
+    When ``tasks`` is empty, auto-discovers task columns from the
+    annotation CSV (every column except the join keys ``fov_name``, ``t``,
+    ``track_id``, ``id``). This supports Wave-2 datasets that publish
+    annotations independently of any LC training task list.
 
     Parameters
     ----------
@@ -44,11 +49,21 @@ def append_annotations(
         Per-experiment annotation CSV sources. Each entry maps an experiment
         name to a CSV path with task columns.
     tasks : list[TaskSpec]
-        Tasks to join (e.g. infection_state, organelle_state). Only tasks
-        present as columns in the annotation CSV are written.
+        Tasks to join (e.g. infection_state, organelle_state). Empty list →
+        auto-discover from the CSV.
     """
-    task_names = [t.task for t in tasks]
-    click.echo(f"Appending annotations for {len(annotations)} experiments, tasks: {task_names}")
+    import pandas as pd
+
+    explicit_tasks = [t.task for t in tasks]
+    join_keys = {"fov_name", "t", "track_id", "id"}
+
+    if explicit_tasks:
+        click.echo(f"Appending annotations for {len(annotations)} experiments, tasks: {explicit_tasks}")
+    else:
+        click.echo(
+            f"Appending annotations for {len(annotations)} experiments, "
+            "tasks auto-discovered per-CSV (all non-join-key columns)"
+        )
 
     for ann_src in annotations:
         experiment = ann_src.experiment
@@ -61,6 +76,14 @@ def append_annotations(
         ann_path = Path(ann_src.path)
         if not ann_path.exists():
             raise FileNotFoundError(f"Annotation CSV not found: {ann_src.path}")
+
+        # Resolve task list: explicit if provided, else discover from this CSV.
+        if explicit_tasks:
+            task_names = explicit_tasks
+        else:
+            csv_cols = pd.read_csv(ann_path, nrows=0).columns.tolist()
+            task_names = [c for c in csv_cols if c not in join_keys]
+            click.echo(f"  [{experiment}] discovered tasks from CSV: {task_names}")
 
         click.echo(f"\n  [{experiment}]")
         adata = ad.read_zarr(zarr_path)
