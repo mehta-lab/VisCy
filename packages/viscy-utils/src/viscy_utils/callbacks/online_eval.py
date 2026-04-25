@@ -214,17 +214,22 @@ class OnlineEvalCallback(Callback):
         self._meta.extend(batch.get("anchor_meta", []))
 
     def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Compute and log metrics on rank 0."""
+        """Compute and log metrics on every rank, sync-reduced via DDP.
+
+        Rank-0-only ``pl_module.log`` deadlocks DDP because the metric is
+        registered in rank 0's ``_ResultCollection`` but not on other ranks.
+        Lightning's epoch-end aggregation then issues an all-reduce that
+        rank 0 enters and the others never reach. Compute on every rank
+        instead and let ``sync_dist=True`` average the per-rank values.
+        """
         if not self._collecting or not self._features:
-            self._reset()
-            return
-        if trainer.global_rank != 0:
             self._reset()
             return
 
         features_np = to_numpy(torch.cat(self._features))
         n_samples = features_np.shape[0]
         epoch = trainer.current_epoch
+        is_rank_zero = trainer.global_rank == 0
 
         # --- Effective rank (always computable) ---
         erank = effective_rank(features_np)
@@ -233,9 +238,13 @@ class OnlineEvalCallback(Callback):
             erank,
             on_epoch=True,
             logger=True,
-            rank_zero_only=True,
+            sync_dist=True,
         )
-        _logger.info(f"[OnlineEval epoch {epoch}] effective_rank={erank:.1f} (n={n_samples}, d={features_np.shape[1]})")
+        if is_rank_zero:
+            _logger.info(
+                f"[OnlineEval epoch {epoch}] effective_rank={erank:.1f} "
+                f"(n={n_samples}, d={features_np.shape[1]}, rank-0 local)"
+            )
 
         # --- k-NN accuracy (requires labels) ---
         labels = self._extract_array(self.label_key, source="labels")
@@ -267,19 +276,23 @@ class OnlineEvalCallback(Callback):
                 eval_desc = f"holdout={self.holdout_test_size:.2f}"
             else:
                 knn_acc = None
-                _logger.debug(
-                    f"[OnlineEval epoch {epoch}] Skipping k-NN: "
-                    f"smallest class has {min_class_count} samples (need >=2)."
-                )
+                if is_rank_zero:
+                    _logger.debug(
+                        f"[OnlineEval epoch {epoch}] Skipping k-NN: "
+                        f"smallest class has {min_class_count} samples (need >=2)."
+                    )
             if knn_acc is not None:
                 pl_module.log(
                     f"metrics/knn_acc/{self.label_key}/val",
                     knn_acc,
                     on_epoch=True,
                     logger=True,
-                    rank_zero_only=True,
+                    sync_dist=True,
                 )
-                _logger.info(f"[OnlineEval epoch {epoch}] knn_acc({self.label_key}, k={k})={knn_acc:.3f} ({eval_desc})")
+                if is_rank_zero:
+                    _logger.info(
+                        f"[OnlineEval epoch {epoch}] knn_acc({self.label_key}, k={k})={knn_acc:.3f} ({eval_desc})"
+                    )
 
         # --- Temporal smoothness (requires track_id + timepoint) ---
         track_ids = self._extract_array(self.track_id_key, source="meta")
@@ -292,9 +305,10 @@ class OnlineEvalCallback(Callback):
                     rho,
                     on_epoch=True,
                     logger=True,
-                    rank_zero_only=True,
+                    sync_dist=True,
                 )
-                _logger.info(f"[OnlineEval epoch {epoch}] temporal_smoothness={rho:.3f}")
+                if is_rank_zero:
+                    _logger.info(f"[OnlineEval epoch {epoch}] temporal_smoothness={rho:.3f}")
 
         self._reset()
 
