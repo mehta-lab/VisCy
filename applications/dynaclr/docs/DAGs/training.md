@@ -158,3 +158,4 @@ To reproduce: `build-cell-index` → `preprocess-cell-index` from the same colle
 - `--focus-channel Phase3D` selects which channel's `per_timepoint` focus indices are written to the `z` column. Use the channel that has the sharpest axial contrast (label-free Phase3D for most experiments).
 - At training time, `ExperimentRegistry.__post_init__` reads `plate.zattrs["focus_slice"][channel]["dataset_statistics"]["z_focus_mean"]` to compute per-experiment z_ranges for patch extraction. This is the only zarr metadata read at training startup; the parquet is self-contained for all per-cell data.
 - The `z` column in the parquet is carried through to embeddings obs during predict — downstream consumers (e.g., visualization) can use it to recover the in-focus plane for each cell at each timepoint.
+- For performance tuning (num_workers, pin_memory, batch_size, augmentation placement), see [profiling.md](profiling.md) — authored after the first validated profiling sweep.

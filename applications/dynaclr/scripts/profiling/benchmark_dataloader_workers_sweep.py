@@ -35,18 +35,19 @@ import numpy as np
 
 from dynaclr.data.datamodule import MultiExperimentDataModule
 
-CELL_INDEX_PARQUET = "/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/cell_index/benchmark_2exp.parquet"
+CELL_INDEX_PARQUET = "/hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v2.parquet"
 
-BATCH_SIZE = 32
-WARMUP_BATCHES = 30
-N_BATCHES = 150
+BATCH_SIZE = 256
+WARMUP_BATCHES = 10
+N_BATCHES = 40
 SEED = 42
 
-Z_WINDOW = 8
-YX_PATCH_SIZE = (192, 192)
+Z_WINDOW = 1
+Z_EXTRACTION_WINDOW = 20
+YX_PATCH_SIZE = (256, 256)
 FINAL_YX_PATCH_SIZE = (160, 160)
 
-WORKER_COUNTS: list[int] = [0, 1, 4]
+WORKER_COUNTS: list[int] = [0, 2, 4, 8]
 RECHECK_VALUES: list[tuple[str, str | bool | None]] = [
     ("None", None),
     ("open", "open"),
@@ -89,18 +90,22 @@ def _build(num_workers: int, recheck_cached_data: str | bool | None) -> MultiExp
     dm = MultiExperimentDataModule(
         cell_index_path=CELL_INDEX_PARQUET,
         z_window=Z_WINDOW,
+        z_extraction_window=Z_EXTRACTION_WINDOW,
+        z_focus_offset=0.3,
         yx_patch_size=YX_PATCH_SIZE,
         final_yx_patch_size=FINAL_YX_PATCH_SIZE,
-        channels_per_sample=None,
+        channels_per_sample=1,
         positive_cell_source="lookup",
         positive_match_columns=["lineage_id"],
         tau_range=(0.5, 2.0),
         tau_decay_rate=2.0,
-        stratify_by=None,
+        stratify_by=["perturbation", "marker"],
         split_ratio=0.8,
         batch_size=BATCH_SIZE,
         num_workers=num_workers,
         seed=SEED,
+        focus_channel="Phase3D",
+        reference_pixel_size_xy_um=0.1494,
         normalizations=[],
         augmentations=[],
     )

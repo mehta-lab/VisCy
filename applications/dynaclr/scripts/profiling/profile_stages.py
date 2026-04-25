@@ -42,13 +42,13 @@ from viscy_transforms import (
 COLLECTION_YAML = "applications/dynaclr/configs/collections/benchmark_2exp.yml"
 CELL_INDEX_PARQUET = "applications/dynaclr/configs/cell_index/benchmark_2exp.parquet"
 
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 N_BATCHES = 15
 WARMUP = 3
 CACHE_POOL_BYTES = 500_000_000
 
-Z_WINDOW = 32
-Z_EXTRACTION_WINDOW = 45
+Z_WINDOW = 1
+Z_EXTRACTION_WINDOW = 11
 YX_PATCH = (192, 192)
 FINAL_YX_PATCH = (160, 160)
 
