@@ -895,9 +895,19 @@ class MultiExperimentTripletDataset(Dataset):
         for i, p in enumerate(patches):
             shape_groups[tuple(p.shape)].append(i)
         read_tensors: list[Tensor | None] = [None] * len(patches)
-        for idxs in shape_groups.values():
-            group_patches = [patches[i] for i in idxs]
-            group_result = ts.stack([p.translate_to[0] for p in group_patches]).read().result()  # noqa: PD013
+        # Issue every shape group's read inside one ts.Batch() so the C++
+        # executor can overlap them; only block on .result() after all are
+        # dispatched. With multiple shape groups (mixed-experiment batches),
+        # this lets tensorstore schedule reads concurrently instead of one
+        # group at a time.
+        pending: list[tuple[list[int], "ts.Future"]] = []
+        with ts.Batch():
+            for idxs in shape_groups.values():
+                group_patches = [patches[i] for i in idxs]
+                fut = ts.stack([p.translate_to[0] for p in group_patches]).read()  # noqa: PD013
+                pending.append((idxs, fut))
+        for idxs, fut in pending:
+            group_result = fut.result()
             for j, idx in enumerate(idxs):
                 read_tensors[idx] = torch.from_numpy(group_result[j])
         # Rescale each patch to the uniform target size
