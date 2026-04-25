@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dynacell.data._yaml import load_yaml
 
@@ -16,7 +16,7 @@ class BenchmarkSpec(BaseModel):
     version: str
     description: str
     collection_path: Path
-    preprocess_configs: list[Path] = []
+    preprocess_configs: list[Path] = Field(default_factory=list)
     train_preset: str | None = None
     predict_preset: str | None = None
     evaluate_config: Path | None = None

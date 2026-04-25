@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dynacell.data._yaml import load_yaml
 from viscy_data.collection import ChannelEntry
@@ -19,7 +19,7 @@ class Provenance(BaseModel):
 
     airtable_base_id: str | None = None
     airtable_query: str | None = None
-    record_ids: list[str] = []
+    record_ids: list[str] = Field(default_factory=list)
     created_at: str
     created_by: str
 
@@ -37,7 +37,7 @@ class CollectionExperiment(BaseModel):
     organelle: str | None = None
     pixel_size_xy_um: float
     pixel_size_z_um: float | None = None
-    exclude_fovs: list[str] = []
+    exclude_fovs: list[str] = Field(default_factory=list)
 
 
 class BenchmarkCollection(BaseModel):
