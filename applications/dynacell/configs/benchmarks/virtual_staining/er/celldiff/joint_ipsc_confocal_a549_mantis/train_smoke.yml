@@ -1,30 +1,19 @@
-# Joint smoke variant of train.yml — small iPSC zarr, single H200, no DDP.
+# Joint smoke variant of train.yml — small iPSC zarr, single H200, 30-min wall.
 #
 # Purpose: validate joint compose / instantiate / training-loop end-to-end
 # without the 250 GB+ mmap_preload staging that blows a smoke wall. Pair
 # this leaf with `--override trainer.fast_dev_run=true` (or
 # `--override trainer.max_steps=5`) at submit time to bound the run.
 #
-# Differences from sibling train.yml:
-#   - hardware profile: hardware_h200_single_smoke (single GPU, no DDP,
-#     30-min wall instead of 4 days).
-#   - drop the trainer.strategy/devices override block (single_gpu.yml,
-#     pulled in by celldiff_fit.yml, sets trainer.strategy=auto, devices=1).
-#   - iPSC child data_path: SEC61B.zarr -> SEC61B_test48.zarr (48 FOVs,
-#     ~24 GB to mmap-stage, vs 423 FOVs and 250 GB+ for prod).
-#   - a549 child data_path: unchanged — the 2024_11_07 train split has
-#     only 4 FOVs, already smoke-sized.
-#   - run_root + logger.save_dir + checkpoint dirpath: nested under .../smoke/
-#     so a smoke run never collides with production checkpoints.
-#
 # Why a sibling leaf rather than --override at submit time: dotlist /
 # bracket syntax (`data.init_args.data_modules.0.init_args.data_path=...`)
 # does not index into list elements via submit_benchmark_job.py's override
-# parser. Pre-swapping data_paths in a sibling leaf is the clean fix.
+# parser. Pre-swapping data_paths in a sibling leaf is the supported fix.
 base:
   - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single_smoke.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/wall_smoke.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -53,9 +42,8 @@ trainer:
         save_last: true
         dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/sec61b/celldiff/smoke/checkpoints
 
-# Top-level keys starting with `_` are private to the YAML compose layer
-# and are stripped by `load_composed_config` before the dict reaches
-# LightningCLI / jsonargparse. The merge expansion under `data:` survives.
+# `_`-prefixed top-level keys are stripped by load_composed_config; see
+# train.yml in this directory for the full anchor-convention rationale.
 _hcs_init_args: &hcs_init_args
   source_channel: [Phase3D]
   target_channel: [Structure]
