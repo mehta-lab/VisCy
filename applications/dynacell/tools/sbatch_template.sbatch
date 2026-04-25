@@ -11,7 +11,11 @@ mkdir -p -m 775 @@run_root/slurm
 mkdir -p -m 775 @@run_root/checkpoints
 
 function cleanup() {
-  rm -rf /tmp/$SLURM_JOB_ID /dev/shm/$SLURM_JOB_ID
+  # Guard the job-id expansion: outside Slurm SLURM_JOB_ID is unset, and
+  # `rm -rf /tmp/ /dev/shm/` would wipe shared temp locations.
+  if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    rm -rf "/tmp/${SLURM_JOB_ID}" "/dev/shm/${SLURM_JOB_ID}"
+  fi
   echo "Cleanup Completed."
 }
 trap cleanup EXIT
