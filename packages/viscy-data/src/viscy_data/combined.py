@@ -327,15 +327,23 @@ class BatchedConcatDataModule(ConcatDataModule):
             processed_micro_batches.append(processed_micro_batch)
         combined_batch = {}
         for key in processed_micro_batches[0].keys():
-            if isinstance(processed_micro_batches[0][key], list):
+            first_val = processed_micro_batches[0][key]
+            if isinstance(first_val, list):
                 combined_batch[key] = []
                 for micro_batch in processed_micro_batches:
                     if key in micro_batch:
                         combined_batch[key].extend(micro_batch[key])
-            else:
+            elif isinstance(first_val, torch.Tensor):
                 tensors_to_concat = [micro_batch[key] for micro_batch in processed_micro_batches if key in micro_batch]
                 if tensors_to_concat:
                     combined_batch[key] = torch.cat(tensors_to_concat, dim=0)
+            # Non-tensor non-list values (e.g. ``norm_meta`` dicts of per-channel
+            # stats, ``index`` tuples of (img_name, t, z)) come from per-dataset
+            # metadata. Joint training across heterogeneous children has no
+            # well-defined combined semantic — channels and FOV identifiers do
+            # not align across zarrs — and Lightning's training/validation only
+            # reads ``source``/``target`` tensors. Drop the key from the joint
+            # batch instead of trying to ``torch.cat`` a dict.
 
         return combined_batch
 

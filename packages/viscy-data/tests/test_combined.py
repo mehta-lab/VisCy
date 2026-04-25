@@ -148,6 +148,40 @@ def test_batched_concat_datamodule_with_hcs_children(preprocessed_hcs_dataset):
     assert sum(mb["source"].shape[0] for mb in batch) == 4
 
 
+def test_batched_concat_on_after_batch_transfer_drops_metadata(preprocessed_hcs_dataset):
+    """on_after_batch_transfer combines tensor keys without crashing on metadata.
+
+    HCSDataModule emits a ``norm_meta`` dict (per-channel normalization
+    stats) and an ``index`` tuple per sample. The cross-micro-batch combine
+    used to assume every value was a tensor or list, raising ``TypeError``
+    on the first dict-valued key. Joint training across heterogeneous
+    children has no well-defined combined semantic for these keys, so they
+    are dropped from the joint batch.
+    """
+    import torch
+
+    dm1 = _make_dm(preprocessed_hcs_dataset)
+    dm2 = _make_dm(preprocessed_hcs_dataset)
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+    batched.setup(stage="fit")
+
+    loader = batched.train_dataloader()
+    batch = next(iter(loader))
+
+    # Sanity: the fixture writes normalization metadata, so the per-micro
+    # batch dict carries ``norm_meta`` — the value that used to crash combine.
+    assert any("norm_meta" in mb for mb in batch), "fixture must emit norm_meta"
+
+    combined = batched.on_after_batch_transfer(batch, dataloader_idx=0)
+
+    assert isinstance(combined, dict)
+    assert "source" in combined and isinstance(combined["source"], torch.Tensor)
+    assert combined["source"].shape[0] == 4  # _make_dm batch_size=4
+    assert "target" in combined and isinstance(combined["target"], torch.Tensor)
+    # Non-tensor metadata is dropped from the joint batch.
+    assert "norm_meta" not in combined
+
+
 def test_batched_concat_ddp_attaches_sharded_sampler(preprocessed_hcs_dataset, monkeypatch):
     """Under DDP, train/val dataloaders attach ShardedDistributedSampler."""
     dm1 = _make_dm(preprocessed_hcs_dataset)
