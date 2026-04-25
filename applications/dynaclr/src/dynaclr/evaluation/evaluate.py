@@ -255,10 +255,22 @@ def _generate_append_annotations_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
 
 
 def _generate_append_predictions_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -> Path:
-    """Generate append-predictions config YAML."""
+    """Generate append-predictions config YAML.
+
+    Honors ``eval_cfg.append_predictions.pipelines_dir`` when set (Wave-2
+    evaluations fetching from the central LC registry, typically
+    ``{registry_root}/{model_name}/latest``). Otherwise falls back to the
+    legacy in-run location ``output_dir/linear_classifiers/pipelines/``.
+    """
+    ap = eval_cfg.append_predictions
+    if ap is not None and ap.pipelines_dir:
+        pipelines_dir = ap.pipelines_dir
+    else:
+        pipelines_dir = str(output_dir / "linear_classifiers" / "pipelines")
+
     cfg_dict = {
         "embeddings_path": str(output_dir / "embeddings"),
-        "pipelines_dir": str(output_dir / "linear_classifiers" / "pipelines"),
+        "pipelines_dir": pipelines_dir,
     }
     out_path = output_dir / "configs" / "append_predictions.yaml"
     with open(out_path, "w") as f:
@@ -267,12 +279,17 @@ def _generate_append_predictions_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
 
 
 def _generate_linear_classifiers_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -> Path:
-    """Generate linear classifiers config YAML for dynaclr run-linear-classifiers."""
+    """Generate linear classifiers config YAML for dynaclr run-linear-classifiers.
+
+    Propagates ``publish_dir`` (central LC registry root) when set — the writer
+    atomically promotes the trained bundle to ``{publish_dir}/vN/`` and updates
+    the ``latest`` symlink.
+    """
     lc = eval_cfg.linear_classifiers
     embeddings_dir = str(output_dir / "embeddings")
     lc_output_dir = str(output_dir / "linear_classifiers")
 
-    cfg_dict = {
+    cfg_dict: dict = {
         "embeddings_path": embeddings_dir,
         "output_dir": lc_output_dir,
         "annotations": [{"experiment": a.experiment, "path": a.path} for a in lc.annotations],
@@ -286,6 +303,8 @@ def _generate_linear_classifiers_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
         "split_train_data": lc.split_train_data,
         "random_seed": lc.random_seed,
     }
+    if lc.publish_dir:
+        cfg_dict["publish_dir"] = lc.publish_dir
 
     out_path = output_dir / "configs" / "linear_classifiers.yaml"
     with open(out_path, "w") as f:
@@ -479,13 +498,21 @@ def prepare_configs(config: Path) -> None:
             click.echo(f"[append_ann] {aa_yaml}", err=True)
 
         elif step == "append_predictions":
-            if eval_cfg.linear_classifiers is None:
-                click.echo("[append_predictions] skipped: no linear_classifiers config", err=True)
-                continue
-            if "linear_classifiers" not in eval_cfg.steps:
+            # Two ways to satisfy append_predictions:
+            #  (a) in-run: the same eval also trains LCs (linear_classifiers in
+            #      steps + LinearClassifiersStepConfig present), and we fetch
+            #      from output_dir/linear_classifiers/pipelines/.
+            #  (b) external: eval_cfg.append_predictions.pipelines_dir points
+            #      at a central registry directory (typically the `latest`
+            #      symlink under a model's registry root). Wave-2 runs.
+            has_external = eval_cfg.append_predictions is not None and eval_cfg.append_predictions.pipelines_dir
+            has_in_run = eval_cfg.linear_classifiers is not None and "linear_classifiers" in eval_cfg.steps
+            if not (has_external or has_in_run):
                 raise ValueError(
-                    "'append_predictions' requires 'linear_classifiers' to also be in steps. "
-                    "Pipelines are saved by run-linear-classifiers and must exist before applying predictions."
+                    "'append_predictions' requires either:\n"
+                    "  (a) 'linear_classifiers' in steps (train LCs in this run), or\n"
+                    "  (b) append_predictions.pipelines_dir set to an existing LC bundle\n"
+                    "      (fetch pipelines from a separate run / central registry)."
                 )
             ap_yaml = _generate_append_predictions_yaml(eval_cfg, output_dir)
             manifest["append_predictions"] = str(ap_yaml)

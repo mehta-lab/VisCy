@@ -35,6 +35,11 @@ def append_predictions(
 ) -> None:
     """Apply saved classifiers to all cells and write predictions to zarrs.
 
+    ``pipelines_dir`` may be a ``latest`` symlink into the central LC registry
+    (e.g. ``/hpc/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/latest``).
+    The symlink is resolved **once** at startup so the whole run is consistent
+    even if a new version is published mid-run.
+
     For each per-experiment zarr, loads all saved classifier pipelines and
     applies each one to cells with the matching marker. Results are merged
     per task (one ``predicted_{task}`` column per task regardless of how
@@ -45,25 +50,48 @@ def append_predictions(
     embeddings_path : Path
         Directory containing per-experiment zarrs named ``{experiment}.zarr``.
     pipelines_dir : Path
-        Directory containing ``manifest.json`` and ``*.joblib`` pipeline files
-        produced by ``dynaclr run-linear-classifiers``.
+        Directory containing ``manifest.json`` and ``{task}_{marker}.joblib``
+        pipeline files. If this is the ``latest`` symlink, it is resolved
+        to a ``vN/`` target before loading.
     """
-    manifest_path = pipelines_dir / "manifest.json"
+    resolved = pipelines_dir.resolve()
+    version_tag = resolved.name
+    # Registry layout: {registry_root}/{model_name}/vN/. Two levels up from
+    # vN is the registry root; one level up is the per-model dir (== model
+    # name). This is the feature_space identifier.
+    feature_space = resolved.parent.name if resolved.parent != resolved else "<unversioned>"
+    click.echo(f"LC pipelines: {pipelines_dir} -> {resolved}")
+    click.echo(f"  feature_space={feature_space}  version={version_tag}")
+
+    manifest_path = resolved / "manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(
             f"Pipeline manifest not found: {manifest_path}. Run dynaclr run-linear-classifiers first."
         )
 
     with open(manifest_path) as f:
-        manifest = json.load(f)
+        manifest_data = json.load(f)
 
-    if not manifest:
+    # New-format manifest: dict with {trained_at, pipelines: [...]}.
+    if not isinstance(manifest_data, dict) or "pipelines" not in manifest_data:
+        raise ValueError(
+            f"Manifest at {manifest_path} is not in the expected format "
+            "(dict with 'pipelines' key). Re-train with the current "
+            "run-linear-classifiers to produce a compatible bundle."
+        )
+    manifest_entries = manifest_data["pipelines"]
+    trained_at = manifest_data.get("trained_at", "<unknown>")
+    click.echo(f"  trained_at={trained_at}")
+
+    if not manifest_entries:
         click.echo("No pipelines in manifest, nothing to do.")
         return
 
-    click.echo(f"Loaded {len(manifest)} pipeline(s) from {manifest_path}")
-    for entry in manifest:
-        click.echo(f"  {entry['task']} / marker={entry['marker_filter']}")
+    click.echo(f"  {len(manifest_entries)} pipeline(s):")
+    for entry in manifest_entries:
+        click.echo(f"    {entry['task']} / marker={entry['marker_filter']}")
+
+    manifest_markers = {e["marker_filter"] for e in manifest_entries}
 
     zarr_paths = sorted(embeddings_path.glob("*.zarr"))
     if not zarr_paths:
@@ -74,17 +102,26 @@ def append_predictions(
     for zarr_path in zarr_paths:
         click.echo(f"\n  {zarr_path.stem}")
         adata = ad.read_zarr(zarr_path)
-        click.echo(f"    {adata.n_obs} cells, markers: {sorted(adata.obs['marker'].unique().tolist())}")
+        zarr_markers = set(adata.obs["marker"].unique().tolist())
+        click.echo(f"    {adata.n_obs} cells, markers: {sorted(zarr_markers)}")
+
+        # Coverage report: which zarr markers are predictable from this bundle?
+        covered = sorted(zarr_markers & manifest_markers)
+        missing = sorted(zarr_markers - manifest_markers)
+        click.echo(
+            f"    LC coverage: {len(covered)}/{len(zarr_markers)} markers predictable"
+            + (f"; missing: {missing}" if missing else "")
+        )
 
         # Group manifest entries by task
-        tasks_seen: set[str] = {entry["task"] for entry in manifest}
+        tasks_seen: set[str] = {entry["task"] for entry in manifest_entries}
 
         new_obsm: dict[str, np.ndarray] = {}
 
         for task in sorted(tasks_seen):
-            task_entries = [e for e in manifest if e["task"] == task]
+            task_entries = [e for e in manifest_entries if e["task"] == task]
 
-            first_pipeline = joblib.load(pipelines_dir / task_entries[0]["path"])
+            first_pipeline = joblib.load(resolved / task_entries[0]["path"])
             n_classes = len(first_pipeline.classifier.classes_)
             classes = first_pipeline.classifier.classes_.tolist()
 
@@ -93,7 +130,7 @@ def append_predictions(
 
             for entry in task_entries:
                 marker_filter = entry["marker_filter"]
-                pipeline_path = pipelines_dir / entry["path"]
+                pipeline_path = resolved / entry["path"]
 
                 if not pipeline_path.exists():
                     click.echo(f"    Pipeline not found: {pipeline_path}, skipping", err=True)
@@ -118,6 +155,9 @@ def append_predictions(
 
             adata.obs[f"predicted_{task}"] = all_pred
             adata.uns[f"predicted_{task}_classes"] = classes
+            adata.uns[f"predicted_{task}_lc_version"] = version_tag
+            adata.uns[f"predicted_{task}_lc_feature_space"] = feature_space
+            adata.uns[f"predicted_{task}_lc_path"] = str(resolved)
             new_obsm[f"predicted_{task}_proba"] = all_proba
 
         if not new_obsm:

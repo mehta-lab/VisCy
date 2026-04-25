@@ -222,6 +222,12 @@ class LinearClassifiersStepConfig(BaseModel):
         (matching obs["experiment"] in embeddings.zarr) to a CSV path.
     tasks : list[TaskSpec]
         Tasks to evaluate. Each task can optionally filter by marker.
+    publish_dir : str or None
+        Central LC registry root for this model (e.g.,
+        ``/hpc/projects/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/``).
+        When set, pipelines are published as a new versioned bundle
+        (``vN/``) with a ``latest`` symlink update. When None, legacy
+        behavior: write to ``output_dir/linear_classifiers/pipelines/``.
     use_scaling : bool
         Apply StandardScaler. Default: True.
     use_pca : bool
@@ -242,6 +248,7 @@ class LinearClassifiersStepConfig(BaseModel):
 
     annotations: list[AnnotationSource]
     tasks: list[TaskSpec]
+    publish_dir: Optional[str] = None
     use_scaling: bool = True
     use_pca: bool = False
     n_pca_components: Optional[int] = None
@@ -250,6 +257,23 @@ class LinearClassifiersStepConfig(BaseModel):
     solver: str = "liblinear"
     split_train_data: float = 0.8
     random_seed: int = 42
+
+
+class AppendPredictionsStepConfig(BaseModel):
+    """Configuration for the append-predictions step.
+
+    Parameters
+    ----------
+    pipelines_dir : str or None
+        Directory (or ``latest`` symlink) holding a published LC bundle
+        with ``manifest.json`` and ``{task}_{marker}.joblib`` files.
+        When None, defaults to ``output_dir/linear_classifiers/pipelines/``
+        (legacy layout for runs that both train and apply LCs in the same
+        eval). Set this explicitly for Wave-2 evaluations that apply
+        pipelines trained by a separate Wave-1 run.
+    """
+
+    pipelines_dir: Optional[str] = None
 
 
 class EvaluationConfig(BaseModel):
@@ -283,6 +307,10 @@ class EvaluationConfig(BaseModel):
         Embedding visualization configuration.
     linear_classifiers : LinearClassifiersStepConfig or None
         Linear classifier configuration. None disables this step.
+    append_predictions : AppendPredictionsStepConfig or None
+        Append-predictions configuration. Set ``pipelines_dir`` to apply
+        pipelines from a separate eval run (e.g., Wave 2 fetching from the
+        central LC registry). None keeps legacy behavior.
     mmd : list[MMDStepConfig]
         MMD evaluation blocks. Each block is an independent run with its own
         group_by, comparisons, and optional obs_filter. Empty list disables MMD.
@@ -299,4 +327,17 @@ class EvaluationConfig(BaseModel):
     smoothness: SmoothnessStepConfig = SmoothnessStepConfig()
     plot: PlotStepConfig = PlotStepConfig()
     linear_classifiers: Optional[LinearClassifiersStepConfig] = None
+    append_predictions: Optional[AppendPredictionsStepConfig] = None
     mmd: list[MMDStepConfig] = []
+
+    @property
+    def model_name(self) -> str:
+        """Derive the model identifier from the training config filename stem.
+
+        Example: ``DynaCLR-2D-MIP-BagOfChannels.yml`` → ``"DynaCLR-2D-MIP-BagOfChannels"``.
+        Used as the ``feature_space`` tag in LC manifests and as the
+        namespace prefix for predicted columns in output zarrs.
+        """
+        from pathlib import Path as _Path
+
+        return _Path(self.training_config).stem

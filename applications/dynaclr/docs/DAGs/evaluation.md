@@ -1,12 +1,18 @@
 # Evaluation DAG
 
+This document describes the **per-run** evaluation pipeline (one model on
+one dataset). For the cross-model, cross-dataset matrix layout — including
+the central linear-classifier registry that lets Wave-2 datasets fetch LC
+pipelines trained on Wave-1 (infectomics-annotated) — see the companion
+[`evaluation_matrix.md`](evaluation_matrix.md).
+
 ## Running with Nextflow (recommended)
 
 ```bash
 module load nextflow/24.10.5
 
-nextflow run applications/dynaclr/nextflow/main.nf \
-    --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels.yaml \
+nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
+    --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/infectomics-annotated.yaml \
     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
     -resume
 ```
@@ -122,23 +128,37 @@ configs/viewer.yaml               # nd-embedding viewer config (also valid input
   │        -c linear_classifiers.yaml    # reads per-experiment zarrs directory + annotation CSVs
   │        # joins annotations on (fov_name, t, track_id); trains one LogisticRegression
   │        # per (task, marker); marker_filters omitted → auto-discovers all markers
-  │        # also saves trained pipelines to linear_classifiers/pipelines/ for append-predictions
+  │        # writes trained pipelines to linear_classifiers/pipelines/ (in-run staging)
+  │        # if publish_dir is set: atomically promotes the bundle to the central
+  │        # LC registry as {publish_dir}/vN/ and updates the `latest` symlink.
   │        → linear_classifiers/metrics_summary.csv
   │        → linear_classifiers/{task}_summary.pdf
   │        → linear_classifiers/pipelines/{task}_{marker}.joblib
   │        → linear_classifiers/pipelines/manifest.json
+  │        → {publish_dir}/vN/{task}_{marker}.joblib            (when publish_dir set)
+  │        → {publish_dir}/vN/manifest.json                     (when publish_dir set)
+  │        → {publish_dir}/latest -> vN                         (atomic symlink swap)
   │
   ├──► dynaclr append-annotations        # persist ground truth labels to per-experiment zarrs
   │        -c append_annotations.yaml    # reads annotation CSVs + writes task columns to zarr obs
   │        # only experiments with AnnotationSource entries are processed; others skipped
   │        → {experiment}.zarr (obs: infection_state, organelle_state, ...)
   │
-  └──► dynaclr append-predictions        # (after linear_classifiers) apply saved classifiers
+  └──► dynaclr append-predictions        # apply saved classifiers
            -c append_predictions.yaml    # predicts on ALL cells per marker, not just annotated ones
-           # loads pipelines/manifest.json, applies each pipeline to matching marker cells
+           # pipelines_dir may be either:
+           #   (a) in-run: {output_dir}/linear_classifiers/pipelines/ (default), or
+           #   (b) external: a `latest` symlink into the central LC registry
+           #       (e.g., /hpc/.../linear_classifiers/{model_name}/latest)
+           # The symlink is resolved once at startup so the run is consistent
+           # even if a new bundle is published mid-run. Logs feature_space (=
+           # registry/{model_name}) and version (= vN) for traceability.
            → {experiment}.zarr (obs: predicted_infection_state, ...)
            → {experiment}.zarr (obsm: predicted_infection_state_proba, ...)
-           → {experiment}.zarr (uns: predicted_infection_state_classes, ...)
+           → {experiment}.zarr (uns: predicted_infection_state_classes,
+                                     predicted_infection_state_lc_version,
+                                     predicted_infection_state_lc_feature_space,
+                                     predicted_infection_state_lc_path, ...)
 
 checkpoint.ckpt  (independent of predict/split — runs in parallel)
   │
@@ -164,9 +184,93 @@ After all enrichment steps complete, per-experiment zarrs contain:
 
 - `.obs`: embeddings metadata + annotations (`infection_state`, etc.) + predictions (`predicted_infection_state`, etc.)
 - `.obsm`: `X_pca`, `X_pca_combined`, `X_phate_combined`, `predicted_{task}_proba`
-- `.uns`: `predicted_{task}_classes`
+- `.uns`: `predicted_{task}_classes`, `predicted_{task}_lc_version`, `predicted_{task}_lc_feature_space`, `predicted_{task}_lc_path`
 
-This enables plots colored by experiment, perturbation, annotation, and prediction from a single zarr.
+This enables plots colored by experiment, perturbation, annotation, and prediction from a single zarr. The `_lc_*` uns fields record exactly which LC bundle produced each predicted column (registry path, version tag, feature_space).
+
+## Central LC registry
+
+Linear-classifier pipelines can be **published** to a central per-model
+registry instead of (or in addition to) the per-run `output_dir`. This lets
+later evaluations on different datasets reuse the same trained classifiers
+without retraining.
+
+### Layout
+
+```
+/hpc/projects/organelle_phenotyping/models/linear_classifiers/
+├── DynaCLR-2D-MIP-BagOfChannels/
+│   ├── latest -> v3                        # symlink (relative target)
+│   ├── v1/ {manifest.json, *.joblib}
+│   ├── v2/
+│   └── v3/
+├── DynaCLR-2D-BagOfChannels-v3/  { same }
+├── DynaCLR-classical/             { same }
+├── DINOv3-temporal-MLP-2D-BagOfChannels-v1/  { same }
+└── DINOv3-frozen/                 { same }
+```
+
+The directory name (e.g. `DynaCLR-2D-MIP-BagOfChannels`) is the
+**feature_space** identifier — pipelines from one model's registry are
+*not* applicable to a different model's embeddings (different dim, different
+distribution). The model name follows the training-config-stem convention
+(see `evaluation_matrix.md` §7).
+
+### Publishing (writer)
+
+A Wave-1 leaf (training run) sets `linear_classifiers.publish_dir`:
+
+```yaml
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/
+  # ... annotations, tasks, ...
+```
+
+`run-linear-classifiers` writes pipelines to a temp staging directory,
+atomically renames to `vN/` (next available version), then atomically
+swaps the `latest` symlink. Crash-safe: a partial bundle never appears as
+`vN/`.
+
+### Fetching (reader)
+
+A Wave-2 leaf (evaluation on a different dataset) sets
+`append_predictions.pipelines_dir`:
+
+```yaml
+append_predictions:
+  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/latest
+```
+
+`append-predictions` resolves the symlink **once** at startup and uses the
+resolved `vN/` for the rest of the run, so a publish during the run does
+not affect output. The resolved path's parent name (`DynaCLR-2D-MIP-BagOfChannels`)
+becomes `feature_space` in the manifest log.
+
+### Manifest format
+
+```json
+{
+  "trained_at": "2026-04-24T15:33:21+00:00",
+  "pipelines": [
+    {"task": "infection_state", "marker_filter": "G3BP1", "path": "infection_state_G3BP1.joblib"},
+    {"task": "infection_state", "marker_filter": "SEC61B", "path": "infection_state_SEC61B.joblib"}
+  ]
+}
+```
+
+Lineage (model name + version) lives in the directory structure, not the
+manifest. Reproducibility comes from pinning a specific `vN` (instead of
+`latest`) in paper-rerun scripts.
+
+### Pinning vs. latest
+
+```yaml
+# active development — picks up the latest published bundle
+pipelines_dir: /hpc/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/latest
+
+# paper rerun — frozen at submission time
+pipelines_dir: /hpc/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/v2
+```
 
 ## Nextflow DAG (process dependency graph)
 

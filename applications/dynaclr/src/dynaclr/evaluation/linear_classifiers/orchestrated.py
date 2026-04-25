@@ -15,6 +15,9 @@ dynaclr run-linear-classifiers -c linear_classifiers.yaml
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,10 +89,15 @@ def run_linear_classifiers(
     all_metrics: list[dict] = []
     # val_outputs_by_task: task → list of per-marker dicts for plotting
     val_outputs_by_task: dict[str, list[dict[str, Any]]] = {}
-    # Saved pipelines for append-predictions step
+    # Saved pipelines for append-predictions step. When publish_dir is set,
+    # we stage here and atomically promote to a versioned registry dir at
+    # the end of training. Otherwise legacy behavior: write in place under
+    # output_dir/pipelines/.
     pipelines_dir = output_dir / "pipelines"
     pipelines_dir.mkdir(parents=True, exist_ok=True)
     pipeline_manifest: list[dict] = []
+    # Collect trained (task, marker, pipeline) tuples for publish_dir promotion.
+    trained_pipelines: list[tuple[str, str, Any]] = []
 
     for task_spec in config.tasks:
         task = task_spec.task
@@ -177,10 +185,13 @@ def run_linear_classifiers(
                 click.echo(f"  Skipping {label}: {exc}")
                 continue
 
-            # Save pipeline for append-predictions step
+            # Save pipeline for append-predictions step. Always write to the
+            # local staging dir; promotion to publish_dir (if configured) happens
+            # atomically after all classifiers finish training.
             pipeline_filename = f"{task}_{marker_filter}.joblib"
             joblib.dump(pipeline, pipelines_dir / pipeline_filename)
             pipeline_manifest.append({"task": task, "marker_filter": marker_filter, "path": pipeline_filename})
+            trained_pipelines.append((task, marker_filter, pipeline))
             click.echo(f"  Pipeline saved: {pipeline_filename}")
 
             # Replay the same split to recover val obs (hours_post_perturbation)
@@ -225,16 +236,93 @@ def run_linear_classifiers(
     results_df.to_csv(summary_path, index=False)
     click.echo(f"\nMetrics summary written to {summary_path}")
 
+    # New-format manifest: dict with trained_at + pipelines list.
+    # Model identity (feature_space) and version are carried by the directory
+    # structure: {registry_root}/{model_name}/v{N}/. No need to duplicate here.
+    manifest_dict = {
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "pipelines": pipeline_manifest,
+    }
     manifest_path = pipelines_dir / "manifest.json"
     with open(manifest_path, "w") as f:
-        json.dump(pipeline_manifest, f, indent=2)
+        json.dump(manifest_dict, f, indent=2)
     click.echo(f"Pipeline manifest written to {manifest_path}")
+
+    # Promote to central LC registry if publish_dir is configured.
+    publish_dir_str = getattr(config, "publish_dir", None)
+    if publish_dir_str:
+        new_dir = _publish_atomically(
+            publish_dir=Path(publish_dir_str),
+            trained=trained_pipelines,
+            manifest_dict=manifest_dict,
+        )
+        click.echo(f"Published LC bundle to {new_dir} (latest -> {new_dir.name})")
 
     _print_summary(results_df)
     for task, task_val_outputs in val_outputs_by_task.items():
         task_df = results_df[results_df["task"] == task]
         _save_task_plots(task, task_df, task_val_outputs, output_dir)
     return results_df
+
+
+def _publish_atomically(
+    publish_dir: Path,
+    trained: list[tuple[str, str, Any]],
+    manifest_dict: dict,
+) -> Path:
+    """Atomically publish a new versioned LC bundle under ``publish_dir``.
+
+    Writes pipelines + manifest.json to a staging directory, renames it to
+    ``vN/`` (where N is max existing version + 1), then swaps the ``latest``
+    symlink to point at the new version. Crash-safe: partial bundles never
+    appear as ``vN/`` because the rename is atomic.
+
+    Parameters
+    ----------
+    publish_dir : Path
+        Model registry root (e.g.,
+        ``/hpc/projects/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/``).
+        Created if it does not exist.
+    trained : list of (task, marker_filter, pipeline)
+        Fitted pipelines to persist.
+    manifest_dict : dict
+        Manifest content to write as ``manifest.json`` inside the new
+        version directory.
+
+    Returns
+    -------
+    Path
+        Absolute path of the newly published ``vN/`` directory.
+    """
+    publish_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pick next version number by scanning existing v* dirs.
+    existing = sorted(int(p.name[1:]) for p in publish_dir.glob("v*") if p.is_dir() and p.name[1:].isdigit())
+    next_v = (max(existing) + 1) if existing else 1
+    new_dir = publish_dir / f"v{next_v}"
+
+    # Stage everything in a temp dir under publish_dir (same filesystem for
+    # atomic rename). If we crash here, nothing named vN/ appears.
+    staging = Path(tempfile.mkdtemp(prefix=f".v{next_v}.stage.", dir=publish_dir))
+    for task, marker_filter, pipeline in trained:
+        joblib.dump(pipeline, staging / f"{task}_{marker_filter}.joblib")
+    with open(staging / "manifest.json", "w") as f:
+        json.dump(manifest_dict, f, indent=2)
+
+    # Atomic rename: staging -> vN.
+    os.rename(staging, new_dir)
+
+    # Atomic symlink swap: write latest.new, then rename over latest.
+    # Relative target ("vN") so the symlink stays valid if the registry
+    # root is ever moved.
+    latest = publish_dir / "latest"
+    latest_new = publish_dir / "latest.new"
+    if latest_new.is_symlink() or latest_new.exists():
+        latest_new.unlink()
+    os.symlink(new_dir.name, latest_new)
+    os.replace(latest_new, latest)
+
+    return new_dir
 
 
 def _print_summary(results_df: pd.DataFrame) -> None:
