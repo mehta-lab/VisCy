@@ -1,30 +1,20 @@
-# Evaluation config for DynaCLR-2D-MIP-BagOfChannels
-# Experiments: 14 infectomics experiments (ZIKV + DENV, G3BP1/SEC61B/Phase3D/viral_sensor)
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels × infectomics-annotated (Wave 1)
+# Trains LC pipelines on 14 infectomics experiments (ZIKV + DENV; G3BP1, SEC61B,
+# Phase3D, viral_sensor markers). Publishes pipelines to the central LC registry.
 #
 # Usage:
-#   nextflow run applications/dynaclr/nextflow/main.nf \
-#     --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-v1.yaml \
+#   nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
+#     --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/infectomics-annotated.yaml \
 #     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
 #     -resume
 
 base:
-  - recipes/predict.yml
-  - recipes/reduce.yml
-  - recipes/plot_infectomics.yml
-  - recipes/linear_classifiers_infectomics.yml
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
 
 training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
 ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
-output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluation_lc_v1/
-cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-BoC-lc-evaluation-v1.parquet
-
-steps:
-  - predict
-  - split
-  - reduce_dimensionality
-  - reduce_combined
-  - smoothness
-  - linear_classifiers
-  - append_annotations
-  - append_predictions
-  - plot
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/infectomics-annotated/

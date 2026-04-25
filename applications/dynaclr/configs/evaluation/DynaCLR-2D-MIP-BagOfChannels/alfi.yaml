@@ -1,33 +1,22 @@
-# Evaluation config for ALFI mitosis datasets
-# Checkpoint: DynaCLR-2D-MIP-BagOfChannels
-# Data: HeLa (MI06), RPE1 (MI07/MI08), U2OS (MI01-MI05), DIC channel
-# Annotations: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
-#   Labels: cell_division_state (interphase / mitosis), cell_cycle_fine_state
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels × alfi (Wave 2)
+# Applies LC pipelines from the central registry (trained on infectomics-annotated).
+# Data: HeLa (MI06), RPE1 (MI07/MI08), U2OS (MI01-MI05), DIC channel.
+# Annotations are appended for plot coloring; no LC training happens here.
 #
-# Steps:
-#   1. Build cell index:
-#      dynaclr build-cell-index \
-#        applications/dynaclr/configs/collections/alfi-eval.yml \
-#        /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/alfi/cell_index.parquet
-#
-#   2. Run predict:
-#      viscy predict -c <generated predict.yml>
-#      (or use the Nextflow orchestrator)
+# Usage:
+#   nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
+#     --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/alfi.yaml \
+#     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+#     -resume
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/alfi.yml
 
 training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
 ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
-cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/alfi-eval.parquet
 output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/alfi/
-
-steps:
-  - predict
-  - reduce_dimensionality
-  - reduce_combined
-  - smoothness
-  - linear_classifiers
-  - append_annotations
-  - append_predictions
-  - plot
 
 predict:
   batch_size: 256
@@ -35,38 +24,5 @@ predict:
   precision: 32-true
   devices: 1
 
-reduce_dimensionality:
-  overwrite_keys: true
-  pca:
-    n_components: 32
-    normalize_features: true
-  umap:
-    n_components: 2
-    n_neighbors: 15
-    normalize: true
-
-reduce_combined:
-  overwrite_keys: true
-  pca:
-    n_components: 32
-    normalize_features: true
-
-smoothness: {}
-
-linear_classifiers:
-  annotations:
-    - experiment: "ALFI_HeLa_DMSO_MLN8237"
-      path: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
-    - experiment: "ALFI_RPE1_untreated"
-      path: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
-    - experiment: "ALFI_U2OS_DMSO_MLN8237"
-      path: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
-  tasks:
-    - task: cell_division_state
-    - task: cell_death_state
-  use_scaling: true
-  use_pca: false
-  split_train_data: 0.8
-  random_seed: 42
-
-plot: {}
+append_predictions:
+  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/latest
