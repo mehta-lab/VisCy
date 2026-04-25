@@ -67,7 +67,7 @@ data:
     focus_channel: Phase3D
     reference_pixel_size_xy_um: 0.1494
     z_window: 1
-    z_extraction_window: 20
+    z_extraction_window: 16
     z_focus_offset: 0.3
     yx_patch_size: [256, 256]
     final_yx_patch_size: [160, 160]
@@ -80,7 +80,7 @@ data:
     stratify_by: [perturbation, marker]
     split_ratio: 0.8
     batch_size: 256
-    num_workers: 2
+    num_workers: 4
     seed: 42
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
