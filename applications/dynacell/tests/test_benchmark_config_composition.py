@@ -305,6 +305,12 @@ def test_joint_train_leaf_composes() -> None:
     assert leaf.is_file(), f"joint leaf missing: {leaf}"
     cfg = load_composed_config(leaf)
 
+    # No top-level keys starting with `_` survive composition. The leaf
+    # uses `_hcs_init_args:` as a YAML merge anchor; LightningCLI rejects
+    # unknown top-level keys, so `load_composed_config` must strip these.
+    leaked = [k for k in cfg if k.startswith("_")]
+    assert not leaked, f"private anchor keys leaked into composed config: {leaked}"
+
     # Topology: DDP 4-GPU overrides the single_gpu.yml pulled in by model_overlays.
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"

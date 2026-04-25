@@ -50,6 +50,11 @@ trainer:
 # differs). Factored as a YAML anchor so the joint leaf stays auditable;
 # this is the first joint leaf — if the pattern sticks we can promote to a
 # reusable fragment.
+#
+# Naming convention: top-level keys starting with `_` are private to the
+# YAML compose layer and are stripped by `load_composed_config` before
+# the dict reaches LightningCLI / jsonargparse (which would reject them
+# as unknown options). The merge expansion under `data:` survives.
 _hcs_init_args: &hcs_init_args
   source_channel: [Phase3D]
   target_channel: [Structure]
