@@ -6,7 +6,8 @@
 # `--override trainer.max_steps=5`) at submit time to bound the run.
 #
 # Differences from sibling train.yml:
-#   - hardware profile: hardware_h200_single (single GPU, not 4-GPU DDP).
+#   - hardware profile: hardware_h200_single_smoke (single GPU, no DDP,
+#     30-min wall instead of 4 days).
 #   - drop the trainer.strategy/devices override block (single_gpu.yml,
 #     pulled in by celldiff_fit.yml, sets trainer.strategy=auto, devices=1).
 #   - iPSC child data_path: SEC61B.zarr -> SEC61B_test48.zarr (48 FOVs,
@@ -23,7 +24,7 @@
 base:
   - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single_smoke.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:

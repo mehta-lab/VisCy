@@ -395,10 +395,12 @@ def test_joint_train_smoke_leaf_composes() -> None:
     assert children[0]["init_args"]["data_path"].endswith("SEC61B_test48.zarr")
     assert children[1]["init_args"]["data_path"].endswith("2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr")
 
-    # Launcher: single GPU on H200, SLURM invariant holds.
+    # Launcher: single GPU on H200, smoke-sized wall, SLURM invariant holds.
     assert cfg["launcher"]["mode"] == "fit"
     sbatch = cfg["launcher"]["sbatch"]
     nodes = sbatch.get("nodes", 1)
     assert sbatch["ntasks_per_node"] == t["devices"]
     assert sbatch["gpus"] == nodes * t["devices"]
     assert sbatch.get("constraint") == "h200"
+    # Smoke wall is bounded so a smoke job cannot sit on a multi-day allocation.
+    assert sbatch["time"] == "00:30:00"
