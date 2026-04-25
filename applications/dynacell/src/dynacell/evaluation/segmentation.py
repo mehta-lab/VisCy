@@ -65,7 +65,7 @@ def segment(img, target_name=None, seg_model: "SuperModel" = None):
     if target_name in ["nucleus", "membrane"]:
         _require_segmenter_model_zoo()
         if seg_model is None:
-            raise ValueError("SegModel must be provided for nucleus and membrane segmentation.")
+            raise ValueError("seg_model (a loaded SuperModel) must be provided for nucleus and membrane segmentation.")
         mask = seg_model.apply_on_single_zstack(img[None, ...])
 
     elif target_name == "nucleoli":
