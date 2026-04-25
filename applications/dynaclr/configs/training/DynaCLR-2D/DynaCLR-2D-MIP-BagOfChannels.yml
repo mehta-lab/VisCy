@@ -82,15 +82,17 @@ data:
     batch_size: 256
     num_workers: 4
     # Per-rank memory budget on h100/h200 nodes (8 GB/CPU × 15 CPUs = 120 GB).
-    # The combination of nw=4 thread-workers, 26 per-plate ts.Context cache
-    # pools (iohub 0.3.x creates one per open_ome_zarr — ~13 GB at 500 MB
-    # each), and in-flight batches (~1.3 GB float32 each, anchor+positive)
-    # OOM'd rank 1 on job 31408970 mid-training. Cap in-flight batches and
-    # disable the per-plate cache pools (random sampling across 26 plates →
-    # near-zero hit rate, dead weight).
-    prefetch_factor: 1
+    # 26 plates × 500 MB per-plate cache pools = ~13 GB of dead weight (iohub
+    # 0.3.x creates one ts.Context per open_ome_zarr; random sampling across
+    # plates → near-zero hit rate). Disable. Cap ThreadBuffer queue to one
+    # batch and let prefetch_factor=2 do modest pipelining without runaway
+    # in-flight memory.
+    prefetch_factor: 2
     buffer_size: 1
     cache_pool_bytes: 0
+    # Match historical iohub default; the 128 we tried for +8.6% A/B amplifies
+    # tensorstore decoder/IO buffers and contributes to OOM under DDP.
+    file_io_concurrency: 32
     seed: 42
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
