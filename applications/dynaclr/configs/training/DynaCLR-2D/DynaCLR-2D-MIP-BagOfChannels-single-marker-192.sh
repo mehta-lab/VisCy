@@ -20,11 +20,12 @@ export PROJECT="DynaCLR-2D-MIP-BagOfChannels"
 export RUN_NAME="2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler"
 export CONFIGS="applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.yml applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.yml applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker-192.yml"
 
-# Warm-start from the 160px single-marker run's epoch-0 checkpoint
-# (0rhpwh77/last.ckpt). ConvNeXt-Tiny stem (1x4x4 kernel, stride 1x4x4)
-# is fully convolutional so it accepts the larger 192 input without
-# state_dict shape mismatch. Optimizer state and epoch counter still
-# reset via engine.py:76-86 (state_dict only, strict=False).
-export EXTRA_ARGS="--model.init_args.ckpt_path=/hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/0rhpwh77/checkpoints/last.ckpt"
+# Warm-start disabled: prior attempt 31442612 hit a 30-min NCCL all-reduce
+# timeout in optimizer.step. Suspected interaction between the warm-start
+# (160-input encoder weights loaded into a 192-input model) and the
+# augmentation pipeline causing rank divergence. Train from random init
+# to remove that confound; if the fresh-init run trains cleanly we can
+# revisit warm-start in v2.
+# export EXTRA_ARGS="--model.init_args.ckpt_path=/hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/0rhpwh77/checkpoints/last.ckpt"
 
 source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh
