@@ -179,7 +179,7 @@ class MultiExperimentDataModule(LightningDataModule):
         # Other
         cache_pool_bytes: int = 500_000_000,
         recheck_cached_data: str | bool | None = None,
-        file_io_concurrency: int | None = 128,
+        file_io_concurrency: int | None = None,
         seed: int = 0,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
