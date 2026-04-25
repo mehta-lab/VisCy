@@ -178,6 +178,8 @@ class MultiExperimentDataModule(LightningDataModule):
         augmentations: list[MapTransform] | None = None,
         # Other
         cache_pool_bytes: int = 500_000_000,
+        recheck_cached_data: str | bool | None = None,
+        file_io_concurrency: int | None = 128,
         seed: int = 0,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
@@ -238,6 +240,8 @@ class MultiExperimentDataModule(LightningDataModule):
         self.tensorstore_config = TensorStoreConfig(
             data_copy_concurrency=cpus,
             cache_pool_bytes=cache_pool_bytes or None,
+            recheck_cached_data=recheck_cached_data,
+            file_io_concurrency=file_io_concurrency,
         )
         self.seed = seed
         self.include_wells = include_wells
