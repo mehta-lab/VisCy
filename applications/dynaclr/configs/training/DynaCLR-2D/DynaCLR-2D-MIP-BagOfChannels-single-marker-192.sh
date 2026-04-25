@@ -13,7 +13,10 @@
 #SBATCH --constraint="h100|h200"
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=15
-#SBATCH --mem-per-cpu=8G
+# 14 GB/CPU × 15 CPUs = 210 GB/rank, 840 GB/node. Bumped from 8G after
+# rank 2 OOM'd on the 384² patches × prefetch buffers (job 31447592).
+# Matches the OPS sbatch which has the same multi-GB-batch profile.
+#SBATCH --mem-per-cpu=14G
 #SBATCH --time=3-00:00:00
 
 export PROJECT="DynaCLR-2D-MIP-BagOfChannels"
