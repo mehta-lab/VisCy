@@ -135,7 +135,10 @@ class OnlineEvalCallback(Callback):
     - ``metrics/effective_rank/val`` — effective rank of covariance
     - ``metrics/temporal_smoothness/val`` — Spearman rho (distance vs dt)
 
-    Only rank 0 computes metrics. Safe for DDP training.
+    Under DDP, features and metadata are ``all_gather``-ed across ranks
+    so every rank computes metrics on the full validation set; the
+    resulting per-rank scalars are identical and ``sync_dist=True``
+    averages them as a no-op. Safe for single-GPU and DDP training.
 
     Parameters
     ----------
@@ -214,19 +217,39 @@ class OnlineEvalCallback(Callback):
         self._meta.extend(batch.get("anchor_meta", []))
 
     def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Compute and log metrics on every rank, sync-reduced via DDP.
+        """Compute and log metrics on the full validation set under DDP.
 
-        Rank-0-only ``pl_module.log`` deadlocks DDP because the metric is
-        registered in rank 0's ``_ResultCollection`` but not on other ranks.
-        Lightning's epoch-end aggregation then issues an all-reduce that
-        rank 0 enters and the others never reach. Compute on every rank
-        instead and let ``sync_dist=True`` average the per-rank values.
+        The validation DataLoader is sharded across ranks (each rank sees
+        N/world_size samples), so per-rank metrics are not the metrics of
+        the full set: ``effective_rank``, k-NN CV/holdout accuracy, and
+        Spearman ``rho`` are non-linear in the sample set, and averaging
+        per-shard values via ``sync_dist=True`` is statistically wrong.
+
+        Fix: ``all_gather`` features and the per-sample arrays needed for
+        each metric across ranks, then compute on the full set on every
+        rank. Every rank produces the same scalar, so ``sync_dist=True``
+        becomes a no-op average of identical values — but keeping it
+        avoids the rank-0-only ``pl_module.log`` DDP deadlock (rank 0
+        registers the metric, other ranks don't, and Lightning's
+        epoch-end all-reduce never completes).
         """
         if not self._collecting or not self._features:
             self._reset()
             return
 
-        features_np = to_numpy(torch.cat(self._features))
+        features_local = torch.cat(self._features)
+        labels_local = self._extract_array(self.label_key, source="labels")
+        track_ids_local = self._extract_array(self.track_id_key, source="meta")
+        timepoints_local = self._extract_array(self.timepoint_key, source="meta")
+
+        features_np, labels, track_ids, timepoints = self._gather_across_ranks(
+            pl_module,
+            features_local,
+            labels_local,
+            track_ids_local,
+            timepoints_local,
+        )
+
         n_samples = features_np.shape[0]
         epoch = trainer.current_epoch
         is_rank_zero = trainer.global_rank == 0
@@ -242,12 +265,10 @@ class OnlineEvalCallback(Callback):
         )
         if is_rank_zero:
             _logger.info(
-                f"[OnlineEval epoch {epoch}] effective_rank={erank:.1f} "
-                f"(n={n_samples}, d={features_np.shape[1]}, rank-0 local)"
+                f"[OnlineEval epoch {epoch}] effective_rank={erank:.1f} (n={n_samples}, d={features_np.shape[1]})"
             )
 
         # --- k-NN accuracy (requires labels) ---
-        labels = self._extract_array(self.label_key, source="labels")
         if labels is not None and len(np.unique(labels)) >= 2:
             k = min(self.k, n_samples - 1)
             knn = KNeighborsClassifier(n_neighbors=k, metric="cosine")
@@ -295,8 +316,6 @@ class OnlineEvalCallback(Callback):
                     )
 
         # --- Temporal smoothness (requires track_id + timepoint) ---
-        track_ids = self._extract_array(self.track_id_key, source="meta")
-        timepoints = self._extract_array(self.timepoint_key, source="meta")
         if track_ids is not None and timepoints is not None:
             rho = temporal_smoothness(features_np, track_ids, timepoints)
             if not np.isnan(rho):
@@ -338,3 +357,90 @@ class OnlineEvalCallback(Callback):
                 return None
             values.append(v)
         return np.array(values)
+
+    def _gather_across_ranks(
+        self,
+        pl_module: LightningModule,
+        features_local: torch.Tensor,
+        labels_local: np.ndarray | None,
+        track_ids_local: np.ndarray | None,
+        timepoints_local: np.ndarray | None,
+    ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+        """Gather per-rank validation arrays into a full-set view on every rank.
+
+        On single-GPU runs this is a pure passthrough that converts the
+        feature tensor to numpy. Under DDP, every rank participates in
+        ``pl_module.all_gather`` so each ends up with the same
+        concatenated arrays — the metrics computed downstream are then
+        deterministic and identical on every rank, and the subsequent
+        ``sync_dist=True`` log call averages identical scalars (a no-op
+        that still pleases Lightning's epoch-end all-reduce).
+
+        Per-rank shard sizes can differ by one batch when the dataset
+        size is not divisible by ``world_size * batch_size``; equalize
+        by truncating to the minimum length before the gather to keep
+        ``all_gather`` happy with a fixed-shape tensor.
+
+        Parameters
+        ----------
+        pl_module : LightningModule
+            Used for ``pl_module.all_gather`` (Lightning routes to the
+            correct backend) and ``pl_module.device``.
+        features_local : torch.Tensor
+            ``(n_local, d)`` features collected on this rank.
+        labels_local, track_ids_local, timepoints_local : np.ndarray or None
+            Per-rank metadata arrays, ``None`` if the corresponding key
+            was missing.
+
+        Returns
+        -------
+        features_np : np.ndarray
+            Full-set features ``(N, d)`` (same on every rank under DDP).
+        labels, track_ids, timepoints : np.ndarray or None
+            Full-set metadata arrays. ``None`` if any rank reported
+            ``None`` (handled via an explicit availability all-reduce).
+        """
+        world_size = getattr(pl_module.trainer, "world_size", 1) or 1
+        if world_size <= 1:
+            return (
+                to_numpy(features_local),
+                labels_local,
+                track_ids_local,
+                timepoints_local,
+            )
+
+        # Equalize shard sizes — all_gather requires identical shapes per rank.
+        n_local = torch.tensor([features_local.shape[0]], device=pl_module.device)
+        n_per_rank = pl_module.all_gather(n_local).flatten()
+        n_min = int(n_per_rank.min().item())
+        features_local = features_local[:n_min].to(pl_module.device)
+
+        # Reduce a per-rank availability flag for each metadata array so
+        # all ranks agree on whether to compute the dependent metric.
+        # If any rank is missing the key, treat as missing globally.
+        def _gather_optional(arr: np.ndarray | None) -> np.ndarray | None:
+            available = torch.tensor(
+                [1 if arr is not None else 0],
+                device=pl_module.device,
+            )
+            available = pl_module.all_gather(available).flatten()
+            if int(available.min().item()) == 0:
+                return None
+            arr_local = arr[:n_min]
+            tensor = torch.as_tensor(arr_local, device=pl_module.device)
+            gathered = pl_module.all_gather(tensor)
+            # all_gather returns shape (world_size, n_min, *rest) for
+            # 1D inputs — collapse to (world_size * n_min, *rest).
+            gathered = gathered.reshape(-1, *tensor.shape[1:]) if tensor.ndim > 1 else gathered.reshape(-1)
+            return gathered.detach().cpu().numpy()
+
+        features_gathered = pl_module.all_gather(features_local)
+        # all_gather on (n_min, d) returns (world_size, n_min, d) — flatten.
+        features_gathered = features_gathered.reshape(-1, features_gathered.shape[-1])
+
+        return (
+            features_gathered.detach().cpu().numpy(),
+            _gather_optional(labels_local),
+            _gather_optional(track_ids_local),
+            _gather_optional(timepoints_local),
+        )
