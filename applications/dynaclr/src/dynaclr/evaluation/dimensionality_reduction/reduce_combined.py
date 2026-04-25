@@ -62,11 +62,15 @@ def main(config: str):
                         f"Key '{key}' already exists in {path}. Use overwrite_keys: true to replace."
                     )
 
-    # Load embeddings from all stores
+    # Load embeddings from all stores. Derive lineage IDs for PHATE
+    # subsampling: a lineage is (path, fov_name, track_id), prefixed
+    # with the path index so track IDs from different stores don't
+    # collide.
     all_features = []
-    all_lineage_ids = []
+    all_lineage_ids: list[np.ndarray] = []
     sample_counts = []
-    for path in resolved_paths:
+    have_lineage_cols = True
+    for store_idx, path in enumerate(resolved_paths):
         click.echo(f"Reading {path}...")
         adata = ad.read_zarr(path)
         features = np.asarray(adata.X)
@@ -74,11 +78,28 @@ def main(config: str):
         sample_counts.append(features.shape[0])
         if "lineage_id" in adata.obs.columns:
             all_lineage_ids.append(adata.obs["lineage_id"].to_numpy())
+        elif {"fov_name", "track_id"}.issubset(adata.obs.columns):
+            fov = adata.obs["fov_name"].astype(str).to_numpy()
+            tid = adata.obs["track_id"].astype(str).to_numpy()
+            # Prefix with store_idx to keep lineage namespaces disjoint
+            # across stores in the concatenated array.
+            lineage = np.array([f"{store_idx}|{f}|{t}" for f, t in zip(fov, tid)])
+            all_lineage_ids.append(lineage)
+        else:
+            have_lineage_cols = False
         click.echo(f"  {features.shape[0]:,} samples x {features.shape[1]} features")
 
     combined = np.concatenate(all_features, axis=0)
-    combined_lineage_ids = np.concatenate(all_lineage_ids) if all_lineage_ids else None
-    click.echo(f"Combined: {combined.shape[0]:,} samples x {combined.shape[1]} features")
+    if have_lineage_cols and all_lineage_ids:
+        combined_lineage_ids = np.concatenate(all_lineage_ids)
+        n_lineages = int(np.unique(combined_lineage_ids).size)
+        click.echo(f"Combined: {combined.shape[0]:,} samples x {combined.shape[1]} features, {n_lineages:,} lineages")
+    else:
+        combined_lineage_ids = None
+        click.echo(
+            f"Combined: {combined.shape[0]:,} samples x {combined.shape[1]} features "
+            "(no lineage_id / fov_name+track_id; PHATE will use random subsampling)"
+        )
 
     # Compute reductions on joint data
     results: dict[str, np.ndarray] = {}

@@ -431,7 +431,7 @@ Our `/hpc/projects/...` is NFSv4-backed; symlinks and atomic `os.replace` work t
 | 12 | DINOv3-frozen row (4 leaves + `recipes/predict_dinov3_frozen.yml`) | ⬜ pending |
 | 13 | `run_all_evals.sh` two-wave runner + `eval_registry.yaml` | ⬜ pending |
 | 14 | Output column namespacing (`predicted_{task}__{model}`) — follow-up | ⬜ deferred |
-| 15 | Lineage-aware PHATE subsampling (long tracks first, balanced per experiment) | ⬜ deferred |
+| 15 | Lineage-aware PHATE subsampling (whole-track sampling via `(fov_name, track_id)`) | ✅ done |
 
 ---
 

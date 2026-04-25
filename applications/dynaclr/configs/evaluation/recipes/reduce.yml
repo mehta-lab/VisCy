@@ -19,7 +19,10 @@ reduce_combined:
     scale_embeddings: false
     random_state: 42
     n_jobs: 48
-    # Random subsample for fitting; PHATE then transforms all cells.
-    # Reduced from default 50_000 to keep REDUCE_COMBINED under 4h on
-    # ~350k-cell matrix runs. Lineage-aware subsampling is a follow-up.
-    subsample: 20_000
+    # PHATE fits on a subsample, then transforms all cells.
+    # When `lineage_id` (or fov_name+track_id) is in obs, this is a
+    # **lineage** count cap — PHATE picks N whole lineages and includes
+    # all timepoints. ~17k lineages across 14 infectomics experiments at
+    # mean track length ~17, so 1500 lineages ≈ 25k fitting cells.
+    # If lineage cols are missing, this is a **cell** count cap (random).
+    subsample: 1_500
