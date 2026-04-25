@@ -18,6 +18,7 @@ trainer:
   enable_model_summary: false
   inference_mode: true
   use_distributed_sampler: false
+  benchmark: true
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
