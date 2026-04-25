@@ -81,6 +81,16 @@ data:
     split_ratio: 0.8
     batch_size: 256
     num_workers: 4
+    # Per-rank memory budget on h100/h200 nodes (8 GB/CPU × 15 CPUs = 120 GB).
+    # The combination of nw=4 thread-workers, 26 per-plate ts.Context cache
+    # pools (iohub 0.3.x creates one per open_ome_zarr — ~13 GB at 500 MB
+    # each), and in-flight batches (~1.3 GB float32 each, anchor+positive)
+    # OOM'd rank 1 on job 31408970 mid-training. Cap in-flight batches and
+    # disable the per-plate cache pools (random sampling across 26 plates →
+    # near-zero hit rate, dead weight).
+    prefetch_factor: 1
+    buffer_size: 1
+    cache_pool_bytes: 0
     seed: 42
     normalizations:
       - class_path: viscy_transforms.NormalizeSampled
