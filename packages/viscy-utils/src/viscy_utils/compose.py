@@ -66,9 +66,35 @@ def load_composed_config(
     Returns
     -------
     dict
-        Fully composed config dict with ``base:`` key removed. If
+        Fully composed config dict with ``base:`` key removed and any
+        top-level keys starting with ``_`` stripped (YAML anchor
+        definitions and other private markers — see notes). If
         ``resolver`` is provided, the returned dict is the resolver's
-        output.
+        output, stripped.
+
+    Notes
+    -----
+    Top-level keys whose name starts with ``_`` are treated as private
+    to the YAML composition layer and are removed from the returned
+    dict. This lets leaves define YAML merge anchors at top level (the
+    only scope ``yaml.safe_load`` resolves) without those defining
+    keys reaching downstream consumers like LightningCLI / jsonargparse,
+    which reject unknown top-level keys::
+
+        _hcs_init_args: &hcs_init_args
+          source_channel: [Phase3D]
+          ...
+        data:
+          init_args:
+            data_modules:
+              - init_args:
+                  <<: *hcs_init_args
+                  data_path: /path/to/zarr
+
+    The merge expansion under ``data.init_args`` survives; the
+    ``_hcs_init_args`` defining key is stripped. The strip applies at
+    every recursion level so anchor defs in ``base:`` fragments do not
+    leak through ``deep_merge``.
 
     Raises
     ------
@@ -94,4 +120,4 @@ def load_composed_config(
     result = deep_merge(merged, cfg)
     if resolver is not None:
         result = resolver(result)
-    return result
+    return {k: v for k, v in result.items() if not k.startswith("_")}
