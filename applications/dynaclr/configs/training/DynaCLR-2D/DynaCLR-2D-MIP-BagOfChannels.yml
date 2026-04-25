@@ -68,7 +68,7 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
-    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v2.parquet
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v3.parquet
     focus_channel: Phase3D
     reference_pixel_size_xy_um: 0.1494
     z_window: 1
