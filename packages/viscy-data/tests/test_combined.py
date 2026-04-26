@@ -121,6 +121,34 @@ def test_concat_datamodule_only_fit_supported(preprocessed_hcs_dataset):
         concat.setup(stage="predict")
 
 
+def test_batched_concat_loader_uses_real_subprocess_workers(preprocessed_hcs_dataset):
+    """Source-level guard against re-introducing ``use_thread_workers=True``.
+
+    The CPU+gloo test in ``test_combined_ddp.py`` cannot reproduce the
+    GPU/NCCL-specific deadlock that PR #413 fixed (pin-memory thread ×
+    thread-shim worker context under CUDA). This non-DDP check runs on
+    every CI matrix cell and catches a direct revert:
+    ``ThreadDataLoader(use_thread_workers=True)`` substitutes
+    ``monai.data.thread_buffer._ProcessThreadContext`` for the loader's
+    ``multiprocessing_context`` (and silently forces
+    ``persistent_workers=False``), per
+    ``monai/data/thread_buffer.py:189-191``.
+    """
+    dm1 = _make_dm(preprocessed_hcs_dataset, num_workers=2)
+    dm2 = _make_dm(preprocessed_hcs_dataset, num_workers=2)
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+    batched.setup(stage="fit")
+
+    for loader in (batched.train_dataloader(), batched.val_dataloader()):
+        ctx = loader.multiprocessing_context
+        if ctx is not None:
+            origin = type(ctx).__module__
+            assert "monai.data.thread_buffer" not in origin, (
+                f"BatchedConcatDataModule must not use use_thread_workers=True "
+                f"(found {type(ctx).__name__} from {origin}); see PR #413."
+            )
+
+
 def test_batched_concat_datamodule_with_hcs_children(preprocessed_hcs_dataset):
     """BatchedConcatDataModule iterates HCS children via the __getitem__ fallback.
 
