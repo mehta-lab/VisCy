@@ -18,6 +18,11 @@ from viscy_data.distributed import ShardedDistributedSampler
 _logger = logging.getLogger("lightning.pytorch")
 
 
+def _identity_collate(x):
+    """Pass-through collate so workers under the spawn start method survive pickling."""
+    return x
+
+
 class CombineMode(Enum):
     """Mode for combining multiple data modules."""
 
@@ -269,7 +274,12 @@ class BatchedConcatDataModule(ConcatDataModule):
 
     Under DDP, attaches ``ShardedDistributedSampler`` so each rank
     iterates a disjoint shard while preserving the existing
-    micro-batch-to-single-batch contract.
+    micro-batch-to-single-batch contract. Worker processes are
+    standard ``multiprocessing`` subprocesses so ``persistent_workers``
+    and ``prefetch_factor`` from the child datamodules are honored
+    end-to-end (versus silently dropped under
+    ``use_thread_workers=True``, which interacts poorly with real
+    ``init_process_group`` topologies).
     """
 
     _ConcatDataset = BatchedConcatDataset
@@ -283,12 +293,11 @@ class BatchedConcatDataModule(ConcatDataModule):
         sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         return ThreadDataLoader(
             self.train_dataset,
-            use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False if sampler else True,
             sampler=sampler,
             drop_last=True,
-            collate_fn=lambda x: x,
+            collate_fn=_identity_collate,
             **self._dataloader_kwargs(),
         )
 
@@ -297,12 +306,11 @@ class BatchedConcatDataModule(ConcatDataModule):
         sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         return ThreadDataLoader(
             self.val_dataset,
-            use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False,
             sampler=sampler,
             drop_last=False,
-            collate_fn=lambda x: x,
+            collate_fn=_identity_collate,
             **self._dataloader_kwargs(),
         )
 
