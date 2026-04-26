@@ -8,6 +8,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import yaml
+from iohub import open_ome_zarr
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -244,8 +245,6 @@ def discover_wells(nfs_zarr_path: Path) -> list[str]:
     list[str]
         Sorted well paths like ``["A/1", "B/1", "C/2"]``.
     """
-    from iohub import open_ome_zarr
-
     wells: list[str] = []
     with open_ome_zarr(str(nfs_zarr_path), mode="r") as plate:
         for pos_path, _pos in plate.positions():
@@ -269,8 +268,6 @@ def discover_channels(nfs_zarr_path: Path) -> list[str]:
     list[str]
         Channel names, e.g. ``["Phase3D", "raw GFP EX488 EM525-45", ...]``.
     """
-    from iohub import open_ome_zarr
-
     with open_ome_zarr(str(nfs_zarr_path), mode="r") as plate:
         return list(plate.channel_names)
 

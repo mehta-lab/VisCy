@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 from xarray import Dataset
@@ -69,8 +70,6 @@ def compute_phate(
         embeddings_scaled = scaler.fit_transform(embeddings)
     else:
         embeddings_scaled = embeddings
-
-    import numpy as np
 
     phate_model = phate.PHATE(
         n_components=n_components,

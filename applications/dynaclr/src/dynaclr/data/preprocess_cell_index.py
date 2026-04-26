@@ -2,6 +2,8 @@
 
 import click
 
+from viscy_data.cell_index import preprocess_cell_index
+
 
 @click.command()
 @click.argument("parquet_path")
@@ -21,8 +23,6 @@ def main(parquet_path, output, focus_channel):
     Reads precomputed metadata from zarr zattrs and writes them as parquet
     columns. Requires `viscy preprocess` to have been run on the zarr stores.
     """
-    from viscy_data.cell_index import preprocess_cell_index
-
     preprocess_cell_index(
         parquet_path=parquet_path,
         output_path=output,
