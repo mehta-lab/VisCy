@@ -1,6 +1,6 @@
 """Tests for the bf16-precision SSIM helper in viscy_utils.evaluation.metrics.
 
-Covers the multi-tier numerical contract from the plan:
+Covers the multi-tier numerical contract:
 
 - per-pixel SSIM equivalence on random inputs (worst-case bf16 drift)
 - aggregate SSIM equivalence on random inputs (per-pixel noise averages out)
@@ -19,14 +19,13 @@ from viscy_utils.evaluation.metrics import _compute_ssim_and_cs_bf16
 # Representative iPSC SEC61B FCMAE batch shape.
 _BATCH = (2, 1, 15, 256, 256)
 _KERNEL = (15, 11, 11)
-_SPATIAL_DIMS = 3
 
 
 def _ref(y_pred: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return _monai_reference(
         y_pred,
         y,
-        spatial_dims=_SPATIAL_DIMS,
+        spatial_dims=3,
         kernel_size=_KERNEL,
         kernel_sigma=None,
         kernel_type="uniform",
@@ -38,7 +37,6 @@ def _bf16(y_pred: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Te
     return _compute_ssim_and_cs_bf16(
         y_pred,
         y,
-        spatial_dims=_SPATIAL_DIMS,
         kernel_size=_KERNEL,
         data_range=y.max(),
     )

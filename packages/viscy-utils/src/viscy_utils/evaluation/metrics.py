@@ -174,7 +174,6 @@ def mean_average_precision(
 def _compute_ssim_and_cs_bf16(
     y_pred: torch.Tensor,
     y: torch.Tensor,
-    spatial_dims: int,
     kernel_size: Sequence[int],
     data_range: Union[float, torch.Tensor] = 1.0,
     k1: float = 0.01,
@@ -195,21 +194,18 @@ def _compute_ssim_and_cs_bf16(
     so only the conv outputs (returned in bf16) lose precision relative to
     monai's all-fp32 path.
 
-    Uniform kernel only — matches the single call site in :func:`ssim_25d`;
-    Gaussian-kernel and ``kernel_sigma`` parameters from monai's signature
-    are intentionally dropped.
+    Specialized to 3D uniform kernels — matches the single call site in
+    :func:`ssim_25d`. Gaussian-kernel, ``kernel_sigma``, and ``spatial_dims``
+    parameters from monai's signature are intentionally dropped.
 
     Parameters
     ----------
     y_pred : torch.Tensor
-        Predicted batch with shape ``(B, C, *spatial)``.
+        Predicted batch with shape ``(B, C, D, H, W)``.
     y : torch.Tensor
         Target batch with the same shape as ``y_pred``.
-    spatial_dims : int
-        Number of spatial dimensions (2 or 3); selects ``F.conv2d`` /
-        ``F.conv3d``.
     kernel_size : Sequence[int]
-        Uniform window size, length equal to ``spatial_dims``.
+        Uniform 3D window size ``(D, H, W)``.
     data_range : float or torch.Tensor, optional
         Data range of the inputs; used to compute the C1, C2 stability
         constants. Defaults to ``1.0``.
@@ -236,22 +232,20 @@ def _compute_ssim_and_cs_bf16(
     )
     kernel_bf = kernel_fp32.to(torch.bfloat16)
 
-    # Compute squared products in fp32 to preserve squaring precision,
-    # then cast to bf16 for the conv input.
+    # Squared products in fp32 to preserve squaring precision; cast to bf16
+    # for the conv input. The simple (non-squared) inputs are cast inline at
+    # the conv site to avoid holding redundant bf16 copies of y / y_pred.
     y_pred_fp32 = y_pred.float()
     y_fp32 = y.float()
-    y_pred_bf = y_pred_fp32.to(torch.bfloat16)
-    y_bf = y_fp32.to(torch.bfloat16)
     y_pred_sq_bf = (y_pred_fp32 * y_pred_fp32).to(torch.bfloat16)
     y_sq_bf = (y_fp32 * y_fp32).to(torch.bfloat16)
     y_pred_y_bf = (y_pred_fp32 * y_fp32).to(torch.bfloat16)
 
-    conv_fn = getattr(F, f"conv{spatial_dims}d")
-    mu_x = conv_fn(y_pred_bf, kernel_bf, groups=num_channels).float()
-    mu_y = conv_fn(y_bf, kernel_bf, groups=num_channels).float()
-    mu_xx = conv_fn(y_pred_sq_bf, kernel_bf, groups=num_channels).float()
-    mu_yy = conv_fn(y_sq_bf, kernel_bf, groups=num_channels).float()
-    mu_xy = conv_fn(y_pred_y_bf, kernel_bf, groups=num_channels).float()
+    mu_x = F.conv3d(y_pred_fp32.to(torch.bfloat16), kernel_bf, groups=num_channels).float()
+    mu_y = F.conv3d(y_fp32.to(torch.bfloat16), kernel_bf, groups=num_channels).float()
+    mu_xx = F.conv3d(y_pred_sq_bf, kernel_bf, groups=num_channels).float()
+    mu_yy = F.conv3d(y_sq_bf, kernel_bf, groups=num_channels).float()
+    mu_xy = F.conv3d(y_pred_y_bf, kernel_bf, groups=num_channels).float()
 
     # Stability constants in fp32 (data_range may be a 0-dim tensor; the
     # multiplication promotes to fp32 since k1/k2 are Python floats).
@@ -293,7 +287,6 @@ def ssim_25d(
     ssim_img, cs_img = _compute_ssim_and_cs_bf16(
         preds,
         target,
-        spatial_dims=3,
         kernel_size=(depth, *in_plane_window_size),
         data_range=target.max(),
     )
