@@ -10,6 +10,7 @@ import torch
 from lightning.pytorch import LightningDataModule
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
 from monai.data import ThreadDataLoader
+from monai.data.utils import no_collation
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from viscy_data._utils import _collate_samples
@@ -283,12 +284,11 @@ class BatchedConcatDataModule(ConcatDataModule):
         sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         return ThreadDataLoader(
             self.train_dataset,
-            use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False if sampler else True,
             sampler=sampler,
             drop_last=True,
-            collate_fn=lambda x: x,
+            collate_fn=no_collation,
             **self._dataloader_kwargs(),
         )
 
@@ -297,12 +297,11 @@ class BatchedConcatDataModule(ConcatDataModule):
         sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         return ThreadDataLoader(
             self.val_dataset,
-            use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False,
             sampler=sampler,
             drop_last=False,
-            collate_fn=lambda x: x,
+            collate_fn=no_collation,
             **self._dataloader_kwargs(),
         )
 
