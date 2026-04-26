@@ -1,0 +1,162 @@
+# 4-GPU DDP smoke variant of train.yml — small zarrs, 4 H200s, 30-min wall.
+#
+# Purpose: validate `BatchedConcatDataModule` + `ShardedDistributedSampler`
+# integration on the real DDP topology used in production. The single-GPU
+# `train_smoke.yml` already proved the joint loader and training/val loops
+# work end-to-end; this leaf isolates the *sharding* behavior — that each
+# rank pulls a disjoint slice of the joint dataset and the sampler attaches
+# automatically once `torch.distributed` is initialized.
+#
+# Why a sibling leaf rather than --override on train.yml: train.yml points
+# at the full 423-FOV iPSC SEC61B store, which `mmap_preload` stages to
+# /dev/shm in 45+ min — blows the 30-min smoke wall before the first step.
+# We swap the iPSC data_path to its `_test48` companion (48 FOVs, ~24 GB)
+# so staging finishes in under a minute. submit_benchmark_job.py's --override
+# parser cannot index into list elements (`data_modules.0` / `data_modules[0]`
+# both fail), so pre-swapping in a sibling leaf is the supported fix — same
+# rationale as train_smoke.yml.
+#
+# Why batch_size=1 / num_samples=1: matches train_smoke.yml. The point of
+# this smoke is "does the sampler shard the joint dataset across ranks",
+# not "does train.yml's heavier per-rank hparams (batch=4, num_samples=2)
+# fit on H200". Validating sharding at small batch isolates the question;
+# memory tuning is a follow-up smoke if needed.
+#
+# Why max_steps is baked in (not --override): the wall_smoke.yml docstring
+# explicitly says to bound the run, and we just spent a 30-min wall on
+# train_smoke.yml because we forgot the override at submit time. Bake it
+# in so the leaf is self-bounded.
+base:
+  - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/wall_smoke.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  gene: SEC61B
+  target: er
+  target_id: er_sec61b
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: celldiff
+  experiment_id: er__joint_ipsc_confocal_a549_mantis__celldiff__smoke_4gpu
+
+trainer:
+  # Override the single_gpu topology pulled in by model_overlays/celldiff_fit.yml.
+  strategy: ddp
+  devices: 4
+  # Bound the run so the leaf is self-contained (see header).
+  max_steps: 5
+  # Smoke runs don't need a logger. `false` disables the recipe's WandbLogger
+  # so consumers don't have to remember --override trainer.logger=false.
+  # LearningRateMonitor (recipe default) raises without a logger, so the
+  # callbacks list is replaced with only ModelCheckpoint (lists replace
+  # wholesale under deep_merge).
+  logger: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/sec61b/celldiff/smoke_4gpu/checkpoints
+
+# `_`-prefixed top-level keys are stripped by load_composed_config; see
+# train.yml in this directory for the full anchor-convention rationale.
+_hcs_init_args: &hcs_init_args
+  source_channel: [Phase3D]
+  target_channel: [Structure]
+  z_window_size: 13
+  # See header — kept at 1 to isolate sharding from per-rank memory tuning.
+  batch_size: 1
+  num_workers: 4
+  yx_patch_size: [512, 512]
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Structure]
+        level: fov_statistics
+        subtrahend: median
+        divisor: iqr
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Structure]
+        w_key: Structure
+        spatial_size: [13, 624, 624]
+        # Must satisfy batch_size % num_samples == 0; batch_size=1 forces 1.
+        num_samples: 1
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandAffined
+      init_args:
+        keys: [source, target]
+        prob: 0.8
+        rotate_range: [3.14, 0, 0]
+        shear_range: [0.0, 0.05, 0.05]
+        scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+        safe_crop_size: [8, 512, 512]
+        safe_crop_coverage: 0.9
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [8, 512, 512]
+    - class_path: viscy_transforms.BatchedRandAdjustContrastd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        gamma: [0.8, 1.2]
+    - class_path: viscy_transforms.BatchedRandScaleIntensityd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        factors: 0.5
+    - class_path: viscy_transforms.BatchedRandGaussianNoised
+      init_args:
+        keys: [source]
+        prob: 0.5
+        mean: 0.0
+        std: 0.3
+    - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        sigma_x: [0.25, 0.75]
+        sigma_y: [0.25, 0.75]
+        sigma_z: [0.25, 0.75]
+  val_gpu_augmentations:
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [8, 512, 512]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc SEC61B test48 zarr (48 FOVs, smoke-sized).
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B_test48.zarr
+      # a549_mantis — 2024_11_07 SEC61B train store. Already 4 FOVs, no
+      # smoke variant needed.
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr
+
+launcher:
+  job_name: CELLDiff_JOINT_SEC61B_SMOKE_4GPU
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/sec61b/celldiff/smoke_4gpu
