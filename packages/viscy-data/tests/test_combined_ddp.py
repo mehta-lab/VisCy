@@ -178,9 +178,12 @@ def test_batched_concat_real_ddp_iter_does_not_hang(
 ) -> None:
     """Spawn 2 ranks, iterate the joint loader, assert no deadlock.
 
-    Guards the regression that broke production: ``use_thread_workers=True``
-    × real ``init_process_group`` × multi-worker DataLoader hung on the
-    NCCL barrier inside ``Trainer.estimated_stepping_batches``.
+    Locks down the joint loader's collate, sampler-attachment, and
+    rank-0 ``prepare_data`` ordering under real DDP + multi-worker +
+    ``mmap_preload``. The GPU/NCCL-specific deadlock that PR #413
+    fixed (pin-memory thread × thread-shim worker context under CUDA)
+    is not reproducible on CPU/gloo and needs a GPU runner to catch a
+    revert of ``use_thread_workers=True`` directly.
     """
     if not torch.distributed.is_available():
         pytest.skip("torch.distributed not available")
