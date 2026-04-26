@@ -381,11 +381,16 @@ def write_yaml(config: dict, output_path: Path) -> None:
     output_path : Path
         Destination file path.
     """
-    # Use a Dumper that avoids YAML anchors/aliases for repeated lists.
-    dumper = yaml.Dumper
-    dumper.ignore_aliases = lambda self, data: True
+
+    # Use a Dumper subclass that avoids YAML anchors/aliases for repeated
+    # lists. Patching yaml.Dumper directly leaks into every other yaml.dump
+    # in the same Python process.
+    class _NoAliasDumper(yaml.Dumper):
+        def ignore_aliases(self, data: object) -> bool:
+            return True
+
     with open(output_path, "w") as f:
-        yaml.dump(config, f, Dumper=dumper, default_flow_style=False, sort_keys=False)
+        yaml.dump(config, f, Dumper=_NoAliasDumper, default_flow_style=False, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
