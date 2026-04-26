@@ -27,4 +27,8 @@ predict:
   devices: 1
 
 append_predictions:
-  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/latest
+  # Microglia has Brightfield/Retardance markers that aren't in the
+  # infectomics manifest, so the coverage report will log "missing" for
+  # those. Phase3D may overlap. Switching to a microglia-trained
+  # sub-registry (e.g. `.../microglia/latest`) is a future option.
+  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/infectomics/latest

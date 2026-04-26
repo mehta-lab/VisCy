@@ -25,4 +25,10 @@ predict:
   devices: 1
 
 append_predictions:
-  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/latest
+  # Once an alfi-annotated Wave-1 leaf trains DIC LCs, switch this to
+  # `.../alfi/latest`. Today's run uses the infectomics sub-registry —
+  # marker mismatch (DIC vs G3BP1/SEC61B/Phase3D/viral_sensor) means
+  # predicted_* columns will be NaN for every cell. The reader logs
+  # "0/N markers covered" and continues. This is a smoke test for the
+  # reader path, not a real prediction run.
+  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/infectomics/latest

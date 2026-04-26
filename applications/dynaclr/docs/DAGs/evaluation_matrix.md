@@ -2,74 +2,99 @@
 
 **Status:** proposal (2026-04-24)
 **Companion:** `evaluation.md` (per-run pipeline DAG)
-**Goal:** run the same evaluation pipeline across **4 models × 4 datasets** with minimal config duplication, then join results via `compare_evals.py` for the NMI paper (Fig 2 smoothness, Fig 3 displacement, Table 1 classification). Infectomics splits into `infectomics-annotated` (trains linear classifiers) and `infectomics-unannotated` (consumes them) so trained LCs transfer to unlabeled datasets.
+**Goal:** run the same evaluation pipeline across **4 models × N datasets** with minimal config duplication, then join results via `compare_evals.py` for the NMI paper (Fig 2 smoothness, Fig 3 displacement, Table 1 classification).
+
+LC pipelines live in **per-model + per-task-domain sub-registries** (e.g. `linear_classifiers/{model}/infectomics/`, `linear_classifiers/{model}/alfi/`). A "task domain" groups annotation tasks that share a marker / channel space — DIC for alfi, fluorescent organelle markers + Phase3D for infectomics, etc. Wave-2 leaves pick which sub-registry to fetch from based on the marker they need predictions for.
 
 ---
 
 ## 1. Matrix
 
-|                        | **infectomics-annotated** (trains LC) | **infectomics-unannotated** (applies LC) | **alfi** (applies LC)   | **microglia** (applies LC) |
-| ---------------------- | -------------------------------------- | ----------------------------------------- | ----------------------- | -------------------------- |
-| **DynaCLR-2D-MIP-BagOfChannels** | ✅ exists (`v1.yaml`)                    | ⬜ create                                  | ✅ exists (`alfi-eval.yaml`) | ✅ exists (`microglia-eval.yaml`) |
-| **DynaCLR-classical**  | ⬜ create                                | ⬜ create                                  | ⬜ create                | ⬜ create                  |
-| **DINOv3-temporal-MLP-2D-BagOfChannels-v1**         | ✅ exists (`v1.yaml`)                    | ⬜ create                                  | ⬜ create                | ⬜ create                  |
-| **DINOv3-frozen**      | ⬜ create (needs orchestrator change)   | ⬜ create                                  | ⬜ create                | ⬜ create                  |
+|                        | **infectomics-annotated** (Wave 1, trains) | **infectomics-unannotated** (Wave 2, applies infectomics) | **alfi-annotated** (Wave 1, trains) | **alfi** (Wave 2, applies alfi) | **microglia** (Wave 2) |
+| ---------------------- | --- | --- | --- | --- | --- |
+| **DynaCLR-2D-MIP-BagOfChannels** | ✅ landed (publishes to `…/infectomics/v1`) | ⬜ create | ⬜ create | 🔄 running (smoke test against `infectomics/latest`) | ⬜ create |
+| **DynaCLR-2D-BagOfChannels-v3**  | ⬜ create | ⬜ create | ⬜ create | ⬜ create | ⬜ create |
+| **DynaCLR-classical**  | ⬜ create | ⬜ create | ⬜ create | ⬜ create | ⬜ create |
+| **DINOv3-temporal-MLP-2D-BagOfChannels-v1** | ✅ leaf exists (no run yet) | ⬜ create | ⬜ create | ⬜ create | ⬜ create |
+| **DINOv3-frozen**      | ⬜ create (needs orchestrator change) | ⬜ create | ⬜ create | ⬜ create | ⬜ create |
 
-**16 leaf configs total.** LC training happens only in the `infectomics-annotated` column; all other columns apply those pipelines.
+**Two Wave-1 columns, three Wave-2 columns.** LC training runs in *-annotated columns and publishes to the matching task-domain sub-registry. Wave-2 columns *apply* pipelines from a chosen sub-registry; same-domain (alfi → alfi/) gives real predictions, cross-domain (alfi → infectomics/) is a reader smoke test that produces NaN predictions and a "0/N markers covered" log.
 
 ---
 
 ## 2. Directory layout (target)
 
-**Trained LCs live centrally**, not inside per-eval output dirs. One registry per model:
+**Trained LCs live centrally**, in per-model + per-task-domain sub-registries. Task domains group annotation tasks that share a marker / channel space (e.g. infectomics covers `{infection_state, organelle_state, cell_division_state, cell_death_state}` on `{G3BP1, SEC61B, Phase3D, viral_sensor}`; alfi covers `{cell_division_state, cell_death_state}` on DIC).
 
 ```
 /hpc/projects/organelle_phenotyping/models/linear_classifiers/
 ├── DynaCLR-2D-MIP-BagOfChannels/
-│   ├── manifest.json                        # {task, marker_filter, pipeline_path, trained_on, trained_at}
-│   ├── infection_state_G3BP1.joblib
-│   ├── infection_state_SEC61B.joblib
-│   ├── infection_state_Phase3D.joblib
-│   ├── organelle_state_G3BP1.joblib
-│   └── ...
-├── DynaCLR-classical/   { same layout }
-├── DINOv3-temporal-MLP-2D-BagOfChannels-v1/          { same layout }
-└── DINOv3-frozen/       { same layout }
+│   ├── infectomics/
+│   │   ├── latest -> v1
+│   │   └── v1/
+│   │       ├── manifest.json                # {trained_at, pipelines: [...]}
+│   │       ├── infection_state_G3BP1.joblib
+│   │       ├── infection_state_SEC61B.joblib
+│   │       ├── infection_state_Phase3D.joblib
+│   │       ├── infection_state_viral_sensor.joblib
+│   │       ├── organelle_state_G3BP1.joblib
+│   │       ├── organelle_state_SEC61B.joblib
+│   │       └── ...                          # 13 pipelines total
+│   └── alfi/                                # populated when alfi-annotated leaf trains
+│       ├── latest -> v1
+│       └── v1/
+│           ├── manifest.json
+│           ├── cell_division_state_DIC.joblib
+│           └── cell_death_state_DIC.joblib
+├── DynaCLR-2D-BagOfChannels-v3/   { same layout }
+├── DynaCLR-classical/             { same layout }
+├── DINOv3-temporal-MLP-2D-BagOfChannels-v1/   { same layout }
+└── DINOv3-frozen/                 { same layout }
 ```
 
-This lets any eval run (new dataset, different timepoint split, etc.) fetch a specific (task, marker) classifier without re-running infectomics-annotated. Rebuilds are explicit.
+Why per-task-domain sub-registries:
+- Each Wave-1 leaf trains a coherent set of `(task, marker)` pipelines and owns one sub-registry
+- Wave-2 leaves pick which sub-registry to fetch from based on what their data's markers need (alfi → `alfi/latest`, microglia → `infectomics/latest` or its own future `microglia/latest`)
+- No write conflicts: two Wave-1 leaves never need to merge into the same `vN/`
+- Versioning is per-domain: retraining alfi LCs bumps `alfi/v1` → `alfi/v2` without disturbing infectomics
+
+This lets any eval run fetch a specific (task, marker) classifier from the appropriate domain without re-running training. Rebuilds are explicit.
 
 ```
 applications/dynaclr/configs/evaluation/
 ├── recipes/
-│   ├── predict.yml                          # existing — default predict settings
+│   ├── predict.yml                          # existing
 │   ├── predict_dinov3_frozen.yml            # NEW — HF-loaded, no ckpt_path
 │   ├── reduce.yml                           # existing
-│   ├── mmd_defaults.yml                     # existing
+│   ├── mmd_defaults.yml                     # existing (for non-matrix runs)
 │   ├── plot_infectomics.yml                 # existing
-│   ├── linear_classifiers_infectomics.yml   # existing → fold into infectomics-annotated.yml
-│   ├── infectomics-annotated.yml            # NEW — trains LC, publishes to central registry
-│   ├── infectomics-unannotated.yml          # NEW — fetches LC from central registry
-│   ├── alfi.yml                             # NEW — fetches LC from central registry
-│   └── microglia.yml                        # NEW — fetches LC from central registry
+│   ├── linear_classifiers_infectomics.yml   # existing
+│   ├── infectomics-annotated.yml            # ✅ landed
+│   ├── infectomics-unannotated.yml          # ⬜ pending
+│   ├── alfi-annotated.yml                   # ⬜ pending (Wave-1 trainer for DIC)
+│   ├── alfi.yml                             # ✅ landed (applier)
+│   └── microglia.yml                        # ✅ landed
 │
 ├── DynaCLR-2D-MIP-BagOfChannels/
-│   ├── infectomics-annotated.yaml           # trains LC → /models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/
-│   ├── infectomics-unannotated.yaml         # fetches from same central dir
-│   ├── alfi.yaml
-│   └── microglia.yaml
-├── DynaCLR-classical/     { same 4 leaves }
-├── DINOv3-temporal-MLP-2D-BagOfChannels-v1/            { same 4 leaves }
-├── DINOv3-frozen/         { same 4 leaves }
+│   ├── infectomics-annotated.yaml           # publishes to .../infectomics/
+│   ├── infectomics-unannotated.yaml         # fetches from .../infectomics/latest
+│   ├── alfi-annotated.yaml                  # publishes to .../alfi/  (future)
+│   ├── alfi.yaml                            # fetches from .../alfi/latest (currently infectomics/ for smoke test)
+│   └── microglia.yaml                       # fetches from .../infectomics/latest
+├── DynaCLR-2D-BagOfChannels-v3/   { same 5 leaves }
+├── DynaCLR-classical/             { same 5 leaves }
+├── DINOv3-temporal-MLP-2D-BagOfChannels-v1/    { same 5 leaves }
+├── DINOv3-frozen/                 { same 5 leaves }
 │
-├── eval_registry.yaml                       # 16 eval_dirs for compare_evals.py
-└── run_all_evals.sh                         # submits 16 Nextflow runs (2 waves for LC dependency)
+├── eval_registry.yaml                       # 25 eval_dirs for compare_evals.py
+└── run_all_evals.sh                         # submits 25 Nextflow runs (Wave-1 then Wave-2)
 ```
 
-By convention each Wave-1 leaf writes to (and each Wave-2 leaf reads from):
+By convention each Wave-1 leaf writes to:
 ```
-/hpc/projects/organelle_phenotyping/models/linear_classifiers/{model_name}/
+/hpc/projects/organelle_phenotyping/models/linear_classifiers/{model}/{task_domain}/
 ```
+and each Wave-2 leaf reads from `{model}/{task_domain}/latest` for whichever sub-registry its markers need.
 
 No `output_dir` lookup, no cross-path stitching — every leaf simply points at the per-model registry directory.
 
