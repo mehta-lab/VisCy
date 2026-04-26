@@ -20,6 +20,7 @@ import numpy as np
 import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
+from lightning_utilities.core.rank_zero import rank_zero_warn
 from scipy.stats import spearmanr
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
@@ -51,14 +52,12 @@ def effective_rank(features: np.ndarray) -> float:
     # Guard against NaN/Inf in features — np.linalg.svd raises
     # "SVD did not converge" on non-finite input, which crashes the whole
     # run from inside a validation callback. Drop affected rows and return
-    # NaN when no finite rows remain.
+    # NaN when no finite rows remain. Under DDP every rank computes on the
+    # all-gathered full set, so the warning would otherwise fire once per
+    # rank with identical content — emit only from rank 0.
     finite_mask = np.isfinite(features).all(axis=1)
     if not finite_mask.all():
-        _logger.warning(
-            "effective_rank: %d/%d rows contain NaN/Inf; skipping those",
-            (~finite_mask).sum(),
-            len(features),
-        )
+        rank_zero_warn(f"effective_rank: {(~finite_mask).sum()}/{len(features)} rows contain NaN/Inf; skipping those")
         features = features[finite_mask]
     if features.shape[0] < 2:
         return float("nan")

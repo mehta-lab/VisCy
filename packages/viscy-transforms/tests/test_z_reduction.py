@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from viscy_transforms import BatchedChannelWiseZReduction, BatchedChannelWiseZReductiond
@@ -47,11 +48,8 @@ class TestBatchedChannelWiseZReduction:
         torch.testing.assert_close(out, img)
 
     def test_invalid_strategy(self):
-        try:
+        with pytest.raises(ValueError):
             BatchedChannelWiseZReduction(default_strategy="invalid")
-            assert False, "Should have raised ValueError"
-        except ValueError:
-            pass
 
 
 class TestBatchedChannelWiseZReductiond:
