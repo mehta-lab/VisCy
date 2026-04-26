@@ -238,7 +238,7 @@ def preprocess_cell_index(
     parquet_path: str | Path,
     output_path: str | Path | None = None,
     focus_channel: str | None = None,
-) -> pd.DataFrame:
+) -> None:
     """Add normalization stats, focus slice, and remove invalid rows.
 
     Reads precomputed metadata from each FOV's ``zattrs`` (written by
@@ -249,7 +249,9 @@ def preprocess_cell_index(
     - ``z_focus_mean`` — per-FOV focus plane from ``focus_slice``
 
     Drops rows where timepoint stats are missing or ``norm_max == 0.0``
-    (empty frames).
+    (empty frames). The processed parquet is written to ``output_path``;
+    the function returns nothing — callers that need the dataframe should
+    ``read_cell_index`` afterwards.
 
     Parameters
     ----------
@@ -260,11 +262,6 @@ def preprocess_cell_index(
     focus_channel : str | None
         Channel name for ``focus_slice`` lookup (e.g. ``"Phase3D"``).
         When ``None``, uses the first channel_name in each FOV's group.
-
-    Returns
-    -------
-    pd.DataFrame
-        The preprocessed cell index with normalization and focus columns.
 
     Raises
     ------
@@ -348,8 +345,12 @@ def preprocess_cell_index(
     write_cell_index(df, output_path)
     if n_dropped > 0:
         _logger.info("Dropped %d invalid rows (%.1f%%).", n_dropped, 100 * n_dropped / n_before)
-    print(f"Wrote {len(df):,} rows to {output_path} (dropped {n_dropped:,}, added norm + focus columns)")
-    return df
+    _logger.info(
+        "Wrote %d rows to %s (dropped %d, added norm + focus columns)",
+        len(df),
+        output_path,
+        n_dropped,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +559,7 @@ def build_timelapse_cell_index(
     experiments = collection.experiments
     n_workers = os.cpu_count() if num_workers == -1 else num_workers
 
-    print(f"Building cell index: {len(experiments)} experiments, {n_workers} workers")
+    _logger.info("Building cell index: %d experiments, %s workers", len(experiments), n_workers)
 
     all_tracks: list[pd.DataFrame] = []
 
@@ -567,7 +568,7 @@ def build_timelapse_cell_index(
             df = _build_experiment_tracks(exp, include_wells, exclude_fovs)
             if not df.empty:
                 all_tracks.append(df)
-                print(f"  {exp.name}: {len(df):,} rows")
+                _logger.info("  %s: %d rows", exp.name, len(df))
     else:
         futures = {}
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
@@ -586,7 +587,7 @@ def build_timelapse_cell_index(
                     df = future.result()
                     if not df.empty:
                         all_tracks.append(df)
-                        print(f"  {exp_name}: {len(df):,} rows")
+                        _logger.info("  %s: %d rows", exp_name, len(df))
                     pbar.update(1)
 
     if not all_tracks:
@@ -599,7 +600,7 @@ def build_timelapse_cell_index(
         df[col] = None
 
     write_cell_index(df, output_path)
-    print(f"Wrote {len(df):,} rows to {output_path}")
+    _logger.info("Wrote %d rows to %s", len(df), output_path)
     return df
 
 
