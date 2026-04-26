@@ -393,7 +393,9 @@ def test_joint_train_smoke_leaf_composes() -> None:
         assert ia["source_channel"] == ["Phase3D"]
         assert ia["target_channel"] == ["Structure"]
         assert ia["z_window_size"] == 13
-        assert ia["batch_size"] == 4
+        # batch_size=1 keeps the smoke under a single H200's memory budget;
+        # train.yml uses batch_size=4 across 4 GPUs.
+        assert ia["batch_size"] == 1
         assert ia["gpu_augmentations"], "gpu_augmentations missing"
 
     # iPSC child: test48 zarr (smoke-sized). a549 child: 2024_11_07 SEC61B

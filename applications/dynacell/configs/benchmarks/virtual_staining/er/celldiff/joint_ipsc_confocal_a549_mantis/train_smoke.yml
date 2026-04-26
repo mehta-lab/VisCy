@@ -47,7 +47,12 @@ _hcs_init_args: &hcs_init_args
   source_channel: [Phase3D]
   target_channel: [Structure]
   z_window_size: 13
-  batch_size: 4
+  # batch_size=1 (vs train.yml's 4) so the smoke fits a single H200. The
+  # 4-GPU train.yml hparams OOM on one GPU because per-step memory is
+  # batch_size * num_samples patches at [8, 512, 512]; scaling batch_size
+  # alone keeps patch shape identical to train.yml so the validation is
+  # apples-to-apples.
+  batch_size: 1
   num_workers: 4
   yx_patch_size: [512, 512]
   split_ratio: 0.8
@@ -73,7 +78,9 @@ _hcs_init_args: &hcs_init_args
         keys: [Phase3D, Structure]
         w_key: Structure
         spatial_size: [13, 624, 624]
-        num_samples: 2
+        # num_samples=1 (vs train.yml's 2) — HCSDataModule requires
+        # batch_size % num_samples == 0 and the smoke uses batch_size=1.
+        num_samples: 1
   gpu_augmentations:
     - class_path: viscy_transforms.BatchedRandAffined
       init_args:
