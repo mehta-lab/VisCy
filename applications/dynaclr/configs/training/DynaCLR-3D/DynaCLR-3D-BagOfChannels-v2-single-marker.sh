@@ -17,4 +17,4 @@ export PROJECT="DynaCLR-3D-BagOfChannels-v2"
 export RUN_NAME="3d-z32-256to228to160-ntxent-t0p2-single-marker"
 export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2.yml applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2-single-marker.yml"
 
-source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh
+source "$(dirname "$0")/../slurm/train.sh"

@@ -27,4 +27,4 @@ export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagO
 # export CKPT_PATH="/hpc/projects/organelle_phenotyping/models/DynaCLR-3D-BagOfChannels-v2/3d-z32-256to228to160-ntxent-t0p2/DynaCLR-3D-BagOfChannels-v2/20260402-185442/checkpoints/last.ckpt"
 # export WANDB_RUN_ID="20260402-185442"
 
-source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh
+source "$(dirname "$0")/../slurm/train.sh"

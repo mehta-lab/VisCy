@@ -18,7 +18,7 @@
 export PYTHONNOUSERSITE=1
 export NCCL_DEBUG=WARN
 
-cd /hpc/mydata/eduardo.hirata/repos/viscy
+cd "$(dirname "$0")/../../../../.."
 
 srun uv run --project . viscy fit \
   --config applications/dynaclr/configs/training/OPS/OPS-1000genes-allmarkers.yml \

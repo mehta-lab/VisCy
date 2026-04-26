@@ -35,4 +35,4 @@ export EXTRA_ARGS="--model.init_args.ckpt_path=/hpc/projects/organelle_phenotypi
 # export CKPT_PATH="/path/to/last.ckpt"
 # export WANDB_RUN_ID="<timestamp>"
 
-source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh
+source "$(dirname "$0")/../slurm/train.sh"

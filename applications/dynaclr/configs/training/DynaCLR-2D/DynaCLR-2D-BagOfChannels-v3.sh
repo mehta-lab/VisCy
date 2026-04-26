@@ -24,4 +24,4 @@ export CONFIGS="applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-BagO
 # export CKPT_PATH=""
 # export WANDB_RUN_ID=""
 
-source "$(dirname "$0")/slurm/train.sh"
+source "$(dirname "$0")/../slurm/train.sh"

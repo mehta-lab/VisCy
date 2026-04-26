@@ -18,4 +18,4 @@ export PROJECT="DynaCLR-2D-MIP-BagOfChannels"
 export RUN_NAME="2d-mip-ntxent-t0p2-lr2e5-bs128-A40-single-marker"
 export CONFIGS="applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.yml applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.yml applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker-A40.yml"
 
-source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh
+source "$(dirname "$0")/../slurm/train.sh"

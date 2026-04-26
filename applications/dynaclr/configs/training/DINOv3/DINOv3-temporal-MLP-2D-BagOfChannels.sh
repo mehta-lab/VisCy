@@ -26,4 +26,4 @@ export CONFIGS="applications/dynaclr/configs/training/DINOv3/DINOv3-temporal-MLP
 export CKPT_PATH="/hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels-v1/dinov3-mlp-2d-mip-ntxent-t0p5-lr1e4-bs512/DINOv3-temporal-MLP-2D-BagOfChannels-v1/20260403-223550/checkpoints/last.ckpt"
 export WANDB_RUN_ID="20260403-223550"
 
-source /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/slurm/train.sh
+source "$(dirname "$0")/../slurm/train.sh"
