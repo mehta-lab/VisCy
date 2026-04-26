@@ -105,7 +105,8 @@ def test_ssim_helper_gradient_flow():
 
     Per-voxel sign equality is too brittle (~0.25% benign flips on
     non-tiny gradients). Use cosine similarity + sign-flip fraction over
-    voxels with ``|grad_ref| > 1e-3``.
+    voxels above 10% of the reference grad max — relative threshold so
+    the assertion is scale-invariant regardless of loss magnitude.
     """
     torch.manual_seed(3)
     y = torch.rand(*_BATCH, device="cuda")

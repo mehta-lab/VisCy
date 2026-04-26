@@ -175,7 +175,7 @@ def _compute_ssim_and_cs_bf16(
     y_pred: torch.Tensor,
     y: torch.Tensor,
     kernel_size: Sequence[int],
-    data_range: Union[float, torch.Tensor] = 1.0,
+    data_range: float | torch.Tensor = 1.0,
     k1: float = 0.01,
     k2: float = 0.03,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -227,6 +227,10 @@ def _compute_ssim_and_cs_bf16(
     num_channels = y_pred.size(1)
 
     # Build uniform kernel in fp32 then cast to bf16 once.
+    # The kernel is rebuilt per call (5x per ms_ssim_25d invocation). The
+    # tensor is small (~1.8k elements at default 15x11x11) so the per-step
+    # overhead is negligible relative to the conv cost. If profiling ever
+    # shows otherwise, cache by (num_channels, kernel_size, device, dtype).
     kernel_fp32 = torch.ones((num_channels, 1, *kernel_size), device=y_pred.device, dtype=torch.float32) / float(
         prod(kernel_size)
     )
