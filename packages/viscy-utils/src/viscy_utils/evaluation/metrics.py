@@ -183,12 +183,12 @@ def _compute_ssim_and_cs_bf16(
 
     Replaces monai's ``compute_ssim_and_cs`` (which unconditionally casts both
     inputs to fp32 internally) with a precision-aware variant that runs the
-    five Gaussian-mean convolutions in bf16 and promotes only the variance
-    subtractions and C1/C2-guarded divisions to fp32. Squared products
-    (``y * y``, ``y_pred * y_pred``, ``y_pred * y``) are computed in fp32
-    before casting to bf16 for the conv input, which preserves precision on
-    the precision-sensitive squaring step at the cost of one extra cast per
-    squared term.
+    five uniform-window mean convolutions in bf16 and promotes only the
+    variance subtractions and C1/C2-guarded divisions to fp32. Squared
+    products (``y * y``, ``y_pred * y_pred``, ``y_pred * y``) are computed in
+    fp32 before casting to bf16 for the conv input, which preserves precision
+    on the precision-sensitive squaring step at the cost of one extra cast
+    per squared term.
 
     The conv accumulator is fp32 on CUDA tensor cores (sm >= 80) and on CPU,
     so only the conv outputs (returned in bf16) lose precision relative to
@@ -236,17 +236,20 @@ def _compute_ssim_and_cs_bf16(
     )
     kernel_bf = kernel_fp32.to(torch.bfloat16)
 
-    # Squared products in fp32 to preserve squaring precision; cast to bf16
-    # for the conv input. The simple (non-squared) inputs are cast inline at
-    # the conv site to avoid holding redundant bf16 copies of y / y_pred.
+    # bf16 views of the simple (non-squared) inputs go straight from the
+    # caller's dtype — skips a round-trip via fp32 when the caller is
+    # already in bf16 (autocast). Squared products are computed in fp32
+    # first to preserve squaring precision, then cast to bf16 for the conv.
+    y_pred_bf = y_pred.to(torch.bfloat16)
+    y_bf = y.to(torch.bfloat16)
     y_pred_fp32 = y_pred.float()
     y_fp32 = y.float()
     y_pred_sq_bf = (y_pred_fp32 * y_pred_fp32).to(torch.bfloat16)
     y_sq_bf = (y_fp32 * y_fp32).to(torch.bfloat16)
     y_pred_y_bf = (y_pred_fp32 * y_fp32).to(torch.bfloat16)
 
-    mu_x = F.conv3d(y_pred_fp32.to(torch.bfloat16), kernel_bf, groups=num_channels).float()
-    mu_y = F.conv3d(y_fp32.to(torch.bfloat16), kernel_bf, groups=num_channels).float()
+    mu_x = F.conv3d(y_pred_bf, kernel_bf, groups=num_channels).float()
+    mu_y = F.conv3d(y_bf, kernel_bf, groups=num_channels).float()
     mu_xx = F.conv3d(y_pred_sq_bf, kernel_bf, groups=num_channels).float()
     mu_yy = F.conv3d(y_sq_bf, kernel_bf, groups=num_channels).float()
     mu_xy = F.conv3d(y_pred_y_bf, kernel_bf, groups=num_channels).float()

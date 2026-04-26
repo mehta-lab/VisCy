@@ -12,9 +12,23 @@ Covers the multi-tier numerical contract:
 import pytest
 import torch
 import torch.nn.functional as F
-from monai.metrics.regression import compute_ssim_and_cs as _monai_reference
 
 from viscy_utils.evaluation.metrics import _compute_ssim_and_cs_bf16
+
+# monai is not a hard dep of viscy-utils — skip the suite if absent rather
+# than failing at import time.
+_monai_regression = pytest.importorskip("monai.metrics.regression")
+_monai_reference = _monai_regression.compute_ssim_and_cs
+
+# The helper unconditionally uses bf16 convs. CUDA bf16 conv works on
+# sm_80+ in tensor cores and falls back to software emulation on older
+# devices, but the equivalence-vs-monai-fp32 tolerances were measured on
+# Hopper — skip on hardware where bf16 emulation could push drift past
+# the configured rtol/atol.
+_skip_no_bf16 = pytest.mark.skipif(
+    not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+    reason="CUDA + bf16 tensor-core support required",
+)
 
 # Representative iPSC SEC61B FCMAE batch shape.
 _BATCH = (2, 1, 15, 256, 256)
@@ -42,7 +56,7 @@ def _bf16(y_pred: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Te
     )
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_ssim_helper_random_per_pixel_equivalence():
     """Per-pixel SSIM on random inputs, worst-case bf16 drift tier.
 
@@ -59,7 +73,7 @@ def test_ssim_helper_random_per_pixel_equivalence():
     torch.testing.assert_close(cs_helper, cs_ref, rtol=5e-2, atol=1e-1)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_ssim_helper_random_aggregate_equivalence():
     """Aggregate SSIM (mean over pixels) on random inputs.
 
@@ -79,7 +93,7 @@ def test_ssim_helper_random_aggregate_equivalence():
     torch.testing.assert_close(agg_helper, agg_ref, rtol=1e-2, atol=1e-2)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_ssim_helper_correlated_pair_equivalence():
     """Aggregate SSIM on a correlated pair (pred = target + small noise).
 
@@ -99,7 +113,7 @@ def test_ssim_helper_correlated_pair_equivalence():
     torch.testing.assert_close(agg_helper, agg_ref, rtol=2e-3, atol=5e-3)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_ssim_helper_gradient_flow():
     """Gradient flow contract: finite, cosine-similar, low sign-flip rate.
 
@@ -141,7 +155,7 @@ def test_ssim_helper_gradient_flow():
     assert flip_fraction.item() < 0.01, f"sign-flip fraction {flip_fraction.item():.4f} above 1%"
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 @pytest.mark.parametrize("input_dtype", [torch.float32, torch.bfloat16, torch.float16])
 def test_ssim_helper_dtypes(input_dtype):
     """Helper returns fp32 regardless of input dtype."""

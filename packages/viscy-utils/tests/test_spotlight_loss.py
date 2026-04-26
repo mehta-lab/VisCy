@@ -5,6 +5,11 @@ import torch
 
 from viscy_utils.losses.spotlight import SpotlightLoss, _otsu_threshold, _tunable_sigmoid
 
+_skip_no_bf16 = pytest.mark.skipif(
+    not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+    reason="CUDA + bf16 tensor-core support required",
+)
+
 
 def test_tunable_sigmoid_range():
     """Output is clamped to [0, 1]."""
@@ -271,7 +276,7 @@ def test_spotlight_loss_invalid_params():
         SpotlightLoss(eps=0)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_spotlight_loss_forward_under_bf16_autocast():
     """Forward+backward under bf16 autocast produces finite scalar + grads.
 
@@ -294,7 +299,7 @@ def test_spotlight_loss_forward_under_bf16_autocast():
     assert torch.isfinite(pred.grad).all().item()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_spotlight_loss_autocast_matches_fp32_baseline():
     """No-decorator autocast result tracks the explicit-fp32 baseline.
 

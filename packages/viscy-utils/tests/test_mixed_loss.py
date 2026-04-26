@@ -16,6 +16,11 @@ from viscy_utils.losses import MixedLoss
 # test convention.
 _BATCH = (2, 1, 15, 192, 192)
 
+_skip_no_bf16 = pytest.mark.skipif(
+    not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+    reason="CUDA + bf16 tensor-core support required",
+)
+
 
 def _seeded_inputs(device: str = "cuda", seed: int = 0):
     torch.manual_seed(seed)
@@ -24,7 +29,7 @@ def _seeded_inputs(device: str = "cuda", seed: int = 0):
     return pred, target
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_mixed_loss_forward_finite_outside_autocast():
     """Forward returns a finite fp32 scalar outside any autocast context."""
     loss_fn = MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5)
@@ -37,7 +42,7 @@ def test_mixed_loss_forward_finite_outside_autocast():
     assert torch.isfinite(loss).item()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_mixed_loss_forward_under_bf16_autocast():
     """Forward under bf16 autocast returns a finite fp32 scalar.
 
@@ -61,7 +66,7 @@ def test_mixed_loss_forward_under_bf16_autocast():
     torch.testing.assert_close(loss_autocast, loss_fp32, rtol=1e-2, atol=1e-2)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")
+@_skip_no_bf16
 def test_mixed_loss_gradient_flow_under_autocast():
     """Backward through MixedLoss under autocast bf16 produces finite grads."""
     loss_fn = MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5)
