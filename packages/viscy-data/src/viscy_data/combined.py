@@ -10,17 +10,13 @@ import torch
 from lightning.pytorch import LightningDataModule
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
 from monai.data import ThreadDataLoader
+from monai.data.utils import no_collation
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from viscy_data._utils import _collate_samples
 from viscy_data.distributed import ShardedDistributedSampler
 
 _logger = logging.getLogger("lightning.pytorch")
-
-
-def _identity_collate(x):
-    """Pass-through collate so workers under the spawn start method survive pickling."""
-    return x
 
 
 class CombineMode(Enum):
@@ -274,12 +270,7 @@ class BatchedConcatDataModule(ConcatDataModule):
 
     Under DDP, attaches ``ShardedDistributedSampler`` so each rank
     iterates a disjoint shard while preserving the existing
-    micro-batch-to-single-batch contract. Worker processes are
-    standard ``multiprocessing`` subprocesses so ``persistent_workers``
-    and ``prefetch_factor`` from the child datamodules are honored
-    end-to-end (versus silently dropped under
-    ``use_thread_workers=True``, which interacts poorly with real
-    ``init_process_group`` topologies).
+    micro-batch-to-single-batch contract.
     """
 
     _ConcatDataset = BatchedConcatDataset
@@ -297,7 +288,7 @@ class BatchedConcatDataModule(ConcatDataModule):
             shuffle=False if sampler else True,
             sampler=sampler,
             drop_last=True,
-            collate_fn=_identity_collate,
+            collate_fn=no_collation,
             **self._dataloader_kwargs(),
         )
 
@@ -310,7 +301,7 @@ class BatchedConcatDataModule(ConcatDataModule):
             shuffle=False,
             sampler=sampler,
             drop_last=False,
-            collate_fn=_identity_collate,
+            collate_fn=no_collation,
             **self._dataloader_kwargs(),
         )
 

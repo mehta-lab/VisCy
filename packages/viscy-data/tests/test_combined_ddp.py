@@ -1,15 +1,10 @@
 """Real-DDP integration tests for ``BatchedConcatDataModule``.
 
-These tests use ``torch.multiprocessing.spawn`` with the ``gloo`` backend
-to genuinely call ``torch.distributed.init_process_group`` and exercise
-the joint loader end-to-end through ``iter() + next()``. The
-monkeypatch-based DDP tests in ``test_combined.py`` do not exercise the
-worker-spawn × ``init_process_group`` interaction, which is exactly the
-surface that broke in the production 4-GPU smoke (SLURM 31453225).
-
-The matrix covers ``(num_workers, mmap_preload) ∈ {(0, False), (2,
-False), (2, True)}`` so any future regression in any of the worker /
-mmap-preload paths is caught.
+Spawn two ranks via ``torch.multiprocessing`` (``gloo`` backend) so the
+joint loader is exercised through a genuine
+``torch.distributed.init_process_group``. The monkeypatch-based DDP
+tests in ``test_combined.py`` cover the sampler-attachment contract but
+not the worker-spawn × real-DDP interaction.
 """
 
 from __future__ import annotations
@@ -31,6 +26,19 @@ from viscy_data.combined import BatchedConcatDataModule
 WORLD_SIZE = 2
 BATCH_SIZE = 4
 CHANNEL_NAMES = ["Phase3D", "Nuclei"]
+
+
+def _kill_survivors(processes, grace: float) -> None:
+    """Terminate-then-kill any still-alive child processes.
+
+    Idempotent: a no-op when every process has already exited.
+    """
+    for proc in processes:
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(grace)
+            if proc.is_alive():
+                proc.kill()
 
 
 def _build_zarr(path: Path) -> None:
@@ -91,10 +99,10 @@ def _worker(
         dm_b = _make_dm(data_path, num_workers, mmap_preload, scratch_dir)
         batched = BatchedConcatDataModule(data_modules=[dm_a, dm_b])
 
-        # Lightning's _InfiniteBarrier (data_connector.py:93) wraps prepare_data
-        # so non-rank-0 ranks don't race past rank 0's mmap writer. Reproduce
-        # that here so the mmap_preload=True path doesn't trip
-        # _check_mmap_cache_ready before .done is written.
+        # Lightning wraps ``prepare_data`` in a barrier so non-rank-0 ranks
+        # don't race past rank 0's mmap writer; reproduce that pattern so
+        # ``mmap_preload=True`` doesn't trip ``_check_mmap_cache_ready``
+        # before ``.done`` exists.
         if rank == 0:
             batched.prepare_data()
         dist.barrier()
@@ -109,7 +117,6 @@ def _worker(
         assert train_loader.sampler.rank == rank
         assert train_loader.sampler.num_replicas == WORLD_SIZE
 
-        # Iterate a few train batches and verify the list-of-micro-batches contract.
         n_batches = 0
         for batch in train_loader:
             assert isinstance(batch, list)
@@ -137,7 +144,6 @@ def _worker(
                     seen.add(idx)
             record(f"cross-rank disjoint, union={len(seen)}")
 
-        # Smoke val iteration too.
         val_loader.sampler.set_epoch(0)
         n_val = 0
         for _ in val_loader:
@@ -184,15 +190,14 @@ def test_batched_concat_real_ddp_iter_does_not_hang(
     _build_zarr(data_path)
     init_file = work_dir / "pg_init"
     out_base = work_dir / "result"
-    scratch_dir = work_dir / "scratch"
-    scratch_dir.mkdir()
+    scratch_dir = work_dir / "scratch" if mmap_preload else None
+    if scratch_dir is not None:
+        scratch_dir.mkdir()
 
-    # ``start_method="fork"`` is necessary because pytest imports the
-    # test module under ``--import-mode=importlib``, which can't be
-    # re-resolved in a spawn-launched child (``ModuleNotFoundError:
-    # 'packages'``). Fork inherits the parent's module loader state.
-    # ``mp.spawn`` only supports ``start_method=spawn`` per the upstream
-    # error message, so go through ``mp.start_processes`` directly.
+    # ``start_method="fork"`` because pytest imports tests under
+    # ``--import-mode=importlib``, whose path can't be re-resolved in a
+    # spawn child (``ModuleNotFoundError: 'packages'``). ``mp.spawn``
+    # only supports ``spawn``, so go through ``mp.start_processes``.
     ctx = mp.start_processes(
         _worker,
         args=(
@@ -201,7 +206,7 @@ def test_batched_concat_real_ddp_iter_does_not_hang(
             str(out_base),
             num_workers,
             mmap_preload,
-            str(scratch_dir) if mmap_preload else None,
+            str(scratch_dir) if scratch_dir is not None else None,
         ),
         nprocs=WORLD_SIZE,
         join=False,
@@ -209,34 +214,21 @@ def test_batched_concat_real_ddp_iter_does_not_hang(
         start_method="fork",
     )
 
-    # Deadline-loop join: ctx.join returns False as soon as ANY rank exits,
-    # so a single ctx.join(timeout=120) is unsafe. See
-    # /home/alex.kalinin/.claude/plans/shiny-tickling-shannon.md.
+    # ``ctx.join`` returns ``False`` as soon as any rank exits, so a
+    # single ``ctx.join(timeout=120)`` would terminate prematurely on
+    # the first rank's clean exit; loop on a wall-time deadline.
     deadline = time.monotonic() + 120
     try:
         while not ctx.join(timeout=max(0.05, deadline - time.monotonic()), grace_period=5):
             if time.monotonic() >= deadline:
-                for proc in ctx.processes:
-                    if proc.is_alive():
-                        proc.terminate()
-                        proc.join(2)
-                        if proc.is_alive():
-                            proc.kill()
+                _kill_survivors(ctx.processes, grace=2)
                 pytest.fail("DDP test hung past 120s; killed surviving ranks")
     finally:
-        # Defense-in-depth: kill any survivors if the test failed for another reason.
-        for proc in ctx.processes:
-            if proc.is_alive():
-                proc.terminate()
-                proc.join(1)
-                if proc.is_alive():
-                    proc.kill()
+        _kill_survivors(ctx.processes, grace=1)
 
     failures: list[str] = []
     for rank in range(WORLD_SIZE):
-        out_file = Path(f"{out_base}.{rank}")
-        assert out_file.exists(), f"rank {rank} produced no result file"
-        text = out_file.read_text()
+        text = Path(f"{out_base}.{rank}").read_text()
         if not text.startswith("OK"):
             failures.append(f"--- rank {rank} ---\n{text}")
     if failures:
