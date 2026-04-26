@@ -93,34 +93,7 @@ def compute_mmd_unbiased(X: NDArray, Y: NDArray, bandwidth: float | None = None)
     return float(mmd2)
 
 
-def _mmd2_from_kernel(K_pool: NDArray, n: int, perm: NDArray) -> float:
-    """Compute unbiased MMD^2 from a pre-computed pooled kernel matrix.
-
-    Parameters
-    ----------
-    K_pool : NDArray
-        Full pooled kernel matrix, shape (n+m, n+m).
-    n : int
-        Number of samples in X (first group).
-    perm : NDArray
-        Permutation index array of length n+m.
-
-    Returns
-    -------
-    float
-        Unbiased MMD^2 for this permutation.
-    """
-    m = len(perm) - n
-    ix = perm[:n]
-    iy = perm[n:]
-    K_XX = K_pool[np.ix_(ix, ix)]
-    K_YY = K_pool[np.ix_(iy, iy)]
-    K_XY = K_pool[np.ix_(ix, iy)]
-    # Unbiased: zero diagonal contribution
-    kxx = (K_XX.sum() - K_XX.trace()) / (n * (n - 1))
-    kyy = (K_YY.sum() - K_YY.trace()) / (m * (m - 1))
-    kxy = K_XY.mean()
-    return float(kxx + kyy - 2.0 * kxy)
+_MMD_PERM_MAX_N = 20_000
 
 
 def mmd_permutation_test(
@@ -168,6 +141,15 @@ def mmd_permutation_test(
     n = len(X)
     m = len(Y)
     N = n + m
+    # The pooled kernel matrix is (N, N) float32 — quadratic in N. Cap N
+    # explicitly so callers see a clear error rather than an OOM when they
+    # forget to subsample (50k => 10 GB; 100k => 40 GB).
+    if N > _MMD_PERM_MAX_N:
+        raise ValueError(
+            f"mmd_permutation_test pooled kernel would be ({N}, {N}) float32 "
+            f"≈ {(N * N * 4) / 1e9:.1f} GB. Subsample X and/or Y so that "
+            f"len(X) + len(Y) <= {_MMD_PERM_MAX_N}."
+        )
     pool = np.concatenate([X, Y], axis=0).astype(np.float32)
     # Compute full pooled kernel matrix once: (N, N) float32
     K = gaussian_rbf_kernel(pool, pool, bandwidth)
