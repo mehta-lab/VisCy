@@ -133,10 +133,13 @@ def test_ssim_helper_gradient_flow():
     ).item()
     assert cos_sim >= 0.99, f"cosine similarity {cos_sim:.4f} below 0.99"
 
-    nontiny = grad_ref.abs() > 1e-3
-    if nontiny.any():
-        flip_fraction = ((grad_helper.sign() != grad_ref.sign()) & nontiny).float().sum() / nontiny.float().sum()
-        assert flip_fraction.item() < 0.01, f"sign-flip fraction {flip_fraction.item():.4f} above 1%"
+    # Relative threshold — observed |grad_ref| max is ~1.7e-6, so the
+    # earlier absolute 1e-3 threshold was vacuous. Anchor to 10% of the
+    # reference max so the assertion is scale-invariant and meaningful.
+    nontiny = grad_ref.abs() > 0.1 * grad_ref.abs().max()
+    assert nontiny.any(), "no non-tiny reference gradients to compare signs against"
+    flip_fraction = ((grad_helper.sign() != grad_ref.sign()) & nontiny).float().sum() / nontiny.float().sum()
+    assert flip_fraction.item() < 0.01, f"sign-flip fraction {flip_fraction.item():.4f} above 1%"
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for bf16")

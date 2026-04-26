@@ -298,9 +298,10 @@ def test_spotlight_loss_forward_under_bf16_autocast():
 def test_spotlight_loss_autocast_matches_fp32_baseline():
     """No-decorator autocast result tracks the explicit-fp32 baseline.
 
-    Drift is bounded by rtol=1e-2, atol=1e-2 — generous since SpotlightLoss
-    has no convs (sigmoid is the only autocast-affected op) and the
-    autocast policy promotes the precision-sensitive parts to fp32.
+    Drift is bounded by rtol=1e-3, atol=1e-3 — SpotlightLoss has no convs
+    (sigmoid is the only autocast-affected op) and the autocast policy
+    promotes the precision-sensitive parts to fp32; in practice the
+    measured drift is 0.0.
     """
     loss_fn = SpotlightLoss().cuda()
     torch.manual_seed(1)
@@ -312,4 +313,4 @@ def test_spotlight_loss_autocast_matches_fp32_baseline():
 
     loss_fp32 = loss_fn(pred.float(), target.float())
 
-    torch.testing.assert_close(loss_autocast.float(), loss_fp32, rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(loss_autocast.float(), loss_fp32, rtol=1e-3, atol=1e-3)
