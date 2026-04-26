@@ -1,0 +1,21 @@
+# Eval registry — declarative list of models to evaluate.
+#
+# Each entry points to an eval config YAML. The `force_rerun` flag forces
+# re-execution even when outputs already exist. Status is derived from the
+# filesystem by `dynaclr check-evals`, not stored here.
+#
+# Usage:
+#   dynaclr check-evals -r applications/dynaclr/configs/evaluation/eval_registry.yaml
+
+models:
+  - name: DynaCLR-2D-MIP-BagOfChannels
+    eval_config: applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels_evaluation.yaml
+    force_rerun: false
+
+  - name: DINOv3-temporal-MLP-2D-BagOfChannels
+    eval_config: applications/dynaclr/configs/evaluation/DINOv3-temporal-MLP-2D-BagOfChannels_evaluation.yaml
+    force_rerun: false
+
+  - name: DynaCLR-2D-BagOfChannels-v3
+    eval_config: applications/dynaclr/configs/evaluation/DynaCLR-2D-BagOfChannels-v3.yaml
+    force_rerun: false

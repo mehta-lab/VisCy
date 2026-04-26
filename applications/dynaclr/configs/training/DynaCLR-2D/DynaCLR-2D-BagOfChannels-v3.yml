@@ -1,0 +1,110 @@
+# DynaCLR-2D-BagOfChannels-v3
+# ============================
+# 2D bag-of-channels contrastive learning.
+# One random fluorescence channel per sample, single Z slice.
+# Temporal positive pairs (same lineage at t+tau), stratified by perturbation + marker.
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-BagOfChannels-v3.sh
+
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
+
+trainer:
+  strategy: ddp
+  devices: 2
+  precision: bf16-mixed
+  max_epochs: 150
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+    - class_path: viscy_utils.callbacks.OnlineEvalCallback
+      init_args:
+        every_n_epochs: 5
+        label_key: perturbation
+        k: 20
+
+model:
+  init_args:
+    encoder:
+      init_args:
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        projection_dim: 32
+        drop_path_rate: 0.1
+    loss_function:
+      init_args:
+        temperature: 0.2
+    lr: 0.00002
+    pca_color_keys: "[perturbation,hours_post_perturbation]"
+    example_input_array_shape: [1, 1, 1, 160, 160]
+
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-BagOfChannels-v3.parquet
+    z_window: 1
+    yx_patch_size: [192, 192]
+    final_yx_patch_size: [160, 160]
+    channels_per_sample: 1
+    positive_cell_source: lookup
+    positive_match_columns: [lineage_id]
+    tau_range: [0.5, 2.0]
+    tau_decay_rate: 2.0
+    stratify_by: [perturbation, marker]
+    split_ratio: 0.8
+    batch_size: 256
+    num_workers: 1
+    seed: 42
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel_0]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel_0]
+          prob: 0.8
+          scale_range: [[0.8, 1.3], [0.8, 1.3], [0.8, 1.3]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          gamma: [0.6, 1.6]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          sigma_x: [0.25, 0.50]
+          sigma_y: [0.25, 0.50]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.1

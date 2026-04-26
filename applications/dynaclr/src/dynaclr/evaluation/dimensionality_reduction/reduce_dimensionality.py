@@ -17,7 +17,7 @@ import click
 import numpy as np
 from numpy.typing import NDArray
 
-from viscy_utils.cli_utils import format_markdown_table, load_config
+from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
 
 from .config import (
@@ -51,7 +51,7 @@ def _run_umap(features: NDArray, cfg: UMAPConfig) -> tuple[str, NDArray]:
     return "X_umap", umap_embedding
 
 
-def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
+def _run_phate(features: NDArray, cfg: PHATEConfig, lineage_ids: NDArray | None = None) -> tuple[str, NDArray]:
     from viscy_utils.evaluation.dimensionality_reduction import compute_phate
 
     _, phate_embedding = compute_phate(
@@ -62,6 +62,10 @@ def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
         knn_dist=cfg.knn_dist,
         scale_embeddings=cfg.scale_embeddings,
         random_state=cfg.random_state,
+        n_pca=cfg.n_pca,
+        subsample=cfg.subsample,
+        lineage_ids=lineage_ids,
+        n_jobs=cfg.n_jobs,
     )
     return "X_phate", phate_embedding
 
@@ -77,7 +81,7 @@ def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
 def main(config: Path):
     """Compute PCA, UMAP, and/or PHATE on saved embeddings."""
     click.echo("Loading configuration...")
-    raw_config = load_config(config)
+    raw_config = load_config_section(config, None, default_section="reduce_dimensionality")
     cfg = DimensionalityReductionConfig(**raw_config)
 
     click.echo(f"Reading embeddings from {cfg.input_path}...")
@@ -103,10 +107,15 @@ def main(config: Path):
 
     click.echo(f"Computing {len(methods_to_run)} reduction(s): {', '.join(name for name, _, _ in methods_to_run)}")
 
+    lineage_ids = adata.obs["lineage_id"].to_numpy() if "lineage_id" in adata.obs.columns else None
+
     results = {}
     for method_name, method_cfg, obsm_key in methods_to_run:
         try:
-            key, embedding = runner_map[method_name](features, method_cfg)
+            if method_name == "phate":
+                key, embedding = _run_phate(features, method_cfg, lineage_ids=lineage_ids)
+            else:
+                key, embedding = runner_map[method_name](features, method_cfg)
             results[key] = embedding
             click.echo(f"  {method_name.upper()} done -> {key} ({embedding.shape[1]} components)")
         except Exception as e:

@@ -35,6 +35,10 @@ WELL_TEMPLATE_FIELDS = (
     "seeding_density",
     "treatment_concentration_nm",
     "fluorescence_modality",
+    "microscope",
+    "labelfree_modality",
+    "treatment",
+    "hours_post_treatment",
 )
 
 
@@ -49,6 +53,7 @@ class RegisterResult:
     channel_names: list[str] = field(default_factory=list)
     pixel_size_xy_um: float | None = None
     pixel_size_z_um: float | None = None
+    template_ids_to_delete: list[str] = field(default_factory=list)
 
 
 def parse_position_path(position_path: Path) -> tuple[Path, str]:
@@ -264,6 +269,7 @@ def format_register_summary(result: RegisterResult, dry_run: bool = False) -> st
         f"| created | {len(result.created)} |",
         f"| updated | {len(result.updated)} |",
         f"| unmatched | {len(result.unmatched)} |",
+        f"| templates_to_delete | {len(result.template_ids_to_delete)} |",
         f"| pixel_size_xy_um | {xy} |",
         f"| pixel_size_z_um | {z} |",
         f"| status | {status} |",
@@ -421,8 +427,8 @@ def register_fovs(
 
     result = RegisterResult(dataset=dataset_name)
 
-    # Filter to directories only — glob("*/*/*") also picks up .zattrs/.zgroup files
-    pos_names = [p for p in pos_names if not Path(zarr_root / p).name.startswith(".")]
+    # Filter to directories only — glob("*/*/*") also picks up zarr.json, .zattrs, .zgroup files
+    pos_names = [p for p in pos_names if (zarr_root / p).is_dir()]
 
     with open_ome_zarr(str(zarr_root), mode="r") as plate:
         result.channel_names = plate.channel_names
@@ -453,7 +459,13 @@ def register_fovs(
 
             # Resolve cell_line linked records -> registry entries -> marker
             rec_for_marker = fov_records.get((well_id, fov)) or well_templates.get(well_id)
-            if rec_for_marker is not None and rec_for_marker.cell_line:
+            if rec_for_marker is not None:
+                if not rec_for_marker.cell_line:
+                    raise ValueError(
+                        f"Well '{well_id}' has no cell_line set in Airtable. "
+                        "cell_line is required for channel marker derivation — "
+                        "fill it in the platemap before registering."
+                    )
                 marker_entries = [registry[rid] for rid in rec_for_marker.cell_line if rid in registry]
                 marker_fields = derive_channel_marker(result.channel_names, marker_entries)
                 zarr_fields.update(marker_fields)
@@ -477,5 +489,12 @@ def register_fovs(
                 **copy_well_template_fields(template),
             }
             result.created.append({"fields": fields})
+
+    # Collect well template record IDs to delete — only for wells where at least
+    # one FOV was created from the template in this batch.
+    used_wells: set[str] = {rec["fields"]["well_id"] for rec in result.created}
+    for well_id, template in well_templates.items():
+        if well_id in used_wells and template.record_id:
+            result.template_ids_to_delete.append(template.record_id)
 
     return result

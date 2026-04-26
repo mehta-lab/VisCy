@@ -22,8 +22,8 @@ class TestAirtableDatasetsInit:
         AirtableDatasets()
         # Api was called with the fake key
         mock_api.assert_called_once_with("patFAKEKEY123")
-        # .table() was called with the fake base id and TABLE_NAME
-        mock_api.return_value.table.assert_called_once_with("appFAKEBASE456", "Datasets")
+        # .table() is called twice: once for Datasets, once for Marker Registry
+        mock_api.return_value.table.assert_any_call("appFAKEBASE456", "Datasets")
 
     def test_init_raises_when_api_key_missing(self, monkeypatch):
         """ValueError is raised when AIRTABLE_API_KEY is not set."""
@@ -183,15 +183,43 @@ class TestListRecords:
             "seeding_density",
             "treatment_concentration_nm",
             "channel_names",
+            "channel_markers",
             *(f"channel_{i}_{attr}" for i in range(8) for attr in ("name", "marker")),
             "data_path",
             "tracks_path",
             "fluorescence_modality",
+            "microscope",
+            "labelfree_modality",
+            "treatment",
+            "hours_post_treatment",
             "t_shape",
             "c_shape",
             "z_shape",
             "y_shape",
             "x_shape",
+            "pixel_size_xy_um",
+            "pixel_size_z_um",
             "record_id",
         }
         assert set(df.columns) == expected_cols
+
+
+# ---------------------------------------------------------------------------
+# batch_delete
+# ---------------------------------------------------------------------------
+
+
+class TestBatchDelete:
+    """Test AirtableDatasets.batch_delete()."""
+
+    def test_delegates_to_table(self, airtable_datasets, mock_table):
+        mock_table.batch_delete.return_value = [{"id": "rec001", "deleted": True}]
+        result = airtable_datasets.batch_delete(["rec001"])
+        mock_table.batch_delete.assert_called_once_with(["rec001"])
+        assert result == [{"id": "rec001", "deleted": True}]
+
+    def test_passes_multiple_ids(self, airtable_datasets, mock_table):
+        ids = ["rec001", "rec002", "rec003"]
+        mock_table.batch_delete.return_value = []
+        airtable_datasets.batch_delete(ids)
+        mock_table.batch_delete.assert_called_once_with(ids)

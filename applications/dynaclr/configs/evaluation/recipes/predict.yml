@@ -1,0 +1,6 @@
+# Default predict step settings for DynaCLR evaluation.
+predict:
+  batch_size: 400
+  num_workers: 4
+  precision: 32-true
+  devices: 1

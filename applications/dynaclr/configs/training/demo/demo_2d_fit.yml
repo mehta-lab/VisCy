@@ -58,11 +58,6 @@ data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
     # ── Data source ──────────────────────────────────────────────────────────
-    # For production: use the full v3 collection + parquet
-    # collection_path: applications/dynaclr/configs/collections/DynaCLR-2D-BagOfChannels-v3.yml
-    # cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-BagOfChannels-v3.parquet
-    # For demo: single zarr, fast startup
-    collection_path: null
     cell_index_path: applications/dynaclr/configs/cell_index/example_flat.parquet
 
     # ── Patch extraction ─────────────────────────────────────────────────────

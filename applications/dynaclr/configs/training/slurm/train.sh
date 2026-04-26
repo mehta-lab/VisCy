@@ -28,6 +28,9 @@ RUN_DIR="${MODEL_ROOT}/${PROJECT}/${RUN_NAME}"
 export PYTHONNOUSERSITE=1
 export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
+# bf16-mixed already lets matmuls use TF32; "high" instructs Lightning to
+# enable TF32 for any remaining float32 matmuls (silences the runtime warning).
+export TORCH_FLOAT32_MATMUL_PRECISION=high
 
 function cleanup() {
   rm -rf /tmp/$SLURM_JOB_ID/*.zarr

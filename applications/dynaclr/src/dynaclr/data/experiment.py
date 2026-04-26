@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pandas as pd
 from iohub.ngff import open_ome_zarr
 
 from viscy_data.cell_index import read_cell_index
@@ -96,27 +97,26 @@ class ExperimentRegistry:
         # Build name -> config map
         self._name_map = {e.name: e for e in experiments}
 
-        # Per-experiment validations
+        # Per-experiment validation + z-range resolution (single zarr open each)
+        z_extract = self.z_extraction_window or self.z_window
+        z_ranges: dict[str, tuple[int, int]] = {}
+
         for exp in experiments:
-            # 4. Negative interval
             if exp.interval_minutes < 0:
                 raise ValueError(
                     f"Experiment '{exp.name}': interval_minutes must be non-negative, got {exp.interval_minutes}."
                 )
-
-            # 5. Empty perturbation_wells
             if not exp.perturbation_wells:
                 raise ValueError(f"Experiment '{exp.name}': perturbation_wells must not be empty.")
-
-            # 6. data_path existence
             if not Path(exp.data_path).exists():
                 raise ValueError(f"Experiment '{exp.name}': data_path does not exist: {exp.data_path}")
 
-            # 7. Zarr channel validation — selected channels must exist in zarr
             with open_ome_zarr(exp.data_path, mode="r") as plate:
                 first_position = next(iter(plate.positions()))[1]
                 zarr_channels = list(first_position.channel_names)
-            # Store the full zarr channel list for index resolution
+                z_total = first_position["0"].shape[2]
+                focus_data = plate.zattrs.get("focus_slice", {})
+
             exp.channel_names = zarr_channels
             missing_channels = [ch.name for ch in exp.channels if ch.name not in zarr_channels]
             if missing_channels:
@@ -125,16 +125,52 @@ class ExperimentRegistry:
                     f"not found in zarr. Available: {zarr_channels}."
                 )
 
-        # Resolve per-experiment z_ranges
-        self.z_ranges = self._resolve_z_ranges()
+            # Z-range resolution
+            if z_extract is None:
+                z_ranges[exp.name] = (0, z_total)
+            else:
+                focus_ch = self.focus_channel or (exp.channels[0].name if exp.channels else None)
+                ch_focus = focus_data.get(focus_ch, {}) if focus_ch else {}
+                ds_stats = ch_focus.get("dataset_statistics", {})
+                z_focus_mean = ds_stats.get("z_focus_mean")
+
+                z_center = int(round(z_focus_mean)) if z_focus_mean is not None else z_total // 2
+                effective_extract = min(z_extract, z_total)
+                z_below = int(effective_extract * self.z_focus_offset)
+                z_start = max(0, z_center - z_below)
+                z_end = min(z_total, z_start + effective_extract)
+                z_start = max(0, z_end - effective_extract)
+
+                z_ranges[exp.name] = (z_start, z_end)
+                _logger.info(
+                    "Experiment '%s': z_range=(%d, %d), z_total=%d, z_extraction_window=%d",
+                    exp.name,
+                    z_start,
+                    z_end,
+                    z_total,
+                    effective_extract,
+                )
+
+        # Validate extraction windows >= z_window
+        if self.z_window is not None and z_ranges:
+            for name, (z_s, z_e) in z_ranges.items():
+                if z_e - z_s < self.z_window:
+                    raise ValueError(
+                        f"Experiment '{name}': extraction range ({z_e - z_s}) "
+                        f"< z_window ({self.z_window}). Increase z_extraction_window "
+                        f"or reduce z_window."
+                    )
+        self.z_ranges = z_ranges
 
         # Validate pixel sizes and compute scale factors
-        if self.reference_pixel_size_xy_um is not None or self.reference_pixel_size_z_um is not None:
-            missing = [e.name for e in experiments if e.pixel_size_xy_um is None or e.pixel_size_z_um is None]
+        if self.reference_pixel_size_xy_um is not None:
+            missing = [e.name for e in experiments if e.pixel_size_xy_um is None]
             if missing:
-                raise ValueError(
-                    f"reference_pixel_size set but experiments are missing pixel_size_xy_um/z_um: {missing}"
-                )
+                raise ValueError(f"reference_pixel_size_xy_um set but experiments missing pixel_size_xy_um: {missing}")
+        if self.reference_pixel_size_z_um is not None:
+            missing = [e.name for e in experiments if e.pixel_size_z_um is None]
+            if missing:
+                raise ValueError(f"reference_pixel_size_z_um set but experiments missing pixel_size_z_um: {missing}")
         self.scale_factors = self._compute_scale_factors()
 
     @property
@@ -158,72 +194,6 @@ class ExperimentRegistry:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _resolve_z_ranges(self) -> dict[str, tuple[int, int]]:
-        """Resolve per-experiment Z extraction ranges.
-
-        When ``z_extraction_window`` is set, extracts a larger Z range
-        centered on ``z_focus_mean`` (capped by the available Z depth).
-        The random crop from extraction size to ``z_window`` happens later
-        in ``on_after_batch_transfer``.
-
-        Falls back to ``z_window`` when ``z_extraction_window`` is None.
-        """
-        experiments = self.collection.experiments
-        z_ranges: dict[str, tuple[int, int]] = {}
-        z_extract = self.z_extraction_window or self.z_window
-
-        for exp in experiments:
-            focus_ch = self.focus_channel or (exp.channels[0].name if exp.channels else None)
-
-            with open_ome_zarr(exp.data_path, mode="r") as plate:
-                first_pos = next(iter(plate.positions()))[1]
-                z_total = first_pos["0"].shape[2]
-
-                if z_extract is None:
-                    z_ranges[exp.name] = (0, z_total)
-                    continue
-
-                focus_data = plate.zattrs.get("focus_slice", {})
-                ch_focus = focus_data.get(focus_ch, {}) if focus_ch else {}
-                ds_stats = ch_focus.get("dataset_statistics", {})
-                z_focus_mean = ds_stats.get("z_focus_mean")
-
-            if z_focus_mean is None:
-                z_center = z_total // 2
-            else:
-                z_center = int(round(z_focus_mean))
-
-            # Cap extraction window by available Z depth.
-            # z_focus_offset controls asymmetry: 0.5 = symmetric,
-            # 0.3 = 30% below focus, 70% above (cells on coverslip).
-            effective_extract = min(z_extract, z_total)
-            z_below = int(effective_extract * self.z_focus_offset)
-            z_start = max(0, z_center - z_below)
-            z_end = min(z_total, z_start + effective_extract)
-            z_start = max(0, z_end - effective_extract)
-
-            z_ranges[exp.name] = (z_start, z_end)
-            _logger.info(
-                "Experiment '%s': z_range=(%d, %d), z_total=%d, z_extraction_window=%d",
-                exp.name,
-                z_start,
-                z_end,
-                z_total,
-                effective_extract,
-            )
-
-        # Validate: all extraction windows must be >= z_window
-        if self.z_window is not None and z_ranges:
-            for name, (z_s, z_e) in z_ranges.items():
-                if z_e - z_s < self.z_window:
-                    raise ValueError(
-                        f"Experiment '{name}': extraction range ({z_e - z_s}) "
-                        f"< z_window ({self.z_window}). Increase z_extraction_window "
-                        f"or reduce z_window."
-                    )
-
-        return z_ranges
-
     def _compute_scale_factors(self) -> dict[str, tuple[float, float, float]]:
         """Compute per-experiment scale factors for physical-space normalization.
 
@@ -237,18 +207,15 @@ class ExperimentRegistry:
         """
         scale_factors: dict[str, tuple[float, float, float]] = {}
         for exp in self.collection.experiments:
-            if (
-                self.reference_pixel_size_xy_um is not None
-                and self.reference_pixel_size_z_um is not None
-                and exp.pixel_size_xy_um is not None
-                and exp.pixel_size_z_um is not None
-            ):
+            if self.reference_pixel_size_xy_um is not None and exp.pixel_size_xy_um is not None:
                 scale_y = self.reference_pixel_size_xy_um / exp.pixel_size_xy_um
                 scale_x = self.reference_pixel_size_xy_um / exp.pixel_size_xy_um
-                scale_z = self.reference_pixel_size_z_um / exp.pixel_size_z_um
             else:
                 scale_y = 1.0
                 scale_x = 1.0
+            if self.reference_pixel_size_z_um is not None and exp.pixel_size_z_um is not None:
+                scale_z = self.reference_pixel_size_z_um / exp.pixel_size_z_um
+            else:
                 scale_z = 1.0
             scale_factors[exp.name] = (scale_z, scale_y, scale_x)
         return scale_factors
@@ -313,7 +280,7 @@ class ExperimentRegistry:
         focus_channel: str | None = None,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
-    ) -> ExperimentRegistry:
+    ) -> tuple["ExperimentRegistry", "pd.DataFrame"]:
         """Build a registry from a flat cell index parquet and zarr metadata.
 
         Derives per-experiment channels from the parquet's ``marker`` and
@@ -339,32 +306,24 @@ class ExperimentRegistry:
 
         Returns
         -------
-        ExperimentRegistry
-            Validated registry of experiments.
+        tuple[ExperimentRegistry, pd.DataFrame]
+            Validated registry of experiments and the raw cell index DataFrame.
         """
         df = read_cell_index(cell_index_path)
         if df.empty:
             raise ValueError(f"Cell index is empty: {cell_index_path}")
 
-        # Step 1: Read channel names per (store_path, well) from zarr.
-        channel_names_cache: dict[tuple[str, str], list[str]] = {}
-        store_cache: dict[str, object] = {}
+        # Step 1: Read channel names per store from a single FOV.
+        # Channel names are uniform across all positions in a plate,
+        # so we open one FOV directly (store_path/well/fov) instead of
+        # iterating all positions.
+        channel_names_cache: dict[str, list[str]] = {}
 
         for store_path, group in df.groupby("store_path"):
-            plate = open_ome_zarr(str(store_path), mode="r")
-            store_cache[str(store_path)] = plate
-            for well in group["well"].unique():
-                # Find one position in this well
-                well_str = str(well)
-                for pos_path, pos in plate.positions():
-                    if pos_path.startswith(well_str + "/"):
-                        channel_names_cache[(str(store_path), well_str)] = list(pos.channel_names)
-                        break
-
-        # Close all opened stores
-        for plate in store_cache.values():
-            if hasattr(plate, "close"):
-                plate.close()
+            first = group.iloc[0]
+            fov_path = f"{store_path}/{first['well']}/{first['fov']}"
+            with open_ome_zarr(fov_path, mode="r") as pos:
+                channel_names_cache[str(store_path)] = list(pos.channel_names)
 
         # Step 2: Derive per-experiment channels from flat (marker, channel_name) columns.
         exp_channels: dict[str, list[ChannelEntry]] = defaultdict(list)
@@ -381,14 +340,7 @@ class ExperimentRegistry:
         for exp_name, exp_group in df.groupby("experiment"):
             exp_name = str(exp_name)
             store_path = str(exp_group["store_path"].iloc[0])
-            first_well = str(exp_group["well"].iloc[0])
-
-            channel_names = channel_names_cache.get((store_path, first_well))
-            if channel_names is None:
-                raise ValueError(
-                    f"Experiment '{exp_name}': could not read channel names from zarr "
-                    f"(store_path={store_path}, well={first_well})."
-                )
+            channel_names = channel_names_cache[store_path]
 
             # Derive perturbation_wells from parquet
             perturbation_wells: dict[str, list[str]] = defaultdict(list)
@@ -453,7 +405,7 @@ class ExperimentRegistry:
             experiments=experiments,
         )
 
-        return cls(
+        registry = cls(
             collection=collection,
             z_window=z_window,
             z_extraction_window=z_extraction_window,
@@ -462,6 +414,7 @@ class ExperimentRegistry:
             reference_pixel_size_xy_um=reference_pixel_size_xy_um,
             reference_pixel_size_z_um=reference_pixel_size_z_um,
         )
+        return registry, df
 
     def subset(self, experiment_names: list[str]) -> ExperimentRegistry:
         """Create a new registry with a subset of experiments.

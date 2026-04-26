@@ -1,0 +1,18 @@
+# Model recipe: ContrastiveModule with ConvNeXt-Tiny encoder.
+# Leaf configs override: in_stack_depth, stem_kernel_size, stem_stride,
+# projection_dim, drop_path_rate, temperature, lr, and logging args.
+
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        embedding_dim: 768
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentLoss
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 3
+    log_embeddings_every_n_epochs: 10

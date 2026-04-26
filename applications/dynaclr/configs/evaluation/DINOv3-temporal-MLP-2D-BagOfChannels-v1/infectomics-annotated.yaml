@@ -1,0 +1,20 @@
+# Evaluation config: DINOv3-temporal-MLP-2D-BagOfChannels-v1 × infectomics-annotated (Wave 1)
+# Trains LC pipelines on 14 infectomics experiments using DINOv3-temporal-MLP
+# 128-dim projections (.X). Publishes pipelines to the central LC registry.
+#
+# Usage:
+#   nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
+#     --eval_config applications/dynaclr/configs/evaluation/DINOv3-temporal-MLP-2D-BagOfChannels-v1/infectomics-annotated.yaml \
+#     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+#     -resume
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/config_updated.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/DINOv3-temporal-MLP-2D-BagOfChannels-v1/20260319-235942/checkpoints/epoch=71-step=14040.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluations/infectomics-annotated/

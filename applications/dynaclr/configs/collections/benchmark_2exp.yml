@@ -1,0 +1,36 @@
+name: benchmark_2exp
+description: "Benchmark collection: G3BP1 (2025_07_24) + H2B (2025_04_15) for dataloader profiling"
+datasets_root: /hpc/projects/organelle_phenotyping
+
+experiments:
+  - name: 2025_07_24_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_04_15_A549_H2B_CAAX_ZIKV_DENV_H2B
+    data_path: ${datasets_root}/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/2025_04_15_A549_H2B_CAAX_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw Cy5 EX639 EM698-70
+        marker: HIST2H2BE
+    perturbation_wells:
+      uninfected:
+        - B/1
+      DENV:
+        - B/2
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174

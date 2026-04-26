@@ -16,6 +16,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import torch
 from iohub.core.config import TensorStoreConfig
 from lightning.pytorch import LightningDataModule
 from monai.data.thread_buffer import ThreadDataLoader
@@ -27,8 +28,8 @@ from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data._utils import BatchedCenterSpatialCropd, _transform_channel_wise
 from viscy_data.channel_dropout import ChannelDropout
+from viscy_data.channel_utils import parse_channel_name
 from viscy_data.sampler import FlexibleBatchSampler
-from viscy_transforms import BatchedRandSpatialCropd
 
 _logger = logging.getLogger(__name__)
 
@@ -51,11 +52,10 @@ class MultiExperimentDataModule(LightningDataModule):
 
     Parameters
     ----------
-    collection_path : str or None
-        Path to collection YAML for ExperimentRegistry.from_collection().
-        Optional when ``cell_index_path`` is provided — the registry is
-        built directly from parquet + zarr metadata via
-        ExperimentRegistry.from_cell_index().
+    cell_index_path : str
+        Path to preprocessed cell index parquet (from ``build-cell-index``
+        + ``preprocess-cell-index``). Contains all metadata needed for
+        training: TCZYX shape, normalization stats, focus slice.
     z_window : int
         Number of Z slices the model consumes (final crop size).
     z_extraction_window : int or None
@@ -85,7 +85,7 @@ class MultiExperimentDataModule(LightningDataModule):
     batch_size : int
         Batch size. Default: 128.
     num_workers : int
-        Thread workers for ThreadDataLoader. Default: 1.
+        Thread workers for ThreadDataLoader. Default: 4.
     batch_group_by : str or list[str] or None
         Column(s) to group batches by (e.g. ``"experiment"``). Default: None.
     stratify_by : str | list[str] | None
@@ -122,17 +122,9 @@ class MultiExperimentDataModule(LightningDataModule):
         Only include these wells. Default: None.
     exclude_fovs : list[str] | None
         Exclude these FOVs. Default: None.
-    cell_index_path : str | None
-        Optional path to a pre-built cell index parquet for faster startup.
-        When provided, both train and val indices load from this parquet
-        (filtered by their respective registries). Default: None.
     focus_channel : str | None
         Channel name for ``focus_slice`` lookup when auto-resolving z_range.
         Default: None (uses first source_channel).
-    num_workers_index : int
-        Number of parallel processes for building the cell index. Default: 1
-        (sequential). When > 1, one process is spawned per experiment.
-        Ignored when ``cell_index_path`` is provided.
     reference_pixel_size_xy_um : float or None
         Reference pixel size in XY (micrometers) for physical-scale normalization.
         None = no rescaling. Default: None.
@@ -157,7 +149,7 @@ class MultiExperimentDataModule(LightningDataModule):
 
     def __init__(
         self,
-        collection_path: str | None,
+        cell_index_path: str,
         z_window: int,
         z_extraction_window: int | None = None,
         z_focus_offset: float = 0.5,
@@ -168,7 +160,7 @@ class MultiExperimentDataModule(LightningDataModule):
         tau_range: tuple[float, float] = (0.5, 2.0),
         tau_decay_rate: float = 2.0,
         batch_size: int = 128,
-        num_workers: int = 1,
+        num_workers: int = 4,
         # Sampling hyperparameters (passed to FlexibleBatchSampler)
         batch_group_by: str | list[str] | None = None,
         stratify_by: str | list[str] | None = "perturbation",
@@ -185,13 +177,13 @@ class MultiExperimentDataModule(LightningDataModule):
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
         # Other
-        cache_pool_bytes: int = 0,
+        cache_pool_bytes: int = 500_000_000,
+        recheck_cached_data: str | bool | None = None,
+        file_io_concurrency: int | None = None,
         seed: int = 0,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
-        cell_index_path: str | None = None,
         focus_channel: str | None = None,
-        num_workers_index: int = 1,
         reference_pixel_size_xy_um: float | None = None,
         reference_pixel_size_z_um: float | None = None,
         positive_cell_source: str = "lookup",
@@ -200,11 +192,14 @@ class MultiExperimentDataModule(LightningDataModule):
         label_columns: dict[str, str] | None = None,
         max_border_shift: int = -1,
         shuffle_val: bool = False,
+        pin_memory: bool = True,
+        prefetch_factor: int | None = None,
+        buffer_size: int = 4,
     ) -> None:
         super().__init__()
 
         # Core parameters
-        self.collection_path = collection_path
+        self.cell_index_path = cell_index_path
         self.z_window = z_window
         self.z_extraction_window = z_extraction_window
         self.z_focus_offset = z_focus_offset
@@ -245,13 +240,13 @@ class MultiExperimentDataModule(LightningDataModule):
         self.tensorstore_config = TensorStoreConfig(
             data_copy_concurrency=cpus,
             cache_pool_bytes=cache_pool_bytes or None,
+            recheck_cached_data=recheck_cached_data,
+            file_io_concurrency=file_io_concurrency,
         )
         self.seed = seed
         self.include_wells = include_wells
         self.exclude_fovs = exclude_fovs
-        self.cell_index_path = cell_index_path
         self.focus_channel = focus_channel
-        self.num_workers_index = num_workers_index
         self.reference_pixel_size_xy_um = reference_pixel_size_xy_um
         self.reference_pixel_size_z_um = reference_pixel_size_z_um
         self.positive_cell_source = positive_cell_source
@@ -260,6 +255,9 @@ class MultiExperimentDataModule(LightningDataModule):
         self.label_columns = label_columns
         self.max_border_shift = max_border_shift
         self.shuffle_val = shuffle_val
+        self.pin_memory = pin_memory
+        self.prefetch_factor = prefetch_factor
+        self.buffer_size = buffer_size
 
         # Create ChannelDropout module
         self.channel_dropout = ChannelDropout(
@@ -270,6 +268,7 @@ class MultiExperimentDataModule(LightningDataModule):
         # Datasets (populated in setup)
         self.train_dataset: MultiExperimentTripletDataset | None = None
         self.val_dataset: MultiExperimentTripletDataset | None = None
+        self.predict_dataset: MultiExperimentTripletDataset | None = None
 
     # ------------------------------------------------------------------
     # Setup
@@ -292,33 +291,20 @@ class MultiExperimentDataModule(LightningDataModule):
             Lightning stage: ``"fit"``, ``"predict"``, etc.
         """
         if stage == "fit" or stage is None:
-            if self.collection_path is not None:
-                registry = ExperimentRegistry.from_collection(
-                    self.collection_path,
-                    z_window=self.z_window,
-                    z_extraction_window=self.z_extraction_window,
-                    z_focus_offset=self.z_focus_offset,
-                    focus_channel=getattr(self, "focus_channel", None),
-                    reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
-                    reference_pixel_size_z_um=self.reference_pixel_size_z_um,
-                )
-            elif self.cell_index_path is not None:
-                registry = ExperimentRegistry.from_cell_index(
-                    self.cell_index_path,
-                    z_window=self.z_window,
-                    z_extraction_window=self.z_extraction_window,
-                    z_focus_offset=self.z_focus_offset,
-                    focus_channel=getattr(self, "focus_channel", None),
-                    reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
-                    reference_pixel_size_z_um=self.reference_pixel_size_z_um,
-                )
-            else:
-                raise ValueError("Either collection_path or cell_index_path must be provided.")
+            registry, cell_index_df = ExperimentRegistry.from_cell_index(
+                self.cell_index_path,
+                z_window=self.z_window,
+                z_extraction_window=self.z_extraction_window,
+                z_focus_offset=self.z_focus_offset,
+                focus_channel=self.focus_channel,
+                reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+                reference_pixel_size_z_um=self.reference_pixel_size_z_um,
+            )
 
             if self.val_experiments:
-                self._setup_experiment_split(registry)
+                self._setup_experiment_split(registry, cell_index_df)
             else:
-                self._setup_fov_split(registry)
+                self._setup_fov_split(registry, cell_index_df)
 
             if self.channels_per_sample is None:
                 self._channel_names = registry.source_channel_labels
@@ -333,7 +319,6 @@ class MultiExperimentDataModule(LightningDataModule):
             self._augmentation_transform = Compose(
                 self.normalizations + self.augmentations + [self._train_final_crop()]
             )
-            self._no_augmentation_transform = Compose(self.normalizations + [self._val_final_crop()])
 
             _logger.info(
                 "MultiExperimentDataModule setup: %d train anchors, %d val anchors",
@@ -341,7 +326,62 @@ class MultiExperimentDataModule(LightningDataModule):
                 len(self.val_dataset) if self.val_dataset else 0,
             )
 
-    def _setup_experiment_split(self, registry: ExperimentRegistry) -> None:
+        elif stage == "predict":
+            self._setup_predict()
+            _logger.info(
+                "MultiExperimentDataModule predict setup: %d anchors",
+                len(self.predict_dataset) if self.predict_dataset else 0,
+            )
+
+    def _setup_predict(self) -> None:
+        """Set up predict dataset over the full cell index (no train/val split)."""
+        registry, cell_index_df = ExperimentRegistry.from_cell_index(
+            self.cell_index_path,
+            z_window=self.z_window,
+            z_extraction_window=self.z_extraction_window,
+            z_focus_offset=self.z_focus_offset,
+            focus_channel=self.focus_channel,
+            reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+            reference_pixel_size_z_um=self.reference_pixel_size_z_um,
+        )
+
+        if self.channels_per_sample is None:
+            self._channel_names = registry.source_channel_labels
+        elif isinstance(self.channels_per_sample, int):
+            self._channel_names = [f"channel_{i}" for i in range(self.channels_per_sample)]
+        else:
+            self._channel_names = list(self.channels_per_sample)
+
+        predict_index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=self.yx_patch_size,
+            tau_range_hours=self.tau_range,
+            include_wells=self.include_wells,
+            exclude_fovs=self.exclude_fovs,
+            cell_index_df=cell_index_df,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
+            fit=False,
+        )
+        self.predict_dataset = MultiExperimentTripletDataset(
+            index=predict_index,
+            fit=False,
+            tau_range_hours=self.tau_range,
+            tau_decay_rate=self.tau_decay_rate,
+            channels_per_sample=self.channels_per_sample,
+            positive_cell_source=self.positive_cell_source,
+            positive_match_columns=self.positive_match_columns,
+            positive_channel_source=self.positive_channel_source,
+            label_columns=self.label_columns,
+        )
+
+        # Predict transform: normalizations + final center crop only (no augmentations).
+        # BatchedChannelWiseZReductiond is kept if present in self.augmentations
+        # since it is architecturally required to produce the 2D model input.
+        z_reduction = [t for t in self.augmentations if type(t).__name__ == "BatchedChannelWiseZReductiond"]
+        self._predict_transform = Compose(self.normalizations + z_reduction + [self._train_final_crop()])
+
+    def _setup_experiment_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
         """Split by whole experiments into train/val."""
         train_names = [e.name for e in registry.experiments if e.name not in self.val_experiments]
         val_names = [e.name for e in registry.experiments if e.name in self.val_experiments]
@@ -364,8 +404,7 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
-            cell_index_path=self.cell_index_path,
-            num_workers=self.num_workers_index,
+            cell_index_df=cell_index_df,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
@@ -391,8 +430,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_range_hours=self.tau_range,
                 include_wells=self.include_wells,
                 exclude_fovs=self.exclude_fovs,
-                cell_index_path=self.cell_index_path,
-                num_workers=self.num_workers_index,
+                cell_index_df=cell_index_df,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
                 max_border_shift=self.max_border_shift,
@@ -410,7 +448,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 label_columns=self.label_columns,
             )
 
-    def _setup_fov_split(self, registry: ExperimentRegistry) -> None:
+    def _setup_fov_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
         """Split FOVs within each experiment by split_ratio.
 
         Uses experiment-qualified keys ``(experiment, fov_name)`` so that
@@ -423,45 +461,119 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_range_hours=self.tau_range,
             include_wells=self.include_wells,
             exclude_fovs=self.exclude_fovs,
-            cell_index_path=self.cell_index_path,
-            num_workers=self.num_workers_index,
+            cell_index_df=cell_index_df,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             tensorstore_config=self.tensorstore_config,
         )
 
         rng = np.random.default_rng(self.seed)
-        train_keys: set[tuple[str, str]] = set()
-        val_keys: set[tuple[str, str]] = set()
+
+        # Build per-row boolean masks directly during the per-experiment
+        # groupby walk. The previous implementation built
+        # pd.MultiIndex.from_arrays over every row of tracks + valid_anchors
+        # (81M+ rows for OPS), which hashes a Python tuple per row and
+        # dominates setup-time memory. Per-group isin against a small
+        # Python-set of FOV names is O(group_size) with no object index.
+        train_fovs_per_exp: dict[str, set[str]] = {}
+        val_fovs_per_exp: dict[str, set[str]] = {}
 
         for exp_name, group in full_index.tracks.groupby("experiment"):
             fovs = sorted(group["fov_name"].unique())
             n_train = max(1, int(len(fovs) * self.split_ratio))
             rng.shuffle(fovs)
-            for f in fovs[:n_train]:
-                train_keys.add((exp_name, f))
-            for f in fovs[n_train:]:
-                val_keys.add((exp_name, f))
+            train_fovs_per_exp[exp_name] = set(fovs[:n_train])
+            val_fovs_per_exp[exp_name] = set(fovs[n_train:])
 
+        n_train_fovs = sum(len(s) for s in train_fovs_per_exp.values())
+        n_val_fovs = sum(len(s) for s in val_fovs_per_exp.values())
         _logger.info(
             "FOV split (ratio=%.2f): %d train FOVs, %d val FOVs",
             self.split_ratio,
-            len(train_keys),
-            len(val_keys),
+            n_train_fovs,
+            n_val_fovs,
         )
 
-        full_qual = list(zip(full_index.tracks["experiment"], full_index.tracks["fov_name"]))
-        train_mask = pd.Series([k in train_keys for k in full_qual], index=full_index.tracks.index)
+        def _build_train_mask(df: pd.DataFrame) -> np.ndarray:
+            """Row-wise boolean mask: True if (experiment, fov_name) is train."""
+            mask = np.zeros(len(df), dtype=bool)
+            # groupby("experiment") returns integer positions in ``df`` via
+            # group.index after reset_index; we rely on the caller passing
+            # reset-indexed frames (which is what MultiExperimentIndex produces).
+            for exp_name, group in df.groupby("experiment", sort=False):
+                train_fovs = train_fovs_per_exp.get(exp_name, set())
+                if not train_fovs:
+                    continue
+                sub_mask = group["fov_name"].isin(train_fovs).to_numpy()
+                mask[group.index.to_numpy()] = sub_mask
+            return mask
 
-        train_tracks = full_index.tracks[train_mask].reset_index(drop=True)
-        val_tracks = full_index.tracks[~train_mask].reset_index(drop=True)
+        def _split_by_mask(df: pd.DataFrame, mask: np.ndarray) -> tuple[pd.DataFrame, pd.DataFrame]:
+            """Partition ``df`` by a boolean mask using integer row indices.
+
+            ``df[bool_mask]`` on an Arrow-backed DataFrame routes through
+            ``pyarrow.compute.take`` which allocates a fresh buffer per
+            string column and scales badly with row count × column count.
+            On a 16M-row × 15-string-col frame this can take 7-8 minutes
+            per call on a contended node.
+
+            Using ``df.take(int_indices)`` on a frame whose Arrow string
+            columns have been cast to ``object`` upfront is ~20× faster
+            because pandas uses plain NumPy fancy indexing on the
+            materialized object arrays.
+            """
+            train_rows = np.flatnonzero(mask)
+            val_rows = np.flatnonzero(~mask)
+            return (
+                df.take(train_rows).reset_index(drop=True),
+                df.take(val_rows).reset_index(drop=True),
+            )
+
+        def _materialize_strings(df: pd.DataFrame) -> pd.DataFrame:
+            """In-place cast remaining ArrowStringArray columns to Categorical.
+
+            ArrowStringArray routes every ``df[mask]`` through
+            ``pyarrow.compute.take`` which allocates a fresh per-column
+            buffer and scales catastrophically (7-8 min per call on 16M rows
+            with 15 string columns on a contended node). Casting to pandas
+            Categorical uses int codes + a single categories dict, so
+            slicing is pure NumPy fancy indexing on the codes.
+
+            Low-cardinality columns (``experiment``, ``marker``, etc.) are
+            already Categorical from ``read_cell_index``/``_align_parquet_columns``
+            — those are skipped. High-cardinality columns like ``cell_id``
+            become effectively int32-indexed even at ~80M unique values,
+            since the dict overhead is one-time and the row-aligned codes
+            are cheap. NumPy-object casts were tried first but allocate
+            ~5-10 GB of Python string objects per frame, which on 4-rank DDP
+            OOMs the node.
+            """
+            for col in df.columns:
+                s = df[col]
+                if isinstance(s.dtype, pd.CategoricalDtype):
+                    continue
+                if pd.api.types.is_string_dtype(s) or str(s.dtype).startswith(("string", "Arrow")):
+                    df[col] = s.astype("category")
+            return df
+
+        _materialize_strings(full_index.tracks)
+        _materialize_strings(full_index.valid_anchors)
+
+        train_mask = _build_train_mask(full_index.tracks)
+        train_tracks, val_tracks = _split_by_mask(full_index.tracks, train_mask)
+
+        va = full_index.valid_anchors
+        train_va_mask = _build_train_mask(va)
+        train_va, val_va = _split_by_mask(va, train_va_mask)
 
         train_index = full_index.clone_with_subset(
             train_tracks,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
+            precomputed_valid_anchors=train_va,
         )
+
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
             fit=True,
@@ -474,11 +586,12 @@ class MultiExperimentDataModule(LightningDataModule):
             label_columns=self.label_columns,
         )
 
-        if val_keys:
+        if not val_tracks.empty:
             val_index = full_index.clone_with_subset(
                 val_tracks,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
+                precomputed_valid_anchors=val_va,
             )
             self.val_dataset = MultiExperimentTripletDataset(
                 index=val_index,
@@ -496,8 +609,29 @@ class MultiExperimentDataModule(LightningDataModule):
     # Dataloaders
     # ------------------------------------------------------------------
 
+    def _ddp_topology(self) -> tuple[int, int]:
+        """Return ``(num_replicas, rank)`` for the current trainer.
+
+        Lightning's auto-wrap hook only passes ``world_size``/``rank`` to
+        ``sampler``, not ``batch_sampler``. With ``use_distributed_sampler:
+        false`` and a batch sampler, the datamodule must read them from the
+        trainer itself and forward them; otherwise every rank iterates the
+        full sequence and yields identical batches.
+
+        Returns ``(1, 0)`` when no trainer is attached (e.g. bare
+        dataloader construction in tests) or when the trainer stub lacks
+        DDP attributes (e.g. the ``_FakeTrainer`` in demo scripts).
+        """
+        trainer = getattr(self, "trainer", None)
+        world_size = getattr(trainer, "world_size", None)
+        global_rank = getattr(trainer, "global_rank", None)
+        if world_size is None or global_rank is None:
+            return 1, 0
+        return world_size, global_rank
+
     def train_dataloader(self) -> ThreadDataLoader:
         """Return training data loader with FlexibleBatchSampler."""
+        num_replicas, rank = self._ddp_topology()
         sampler = FlexibleBatchSampler(
             valid_anchors=self.train_dataset.index.valid_anchors,
             batch_size=self.batch_size,
@@ -508,27 +642,76 @@ class MultiExperimentDataModule(LightningDataModule):
             temporal_enrichment=self.temporal_enrichment,
             temporal_window_hours=self.temporal_window_hours,
             temporal_global_fraction=self.temporal_global_fraction,
+            num_replicas=num_replicas,
+            rank=rank,
             seed=self.seed,
         )
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
+            buffer_size=self.buffer_size,
             batch_sampler=sampler,
             num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.prefetch_factor,
             collate_fn=lambda x: x,
         )
 
     def val_dataloader(self) -> ThreadDataLoader | None:
-        """Return validation data loader."""
+        """Return validation data loader.
+
+        Uses the same ``FlexibleBatchSampler`` as training so ``loss/val``
+        is measured on batches whose composition matches the training
+        regime — e.g. single-marker batches when ``batch_group_by="marker"``,
+        or perturbation-stratified batches when ``stratify_by`` is set.
+
+        Without this, val was a plain sequential DataLoader that served
+        one experiment/marker at a time (all 4 example batches end up as
+        the same marker), and DDP sync of ``loss/val`` silently desynced
+        across ranks because each rank's shard had a different set of
+        markers.
+
+        Temporal enrichment is disabled for val (we want a deterministic
+        representative sample, not oversampled biology-of-interest windows).
+        """
         if self.val_dataset is None:
             return None
+        num_replicas, rank = self._ddp_topology()
+        sampler = FlexibleBatchSampler(
+            valid_anchors=self.val_dataset.index.valid_anchors,
+            batch_size=self.batch_size,
+            batch_group_by=self.batch_group_by,
+            leaky=self.leaky,
+            group_weights=self.group_weights,
+            stratify_by=self.stratify_by,
+            temporal_enrichment=False,
+            num_replicas=num_replicas,
+            rank=rank,
+            seed=self.seed,
+        )
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
+            buffer_size=self.buffer_size,
+            batch_sampler=sampler,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.prefetch_factor,
+            collate_fn=lambda x: x,
+        )
+
+    def predict_dataloader(self) -> ThreadDataLoader:
+        """Return predict data loader (no shuffling, no dropping)."""
+        return ThreadDataLoader(
+            self.predict_dataset,
+            use_thread_workers=True,
+            buffer_size=self.buffer_size,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=self.shuffle_val,
+            shuffle=False,
             drop_last=False,
+            pin_memory=self.pin_memory,
+            prefetch_factor=self.prefetch_factor,
             collate_fn=lambda x: x,
         )
 
@@ -536,18 +719,15 @@ class MultiExperimentDataModule(LightningDataModule):
     # Transforms
     # ------------------------------------------------------------------
 
-    def _train_final_crop(self) -> BatchedRandSpatialCropd:
-        """Random crop from extraction size to model input size (training)."""
-        return BatchedRandSpatialCropd(
-            keys=self._channel_names,
-            roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),
-        )
-
-    def _val_final_crop(self) -> BatchedCenterSpatialCropd:
-        """Center crop from extraction size to model input size (validation)."""
+    def _train_final_crop(self) -> BatchedCenterSpatialCropd:
+        """Center crop from extraction size to model input size (training)."""
         return BatchedCenterSpatialCropd(
             keys=self._channel_names,
-            roi_size=(self.z_window, self.final_yx_patch_size[0], self.final_yx_patch_size[1]),
+            roi_size=(
+                self.z_window,
+                self.final_yx_patch_size[0],
+                self.final_yx_patch_size[1],
+            ),
         )
 
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
@@ -568,11 +748,38 @@ class MultiExperimentDataModule(LightningDataModule):
         if isinstance(batch, Tensor):
             return batch
 
-        # Determine transform: augmentation for training, no-aug for val
-        if self.trainer and self.trainer.validating:
-            transform = self._no_augmentation_transform
-        else:
-            transform = self._augmentation_transform
+        # During predict: normalizations + z_reduction only (no augmentations, no channel dropout).
+        if self.trainer.predicting:
+            norm_meta = batch.get("anchor_norm_meta")
+            if isinstance(norm_meta, list):
+                non_none = [m for m in norm_meta if m is not None]
+                if len(non_none) == 0:
+                    norm_meta = None
+                elif len(non_none) != len(norm_meta):
+                    raise ValueError("Mixed None/non-None norm_meta in predict batch.")
+            extra = None
+            if isinstance(self.channels_per_sample, int):
+                meta = batch.get("anchor_meta")
+                if meta is not None:
+                    extra = {
+                        "_is_labelfree": torch.tensor(
+                            [parse_channel_name(m.get("marker", ""))["channel_type"] == "labelfree" for m in meta],
+                            dtype=torch.bool,
+                            device=batch["anchor"].device,
+                        )
+                    }
+            batch["anchor"] = _transform_channel_wise(
+                transform=self._predict_transform,
+                channel_names=self._channel_names,
+                patch=batch["anchor"],
+                norm_meta=norm_meta,
+                extra=extra,
+            )
+            batch.pop("anchor_norm_meta", None)
+            batch.pop("anchor_meta", None)
+            return batch
+
+        transform = self._augmentation_transform
 
         for key in ["anchor", "positive", "negative"]:
             if key in batch:
@@ -588,20 +795,31 @@ class MultiExperimentDataModule(LightningDataModule):
                             "All FOVs must have normalization metadata or none of them."
                         )
                     # else: all non-None, pass through as list
+                extra = None
+                if isinstance(self.channels_per_sample, int):
+                    meta = batch.get(f"{key}_meta")
+                    if meta is not None:
+                        extra = {
+                            "_is_labelfree": torch.tensor(
+                                [parse_channel_name(m.get("marker", ""))["channel_type"] == "labelfree" for m in meta],
+                                dtype=torch.bool,
+                                device=batch[key].device,
+                            )
+                        }
                 transformed = _transform_channel_wise(
                     transform=transform,
                     channel_names=self._channel_names,
                     patch=batch[key],
                     norm_meta=norm_meta,
+                    extra=extra,
                 )
                 batch[key] = transformed
                 if norm_meta_key in batch:
                     del batch[norm_meta_key]
 
-        # Apply ChannelDropout to anchor and positive (training only)
-        if not (self.trainer and self.trainer.validating):
-            for key in ["anchor", "positive"]:
-                if key in batch:
-                    batch[key] = self.channel_dropout(batch[key])
+        # Apply ChannelDropout to anchor and positive
+        for key in ["anchor", "positive"]:
+            if key in batch:
+                batch[key] = self.channel_dropout(batch[key])
 
         return batch

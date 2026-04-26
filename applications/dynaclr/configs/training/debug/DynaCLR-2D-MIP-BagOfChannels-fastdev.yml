@@ -1,0 +1,32 @@
+# Local fast-dev-run override for DynaCLR-2D-MIP-BagOfChannels.
+# Goal: verify training starts and completes ≥1 train + val batch end-to-end
+# on a single GPU. Uses the smallest DynaCLR parquet (3.4M rows).
+#
+# Run:
+#   uv run viscy fit \
+#     --config applications/dynaclr/configs/training/DynaCLR-2D-MIP-BagOfChannels.yml \
+#     --config applications/dynaclr/configs/training/DynaCLR-2D-MIP-BagOfChannels-fastdev.yml
+
+trainer:
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  fast_dev_run: 5
+  logger: null
+  callbacks: []
+  max_epochs: 1
+
+data:
+  init_args:
+    # ~20k-row slice of the full BoC parquet — enough to exercise every
+    # sampling path without a 3-minute parquet load.
+    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/tmp/boc_tiny.parquet
+    batch_size: 8
+    num_workers: 0
+    prefetch_factor: null
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null

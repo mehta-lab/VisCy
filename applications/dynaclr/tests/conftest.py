@@ -144,6 +144,14 @@ def create_experiment(
                     dtype=np.float32,
                 )
                 arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
+                tp_stats = {
+                    str(t): {"mean": 1.0, "std": 0.5, "median": 1.0, "iqr": 1.0, "max": 2.0, "min": 0.0}
+                    for t in range(n_t)
+                }
+                pos.zattrs["normalization"] = {
+                    ch: {"fov_statistics": {"mean": 1.0, "std": 0.5}, "timepoint_statistics": tp_stats}
+                    for ch in channel_names
+                }
                 fov_name = f"{row}/{col}/{fov_idx}"
                 csv_path = tracks_root / fov_name / "tracks.csv"
                 make_tracks_csv(

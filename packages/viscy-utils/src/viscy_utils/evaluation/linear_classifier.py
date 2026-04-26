@@ -203,7 +203,7 @@ def train_linear_classifier(
     classifier_params: Optional[dict[str, Any]] = None,
     split_train_data: float = 0.8,
     random_seed: int = 42,
-) -> tuple[LinearClassifierPipeline, dict[str, float]]:
+) -> tuple[LinearClassifierPipeline, dict[str, float], dict[str, Any]]:
     """Train a linear classifier on embeddings with preprocessing and evaluation.
 
     Parameters
@@ -231,6 +231,9 @@ def train_linear_classifier(
         Trained classifier pipeline with preprocessing.
     dict
         Dictionary of evaluation metrics (train and validation if split).
+    dict
+        Raw validation outputs for plotting: ``y_val``, ``y_val_proba``,
+        ``classes``. Values are ``None`` when no validation split was made.
     """
     print("\n" + "=" * 60)
     print("TRAINING CLASSIFIER")
@@ -316,6 +319,7 @@ def train_linear_classifier(
             train_metrics[f"train_{class_name}_f1"] = train_report[class_name]["f1-score"]
 
     val_metrics = {}
+    y_val_proba: Optional[np.ndarray] = None
     if X_val is not None and y_val is not None:
         y_val_pred = classifier.predict(X_val)
         val_report = classification_report(y_val, y_val_pred, digits=3, output_dict=True)
@@ -336,6 +340,15 @@ def train_linear_classifier(
             else:
                 val_metrics["val_auroc"] = roc_auc_score(y_val, y_val_proba, multi_class="ovr", average="macro")
             print(f"  Val AUROC: {val_metrics['val_auroc']:.3f}")
+
+            if len(classifier.classes_) > 2:
+                for i, class_name in enumerate(classifier.classes_):
+                    try:
+                        val_metrics[f"val_{class_name}_auroc"] = roc_auc_score(
+                            (y_val == class_name).astype(int), y_val_proba[:, i]
+                        )
+                    except ValueError:
+                        pass
         except ValueError as e:
             _logger.warning(f"Could not compute val AUROC (likely only one class present): {e}")
 
@@ -365,7 +378,13 @@ def train_linear_classifier(
         task=task,
     )
 
-    return pipeline, all_metrics
+    val_outputs: dict[str, Any] = {
+        "y_val": y_val,
+        "y_val_proba": y_val_proba,
+        "classes": classifier.classes_.tolist(),
+    }
+
+    return pipeline, all_metrics, val_outputs
 
 
 def predict_with_classifier(

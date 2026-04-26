@@ -1,0 +1,27 @@
+# Model recipe: Frozen DINOv3-ConvNeXt-Tiny backbone + trainable MLP projection.
+# Leaf configs override: pca_color_keys, example_input_array_shape.
+
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.foundation.DINOv3Model
+      init_args:
+        model_name: facebook/dinov3-convnext-tiny-pretrain-lvd1689m
+        freeze: true
+        projection:
+          class_path: viscy_models.components.heads.MLP
+          init_args:
+            in_dims: 768
+            hidden_dims: 768
+            out_dims: 128
+            norm: ln
+            activation: relu
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentLoss
+      init_args:
+        temperature: 0.5
+    lr: 0.0001
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 3
+    log_embeddings_every_n_epochs: 10

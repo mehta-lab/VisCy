@@ -1,0 +1,47 @@
+# Dataset preparation pipeline: NFS -> VAST rechunked zarr v3
+# Usage: prepare run <dataset_name> -c prepare_config.yml [--dry-run]
+
+nfs_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+vast_root: /hpc/projects/organelle_phenotyping/datasets
+workspace_dir: /hpc/mydata/eduardo.hirata/repos/viscy
+
+concatenate:
+  # null = auto-detect raw channels (Phase3D + raw *). Set explicitly to override.
+  channel_names: null
+  chunks_czyx: [1, 16, 256, 256]
+  shards_ratio: [1, 1, 8, 8, 8]
+  output_ome_zarr_version: "0.5"
+  conda_env: biahub
+  # Override biahub's internal SLURM settings (passed via -sb flag)
+  # Set to null to use biahub defaults
+  sbatch_overrides:
+    partition: cpu
+
+qc:
+  channel_names: [Phase3D]
+  NA_det: 1.35
+  lambda_ill: 0.450
+  pixel_size: 0.1494
+  midband_fractions: [0.125, 0.25]
+  device: cuda
+  num_workers: 16
+
+preprocess:
+  channel_names: -1
+  num_workers: 32
+  block_size: 32
+
+# biahub concatenate submits its own SLURM jobs via submitit (no config needed)
+# QC and preprocess run as separate SLURM jobs (no race condition)
+slurm:
+  qc:
+    partition: gpu
+    gres: "gpu:1"
+    cpus_per_task: 16
+    mem_per_cpu: 4G
+    time: "00:30:00"
+  preprocess:
+    partition: cpu
+    cpus_per_task: 32
+    mem_per_cpu: 4G
+    time: "04:00:00"

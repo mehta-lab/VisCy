@@ -1,0 +1,34 @@
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels × alfi (Wave 2)
+# Applies LC pipelines from the central registry (trained on infectomics-annotated).
+# Data: HeLa (MI06), RPE1 (MI07/MI08), U2OS (MI01-MI05), DIC channel.
+# Annotations are appended for plot coloring; no LC training happens here.
+#
+# Usage:
+#   nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
+#     --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/alfi.yaml \
+#     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+#     -resume
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/alfi.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/alfi/
+
+predict:
+  batch_size: 256
+  num_workers: 4
+  precision: 32-true
+  devices: 1
+
+append_predictions:
+  # Once an alfi-annotated Wave-1 leaf trains DIC LCs, switch this to
+  # `.../alfi/latest`. Today's run uses the infectomics sub-registry —
+  # marker mismatch (DIC vs G3BP1/SEC61B/Phase3D/viral_sensor) means
+  # predicted_* columns will be NaN for every cell. The reader logs
+  # "0/N markers covered" and continues. This is a smoke test for the
+  # reader path, not a real prediction run.
+  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/infectomics/latest

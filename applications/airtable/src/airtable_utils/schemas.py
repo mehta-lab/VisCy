@@ -131,7 +131,7 @@ class DatasetRecord(FOVRecord):
 
     @model_validator(mode="after")
     def _derive_channel_names(self) -> DatasetRecord:
-        """Populate ``channel_names`` from ``channel_0..7_name`` fields."""
+        """Populate ``channel_names`` and ``channel_markers`` from ``channel_0..7_name/marker`` fields."""
         if not self.channel_names:
             names = []
             for i in range(MAX_CHANNELS):
@@ -139,6 +139,14 @@ class DatasetRecord(FOVRecord):
                 if name is not None:
                     names.append(name)
             self.channel_names = names
+        if not self.channel_markers:
+            markers: dict[str, str] = {}
+            for i in range(MAX_CHANNELS):
+                name = getattr(self, f"channel_{i}_name")
+                marker = getattr(self, f"channel_{i}_marker")
+                if name is not None and marker is not None:
+                    markers[name] = marker
+            self.channel_markers = markers
         return self
 
     @classmethod
@@ -191,6 +199,10 @@ class DatasetRecord(FOVRecord):
             data_path=fields.get("data_path"),
             tracks_path=fields.get("tracks_path"),
             fluorescence_modality=_select_val(fields.get("fluorescence_modality")),
+            microscope=_select_val(fields.get("microscope")),
+            labelfree_modality=_select_val(fields.get("labelfree_modality")),
+            treatment=_select_val(fields.get("treatment")),
+            hours_post_treatment=fields.get("hours post treatment"),
             t_shape=fields.get("t_shape"),
             c_shape=fields.get("c_shape"),
             z_shape=fields.get("z_shape"),

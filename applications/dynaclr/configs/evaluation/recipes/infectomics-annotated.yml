@@ -1,0 +1,33 @@
+# Dataset recipe: infectomics-annotated
+# =============================================================================
+# Wave-1 column of the evaluation matrix. Used by all model leaves to train
+# linear classifiers on annotated infectomics data and publish them to the
+# central LC registry. Leaf configs override training_config + ckpt_path +
+# output_dir + linear_classifiers.publish_dir (the registry path is per-model).
+#
+# Composition:
+#   - cell_index_path           — shared infectomics parquet (14 experiments)
+#   - steps                     — full pipeline incl. LC + append_annotations + append_predictions
+#   - linear_classifiers        — annotations + tasks (inherited from linear_classifiers_infectomics.yml)
+#   - plot                      — infectomics defaults (inherited from plot_infectomics.yml)
+#
+# Leaves merge this via:
+#   base:
+#     - recipes/predict.yml
+#     - recipes/reduce.yml
+#     - recipes/plot_infectomics.yml
+#     - recipes/linear_classifiers_infectomics.yml
+#     - recipes/infectomics-annotated.yml
+
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-BoC-lc-evaluation-v1.parquet
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - smoothness
+  - linear_classifiers
+  - append_annotations
+  - append_predictions
+  - plot
