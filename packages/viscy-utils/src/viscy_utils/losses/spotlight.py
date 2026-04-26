@@ -158,7 +158,6 @@ class SpotlightLoss(nn.Module):
         self.fg_threshold = fg_threshold
         self._warned_no_real_mask = False
 
-    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, pred: Tensor, target: Tensor, fg_mask: Tensor | None = None) -> Tensor:
         """Compute the Spotlight loss.
 
