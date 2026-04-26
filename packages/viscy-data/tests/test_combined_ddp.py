@@ -184,6 +184,8 @@ def test_batched_concat_real_ddp_iter_does_not_hang(
     """
     if not torch.distributed.is_available():
         pytest.skip("torch.distributed not available")
+    if "fork" not in mp.get_all_start_methods():
+        pytest.skip("fork start_method not available (Windows)")
 
     work_dir = tmp_path_factory.mktemp(f"ddp_{num_workers}_{int(mmap_preload)}")
     data_path = work_dir / "smoke.zarr"
