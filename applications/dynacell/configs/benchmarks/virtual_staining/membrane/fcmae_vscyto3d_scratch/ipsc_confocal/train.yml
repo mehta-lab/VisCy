@@ -19,6 +19,21 @@ benchmark:
   model_name: fcmae_vscyto3d_scratch
   experiment_id: membrane__ipsc_confocal__fcmae_vscyto3d_scratch
 
+# Override the FCMAE data overlay's hardcoded `Structure` augmentation
+# keys (the overlay was authored for ER/Mito where target_channel ==
+# "Structure"). RandWeightedCropd needs the actual membrane channel
+# name in keys/w_key. spatial_size + num_samples kept identical to the
+# FCMAE overlay so the augmentation policy matches ER/Mito.
+data:
+  init_args:
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          w_key: Membrane
+          spatial_size: [20, 600, 600]
+          num_samples: 4
+
 trainer:
   logger:
     init_args:
