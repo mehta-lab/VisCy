@@ -334,3 +334,85 @@ correlate with memory pressure signals to pin the actual source.
    mid-resume.
 3. Separately, add RSS instrumentation and investigate the 20 h host-RAM
    leak; do not treat the `--mem=640G` bump as a fix.
+4. **Exclude A100 nodes for FCMAE training** via
+   `--constraint='h100|h200|a40|a6000|l40s'`. Two FCMAE scratch jobs
+   on A100 nodes (gpu-a-1, gpu-a-2) hit a ~30-min NCCL watchdog
+   timeout on the SeqNum-13 BROADCAST of the 32,148,528-element
+   encoder weights during DDP setup — same I/O coordination problem
+   that killed the earlier A100 sanity attempts. The bf16 fix doesn't
+   address this; it's an A100-shared-storage issue.
+
+## Final findings (2026-04-26) — bf16 fix shipped, 4-organelle benchmark in flight
+
+### Solution (one paragraph)
+
+The viscy-utils SSIM helper (`packages/viscy-utils/src/viscy_utils/
+evaluation/metrics.py`) replaces monai's fp32-pinned
+`compute_ssim_and_cs` with a precision-aware variant that runs the 5
+uniform-window mean convolutions in bf16 with squared products
+computed in fp32 *before* casting to bf16, and promotes only the
+variance subtractions and C₁/C₂-guarded divisions back to fp32.
+Redundant `@torch.amp.custom_fwd(cast_inputs=fp32)` decorators on
+`MixedLoss.forward` and `SpotlightLoss.forward` were removed in the
+same PR. Numerical contract is documented and tested with a 4-tier
+tolerance (per-pixel random, aggregate random, correlated-pair,
+gradient cosine + sign-flip) at ≥2× margin over measured drift. PR
+[#412](https://github.com/mehta-lab/VisCy/pull/412) merged as squash
+commit `48f4878`.
+
+### Live 8-job FCMAE matrix (4 organelles × {scratch, pretrained})
+
+In flight on `dynacell-models` HEAD (post-bf16-fix, plus the new
+nucleus + membrane configs at `787fed9` with the augmentation-key
+override at `1c3034a`):
+
+| Run                                | Hardware           | global_step | Median s/step | p10 s/step |
+| ---                                | ---                | ---:        | ---:          | ---:       |
+| Nucleus pretrained (NEW)           | H200 gpu-h-8       | 1,679       | 5.37          | 5.36       |
+| Nucleus scratch (NEW)              | H200 gpu-h-4       | 1,069       | 5.73          | 5.45       |
+| Membrane pretrained (NEW)          | H100 gpu-f-6       | 1,609       | 5.08          | 4.97       |
+| Membrane scratch (NEW)             | H100 gpu-f-4       | 1,329       | 5.76          | 5.07       |
+| ER (SEC61B) scratch (NEW)          | H200 gpu-h-1       | 299         | 5.56          | 5.46       |
+| Mito (TOMM20) scratch (NEW)        | H200 gpu-h-7       | 469         | 4.77          | 4.75       |
+| ER (SEC61B) pretrained (BASELINE)  | L40S gpu-g-2       | 30,779      | 4.76          | 4.75       |
+| Mito (TOMM20) pretrained (BASELINE)| A40 gpu-c-1        | 35,619      | 2.40          | 2.36       |
+
+Numbers come from wandb `loss/train_step` step×timestamp deltas with
+a `dt < 60s` filter (excludes ckpt-save / val / epoch-boundary
+insertions). All 8 jobs request `--mem=1024G` except the L40S baseline
+at 768G (CPU/RAM is not the driver). **All numbers will be re-pulled
+once the new Hopper jobs reach gstep ≥10k** — they are still in epoch
+0 (gstep < 1.7k) and warmup effects (DataLoader cache, mmap_preload,
+prefetch) likely inflate the per-step time. Steady-state from
+gstep ≥30k on A40/L40S is reliable.
+
+### What we can claim now
+
+- **Catastrophic Hopper slowdown is fixed.** Pre-fix Hopper measured
+  45–75 s/step; post-fix Hopper sits in 4.77–5.76 s/step — a 9–14×
+  recovery, within the same order of magnitude as L40S/A40.
+- **Hopper is now competitive but not visibly faster than L40S.** The
+  bf16 fix unblocks the catastrophic kernel cost but doesn't expose
+  a Hopper-specific tensor-core advantage in the end-to-end loop.
+- **A40 (gpu-c-1) is still the fastest measured path** at 2.40 s/step
+  steady-state. Likely drivers (not yet measured): node-local I/O for
+  zarr reads, /dev/shm topology, PCIe + CPU-worker layout. Same
+  shared-FS data path as Hopper, so the differentiator is on the
+  compute-node side.
+
+### What remains open
+
+- **Hopper steady-state vs warmup.** Will re-measure once new jobs
+  reach gstep ≥10k. Hopper might converge to ~A40 throughput once
+  caches warm, or may stay ~5 s/step (would suggest a stable
+  data-pipeline ceiling).
+- **A40 vs Hopper compute path.** No profiler / `iostat` /
+  `nvidia-smi dmon` data on either side. If Hopper steady-state stays
+  above ~3 s/step, a 5-min profiling probe on both nodes during
+  steady-state would isolate the bottleneck (data I/O vs GPU compute
+  vs DDP collective).
+- **20-hour host-RAM leak** still unresolved (separate thread, see
+  above). Independent of the bf16 fix.
+- **NCCL BROADCAST hang on A100** is a known I/O coordination issue
+  on those specific nodes' shared-storage path. Mitigation in place
+  (constraint OR-list); root cause not investigated.
