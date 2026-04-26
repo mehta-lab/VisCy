@@ -1,12 +1,12 @@
 """Metrics for model evaluation"""
 
+from math import prod
 from typing import Sequence, Union
 from warnings import warn
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from monai.metrics.regression import compute_ssim_and_cs
 from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
@@ -42,10 +42,7 @@ def VOI_metric(target, prediction):
     im_intersection = np.logical_and(im_pred_mask, im_targ_mask)
     im_inters_informed = im_intersection * im_targ_mask * im_pred_mask
 
-    marg_intr = (
-        np.histogramdd(np.ravel(im_inters_informed), bins=256)[0]
-        / im_inters_informed.size
-    )
+    marg_intr = np.histogramdd(np.ravel(im_inters_informed), bins=256)[0] / im_inters_informed.size
     marg_intr = list(filter(lambda p: p > 0, np.ravel(marg_intr)))
     entropy_intr = -np.sum(np.multiply(marg_intr, np.log2(marg_intr)))
 
@@ -128,9 +125,7 @@ def labels_to_masks(labels: torch.ShortTensor) -> torch.BoolTensor:
         raise ValueError(f"Labels must be 2D, got shape {labels.shape}.")
     segments = torch.unique(labels)
     n_instances = segments.numel() - 1
-    masks = torch.zeros(
-        (n_instances, *labels.shape), dtype=torch.bool, device=labels.device
-    )
+    masks = torch.zeros((n_instances, *labels.shape), dtype=torch.bool, device=labels.device)
     # TODO: optimize this?
     for s, segment in enumerate(segments):
         # start from label value 1, i.e. skip background label
@@ -150,13 +145,9 @@ def labels_to_detection(labels: torch.ShortTensor) -> dict[str, torch.Tensor]:
     return {
         "boxes": boxes,
         # dummy confidence scores
-        "scores": torch.ones(
-            (boxes.shape[0],), dtype=torch.float32, device=boxes.device
-        ),
+        "scores": torch.ones((boxes.shape[0],), dtype=torch.float32, device=boxes.device),
         # dummy class labels
-        "labels": torch.zeros(
-            (boxes.shape[0],), dtype=torch.uint8, device=boxes.device
-        ),
+        "labels": torch.zeros((boxes.shape[0],), dtype=torch.uint8, device=boxes.device),
         "masks": masks,
     }
 
@@ -172,16 +163,109 @@ def mean_average_precision(
         :py:class:`torchmetrics.detection.MeanAveragePrecision`
     :return dict[str, torch.Tensor]: COCO-style metrics
     """
-    defaults = dict(
-        iou_type="segm", box_format="xyxy", max_detection_thresholds=[1, 100, 10000]
-    )
+    defaults = dict(iou_type="segm", box_format="xyxy", max_detection_thresholds=[1, 100, 10000])
     if not kwargs:
         kwargs = {}
     map_metric = MeanAveragePrecision(**(defaults | kwargs))
-    map_metric.update(
-        [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
-    )
+    map_metric.update([labels_to_detection(pred_labels)], [labels_to_detection(target_labels)])
     return map_metric.compute()
+
+
+def _compute_ssim_and_cs_bf16(
+    y_pred: torch.Tensor,
+    y: torch.Tensor,
+    spatial_dims: int,
+    kernel_size: Sequence[int],
+    data_range: Union[float, torch.Tensor] = 1.0,
+    k1: float = 0.01,
+    k2: float = 0.03,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute SSIM and contrast-sensitivity with bf16 convolutions.
+
+    Replaces monai's ``compute_ssim_and_cs`` (which unconditionally casts both
+    inputs to fp32 internally) with a precision-aware variant that runs the
+    five Gaussian-mean convolutions in bf16 and promotes only the variance
+    subtractions and C1/C2-guarded divisions to fp32. Squared products
+    (``y * y``, ``y_pred * y_pred``, ``y_pred * y``) are computed in fp32
+    before casting to bf16 for the conv input, which preserves precision on
+    the precision-sensitive squaring step at the cost of one extra cast per
+    squared term.
+
+    The conv accumulator is fp32 on CUDA tensor cores (sm >= 80) and on CPU,
+    so only the conv outputs (returned in bf16) lose precision relative to
+    monai's all-fp32 path.
+
+    Uniform kernel only — matches the single call site in :func:`ssim_25d`;
+    Gaussian-kernel and ``kernel_sigma`` parameters from monai's signature
+    are intentionally dropped.
+
+    Parameters
+    ----------
+    y_pred : torch.Tensor
+        Predicted batch with shape ``(B, C, *spatial)``.
+    y : torch.Tensor
+        Target batch with the same shape as ``y_pred``.
+    spatial_dims : int
+        Number of spatial dimensions (2 or 3); selects ``F.conv2d`` /
+        ``F.conv3d``.
+    kernel_size : Sequence[int]
+        Uniform window size, length equal to ``spatial_dims``.
+    data_range : float or torch.Tensor, optional
+        Data range of the inputs; used to compute the C1, C2 stability
+        constants. Defaults to ``1.0``.
+    k1 : float, optional
+        Luminance stability constant. Defaults to ``0.01``.
+    k2 : float, optional
+        Contrast stability constant. Defaults to ``0.03``.
+
+    Returns
+    -------
+    ssim : torch.Tensor
+        Per-pixel SSIM map in fp32, shape ``(B, C, *reduced_spatial)``.
+    cs : torch.Tensor
+        Per-pixel contrast-sensitivity map in fp32, same shape as ``ssim``.
+    """
+    if y.shape != y_pred.shape:
+        raise ValueError(f"y_pred and y must have same shape, got {y_pred.shape} and {y.shape}.")
+
+    num_channels = y_pred.size(1)
+
+    # Build uniform kernel in fp32 then cast to bf16 once.
+    kernel_fp32 = torch.ones((num_channels, 1, *kernel_size), device=y_pred.device, dtype=torch.float32) / float(
+        prod(kernel_size)
+    )
+    kernel_bf = kernel_fp32.to(torch.bfloat16)
+
+    # Compute squared products in fp32 to preserve squaring precision,
+    # then cast to bf16 for the conv input.
+    y_pred_fp32 = y_pred.float()
+    y_fp32 = y.float()
+    y_pred_bf = y_pred_fp32.to(torch.bfloat16)
+    y_bf = y_fp32.to(torch.bfloat16)
+    y_pred_sq_bf = (y_pred_fp32 * y_pred_fp32).to(torch.bfloat16)
+    y_sq_bf = (y_fp32 * y_fp32).to(torch.bfloat16)
+    y_pred_y_bf = (y_pred_fp32 * y_fp32).to(torch.bfloat16)
+
+    conv_fn = getattr(F, f"conv{spatial_dims}d")
+    mu_x = conv_fn(y_pred_bf, kernel_bf, groups=num_channels).float()
+    mu_y = conv_fn(y_bf, kernel_bf, groups=num_channels).float()
+    mu_xx = conv_fn(y_pred_sq_bf, kernel_bf, groups=num_channels).float()
+    mu_yy = conv_fn(y_sq_bf, kernel_bf, groups=num_channels).float()
+    mu_xy = conv_fn(y_pred_y_bf, kernel_bf, groups=num_channels).float()
+
+    # Stability constants in fp32 (data_range may be a 0-dim tensor; the
+    # multiplication promotes to fp32 since k1/k2 are Python floats).
+    c1 = (k1 * data_range) ** 2
+    c2 = (k2 * data_range) ** 2
+
+    sigma_x = mu_xx - mu_x * mu_x
+    sigma_y = mu_yy - mu_y * mu_y
+    sigma_xy = mu_xy - mu_x * mu_y
+
+    contrast_sensitivity = (2 * sigma_xy + c2) / (sigma_x + sigma_y + c2)
+    ssim_full = ((2 * mu_x * mu_y + c1) / (mu_x * mu_x + mu_y * mu_y + c1)) * contrast_sensitivity
+
+    return ssim_full, contrast_sensitivity
 
 
 def ssim_25d(
@@ -202,20 +286,16 @@ def ssim_25d(
     :return Optional[torch.Tensor]: contrast sensitivity
     """
     if preds.ndim != 5:
-        raise ValueError(
-            f"Input shape must be (B, C, D, W, H), got input shape {preds.shape}"
-        )
+        raise ValueError(f"Input shape must be (B, C, D, W, H), got input shape {preds.shape}")
     depth = preds.shape[2]
     if depth > 15:
         warn(f"Input depth {depth} is potentially too large for 2.5D SSIM.")
-    ssim_img, cs_img = compute_ssim_and_cs(
+    ssim_img, cs_img = _compute_ssim_and_cs_bf16(
         preds,
         target,
-        3,
-        kernel_sigma=None,
+        spatial_dims=3,
         kernel_size=(depth, *in_plane_window_size),
         data_range=target.max(),
-        kernel_type="uniform",
     )
     # aggregate to one scalar per batch
     ssim = ssim_img.view(ssim_img.shape[0], -1).mean(1)
@@ -253,9 +333,7 @@ def ms_ssim_25d(
     base_min = 1e-4
     mcs_list = []
     for _ in range(len(betas)):
-        ssim, contrast_sensitivity = ssim_25d(
-            preds, target, in_plane_window_size, return_contrast_sensitivity=True
-        )
+        ssim, contrast_sensitivity = ssim_25d(preds, target, in_plane_window_size, return_contrast_sensitivity=True)
         if clamp:
             contrast_sensitivity = contrast_sensitivity.clamp(min=base_min)
         mcs_list.append(contrast_sensitivity)
