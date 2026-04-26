@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from viscy_utils.compose import load_composed_config
+
 
 def format_markdown_table(data: dict | list[dict], title: str = None, headers: list[str] = None) -> str:
     """Format data as a markdown table.
@@ -67,7 +69,15 @@ def format_markdown_table(data: dict | list[dict], title: str = None, headers: l
 
 
 def load_config(config_path: str | Path) -> dict:
-    """Load YAML configuration file.
+    """Load a YAML configuration file with optional recipe composition.
+
+    A top-level ``base:`` key is interpreted as a list of relative paths
+    to other YAML files that are merged before this file's own keys
+    (later entries override earlier ones; this file overrides the bases).
+    YAML files without a ``base:`` key behave identically to
+    ``yaml.safe_load`` — there is no special handling beyond that one
+    key. See ``viscy_utils.compose.load_composed_config`` for the merge
+    rules.
 
     Parameters
     ----------
@@ -77,21 +87,14 @@ def load_config(config_path: str | Path) -> dict:
     Returns
     -------
     dict
-        Configuration dictionary.
+        Composed configuration dictionary.
 
     Raises
     ------
     FileNotFoundError
-        If the config file does not exist.
-    yaml.YAMLError
-        If the YAML file is malformed.
+        If the config file (or any referenced base) does not exist.
     """
-    from viscy_utils.compose import load_composed_config
-
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    return load_composed_config(config_path)
+    return load_composed_config(Path(config_path))
 
 
 def load_config_section(config_path: str | Path, section: str | None, default_section: str | None = None) -> dict:
