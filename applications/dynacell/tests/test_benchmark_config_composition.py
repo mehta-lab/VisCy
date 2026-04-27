@@ -254,7 +254,7 @@ def test_migrated_target_predict_resolves_to_test_store(organelle: str, model: s
 
 # Each cross-eval cell → (plate_date, target_slug, target_channel,
 # gt_test_substring). Plate is per-organelle because the a549 plates are
-# split: 2024_11_07 has SEC61B, 2024_10_29 has TOMM20, 2026_03_26 has both
+# split: 2024_11_07 has SEC61B, 2024_11_21 has TOMM20, 2026_03_26 has both
 # h2b (nucleus) + caax (membrane). Target_slug is the manifest's
 # target key — same as iPSC for er/mito but gene-keyed for a549's
 # nucleus + membrane.
@@ -278,18 +278,18 @@ _A549_PREDICT_EXPECTATIONS = [
     (
         "mito",
         "celldiff",
-        "2024_10_29",
+        "2024_11_21",
         "tomm20",
         "Structure",
-        "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr",
+        "2024_11_21_A549_TOMM20_DENV/test/TOMM20.zarr",
     ),
     (
         "mito",
         "unetvit3d",
-        "2024_10_29",
+        "2024_11_21",
         "tomm20",
         "Structure",
-        "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr",
+        "2024_11_21_A549_TOMM20_DENV/test/TOMM20.zarr",
     ),
     (
         "nucleus",

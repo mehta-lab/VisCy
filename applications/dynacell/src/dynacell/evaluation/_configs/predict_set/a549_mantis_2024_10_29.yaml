@@ -1,5 +1,0 @@
-# @package _global_
-# Predict set group: A549 mantis 2024_10_29 (TOMM20 plate).
-benchmark:
-  dataset_ref:
-    dataset: a549-mantis-2024_10_29

@@ -251,13 +251,13 @@ def test_precompute_gt_wires_hook(monkeypatch, tmp_path) -> None:
 # {organelle: (target_group, gt_channel, gt_suffix)}
 _A549_EVAL_EXPECTATIONS = {
     "er": ("er_sec61b", "Structure", "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr"),
-    "mito": ("mito_tomm20", "Structure", "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr"),
+    "mito": ("mito_tomm20", "Structure", "2024_11_21_A549_TOMM20_DENV/test/TOMM20.zarr"),
     "nucleus": ("nucleus", "Nuclei", "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr"),
     "membrane": ("membrane", "Membrane", "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr"),
 }
 _A549_PLATES = {
     "er": "2024_11_07",
-    "mito": "2024_10_29",
+    "mito": "2024_11_21",
     "nucleus": "2026_03_26",
     "membrane": "2026_03_26",
 }

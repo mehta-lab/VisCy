@@ -1,8 +1,8 @@
 # @package _global_
-# Benchmark eval leaf: mito (TOMM20) predicted by CellDiff on a549_mantis_2024_10_29.
+# Benchmark eval leaf: mito (TOMM20) predicted by CellDiff on a549_mantis_2024_11_21.
 defaults:
   - override /target: mito_tomm20
-  - override /predict_set: a549_mantis_2024_10_29
+  - override /predict_set: a549_mantis_2024_11_21
 
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_celldiff_iterative.zarr
