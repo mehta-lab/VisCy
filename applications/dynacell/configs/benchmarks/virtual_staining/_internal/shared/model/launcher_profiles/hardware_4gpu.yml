@@ -1,4 +1,4 @@
-# Hardware profile: 4 GPU DDP, any GPU model (no constraint).
+# Hardware profile: 4 GPU DDP, A100 excluded (NCCL coordination hangs).
 #
 # 4 GPUs, DDP strategy, 1024G host mem, 4-day wall-time per restart.
 # Bumped from 512G after OOM on jobs 31287777 (ER scratch, died at 26h)
@@ -6,6 +6,13 @@
 # + 4 × 58 GiB rank RSS + persistent-worker headroom was tight against
 # 512G and tipped over on validation-time transients. 1024G on a 2 TB
 # H200 node gives ~700 GiB of headroom for the same workload.
+#
+# constraint excludes A100 nodes after repeat NCCL BROADCAST/ALLREDUCE
+# hangs at first-batch coordination on this cluster's A100 partition.
+# Alternation to non-A100 GPUs (h100/h200/a40/a6000/l40s) is the verified
+# workaround. Baking the exclusion in applies to every 4-GPU consumer of
+# this profile by default; leaves that need A100 must opt out via
+# `--override launcher.sbatch.constraint=null`.
 launcher:
   sbatch:
     partition: gpu
@@ -14,5 +21,5 @@ launcher:
     cpus_per_task: 8
     gpus: 4
     mem: "1024G"
-    constraint: null
+    constraint: "h100|h200|a40|a6000|l40s"
     time: "4-00:00:00"

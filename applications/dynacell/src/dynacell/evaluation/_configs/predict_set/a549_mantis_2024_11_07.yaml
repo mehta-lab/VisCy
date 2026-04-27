@@ -1,0 +1,5 @@
+# @package _global_
+# Predict set group: A549 mantis 2024_11_07 (SEC61B plate).
+benchmark:
+  dataset_ref:
+    dataset: a549-mantis-2024_11_07

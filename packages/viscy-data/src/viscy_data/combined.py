@@ -194,6 +194,18 @@ class ConcatDataModule(LightningDataModule):
     ----------
     data_modules : Sequence[LightningDataModule]
         Data modules to concatenate.
+
+    Notes
+    -----
+    Trainer propagation to children happens in both ``prepare_data`` and
+    ``setup`` because ``prepare_data_per_node=True`` causes Lightning to
+    invoke ``prepare_data`` only on rank 0 of each node. Without the
+    ``setup`` propagation, non-rank-0 children keep ``self.trainer = None``
+    and silently skip trainer-gated paths such as
+    ``HCSDataModule.on_after_batch_transfer``'s
+    ``if self.trainer and self.trainer.training`` guard, producing
+    rank-asymmetric failures where non-rank-0 ranks receive un-cropped
+    batches because ``gpu_augmentations`` did not run.
     """
 
     _ConcatDataset = ConcatDataset
@@ -225,6 +237,7 @@ class ConcatDataModule(LightningDataModule):
             raise NotImplementedError("Only fit stage is supported")
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.setup(stage)
             if patches := getattr(dm, "train_patches_per_stack", 0):
                 if self.train_patches_per_stack == 0:
@@ -354,6 +367,12 @@ class CachedConcatDataModule(LightningDataModule):
     ----------
     data_modules : Sequence[LightningDataModule]
         Data modules to concatenate.
+
+    Notes
+    -----
+    Trainer propagation to children happens in both ``prepare_data`` and
+    ``setup`` for the same reason as ``ConcatDataModule`` — see that
+    class's docstring.
     """
 
     def __init__(self, data_modules: Sequence[LightningDataModule]):
@@ -380,6 +399,7 @@ class CachedConcatDataModule(LightningDataModule):
             raise NotImplementedError("Only fit stage is supported")
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.setup(stage)
             if patches := getattr(dm, "train_patches_per_stack", 1):
                 if self.train_patches_per_stack == 0:
