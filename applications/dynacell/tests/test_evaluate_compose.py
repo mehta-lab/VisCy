@@ -233,3 +233,79 @@ def test_precompute_gt_wires_hook(monkeypatch, tmp_path) -> None:
     assert spliced.io.gt_channel_name == "Structure"
     assert spliced.io.pred_channel_name == "Structure_prediction"
     assert list(spliced.pixel_metrics.spacing) == _EXPECTED_SPACING
+
+
+# -- Stage 6: A549 cross-eval leaves ----------------------------------------
+#
+# Each iPSC training cell now has an a549_mantis sibling eval leaf. The
+# resolver splices a549 plate-specific paths via the per-plate predict_set
+# fragment (a549_mantis_<date>) and, for nucleus + membrane, a leaf-level
+# ``dataset_ref.target`` override (the iPSC manifest keys nucleus by
+# `nucleus`; a549 keys it by `h2b`. Same for membrane → caax).
+#
+# A549 manifests don't carry ``cell_segmentation`` or ``gt_cache_dir``, so
+# those resolve to None — Stage 6 eval leaves set
+# ``compute_feature_metrics: false`` to skip the segmentation-dependent
+# paths.
+
+# (organelle, target_group, gt_channel, gt_suffix)
+_A549_EVAL_EXPECTATIONS = {
+    "er": ("er_sec61b", "Structure", "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr"),
+    "mito": ("mito_tomm20", "Structure", "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr"),
+    "nucleus": ("nucleus", "Nuclei", "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr"),
+    "membrane": ("membrane", "Membrane", "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr"),
+}
+_A549_PLATES = {
+    "er": "2024_11_07",
+    "mito": "2024_10_29",
+    "nucleus": "2026_03_26",
+    "membrane": "2026_03_26",
+}
+_A549_LEAF_MATRIX = [(o, m) for o in _A549_EVAL_EXPECTATIONS for m in ("celldiff", "unetvit3d")]
+
+
+@pytest.mark.parametrize("organelle,model", _A549_LEAF_MATRIX)
+def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str) -> None:
+    """Stage 6 eval leaves resolve a549 paths via per-plate predict_set.
+
+    For nucleus + membrane, the leaf-level ``dataset_ref.target`` override
+    (h2b / caax) and matching ``target_name`` flip both the manifest
+    target lookup and the Hydra-side cache key.
+    """
+    leaf_selector = f"{organelle}/{model}/ipsc_confocal/eval__a549_mantis"
+    leaf_symlink = _LEAF_ROOT / organelle / model / "ipsc_confocal" / "eval__a549_mantis.yaml"
+    assert leaf_symlink.is_symlink(), f"missing symlink: {leaf_symlink}"
+
+    target_group, gt_channel, gt_suffix = _A549_EVAL_EXPECTATIONS[organelle]
+    plate = _A549_PLATES[organelle]
+
+    cfg = _compose_eval_cfg(
+        [
+            f"target={target_group}",
+            f"predict_set=a549_mantis_{plate}",
+            f"leaf={leaf_selector}",
+        ]
+    )
+    apply_dataset_ref(cfg)
+
+    # GT path resolves to the right plate's test store.
+    assert str(cfg.io.gt_path).endswith(gt_suffix), (
+        f"{organelle}/{model}: cfg.io.gt_path={cfg.io.gt_path} does not end with {gt_suffix}"
+    )
+    # GT channel is the manifest's target_channel value.
+    assert cfg.io.gt_channel_name == gt_channel
+    assert cfg.io.pred_channel_name == f"{gt_channel}_prediction"
+    # A549 manifests omit segmentation + cache → None.
+    assert cfg.io.cell_segmentation_path is None, (
+        f"{organelle}/{model}: a549 has no segmentation; got cell_segmentation_path={cfg.io.cell_segmentation_path}"
+    )
+    assert cfg.io.gt_cache_dir is None, f"{organelle}/{model}: a549 has no gt_cache_dir; got {cfg.io.gt_cache_dir}"
+    # Spacing comes from the manifest. mantis_v1 plates (2024_*) are
+    # 0.1494 µm; mantis_v2 (2026_03_26) is 0.116 µm. Both share Z=0.174.
+    spacing = list(cfg.pixel_metrics.spacing)
+    if plate == "2026_03_26":
+        assert spacing == [0.174, 0.116, 0.116]
+    else:
+        assert spacing == [0.174, 0.1494, 0.1494]
+    # Stage 6 leaves opt out of segmentation-dependent metrics.
+    assert cfg.compute_feature_metrics is False

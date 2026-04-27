@@ -250,6 +250,128 @@ def test_migrated_target_predict_resolves_to_test_store(organelle: str, model: s
     assert ia["target_channel"] == target_channel
 
 
+# -- Stage 6: A549 cross-eval predict leaves ------------------------------
+
+# Each cross-eval cell → (plate_date, target_slug, target_channel,
+# gt_test_substring). Plate is per-organelle because the a549 plates are
+# split: 2024_11_07 has SEC61B, 2024_10_29 has TOMM20, 2026_03_26 has both
+# h2b (nucleus) + caax (membrane). Target_slug is the manifest's
+# target key — same as iPSC for er/mito but gene-keyed for a549's
+# nucleus + membrane.
+_A549_PREDICT_EXPECTATIONS = [
+    (
+        "er",
+        "celldiff",
+        "2024_11_07",
+        "sec61b",
+        "Structure",
+        "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr",
+    ),
+    (
+        "er",
+        "unetvit3d",
+        "2024_11_07",
+        "sec61b",
+        "Structure",
+        "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr",
+    ),
+    (
+        "mito",
+        "celldiff",
+        "2024_10_29",
+        "tomm20",
+        "Structure",
+        "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr",
+    ),
+    (
+        "mito",
+        "unetvit3d",
+        "2024_10_29",
+        "tomm20",
+        "Structure",
+        "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr",
+    ),
+    (
+        "nucleus",
+        "celldiff",
+        "2026_03_26",
+        "h2b",
+        "Nuclei",
+        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr",
+    ),
+    (
+        "nucleus",
+        "unetvit3d",
+        "2026_03_26",
+        "h2b",
+        "Nuclei",
+        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr",
+    ),
+    (
+        "membrane",
+        "celldiff",
+        "2026_03_26",
+        "caax",
+        "Membrane",
+        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr",
+    ),
+    (
+        "membrane",
+        "unetvit3d",
+        "2026_03_26",
+        "caax",
+        "Membrane",
+        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "organelle,model,plate_date,target_slug,target_channel,gt_test_substring",
+    _A549_PREDICT_EXPECTATIONS,
+    ids=lambda v: v if isinstance(v, str) else None,
+)
+def test_a549_predict_leaf_composes(
+    organelle: str,
+    model: str,
+    plate_date: str,
+    target_slug: str,
+    target_channel: str,
+    gt_test_substring: str,
+    monkeypatch,
+) -> None:
+    """Stage 6 cross-eval predict leaves compose against a549 manifests.
+
+    Verifies for each cell:
+    - data.init_args.data_path resolves to the right plate's test store.
+    - target_channel is a bare string (not a list) per _compose_hook.py.
+    - dataset_ref.{dataset,target} carry through composition (proves the
+      nucleus → h2b and membrane → caax leaf-level overrides took effect).
+    - experiment_id reflects the cross-eval pairing.
+    - sbatch.constraint inherits "h200" from hardware_h200_single (these
+      are single-GPU predict leaves).
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__a549_mantis.yml"
+    assert leaf.is_file(), f"missing predict leaf: {leaf}"
+    cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+
+    ia = cfg["data"]["init_args"]
+    assert ia["data_path"].endswith(gt_test_substring), (
+        f"{organelle}/{model}: data_path={ia['data_path']!r} does not end with {gt_test_substring!r}"
+    )
+    assert ia["source_channel"] == "Phase3D"
+    assert ia["target_channel"] == target_channel  # bare string, not [list]
+
+    bench = cfg["benchmark"]
+    assert bench["dataset_ref"]["dataset"] == f"a549-mantis-{plate_date}"
+    assert bench["dataset_ref"]["target"] == target_slug
+    assert bench["experiment_id"] == f"{organelle}__ipsc_confocal__{model}__a549_mantis"
+
+    # Single-GPU predict topology: h200 only, not the 4-GPU alternation.
+    assert cfg["launcher"]["sbatch"].get("constraint") == "h200"
+
+
 def test_manifest_spacing_propagates(monkeypatch) -> None:
     """Resolver exposes manifest spacing via benchmark.spacing on composed fit configs."""
     monkeypatch.setattr("sys.argv", ["dynacell", "fit"])

@@ -1,0 +1,49 @@
+# UNetViT3D predict: nucleus trained on iPSC, predicting against a549_mantis_2026_03_26 test.
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side `nucleus`
+# target_id from targets/nucleus.yml so the resolver finds the h2b target on
+# a549-mantis-2026_03_26.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_2026_03_26.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/unetvit3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis
+  model_name: unetvit3d
+  experiment_id: nucleus__ipsc_confocal__unetvit3d__a549_mantis
+  # Override the iPSC-side `nucleus` target to a549's gene-keyed `h2b`.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/unetvit3d/checkpoints/last.ckpt
+
+data:
+  init_args:
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucleus_unetvit3d.zarr
+
+launcher:
+  job_name: UNetViT3D_PRED_NUCLEUS_ON_A549
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

@@ -1,0 +1,23 @@
+# @package _global_
+# Benchmark eval leaf: nucleus predicted by UNetViT3D on a549_mantis_2026_03_26 (h2b target).
+defaults:
+  - override /target: nucleus
+  - override /predict_set: a549_mantis_2026_03_26
+
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side `nucleus`
+# target_id from the target group so the resolver finds h2b on
+# a549-mantis-2026_03_26.
+target_name: h2b
+benchmark:
+  dataset_ref:
+    target: h2b
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucleus_unetvit3d.zarr
+
+# A549 manifests don't carry cell_segmentation paths (no segmentation
+# pipeline yet). Skip feature metrics until segmentation lands.
+compute_feature_metrics: false
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_nucleus_unetvit3d

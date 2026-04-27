@@ -1,0 +1,5 @@
+# @package _global_
+# Predict set group: A549 mantis 2026_03_26 (mantis_v2; H2B + CAAX co-imaged).
+benchmark:
+  dataset_ref:
+    dataset: a549-mantis-2026_03_26
