@@ -11,11 +11,14 @@
 #SBATCH --job-name=eval_w1_2dmip_infectomics
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
 #SBATCH --partition=cpu
 #SBATCH --time=1-00:00:00
 #SBATCH --output=%x-%j.out
+# Wrapper hosts the Nextflow head + any local-executor processes (per-experiment
+# PLOT runs locally; PLOT_COMBINED + REDUCE_COMBINED + LC + PREDICT go to slurm).
+# 32G + 4 cpus is enough for 19 sequential per-experiment plots on 350k cells.
 
 export PYTHONNOUSERSITE=1
 

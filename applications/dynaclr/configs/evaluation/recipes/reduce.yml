@@ -12,17 +12,13 @@ reduce_combined:
   pca:
     n_components: 32
     normalize_features: true
-  phate:
-    n_components: 2
-    knn: 5
-    decay: 40
-    scale_embeddings: false
-    random_state: 42
-    n_jobs: 48
-    # PHATE fits on a subsample, then transforms all cells.
-    # When `lineage_id` (or fov_name+track_id) is in obs, this is a
-    # **lineage** count cap — PHATE picks N whole lineages and includes
-    # all timepoints. ~17k lineages across 14 infectomics experiments at
-    # mean track length ~17, so 1500 lineages ≈ 25k fitting cells.
-    # If lineage cols are missing, this is a **cell** count cap (random).
-    subsample: 1_500
+  # PHATE temporarily disabled. With scipy 1.17.1 + sklearn 1.8.0, PHATE's
+  # internal PCA pre-reduction (graphtools -> sklearn -> scipy.lu) deadlocks
+  # silently — process sits at ~0% CPU forever in scipy LU decomposition,
+  # not affected by BLAS thread caps. Even small inputs (33k cells x 768
+  # features after lineage-aware subsampling) hang. PCA-only reductions are
+  # sufficient for Table 1 + matrix comparison plots. Re-enable when:
+  #   (a) downgrade scipy < 1.17 OR
+  #   (b) wire X_pca_combined back into PHATE (skip its internal PCA) OR
+  #   (c) upstream graphtools/phate fix lands.
+  phate: null
