@@ -9,14 +9,13 @@ readme = "README.md"
 keywords = [ "deep learning", "microscopy", "pytorch", "virtual staining" ]
 license = "BSD-3-Clause"
 authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: BSD License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
@@ -63,9 +62,12 @@ waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
 aicsmlsegment = { git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git", branch = "main" }
+# Pin to czbiohub-sf/iohub PR #408 (RFC-9 zipped OME-Zarr) until merged.
+# SHA pin survives force-pushes on the PR; bump deliberately when needed.
+iohub = { git = "https://github.com/czbiohub-sf/iohub.git", rev = "53b10acb7a30a2c7e8dfd9b04258dea073e14088" }
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 indent-width = 4
 src = [ "applications/*/src", "packages/*/src" ]
