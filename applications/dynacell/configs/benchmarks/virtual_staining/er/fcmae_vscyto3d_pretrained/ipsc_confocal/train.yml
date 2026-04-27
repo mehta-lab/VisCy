@@ -30,8 +30,8 @@ model:
 trainer:
   logger:
     init_args:
-      name: FCMAE_VSCyto3D_Pretrained_iPSC_SEC61B
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained
+      name: FCMAE_VSCyto3D_Pretrained_iPSC_SEC61B_ws8500
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -42,8 +42,8 @@ trainer:
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500/checkpoints
 
 launcher:
-  job_name: FCMAE_VSCyto3D_Pretrained_SEC61B
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained
+  job_name: FCMAE_VSCyto3D_Pretrained_SEC61B_ws8500
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500
