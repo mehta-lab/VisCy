@@ -12,9 +12,11 @@ train/val split.
 from __future__ import annotations
 
 import logging
+import os
 
 import numpy as np
 import pandas as pd
+from iohub.core.config import TensorStoreConfig
 from lightning.pytorch import LightningDataModule
 from monai.data.thread_buffer import ThreadDataLoader
 from monai.transforms import Compose, MapTransform
@@ -238,6 +240,12 @@ class MultiExperimentDataModule(LightningDataModule):
         # Loss hyperparameters (informational)
         # Other
         self.cache_pool_bytes = cache_pool_bytes
+        cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+        cpus = int(cpus) if cpus is not None else (os.cpu_count() or 4)
+        self.tensorstore_config = TensorStoreConfig(
+            data_copy_concurrency=cpus,
+            cache_pool_bytes=cache_pool_bytes or None,
+        )
         self.seed = seed
         self.include_wells = include_wells
         self.exclude_fovs = exclude_fovs
@@ -361,13 +369,13 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
             max_border_shift=self.max_border_shift,
+            tensorstore_config=self.tensorstore_config,
         )
         self.train_dataset = MultiExperimentTripletDataset(
             index=train_index,
             fit=True,
             tau_range_hours=self.tau_range,
             tau_decay_rate=self.tau_decay_rate,
-            cache_pool_bytes=self.cache_pool_bytes,
             channels_per_sample=self.channels_per_sample,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
@@ -388,13 +396,13 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
                 max_border_shift=self.max_border_shift,
+                tensorstore_config=self.tensorstore_config,
             )
             self.val_dataset = MultiExperimentTripletDataset(
                 index=val_index,
                 fit=True,
                 tau_range_hours=self.tau_range,
                 tau_decay_rate=self.tau_decay_rate,
-                cache_pool_bytes=self.cache_pool_bytes,
                 channels_per_sample=self.channels_per_sample,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
@@ -419,6 +427,7 @@ class MultiExperimentDataModule(LightningDataModule):
             num_workers=self.num_workers_index,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
+            tensorstore_config=self.tensorstore_config,
         )
 
         rng = np.random.default_rng(self.seed)
@@ -458,7 +467,6 @@ class MultiExperimentDataModule(LightningDataModule):
             fit=True,
             tau_range_hours=self.tau_range,
             tau_decay_rate=self.tau_decay_rate,
-            cache_pool_bytes=self.cache_pool_bytes,
             channels_per_sample=self.channels_per_sample,
             positive_cell_source=self.positive_cell_source,
             positive_match_columns=self.positive_match_columns,
@@ -477,7 +485,6 @@ class MultiExperimentDataModule(LightningDataModule):
                 fit=True,
                 tau_range_hours=self.tau_range,
                 tau_decay_rate=self.tau_decay_rate,
-                cache_pool_bytes=self.cache_pool_bytes,
                 channels_per_sample=self.channels_per_sample,
                 positive_cell_source=self.positive_cell_source,
                 positive_match_columns=self.positive_match_columns,
