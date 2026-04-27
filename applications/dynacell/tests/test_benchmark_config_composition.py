@@ -412,3 +412,37 @@ def test_joint_train_smoke_leaf_composes() -> None:
     assert sbatch.get("constraint") == "h200"
     # Smoke wall is bounded so a smoke job cannot sit on a multi-day allocation.
     assert sbatch["time"] == "00:30:00"
+
+
+# Lock-in for the A100-exclude bake-in in hardware_4gpu.yml. After repeat
+# NCCL coordination hangs on this cluster's A100 partition (FCMAE jobs
+# 31474030 + 31474038, joint smoke 31480607), every 4-GPU train leaf
+# inherits this alternation by default. Future leaves needing A100 must
+# explicitly opt out via `--override launcher.sbatch.constraint=null`.
+_HARDWARE_4GPU_CONSTRAINT = "h100|h200|a40|a6000|l40s"
+
+
+def _all_train_leaves() -> list[Path]:
+    """All ``train*.yml`` leaves under benchmarks/virtual_staining/ except _internal/."""
+    return sorted(p for p in BENCHMARKS.rglob("train*.yml") if "_internal" not in p.parts)
+
+
+@pytest.mark.parametrize("leaf", _all_train_leaves(), ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
+    """Every 4-GPU train leaf must inherit the A100-exclude constraint.
+
+    Data-driven: walks every train leaf under virtual_staining/ and
+    skips single-GPU leaves; for 4-GPU leaves, asserts the constraint.
+    Adding a new 4-GPU leaf without the override picks this up
+    automatically.
+    """
+    cfg = load_composed_config(leaf)
+    if cfg["trainer"]["devices"] != 4:
+        pytest.skip(f"single-GPU leaf: {leaf.relative_to(BENCHMARKS)}")
+    constraint = cfg["launcher"]["sbatch"].get("constraint")
+    assert constraint == _HARDWARE_4GPU_CONSTRAINT, (
+        f"{leaf.relative_to(BENCHMARKS)}: 4-GPU leaf has constraint={constraint!r}, "
+        f"expected {_HARDWARE_4GPU_CONSTRAINT!r}. If this leaf must run on A100, "
+        f"override with `--override launcher.sbatch.constraint=null` instead of "
+        f"unsetting the profile default."
+    )
