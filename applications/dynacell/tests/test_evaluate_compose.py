@@ -248,7 +248,7 @@ def test_precompute_gt_wires_hook(monkeypatch, tmp_path) -> None:
 # ``compute_feature_metrics: false`` to skip the segmentation-dependent
 # paths.
 
-# (organelle, target_group, gt_channel, gt_suffix)
+# {organelle: (target_group, gt_channel, gt_suffix)}
 _A549_EVAL_EXPECTATIONS = {
     "er": ("er_sec61b", "Structure", "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr"),
     "mito": ("mito_tomm20", "Structure", "2024_10_29_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr"),
