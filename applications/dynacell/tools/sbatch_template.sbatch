@@ -22,6 +22,10 @@ trap cleanup EXIT
 
 ml uv
 
+# uv resolves project context from CWD; pin to repo_root so the compute job
+# uses the worktree's pyproject + .venv regardless of where sbatch was invoked.
+cd @@repo_root
+
 @@env_block
 
 scontrol show job $SLURM_JOB_ID
