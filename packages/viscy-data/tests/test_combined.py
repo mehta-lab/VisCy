@@ -265,3 +265,52 @@ def test_batched_concat_ddp_rank_disjointness(preprocessed_hcs_dataset, monkeypa
     assert rank0_indices.isdisjoint(rank1_indices)
     # Together ranks cover the full concatenated dataset (no gaps).
     assert rank0_indices | rank1_indices == set(range(len(batched.train_dataset)))
+
+
+def test_concat_setup_propagates_trainer_to_children(preprocessed_hcs_dataset):
+    """Trainer must be propagated to children even when ``prepare_data`` is skipped.
+
+    Production failure surface (SLURM 31481032): under DDP with
+    ``prepare_data_per_node=True``, only rank 0 runs ``prepare_data``. If
+    ``setup`` doesn't propagate ``dm.trainer``, non-rank-0 children miss
+    ``HCSDataModule.on_after_batch_transfer``'s gpu_augmentation guard
+    (``if self.trainer and self.trainer.training``) and the model receives
+    un-cropped batches — rank 0 trains correctly, ranks 1-3 fail with a
+    shape mismatch at the first training step.
+
+    This single-process test reproduces the bug by skipping
+    ``prepare_data`` entirely and asserting that ``setup`` alone is enough
+    to make trainer-gated paths fire.
+    """
+    from types import SimpleNamespace
+
+    from viscy_transforms import BatchedCenterSpatialCropd
+
+    dm1 = _make_dm(preprocessed_hcs_dataset)
+    dm2 = _make_dm(preprocessed_hcs_dataset)
+
+    # Attach a non-trivial gpu_augmentation directly so we can prove it ran.
+    # Bare MapTransform is callable on a dict — no Compose wrapper needed.
+    crop = BatchedCenterSpatialCropd(keys=["source", "target"], roi_size=[3, 64, 48])
+    dm1._gpu_augmentations = crop
+    dm2._gpu_augmentations = crop
+
+    batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
+
+    # Bypass prepare_data entirely; mimic the non-rank-0 lifecycle where
+    # only setup runs.
+    batched.trainer = SimpleNamespace(training=True, validating=False, sanity_checking=False)
+    batched.setup(stage="fit")
+
+    # Children received the trainer.
+    assert dm1.trainer is batched.trainer
+    assert dm2.trainer is batched.trainer
+
+    # And the gpu_augmentation actually runs through ``on_after_batch_transfer``.
+    # Without the fix, children's ``self.trainer`` is None and the guard
+    # short-circuits, returning the un-cropped batch.
+    batch = next(iter(batched.train_dataloader()))
+    combined = batched.on_after_batch_transfer(batch, dataloader_idx=0)
+    assert combined["source"].shape[2:] == (3, 64, 48), (
+        f"gpu_augmentation did not run; got shape {combined['source'].shape}"
+    )
