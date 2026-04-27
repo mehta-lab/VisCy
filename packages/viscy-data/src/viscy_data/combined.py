@@ -204,8 +204,8 @@ class ConcatDataModule(LightningDataModule):
     and silently skip trainer-gated paths such as
     ``HCSDataModule.on_after_batch_transfer``'s
     ``if self.trainer and self.trainer.training`` guard, producing
-    rank-asymmetric failures (e.g. SLURM 31481032 where ranks 1-3 received
-    un-cropped batches because ``gpu_augmentations`` did not run).
+    rank-asymmetric failures where non-rank-0 ranks receive un-cropped
+    batches because ``gpu_augmentations`` did not run.
     """
 
     _ConcatDataset = ConcatDataset

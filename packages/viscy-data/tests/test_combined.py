@@ -1,5 +1,7 @@
 """Tests for CombinedDataModule and ConcatDataModule."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from iohub import open_ome_zarr
 
@@ -11,6 +13,7 @@ from viscy_data import (
     HCSDataModule,
     ShardedDistributedSampler,
 )
+from viscy_transforms import BatchedCenterSpatialCropd
 
 
 def _fake_ddp(monkeypatch, world_size: int = 2, rank: int = 0) -> None:
@@ -282,14 +285,9 @@ def test_concat_setup_propagates_trainer_to_children(preprocessed_hcs_dataset):
     ``prepare_data`` entirely and asserting that ``setup`` alone is enough
     to make trainer-gated paths fire.
     """
-    from types import SimpleNamespace
-
-    from viscy_transforms import BatchedCenterSpatialCropd
-
     dm1 = _make_dm(preprocessed_hcs_dataset)
     dm2 = _make_dm(preprocessed_hcs_dataset)
 
-    # Attach a non-trivial gpu_augmentation directly so we can prove it ran.
     # Bare MapTransform is callable on a dict — no Compose wrapper needed.
     crop = BatchedCenterSpatialCropd(keys=["source", "target"], roi_size=[3, 64, 48])
     dm1._gpu_augmentations = crop
@@ -297,9 +295,9 @@ def test_concat_setup_propagates_trainer_to_children(preprocessed_hcs_dataset):
 
     batched = BatchedConcatDataModule(data_modules=[dm1, dm2])
 
-    # Bypass prepare_data entirely; mimic the non-rank-0 lifecycle where
-    # only setup runs.
-    batched.trainer = SimpleNamespace(training=True, validating=False, sanity_checking=False)
+    # Skip prepare_data; mimic the non-rank-0 lifecycle where only setup runs.
+    # MagicMock matches the fake-trainer pattern in test_hcs.py.
+    batched.trainer = MagicMock(training=True, validating=False, sanity_checking=False)
     batched.setup(stage="fit")
 
     # Children received the trainer.

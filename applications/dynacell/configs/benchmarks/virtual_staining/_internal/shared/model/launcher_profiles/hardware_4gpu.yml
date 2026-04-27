@@ -8,15 +8,10 @@
 # H200 node gives ~700 GiB of headroom for the same workload.
 #
 # constraint excludes A100 nodes after repeat NCCL BROADCAST/ALLREDUCE
-# hangs at first-batch coordination on this cluster's A100 partition:
-# FCMAE jobs 31474030 (gpu-a-1) + 31474038 (gpu-a-2) timed out at
-# 1h13m / 1h21m on watchdog; the joint smoke 31480607 (gpu-a-3) hung
-# indefinitely at `Loading 'train_dataloader'`. Job 31481032 with this
-# alternation as a one-shot --override scheduled to gpu-h-3 (H100) and
-# pushed past the same milestone, confirming the workaround. Baking
-# the exclusion in here replaces the per-leaf override across all
-# 11 4-GPU consumers (FCMAE × 8 + er/unext2 + 2 joint celldiff smoke
-# leaves). Leaves that need A100 must opt out via
+# hangs at first-batch coordination on this cluster's A100 partition.
+# Alternation to non-A100 GPUs (h100/h200/a40/a6000/l40s) is the verified
+# workaround. Baking the exclusion in applies to every 4-GPU consumer of
+# this profile by default; leaves that need A100 must opt out via
 # `--override launcher.sbatch.constraint=null`.
 launcher:
   sbatch:
