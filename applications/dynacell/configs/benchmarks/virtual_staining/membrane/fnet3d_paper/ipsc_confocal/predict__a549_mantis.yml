@@ -1,0 +1,48 @@
+# FNet3D paper-baseline predict: membrane trained on iPSC, predicting against a549_mantis_2026_03_26 test.
+# A549 manifest keys membrane by gene (`caax`); override the iPSC-side `membrane`
+# target_id from targets/membrane.yml so the resolver finds the caax target on
+# a549-mantis-2026_03_26.
+# Same iPSC best val-loss checkpoint as predict__ipsc_confocal.yml (epoch 181, loss/validate=0.6214).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_2026_03_26.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis
+  model_name: fnet3d_paper
+  experiment_id: membrane__ipsc_confocal__fnet3d_paper__a549_mantis
+  # Override the iPSC-side `membrane` target to a549's gene-keyed `caax`.
+  dataset_ref:
+    target: caax
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper/checkpoints/epoch=181-step=157612.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fnet3d_paper.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_MEMB_ON_A549
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
