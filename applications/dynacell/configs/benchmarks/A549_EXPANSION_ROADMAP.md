@@ -27,9 +27,9 @@ duplication that would otherwise blow up across ~60 new leaves.
 | 2 | Migrate `mito_tomm20`, `nucleus`, `membrane` to `dataset_ref` | **Done** — `11836c8`, `326b2d0`, `6273439` |
 | 3 | Hydra-side hook + 4 eval target YAMLs migrated | **Done** — `8924ab2`, `f5a6e56`, `a984384` |
 | 4 | (folded into Stage 3) | n/a |
-| 5 | Register a549-mantis manifests | **Partial** — done in dynacell-paper (`aeef64c`, 7 per-plate manifests 2024_10_29 → 2025_08_26); VisCy fixture mirror missing |
+| 5 | Register a549-mantis manifests | **Partial** — done in dynacell-paper (`aeef64c`, 7 per-plate manifests 2024_10_29 → 2025_08_26); VisCy fixture mirror missing. A549 zarr normalization-stats backfill closed 2026-04-24 (dynacell-paper `f4120e0` + 17-zarr backfill). |
 | 6 | Single-dataset a549 predict + eval leaves | **Not started** |
-| 7 | Joint training leaves (ipsc + a549) | **In flight** — first leaf only (`er/celldiff`); the 4-GPU DDP deadlock that blocked the full path is fixed (PR #413, `0b04b24`) |
+| 7 | Joint training leaves (ipsc + a549) | **In flight — blocked**. First leaf + smoke variants shipped (`er/celldiff`: `9654e2b`, `4d399d5`, `234819a`). 4-GPU DDP smoke still hangs after PR #413 (`0b04b24`) — a second deadlock surface remains; see `.claude/handoffs/handoff-batched-concat-ddp-hang-followup-2026-04-26.md`. |
 
 ## Remaining work
 
@@ -42,6 +42,14 @@ Stage 6 can be tested without a `dynacell-paper` install, add an
 `a549-mantis/manifest.yaml` fixture mirror (one date is enough — pick
 the one currently consumed by Stage 7's joint leaf,
 `2024_11_07/manifest.yaml`).
+
+The a549 zarr normalization-stats gap (every `mantis_v1/<plate>/<split>/<GENE>.zarr`
+missing `normalization` zattrs at plate and position level) closed on
+2026-04-24: dynacell-paper `f4120e0` adds `generate_normalization_metadata`
+as a post-write step in the assembly pipeline, and the 17 pre-hook
+zarrs were backfilled in 5.7 min. Joint leaves consuming these stores
+no longer fail or asymmetrically normalize at training time. Treat as
+done; no VisCy-side action.
 
 ### Stage 6 — single-dataset a549 predict + eval leaves
 
@@ -76,9 +84,24 @@ save:
 
 The joint-loader infrastructure landed in `4bc2e53` (sharded sampler
 in `BatchedConcatDataModule`) and `5950576` (split fit overlays). PR
-#413 fixed the production 4-GPU DDP deadlock. The first joint leaf
-shipped at `er/celldiff/joint_ipsc_confocal_a549_mantis/train.yml`
-(`9654e2b`); smoke variants followed (`4d399d5`, `234819a`).
+#413 (`0b04b24`) addressed one DDP deadlock surface (the
+`use_thread_workers=True` thread-shim under real `init_process_group`)
+but the 4-GPU smoke still hangs at the same milestone — a second
+deadlock surface remains; see
+`.claude/handoffs/handoff-batched-concat-ddp-hang-followup-2026-04-26.md`.
+Joint leaf expansion is blocked until this resolves.
+
+The first joint leaf shipped at
+`er/celldiff/joint_ipsc_confocal_a549_mantis/train.yml` (`9654e2b`);
+smoke variants followed (single-GPU `4d399d5`, 4-GPU DDP `234819a`).
+The single-GPU smoke runs end-to-end against `_test48` debug zarrs;
+the 4-GPU DDP smoke is the failing reproducer for the open deadlock.
+
+Smoke leaves rely on the `_test48` debug-zarr convention documented
+in this app's `CLAUDE.md` and mirrored in `dynacell-paper`'s `CLAUDE.md`:
+short-wall validation jobs override `data_path` to the colocated
+`<NAME>_test48.zarr` so `mmap_preload` finishes staging in under a
+minute instead of 45+ min on the full 500-FOV stores.
 
 Joint leaves bypass the single-dataset `dataset_ref` resolver and
 author the data block inline because hparams live on each child.
@@ -112,7 +135,9 @@ Stage 5 (a549 manifest) — partial ────┘
         VisCy fixture mirror: pending
 
 Stage 7 (joint training leaves) — independent of resolver path
-        first leaf: done; expansion pending
+        first leaf + smoke variants: done
+        4-GPU DDP smoke: blocked on remaining deadlock (see followup handoff)
+        expansion (24 cells + companion leaves): pending P0 deadlock fix
 ```
 
 Stages 1–3 and 5 (canonical) blocked Stage 6. The remaining gap on
