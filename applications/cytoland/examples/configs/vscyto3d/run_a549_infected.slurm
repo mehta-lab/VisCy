@@ -10,6 +10,9 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus=4
 #SBATCH --mem=1024G
+# Need >=80 GB VRAM so the 3-DM cycled batch (16x4x3 = 192 crops/step/GPU)
+# fits with bf16 + 35M-param FCMAE. Excludes 40 GB A100 / 48 GB A40/A6000.
+#SBATCH --constraint='h200|h100_80|a100_80'
 #SBATCH --output=/hpc/projects/comp.micro/virtual_staining/models/cytoland/a549_infected/vscyto3d/slurm/%j.out
 #SBATCH --error=/hpc/projects/comp.micro/virtual_staining/models/cytoland/a549_infected/vscyto3d/slurm/%j.err
 
