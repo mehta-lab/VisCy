@@ -1,6 +1,6 @@
 ml uv
 
-source "$(dirname "$0")/../.envrc"
+source ".envrc"
 
 # UNetViT3D — ER (SEC61B)
 uv run dynacell evaluate \
