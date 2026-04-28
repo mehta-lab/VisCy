@@ -226,3 +226,125 @@ def test_submit_rejects_devices_gpus_mismatch(tmp_path):
     )
     with pytest.raises(SystemExit, match="topology mismatch"):
         sbj.submit([str(leaf), "--dry-run"])
+
+
+def _write_minimal_valid_leaf(tmp_path: Path) -> Path:
+    """Synthetic leaf with consistent topology so submit() reaches sbatch."""
+    leaf = tmp_path / "leaf.yml"
+    leaf.write_text(
+        yaml.safe_dump(
+            {
+                "launcher": {
+                    "mode": "fit",
+                    "job_name": "JOB",
+                    "run_root": str(tmp_path / "run_root"),
+                    "sbatch": {
+                        "partition": "gpu",
+                        "nodes": 1,
+                        "ntasks_per_node": 1,
+                        "cpus_per_task": 1,
+                        "gpus": 1,
+                        "mem": "1G",
+                        "constraint": "h200",
+                        "time": "1:00:00",
+                    },
+                },
+                "trainer": {"devices": 1},
+            }
+        )
+    )
+    return leaf
+
+
+def test_sbatch_cmd_default_no_flags(monkeypatch, tmp_path):
+    """No flags → ``sbatch <script>`` with stdout untouched (existing shape)."""
+    leaf = _write_minimal_valid_leaf(tmp_path)
+    captured: dict = {}
+
+    def _fake_run(cmd, check=True, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr(sbj.subprocess, "run", _fake_run)
+    rc = sbj.submit([str(leaf)])
+    assert rc == 0
+    assert captured["cmd"][0] == "sbatch"
+    assert captured["cmd"][-1].endswith(".sbatch")
+    assert "--parsable" not in captured["cmd"]
+    assert not any(a.startswith("--dependency") for a in captured["cmd"])
+    # Backward compat: no capture_output, so sbatch prose flows to stdout.
+    assert "capture_output" not in captured["kwargs"]
+
+
+def test_sbatch_cmd_with_dependency(monkeypatch, tmp_path):
+    """--dependency afterok:<id> appends ``--dependency=afterok:<id>`` to sbatch."""
+    leaf = _write_minimal_valid_leaf(tmp_path)
+    captured: dict = {}
+
+    def _fake_run(cmd, check=True, **kwargs):
+        captured["cmd"] = cmd
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr(sbj.subprocess, "run", _fake_run)
+    sbj.submit([str(leaf), "--dependency", "afterok:12345"])
+    assert "--dependency=afterok:12345" in captured["cmd"]
+
+
+def test_sbatch_cmd_with_parsable(monkeypatch, capsys, tmp_path):
+    """--parsable adds ``--parsable``, captures sbatch stdout, forwards job ID."""
+    leaf = _write_minimal_valid_leaf(tmp_path)
+    captured: dict = {}
+
+    def _fake_run(cmd, check=True, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+
+        class _Result:
+            returncode = 0
+            stdout = "67890\n"
+
+        return _Result()
+
+    monkeypatch.setattr(sbj.subprocess, "run", _fake_run)
+    sbj.submit([str(leaf), "--parsable"])
+    assert "--parsable" in captured["cmd"]
+    # stdout captured for forwarding; stderr left attached so sbatch
+    # warnings/diagnostics remain visible to the operator.
+    assert captured["kwargs"]["stdout"] is sbj.subprocess.PIPE
+    assert "stderr" not in captured["kwargs"]
+    assert "capture_output" not in captured["kwargs"]
+    assert captured["kwargs"]["text"] is True
+    out = capsys.readouterr().out
+    assert "67890" in out
+
+
+def test_sbatch_cmd_dependency_and_parsable(monkeypatch, tmp_path):
+    """Both flags compose; --parsable, then --dependency, then script path."""
+    leaf = _write_minimal_valid_leaf(tmp_path)
+    captured: dict = {}
+
+    def _fake_run(cmd, check=True, **kwargs):
+        captured["cmd"] = cmd
+
+        class _Result:
+            returncode = 0
+            stdout = "11111\n"
+
+        return _Result()
+
+    monkeypatch.setattr(sbj.subprocess, "run", _fake_run)
+    sbj.submit([str(leaf), "--parsable", "--dependency", "afterok:42"])
+    cmd = captured["cmd"]
+    assert cmd[0] == "sbatch"
+    assert "--parsable" in cmd
+    assert "--dependency=afterok:42" in cmd
+    assert cmd[-1].endswith(".sbatch")

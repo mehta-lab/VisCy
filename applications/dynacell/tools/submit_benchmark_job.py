@@ -149,6 +149,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="key.path=value",
         help="dotlist override, deep-merged after compose (repeatable)",
     )
+    ap.add_argument(
+        "--dependency",
+        default=None,
+        metavar="afterok:<job_id>",
+        help="SLURM dependency expression for the rendered sbatch job. "
+        "When set, sbatch is invoked with --dependency=<value>. Default off; "
+        "manual invocations behave as before.",
+    )
+    ap.add_argument(
+        "--parsable",
+        action="store_true",
+        help="Invoke sbatch with --parsable and forward sbatch's parsable "
+        "stdout (typically the bare job id, or 'job_id;cluster' on "
+        "multi-cluster setups) to this process's stdout, in place of "
+        "sbatch's default 'Submitted batch job <id>' prose. Default off; "
+        "manual invocations see the existing prose. Useful for "
+        "orchestration that needs to capture sbatch's machine-readable "
+        "output.",
+    )
     return ap.parse_args(argv)
 
 
@@ -244,7 +263,24 @@ def submit(argv: list[str] | None = None) -> int:
         resolved_path.write_text(yaml.safe_dump(composed, default_flow_style=False))
         sbatch_path.write_text(rendered)
     if not skip_submit:
-        subprocess.run(["sbatch", str(sbatch_path)], check=True)
+        sbatch_cmd = ["sbatch"]
+        if args.parsable:
+            sbatch_cmd.append("--parsable")
+        if args.dependency:
+            sbatch_cmd.append(f"--dependency={args.dependency}")
+        sbatch_cmd.append(str(sbatch_path))
+        # --parsable mode: capture only sbatch's stdout (its parsable
+        # output) and forward to our caller, so an orchestrator can chain
+        # submissions. Stderr stays attached to the parent so any sbatch
+        # warnings or diagnostics remain visible. Without --parsable,
+        # sbatch's prose ("Submitted batch job <id>") flows through to the
+        # parent's stdout untouched — backward-compatible with every
+        # existing manual workflow.
+        if args.parsable:
+            result = subprocess.run(sbatch_cmd, check=True, stdout=subprocess.PIPE, text=True)
+            print(result.stdout.strip())
+        else:
+            subprocess.run(sbatch_cmd, check=True)
 
     return 0
 
