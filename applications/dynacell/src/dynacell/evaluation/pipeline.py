@@ -13,8 +13,10 @@ from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.metrics import (
     calculate_microssim,
     compute_pixel_metrics,
+    cp_dataset_fid_kid,
     cp_pairwise,
     cp_pred_regionprops,
+    deep_dataset_fid_kid,
     deep_pairwise,
     deep_pred_features,
     evaluate_segmentations,
@@ -28,28 +30,6 @@ from dynacell.evaluation.pipeline_cache import (
     resolve_dynaclr_encoder_cfg,
 )
 from dynacell.evaluation.utils import plot_metrics
-
-
-def _pair_feature_metrics(
-    predict_t: np.ndarray,
-    cell_segmentation_t: np.ndarray,
-    gt_cp_t: np.ndarray,
-    gt_dinov3_t: np.ndarray,
-    gt_dynaclr_t: np.ndarray,
-    dinov3_extractor,
-    dynaclr_extractor,
-    spacing,
-    patch_size: int,
-) -> dict[str, float]:
-    """Compute prediction-side features and pair them with precomputed GT features."""
-    pred_cp = cp_pred_regionprops(predict_t, cell_segmentation_t, spacing)
-    pred_dinov3 = deep_pred_features(predict_t, cell_segmentation_t, dinov3_extractor, patch_size)
-    pred_dynaclr = deep_pred_features(predict_t, cell_segmentation_t, dynaclr_extractor, patch_size)
-    return {
-        **cp_pairwise(pred_cp, gt_cp_t),
-        **deep_pairwise(pred_dinov3, gt_dinov3_t, "DINOv3"),
-        **deep_pairwise(pred_dynaclr, gt_dynaclr_t, "DynaCLR"),
-    }
 
 
 def evaluate_predictions(config: DictConfig):
@@ -96,6 +76,13 @@ def evaluate_predictions(config: DictConfig):
     )
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
+
+    pred_cp_feats: list[np.ndarray] = []
+    gt_cp_feats: list[np.ndarray] = []
+    pred_dinov3_feats: list[np.ndarray] = []
+    gt_dinov3_feats: list[np.ndarray] = []
+    pred_dynaclr_feats: list[np.ndarray] = []
+    gt_dynaclr_feats: list[np.ndarray] = []
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
@@ -192,18 +179,28 @@ def evaluate_predictions(config: DictConfig):
                     segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
                     if config.compute_feature_metrics:
-                        feature_metrics = _pair_feature_metrics(
-                            predict[t],
-                            cell_segmentation[t],
-                            gt_cp_per_t[t],
-                            gt_dinov3_per_t[t],
-                            gt_dynaclr_per_t[t],
-                            dinov3_feature_extractor,
-                            dynaclr_feature_extractor,
-                            config.pixel_metrics.spacing,
-                            config.feature_metrics.patch_size,
+                        pred_cp = cp_pred_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
+                        pred_dinov3 = deep_pred_features(
+                            predict[t], cell_segmentation[t], dinov3_feature_extractor, config.feature_metrics.patch_size
                         )
-                        all_feature_metrics.append({**data_info, **feature_metrics})
+                        pred_dynaclr = deep_pred_features(
+                            predict[t], cell_segmentation[t], dynaclr_feature_extractor, config.feature_metrics.patch_size
+                        )
+                        cosine_metrics = {
+                            **cp_pairwise(pred_cp, gt_cp_per_t[t]),
+                            **deep_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
+                            **deep_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
+                        }
+                        all_feature_metrics.append({**data_info, **cosine_metrics})
+                        if pred_cp.size > 0:
+                            pred_cp_feats.append(pred_cp)
+                            gt_cp_feats.append(gt_cp_per_t[t])
+                        if pred_dinov3.size > 0:
+                            pred_dinov3_feats.append(pred_dinov3)
+                            gt_dinov3_feats.append(gt_dinov3_per_t[t])
+                        if pred_dynaclr.size > 0:
+                            pred_dynaclr_feats.append(pred_dynaclr)
+                            gt_dynaclr_feats.append(gt_dynaclr_per_t[t])
 
                 seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
                 row, col, fov = pos_name_pred.split("/")
@@ -222,6 +219,15 @@ def evaluate_predictions(config: DictConfig):
         finally:
             if seg_plate is not None:
                 seg_plate.close()
+
+    if config.compute_feature_metrics and all_feature_metrics:
+        dataset_fid_kid = {
+            **cp_dataset_fid_kid(pred_cp_feats, gt_cp_feats),
+            **deep_dataset_fid_kid(pred_dinov3_feats, gt_dinov3_feats, "DINOv3"),
+            **deep_dataset_fid_kid(pred_dynaclr_feats, gt_dynaclr_feats, "DynaCLR"),
+        }
+        for row in all_feature_metrics:
+            row.update(dataset_fid_kid)
 
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 

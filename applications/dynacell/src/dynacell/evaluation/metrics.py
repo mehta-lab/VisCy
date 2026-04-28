@@ -21,7 +21,7 @@ except ImportError:
     spectral_pcc = None  # type: ignore[assignment]
 
 from dynacell.evaluation.torch_ssim import ssim as torch_ssim
-from dynacell.evaluation.utils import _minmax_norm, _pairwise_feature_metrics
+from dynacell.evaluation.utils import _frechet_distance, _minmax_norm, _pairwise_feature_metrics, _polynomial_mmd
 
 
 def _require_microssim():
@@ -422,4 +422,39 @@ def _nan_pairwise(name):
         f"{name}_Median_Cosine_Similarity": float("nan"),
         f"{name}_FID": float("nan"),
         f"{name}_KID": float("nan"),
+    }
+
+
+def cp_dataset_fid_kid(pred_raw_all: list[np.ndarray], target_raw_all: list[np.ndarray]) -> dict[str, float]:
+    """FID and KID for CP features pooled across the full dataset."""
+    if not pred_raw_all:
+        return {"CP_FID": float("nan"), "CP_KID": float("nan")}
+    pred_raw = np.concatenate(pred_raw_all, axis=0)
+    target_raw = np.concatenate(target_raw_all, axis=0)
+    non_zero_cols = ~np.all(target_raw == 0, axis=0)
+    pred_mat = pred_raw[:, non_zero_cols]
+    target_mat = target_raw[:, non_zero_cols]
+    if pred_mat.size == 0:
+        return {"CP_FID": float("nan"), "CP_KID": float("nan")}
+    pred_mat = (pred_mat - pred_mat.mean(axis=0)) / (pred_mat.std(axis=0) + 1e-8)
+    target_mat = (target_mat - target_mat.mean(axis=0)) / (target_mat.std(axis=0) + 1e-8)
+    return {
+        "CP_FID": _frechet_distance(pred_mat, target_mat),
+        "CP_KID": _polynomial_mmd(pred_mat, target_mat),
+    }
+
+
+def deep_dataset_fid_kid(
+    pred_feats_all: list[np.ndarray], target_feats_all: list[np.ndarray], name: str
+) -> dict[str, float]:
+    """FID and KID for deep embeddings pooled across the full dataset."""
+    if name not in ("DINOv3", "DynaCLR"):
+        raise ValueError(f"Unsupported feature extractor: {name}")
+    if not pred_feats_all:
+        return {f"{name}_FID": float("nan"), f"{name}_KID": float("nan")}
+    pred_feats = np.concatenate(pred_feats_all, axis=0)
+    target_feats = np.concatenate(target_feats_all, axis=0)
+    return {
+        f"{name}_FID": _frechet_distance(pred_feats, target_feats),
+        f"{name}_KID": _polynomial_mmd(pred_feats, target_feats),
     }
