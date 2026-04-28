@@ -1,8 +1,8 @@
-# FNet3D paper-baseline predict: ER (SEC61B) trained on iPSC, predicting against a549_mantis_2024_11_07 test.
-# Same iPSC best val-loss checkpoint as predict__ipsc_confocal.yml (epoch 183, loss/validate=0.5991).
+# FNet3D paper-baseline predict: mito (TOMM20) trained on iPSC, predicting against a549_mantis_2024_11_05 test.
+# Same iPSC best val-loss checkpoint as predict__ipsc_confocal.yml (epoch 215, loss/validate=0.7571).
 base:
-  - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_07.yml
-  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_05.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
   - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
@@ -10,15 +10,15 @@ base:
 
 benchmark:
   task: virtual_staining
-  organelle: er
+  organelle: mito
   trained_on: ipsc_confocal
-  predict_set: a549_mantis
+  predict_set: a549_mantis_2024_11_05
   model_name: fnet3d_paper
-  experiment_id: er__ipsc_confocal__fnet3d_paper__a549_mantis
+  experiment_id: mito__ipsc_confocal__fnet3d_paper__a549_mantis_2024_11_05
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/checkpoints/epoch=183-step=134688.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fnet3d_paper/checkpoints/epoch=215-step=187056.ckpt
 
 data:
   init_args:
@@ -35,8 +35,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fnet3d_paper.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fnet3d_paper__2024_11_05.zarr
 
 launcher:
-  job_name: FNet3DPaper_PRED_SEC61B_ON_A549
+  job_name: FNet3DPaper_PRED_TOMM20_ON_A549_2024_11_05
   run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

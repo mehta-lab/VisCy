@@ -1,6 +1,6 @@
-# CellDiff predict: mito (TOMM20) trained on iPSC, predicting against a549_mantis_2024_11_21 test.
+# CellDiff predict: mito (TOMM20) trained on iPSC, predicting against a549_mantis_2024_11_05 test.
 base:
-  - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_21.yml
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_05.yml
   - ../../../_internal/shared/model/targets/mito_tomm20.yml
   - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
@@ -11,9 +11,9 @@ benchmark:
   task: virtual_staining
   organelle: mito
   trained_on: ipsc_confocal
-  predict_set: a549_mantis
+  predict_set: a549_mantis_2024_11_05
   model_name: celldiff
-  experiment_id: mito__ipsc_confocal__celldiff__a549_mantis
+  experiment_id: mito__ipsc_confocal__celldiff__a549_mantis_2024_11_05
 
 model:
   init_args:
@@ -37,8 +37,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_celldiff_iterative.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_celldiff_iterative__2024_11_05.zarr
 
 launcher:
-  job_name: CELLDiff_PRED_TOMM20_ON_A549
+  job_name: CELLDiff_PRED_TOMM20_ON_A549_2024_11_05
   run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

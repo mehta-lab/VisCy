@@ -1,0 +1,42 @@
+# FNet3D paper-baseline predict: mito (TOMM20) trained on iPSC, predicting against a549_mantis_2024_11_21 test.
+# Same iPSC best val-loss checkpoint as predict__ipsc_confocal.yml (epoch 215, loss/validate=0.7571).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_21.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_2024_11_21
+  model_name: fnet3d_paper
+  experiment_id: mito__ipsc_confocal__fnet3d_paper__a549_mantis_2024_11_21
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fnet3d_paper/checkpoints/epoch=215-step=187056.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fnet3d_paper__2024_11_21.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_TOMM20_ON_A549_2024_11_21
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

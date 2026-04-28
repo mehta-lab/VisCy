@@ -1,9 +1,8 @@
-# FNet3D paper-baseline predict: mito (TOMM20) trained on iPSC, predicting against a549_mantis_2024_11_21 test.
-# Same iPSC best val-loss checkpoint as predict__ipsc_confocal.yml (epoch 215, loss/validate=0.7571).
+# CellDiff predict: mito (TOMM20) trained on iPSC, predicting against a549_mantis_2024_11_21 test.
 base:
   - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_21.yml
   - ../../../_internal/shared/model/targets/mito_tomm20.yml
-  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
@@ -12,13 +11,15 @@ benchmark:
   task: virtual_staining
   organelle: mito
   trained_on: ipsc_confocal
-  predict_set: a549_mantis
-  model_name: fnet3d_paper
-  experiment_id: mito__ipsc_confocal__fnet3d_paper__a549_mantis
+  predict_set: a549_mantis_2024_11_21
+  model_name: celldiff
+  experiment_id: mito__ipsc_confocal__celldiff__a549_mantis_2024_11_21
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fnet3d_paper/checkpoints/epoch=215-step=187056.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff/checkpoints/last.ckpt
+    predict_method: iterative # denoise, generate, sliding_window, or iterative
+    predict_overlap: [4, 256, 256]
 
 data:
   init_args:
@@ -30,13 +31,14 @@ data:
           subtrahend: mean
           divisor: std
     augmentations: []
+    z_window_size: 40 # 8 for denoise and generate, 40 for iterative and sliding_window.
 
 trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fnet3d_paper.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_celldiff_iterative__2024_11_21.zarr
 
 launcher:
-  job_name: FNet3DPaper_PRED_TOMM20_ON_A549
+  job_name: CELLDiff_PRED_TOMM20_ON_A549_2024_11_21
   run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

@@ -1,11 +1,11 @@
-# FCMAE_VSCyto3D_Pretrained predict: ER (SEC61B) trained on iPSC,
-# predicting against a549_mantis_2024_11_07 test.
+# FCMAE_VSCyto3D_Scratch predict: ER (SEC61B) trained on iPSC,
+# predicting against a549_mantis_2025_08_26 test.
 #
-# TODO: replace ckpt_path once iPSC FCMAE pretrained ER training
-# completes. Expected output (per fit leaf):
-#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500/checkpoints/last.ckpt
+# TODO: replace ckpt_path once iPSC FCMAE scratch ER training completes.
+# Expected output (per fit leaf):
+#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch/checkpoints/last.ckpt
 base:
-  - ../../../_internal/shared/model/predict_sets/a549_mantis_2024_11_07.yml
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_2025_08_26.yml
   - ../../../_internal/shared/model/targets/er_sec61b.yml
   - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
@@ -16,14 +16,14 @@ benchmark:
   task: virtual_staining
   organelle: er
   trained_on: ipsc_confocal
-  predict_set: a549_mantis
-  model_name: fcmae_vscyto3d_pretrained
-  experiment_id: er__ipsc_confocal__fcmae_vscyto3d_pretrained__a549_mantis
+  predict_set: a549_mantis_2025_08_26
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: er__ipsc_confocal__fcmae_vscyto3d_scratch__a549_mantis_2025_08_26
 
 model:
   init_args:
     # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/sec61b/last.ckpt
+    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_scratch/sec61b/last.ckpt
 
 data:
   init_args:
@@ -40,8 +40,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_pretrained.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_scratch__2025_08_26.zarr
 
 launcher:
-  job_name: FCMAE_VSCyto3D_Pretrained_PRED_SEC61B_ON_A549
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_SEC61B_ON_A549_2025_08_26
   run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

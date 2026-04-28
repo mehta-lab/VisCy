@@ -16,9 +16,9 @@ benchmark:
   task: virtual_staining
   organelle: mito
   trained_on: ipsc_confocal
-  predict_set: a549_mantis
+  predict_set: a549_mantis_2024_11_21
   model_name: fcmae_vscyto3d_pretrained
-  experiment_id: mito__ipsc_confocal__fcmae_vscyto3d_pretrained__a549_mantis
+  experiment_id: mito__ipsc_confocal__fcmae_vscyto3d_pretrained__a549_mantis_2024_11_21
 
 model:
   init_args:
@@ -40,8 +40,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_pretrained.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_pretrained__2024_11_21.zarr
 
 launcher:
-  job_name: FCMAE_VSCyto3D_Pretrained_PRED_TOMM20_ON_A549
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_TOMM20_ON_A549_2024_11_21
   run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
