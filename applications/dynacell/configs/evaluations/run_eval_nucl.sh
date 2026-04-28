@@ -45,7 +45,7 @@ source "$(dirname "$0")/.envrc"
 # This script runs the evaluation of the UNetVit3D predictions for the Nucleus in the iPSC dataset.
 dynacell evaluate \
     target_name=nucleus \
-    io.pred_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucleus_unetvit3d.zarr \
+    io.pred_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_unetvit3d.zarr \
     io.pred_channel_name=Nuclei_prediction \
     io.gt_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr \
     io.gt_channel_name=Nuclei \

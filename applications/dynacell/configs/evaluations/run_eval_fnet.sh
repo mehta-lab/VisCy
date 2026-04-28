@@ -14,6 +14,7 @@ uv run dynacell evaluate \
     save.save_dir=/hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations/eval_fnet3d_sec61b \
     compute_feature_metrics=true \
     "feature_extractor.dynaclr.checkpoint='/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt'" \
+    force_recompute.all=true \
 
 # This script runs the evaluation of the FNet3D predictions for the Membrane in the iPSC dataset.
 uv run dynacell evaluate \
@@ -27,6 +28,7 @@ uv run dynacell evaluate \
     save.save_dir=/hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations/eval_fnet3d_membrane \
     compute_feature_metrics=true \
     "feature_extractor.dynaclr.checkpoint='/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt'" \
+    force_recompute.all=true \
 
 # This script runs the evaluation of the FNet3D predictions for the TOMM20 structure in the iPSC dataset.
 uv run dynacell evaluate \
@@ -43,7 +45,7 @@ uv run dynacell evaluate \
     force_recompute.all=true \
 
 # This script runs the evaluation of the FNet3D predictions for the Nucleus in the iPSC dataset.
-dynacell evaluate \
+uv run dynacell evaluate \
     target_name=nucleus \
     io.pred_path=/hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fnet3d_paper.zarr \
     io.pred_channel_name=Nuclei_prediction \
@@ -54,3 +56,4 @@ dynacell evaluate \
     save.save_dir=/hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations/eval_fnet3d_nucleus \
     compute_feature_metrics=true \
     "feature_extractor.dynaclr.checkpoint='/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt'" \
+    force_recompute.all=true \
