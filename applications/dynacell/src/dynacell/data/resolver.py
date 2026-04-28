@@ -121,9 +121,14 @@ def discover_manifest_roots(cli_roots: list[Path] | None = None) -> list[Path]:
     if not roots:
         raise NoManifestRootsError(
             "No dynacell manifest roots configured.\n\n"
-            "Configure via one of:\n"
-            f"  - Env var:        export {_ENV_VAR}=/path/to/datasets\n"
-            "  - Install a provider:  pip install dynacell-paper\n"
+            "VisCy ships its own bundled registry at "
+            "``dynacell._manifests``; this error means the entry-point "
+            "provider declared in applications/dynacell/pyproject.toml "
+            "didn't load.\n\n"
+            "Confirm dynacell was installed cleanly (``uv sync`` from the "
+            "VisCy worktree). To override with a different registry, set "
+            f"``{_ENV_VAR}=/path/to/datasets`` (env var) or pass "
+            "``cli_roots=`` to ``discover_manifest_roots``.\n"
         )
     return roots
 

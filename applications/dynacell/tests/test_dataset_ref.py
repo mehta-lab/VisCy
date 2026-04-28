@@ -121,14 +121,19 @@ def test_unknown_target_raises_target_not_found(monkeypatch, tmp_path):
     assert "sec61b" in msg  # available targets listed
 
 
-def test_no_roots_raises_with_install_hint(monkeypatch):
-    """Unset env var + no cli + no entry points → NoManifestRootsError."""
+def test_no_roots_raises_with_helpful_error(monkeypatch):
+    """Unset env var + no cli + no entry points → NoManifestRootsError.
+
+    Patches ``_entry_point_roots`` to return ``[]`` to simulate a
+    consumer that uninstalled or excluded VisCy's bundled registry.
+    """
     monkeypatch.delenv("DYNACELL_MANIFEST_ROOTS", raising=False)
+    monkeypatch.setattr("dynacell.data.resolver._entry_point_roots", lambda: [])
     with pytest.raises(NoManifestRootsError) as exc:
         discover_manifest_roots()
     msg = str(exc.value)
     assert "DYNACELL_MANIFEST_ROOTS" in msg
-    assert "dynacell-paper" in msg
+    assert "dynacell._manifests" in msg
 
 
 def test_cli_roots_take_precedence_over_env(monkeypatch, tmp_path):

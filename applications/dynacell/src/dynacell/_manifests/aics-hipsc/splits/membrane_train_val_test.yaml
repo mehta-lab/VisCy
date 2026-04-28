@@ -1,0 +1,12 @@
+split_version: "1.0"
+random_seed: 42
+selection_criteria:
+  organelle: Membrane
+  source_store: cell.zarr
+  notes: "Membrane channel selected from shared cell.zarr (also serves nucleus target)."
+train:
+  count: 500
+  fovs: []
+test:
+  count: 100
+  fovs: []

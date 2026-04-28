@@ -83,6 +83,12 @@ urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 scripts.dynacell = "dynacell.__main__:main_cli"
 
+# Default manifest registry. Auto-discovered by
+# ``dynacell.data.resolver.discover_manifest_roots`` so the resolver
+# works without ``DYNACELL_MANIFEST_ROOTS`` on a fresh clone. Override
+# the env var (or pass cli_roots) to point at a different registry.
+entry-points."dynacell.manifest_roots".dynacell_default = "dynacell._manifests"
+
 [dependency-groups]
 dev = [ { include-group = "test" } ]
 test = [

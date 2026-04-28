@@ -18,29 +18,21 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
 
 
-FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
-
-
 @pytest.fixture(scope="module")
 def rendered_celldiff_sbatch():
     """Render the celldiff leaf once per module; tests below share the output.
 
-    Module-scoped fixtures run before conftest's function-scoped autouse
-    monkeypatch, so ``DYNACELL_MANIFEST_ROOTS`` must be set here via a
-    module-scoped ``MonkeyPatch``. ``capsys`` is also function-scoped —
-    use ``contextlib.redirect_stdout`` instead.
+    Resolver auto-discovers the bundled manifest registry via the
+    ``dynacell.manifest_roots`` entry point — no ``DYNACELL_MANIFEST_ROOTS``
+    setup needed. ``capsys`` is function-scoped, so use
+    ``contextlib.redirect_stdout`` to capture the print-script output.
     """
-    mp = pytest.MonkeyPatch()
-    mp.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
-    try:
-        leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = sbj.submit([str(leaf), "--print-script"])
-        assert rc == 0
-        yield buf.getvalue()
-    finally:
-        mp.undo()
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = sbj.submit([str(leaf), "--print-script"])
+    assert rc == 0
+    return buf.getvalue()
 
 
 def test_parse_override_scalar_and_nested():

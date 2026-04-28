@@ -1,5 +1,6 @@
 """Test fixtures for dynacell application tests."""
 
+from importlib.resources import files
 from pathlib import Path
 
 import numpy as np
@@ -9,23 +10,18 @@ from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
 
-FIXTURE_MANIFEST_ROOT = Path(__file__).resolve().parent / "fixtures" / "manifests"
+# Bundled manifest registry. Resolver auto-discovers via the
+# ``dynacell.manifest_roots`` entry point declared in pyproject.toml, so
+# tests don't need to set ``DYNACELL_MANIFEST_ROOTS`` themselves. This
+# constant is kept for tests that need to construct an explicit roots
+# argument (e.g., precedence tests that override the env var).
+FIXTURE_MANIFEST_ROOT = Path(str(files("dynacell._manifests")))
 
 
 @pytest.fixture
 def fixture_manifest_root() -> Path:
-    """Path to the on-disk manifest fixtures (``aics-hipsc`` etc.)."""
+    """Path to the bundled manifest registry (``aics-hipsc`` etc.)."""
     return FIXTURE_MANIFEST_ROOT
-
-
-@pytest.fixture(autouse=True)
-def _dynacell_manifest_root_env(monkeypatch):
-    """Point the resolver at the on-disk fixture manifest for every test.
-
-    Individual tests override this via ``monkeypatch.setenv`` or
-    ``monkeypatch.delenv`` to exercise discovery-precedence logic.
-    """
-    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(FIXTURE_MANIFEST_ROOT))
 
 
 @pytest.fixture

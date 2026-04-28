@@ -1,0 +1,11 @@
+split_version: "1.0"
+random_seed: 42
+selection_criteria:
+  organelle: SEC61B
+  min_depth: 44
+train:
+  count: 500
+  fovs: []
+test:
+  count: 100
+  fovs: []

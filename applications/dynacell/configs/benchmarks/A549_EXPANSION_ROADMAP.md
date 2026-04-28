@@ -33,15 +33,18 @@ duplication that would otherwise blow up across ~60 new leaves.
 
 ## Remaining work
 
-### Stage 5 — finish the VisCy fixture mirror
+### Stage 5 — VisCy bundled manifest registry
 
 The canonical a549-mantis manifests live in `dynacell-paper`. VisCy
-integration tests still resolve only `aics-hipsc` (single fixture
-under `applications/dynacell/tests/fixtures/manifests/`). Before
-Stage 6 can be tested without a `dynacell-paper` install, add an
-`a549-mantis/manifest.yaml` fixture mirror (one date is enough — pick
-the one currently consumed by Stage 7's joint leaf,
-`2024_11_07/manifest.yaml`).
+ships its own copy of the canonical YAMLs as a bundled registry under
+`applications/dynacell/src/dynacell/_manifests/`, registered as a
+`dynacell.manifest_roots` entry-point provider in
+`applications/dynacell/pyproject.toml`. The resolver auto-discovers
+this without any `DYNACELL_MANIFEST_ROOTS` env var configuration —
+works on a fresh clone for any Stage 6 a549 leaf. Drift between the
+mirror and dynacell-paper canonical is guarded by
+`tests/test_manifest_sync.py`, which is skipped unless
+`DYNACELL_PAPER_PATH` is set (typical CI / local dev environment).
 
 The a549 zarr normalization-stats gap (every `mantis_v1/<plate>/<split>/<GENE>.zarr`
 missing `normalization` zattrs at plate and position level) closed on
