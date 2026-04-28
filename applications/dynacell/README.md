@@ -90,6 +90,22 @@ without the submit tool.
 See `configs/benchmarks/virtual_staining/README.md` for the shared-axis
 layout, composition order, and reserved-key contract.
 
+## Manifest registry (drift policy)
+
+Benchmark leaves resolve `benchmark.dataset_ref` lookups against a bundled
+manifest registry shipped with the dynacell wheel at
+`applications/dynacell/src/dynacell/_manifests/`. The resolver auto-discovers
+this via the `dynacell.manifest_roots` entry point, so `uv run dynacell
+predict -c <leaf>` works out of the box without `DYNACELL_MANIFEST_ROOTS`.
+Override the env var to point at an alternate registry for testing.
+
+VisCy is the source of truth for manifest **content**; `dynacell-paper`
+remains the source of truth for manifest **authoring**. When a new plate
+is preprocessed in `dynacell-paper`, mirror the new manifest (and its
+`splits/` siblings) into `applications/dynacell/src/dynacell/_manifests/`.
+The `tests/test_manifest_sync.py` suite catches drift when run with
+`DYNACELL_PAPER_PATH=/path/to/dynacell-paper` set.
+
 ## Supported subcommands
 
 - `fit` and `validate`: fully supported for all architectures
