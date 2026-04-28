@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dynamic = [ "version" ]
 dependencies = [
   "click",
+  "cp-measure",
   "iohub>=0.3a2",
   "numpy>=2.4.1",
   "pandas",

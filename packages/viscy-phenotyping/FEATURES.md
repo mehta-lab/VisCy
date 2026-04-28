@@ -248,3 +248,137 @@ raw_mCherry_EX561_EM600-37_intensity_cv
 
 Nuclear shape features (`circularity`, `convexity`, `radial_std_norm`, `fsd_1`…`fsd_6`)
 have no channel prefix.
+
+---
+
+## CellProfiler Measurements (`cp-measure`)
+
+These features are computed using the
+[cp-measure](https://github.com/afermg/cp_measure) library, which provides
+faithful Python implementations of CellProfiler's measurement modules. They
+complement the custom features above with established, widely-used morphological
+and intensity descriptors.
+
+### Naming convention
+
+| Feature group | Prefix in CSV |
+|---|---|
+| MeasureObjectSizeShape | `cp_{feature}` |
+| MeasureObjectIntensity | `{channel}_cp_{feature}` |
+| MeasureTexture | `{channel}_cp_{feature}` |
+| MeasureGranularity | `{channel}_cp_{feature}` |
+
+---
+
+## cp MeasureObjectSizeShape
+
+**Source:** `features_cp_measure.py` — `cp_sizeshape_features(mask)`
+**Input:** Binary nuclear mask (no intensity image)
+**Prefix:** `cp_`
+
+| Feature | Description |
+|---|---|
+| `cp_Area` | Number of pixels in the nucleus. |
+| `cp_BoundingBoxArea` | Area of the nucleus bounding box. |
+| `cp_ConvexArea` | Area of the convex hull of the nucleus. |
+| `cp_EquivalentDiameter` | Diameter of a circle with the same area as the nucleus. |
+| `cp_Perimeter` | Perimeter length of the nucleus boundary. |
+| `cp_PerimeterCrofton` | Perimeter estimated using the Crofton formula (more accurate for digital images). |
+| `cp_MajorAxisLength` | Length of the major axis of the best-fit ellipse. |
+| `cp_MinorAxisLength` | Length of the minor axis of the best-fit ellipse. |
+| `cp_Eccentricity` | Eccentricity of the best-fit ellipse (0 = circle, 1 = line). |
+| `cp_Orientation` | Angle of the major axis relative to the horizontal (degrees). |
+| `cp_FormFactor` | 4π × Area / Perimeter². Equals 1.0 for a perfect circle. |
+| `cp_Extent` | Nucleus area / bounding-box area. Low = non-compact shape. |
+| `cp_Solidity` | Nucleus area / convex-hull area. Low = concave or irregular shape. |
+| `cp_Compactness` | Mean squared distance from centroid to boundary, normalised by area. |
+| `cp_EulerNumber` | Number of objects minus number of holes. |
+| `cp_MaximumRadius` | Maximum distance from centroid to boundary. |
+| `cp_MeanRadius` | Mean distance from centroid to boundary. |
+| `cp_MedianRadius` | Median distance from centroid to boundary. |
+| `cp_FilledArea` | Area after filling holes in the nucleus mask. |
+| `cp_MinFeretDiameter` | Minimum caliper diameter (shortest span across the nucleus). |
+| `cp_MaxFeretDiameter` | Maximum caliper diameter (longest span across the nucleus). |
+| `cp_HuMoment_0` … `cp_HuMoment_6` | Seven Hu invariant moments — rotation-, scale-, and translation-invariant shape descriptors. |
+| `cp_Zernike_n_m` | Zernike polynomial magnitudes up to degree 9. Orthogonal shape descriptors on the unit disk. |
+| `cp_SpatialMoment_p_q` | Raw spatial moments of the binary mask. |
+| `cp_CentralMoment_p_q` | Translation-invariant central moments. |
+| `cp_NormalizedMoment_p_q` | Scale-invariant normalised central moments. |
+| `cp_InertiaTensor_i_j` | Elements of the 2×2 inertia tensor. |
+| `cp_InertiaTensorEigenvalues_0/1` | Principal moments of inertia (eigenvalues of the inertia tensor). |
+| `cp_Center_X/Y` | Centroid coordinates (pixels, patch-relative). |
+| `cp_BoundingBoxMinimum/Maximum_X/Y` | Bounding-box corner coordinates. |
+
+---
+
+## cp MeasureObjectIntensity
+
+**Source:** `features_cp_measure.py` — `cp_intensity_features(image, mask)`
+**Input:** Single-channel fluorescence patch; nuclear mask
+**Prefix:** `{channel}_cp_`
+
+| Feature | Description |
+|---|---|
+| `Intensity_IntegratedIntensity` | Sum of all pixel intensities inside the nucleus. |
+| `Intensity_MeanIntensity` | Mean intensity inside the nucleus. |
+| `Intensity_StdIntensity` | Standard deviation of intensity inside the nucleus. |
+| `Intensity_MinIntensity` | Minimum pixel intensity inside the nucleus. |
+| `Intensity_MaxIntensity` | Maximum pixel intensity inside the nucleus. |
+| `Intensity_MassDisplacement` | Distance between intensity centre-of-mass and geometric centroid, normalised by object radius. |
+| `Intensity_LowerQuartileIntensity` | 25th-percentile intensity inside the nucleus. |
+| `Intensity_MedianIntensity` | Median intensity inside the nucleus. |
+| `Intensity_MADIntensity` | Median absolute deviation of intensities inside the nucleus. |
+| `Intensity_UpperQuartileIntensity` | 75th-percentile intensity inside the nucleus. |
+| `Intensity_IntegratedIntensityEdge` | Sum of pixel intensities on the nucleus boundary edge. |
+| `Intensity_MeanIntensityEdge` | Mean intensity on the nucleus boundary edge. |
+| `Intensity_StdIntensityEdge` | Standard deviation of intensity on the nucleus boundary edge. |
+| `Intensity_MinIntensityEdge` | Minimum intensity on the nucleus boundary edge. |
+| `Intensity_MaxIntensityEdge` | Maximum intensity on the nucleus boundary edge. |
+| `Location_CenterMassIntensity_X/Y` | X/Y coordinates of the intensity-weighted centroid. |
+| `Location_MaxIntensity_X/Y` | X/Y coordinates of the brightest pixel inside the nucleus. |
+
+---
+
+## cp MeasureTexture
+
+**Source:** `features_cp_measure.py` — `cp_texture_features(image, mask)`
+**Input:** Single-channel fluorescence patch; nuclear mask
+**Prefix:** `{channel}_cp_`
+
+Haralick features computed from the Grey-Level Co-occurrence Matrix (GLCM) at
+scale 3 px and 4 directions (0°, 45°, 90°, 135°), quantised to 256 grey levels.
+Feature names follow the pattern `{Property}_{scale}_{direction}_{levels}`.
+
+| Feature | Description |
+|---|---|
+| `AngularSecondMoment_3_{dir}_256` | Uniformity of the GLCM (Angular Second Moment). High = repetitive or homogeneous texture. |
+| `Contrast_3_{dir}_256` | Local intensity variation between neighbouring pixels. High = high-contrast, heterogeneous texture. |
+| `Correlation_3_{dir}_256` | Linear correlation between neighbouring pixel grey levels. |
+| `Variance_3_{dir}_256` | Variance of grey-level intensities in the GLCM. |
+| `InverseDifferenceMoment_3_{dir}_256` | Homogeneity. High = similar neighbouring pixels (smooth texture). |
+| `SumAverage_3_{dir}_256` | Mean of the sum of grey-level pairs. |
+| `SumVariance_3_{dir}_256` | Variance of the sum of grey-level pairs. |
+| `SumEntropy_3_{dir}_256` | Entropy of the sum distribution. |
+| `Entropy_3_{dir}_256` | Shannon entropy of the full GLCM. High = complex, non-repetitive texture. |
+| `DifferenceVariance_3_{dir}_256` | Variance of the difference between grey-level pairs. |
+| `DifferenceEntropy_3_{dir}_256` | Entropy of the difference distribution. |
+| `InfoMeas1_3_{dir}_256` | Information measure of correlation 1 (HXY1). |
+| `InfoMeas2_3_{dir}_256` | Information measure of correlation 2 (HXY2). |
+
+Directions: `00` = 0°, `01` = 45°, `02` = 90°, `03` = 135°.
+
+---
+
+## cp MeasureGranularity
+
+**Source:** `features_cp_measure.py` — `cp_granularity_features(image, mask)`
+**Input:** Single-channel fluorescence patch; nuclear mask
+**Prefix:** `{channel}_cp_`
+
+The granularity spectrum quantifies the size distribution of bright structures
+by applying morphological opening at increasing scales and measuring the fraction
+of signal removed at each scale.
+
+| Feature | Description |
+|---|---|
+| `Granularity_1` … `Granularity_16` | Fraction of total image intensity removed by morphological opening at scale r = 1..16 pixels. High at small r = fine-grained puncta or dense small spots. High at large r = coarse or large bright regions. The peak of the spectrum indicates the dominant size scale of bright structures in the patch. |

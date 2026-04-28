@@ -2,6 +2,12 @@
 
 import numpy as np
 
+from viscy_phenotyping.features_cp_measure import (
+    cp_granularity_features,
+    cp_intensity_features,
+    cp_sizeshape_features,
+    cp_texture_features,
+)
 from viscy_phenotyping.features_density import density_features
 from viscy_phenotyping.features_gradient import gradient_features
 from viscy_phenotyping.features_radial import concentric_uniformity_features, radial_distribution_features
@@ -47,6 +53,9 @@ def compute_cell_features(
     # Problem 6: nuclear shape — mask only, no channel prefix
     features.update(shape_features(mask))
 
+    # cp-measure: MeasureObjectSizeShape — mask only, no channel prefix
+    features.update({"cp_" + k: v for k, v in cp_sizeshape_features(mask).items()})
+
     for ch_idx, ch_name in enumerate(channel_names):
         ch_img = img_patch[ch_idx].astype(np.float32)
         prefix = ch_name.replace(" ", "_") + "_"
@@ -63,5 +72,10 @@ def compute_cell_features(
         features.update({prefix + k: v for k, v in structure_features(ch_img).items()})
         # Problem 7: gradient changes (full patch; mask used only for signal_to_background)
         features.update({prefix + k: v for k, v in gradient_features(ch_img, mask).items()})
+
+        # cp-measure: MeasureObjectIntensity, MeasureTexture, MeasureGranularity
+        features.update({prefix + "cp_" + k: v for k, v in cp_intensity_features(ch_img, mask).items()})
+        features.update({prefix + "cp_" + k: v for k, v in cp_texture_features(ch_img, mask).items()})
+        features.update({prefix + "cp_" + k: v for k, v in cp_granularity_features(ch_img, mask).items()})
 
     return features
