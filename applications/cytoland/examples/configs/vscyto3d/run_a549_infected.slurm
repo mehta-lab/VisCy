@@ -10,7 +10,6 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus=4
 #SBATCH --mem=1024G
-#SBATCH --constraint=h200
 #SBATCH --output=/hpc/projects/comp.micro/virtual_staining/models/cytoland/a549_infected/vscyto3d/slurm/%j.out
 #SBATCH --error=/hpc/projects/comp.micro/virtual_staining/models/cytoland/a549_infected/vscyto3d/slurm/%j.err
 
