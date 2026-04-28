@@ -160,10 +160,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--parsable",
         action="store_true",
-        help="Invoke sbatch with --parsable and forward the parsed job ID to "
-        "stdout (instead of sbatch's default 'Submitted batch job <id>' "
-        "prose). Default off; manual invocations see the existing prose. "
-        "Useful for orchestration that needs to capture the job ID.",
+        help="Invoke sbatch with --parsable and forward sbatch's parsable "
+        "stdout (typically the bare job id, or 'job_id;cluster' on "
+        "multi-cluster setups) to this process's stdout, in place of "
+        "sbatch's default 'Submitted batch job <id>' prose. Default off; "
+        "manual invocations see the existing prose. Useful for "
+        "orchestration that needs to capture sbatch's machine-readable "
+        "output.",
     )
     return ap.parse_args(argv)
 
@@ -266,13 +269,15 @@ def submit(argv: list[str] | None = None) -> int:
         if args.dependency:
             sbatch_cmd.append(f"--dependency={args.dependency}")
         sbatch_cmd.append(str(sbatch_path))
-        # --parsable mode: capture stdout (just the numeric job ID) and
-        # forward to our caller, so an orchestrator can chain submissions
-        # by job ID. Without --parsable, sbatch's prose ("Submitted batch
-        # job <id>") flows through to the parent's stdout untouched —
-        # backward-compatible with every existing manual workflow.
+        # --parsable mode: capture only sbatch's stdout (its parsable
+        # output) and forward to our caller, so an orchestrator can chain
+        # submissions. Stderr stays attached to the parent so any sbatch
+        # warnings or diagnostics remain visible. Without --parsable,
+        # sbatch's prose ("Submitted batch job <id>") flows through to the
+        # parent's stdout untouched — backward-compatible with every
+        # existing manual workflow.
         if args.parsable:
-            result = subprocess.run(sbatch_cmd, check=True, capture_output=True, text=True)
+            result = subprocess.run(sbatch_cmd, check=True, stdout=subprocess.PIPE, text=True)
             print(result.stdout.strip())
         else:
             subprocess.run(sbatch_cmd, check=True)

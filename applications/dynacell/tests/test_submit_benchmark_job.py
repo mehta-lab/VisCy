@@ -317,7 +317,11 @@ def test_sbatch_cmd_with_parsable(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(sbj.subprocess, "run", _fake_run)
     sbj.submit([str(leaf), "--parsable"])
     assert "--parsable" in captured["cmd"]
-    assert captured["kwargs"]["capture_output"] is True
+    # stdout captured for forwarding; stderr left attached so sbatch
+    # warnings/diagnostics remain visible to the operator.
+    assert captured["kwargs"]["stdout"] is sbj.subprocess.PIPE
+    assert "stderr" not in captured["kwargs"]
+    assert "capture_output" not in captured["kwargs"]
     assert captured["kwargs"]["text"] is True
     out = capsys.readouterr().out
     assert "67890" in out
