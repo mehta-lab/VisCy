@@ -149,6 +149,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="key.path=value",
         help="dotlist override, deep-merged after compose (repeatable)",
     )
+    ap.add_argument(
+        "--dependency",
+        default=None,
+        metavar="afterok:<job_id>",
+        help="SLURM dependency expression for the rendered sbatch job. "
+        "When set, sbatch is invoked with --dependency=<value>. Default off; "
+        "manual invocations behave as before.",
+    )
+    ap.add_argument(
+        "--parsable",
+        action="store_true",
+        help="Invoke sbatch with --parsable and forward the parsed job ID to "
+        "stdout (instead of sbatch's default 'Submitted batch job <id>' "
+        "prose). Default off; manual invocations see the existing prose. "
+        "Useful for orchestration that needs to capture the job ID.",
+    )
     return ap.parse_args(argv)
 
 
@@ -244,7 +260,22 @@ def submit(argv: list[str] | None = None) -> int:
         resolved_path.write_text(yaml.safe_dump(composed, default_flow_style=False))
         sbatch_path.write_text(rendered)
     if not skip_submit:
-        subprocess.run(["sbatch", str(sbatch_path)], check=True)
+        sbatch_cmd = ["sbatch"]
+        if args.parsable:
+            sbatch_cmd.append("--parsable")
+        if args.dependency:
+            sbatch_cmd.append(f"--dependency={args.dependency}")
+        sbatch_cmd.append(str(sbatch_path))
+        # --parsable mode: capture stdout (just the numeric job ID) and
+        # forward to our caller, so an orchestrator can chain submissions
+        # by job ID. Without --parsable, sbatch's prose ("Submitted batch
+        # job <id>") flows through to the parent's stdout untouched —
+        # backward-compatible with every existing manual workflow.
+        if args.parsable:
+            result = subprocess.run(sbatch_cmd, check=True, capture_output=True, text=True)
+            print(result.stdout.strip())
+        else:
+            subprocess.run(sbatch_cmd, check=True)
 
     return 0
 
