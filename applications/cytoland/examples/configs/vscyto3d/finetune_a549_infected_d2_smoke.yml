@@ -42,7 +42,7 @@ trainer:
   accelerator: gpu
   strategy: auto
   devices: 1
-  precision: 16-mixed
+  precision: bf16-mixed
   max_epochs: 1
   limit_train_batches: 2
   limit_val_batches: 2
@@ -55,3 +55,7 @@ data:
     # batch_size must be divisible by augmentations.RandWeightedCropd.num_samples (4).
     batch_size: 4
     num_workers: 2
+    # Disable mmap_preload for the smoke — building the full D2 cache would
+    # dominate smoke walltime. Prod leaves keep mmap_preload: true.
+    mmap_preload: false
+    persistent_workers: false

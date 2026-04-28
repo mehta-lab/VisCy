@@ -66,7 +66,9 @@ trainer:
   # find_unused_parameters=False errors at step 1. Matches dynacell
   # fcmae_vscyto3d_fit.yml and vs_test/finetune_3d.py:215.
   strategy: ddp_find_unused_parameters_true
-  precision: 16-mixed
+  # bf16-mixed avoids the Hopper fp16 cuDNN slowdown documented in
+  # applications/dynacell/configs/examples/fcmae_hopper_slowdown.md.
+  precision: bf16-mixed
   # Matches the canonical vs_test finetune budget that produced the
   # published VSCyto3D ckpt (stopped at epoch 83 on val loss).
   max_epochs: 100
@@ -103,6 +105,8 @@ data:
           split_ratio: 0.8
           batch_size: 16
           num_workers: 8
+          persistent_workers: true
+          mmap_preload: true
           yx_patch_size: [384, 384]
           augmentations:
             - class_path: viscy_transforms.RandWeightedCropd
@@ -175,6 +179,8 @@ data:
           split_ratio: 0.8
           batch_size: 16
           num_workers: 8
+          persistent_workers: true
+          mmap_preload: true
           yx_patch_size: [384, 384]
           augmentations:
             - class_path: viscy_transforms.RandWeightedCropd
@@ -249,6 +255,8 @@ data:
           split_ratio: 0.8
           batch_size: 16
           num_workers: 8
+          persistent_workers: true
+          mmap_preload: true
           yx_patch_size: [384, 384]
           augmentations:
             - class_path: viscy_transforms.RandWeightedCropd

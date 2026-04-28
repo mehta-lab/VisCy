@@ -10,6 +10,8 @@ data:
     split_ratio: 0.8
     batch_size: 16
     num_workers: 8
+    persistent_workers: true
+    mmap_preload: true
     yx_patch_size: [384, 384]
     # CPU: normalize, then weighted-sample 4 crops per FOV at full Z depth
     # (20, 600, 600). Weighting by the DAPI (nucleus) channel biases crops
