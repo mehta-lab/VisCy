@@ -19,8 +19,8 @@ targets:
     display_name: ER (Sec61b)
     target_channel: Structure
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/SEC61B.zarr
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/SEC61B.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/SEC61B.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/SEC61B.ozx
     splits: splits/sec61b_train_test.yaml
   tomm20:
     gene: TOMM20
@@ -28,6 +28,6 @@ targets:
     display_name: Mitochondria (TOMM20)
     target_channel: Structure
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/TOMM20.zarr
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/TOMM20.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/TOMM20.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/TOMM20.ozx
     splits: splits/tomm20_train_test.yaml

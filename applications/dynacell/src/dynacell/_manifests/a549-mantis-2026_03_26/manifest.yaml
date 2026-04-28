@@ -18,8 +18,8 @@ targets:
     display_name: Nucleus (H2B)
     target_channel: Nuclei
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/train/H2B.zarr
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/train/H2B.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.ozx
     splits: splits/h2b_train_test.yaml
   caax:
     gene: CAAX
@@ -27,6 +27,6 @@ targets:
     display_name: Membrane (CAAX)
     target_channel: Membrane
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/train/CAAX.zarr
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/train/CAAX.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.ozx
     splits: splits/caax_train_test.yaml

@@ -19,6 +19,6 @@ targets:
     display_name: ER (Sec61b)
     target_channel: Structure
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_31_A549_SEC61_ZIKV_DENV/train/SEC61B.zarr
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_31_A549_SEC61_ZIKV_DENV/test/SEC61B.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_31_A549_SEC61_ZIKV_DENV/train/SEC61B.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_31_A549_SEC61_ZIKV_DENV/test/SEC61B.ozx
     splits: splits/sec61b_train_test.yaml

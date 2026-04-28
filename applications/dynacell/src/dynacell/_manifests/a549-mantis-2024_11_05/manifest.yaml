@@ -19,6 +19,6 @@ targets:
     display_name: Mitochondria (TOMM20)
     target_channel: Structure
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_05_A549_TOMM20_ZIKV_DENV/train/TOMM20.zarr
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_05_A549_TOMM20_ZIKV_DENV/test/TOMM20.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_05_A549_TOMM20_ZIKV_DENV/train/TOMM20.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_05_A549_TOMM20_ZIKV_DENV/test/TOMM20.ozx
     splits: splits/tomm20_train_test.yaml
