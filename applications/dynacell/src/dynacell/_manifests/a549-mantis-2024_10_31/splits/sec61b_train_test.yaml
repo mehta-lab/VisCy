@@ -1,0 +1,24 @@
+split_version: '1.0'
+random_seed: 0
+selection_criteria:
+  source: a549-mantis authoring splits
+  plate: 2024_10_31_A549_SEC61_ZIKV_DENV
+  target: sec61b
+train:
+  count: 8
+  fovs:
+  - C/2/000000
+  - C/2/000001
+  - C/2/001000
+  - C/2/001001
+  - C/2/002000
+  - C/2/002001
+  - C/4/002000
+  - C/4/002001
+test:
+  count: 4
+  fovs:
+  - C/4/000000
+  - C/4/000001
+  - C/4/001000
+  - C/4/001001

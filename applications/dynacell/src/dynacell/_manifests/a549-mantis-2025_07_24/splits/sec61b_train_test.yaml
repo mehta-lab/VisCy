@@ -1,0 +1,24 @@
+split_version: '1.0'
+random_seed: 0
+selection_criteria:
+  source: a549-mantis authoring splits
+  plate: 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
+  target: sec61b
+train:
+  count: 2
+  fovs:
+  - A/1/002000
+  - A/1/002001
+test:
+  count: 10
+  fovs:
+  - A/1/000000
+  - A/1/000001
+  - A/1/001000
+  - A/1/001001
+  - A/2/000000
+  - A/2/000001
+  - A/2/001000
+  - A/2/001001
+  - A/2/002000
+  - A/2/002001

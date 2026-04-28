@@ -1,0 +1,30 @@
+split_version: '1.0'
+random_seed: 0
+selection_criteria:
+  source: a549-mantis authoring splits
+  plate: 2025_08_26_A549_SEC61_TOMM20_ZIKV
+  target: tomm20
+train:
+  count: 9
+  fovs:
+  - A/2/001000
+  - A/2/001001
+  - A/2/001002
+  - A/2/002000
+  - A/2/002001
+  - A/2/002002
+  - B/2/002000
+  - B/2/002001
+  - B/2/002002
+test:
+  count: 9
+  fovs:
+  - A/2/000000
+  - A/2/000001
+  - A/2/000002
+  - B/2/000000
+  - B/2/000001
+  - B/2/000002
+  - B/2/001000
+  - B/2/001001
+  - B/2/001002

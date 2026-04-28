@@ -1,0 +1,33 @@
+name: a549-mantis-2025_08_26
+version: '1'
+description: "A549 mantis 2025_08_26 \u2014 sec61b, tomm20 at 2-h odd-hpi grid (native_t=41,\
+  \ dt=30.0 min, hpi_start=3.0)"
+cell_type: A549
+imaging_modality: mantis-lightsheet
+spacing:
+  z: 0.174
+  y: 0.1494
+  x: 0.1494
+channels:
+  source: Phase3D
+  auxiliary:
+  - Brightfield
+targets:
+  sec61b:
+    gene: SEC61B
+    organelle: er
+    display_name: ER (Sec61b)
+    target_channel: Structure
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/SEC61B.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/SEC61B.zarr
+    splits: splits/sec61b_train_test.yaml
+  tomm20:
+    gene: TOMM20
+    organelle: mitochondria
+    display_name: Mitochondria (TOMM20)
+    target_channel: Structure
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/TOMM20.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/TOMM20.zarr
+    splits: splits/tomm20_train_test.yaml
