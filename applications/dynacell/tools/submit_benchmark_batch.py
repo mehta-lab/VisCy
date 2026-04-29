@@ -30,6 +30,12 @@ Usage::
         $LEAVES/predict__a549_mantis_2025_08_26.yml \
         --job-name FNet3DPaper_PRED_SEC61B_ON_A549_ALL \
         --dry-run
+
+Re-running over plates whose output stores already contain the prediction
+channel requires ``--overwrite`` (a dedicated alias that walks
+``trainer.callbacks`` and sets ``HCSPredictionWriter.init_args.overwrite=True``
+on every leaf). Plain ``--override`` deep-merges by dict key only and cannot
+reach list elements.
 """
 
 from __future__ import annotations
@@ -43,11 +49,12 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from dynacell._compose_hook import _dynacell_ref_resolver
-from viscy_utils.compose import load_composed_config
+from viscy_utils.compose import deep_merge, load_composed_config
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -71,6 +78,64 @@ class SbatchTemplate(string.Template):
     """``@@`` delimiter to pass shell ``$VAR`` through verbatim."""
 
     delimiter = "@@"
+
+
+_PRED_WRITER_CLASS_SUFFIX = "HCSPredictionWriter"
+
+
+def _parse_override(token: str) -> tuple[list[str], Any]:
+    """Parse ``key.path=value`` into (path-segments, parsed-value).
+
+    Mirrors :func:`submit_benchmark_job._parse_override`. List indexing
+    syntax (``foo[0].bar``) is *not* supported — :func:`deep_merge`
+    operates on dict keys only. Use ``--overwrite`` for the prediction
+    writer's overwrite flag and accept that other list-element overrides
+    require editing the leaf YAML.
+    """
+    if "=" not in token:
+        raise SystemExit(f"--override {token!r}: missing '=' (expected key.path=value)")
+    key, value = token.split("=", 1)
+    if value.startswith("${"):
+        raise SystemExit(f"--override {token!r}: ${{...}} interpolation is not supported")
+    parsed = yaml.safe_load(value)
+    return key.split("."), parsed
+
+
+def _apply_override(composed: dict, path: list[str], value: Any) -> dict:
+    """Deep-merge a single dotlist override and return the new config."""
+    nested: Any = value
+    for seg in reversed(path):
+        nested = {seg: nested}
+    return deep_merge(composed, nested)
+
+
+def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
+    """Set ``init_args.overwrite=True`` on every ``HCSPredictionWriter`` callback.
+
+    Mutates ``composed`` in place. Walks ``trainer.callbacks`` and
+    matches by ``class_path`` ending in ``HCSPredictionWriter`` — robust
+    against re-ordered callback lists and additional callbacks
+    (``LearningRateMonitor``, etc.). Raises if no writer is found, since
+    that means the alias cannot do what the user asked.
+    """
+    callbacks = composed.get("trainer", {}).get("callbacks", [])
+    if not isinstance(callbacks, list):
+        raise SystemExit(
+            f"{leaf_path}: trainer.callbacks must be a list to use --overwrite (got {type(callbacks).__name__})"
+        )
+    matched = 0
+    for cb in callbacks:
+        if not isinstance(cb, dict):
+            continue
+        if str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX):
+            cb.setdefault("init_args", {})["overwrite"] = True
+            matched += 1
+    if matched == 0:
+        class_paths = [cb.get("class_path") for cb in callbacks if isinstance(cb, dict)]
+        raise SystemExit(
+            f"{leaf_path}: --overwrite requested but no HCSPredictionWriter callback "
+            f"found under trainer.callbacks (got class_paths={class_paths!r})"
+        )
 
 
 def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str:
@@ -115,6 +180,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--dry-run", action="store_true", help="render artifacts but don't sbatch")
     ap.add_argument("--print-script", action="store_true", help="print rendered sbatch to stdout, no writes")
     ap.add_argument("--parsable", action="store_true", help="invoke sbatch with --parsable")
+    ap.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="KEY.PATH=VALUE",
+        help="dotlist override applied to every leaf after compose, deep-merged. "
+        "Repeatable. ${...} interpolation not supported. Note: list-index syntax "
+        "(callbacks[0]) is NOT honored — deep_merge operates on dict keys. Use "
+        "--overwrite for the common case of forcing prediction-writer overwrite.",
+    )
+    ap.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="set init_args.overwrite=True on every HCSPredictionWriter callback "
+        "in every leaf, after compose. Required to re-run a leaf whose output "
+        "store already contains the prediction channel. Off by default.",
+    )
     return ap.parse_args(argv)
 
 
@@ -139,10 +221,16 @@ def submit(argv: list[str] | None = None) -> int:
     if len(args.leaves) < 1:
         raise SystemExit("at least one leaf is required")
 
+    parsed_overrides = [_parse_override(t) for t in args.override]
+
     composed_list: list[dict] = []
     launcher_list: list[dict] = []
     for leaf in args.leaves:
         composed = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
+        for path, value in parsed_overrides:
+            composed = _apply_override(composed, path, value)
+        if args.overwrite:
+            _apply_overwrite_alias(composed, leaf)
         if "launcher" not in composed:
             raise SystemExit(f"{leaf}: missing required 'launcher:' block")
         launcher = composed.pop("launcher")

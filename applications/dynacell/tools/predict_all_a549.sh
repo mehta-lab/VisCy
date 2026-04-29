@@ -11,6 +11,12 @@
 #   predict_all_a549.sh er  fnet3d_paper             # submit
 #   predict_all_a549.sh er  fnet3d_paper --dry-run   # render only
 #   predict_all_a549.sh mito celldiff --time 10:00:00
+#   predict_all_a549.sh er  fnet3d_paper --overwrite # force-replace existing prediction channels
+#
+# Extra args are forwarded verbatim to submit_benchmark_batch.py — including
+# --overwrite (alias for HCSPredictionWriter.overwrite=True on every leaf;
+# required to re-run a plate whose output store already has predictions) and
+# --override KEY.PATH=VALUE (dict-key dotlist, deep-merged after compose).
 #
 # Discovers all `predict__a549_mantis_*.yml` leaves under
 #   configs/benchmarks/virtual_staining/<organelle>/<model>/ipsc_confocal/
