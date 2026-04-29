@@ -183,7 +183,7 @@ class ContrastiveModule(LightningModule):
 
     def log_embedding_umap(self, embeddings: Tensor, tag: str):
         from umap import UMAP
-        
+
         _logger.debug(f"Computing UMAP for {tag} embeddings.")
         umap = UMAP(n_components=2)
         embeddings_np = embeddings.detach().cpu().numpy()
