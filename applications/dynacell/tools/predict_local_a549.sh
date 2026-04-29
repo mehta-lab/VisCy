@@ -92,12 +92,16 @@ for leaf in "${LEAVES[@]}"; do
 done
 
 # Pick the runner: unbuffer keeps Lightning's TQDM progress bar visible
-# in the log (Python sees a pseudo-tty); fall back to plain uv if missing.
-if command -v unbuffer >/dev/null 2>&1; then
+# in the log (Python sees a pseudo-tty); fall back to plain uv if missing
+# OR if unbuffer is on PATH but its Tcl Expect runtime isn't installed
+# (some HPC nodes ship the wrapper without the package, so a PATH check
+# alone is insufficient). Probe by running it on `true` and checking the
+# exit code.
+if command -v unbuffer >/dev/null 2>&1 && unbuffer true 2>/dev/null; then
   RUNNER=(unbuffer uv run dynacell predict)
 else
   RUNNER=(uv run dynacell predict)
-  echo "[warn] 'unbuffer' not found — TQDM progress bar will be hidden in logs"
+  echo "[warn] 'unbuffer' unavailable or broken — TQDM progress bar will be hidden in logs"
 fi
 
 # Trap to kill any backgrounded predicts if we exit early (Ctrl+C, error).
@@ -107,6 +111,32 @@ trap 'kill 0 2>/dev/null || true' EXIT
 TS=$(date +%Y%m%d-%H%M%S)
 
 echo "[run] parallel=$PARALLEL leaves=${#LEAVES[@]} run_root=$RUN_ROOT"
+declare -a PIDS=()
+declare -a PID_PLATES=()
+declare -a PID_LOGS=()
+declare -a FAILED_PLATES=()
+
+# Wait for all currently backgrounded predicts and record any failures.
+# Bash's set -e does NOT propagate background-job failures through `wait`
+# (treated as already-handled async), so we check exit codes manually.
+flush_batch() {
+  local idx pid status
+  for idx in "${!PIDS[@]}"; do
+    pid=${PIDS[$idx]}
+    if wait "$pid"; then
+      status=0
+    else
+      status=$?
+    fi
+    if [ "$status" -ne 0 ]; then
+      FAILED_PLATES+=("${PID_PLATES[$idx]} (exit=$status, log=$(basename "${PID_LOGS[$idx]}"))")
+    fi
+  done
+  PIDS=()
+  PID_PLATES=()
+  PID_LOGS=()
+}
+
 i=0
 while IFS=$'\t' read -r leaf job_name _run_root; do
   resolved=$(ls -t "$RUN_ROOT/resolved/predict_${job_name}_"*.yml 2>/dev/null | head -1)
@@ -119,17 +149,28 @@ while IFS=$'\t' read -r leaf job_name _run_root; do
 
   echo "  [start] plate=$plate log=$(basename "$log")"
   "${RUNNER[@]}" -c "$resolved" >"$log" 2>&1 &
+  PIDS+=($!)
+  PID_PLATES+=("$plate")
+  PID_LOGS+=("$log")
 
-  # Use pure-assignment increment, NOT ((i++)). With set -e, the
-  # arithmetic expression i++ returns its pre-increment value (0 on
-  # the first iteration), which bash treats as exit status 1 → the
-  # EXIT trap fires kill 0 → script + just-started child both die.
+  # Pure-assignment increment, NOT ((i++)). With set -e, ((i++)) returns
+  # its pre-increment value (0 on first iteration), which bash treats as
+  # exit status 1 → the EXIT trap fires kill 0 → script + just-started
+  # child both die.
   i=$((i + 1))
   if [ $((i % PARALLEL)) -eq 0 ]; then
-    wait
+    flush_batch
   fi
 done <<< "$META"
 
-wait
+flush_batch
 trap - EXIT
+
+if [ ${#FAILED_PLATES[@]} -gt 0 ]; then
+  echo "[fail] ${#FAILED_PLATES[@]}/${#LEAVES[@]} plate(s) failed:" >&2
+  for f in "${FAILED_PLATES[@]}"; do
+    echo "  - $f" >&2
+  done
+  exit 1
+fi
 echo "[done] all leaves complete; logs: $RUN_ROOT/slurm/local_${TS}_${ORGANELLE}_${MODEL}_*.log"
