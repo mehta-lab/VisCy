@@ -120,7 +120,11 @@ while IFS=$'\t' read -r leaf job_name _run_root; do
   echo "  [start] plate=$plate log=$(basename "$log")"
   "${RUNNER[@]}" -c "$resolved" >"$log" 2>&1 &
 
-  ((i++))
+  # Use pure-assignment increment, NOT ((i++)). With set -e, the
+  # arithmetic expression i++ returns its pre-increment value (0 on
+  # the first iteration), which bash treats as exit status 1 → the
+  # EXIT trap fires kill 0 → script + just-started child both die.
+  i=$((i + 1))
   if [ $((i % PARALLEL)) -eq 0 ]; then
     wait
   fi
