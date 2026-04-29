@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
-from umap import UMAP
 
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
@@ -183,6 +182,8 @@ class ContrastiveModule(LightningModule):
             output_list.extend(detach_sample(samples, self.log_samples_per_batch))
 
     def log_embedding_umap(self, embeddings: Tensor, tag: str):
+        from umap import UMAP
+
         _logger.debug(f"Computing UMAP for {tag} embeddings.")
         umap = UMAP(n_components=2)
         embeddings_np = embeddings.detach().cpu().numpy()
