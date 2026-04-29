@@ -80,6 +80,42 @@ def _apply_override(composed: dict, path: list[str], value: Any) -> dict:
     return deep_merge(composed, nested)
 
 
+_PRED_WRITER_CLASS_SUFFIX = "HCSPredictionWriter"
+
+
+def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
+    """Set ``init_args.overwrite=True`` on every ``HCSPredictionWriter`` callback.
+
+    Mutates ``composed`` in place. Walks ``trainer.callbacks`` and matches
+    by ``class_path`` ending in ``HCSPredictionWriter`` — robust against
+    re-ordered callback lists and additional callbacks. Raises if no
+    writer is found, since the alias cannot do what the user asked.
+
+    This intentionally avoids ``--override
+    "trainer.callbacks[0].init_args.overwrite=true"`` because
+    :func:`deep_merge` is dict-key-only and silently no-ops on
+    ``[0]``-style segments.
+    """
+    callbacks = composed.get("trainer", {}).get("callbacks", [])
+    if not isinstance(callbacks, list):
+        raise SystemExit(
+            f"{leaf_path}: trainer.callbacks must be a list to use --overwrite (got {type(callbacks).__name__})"
+        )
+    matched = 0
+    for cb in callbacks:
+        if not isinstance(cb, dict):
+            continue
+        if str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX):
+            cb.setdefault("init_args", {})["overwrite"] = True
+            matched += 1
+    if matched == 0:
+        class_paths = [cb.get("class_path") for cb in callbacks if isinstance(cb, dict)]
+        raise SystemExit(
+            f"{leaf_path}: --overwrite requested but no HCSPredictionWriter callback "
+            f"found under trainer.callbacks (got class_paths={class_paths!r})"
+        )
+
+
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
 
 
@@ -147,7 +183,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         default=[],
         metavar="key.path=value",
-        help="dotlist override, deep-merged after compose (repeatable)",
+        help="dotlist override, deep-merged after compose (repeatable). "
+        "Note: list-index syntax (callbacks[0]) is NOT honored — deep_merge "
+        "operates on dict keys. Use --overwrite for the prediction writer.",
+    )
+    ap.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="set init_args.overwrite=True on every HCSPredictionWriter "
+        "callback after compose. Required to re-run a leaf whose output "
+        "store already contains the prediction channel. Off by default.",
     )
     ap.add_argument(
         "--dependency",
@@ -184,6 +229,8 @@ def submit(argv: list[str] | None = None) -> int:
     for token in args.override:
         path, value = _parse_override(token)
         composed = _apply_override(composed, path, value)
+    if args.overwrite:
+        _apply_overwrite_alias(composed, args.leaf)
 
     if "launcher" not in composed:
         raise SystemExit("leaf is missing required 'launcher:' block")
