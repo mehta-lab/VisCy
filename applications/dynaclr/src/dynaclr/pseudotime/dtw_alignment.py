@@ -60,7 +60,15 @@ class TemplateResult(NamedTuple):
 
 
 class AlignmentResult(NamedTuple):
-    """DTW alignment result for a single cell track."""
+    """DTW alignment result for a single cell track.
+
+    ``length_normalized_cost`` and ``path_skew`` are scalar gating
+    signals computed from the warp path. Per discussion §3.8, path_skew
+    is the primary gate (rejects degenerate non-diagonal warps) and
+    length_normalized_cost is the secondary gate (stereotypy filter).
+    Both are surfaced in the alignment parquet so robustness checks
+    can sweep gate thresholds without re-running DTW.
+    """
 
     cell_uid: str
     dataset_id: str
@@ -69,6 +77,8 @@ class AlignmentResult(NamedTuple):
     timepoints: np.ndarray
     pseudotime: np.ndarray
     dtw_cost: float
+    length_normalized_cost: float
+    path_skew: float
     warping_path: np.ndarray
     warping_speed: np.ndarray
     propagated_labels: dict[str, np.ndarray] | None  # {col: (T,) fraction} per label column
@@ -599,6 +609,32 @@ def dtw_align_tracks(
 
         cost = paths[path_arr[-1, 0], path_arr[-1, 1]]
 
+        # length-normalized cost: divide raw DTW cost by the warp path
+        # length so longer matches don't accumulate more cost simply by
+        # having more steps. This is the standard ranking signal for
+        # subsequence DTW.
+        if len(path_arr) > 0 and np.isfinite(cost):
+            length_normalized_cost = float(cost) / float(len(path_arr))
+        else:
+            length_normalized_cost = float("inf")
+
+        # Path skew: mean per-step deviation from the ideal diagonal in
+        # the warp path's own coordinates. The ideal warp from
+        # (0, 0) to (T-1, n-1) has slope (n-1)/(T-1); the diagonal at
+        # warp-path step k is (template_step, query_step) =
+        # (k * (T-1)/(K-1), k * (n-1)/(K-1)). Skew is the mean L1
+        # normalized distance from each warp-path point to that ideal
+        # diagonal point, divided by max(T, n) for [0, 1] scaling.
+        if len(path_arr) >= 2 and t_template > 1 and n_track > 1:
+            K = len(path_arr)
+            ideal_t = np.linspace(path_arr[0, 0], path_arr[-1, 0], K)
+            ideal_q = np.linspace(path_arr[0, 1], path_arr[-1, 1], K)
+            dev = np.abs(path_arr[:, 0] - ideal_t) + np.abs(path_arr[:, 1] - ideal_q)
+            denom = max(t_template, n_track)
+            path_skew = float(dev.mean() / denom)
+        else:
+            path_skew = 0.0
+
         pseudotime = np.zeros(n_track)
         speed = np.zeros(n_track)
         alignment_region = np.full(n_track, "aligned", dtype=object)
@@ -686,6 +722,8 @@ def dtw_align_tracks(
                 track_id=track_id,
                 timepoints=timepoints,
                 pseudotime=pseudotime,
+                length_normalized_cost=length_normalized_cost,
+                path_skew=path_skew,
                 dtw_cost=float(cost),
                 warping_path=path_arr,
                 warping_speed=speed,
@@ -835,6 +873,8 @@ def alignment_results_to_dataframe(
                 "t": int(t),
                 "pseudotime": float(r.pseudotime[i]),
                 "dtw_cost": r.dtw_cost,
+                "length_normalized_cost": float(r.length_normalized_cost),
+                "path_skew": float(r.path_skew),
                 "warping_speed": float(r.warping_speed[i]),
                 "alignment_region": r.alignment_region[i],
                 "template_id": template_id,

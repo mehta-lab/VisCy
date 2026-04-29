@@ -123,6 +123,64 @@ def get_dynaclr_versions() -> dict[str, str]:
     return versions
 
 
+def compute_tau_event_band(
+    template: np.ndarray,
+    threshold_fraction: float = 0.5,
+) -> tuple[float, float]:
+    """Compute the half-rise band of a template's first-derivative magnitude.
+
+    The template's "event" is the region of fastest change. We compute
+    the per-position rate of change as the L2 norm of consecutive
+    template differences, then return the pseudotime band where the
+    rate exceeds ``threshold_fraction`` of its maximum.
+
+    Per discussion §3.4 and the locked execution plan: τ_event is a
+    band, not a point, because (1) the template's argmax-derivative has
+    a resolution floor of 1/n_frames, and (2) DBA averages flatten
+    cell-specific kinks so the template derivative is structurally
+    smoother than any individual cell's. The band honestly reflects
+    template-derivative resolution.
+
+    Parameters
+    ----------
+    template : np.ndarray
+        DBA template, shape ``(T, D)`` where T is the number of
+        template positions and D the embedding dimension.
+    threshold_fraction : float
+        Fraction of the maximum derivative magnitude that defines the
+        band edges. Default 0.5 (half-rise band).
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(τ_lo, τ_hi)`` in pseudotime ∈ [0, 1]. If the template has
+        fewer than two positions or the derivative is degenerate,
+        returns ``(0.0, 1.0)``.
+    """
+    if template.ndim != 2 or template.shape[0] < 2:
+        return (0.0, 1.0)
+
+    diffs = np.diff(template, axis=0)
+    rate = np.linalg.norm(diffs, axis=1)  # shape (T-1,)
+    if rate.size == 0 or float(rate.max()) <= 0:
+        return (0.0, 1.0)
+
+    threshold = threshold_fraction * float(rate.max())
+    above = rate >= threshold
+    indices = np.where(above)[0]
+    if indices.size == 0:
+        return (0.0, 1.0)
+
+    # Map derivative-position indices to pseudotime midpoints.
+    # rate[i] reports the change from template[i] to template[i+1], so
+    # the rate's natural pseudotime is the midpoint between positions i
+    # and i+1: τ = (i + 0.5) / (T - 1).
+    n_positions = template.shape[0]
+    tau_lo = float(indices.min() + 0.5) / float(n_positions - 1)
+    tau_hi = float(indices.max() + 0.5) / float(n_positions - 1)
+    return (tau_lo, tau_hi)
+
+
 def _save_flavor(group, result: TemplateResult, flavor_name: str) -> None:
     """Serialize one ``TemplateResult`` flavor into a zarr group."""
     group.create_array("template", data=result.template)
@@ -139,6 +197,13 @@ def _save_flavor(group, result: TemplateResult, flavor_name: str) -> None:
         group.create_array("explained_variance_ratio", data=result.pca.explained_variance_ratio_)
         group.attrs["n_components"] = int(result.pca.n_components_)
         group.attrs["explained_variance"] = float(result.explained_variance or 0.0)
+
+    # τ_event band: half-rise of the template-derivative magnitude.
+    # Stored per-flavor because raw and PCA templates have different
+    # geometries and may yield slightly different bands.
+    tau_lo, tau_hi = compute_tau_event_band(result.template)
+    group.create_array("tau_event_band", data=np.array([tau_lo, tau_hi], dtype=np.float64))
+
     group.attrs["template_id"] = result.template_id
     group.attrs["n_input_tracks"] = int(result.n_input_tracks)
 
@@ -337,3 +402,27 @@ def read_time_calibration(template_path: str | Path, flavor: str) -> np.ndarray:
     if "time_calibration" not in grp:
         raise KeyError(f"time_calibration missing for flavor {flavor!r} in {template_path}")
     return np.asarray(grp["time_calibration"])
+
+
+def read_tau_event_band(template_path: str | Path, flavor: str) -> tuple[float, float]:
+    """Read the τ_event band ``[τ_lo, τ_hi]`` from a template flavor.
+
+    The band is computed at template-build time (see
+    :func:`compute_tau_event_band`) and stored alongside the template
+    arrays. Returns ``(0.0, 1.0)`` if the band array is missing
+    (templates built before the band feature was added).
+
+    Parameters
+    ----------
+    template_path : str or Path
+        Path to the template zarr.
+    flavor : {"raw", "pca"}
+        Which flavor's band to read.
+    """
+    if flavor not in ("raw", "pca"):
+        raise ValueError(f"flavor must be 'raw' or 'pca', got {flavor!r}")
+    grp = zarr.open(str(template_path), mode="r")[flavor]
+    if "tau_event_band" not in grp:
+        return (0.0, 1.0)
+    band = np.asarray(grp["tau_event_band"])
+    return (float(band[0]), float(band[1]))
