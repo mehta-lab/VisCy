@@ -139,14 +139,25 @@ def per_cell_baseline_distance(
                 continue
             t_to_idx = dict(zip(track_obs["t"].astype(int), track_obs["_idx"].astype(int)))
 
-            # Baseline frames: pre-window in t_rel_minutes.
-            bl_mask = (track_rows["t_rel_minutes"] >= baseline_window_minutes[0]) & (
-                track_rows["t_rel_minutes"] <= baseline_window_minutes[1]
-            )
-            bl_t = track_rows.loc[bl_mask, "t"].astype(int).tolist()
-            bl_indices = [t_to_idx[t] for t in bl_t if t in t_to_idx]
-            if len(bl_indices) < min_baseline_frames:
-                continue
+            # Baseline frames: pre-window in t_rel_minutes for cells with
+            # an anchor (productive cohort + sibling daughters); for
+            # cohorts without an anchor (mock, bystander, abortive,
+            # unannotated_productive) fall back to the whole-track mean
+            # so they contribute a per-frame signal usable as a null
+            # distribution per discussion §3.7.
+            anchored = track_rows["t_rel_minutes"].notna().any()
+            if anchored:
+                bl_mask = (track_rows["t_rel_minutes"] >= baseline_window_minutes[0]) & (
+                    track_rows["t_rel_minutes"] <= baseline_window_minutes[1]
+                )
+                bl_t = track_rows.loc[bl_mask, "t"].astype(int).tolist()
+                bl_indices = [t_to_idx[t] for t in bl_t if t in t_to_idx]
+                if len(bl_indices) < min_baseline_frames:
+                    continue
+            else:
+                bl_indices = list(t_to_idx.values())
+                if len(bl_indices) < min_baseline_frames:
+                    continue
             X = adata.X
             baseline = np.asarray(X[bl_indices]).mean(axis=0, keepdims=True)
 
