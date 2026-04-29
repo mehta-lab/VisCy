@@ -1,0 +1,17 @@
+# Stage 4 config — cross-track comparison of organelle readouts.
+# Load via: --datasets datasets.yaml --config compare_tracks.yaml
+
+comparisons:
+  zikv_07_24_full:
+    description: "Full ZIKV 07_24 comparison: SEC61 + G3BP1 + phase under all three tracks."
+    candidate_set: zikv_productive_07_24
+    organelles: [sec61, g3bp1, phase]
+    tracks: [A-anno, A-LC, B]
+    cohorts: [productive, mock, bystander]
+    # Target headline metric for the methodological claim (per DAG §9.1
+    # and discussion §2.2). Path B succeeds if its IQR width at the
+    # primary metric is ≥ 25% tighter than the better of A-anno and A-LC.
+    methodological_threshold_fraction: 0.25
+    # Real-time bins for population aggregation.
+    bin_minutes: 30
+    bin_range_minutes: [-360, 540]
