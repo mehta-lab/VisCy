@@ -80,15 +80,28 @@ def _embedding_dir_lookup(config: dict) -> dict[str, Path]:
 
 def _load_lc_predictions(
     pred_dir: Path,
+    dataset_id: str,
     pattern: str,
     pred_column: str,
 ) -> pd.DataFrame:
-    """Read ``predicted_infection_state`` per (fov_name, track_id, t) from one zarr."""
-    matches = list(pred_dir.glob(pattern))
+    """Read LC predictions per (fov_name, track_id, t) from a date-matched zarr.
+
+    Filters glob matches to the dataset's date prefix (first three
+    underscore-separated tokens) so multi-date pred_dirs pick the
+    correct zarr.
+    """
+    date_prefix = "_".join(dataset_id.split("_")[:3])
+    matches = [m for m in pred_dir.glob(pattern) if m.name.startswith(date_prefix)]
     if not matches:
-        _logger.warning(f"No embedding zarr matched {pattern} in {pred_dir}")
+        _logger.warning(f"[{dataset_id}] no embedding zarr matched {pattern} with prefix {date_prefix} in {pred_dir}")
         return pd.DataFrame(columns=["fov_name", "track_id", "t", pred_column])
+    if len(matches) > 1:
+        _logger.warning(
+            f"[{dataset_id}] multiple zarrs matched {pattern} with prefix {date_prefix}: "
+            f"{[m.name for m in matches]}; using first"
+        )
     adata = ad.read_zarr(matches[0])
+    adata.obs_names_make_unique()
     if pred_column not in adata.obs.columns:
         _logger.warning(f"{pred_column} not in {matches[0]} .obs")
         return pd.DataFrame(columns=["fov_name", "track_id", "t", pred_column])
@@ -218,7 +231,7 @@ def main() -> None:
     pred_dirs = _embedding_dir_lookup(config)
     sensor_pattern = config.get("embeddings", {}).get("sensor", "*_viral_sensor_*.zarr")
 
-    cohorts = ["productive", "bystander", "abortive", "mock"]
+    cohorts = ["productive", "bystander", "abortive", "unannotated_productive", "mock"]
     cohort_dfs: dict[str, pd.DataFrame] = {}
     for cohort in cohorts:
         path = CANDIDATES_DIR / f"{args.candidate_set}_{cohort}.csv"
@@ -240,7 +253,9 @@ def main() -> None:
         if ds_id not in pred_dirs:
             _logger.warning(f"dataset_id {ds_id!r} missing from datasets.yaml; LC anchor unavailable")
             continue
-        lc_obs_by_dataset[ds_id] = _load_lc_predictions(pred_dirs[ds_id], sensor_pattern, args.pred_column)
+        lc_obs_by_dataset[ds_id] = _load_lc_predictions(
+            pred_dirs[ds_id], dataset_id=ds_id, pattern=sensor_pattern, pred_column=args.pred_column
+        )
 
     t_zero_lookup = _t_zero_from_lc(
         productive_df,

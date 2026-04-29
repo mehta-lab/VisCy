@@ -135,7 +135,7 @@ def classify_divides(
     return "post"
 
 
-CohortLabel = Literal["productive", "bystander", "abortive", "mock"]
+CohortLabel = Literal["productive", "bystander", "abortive", "unannotated_productive", "mock"]
 
 
 def tag_cohort_for_lineage(
@@ -150,12 +150,16 @@ def tag_cohort_for_lineage(
 
     Per discussion §3.2 and the locked plan:
 
-    - Productive: lineage has a manual ``t_key_event`` (operationally:
-      ``has_manual_t_zero=True``).
+    - Productive: lineage has a manual ``t_key_event``.
     - Bystander: in an infected well, LC says uninfected for at least
-      ``bystander_uninfected_fraction`` of frames.
+      ``bystander_uninfected_fraction`` of frames AND has no sustained
+      positive run.
     - Abortive: in an infected well, LC shows at least one positive frame
       but no sustained run of ``min_run`` consecutive positives.
+    - Unannotated productive: in an infected well, LC shows a sustained
+      positive run but the lineage has no manual anchor. These are the
+      LC's "extra" calls that the manual annotation missed; downstream
+      stages may treat them as a separate cohort or exclude them.
     - Mock: in an uninfected well.
 
     Parameters
@@ -163,24 +167,17 @@ def tag_cohort_for_lineage(
     df : pd.DataFrame
         Lineage rows.
     well_is_uninfected : bool
-        Whether the lineage's well is in the mock cohort (per
-        ``candidates.yaml`` well_pattern).
+        Whether the lineage's well is in the mock cohort.
     has_manual_t_zero : bool
         Whether the lineage has a manual anchor.
     lc_predictions : pd.Series or None
         LC ``predicted_infection_state`` per frame for this lineage
-        (sorted by ``t``). ``None`` means LC unavailable; falls back to
-        annotation-only logic (lineages without a manual anchor in an
-        infected well are flagged ambiguous and tagged ``"bystander"``).
+        (sorted by ``t``). ``None`` falls back to ``bystander`` for any
+        non-mock, non-productive lineage.
     min_run : int
         Minimum consecutive positives to count as a sustained rise.
     bystander_uninfected_fraction : float
         Fraction of frames a bystander must spend negative (default 0.8).
-
-    Returns
-    -------
-    str
-        One of ``"productive"``, ``"bystander"``, ``"abortive"``, ``"mock"``.
     """
     if well_is_uninfected:
         return "mock"
@@ -188,23 +185,20 @@ def tag_cohort_for_lineage(
         return "productive"
 
     if lc_predictions is None:
-        # No LC: cannot distinguish bystander vs abortive. Fall back to
-        # bystander as the conservative default.
         return "bystander"
 
     pos = (lc_predictions == "infected").astype(int).to_numpy()
     if pos.sum() == 0:
         return "bystander"
 
-    fraction_negative = 1.0 - (pos.sum() / len(pos))
-    if fraction_negative >= bystander_uninfected_fraction and not _has_run(pos, min_run):
-        return "bystander"
-
     if _has_run(pos, min_run):
-        # Sustained rise but no manual anchor: this lineage is productive
-        # but un-annotated. Caller decides whether to promote to productive
-        # or skip; default tag is bystander to keep the cohort definition
-        # tight.
+        # LC found a sustained run but no manual anchor: an unannotated
+        # productive candidate. Tag distinctly so downstream stages can
+        # decide to include, exclude, or compare against the manual set.
+        return "unannotated_productive"
+
+    fraction_negative = 1.0 - (pos.sum() / len(pos))
+    if fraction_negative >= bystander_uninfected_fraction:
         return "bystander"
 
     return "abortive"

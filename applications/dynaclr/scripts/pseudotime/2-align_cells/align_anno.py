@@ -162,7 +162,7 @@ def main() -> None:
     config = load_stage_config(args.datasets, args.config)
     frame_intervals = _frame_interval_lookup(config)
 
-    cohorts = ["productive", "bystander", "abortive", "mock"]
+    cohorts = ["productive", "bystander", "abortive", "unannotated_productive", "mock"]
     cohort_dfs: dict[str, pd.DataFrame] = {}
     for cohort in cohorts:
         path = CANDIDATES_DIR / f"{args.candidate_set}_{cohort}.csv"

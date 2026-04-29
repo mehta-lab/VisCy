@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument(
         "--cohort",
         default="productive",
-        choices=["productive", "bystander", "abortive", "mock"],
+        choices=["productive", "bystander", "abortive", "unannotated_productive", "mock"],
         help="Cohort CSV to inspect (default: productive)",
     )
     args = parser.parse_args()

@@ -200,28 +200,39 @@ def _select_well_tracks(
 
 def _load_lc_predictions(
     dataset_cfg: dict,
+    dataset_id: str,
     fov_pattern: str,
     embedding_pattern: str,
     pred_column: str = "predicted_infection_state",
 ) -> pd.DataFrame:
     """Pull LC predictions from the embedding zarr's obs.
 
-    Returns per (fov_name, track_id, t) rows with ``pred_column``. Only
-    needed for bystander/abortive cohort tagging; productive and mock
-    cohorts don't depend on LC.
+    The pred_dir typically contains many zarrs across dates and channels;
+    we filter by the dataset's date prefix (first three underscore-separated
+    tokens of ``dataset_id``, e.g. ``2025_07_24``) before glob-matching the
+    channel pattern. Without the date filter, multiple datasets' zarrs
+    would all match ``*_viral_sensor_*.zarr`` and we'd pick an arbitrary
+    (often wrong) one.
 
-    Returns empty DataFrame if no embedding zarr matches the pattern.
+    Returns empty DataFrame if no embedding zarr matches.
     """
     pred_dir = Path(dataset_cfg["pred_dir"])
-    matches = list(pred_dir.glob(embedding_pattern))
+    date_prefix = "_".join(dataset_id.split("_")[:3])  # e.g. "2025_07_24"
+    matches = [m for m in pred_dir.glob(embedding_pattern) if m.name.startswith(date_prefix)]
     if not matches:
         _logger.warning(
-            f"No embedding zarr matched {embedding_pattern} in {pred_dir}; "
-            f"LC-derived cohorts will fall back to bystander default"
+            f"No embedding zarr matched {embedding_pattern} with date prefix "
+            f"{date_prefix} in {pred_dir}; LC cohorts fall back to bystander default"
         )
         return pd.DataFrame()
+    if len(matches) > 1:
+        _logger.warning(
+            f"Multiple zarrs matched {embedding_pattern} with date prefix "
+            f"{date_prefix} for {dataset_id}: {[m.name for m in matches]}; using first"
+        )
 
     adata = ad.read_zarr(matches[0])
+    adata.obs_names_make_unique()
     if pred_column not in adata.obs.columns:
         _logger.warning(f"{pred_column} not in {matches[0]} .obs; LC fallback")
         return pd.DataFrame()
@@ -231,6 +242,7 @@ def _load_lc_predictions(
     obs["fov_name"] = obs["fov_name"].astype(str)
     obs["track_id"] = obs["track_id"].astype(int)
     obs["t"] = obs["t"].astype(int)
+    _logger.info(f"[{dataset_id}] loaded LC predictions from {matches[0].name} ({len(obs)} rows in {fov_pattern})")
     return obs
 
 
@@ -370,7 +382,12 @@ def _build_dataset_cohorts(
         )
     ].copy()
 
-    lc_obs = _load_lc_predictions(dataset_cfg, fov_pattern=fov_pattern, embedding_pattern=embedding_pattern)
+    lc_obs = _load_lc_predictions(
+        dataset_cfg,
+        dataset_id=dataset_id,
+        fov_pattern=fov_pattern,
+        embedding_pattern=embedding_pattern,
+    )
 
     return {
         "productive": productive_df,
@@ -389,24 +406,30 @@ def _build_dataset_cohorts(
     }
 
 
-def _split_bystander_abortive(
+def _split_well_non_productive(
     well_df: pd.DataFrame,
     lc_obs: pd.DataFrame,
     bystander_fraction: float,
     abortive_min_run: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split non-productive tracks into bystander and abortive."""
-    if well_df.empty:
-        return well_df.copy(), well_df.copy()
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split non-productive infected-well tracks into bystander, abortive, unannotated_productive.
 
-    # Per-track LC prediction sequences.
+    Returns three dataframes in that order. ``unannotated_productive``
+    captures lineages with sustained LC positive runs that lack a manual
+    anchor — they're not in the productive cohort but the LC says they
+    look infected. Reported separately so downstream stages can decide.
+    """
+    empty = well_df.iloc[0:0].copy()
+    if well_df.empty:
+        return empty, empty, empty
+
     if lc_obs is None or len(lc_obs) == 0:
-        # Without LC, all non-productive tracks get tagged bystander
-        # (the conservative default per lineage_utils.tag_cohort_for_lineage).
-        return well_df.copy(), well_df.iloc[0:0].copy()
+        # No LC: everything falls back to bystander (conservative default).
+        return well_df.copy(), empty, empty
 
     bystander_keys: set[tuple[str, int]] = set()
     abortive_keys: set[tuple[str, int]] = set()
+    unannotated_keys: set[tuple[str, int]] = set()
     for (fov, tid), g in lc_obs.groupby(["fov_name", "track_id"]):
         g = g.sort_values("t")
         cohort = tag_cohort_for_lineage(
@@ -417,18 +440,18 @@ def _split_bystander_abortive(
             min_run=abortive_min_run,
             bystander_uninfected_fraction=bystander_fraction,
         )
+        key = (str(fov), int(tid))
         if cohort == "bystander":
-            bystander_keys.add((str(fov), int(tid)))
+            bystander_keys.add(key)
         elif cohort == "abortive":
-            abortive_keys.add((str(fov), int(tid)))
+            abortive_keys.add(key)
+        elif cohort == "unannotated_productive":
+            unannotated_keys.add(key)
 
-    bystander_df = well_df[
-        well_df.apply(lambda r: (str(r["fov_name"]), int(r["track_id"])) in bystander_keys, axis=1)
-    ].copy()
-    abortive_df = well_df[
-        well_df.apply(lambda r: (str(r["fov_name"]), int(r["track_id"])) in abortive_keys, axis=1)
-    ].copy()
-    return bystander_df, abortive_df
+    def _filter(keys: set[tuple[str, int]]) -> pd.DataFrame:
+        return well_df[well_df.apply(lambda r: (str(r["fov_name"]), int(r["track_id"])) in keys, axis=1)].copy()
+
+    return _filter(bystander_keys), _filter(abortive_keys), _filter(unannotated_keys)
 
 
 def _funnel_report(
@@ -485,6 +508,7 @@ def main() -> None:
     productive_parts: list[pd.DataFrame] = []
     bystander_parts: list[pd.DataFrame] = []
     abortive_parts: list[pd.DataFrame] = []
+    unannotated_parts: list[pd.DataFrame] = []
     mock_parts: list[pd.DataFrame] = []
 
     for ds_id in dataset_ids:
@@ -498,7 +522,7 @@ def main() -> None:
             embedding_pattern=embedding_pattern,
         )
         meta = results["_meta"]
-        bystander_df, abortive_df = _split_bystander_abortive(
+        bystander_df, abortive_df, unannotated_df = _split_well_non_productive(
             results["well_non_productive"],
             meta["lc_obs"],
             meta["bystander_fraction"],
@@ -510,28 +534,39 @@ def main() -> None:
             bystander_parts.append(bystander_df)
         if not abortive_df.empty:
             abortive_parts.append(abortive_df)
+        if not unannotated_df.empty:
+            unannotated_parts.append(unannotated_df)
         if not results["mock"].empty:
             mock_parts.append(results["mock"])
 
     if not productive_parts:
         raise RuntimeError(f"Candidate set {args.candidate_set!r} produced no productive lineages.")
 
-    productive_df = pd.concat(productive_parts, ignore_index=True)
-    bystander_df = (
-        pd.concat(bystander_parts, ignore_index=True) if bystander_parts else pd.DataFrame(columns=OUTPUT_COLUMNS)
-    )
-    abortive_df = (
-        pd.concat(abortive_parts, ignore_index=True) if abortive_parts else pd.DataFrame(columns=OUTPUT_COLUMNS)
-    )
-    mock_df = pd.concat(mock_parts, ignore_index=True) if mock_parts else pd.DataFrame(columns=OUTPUT_COLUMNS)
+    # Tag cohort on each cohort frame before merging, so we can split
+    # back after lineage reconnection without losing cohort identity.
+    def _tag(parts: list[pd.DataFrame], cohort: str) -> pd.DataFrame:
+        if not parts:
+            return pd.DataFrame(columns=[*OUTPUT_COLUMNS, "cohort"])
+        merged = pd.concat(parts, ignore_index=True)
+        merged["cohort"] = cohort
+        return merged
 
-    # Lineage reconnection — operates per (dataset, fov) group inside identify_lineages().
-    productive_df = assign_lineage_ids(productive_df, return_both_branches=True)
-    bystander_df = (
-        assign_lineage_ids(bystander_df, return_both_branches=True) if not bystander_df.empty else bystander_df
-    )
-    abortive_df = assign_lineage_ids(abortive_df, return_both_branches=True) if not abortive_df.empty else abortive_df
-    mock_df = assign_lineage_ids(mock_df, return_both_branches=True) if not mock_df.empty else mock_df
+    productive_df = _tag(productive_parts, "productive")
+    bystander_df = _tag(bystander_parts, "bystander")
+    abortive_df = _tag(abortive_parts, "abortive")
+    unannotated_df = _tag(unannotated_parts, "unannotated_productive")
+    mock_df = _tag(mock_parts, "mock")
+
+    # Lineage reconnection on the combined frame produces globally unique
+    # lineage_ids across all cohorts. We then split back by cohort.
+    combined = pd.concat([productive_df, bystander_df, abortive_df, unannotated_df, mock_df], ignore_index=True)
+    combined = assign_lineage_ids(combined, return_both_branches=True)
+
+    productive_df = combined[combined["cohort"] == "productive"].copy()
+    bystander_df = combined[combined["cohort"] == "bystander"].copy()
+    abortive_df = combined[combined["cohort"] == "abortive"].copy()
+    unannotated_df = combined[combined["cohort"] == "unannotated_productive"].copy()
+    mock_df = combined[combined["cohort"] == "mock"].copy()
 
     # Cap productive lineages to max_lineages by length.
     max_lineages = cand_cfg.get("max_lineages")
@@ -571,6 +606,7 @@ def main() -> None:
     productive_out = _emit_cohort(productive_df, "productive", t_zero_lookup, window_frames_by_dataset)
     bystander_out = _emit_cohort(bystander_df, "bystander", t_zero_lookup, window_frames_by_dataset)
     abortive_out = _emit_cohort(abortive_df, "abortive", t_zero_lookup, window_frames_by_dataset)
+    unannotated_out = _emit_cohort(unannotated_df, "unannotated_productive", t_zero_lookup, window_frames_by_dataset)
     mock_out = _emit_cohort(mock_df, "mock", t_zero_lookup, window_frames_by_dataset)
 
     CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
@@ -578,6 +614,7 @@ def main() -> None:
         "productive": productive_out,
         "bystander": bystander_out,
         "abortive": abortive_out,
+        "unannotated_productive": unannotated_out,
         "mock": mock_out,
     }
     for cohort, df in cohort_dfs.items():
