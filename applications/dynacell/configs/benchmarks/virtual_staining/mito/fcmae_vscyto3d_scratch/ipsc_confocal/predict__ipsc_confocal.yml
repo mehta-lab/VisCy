@@ -1,0 +1,45 @@
+# FCMAE_VSCyto3D_Scratch predict: mito (TOMM20) against ipsc_confocal test_cropped.
+#
+# Pinned to best-val checkpoint from training run J31475715
+# (val 0.5527, epoch 69). Run cancelled at epoch 164 — val plateaued
+# at epoch ~51 and never recovered, so later epochs are not better.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: mito__ipsc_confocal__fcmae_vscyto3d_scratch__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fcmae_vscyto3d_scratch/checkpoints/epoch=69-step=21840.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_fcmae_vscyto3d_scratch.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_TOMM20
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
