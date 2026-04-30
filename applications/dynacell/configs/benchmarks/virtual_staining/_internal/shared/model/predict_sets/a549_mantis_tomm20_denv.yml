@@ -1,0 +1,12 @@
+# Predict set: A549 mantis TOMM20 on DENV (condition-pooled test store).
+# data_path resolves to the test store in predict mode via dataset_ref.
+# Pool naming inside the store is sequential 0/0/fov<NNNN>; plate
+# provenance lives in per-position zattrs and the colocated
+# .provenance.json sidecar (see dynacell-paper assemble-pool docs).
+benchmark:
+  predict_set: a549_mantis_tomm20_denv
+  dataset_ref:
+    dataset: a549-mantis-tomm20-denv
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args: {}

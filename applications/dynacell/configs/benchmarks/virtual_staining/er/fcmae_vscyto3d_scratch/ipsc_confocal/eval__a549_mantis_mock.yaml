@@ -1,0 +1,15 @@
+# @package _global_
+# Benchmark eval leaf: ER (SEC61B) predicted by FCMAE_VSCyto3D_Scratch on a549-mantis-sec61b-mock.
+defaults:
+  - override /target: er_sec61b
+  - override /predict_set: a549_mantis_sec61b_mock
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_scratch__sec61b_mock.zarr
+
+# A549 manifests don't carry cell_segmentation paths (no segmentation
+# pipeline yet). Skip feature metrics until segmentation lands.
+compute_feature_metrics: false
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_sec61b_fcmae_vscyto3d_scratch__sec61b_mock

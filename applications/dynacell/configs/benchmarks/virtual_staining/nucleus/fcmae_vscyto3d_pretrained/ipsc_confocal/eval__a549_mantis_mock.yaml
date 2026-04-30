@@ -1,0 +1,22 @@
+# @package _global_
+# Benchmark eval leaf: Nucleus (H2B) predicted by FCMAE_VSCyto3D_Pretrained on a549-mantis-h2b-mock.
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side `nucleus`
+# target_id from the target group so the resolver finds h2b on a549-mantis-h2b-mock.
+defaults:
+  - override /target: nucleus
+  - override /predict_set: a549_mantis_h2b_mock
+
+target_name: h2b
+benchmark:
+  dataset_ref:
+    target: h2b
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_pretrained_mock.zarr
+
+# A549 manifests don't carry cell_segmentation paths (no segmentation
+# pipeline yet). Skip feature metrics until segmentation lands.
+compute_feature_metrics: false
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_nucl_fcmae_vscyto3d_pretrained_mock

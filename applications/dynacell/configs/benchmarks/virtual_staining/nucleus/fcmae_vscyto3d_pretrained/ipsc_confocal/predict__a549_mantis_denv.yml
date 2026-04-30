@@ -1,0 +1,54 @@
+# FCMAE_VSCyto3D_Pretrained predict: nucleus trained on iPSC,
+# predicting against a549-mantis-h2b-denv test.
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
+# `nucleus` target_id from targets/nucleus.yml so the resolver finds
+# the h2b target on a549-mantis-h2b-denv.
+#
+# TODO: replace ckpt_path once iPSC FCMAE pretrained nucleus training
+# completes. Expected output (per fit leaf — note no _ws8500 suffix on
+# nucleus / membrane outputs):
+#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_pretrained/checkpoints/last.ckpt
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_denv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_h2b_denv
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: nucleus__ipsc_confocal__fcmae_vscyto3d_pretrained__a549_mantis_h2b_denv
+  # Override the iPSC-side `nucleus` target to a549's gene-keyed `h2b`.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    # TODO: fill before submit (see header).
+    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/nucl/last.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_pretrained_denv.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_NUCL_ON_A549_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

@@ -1,0 +1,15 @@
+# @package _global_
+# Benchmark eval leaf: Mitochondria (TOMM20) predicted by UNetViT3D on a549-mantis-tomm20-mock.
+defaults:
+  - override /target: mito_tomm20
+  - override /predict_set: a549_mantis_tomm20_mock
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_unetvit3d__tomm20_mock.zarr
+
+# A549 manifests don't carry cell_segmentation paths (no segmentation
+# pipeline yet). Skip feature metrics until segmentation lands.
+compute_feature_metrics: false
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_tomm20_unetvit3d__tomm20_mock

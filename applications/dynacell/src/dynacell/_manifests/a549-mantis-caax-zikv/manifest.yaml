@@ -1,0 +1,25 @@
+name: a549-mantis-caax-zikv
+version: '1'
+description: "A549 mantis condition-pooled \u2014 caax on ZIKV (pool-internal 0/0/fov<NNNN>\
+  \ naming, plate provenance in per-position zattrs and the colocated provenance.json\
+  \ sidecar)."
+cell_type: A549
+imaging_modality: mantis-lightsheet
+spacing:
+  z: 0.174
+  y: 0.116
+  x: 0.116
+channels:
+  source: Phase3D
+  auxiliary:
+  - Brightfield
+targets:
+  caax:
+    gene: CAAX
+    organelle: membrane
+    display_name: Membrane (CAAX)
+    target_channel: Membrane
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/CAAX_ZIKV.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/CAAX_ZIKV.ozx
+    splits: splits/caax_train_test.yaml

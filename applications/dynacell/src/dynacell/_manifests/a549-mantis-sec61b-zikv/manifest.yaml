@@ -1,0 +1,25 @@
+name: a549-mantis-sec61b-zikv
+version: '1'
+description: "A549 mantis condition-pooled \u2014 sec61b on ZIKV (pool-internal 0/0/fov<NNNN>\
+  \ naming, plate provenance in per-position zattrs and the colocated provenance.json\
+  \ sidecar)."
+cell_type: A549
+imaging_modality: mantis-lightsheet
+spacing:
+  z: 0.174
+  y: 0.1494
+  x: 0.1494
+channels:
+  source: Phase3D
+  auxiliary:
+  - Brightfield
+targets:
+  sec61b:
+    gene: SEC61B
+    organelle: er
+    display_name: ER (Sec61b)
+    target_channel: Structure
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_ZIKV.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/SEC61B_ZIKV.ozx
+    splits: splits/sec61b_train_test.yaml

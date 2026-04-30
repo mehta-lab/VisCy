@@ -1,0 +1,25 @@
+name: a549-mantis-h2b-zikv
+version: '1'
+description: "A549 mantis condition-pooled \u2014 h2b on ZIKV (pool-internal 0/0/fov<NNNN>\
+  \ naming, plate provenance in per-position zattrs and the colocated provenance.json\
+  \ sidecar)."
+cell_type: A549
+imaging_modality: mantis-lightsheet
+spacing:
+  z: 0.174
+  y: 0.116
+  x: 0.116
+channels:
+  source: Phase3D
+  auxiliary:
+  - Brightfield
+targets:
+  h2b:
+    gene: H2B
+    organelle: nuclei
+    display_name: Nuclei (H2B)
+    target_channel: Nuclei
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_ZIKV.ozx
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
+    splits: splits/h2b_train_test.yaml

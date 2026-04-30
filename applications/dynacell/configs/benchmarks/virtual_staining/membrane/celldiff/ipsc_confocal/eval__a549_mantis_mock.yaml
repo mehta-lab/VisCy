@@ -1,0 +1,22 @@
+# @package _global_
+# Benchmark eval leaf: Membrane (CAAX) predicted by CellDiff on a549-mantis-caax-mock.
+# A549 manifest keys membrane by gene (`caax`); override the iPSC-side `membrane`
+# target_id from the target group so the resolver finds caax on a549-mantis-caax-mock.
+defaults:
+  - override /target: membrane
+  - override /predict_set: a549_mantis_caax_mock
+
+target_name: caax
+benchmark:
+  dataset_ref:
+    target: caax
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_sliding_window_mock.zarr
+
+# A549 manifests don't carry cell_segmentation paths (no segmentation
+# pipeline yet). Skip feature metrics until segmentation lands.
+compute_feature_metrics: false
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_memb_celldiff_sliding_window_mock
