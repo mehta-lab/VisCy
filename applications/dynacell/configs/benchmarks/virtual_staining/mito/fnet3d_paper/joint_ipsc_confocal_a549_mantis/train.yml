@@ -1,0 +1,118 @@
+# FNet3D paper-baseline fit on mito (TOMM20) — joint
+# ipsc_confocal + a549_mantis pooled. Mirrors
+# mito/fnet3d_paper/ipsc_confocal/train.yml on the joint
+# train_set.
+#
+# Joint leaf per Stage 7 of A549_EXPANSION_ROADMAP.md.
+# BatchedConcatDataModule + two explicit HCSDataModule children;
+# only model_overlays/fnet3d_paper_fit.yml is composed; data block
+# inline. Norms + 8-crops-per-FOV diverge from the CellDiff/UNetViT
+# conventions: target channel uses mean/std (not median/iqr) and
+# val augmentations are CPU CenterSpatialCropd on the raw keys (the
+# baseline's training pipeline doesn't go through GPU val transforms).
+#
+# Topology: 4-GPU DDP (joint convention; deviates from the paper's
+# single-GPU setup that the single-set fnet3d_paper/ipsc_confocal
+# leaf preserves). Override leaf-level strategy/devices to single GPU
+# if a paper-faithful joint run is needed.
+base:
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  gene: TOMM20
+  target: mito
+  target_id: mito_tomm20
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: fnet3d_paper
+  experiment_id: mito__joint_ipsc_confocal_a549_mantis__fnet3d_paper
+
+trainer:
+  strategy: ddp
+  devices: 4
+  logger:
+    init_args:
+      name: FNet3D_JOINT_TOMM20_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper/checkpoints
+
+_hcs_init_args: &hcs_init_args
+  source_channel: [Phase3D]
+  target_channel: [Structure]
+  z_window_size: 32
+  batch_size: 48
+  num_workers: 8
+  yx_patch_size: [64, 64]
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Structure]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Structure]
+        w_key: Structure
+        spatial_size: [32, 64, 64]
+        num_samples: 8
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandFlipd
+      init_args:
+        keys: [source, target]
+        spatial_axes: [1]
+        prob: 0.5
+    - class_path: viscy_transforms.BatchedRandFlipd
+      init_args:
+        keys: [source, target]
+        spatial_axes: [2]
+        prob: 0.5
+  val_augmentations:
+    - class_path: viscy_transforms.CenterSpatialCropd
+      init_args:
+        keys: [Phase3D, Structure]
+        roi_size: [32, 64, 64]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc TOMM20 train store
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20.zarr
+      # a549_mantis — pooled TOMM20 all-conditions train store
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/TOMM20_all.zarr
+
+launcher:
+  job_name: FNet3DPaper_JOINT_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper

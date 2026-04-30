@@ -1,0 +1,142 @@
+# Timm-backed UNeXt2 (viscy_models.unet.unext2:UNeXt2) supervised
+# scratch baseline on er (SEC61B) — joint ipsc_confocal +
+# a549_mantis pooled. Mirrors
+# er/unext2/ipsc_confocal/train.yml on the joint train_set.
+# Reproduces Run 4 hparams (lr=0.0004, bs=32, z=20, 4-GPU DDP,
+# MixedLoss(L1 0.5 + DSSIM 0.5), max_epochs=200) inherited from
+# model_overlays/unext2_fit.yml.
+#
+# This is NOT the apples-to-apples scratch control for FCMAE-pretrained
+# init. The FCMAE paper-adjacent scratch baseline lives at
+# fcmae_vscyto3d_scratch/joint_*/train.yml and uses a different model
+# class. See applications/dynacell/configs/benchmarks/UNEXT2_VS_FCMAE_CLASSES.md.
+#
+# Joint leaf per Stage 7 of A549_EXPANSION_ROADMAP.md.
+# BatchedConcatDataModule + two explicit HCSDataModule children;
+# only model_overlays/unext2_fit.yml is composed; data block inline.
+#
+# Topology: 4-GPU DDP (inherited from
+# model_overlays/unext2_fit.yml's ddp_4gpu base).
+base:
+  - ../../../_internal/shared/model/model_overlays/unext2_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  gene: SEC61B
+  target: er
+  target_id: er_sec61b
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: unext2_timm_scratch
+  experiment_id: er__joint_ipsc_confocal_a549_mantis__unext2_timm_scratch
+
+trainer:
+  logger:
+    init_args:
+      name: UNeXt2_JOINT_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/unext2
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/unext2/checkpoints
+
+_hcs_init_args: &hcs_init_args
+  source_channel: [Phase3D]
+  target_channel: [Structure]
+  z_window_size: 20
+  batch_size: 32
+  num_workers: 8
+  yx_patch_size: [384, 384]
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Structure]
+        level: fov_statistics
+        subtrahend: median
+        divisor: iqr
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Structure]
+        w_key: Structure
+        spatial_size: [20, 600, 600]
+        num_samples: 4
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandAffined
+      init_args:
+        keys: [source, target]
+        prob: 0.8
+        rotate_range: [3.14, 0, 0]
+        shear_range: [0.0, 0.05, 0.05]
+        scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [15, 384, 384]
+    - class_path: viscy_transforms.BatchedRandAdjustContrastd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        gamma: [0.8, 1.2]
+    - class_path: viscy_transforms.BatchedRandScaleIntensityd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        factors: 0.5
+    - class_path: viscy_transforms.BatchedRandGaussianNoised
+      init_args:
+        keys: [source]
+        prob: 0.5
+        mean: 0.0
+        std: 0.3
+    - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        sigma_x: [0.25, 0.75]
+        sigma_y: [0.25, 0.75]
+        sigma_z: [0.25, 0.75]
+  val_gpu_augmentations:
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [15, 384, 384]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc SEC61B train store
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
+      # a549_mantis — pooled SEC61B all-conditions train store
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
+
+launcher:
+  job_name: UNeXt2_JOINT_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/unext2
