@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 
 from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
+from viscy_utils.mp_utils import available_cpus
 
 from .config import (
     DimensionalityReductionConfig,
@@ -51,8 +52,31 @@ def _run_umap(features: NDArray, cfg: UMAPConfig) -> tuple[str, NDArray]:
     return "X_umap", umap_embedding
 
 
-def _run_phate(features: NDArray, cfg: PHATEConfig, lineage_ids: NDArray | None = None) -> tuple[str, NDArray]:
+def _run_phate(
+    features: NDArray,
+    cfg: PHATEConfig,
+    lineage_ids: NDArray | None = None,
+    fit_idx: NDArray | None = None,
+) -> tuple[str, NDArray]:
     from viscy_utils.evaluation.dimensionality_reduction import compute_phate
+
+    # n_jobs == -1 follows the sklearn convention "use all CPUs", but resolved
+    # SLURM-aware: respects SLURM_CPUS_PER_TASK so we don't oversubscribe a
+    # node when the job was allocated only a subset of cores.
+    n_jobs = available_cpus(default=1) if cfg.n_jobs == -1 else cfg.n_jobs
+
+    set_fields = cfg.model_fields_set
+    resolved = [
+        {
+            "param": name,
+            "value": "None (no subsample)"
+            if name == "subsample" and getattr(cfg, name) is None
+            else getattr(cfg, name),
+            "source": "yaml" if name in set_fields else "default",
+        }
+        for name in ("subsample", "n_pca", "knn", "decay", "knn_dist", "scale_embeddings", "random_state", "n_jobs")
+    ]
+    click.echo("\n" + format_markdown_table(resolved, title="PHATE resolved parameters"))
 
     _, phate_embedding = compute_phate(
         features,
@@ -65,7 +89,8 @@ def _run_phate(features: NDArray, cfg: PHATEConfig, lineage_ids: NDArray | None 
         n_pca=cfg.n_pca,
         subsample=cfg.subsample,
         lineage_ids=lineage_ids,
-        n_jobs=cfg.n_jobs,
+        fit_idx=fit_idx,
+        n_jobs=n_jobs,
     )
     return "X_phate", phate_embedding
 
