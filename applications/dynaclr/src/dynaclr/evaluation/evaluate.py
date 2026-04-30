@@ -125,8 +125,13 @@ def _generate_predict_yaml(eval_cfg: EvaluationConfig, training_cfg: dict, outpu
             "class_path": training_cfg["data"]["class_path"],
             "init_args": data_init,
         },
-        "ckpt_path": eval_cfg.ckpt_path,
     }
+    # Only emit ckpt_path when set. Foundation-model baselines (e.g. DINOv3-frozen)
+    # load weights from HuggingFace inside the model __init__ and have no
+    # Lightning checkpoint; passing ``ckpt_path: null`` to ``viscy predict``
+    # would still try to restore from a None path.
+    if eval_cfg.ckpt_path is not None:
+        predict_cfg["ckpt_path"] = eval_cfg.ckpt_path
 
     out_path = output_dir / "configs" / "predict.yml"
     with open(out_path, "w") as f:
@@ -210,6 +215,7 @@ def _generate_plot_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -> Path:
         "color_by": eval_cfg.plot.color_by,
         "point_size": eval_cfg.plot.point_size,
         "components": list(eval_cfg.plot.components),
+        "pairplot_components": eval_cfg.plot.pairplot_components,
         "format": eval_cfg.plot.format,
     }
 
@@ -231,6 +237,7 @@ def _generate_plot_combined_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -
         "color_by": eval_cfg.plot.combined_color_by,
         "point_size": eval_cfg.plot.point_size,
         "components": list(eval_cfg.plot.components),
+        "pairplot_components": eval_cfg.plot.pairplot_components,
         "format": eval_cfg.plot.format,
     }
 
@@ -458,6 +465,8 @@ def prepare_configs(config: Path) -> None:
             plot_yaml = _generate_plot_yaml(eval_cfg, output_dir)
             manifest["plot"] = str(plot_yaml)
             click.echo(f"[plot]     {plot_yaml}", err=True)
+
+        elif step == "plot_combined":
             plot_combined_yaml = _generate_plot_combined_yaml(eval_cfg, output_dir)
             manifest["plot_combined"] = str(plot_combined_yaml)
             click.echo(f"[plot]     {plot_combined_yaml}", err=True)

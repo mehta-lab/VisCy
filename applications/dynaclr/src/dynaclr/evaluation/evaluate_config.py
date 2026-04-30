@@ -113,6 +113,9 @@ class PlotStepConfig(BaseModel):
         Scatter plot point size. Default: 1.0.
     components : tuple[int, int]
         Which components to use as X/Y axes (0-indexed). Default: (0, 1).
+    pairplot_components : int
+        Number of leading PCs to render in the pairplot grid (NxN panels).
+        Smaller is faster: rendering scales with N^2. Default: 8.
     format : str
         Output format. "pdf" or "png". Default: "pdf".
     """
@@ -123,6 +126,7 @@ class PlotStepConfig(BaseModel):
     combined_color_by: list[str] = ["perturbation", "hours_post_perturbation", "experiment", "marker"]
     point_size: float = 1.0
     components: tuple[int, int] = (0, 1)
+    pairplot_components: int = 8
     format: str = "pdf"
 
 
@@ -312,7 +316,11 @@ class EvaluationConfig(BaseModel):
     steps : list[str]
         Ordered list of steps to generate configs for.
         Valid values: predict, split, reduce_dimensionality, reduce_combined,
-        plot, smoothness, mmd, linear_classifiers.
+        plot, plot_combined, smoothness, mmd, linear_classifiers,
+        append_annotations, append_predictions.
+        ``plot`` emits per-experiment scatter plots (fans out one job per
+        experiment). ``plot_combined`` emits the joint cross-experiment
+        plot only. List both to get both; list neither to skip plotting.
     predict : PredictStepConfig
         Predict step configuration.
     reduce_dimensionality : ReduceStepConfig
@@ -335,7 +343,10 @@ class EvaluationConfig(BaseModel):
     """
 
     training_config: str
-    ckpt_path: str
+    # ckpt_path is None for foundation-model baselines (e.g. DINOv3-frozen) where
+    # weights are loaded from HuggingFace inside the model __init__ and there is
+    # no Lightning checkpoint to restore from.
+    ckpt_path: Optional[str] = None
     cell_index_path: Optional[str] = None
     output_dir: str
     steps: list[str] = ["predict", "split", "reduce_dimensionality", "reduce_combined", "plot", "smoothness"]
