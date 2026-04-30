@@ -65,6 +65,14 @@ aicsmlsegment = { git = "https://github.com/alxndrkalinin/aics-ml-segmentation.g
 # Pin to czbiohub-sf/iohub PR #408 (RFC-9 zipped OME-Zarr) until merged.
 # SHA pin survives force-pushes on the PR; bump deliberately when needed.
 iohub = { git = "https://github.com/czbiohub-sf/iohub.git", rev = "53b10acb7a30a2c7e8dfd9b04258dea073e14088" }
+# Pin lightning to the last clean release (2.6.1) by direct wheel URL on the
+# pythonhosted CDN. PyPI quarantined the entire `lightning` package on
+# 2026-04-30 after the 2.6.2 / 2.6.3 supply-chain compromise (socket.dev
+# advisory: malicious payload exfiltrates cloud creds + GitHub/npm tokens on
+# import). The package index serves no versions; the CDN still serves the
+# 2.6.1 wheel directly. Drop this pin once PyPI un-quarantines lightning and
+# Lightning AI publishes a clean post-2.6.3 release.
+lightning = { url = "https://files.pythonhosted.org/packages/4a/6d/42640e15a8c34b57dc7ea922152440c0c6692214a08d5282b6e3eb46ddf4/lightning-2.6.1-py3-none-any.whl" }
 
 [tool.ruff]
 target-version = "py312"
