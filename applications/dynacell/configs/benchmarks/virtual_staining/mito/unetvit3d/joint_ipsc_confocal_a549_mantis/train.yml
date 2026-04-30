@@ -6,15 +6,13 @@
 # resolver). Only model_overlays/unetvit3d_fit.yml is composed; the data
 # block is authored inline because joint hparams live on the children.
 #
-# Topology: 4-GPU DDP. BatchedConcatDataModule attaches
-# ShardedDistributedSampler automatically when torch.distributed is
-# initialized; trainer.use_distributed_sampler stays at the default
-# (Lightning skips injection because the sampler is a
-# DistributedSampler subclass).
+# Topology: single H200, single GPU — same as unetvit3d/ipsc_confocal/train.yml.
+# The paper baseline pattern is single-GPU and we keep that here so
+# iPSC-only and joint runs are apples-to-apples.
 base:
   - ../../../_internal/shared/model/model_overlays/unetvit3d_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -28,8 +26,6 @@ benchmark:
   experiment_id: mito__joint_ipsc_confocal_a549_mantis__unetvit3d
 
 trainer:
-  strategy: ddp
-  devices: 4
   logger:
     init_args:
       name: UNetViT3D_JOINT_TOMM20
