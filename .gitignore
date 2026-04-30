@@ -68,3 +68,5 @@ lightning_logs/
 # NOTE: uv.lock is NOT ignored - it should be tracked for reproducibility
 
 checkpoints/
+
+plot_related/
