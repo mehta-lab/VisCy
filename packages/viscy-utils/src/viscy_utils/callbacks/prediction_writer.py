@@ -337,8 +337,17 @@ class HCSPredictionWriter(BasePredictionWriter):
         ImageArray
             The created or existing image array.
         """
-        if img_name in self.plate.zgroup:
+        # ``img_name in self.plate.zgroup`` does not reliably hit
+        # in-progress positions (zarr3 nested-path lookups + the
+        # leading slash in img_name combine to miss entries created
+        # earlier in this same writer). On multi-timepoint inputs the
+        # second batch for a given FOV would then re-enter the create
+        # branch and crash with FileExistsError. Try-open is robust to
+        # both cases.
+        try:
             return self.plate[img_name]
+        except KeyError:
+            pass
         _logger.debug(f"Creating image '{img_name}'")
         _, row_name, col_name, pos_name, arr_name = img_name.split("/")
         position = self.plate.create_position(row_name, col_name, pos_name)
