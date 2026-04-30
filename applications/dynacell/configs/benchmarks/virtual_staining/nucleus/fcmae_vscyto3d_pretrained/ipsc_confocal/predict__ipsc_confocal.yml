@@ -1,8 +1,8 @@
 # FCMAE_VSCyto3D_Pretrained predict: nucleus (H2B) against ipsc_confocal test_cropped.
 #
-# TODO: replace ckpt_path with best-val ckpt once iPSC FCMAE pretrained
-# nucleus training (J31475094) completes. Expected dir:
-#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_pretrained/checkpoints/
+# Pinned to best-val checkpoint from training run J31475094
+# (val 0.3921, epoch 89). Run cancelled at epoch 172 — val plateaued
+# at epoch 89 and never recovered (~83 epochs without improvement).
 base:
   - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
   - ../../../_internal/shared/model/targets/nucleus.yml
@@ -21,8 +21,7 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/nucl/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_pretrained/checkpoints/epoch=89-step=28080.ckpt
 
 data:
   init_args:
