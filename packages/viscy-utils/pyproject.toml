@@ -32,7 +32,7 @@ dynamic = [ "version" ]
 dependencies = [
   "iohub>=0.3a2",
   "jsonargparse[signatures]>=4.26",
-  "lightning>=2.3",
+  "lightning>=2.3",                 # SECURITY: do NOT upgrade past 2.6.1 — lightning 2.6.2 / 2.6.3 are compromised on PyPI (socket.dev advisory, 2026-04-30: credential-harvesting payload runs on import). Don't run `uv lock --upgrade lightning` until Lightning AI publishes a clean post-2.6.3 release.
   "matplotlib>=3.10",
   "numpy>=2.4.1",
   "pyyaml",
