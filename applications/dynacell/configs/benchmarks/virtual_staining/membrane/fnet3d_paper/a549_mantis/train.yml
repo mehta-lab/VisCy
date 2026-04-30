@@ -1,0 +1,75 @@
+# FNet3D paper-baseline fit on membrane (Membrane channel of cell.zarr) — A549 mantis-lightsheet pooled (mock + DENV + ZIKV).
+# The overlay's norm/aug/val_aug are keyed on Structure (the SEC61B/TOMM20 target
+# channel). Membrane target_channel is Membrane, so we list-replace those three
+# lists here to re-key them.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  train_set: a549_mantis
+  model_name: fnet3d_paper
+  experiment_id: membrane__a549_mantis__fnet3d_paper
+
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Membrane
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/CAAX_all.zarr
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Membrane]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          w_key: Membrane
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Membrane]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_A549_MEMB_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/memb/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/memb/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaper_A549_MEMB
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/memb/fnet3d_paper
+  # cell.zarr-backed preload (same plate as nucleus) puts MaxVMSize over
+  # the shared 256G cap; bump to match nucleus.
+  sbatch:
+    mem: "512G"

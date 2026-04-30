@@ -1,0 +1,59 @@
+# FCMAE-class (FullyConvolutionalMAE, pretraining=False) random-init
+# baseline on nucleus (Nuclei marker). Scratch control for the pretrained
+# counterpart — the two leaves are identical except this one does NOT
+# load pretrained encoder weights. See UNEXT2_VS_FCMAE_CLASSES.md for
+# why this is the paper-adjacent scratch baseline (and not unext2.yml).
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: a549_mantis
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: nucleus__a549_mantis__fcmae_vscyto3d_scratch
+
+# Override the FCMAE data overlay's hardcoded `Structure` augmentation
+# keys (the overlay was authored for ER/Mito where target_channel ==
+# "Structure"). RandWeightedCropd needs the actual nucleus channel name
+# in keys/w_key. spatial_size + num_samples kept identical to the FCMAE
+# overlay so the augmentation policy matches ER/Mito.
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_all.zarr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [20, 600, 600]
+          num_samples: 4
+
+trainer:
+  logger:
+    init_args:
+      name: FCMAE_VSCyto3D_Scratch_A549_Nucleus
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fcmae_vscyto3d_scratch
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fcmae_vscyto3d_scratch/checkpoints
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_A549_Nucleus
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fcmae_vscyto3d_scratch

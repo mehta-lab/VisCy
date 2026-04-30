@@ -1,0 +1,42 @@
+# CellDiff fit on ER (SEC61B marker) — A549 mantis-lightsheet pooled (mock + DENV + ZIKV).
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: a549_mantis
+  model_name: celldiff
+  experiment_id: er__a549_mantis__celldiff
+
+trainer:
+  logger:
+    init_args:
+      name: CELLDiff_A549_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/sec61b/celldiff
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/sec61b/celldiff/checkpoints
+
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
+
+launcher:
+  job_name: CELLDiff_A549_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/sec61b/celldiff
