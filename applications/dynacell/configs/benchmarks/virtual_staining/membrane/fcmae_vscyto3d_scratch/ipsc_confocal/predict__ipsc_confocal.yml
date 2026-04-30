@@ -1,0 +1,46 @@
+# FCMAE_VSCyto3D_Scratch predict: membrane (CAAX) against ipsc_confocal test_cropped.
+#
+# TODO: replace ckpt_path with best-val ckpt once iPSC FCMAE scratch
+# membrane training (J31710718, resumed from J31475106) completes. Expected dir:
+#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_scratch/checkpoints/
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: membrane__ipsc_confocal__fcmae_vscyto3d_scratch__ipsc_confocal
+
+model:
+  init_args:
+    # TODO: fill before submit (see header).
+    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_scratch/memb/last.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_scratch.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_MEMB
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
