@@ -1,9 +1,10 @@
 # FCMAE_VSCyto3D_Pretrained predict: mito (TOMM20) trained on iPSC,
 # predicting against a549_mantis_tomm20_mock test.
 #
-# TODO: replace ckpt_path once iPSC FCMAE pretrained mito training
-# completes. Expected output (per fit leaf):
-#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints/last.ckpt
+# Pinned to best-val checkpoint from training run J31523064 (ws8500
+# variant; val 0.5543, epoch 58). Run cancelled at epoch 92 — val
+# plateaued at epoch 58 and never recovered (~34 epochs without
+# improvement, drifting up in last 5 epochs).
 base:
   - ../../../_internal/shared/model/predict_sets/a549_mantis_tomm20_mock.yml
   - ../../../_internal/shared/model/targets/mito_tomm20.yml
@@ -22,8 +23,7 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/tomm20/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints/epoch=58-step=18408.ckpt
 
 data:
   init_args:
