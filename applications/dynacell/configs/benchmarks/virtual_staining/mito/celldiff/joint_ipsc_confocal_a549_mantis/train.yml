@@ -49,8 +49,8 @@ trainer:
 # `_`-prefixed top-level keys are stripped by load_composed_config; see
 # er/celldiff/joint_*/train.yml for the full anchor-convention rationale.
 _hcs_init_args: &hcs_init_args
-  source_channel: [Phase3D]
-  target_channel: [Structure]
+  source_channel: Phase3D
+  target_channel: Structure
   z_window_size: 13
   batch_size: 4
   num_workers: 4

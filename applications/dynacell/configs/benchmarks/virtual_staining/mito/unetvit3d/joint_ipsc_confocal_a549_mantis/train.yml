@@ -47,8 +47,8 @@ trainer:
         dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/unetvit3d/checkpoints
 
 _hcs_init_args: &hcs_init_args
-  source_channel: [Phase3D]
-  target_channel: [Structure]
+  source_channel: Phase3D
+  target_channel: Structure
   z_window_size: 13
   batch_size: 4
   num_workers: 4

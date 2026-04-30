@@ -56,8 +56,8 @@ trainer:
 # the dict reaches LightningCLI / jsonargparse (which would reject them
 # as unknown options). The merge expansion under `data:` survives.
 _hcs_init_args: &hcs_init_args
-  source_channel: [Phase3D]
-  target_channel: [Structure]
+  source_channel: Phase3D
+  target_channel: Structure
   z_window_size: 13
   batch_size: 4
   num_workers: 4

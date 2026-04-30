@@ -60,8 +60,8 @@ trainer:
         dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints
 
 _hcs_init_args: &hcs_init_args
-  source_channel: [Phase3D]
-  target_channel: [Membrane]
+  source_channel: Phase3D
+  target_channel: Membrane
   z_window_size: 20
   batch_size: 32
   num_workers: 4
