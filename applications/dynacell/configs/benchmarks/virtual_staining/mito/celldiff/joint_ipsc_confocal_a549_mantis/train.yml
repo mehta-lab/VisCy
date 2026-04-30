@@ -135,3 +135,8 @@ data:
 launcher:
   job_name: CELLDiff_JOINT_TOMM20
   run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff
+  # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; the default
+  # 256G cap is too tight (256G iPSC mem + ~50G A549 + worker peak OOMs).
+  # 512G is the smallest tier that fits joint preload + worker overhead.
+  sbatch:
+    mem: "512G"

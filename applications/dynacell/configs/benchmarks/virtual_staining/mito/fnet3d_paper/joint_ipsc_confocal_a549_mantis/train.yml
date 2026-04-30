@@ -113,3 +113,8 @@ data:
 launcher:
   job_name: FNet3DPaper_JOINT_TOMM20
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper
+  # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; the default
+  # 256G cap is too tight (256G iPSC mem + ~50G A549 + worker peak OOMs).
+  # 512G is the smallest tier that fits joint preload + worker overhead.
+  sbatch:
+    mem: "512G"
