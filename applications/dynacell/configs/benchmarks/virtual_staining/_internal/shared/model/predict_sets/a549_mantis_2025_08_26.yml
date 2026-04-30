@@ -1,9 +1,0 @@
-# Predict set: A549 mantis 2025_08_26 (SEC61_TOMM20_ZIKV plate).
-# data_path resolves to the test store in predict mode via dataset_ref.
-benchmark:
-  predict_set: a549_mantis
-  dataset_ref:
-    dataset: a549-mantis-2025_08_26
-data:
-  class_path: viscy_data.hcs.HCSDataModule
-  init_args: {}
