@@ -151,6 +151,67 @@ def _select_productive_tracks(
     return pd.DataFrame(rows)
 
 
+def _select_mock_from_zarr(
+    dataset_cfg: dict,
+    dataset_id: str,
+    fov_pattern: str,
+    embedding_pattern: str,
+    min_track_minutes: float,
+    frame_interval_minutes: float,
+) -> pd.DataFrame:
+    """Pull mock cells directly from the embedding zarr's .obs.
+
+    Fallback path for control wells that were never manually annotated
+    (e.g. SEC61's A/1 in 07_24). The well is uninfected by experimental
+    design; we synthesize ``infection_state="uninfected"`` and leave
+    other annotation columns blank, then run the resulting frame through
+    the same lineage and cohort machinery as annotation-derived cohorts.
+    Reads ``parent_track_id`` from the zarr so lineage reconnection works.
+    """
+    pred_dir = Path(dataset_cfg["pred_dir"])
+    date_prefix = "_".join(dataset_id.split("_")[:3])
+    matches = [m for m in pred_dir.glob(embedding_pattern) if m.name.startswith(date_prefix)]
+    if not matches:
+        _logger.warning(f"[{dataset_id}] no zarr matched {embedding_pattern} with prefix {date_prefix}")
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    adata = ad.read_zarr(matches[0])
+    adata.obs_names_make_unique()
+    obs = adata.obs.copy()
+    obs = obs[obs["fov_name"].astype(str).str.contains(fov_pattern, regex=False)]
+    if obs.empty:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    min_frames = int(round(min_track_minutes / frame_interval_minutes))
+    rows: list[dict] = []
+    for (fov, tid), g in obs.groupby(["fov_name", "track_id"]):
+        if len(g) < min_frames:
+            continue
+        g = g.sort_values("t")
+        parent_id = int(g["parent_track_id"].iloc[0]) if "parent_track_id" in g.columns else -1
+        for _, r in g.iterrows():
+            rows.append(
+                {
+                    "dataset_id": dataset_id,
+                    "fov_name": str(fov),
+                    "track_id": int(tid),
+                    "parent_track_id": parent_id,
+                    "t": int(r["t"]),
+                    "infection_state": "uninfected",
+                    "organelle_state": "",
+                    "cell_division_state": "",
+                }
+            )
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        n_tracks = df.groupby(["fov_name", "track_id"]).ngroups
+        _logger.info(
+            f"[{dataset_id}] pulled {n_tracks} mock tracks from zarr {matches[0].name} "
+            f"(fov={fov_pattern}; annotation CSV had none)"
+        )
+    return df
+
+
 def _select_well_tracks(
     ann_df: pd.DataFrame,
     dataset_id: str,
@@ -332,7 +393,17 @@ def _build_dataset_cohorts(
     cohort_rules = cand_cfg.get("cohort_rules", {})
     lineage_rules = cand_cfg.get("lineage_rules", {})
 
-    mock_patterns: list[str] = list(cohort_rules.get("mock_well_patterns", []))
+    # Mock wells are per-dataset: each dataset's `control_fov_pattern`
+    # in datasets.yaml names the well that has the same imaging channel
+    # as that dataset (e.g. A/1 for SEC61, C/1 for G3BP1). The cohort-
+    # level `mock_well_patterns` is a fallback that applies the same
+    # well list to every dataset — keeps backwards-compat with
+    # candidate-set configs that don't yet split per-dataset.
+    ds_control_pattern = dataset_cfg.get("control_fov_pattern")
+    if ds_control_pattern:
+        mock_patterns: list[str] = [ds_control_pattern]
+    else:
+        mock_patterns = list(cohort_rules.get("mock_well_patterns", []))
     bystander_fraction = float(cohort_rules.get("bystander_uninfected_fraction", 0.8))
     abortive_min_run = int(cohort_rules.get("abortive_min_run", 3))
 
@@ -349,16 +420,31 @@ def _build_dataset_cohorts(
     )
 
     # 2) Mock cohort from uninfected control wells.
+    # First try the annotation CSV; if it has no rows for the control
+    # well (common for never-annotated control wells), fall back to the
+    # embedding zarr's .obs and synthesize the cohort with
+    # infection_state="uninfected" (true by well design).
     mock_parts: list[pd.DataFrame] = []
+    min_track_minutes = float(productive_filter.get("min_pre_minutes", 0)) + float(
+        productive_filter.get("min_post_minutes", 0)
+    )
     for pat in mock_patterns:
         ctrl_df = _select_well_tracks(
             ann_df,
             dataset_id=dataset_id,
             fov_pattern=pat,
-            min_track_minutes=float(productive_filter.get("min_pre_minutes", 0))
-            + float(productive_filter.get("min_post_minutes", 0)),
+            min_track_minutes=min_track_minutes,
             frame_interval_minutes=frame_interval,
         )
+        if ctrl_df.empty:
+            ctrl_df = _select_mock_from_zarr(
+                dataset_cfg=dataset_cfg,
+                dataset_id=dataset_id,
+                fov_pattern=pat,
+                embedding_pattern=embedding_pattern,
+                min_track_minutes=min_track_minutes,
+                frame_interval_minutes=frame_interval,
+            )
         if not ctrl_df.empty:
             mock_parts.append(ctrl_df)
     mock_df = pd.concat(mock_parts, ignore_index=True) if mock_parts else pd.DataFrame(columns=OUTPUT_COLUMNS)
