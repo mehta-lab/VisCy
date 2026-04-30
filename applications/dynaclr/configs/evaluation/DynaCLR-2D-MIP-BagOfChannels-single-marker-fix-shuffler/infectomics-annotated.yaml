@@ -1,0 +1,21 @@
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler × infectomics-annotated (Wave 1)
+# Sibling row to DynaCLR-2D-MIP-BagOfChannels for direct comparison.
+# Same training-config family, different run (single-marker variant + shuffler fix).
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/run_infectomics_annotated.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/config.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/jbrwhzr3/checkpoints/last.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/
+
+# Publish to its own sub-registry: separate model, separate task domain.
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/infectomics/

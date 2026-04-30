@@ -1,0 +1,25 @@
+# Evaluation: DynaCLR-2D-MIP-BagOfChannels (single-marker, 384->192, zext16) x infectomics-annotated.
+# Variant: single-marker batching at the larger 384->216->192 patch with zext16.
+# Checkpoint: p6vlebcu/last.ckpt (2026-04-28).
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-single-marker-192/run_infectomics_annotated.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/config.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/p6vlebcu/checkpoints/last.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated/
+
+# Larger 384->192 patches need a smaller predict batch to fit on gpu_2d.
+# The default 400 OOMs (exit 137) on this checkpoint; 128 is safe.
+predict:
+  batch_size: 128
+
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels-single-marker-192/infectomics/
