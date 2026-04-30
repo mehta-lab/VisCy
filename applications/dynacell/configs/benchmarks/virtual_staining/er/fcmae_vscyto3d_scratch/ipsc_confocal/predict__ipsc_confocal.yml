@@ -1,8 +1,9 @@
 # FCMAE_VSCyto3D_Scratch predict: ER (SEC61B) against ipsc_confocal test_cropped.
 #
-# TODO: replace ckpt_path with best-val ckpt once iPSC FCMAE scratch
-# ER training (J31483778) completes. Expected dir:
-#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch/checkpoints/
+# Pinned to best-val checkpoint from training run J31483778
+# (val 0.4119, epoch 122). Run cancelled at epoch 164 — val plateaued
+# at epoch 122 and never recovered (~42 epochs without improvement,
+# drifting up in last 5 epochs).
 base:
   - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
   - ../../../_internal/shared/model/targets/er_sec61b.yml
@@ -21,8 +22,7 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_scratch/sec61b/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch/checkpoints/epoch=122-step=32472.ckpt
 
 data:
   init_args:
