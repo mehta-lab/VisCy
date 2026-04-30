@@ -49,15 +49,22 @@ def _load_registry(path: Path) -> tuple[list[dict], Path, float]:
 
 
 def _load_smoothness(models: list[dict]) -> pd.DataFrame | None:
+    """Load per-marker smoothness CSVs from all evals and concat.
+
+    Each eval writes one ``*_per_marker_smoothness.csv`` per (experiment, marker)
+    with columns including ``smoothness_score`` and ``dynamic_range``. We
+    concat all of them and tag with the model name; the plotting step
+    aggregates (mean across experiments+markers) for the headline bar chart.
+    """
     frames = []
     for entry in models:
         smoothness_dir = Path(entry["eval_dir"]) / "smoothness"
-        csvs = list(smoothness_dir.glob("*_smoothness_stats.csv"))
+        csvs = list(smoothness_dir.glob("*_per_marker_smoothness.csv"))
         if not csvs:
             click.echo(f"[smoothness] No smoothness CSV found for {entry['name']}", err=True)
             continue
-        # Take the first (usually only) stats file — not per-group
-        df = pd.read_csv(csvs[0])
+        per_csv = [pd.read_csv(c) for c in csvs]
+        df = pd.concat(per_csv, ignore_index=True)
         df["model"] = entry["name"]
         frames.append(df)
     if not frames:
@@ -66,15 +73,26 @@ def _load_smoothness(models: list[dict]) -> pd.DataFrame | None:
 
 
 def _plot_smoothness(df: pd.DataFrame, output_dir: Path) -> None:
+    """Plot per-model smoothness as mean ± std across (experiment, marker) rows."""
     metrics = ["smoothness_score", "dynamic_range"]
     present = [m for m in metrics if m in df.columns]
     if not present:
         return
 
+    # Aggregate across (experiment, marker) per model: mean ± std.
+    agg = df.groupby("model")[present].agg(["mean", "std"])
+
     fig, axes = plt.subplots(1, len(present), figsize=(5 * len(present), 4), squeeze=False)
     for ax, metric in zip(axes[0], present):
-        vals = df.set_index("model")[metric]
-        ax.bar(vals.index, vals.values, color=plt.cm.tab10(np.arange(len(vals)) / len(vals)))
+        means = agg[(metric, "mean")]
+        stds = agg[(metric, "std")].fillna(0.0)
+        ax.bar(
+            means.index,
+            means.values,
+            yerr=stds.values,
+            capsize=4,
+            color=plt.cm.tab10(np.arange(len(means)) / max(len(means), 1)),
+        )
         ax.set_title(metric.replace("_", " ").title())
         ax.set_ylabel(metric)
         plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
@@ -107,8 +125,15 @@ def _load_linear_classifiers(models: list[dict]) -> pd.DataFrame | None:
 
 
 def _plot_linear_classifiers(df: pd.DataFrame, output_dir: Path) -> None:
-    if "auroc" not in df.columns:
+    # The LC writer emits per-split metrics: train_auroc and val_auroc.
+    # Plot val_auroc (held-out generalization) — that is the headline number
+    # for cross-model comparison.
+    auroc_col = "val_auroc"
+    if auroc_col not in df.columns:
         return
+
+    # Marker breakdown lives in `marker_filter` (per-marker LCs), not `marker`.
+    marker_col = "marker_filter" if "marker_filter" in df.columns else "marker"
 
     tasks = sorted(df["task"].unique()) if "task" in df.columns else ["all"]
     ncols = min(4, len(tasks))
@@ -123,7 +148,9 @@ def _plot_linear_classifiers(df: pd.DataFrame, output_dir: Path) -> None:
         ax = axes_flat[ax_idx]
         sub = df[df["task"] == task] if "task" in df.columns else df
         pivot = sub.pivot_table(
-            index="marker" if "marker" in sub.columns else sub.index, columns="model", values="auroc"
+            index=marker_col if marker_col in sub.columns else sub.index,
+            columns="model",
+            values=auroc_col,
         )
         pivot = pivot.reindex(columns=models)
 
@@ -136,7 +163,7 @@ def _plot_linear_classifiers(df: pd.DataFrame, output_dir: Path) -> None:
 
         ax.set_xticks(x + width * (len(models) - 1) / 2)
         ax.set_xticklabels(pivot.index, rotation=45, ha="right", fontsize=8)
-        ax.set_ylabel("AUROC")
+        ax.set_ylabel("Validation AUROC")
         ax.set_title(task, fontsize=9)
         ax.axhline(0.5, color="gray", linewidth=0.8, linestyle="--")
         ax.set_ylim(0, 1.05)
