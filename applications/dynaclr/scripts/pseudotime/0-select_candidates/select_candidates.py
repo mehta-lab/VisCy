@@ -151,6 +151,17 @@ def _select_productive_tracks(
     return pd.DataFrame(rows)
 
 
+def _organelle_zarr_pattern(dataset_id: str, embeddings: dict[str, str]) -> str:
+    """Return the organelle-channel zarr pattern for ``dataset_id``.
+
+    Maps the dataset suffix (e.g. ``SEC61``) to ``embeddings.organelle_sec61``.
+    Falls back to ``embeddings.sensor`` if no per-organelle entry exists.
+    """
+    suffix = dataset_id.split("_")[-1].lower()
+    key = f"organelle_{suffix}"
+    return embeddings.get(key, embeddings.get("sensor", "*.zarr"))
+
+
 def _select_mock_from_zarr(
     dataset_cfg: dict,
     dataset_id: str,
@@ -369,6 +380,7 @@ def _build_dataset_cohorts(
     dataset_cfg: dict,
     cand_cfg: dict,
     embedding_pattern: str,
+    embeddings: dict[str, str] | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Produce productive / bystander / abortive / mock dataframes for one dataset.
 
@@ -382,6 +394,11 @@ def _build_dataset_cohorts(
         Candidate-set entry from ``candidates.yaml``.
     embedding_pattern : str
         Glob pattern for the LC-prediction embedding zarr (e.g. sensor channel).
+    embeddings : dict[str, str], optional
+        Full ``embeddings`` mapping from ``datasets.yaml``. Used to pick the
+        per-dataset organelle-channel pattern for the mock-from-zarr fallback,
+        since control wells (e.g. SEC61's A/1) may be absent from the sensor
+        zarr but present in the organelle zarr.
     """
     fov_pattern = dataset_cfg.get("fov_pattern", "")
     frame_interval = float(dataset_cfg["frame_interval_minutes"])
@@ -437,11 +454,12 @@ def _build_dataset_cohorts(
             frame_interval_minutes=frame_interval,
         )
         if ctrl_df.empty:
+            mock_pattern = _organelle_zarr_pattern(dataset_id, embeddings) if embeddings else embedding_pattern
             ctrl_df = _select_mock_from_zarr(
                 dataset_cfg=dataset_cfg,
                 dataset_id=dataset_id,
                 fov_pattern=pat,
-                embedding_pattern=embedding_pattern,
+                embedding_pattern=mock_pattern,
                 min_track_minutes=min_track_minutes,
                 frame_interval_minutes=frame_interval,
             )
@@ -589,7 +607,8 @@ def main() -> None:
     dataset_cfgs = {d["dataset_id"]: d for d in config["datasets"]}
 
     # Embedding pattern for LC predictions (sensor channel by convention).
-    embedding_pattern = config.get("embeddings", {}).get("sensor", "*_viral_sensor_*.zarr")
+    embeddings_cfg = config.get("embeddings", {})
+    embedding_pattern = embeddings_cfg.get("sensor", "*_viral_sensor_*.zarr")
 
     productive_parts: list[pd.DataFrame] = []
     bystander_parts: list[pd.DataFrame] = []
@@ -606,6 +625,7 @@ def main() -> None:
             dataset_cfg=ds_cfg,
             cand_cfg=cand_cfg,
             embedding_pattern=embedding_pattern,
+            embeddings=embeddings_cfg,
         )
         meta = results["_meta"]
         bystander_df, abortive_df, unannotated_df = _split_well_non_productive(
