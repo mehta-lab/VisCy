@@ -138,11 +138,11 @@ data:
         init_args:
           <<: *hcs_init_args
           data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
-      # a549_mantis — 2024_11_07 SEC61B train store (first of 7 per-plate stores)
+      # a549_mantis — pooled SEC61B all-conditions train store (mantis_v1/train/SEC61B_all.zarr)
       - class_path: viscy_data.hcs.HCSDataModule
         init_args:
           <<: *hcs_init_args
-          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
 
 launcher:
   job_name: CELLDiff_JOINT_SEC61B
