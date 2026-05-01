@@ -49,6 +49,18 @@ def _load_registry(path: Path) -> tuple[list[dict], Path, float]:
     return raw["models"], output_dir, fdr_threshold
 
 
+def _build_model_palette(model_names: list[str]) -> dict[str, tuple[float, float, float, float]]:
+    """Map model name → RGBA color, stable across all plots in one run.
+
+    Uses ``tab10`` for ≤10 models (10 visually distinct hues) and ``tab20``
+    for 11–20 models. Colors are picked from discrete colormap indices so
+    they don't blur into each other when many models are compared.
+    """
+    n = len(model_names)
+    cmap = plt.cm.tab10 if n <= 10 else plt.cm.tab20
+    return {name: cmap(i % cmap.N) for i, name in enumerate(sorted(model_names))}
+
+
 # ---------------------------------------------------------------------------
 # Smoothness
 # ---------------------------------------------------------------------------
@@ -78,7 +90,7 @@ def _load_smoothness(models: list[dict]) -> pd.DataFrame | None:
     return pd.concat(frames, ignore_index=True)
 
 
-def _plot_smoothness(df: pd.DataFrame, output_dir: Path) -> None:
+def _plot_smoothness(df: pd.DataFrame, output_dir: Path, model_color: dict) -> None:
     """Plot per-model smoothness as mean ± std across (experiment, marker) rows."""
     metrics = ["smoothness_score", "dynamic_range"]
     present = [m for m in metrics if m in df.columns]
@@ -92,12 +104,13 @@ def _plot_smoothness(df: pd.DataFrame, output_dir: Path) -> None:
     for ax, metric in zip(axes[0], present):
         means = agg[(metric, "mean")]
         stds = agg[(metric, "std")].fillna(0.0)
+        bar_colors = [model_color.get(m, "gray") for m in means.index]
         ax.bar(
             means.index,
             means.values,
             yerr=stds.values,
             capsize=4,
-            color=plt.cm.tab10(np.arange(len(means)) / max(len(means), 1)),
+            color=bar_colors,
         )
         ax.set_title(metric.replace("_", " ").title())
         ax.set_ylabel(metric)
@@ -130,7 +143,7 @@ def _load_linear_classifiers(models: list[dict]) -> pd.DataFrame | None:
     return pd.concat(frames, ignore_index=True)
 
 
-def _plot_linear_classifiers(df: pd.DataFrame, output_dir: Path) -> None:
+def _plot_linear_classifiers(df: pd.DataFrame, output_dir: Path, model_color: dict) -> None:
     # The LC writer emits per-split metrics: train_auroc and val_auroc.
     # Plot val_auroc (held-out generalization) — that is the headline number
     # for cross-model comparison.
@@ -147,8 +160,6 @@ def _plot_linear_classifiers(df: pd.DataFrame, output_dir: Path) -> None:
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), squeeze=False)
     axes_flat = axes.flatten()
     models = sorted(df["model"].unique())
-    colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
-    model_color = dict(zip(models, colors))
 
     for ax_idx, task in enumerate(tasks):
         ax = axes_flat[ax_idx]
@@ -208,7 +219,7 @@ def _discover_per_class_metrics(df: pd.DataFrame) -> dict[str, list[str]]:
     return {cls: sorted(metrics) for cls, metrics in found.items()}
 
 
-def _plot_linear_classifiers_per_class(df: pd.DataFrame, output_dir: Path) -> None:
+def _plot_linear_classifiers_per_class(df: pd.DataFrame, output_dir: Path, model_color: dict) -> None:
     """Per-class precision/recall/F1 grouped bars per (task, marker_filter).
 
     AUROC is prevalence-invariant and rewards good ranking, but the
@@ -222,8 +233,6 @@ def _plot_linear_classifiers_per_class(df: pd.DataFrame, output_dir: Path) -> No
         return
 
     models = sorted(df["model"].unique())
-    colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
-    model_color = dict(zip(models, colors))
 
     # One subplot per (task, marker_filter) so SEC61B vs G3BP1 stay separate.
     # Normalize missing marker_filter to None so iteration semantics are
@@ -351,7 +360,7 @@ def _load_mmd(models: list[dict]) -> pd.DataFrame | None:
     return pd.concat(frames, ignore_index=True)
 
 
-def _plot_mmd_kinetics(df: pd.DataFrame, output_dir: Path, fdr_threshold: float) -> None:
+def _plot_mmd_kinetics(df: pd.DataFrame, output_dir: Path, fdr_threshold: float, model_color: dict) -> None:
     temporal = df.dropna(subset=["hours_bin_start", "hours_bin_end"]).copy()
     if temporal.empty:
         click.echo("[mmd] No temporal rows — skipping kinetics plot", err=True)
@@ -370,9 +379,7 @@ def _plot_mmd_kinetics(df: pd.DataFrame, output_dir: Path, fdr_threshold: float)
         fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), squeeze=False)
         axes_flat = axes.flatten()
 
-        colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
         linestyles = ["-", "--", ":", "-."]
-        model_color = dict(zip(models, colors))
         label_ls = dict(zip(labels, linestyles[: len(labels)]))
 
         for ax_idx, marker in enumerate(markers):
@@ -475,11 +482,15 @@ def main(config: Path) -> None:
     models, output_dir, fdr_threshold = _load_registry(config)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Build the model→color palette once from the registry's model list so
+    # every plot in this run uses the same color for the same model.
+    model_color = _build_model_palette([m["name"] for m in models])
+
     # Smoothness
     smoothness_df = _load_smoothness(models)
     if smoothness_df is not None:
         smoothness_df.to_csv(output_dir / "smoothness_comparison.csv", index=False)
-        _plot_smoothness(smoothness_df, output_dir)
+        _plot_smoothness(smoothness_df, output_dir, model_color)
         click.echo("\n## Smoothness\n")
         click.echo(smoothness_df[["model", "smoothness_score", "dynamic_range"]].to_markdown(index=False))
 
@@ -487,8 +498,8 @@ def main(config: Path) -> None:
     lc_df = _load_linear_classifiers(models)
     if lc_df is not None:
         lc_df.to_csv(output_dir / "linear_classifiers_comparison.csv", index=False)
-        _plot_linear_classifiers(lc_df, output_dir)
-        _plot_linear_classifiers_per_class(lc_df, output_dir)
+        _plot_linear_classifiers(lc_df, output_dir, model_color)
+        _plot_linear_classifiers_per_class(lc_df, output_dir, model_color)
         summary_cols = [c for c in ["model", "task", "marker", "auroc", "f1"] if c in lc_df.columns]
         click.echo("\n## Linear Classifiers\n")
         click.echo(lc_df[summary_cols].to_markdown(index=False))
@@ -498,7 +509,7 @@ def main(config: Path) -> None:
     if mmd_df is not None:
         mmd_summary = _build_mmd_summary(mmd_df)
         mmd_summary.to_csv(output_dir / "mmd_comparison.csv", index=False)
-        _plot_mmd_kinetics(mmd_df, output_dir, fdr_threshold)
+        _plot_mmd_kinetics(mmd_df, output_dir, fdr_threshold, model_color)
         _plot_mmd_summary_heatmap(mmd_summary, output_dir)
         click.echo("\n## MMD activity z-score\n")
         click.echo(mmd_summary.to_markdown(index=False))
