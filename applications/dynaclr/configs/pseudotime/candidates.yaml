@@ -40,10 +40,16 @@ candidate_sets:
   zikv_productive_pooled:
     description: |
       Pooled productive cohort across 07_24 (SEC61 + G3BP1), 07_22 (G3BP1
-      only), and 08_26 (SEC61 only). Used to increase n for compare_phase_to_fluor
-      Spearman ρ — the per-experiment 07_24 set was n=6/7. Mock comes
-      from each experiment's matched control well via the per-dataset
-      organelle-zarr fallback added in 98c5eb29.
+      only), and 08_26 (SEC61 only). Used to increase n for
+      compare_phase_to_fluor — the 07_24-only set was n=6/7.
+
+      Filter is loosened to a 300-min track-length floor (10 frames at
+      30 min/frame, 30 frames at 10 min/frame) to recover 07_22 cells
+      that the strict 600-min filter excluded. 08_26 uses
+      ``productive_source: lc_zarr`` because its annotation CSV is
+      per-frame rather than track-linked. Mock cohort uses
+      ``min_non_productive_minutes`` decoupled from the productive
+      filter so short tracks can still serve as null distributions.
     datasets:
       - "2025_07_24_SEC61"
       - "2025_07_24_G3BP1"
@@ -53,12 +59,14 @@ candidate_sets:
       anchor_label: infection_state
       anchor_positive: infected
       anchor_negative: uninfected
-      min_pre_minutes: 240
-      min_post_minutes: 360
+      min_pre_minutes: 120         # was 240; loosened to 300-min total floor
+      min_post_minutes: 180        # was 360; loosened to 300-min total floor
       crop_window_minutes: 360
     cohort_rules:
       bystander_uninfected_fraction: 0.8
       abortive_min_run: 3
+      min_non_productive_minutes: 300   # decoupled from productive pre/post; lets
+                                        # short tracks contribute as bystander/mock
       mock_well_patterns:
         - "A/1"
         - "C/1"

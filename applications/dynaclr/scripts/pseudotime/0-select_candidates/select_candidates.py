@@ -151,6 +151,115 @@ def _select_productive_tracks(
     return pd.DataFrame(rows)
 
 
+def _select_productive_from_zarr(
+    dataset_cfg: dict,
+    dataset_id: str,
+    fov_pattern: str,
+    filter_cfg: dict,
+    frame_interval_minutes: float,
+    embedding_pattern: str,
+    pred_column: str = "predicted_infection_state",
+    min_run: int = 3,
+) -> pd.DataFrame:
+    """Pick productive tracks from the embedding zarr's LC predictions.
+
+    Used for datasets without a track-linked manual annotation CSV (e.g.
+    08_26 SEC61). Anchor is the first frame of a sustained run of
+    ``min_run`` consecutive ``predicted_infection_state == anchor_positive``
+    predictions. The pre/post window requirements match
+    ``_select_productive_tracks``.
+
+    Per-frame rows for each surviving track are emitted with the manual
+    annotation columns left blank (only the LC-derived anchor is real).
+    Downstream A-LC alignment will recompute the LC anchor; A-anno will
+    have no anchor for these cells (NaN ``t_zero``).
+    """
+    anchor_positive = filter_cfg["anchor_positive"]
+    anchor_negative = filter_cfg.get("anchor_negative", "uninfected")
+    min_pre = float(filter_cfg.get("min_pre_minutes", 0))
+    min_post = float(filter_cfg.get("min_post_minutes", 0))
+    crop_window_minutes = filter_cfg["crop_window_minutes"]
+
+    pre_frames = int(round(min_pre / frame_interval_minutes))
+    post_frames = int(round(min_post / frame_interval_minutes))
+    crop_half = int(round(float(crop_window_minutes) / frame_interval_minutes))
+
+    pred_dir = Path(dataset_cfg["pred_dir"])
+    date_prefix = "_".join(dataset_id.split("_")[:3])
+    matches = [m for m in pred_dir.glob(embedding_pattern) if m.name.startswith(date_prefix)]
+    if not matches:
+        _logger.warning(
+            f"[{dataset_id}] no zarr matched {embedding_pattern} with prefix {date_prefix}; "
+            "productive_source=lc_zarr produces empty cohort"
+        )
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    adata = ad.read_zarr(matches[0])
+    adata.obs_names_make_unique()
+    if pred_column not in adata.obs.columns:
+        _logger.warning(f"[{dataset_id}] {pred_column} not in {matches[0].name}; productive empty")
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    obs = adata.obs.copy()
+    obs = obs[obs["fov_name"].astype(str).str.contains(fov_pattern, regex=False)]
+    if obs.empty:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    rows: list[dict] = []
+    n_anchored = 0
+    for (fov, tid), g in obs.groupby(["fov_name", "track_id"]):
+        g = g.sort_values("t")
+        states = set(g[pred_column].dropna().unique()) - {""}
+        if anchor_positive not in states or anchor_negative not in states:
+            continue
+
+        # Find the first sustained run of `min_run` consecutive positives.
+        positive_mask = (g[pred_column] == anchor_positive).to_numpy()
+        run_start = None
+        run = 0
+        for i, v in enumerate(positive_mask):
+            if v:
+                run += 1
+                if run >= min_run:
+                    run_start = i - min_run + 1
+                    break
+            else:
+                run = 0
+        if run_start is None:
+            continue
+
+        t_onset = int(g["t"].iloc[run_start])
+        t_min, t_max = int(g["t"].min()), int(g["t"].max())
+        if (t_onset - t_min) < pre_frames or (t_max - t_onset) < post_frames:
+            continue
+
+        t_before = max(t_min, t_onset - crop_half)
+        t_after = min(t_max, t_onset + crop_half)
+
+        parent_id = int(g["parent_track_id"].iloc[0]) if "parent_track_id" in g.columns else -1
+
+        in_window = g[(g["t"] >= t_before) & (g["t"] <= t_after)]
+        n_anchored += 1
+        for _, r in in_window.iterrows():
+            row = {
+                "dataset_id": dataset_id,
+                "fov_name": str(fov),
+                "track_id": int(tid),
+                "parent_track_id": parent_id,
+                "t": int(r["t"]),
+            }
+            for label_col in LABEL_VALUES:
+                row[label_col] = ""
+            rows.append(row)
+
+    if n_anchored:
+        _logger.info(
+            f"[{dataset_id}] productive_source=lc_zarr: {n_anchored} tracks anchored from "
+            f"{matches[0].name} (fov={fov_pattern}, min_run={min_run})"
+        )
+    return pd.DataFrame(rows)
+
+
 def _organelle_zarr_pattern(dataset_id: str, embeddings: dict[str, str]) -> str:
     """Return the organelle-channel zarr pattern for ``dataset_id``.
 
@@ -423,18 +532,43 @@ def _build_dataset_cohorts(
         mock_patterns = list(cohort_rules.get("mock_well_patterns", []))
     bystander_fraction = float(cohort_rules.get("bystander_uninfected_fraction", 0.8))
     abortive_min_run = int(cohort_rules.get("abortive_min_run", 3))
+    # Non-productive cohorts (bystander, abortive, mock) only need enough
+    # frames to compute LC-run statistics for cohort tagging — they don't
+    # need the productive filter's pre/post window. Decoupling lets short
+    # tracks (e.g. 07_22 at 10 min/frame) contribute to comparison cohorts
+    # without weakening the productive definition.
+    min_non_productive_minutes = float(cohort_rules.get("min_non_productive_minutes", 300.0))
 
     k_pre = int(round(float(lineage_rules.get("transition_window_k_pre_minutes", 60)) / frame_interval))
     k_post = int(round(float(lineage_rules.get("transition_window_k_post_minutes", 120)) / frame_interval))
 
-    # 1) Productive cohort from the infected well.
-    productive_df = _select_productive_tracks(
-        ann_df,
-        dataset_id=dataset_id,
-        fov_pattern=fov_pattern,
-        filter_cfg=productive_filter,
-        frame_interval_minutes=frame_interval,
-    )
+    # 1) Productive cohort from the infected well. ``productive_source``
+    # in datasets.yaml selects between annotation CSV (default) and
+    # LC-from-zarr (for datasets without track-linked manual annotations,
+    # e.g. 08_26_SEC61).
+    productive_source = dataset_cfg.get("productive_source", "annotation_csv")
+    if productive_source == "lc_zarr":
+        productive_df = _select_productive_from_zarr(
+            dataset_cfg=dataset_cfg,
+            dataset_id=dataset_id,
+            fov_pattern=fov_pattern,
+            filter_cfg=productive_filter,
+            frame_interval_minutes=frame_interval,
+            embedding_pattern=embedding_pattern,
+            min_run=abortive_min_run,
+        )
+    elif productive_source == "annotation_csv":
+        productive_df = _select_productive_tracks(
+            ann_df,
+            dataset_id=dataset_id,
+            fov_pattern=fov_pattern,
+            filter_cfg=productive_filter,
+            frame_interval_minutes=frame_interval,
+        )
+    else:
+        raise ValueError(
+            f"[{dataset_id}] unknown productive_source={productive_source!r}; must be 'annotation_csv' or 'lc_zarr'"
+        )
 
     # 2) Mock cohort from uninfected control wells.
     # First try the annotation CSV; if it has no rows for the control
@@ -442,9 +576,7 @@ def _build_dataset_cohorts(
     # embedding zarr's .obs and synthesize the cohort with
     # infection_state="uninfected" (true by well design).
     mock_parts: list[pd.DataFrame] = []
-    min_track_minutes = float(productive_filter.get("min_pre_minutes", 0)) + float(
-        productive_filter.get("min_post_minutes", 0)
-    )
+    min_track_minutes = min_non_productive_minutes
     for pat in mock_patterns:
         ctrl_df = _select_well_tracks(
             ann_df,
@@ -473,8 +605,7 @@ def _build_dataset_cohorts(
         ann_df,
         dataset_id=dataset_id,
         fov_pattern=fov_pattern,
-        min_track_minutes=float(productive_filter.get("min_pre_minutes", 0))
-        + float(productive_filter.get("min_post_minutes", 0)),
+        min_track_minutes=min_non_productive_minutes,
         frame_interval_minutes=frame_interval,
     )
 

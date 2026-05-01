@@ -49,7 +49,9 @@ def _per_cell_onset(signal_df: pd.DataFrame, threshold_df: pd.DataFrame) -> pd.D
     """Productive-cell onset = first ``t_rel_minutes`` where signal > FOV threshold."""
     threshold_lookup = dict(zip(threshold_df["fov_name"].astype(str), threshold_df["threshold"]))
     rows = []
-    productive = signal_df[(signal_df["cohort"] == "productive") & signal_df["signal"].notna()]
+    productive = signal_df[
+        (signal_df["cohort"] == "productive") & signal_df["signal"].notna() & signal_df["t_rel_minutes"].notna()
+    ]
     for (ds, fov, tid), g in productive.groupby(["dataset_id", "fov_name", "track_id"]):
         threshold = threshold_lookup.get(str(fov))
         if threshold is None:
