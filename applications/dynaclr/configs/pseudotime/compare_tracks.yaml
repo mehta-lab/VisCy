@@ -15,3 +15,15 @@ comparisons:
     # Real-time bins for population aggregation.
     bin_minutes: 30
     bin_range_minutes: [-360, 540]
+
+  zikv_pooled_full:
+    description: |
+      Pooled comparison across 07_24 (SEC61+G3BP1), 07_22 (G3BP1), and
+      08_26 (SEC61). Increases sample size for compare_phase_to_fluor.
+    candidate_set: zikv_productive_pooled
+    organelles: [sec61, g3bp1, phase]
+    tracks: [A-anno, A-LC, B]
+    cohorts: [productive, mock, bystander]
+    methodological_threshold_fraction: 0.25
+    bin_minutes: 30
+    bin_range_minutes: [-360, 540]

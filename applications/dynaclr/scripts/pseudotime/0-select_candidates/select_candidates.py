@@ -478,7 +478,10 @@ def _build_dataset_cohorts(
         frame_interval_minutes=frame_interval,
     )
 
-    productive_track_keys = set(zip(productive_df["fov_name"].astype(str), productive_df["track_id"].astype(int)))
+    if productive_df.empty:
+        productive_track_keys: set[tuple[str, int]] = set()
+    else:
+        productive_track_keys = set(zip(productive_df["fov_name"].astype(str), productive_df["track_id"].astype(int)))
     well_non_productive_df = well_df[
         ~well_df.apply(
             lambda r: (str(r["fov_name"]), int(r["track_id"])) in productive_track_keys,

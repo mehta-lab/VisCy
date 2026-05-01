@@ -182,15 +182,24 @@ def fov_stratified_threshold(
     mock_signal: pd.DataFrame,
     percentile: float = 95.0,
 ) -> pd.DataFrame:
-    """Per-FOV threshold from mock cells.
+    """Per-FOV threshold from mock cells with well-row fallback.
 
     For each FOV present in the productive set, compute the
     ``percentile``th of mock-cell ``signal`` values from the same FOV.
-    Returns a frame with ``(fov_name, threshold)``.
+    Returns a frame with ``(fov_name, threshold, n_mock, n_mock_source,
+    fallback)``.
 
-    Falls back to the global mock percentile for FOVs without enough
-    mock data (< 30 frames). Per discussion §3.8 #8 the per-FOV check
-    is mandatory; the fallback is documented.
+    Fallback ladder:
+
+    1. Same FOV (e.g. ``A/2/000000``) — exact stratification.
+    2. Same well-row (e.g. ``A/*`` for productive ``A/2/000000``) —
+       channel-matched stratification when mock lives in a sibling well
+       on the same row (e.g. SEC61 productive=A/2, SEC61 mock=A/1).
+    3. Global mock percentile.
+
+    Each level requires ≥ 30 frames; otherwise descends to the next.
+    Per discussion §3.8 #8 the per-FOV check is mandatory; this records
+    which level supplied the threshold.
     """
     if mock_signal.empty:
         raise RuntimeError("Mock cohort empty; cannot compute FOV-stratified threshold")
@@ -198,23 +207,50 @@ def fov_stratified_threshold(
     if mock_valid.empty:
         raise RuntimeError("Mock cohort has no finite signal values")
 
+    mock_valid = mock_valid.copy()
+    mock_valid["fov_name"] = mock_valid["fov_name"].astype(str)
+    mock_valid["_row"] = mock_valid["fov_name"].str.split("/").str[0]
+
     global_threshold = float(np.percentile(mock_valid["signal"].to_numpy(), percentile))
 
     rows = []
     productive_fovs = sorted(productive_signal["fov_name"].astype(str).unique())
     for fov in productive_fovs:
-        sub = mock_valid[mock_valid["fov_name"].astype(str) == fov]
-        if len(sub) < 30:
-            rows.append({"fov_name": fov, "threshold": global_threshold, "n_mock": len(sub), "fallback": True})
-            continue
-        rows.append(
-            {
-                "fov_name": fov,
-                "threshold": float(np.percentile(sub["signal"].to_numpy(), percentile)),
-                "n_mock": len(sub),
-                "fallback": False,
-            }
-        )
+        row_label = fov.split("/")[0]
+        same_fov = mock_valid[mock_valid["fov_name"] == fov]
+        same_row = mock_valid[mock_valid["_row"] == row_label]
+        if len(same_fov) >= 30:
+            threshold = float(np.percentile(same_fov["signal"].to_numpy(), percentile))
+            rows.append(
+                {
+                    "fov_name": fov,
+                    "threshold": threshold,
+                    "n_mock": len(same_fov),
+                    "n_mock_source": "same_fov",
+                    "fallback": False,
+                }
+            )
+        elif len(same_row) >= 30:
+            threshold = float(np.percentile(same_row["signal"].to_numpy(), percentile))
+            rows.append(
+                {
+                    "fov_name": fov,
+                    "threshold": threshold,
+                    "n_mock": len(same_row),
+                    "n_mock_source": "same_row",
+                    "fallback": True,
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "fov_name": fov,
+                    "threshold": global_threshold,
+                    "n_mock": len(mock_valid),
+                    "n_mock_source": "global",
+                    "fallback": True,
+                }
+            )
     return pd.DataFrame(rows)
 
 
