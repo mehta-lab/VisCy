@@ -278,7 +278,6 @@ row = 0
 col = 0
 field = 9  # TODO: Change this to explore data.
 
-# NOTE: this dataset only has one level
 pyaramid_level = 0
 
 # `channel_names` is the metadata that is stored with data according to the OME-NGFF spec.
