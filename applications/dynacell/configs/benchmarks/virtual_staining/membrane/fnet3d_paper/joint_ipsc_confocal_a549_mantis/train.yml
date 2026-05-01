@@ -113,8 +113,10 @@ data:
 launcher:
   job_name: FNet3DPaper_JOINT_MEMB
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fnet3d_paper
-  # cell.zarr-backed preload pushes MaxVMSize past the shared 256G cap
-  # (observed 264G on the first launch; worker OOM-killed in validation).
-  # Same override as membrane/fnet3d_paper/ipsc_confocal/train.yml.
+  # Two mmap_preload datasets stack in /dev/shm: cell.zarr (500 FOVs, ~430 GB
+  # MaxRSS observed on the nucl-joint OOM-kill J31812394) + CAAX_all.zarr
+  # (30 FOVs, smaller but enough to push the cumulative stage past 512G).
+  # Single-set membrane fnet3d_paper runs at 512G; joint needs 1024G
+  # headroom for both stages.
   sbatch:
-    mem: "512G"
+    mem: "1024G"
