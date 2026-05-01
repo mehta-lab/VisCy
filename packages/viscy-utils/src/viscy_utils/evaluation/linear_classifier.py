@@ -317,6 +317,7 @@ def train_linear_classifier(
             train_metrics[f"train_{class_name}_precision"] = train_report[class_name]["precision"]
             train_metrics[f"train_{class_name}_recall"] = train_report[class_name]["recall"]
             train_metrics[f"train_{class_name}_f1"] = train_report[class_name]["f1-score"]
+            train_metrics[f"train_{class_name}_support"] = int(train_report[class_name]["support"])
 
     val_metrics = {}
     y_val_proba: Optional[np.ndarray] = None
@@ -357,6 +358,7 @@ def train_linear_classifier(
                 val_metrics[f"val_{class_name}_precision"] = val_report[class_name]["precision"]
                 val_metrics[f"val_{class_name}_recall"] = val_report[class_name]["recall"]
                 val_metrics[f"val_{class_name}_f1"] = val_report[class_name]["f1-score"]
+                val_metrics[f"val_{class_name}_support"] = int(val_report[class_name]["support"])
 
     all_metrics = {**train_metrics, **val_metrics}
 
