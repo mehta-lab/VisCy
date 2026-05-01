@@ -28,8 +28,13 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_scratch/memb/last.ckpt
+    # Best checkpoint from J31710718 (FCMAE_VSCyto3D_Scratch_iPSC_Membrane):
+    # ep 136 / val_loss 0.39590 (27-epoch plateau, scancelled at 1d 11h elapsed).
+    # Note: pretrained variant (J31795524, ep 194 = 0.37878) outperforms scratch
+    # by 4.3%; prefer the pretrained predict configs for downstream eval.
+    # Hardlink alias at run_root; underlying epoch=136-step=42744.ckpt also
+    # preserved in checkpoints_frozen_ep136_20260501_005505/.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_scratch/best_ep136_val0.39590.ckpt
 
 data:
   init_args:
