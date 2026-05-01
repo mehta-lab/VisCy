@@ -282,7 +282,18 @@ class HCSDataModule(LightningDataModule):
 
                 def _write_fov(i_pos):
                     i, pos = i_pos
-                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(pos[self.array_key].oindex[:, ch_idx, :])
+                    # Read each channel as a basic slice and concatenate.
+                    # zarr's oindex builds CoordinateIndexer, which materializes
+                    # 5 dense int64 broadcast arrays sized prod(out_shape) per
+                    # call (see zarr/core/indexing.py CoordinateIndexer.__init__),
+                    # peaking at ~7x the output size for slab selections on
+                    # sharded arrays. Per-channel basic indexing routes through
+                    # BasicIndexer, which is proportional to the output only.
+                    src = np.concatenate(
+                        [np.asarray(pos[self.array_key][:, c : c + 1, :, :, :]) for c in ch_idx],
+                        axis=1,
+                    )
+                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(src)
 
                 n_threads = min(len(positions), 16)
                 _logger.info(f"Mmap preload: staging {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
@@ -304,9 +315,12 @@ class HCSDataModule(LightningDataModule):
 
                     def _write_mask(i_pos):
                         i, pos = i_pos
-                        mask_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                            pos[self.fg_mask_key].oindex[:, mask_ch_idx, :]
+                        # Same per-channel BasicIndexer pattern as _write_fov above.
+                        mask_src = np.concatenate(
+                            [np.asarray(pos[self.fg_mask_key][:, c : c + 1, :, :, :]) for c in mask_ch_idx],
+                            axis=1,
                         )
+                        mask_buf[i * T : (i + 1) * T] = torch.from_numpy(mask_src)
 
                     with ThreadPoolExecutor(max_workers=n_threads) as pool:
                         list(pool.map(_write_mask, enumerate(positions)))

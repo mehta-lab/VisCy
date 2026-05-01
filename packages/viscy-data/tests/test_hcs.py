@@ -1019,3 +1019,49 @@ def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path)
     dm.setup(stage="fit")
     batch = next(iter(dm.train_dataloader()))
     assert batch["fg_mask"].dtype == torch.float32
+
+
+def test_mmap_preload_matches_oindex(preprocessed_hcs_dataset, tmp_path):
+    """Staged buffer is byte-equal to ``arr.oindex[:, ch_idx, :]`` per FOV.
+
+    Regression guard for the prepare_data read pattern: the production loop
+    selects channels by per-channel basic indexing + numpy concat instead
+    of zarr's ``oindex`` (which materializes O(prod(out_shape)) coordinate
+    arrays in CoordinateIndexer). This test asserts the two produce
+    identical bytes — runs against both v2 (unsharded) and v3 (sharded)
+    via the parameterized fixture.
+    """
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    # Pick non-adjacent source/target channel indices so ch_idx is a
+    # genuine list (not a contiguous slice) — exactly the case oindex
+    # was being used for.
+    dm = HCSDataModule(
+        data_path=preprocessed_hcs_dataset,
+        source_channel="Phase",
+        target_channel="GFP",
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    with open_ome_zarr(preprocessed_hcs_dataset) as plate:
+        positions = [p for _, p in plate.positions()]
+        ch_idx = [positions[0].get_channel_index(c) for c in ("Phase", "GFP")]
+        arr0 = positions[0]["0"]
+        T = arr0.frames
+        total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
+        buf = MemoryMappedTensor.from_filename(
+            dm._mmap_cache_dir / "data.mmap",
+            dtype=torch.float32,
+            shape=total_shape,
+        )
+        for i, pos in enumerate(positions):
+            staged = np.asarray(buf[i * T : (i + 1) * T])
+            expected = np.asarray(pos["0"].oindex[:, ch_idx, :])
+            assert staged.shape == expected.shape
+            np.testing.assert_array_equal(staged, expected)
