@@ -24,15 +24,35 @@ from dynaclr.pseudotime.alignment import identify_lineages
 _logger = logging.getLogger(__name__)
 
 
+ORPHAN_LINEAGE_ID = ""
+
+
+def _format_lineage_id(dataset_id: str, fov_name: str, root_tid: int, leaf_tid: int) -> str:
+    """Build a content-stable lineage id from its branch endpoints.
+
+    The id is unique across the whole pipeline as long as
+    ``(dataset_id, fov_name, root_track_id, leaf_track_id)`` is unique.
+    Stable across re-runs regardless of cohort composition or row order.
+    """
+    return f"{dataset_id}|{fov_name}|root{int(root_tid)}|leaf{int(leaf_tid)}"
+
+
 def assign_lineage_ids(
     df: pd.DataFrame,
     return_both_branches: bool = True,
 ) -> pd.DataFrame:
-    """Add a ``lineage_id`` column linking mother + daughter tracks.
+    """Add a content-stable ``lineage_id`` column.
 
-    Calls ``identify_lineages()`` once per ``dataset_id`` group, then
-    assigns a globally unique ``lineage_id`` across the whole frame.
-    Tracks that do not match any lineage get ``lineage_id = -1``.
+    Calls ``identify_lineages()`` per ``dataset_id`` group; for each branch
+    ``[root_track_id, ..., leaf_track_id]`` builds the deterministic id
+    ``"{dataset_id}|{fov_name}|root{root_tid}|leaf{leaf_tid}"`` and assigns
+    every track in the branch to it. When ``return_both_branches=True`` and
+    a mother track appears in multiple branches, the first branch wins (so
+    the mother shares an id with one branch only — same convention as
+    before).
+
+    Tracks that do not match any lineage get ``lineage_id = ""``
+    (the orphan sentinel).
 
     Parameters
     ----------
@@ -46,7 +66,7 @@ def assign_lineage_ids(
     Returns
     -------
     pd.DataFrame
-        Input with an added ``lineage_id`` column.
+        Input with a string ``lineage_id`` column added.
     """
     required = {"dataset_id", "fov_name", "track_id", "parent_track_id"}
     missing = required - set(df.columns)
@@ -55,30 +75,36 @@ def assign_lineage_ids(
 
     if df.empty:
         out = df.copy()
-        out["lineage_id"] = pd.Series(dtype=int)
+        out["lineage_id"] = pd.Series(dtype=str)
         return out
 
-    track_to_lineage: dict[tuple[str, str, int], int] = {}
-    next_lineage_id = 0
+    track_to_lineage: dict[tuple[str, str, int], str] = {}
 
     for dataset_id, ds_group in df.groupby("dataset_id", sort=False):
         lineages = identify_lineages(ds_group, return_both_branches=return_both_branches)
         for fov_name, track_ids in lineages:
+            if not track_ids:
+                continue
+            root_tid = int(track_ids[0])
+            leaf_tid = int(track_ids[-1])
+            lineage_id = _format_lineage_id(str(dataset_id), str(fov_name), root_tid, leaf_tid)
             for tid in track_ids:
                 key = (str(dataset_id), str(fov_name), int(tid))
                 # When return_both_branches=True a mother can appear in multiple
                 # branches; the first branch wins.
                 if key not in track_to_lineage:
-                    track_to_lineage[key] = next_lineage_id
-            next_lineage_id += 1
+                    track_to_lineage[key] = lineage_id
 
     df = df.copy()
     df["lineage_id"] = df.apply(
-        lambda row: track_to_lineage.get((str(row["dataset_id"]), str(row["fov_name"]), int(row["track_id"])), -1),
+        lambda row: track_to_lineage.get(
+            (str(row["dataset_id"]), str(row["fov_name"]), int(row["track_id"])),
+            ORPHAN_LINEAGE_ID,
+        ),
         axis=1,
     )
 
-    n_orphan_tracks = df[df["lineage_id"] == -1].groupby(["dataset_id", "fov_name", "track_id"]).ngroups
+    n_orphan_tracks = df[df["lineage_id"] == ORPHAN_LINEAGE_ID].groupby(["dataset_id", "fov_name", "track_id"]).ngroups
     n_total_tracks = df.groupby(["dataset_id", "fov_name", "track_id"]).ngroups
     if n_orphan_tracks:
         _logger.info(f"{n_orphan_tracks}/{n_total_tracks} tracks did not match any lineage")

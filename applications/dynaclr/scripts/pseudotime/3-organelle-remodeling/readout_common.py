@@ -284,7 +284,7 @@ def oscillation_metrics_per_cell(
                 "dataset_id": ds_id,
                 "fov_name": str(fov),
                 "track_id": int(tid),
-                "lineage_id": int(g["lineage_id"].iloc[0]),
+                "lineage_id": str(g["lineage_id"].iloc[0]),
                 "cohort": str(g["cohort"].iloc[0]),
                 "threshold": float(threshold),
                 "excursion_count": excursion_count,

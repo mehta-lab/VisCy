@@ -187,7 +187,7 @@ def _enrich_with_cohort_metadata(
 
     Path B alignment runs only on the productive cohort. Cells not
     matched in the cohort CSV get ``cohort="productive"`` (default for
-    Path B input), ``lineage_id=-1``, ``t_zero=NaN``.
+    Path B input), ``lineage_id=""`` (orphan sentinel), ``t_zero=NaN``.
     """
     flat = flat.copy()
     cand_csv = CANDIDATES_DIR / f"{candidate_set}_productive.csv"
@@ -195,7 +195,7 @@ def _enrich_with_cohort_metadata(
         _logger.warning(
             f"Productive cohort CSV {cand_csv} not found; lineage_id, cohort, divides, t_zero will be missing."
         )
-        flat["lineage_id"] = -1
+        flat["lineage_id"] = ""
         flat["cohort"] = "productive"
         flat["divides"] = "none"
         flat["t_zero"] = pd.NA
@@ -217,7 +217,7 @@ def _enrich_with_cohort_metadata(
     per_track["fov_name"] = per_track["fov_name"].astype(str)
     per_track["track_id"] = per_track["track_id"].astype(int)
     flat = flat.merge(per_track, on=["dataset_id", "fov_name", "track_id"], how="left")
-    flat["lineage_id"] = flat["lineage_id"].fillna(-1).astype(int)
+    flat["lineage_id"] = flat["lineage_id"].fillna("").astype(str)
     flat["divides"] = flat["divides"].fillna("none")
     flat["cohort"] = "productive"
 

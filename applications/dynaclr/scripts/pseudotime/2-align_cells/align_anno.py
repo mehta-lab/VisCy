@@ -80,16 +80,16 @@ def _t_zero_from_annotations(
     cohort_df: pd.DataFrame,
     anchor_label: str,
     anchor_positive: str,
-) -> dict[int, int]:
+) -> dict[str, int]:
     """First frame per lineage where ``anchor_label == anchor_positive``."""
-    out: dict[int, int] = {}
+    out: dict[str, int] = {}
     if cohort_df.empty:
         return out
     positive_rows = cohort_df[cohort_df[anchor_label] == anchor_positive]
     for lineage_id, g in positive_rows.groupby("lineage_id"):
-        if int(lineage_id) < 0:
+        if not lineage_id:
             continue
-        out[int(lineage_id)] = int(g["t"].min())
+        out[str(lineage_id)] = int(g["t"].min())
     return out
 
 

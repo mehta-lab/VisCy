@@ -62,7 +62,7 @@ def _per_cell_onset(signal_df: pd.DataFrame, threshold_df: pd.DataFrame) -> pd.D
                 "dataset_id": ds,
                 "fov_name": str(fov),
                 "track_id": int(tid),
-                "lineage_id": int(g["lineage_id"].iloc[0]),
+                "lineage_id": str(g["lineage_id"].iloc[0]),
                 "onset_t_rel_minutes": float(g["t_rel_minutes"].iloc[first_idx]),
             }
         )

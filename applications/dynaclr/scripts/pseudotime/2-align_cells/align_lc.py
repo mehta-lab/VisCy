@@ -135,7 +135,7 @@ def _t_zero_from_lc(
     pred_column: str,
     positive_value: str,
     min_run: int,
-) -> dict[int, int]:
+) -> dict[str, int]:
     """For each productive lineage, find the LC anchor frame.
 
     Joins productive cohort rows with LC predictions on
@@ -143,12 +143,12 @@ def _t_zero_from_lc(
     first frame entering a run of at least ``min_run`` consecutive
     positive predictions.
     """
-    out: dict[int, int] = {}
+    out: dict[str, int] = {}
     if productive_df.empty:
         return out
 
     for lineage_id, g in productive_df.groupby("lineage_id"):
-        if int(lineage_id) < 0:
+        if not lineage_id:
             continue
         ds_id = str(g["dataset_id"].iloc[0])
         if ds_id not in lc_obs_by_dataset or lc_obs_by_dataset[ds_id].empty:
@@ -165,7 +165,7 @@ def _t_zero_from_lc(
         run_start_idx = _first_run_start(positive_mask, min_run)
         if run_start_idx is None:
             continue
-        out[int(lineage_id)] = int(sub["t"].iloc[run_start_idx])
+        out[str(lineage_id)] = int(sub["t"].iloc[run_start_idx])
 
     return out
 
@@ -173,7 +173,7 @@ def _t_zero_from_lc(
 def _align_cohort(
     cohort_df: pd.DataFrame,
     cohort: str,
-    t_zero_lookup: dict[int, int],
+    t_zero_lookup: dict[str, int],
     frame_intervals: dict[str, float],
 ) -> pd.DataFrame:
     """Add ``t_zero``, ``t_rel_minutes``, ``track_path`` columns to a cohort frame."""

@@ -322,16 +322,16 @@ def _t_zero_per_lineage(
     productive_df: pd.DataFrame,
     anchor_label: str,
     anchor_positive: str,
-) -> dict[int, int]:
+) -> dict[str, int]:
     """First frame where ``anchor_label == anchor_positive`` per lineage."""
-    out: dict[int, int] = {}
+    out: dict[str, int] = {}
     for lineage_id, g in productive_df.groupby("lineage_id"):
-        if lineage_id < 0:
+        if not lineage_id:
             continue
         positive = g[g[anchor_label] == anchor_positive]
         if positive.empty:
             continue
-        out[int(lineage_id)] = int(positive["t"].min())
+        out[str(lineage_id)] = int(positive["t"].min())
     return out
 
 
@@ -342,7 +342,7 @@ def _well_is_uninfected(fov_name: str, mock_well_patterns: list[str]) -> bool:
 def _emit_cohort(
     df: pd.DataFrame,
     cohort: str,
-    t_zero_lookup: dict[int, int],
+    t_zero_lookup: dict[str, int],
     window_frames_by_dataset: dict[str, tuple[int, int]],
 ) -> pd.DataFrame:
     """Add cohort + divides columns and order the output schema.
@@ -354,12 +354,12 @@ def _emit_cohort(
     df = df.copy()
     df["cohort"] = cohort
 
-    divides_per_lineage: dict[int, str] = {}
+    divides_per_lineage: dict[str, str] = {}
     for lineage_id, g in df.groupby("lineage_id"):
-        if lineage_id < 0:
+        if not lineage_id:
             divides_per_lineage[lineage_id] = "none"
             continue
-        t_zero = t_zero_lookup.get(int(lineage_id))
+        t_zero = t_zero_lookup.get(str(lineage_id))
         if t_zero is None:
             divides_per_lineage[lineage_id] = "none"
             continue
@@ -681,7 +681,7 @@ def main() -> None:
             productive_df.groupby(["dataset_id", "fov_name", "lineage_id"]).size().sort_values(ascending=False)
         )
         keep = set(lineage_lengths.head(max_lineages).index)
-        mask = productive_df.apply(lambda r: (r["dataset_id"], r["fov_name"], int(r["lineage_id"])) in keep, axis=1)
+        mask = productive_df.apply(lambda r: (r["dataset_id"], r["fov_name"], str(r["lineage_id"])) in keep, axis=1)
         n_before = productive_df.groupby(["dataset_id", "fov_name", "lineage_id"]).ngroups
         productive_df = productive_df[mask].reset_index(drop=True)
         n_after = productive_df.groupby(["dataset_id", "fov_name", "lineage_id"]).ngroups

@@ -214,15 +214,15 @@ def main() -> None:
     df = assign_lineage_ids(df, return_both_branches=True)
 
     # Per-cell t_zero from the manual anchor.
-    t_zero_lookup: dict[int, int] = {}
+    t_zero_lookup: dict[str, int] = {}
     for (dataset_id, fov_name), tracks in TRACKS.items():
         for spec in tracks:
             tid = int(spec["track_id"])
             mask = (df["dataset_id"] == dataset_id) & (df["fov_name"] == fov_name) & (df["track_id"] == tid)
             if not mask.any():
                 continue
-            lineage_id = int(df.loc[mask, "lineage_id"].iloc[0])
-            if lineage_id < 0:
+            lineage_id = str(df.loc[mask, "lineage_id"].iloc[0])
+            if not lineage_id:
                 continue
             # Set t_zero per lineage to the earliest manual anchor across
             # tracks in that lineage.
@@ -230,12 +230,12 @@ def main() -> None:
             t_zero_lookup[lineage_id] = min(t_zero_lookup.get(lineage_id, t_anchor), t_anchor)
 
     # Divides classification per lineage using its dataset's frame interval.
-    divides: dict[int, str] = {}
+    divides: dict[str, str] = {}
     for lineage_id, lineage_df in df.groupby("lineage_id"):
-        if lineage_id < 0:
+        if not lineage_id:
             divides[lineage_id] = "none"
             continue
-        t_zero = t_zero_lookup.get(int(lineage_id))
+        t_zero = t_zero_lookup.get(str(lineage_id))
         if t_zero is None:
             divides[lineage_id] = "none"
             continue
