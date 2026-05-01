@@ -7,6 +7,14 @@ launcher:
     PYTHONUNBUFFERED: "1"
     NCCL_DEBUG: INFO
     PYTHONFAULTHANDLER: "1"
+    # Use expandable VA segments in PyTorch's CUDA caching allocator.
+    # Avoids "tried to allocate N GiB; X GiB free, Y GiB reserved" OOMs
+    # caused by allocator fragmentation across the variable-shape U-Net
+    # forward+backward (skip-concat doubles channel counts mid-decoder).
+    # Hit on J31821456 (A40 48GB, fnet3d joint nucl): 45 GB allocated +
+    # 2.4 GB free could not fit a 3 GB cat. PyTorch's own OOM message
+    # explicitly recommends this setting. No known regressions.
+    PYTORCH_ALLOC_CONF: "expandable_segments:True"
     # Shared Hugging Face hub cache on project storage: the first user
     # with gated-repo access downloads each model (e.g. DINOv3) once
     # into this dir, and every subsequent job on any dynacell team
