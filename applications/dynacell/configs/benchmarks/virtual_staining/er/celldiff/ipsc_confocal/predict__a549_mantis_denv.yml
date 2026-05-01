@@ -31,7 +31,7 @@ data:
           subtrahend: mean
           divisor: std
     augmentations: []
-    z_window_size: 40 # 8 for denoise and generate, 40 for iterative and sliding_window.
+    z_window_size: 48 # 8 for denoise and generate, 48 for iterative and sliding_window.
 
 trainer:
   callbacks:

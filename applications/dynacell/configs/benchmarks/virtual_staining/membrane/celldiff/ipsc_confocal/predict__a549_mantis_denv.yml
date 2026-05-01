@@ -37,13 +37,13 @@ data:
           subtrahend: mean
           divisor: std
     augmentations: []
-    z_window_size: 40 # 8 for denoise and generate, 40 for iterative and sliding_window.
+    z_window_size: 48 # 8 for denoise and generate, 40 for iterative and sliding_window.
 
 trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_sliding_window_denv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_iterative_denv.zarr
 
 launcher:
   job_name: CELLDiff_PRED_MEMB_ON_A549_DENV
