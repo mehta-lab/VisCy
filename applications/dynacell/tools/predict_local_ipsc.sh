@@ -49,17 +49,38 @@ fi
 
 cd "$VISCY_ROOT"
 
-# Read launcher.{run_root,job_name} so we can locate the resolved YAML
-# staged below by job_name suffix.
+# Read launcher.{run_root,job_name} + model.init_args.ckpt_path so we can
+# locate the resolved YAML staged below by job_name suffix AND fail fast
+# (before the slow compose / Lightning init) if ckpt_path is a placeholder
+# or missing on disk.
 META=$(uv run python - "$LEAF" <<'PY'
 import sys, yaml
 with open(sys.argv[1]) as f:
     d = yaml.safe_load(f)
-print(f"{d['launcher']['job_name']}\t{d['launcher']['run_root']}")
+ckpt = d.get("model", {}).get("init_args", {}).get("ckpt_path", "") or ""
+print(f"{d['launcher']['job_name']}\t{d['launcher']['run_root']}\t{ckpt}")
 PY
 )
 JOB_NAME=$(echo "$META" | cut -f1)
 RUN_ROOT=$(echo "$META" | cut -f2)
+CKPT=$(echo "$META" | cut -f3)
+
+if [ -z "$CKPT" ]; then
+  echo "error: leaf has no model.init_args.ckpt_path: $LEAF" >&2
+  exit 1
+fi
+if echo "$CKPT" | grep -qE "TODO|FIXME|TBD"; then
+  echo "error: ckpt_path is still a placeholder: $CKPT" >&2
+  echo "       set a real path in: $LEAF" >&2
+  exit 1
+fi
+if [ ! -f "$CKPT" ]; then
+  echo "error: ckpt_path file does not exist on disk: $CKPT" >&2
+  echo "       referenced by:                          $LEAF" >&2
+  exit 1
+fi
+echo "[ckpt] $CKPT"
+
 mkdir -p "$RUN_ROOT/slurm"
 
 echo "[stage] composing $ORGANELLE/$MODEL/ipsc_confocal${OVERWRITE:+ + overwrite}"

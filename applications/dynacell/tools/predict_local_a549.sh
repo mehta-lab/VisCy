@@ -68,16 +68,37 @@ fi
 
 cd "$VISCY_ROOT"
 
-# Extract launcher.{run_root,job_name} from each leaf in one python call
-# so we can locate the resolved YAML staged below by job_name suffix.
+# Extract launcher.{run_root,job_name} + model.init_args.ckpt_path from each
+# leaf in one python call so we can (a) locate the resolved YAML staged below
+# by job_name suffix, and (b) fail fast before the slow compose / Lightning
+# init if any leaf has a placeholder or missing-on-disk ckpt_path.
 META=$(uv run python - "${LEAVES[@]}" <<'PY'
 import sys, yaml
 for path in sys.argv[1:]:
     with open(path) as f:
         d = yaml.safe_load(f)
-    print(f"{path}\t{d['launcher']['job_name']}\t{d['launcher']['run_root']}")
+    ckpt = d.get("model", {}).get("init_args", {}).get("ckpt_path", "") or ""
+    print(f"{path}\t{d['launcher']['job_name']}\t{d['launcher']['run_root']}\t{ckpt}")
 PY
 )
+
+# Pre-flight: validate every leaf's ckpt_path before doing anything else.
+BAD=0
+while IFS=$'\t' read -r leaf _job _root ckpt; do
+  if [ -z "$ckpt" ]; then
+    echo "error: leaf has no model.init_args.ckpt_path: $leaf" >&2
+    BAD=1
+  elif echo "$ckpt" | grep -qE "TODO|FIXME|TBD"; then
+    echo "error: ckpt_path is still a placeholder: $ckpt" >&2
+    echo "       set a real path in: $leaf" >&2
+    BAD=1
+  elif [ ! -f "$ckpt" ]; then
+    echo "error: ckpt_path file does not exist on disk: $ckpt" >&2
+    echo "       referenced by:                          $leaf" >&2
+    BAD=1
+  fi
+done <<< "$META"
+[ "$BAD" -eq 0 ] || exit 1
 
 RUN_ROOT=$(echo "$META" | head -1 | cut -f3)
 mkdir -p "$RUN_ROOT/slurm"
@@ -138,7 +159,7 @@ flush_batch() {
 }
 
 i=0
-while IFS=$'\t' read -r leaf job_name _run_root; do
+while IFS=$'\t' read -r leaf job_name _run_root _ckpt; do
   resolved=$(ls -t "$RUN_ROOT/resolved/predict_${job_name}_"*.yml 2>/dev/null | head -1)
   if [ -z "$resolved" ]; then
     echo "error: no resolved yaml found for job_name=$job_name" >&2
