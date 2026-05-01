@@ -21,8 +21,14 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_scratch/nucl/last.ckpt
+    # Best checkpoint from J31710710 (FCMAE_VSCyto3D_Scratch_iPSC_Nucleus):
+    # ep 80 / val_loss 0.39342 (49-epoch plateau, scancelled at 1d 8h elapsed).
+    # Note: pretrained variant (J31475094, ep 89 = 0.39215) edges scratch on the
+    # same data; downstream eval should prefer the pretrained predict configs
+    # unless explicitly ablating against the scratch baseline.
+    # Hardlink alias at run_root; underlying epoch=80-step=25272.ckpt also
+    # preserved in checkpoints_frozen_ep80_<ts>/.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_scratch/best_ep80_val0.39342.ckpt
 
 data:
   init_args:
