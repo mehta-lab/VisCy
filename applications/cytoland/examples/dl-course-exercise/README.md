@@ -44,7 +44,7 @@ VisCy exploits recent advances in data and metadata formats
 From the exercise folder, run:
 
 ```bash
-cd applications/cytoland/examples/dlmbl_exercise
+cd applications/cytoland/examples/dl-course-exercise
 bash setup.sh
 ```
 

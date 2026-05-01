@@ -13,7 +13,7 @@
 #      pretrained checkpoint into ~/data/06_image_translation/.
 #
 # Run this from the exercise folder:
-#   cd applications/cytoland/examples/dlmbl_exercise
+#   cd applications/cytoland/examples/dl-course-exercise
 #   bash setup.sh
 
 set -euo pipefail

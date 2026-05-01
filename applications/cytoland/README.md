@@ -45,7 +45,7 @@ Scripts and tutorials live under [`examples/`](./examples/):
 |--------|----------------------|
 | [`examples/VS_model_inference/`](./examples/VS_model_inference/) | Python API inference demos for VSCyto2D, VSCyto3D, VSNeuromast, and TTA-augmented sliding-window prediction |
 | [`examples/vcp_tutorials/`](./examples/vcp_tutorials/) | Virtual Cell Platform quick-start and organism-specific walkthroughs (HEK293T, neuromast) |
-| [`examples/dlmbl_exercise/`](./examples/dlmbl_exercise/) | DL@MBL 2024 image-translation course exercise (training from scratch + evaluation) |
+| [`examples/dl-course-exercise/`](./examples/dl-course-exercise/) | Image-translation course exercise (training from scratch + evaluation) — used at DL@MBL and DL@Janelia |
 | [`examples/configs/`](./examples/configs/) | YAML configs for `viscy fit` / `viscy predict` across models (VSCyto2D/3D, VSNeuromast, FNet3D, dynacell) |
 
 All demo scripts are written as jupytext-style percent-cell `.py` files.
