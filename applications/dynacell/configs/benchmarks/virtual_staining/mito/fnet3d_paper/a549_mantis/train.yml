@@ -42,3 +42,9 @@ data:
 launcher:
   job_name: FNet3DPaper_A549_TOMM20
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fnet3d_paper
+  # 512G to match the shared headroom convention across the fnet3d
+  # leaves on a549/joint workloads. mmap_preload after the BasicIndexer
+  # fix peaks at ~75 GB for TOMM20_all alone (single-set); 512G gives
+  # generous headroom.
+  sbatch:
+    mem: "512G"

@@ -116,3 +116,9 @@ data:
 launcher:
   job_name: FNet3DPaper_JOINT_MEMB
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fnet3d_paper
+  # 512G to match the shared headroom convention across the fnet3d
+  # leaves on a549/joint workloads. mmap_preload after the BasicIndexer
+  # fix peaks at ~185 GB for joint cell.zarr + CAAX_all; 512G gives
+  # generous headroom for worker buffers and validation transients.
+  sbatch:
+    mem: "512G"
