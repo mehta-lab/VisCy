@@ -3,11 +3,6 @@
 # A549 manifest keys membrane by gene (`caax`); override the iPSC-side
 # `membrane` target_id from targets/membrane.yml so the resolver finds
 # the caax target on a549-mantis-caax-zikv.
-#
-# TODO: replace ckpt_path once iPSC FCMAE pretrained membrane training
-# completes. Expected output (per fit leaf — note no _ws8500 suffix on
-# nucleus / membrane outputs):
-#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_pretrained/checkpoints/last.ckpt
 base:
   - ../../../_internal/shared/model/predict_sets/a549_mantis_caax_zikv.yml
   - ../../../_internal/shared/model/targets/membrane.yml
@@ -29,8 +24,7 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/memb/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=189-step=59280.ckpt
 
 data:
   init_args:

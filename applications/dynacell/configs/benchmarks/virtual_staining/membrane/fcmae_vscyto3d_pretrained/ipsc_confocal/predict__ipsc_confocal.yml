@@ -1,8 +1,4 @@
 # FCMAE_VSCyto3D_Pretrained predict: membrane (CAAX) against ipsc_confocal test_cropped.
-#
-# TODO: replace ckpt_path with best-val ckpt once iPSC FCMAE pretrained
-# membrane training (J31475104) completes. Expected dir:
-#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_pretrained/checkpoints/
 base:
   - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
   - ../../../_internal/shared/model/targets/membrane.yml
@@ -21,8 +17,7 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/memb/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=189-step=59280.ckpt
 
 data:
   init_args:
