@@ -69,10 +69,13 @@ DATA_ROOT=/mnt/shared/image_translation bash setup_student.sh
 The script will:
 
 - Install [`uv`](https://docs.astral.sh/uv/) if it isn't already on your PATH.
-- Create a Python 3.11 virtual environment at `./.venv`.
-- Install `cytoland` (editable) plus the tutorial extras:
+- Create a Python 3.13 virtual environment at `./.venv`.
+- Install `cytoland` + `viscy` (`>=0.5.0a0`) plus the tutorial extras:
   `cellpose`, `torchview`, `microssim`, `jupyter`, `ipykernel`,
-  `ipywidgets`, `jupytext`.
+  `ipywidgets`, `jupytext`. If you ran the script from inside a clone of
+  the [VisCy monorepo](https://github.com/mehta-lab/VisCy), it installs
+  `cytoland` editable from the local workspace; otherwise it installs from
+  PyPI.
 - Register the venv as a Jupyter kernel named **`06_image_translation`**
   (display name: *Python (06_image_translation)*).
 - Download the training / test OME-Zarr datasets and the VSCyto2D

@@ -4,13 +4,17 @@
 #
 # This script:
 #   1. Installs uv if missing (user-level, no sudo).
-#   2. Creates a Python 3.11 venv under this folder (./.venv).
-#   3. Installs cytoland (from the VisCy monorepo) plus the tutorial
-#      extras: cellpose, torchview, microssim, jupyter, ipywidgets, jupytext.
-#   4. Registers the venv as a Jupyter kernel named "image_translation"
+#   2. Creates a Python 3.13 venv under this folder (./.venv).
+#   3. Installs cytoland + viscy (>=0.5.0a0) plus the tutorial extras:
+#      cellpose, torchview, microssim, jupyter, ipywidgets, jupytext.
+#      If run from inside a checkout of the VisCy monorepo, installs
+#      the local cytoland workspace package in editable mode (pulls
+#      viscy-data, viscy-models, viscy-transforms, viscy-utils from
+#      the workspace). Otherwise installs from PyPI.
+#   4. Registers the venv as a Jupyter kernel named "06_image_translation"
 #      so students see it in VSCode / JupyterLab.
 #   5. Downloads the training / test OME-Zarr datasets and the VSCyto2D
-#      pretrained checkpoint into $DATA_ROOT (default ~/data/image_translation),
+#      pretrained checkpoint into $DATA_ROOT (default ~/data/06_image_translation),
 #      ONLY IF the data is not already there. If a TA has pre-staged data
 #      on a shared filesystem, point DATA_ROOT at it to skip the download:
 #
@@ -24,15 +28,21 @@ set -euo pipefail
 
 START_DIR=$(pwd)
 KERNEL_NAME="${KERNEL_NAME:-06_image_translation}"
-PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
 
-# --- Resolve VisCy monorepo root (four levels up from this script) ----------
+# --- Detect optional VisCy monorepo root (four levels up from this script) -
+# When this exercise lives inside a viscy clone, install cytoland in editable
+# mode against the local workspace. Otherwise fall back to PyPI.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MONOREPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-if [[ ! -f "$MONOREPO_ROOT/pyproject.toml" ]]; then
-    echo "Could not find VisCy monorepo root at $MONOREPO_ROOT" >&2
-    exit 1
+MONOREPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." 2>/dev/null && pwd || true)"
+if [[ -n "${MONOREPO_ROOT:-}" && -f "$MONOREPO_ROOT/pyproject.toml" ]] \
+        && grep -q '^name = "viscy"' "$MONOREPO_ROOT/pyproject.toml"; then
+    INSTALL_MODE="workspace"
+else
+    INSTALL_MODE="pypi"
+    MONOREPO_ROOT=""
 fi
+echo "Install mode: $INSTALL_MODE"
 
 # --- 1. Install uv if missing ----------------------------------------------
 if ! command -v uv >/dev/null 2>&1; then
@@ -48,8 +58,16 @@ VENV_DIR="$SCRIPT_DIR/.venv"
 uv venv --python "$PYTHON_VERSION" "$VENV_DIR"
 PY="$VENV_DIR/bin/python"
 
-# --- 3. Install cytoland + tutorial extras ---------------------------------
-uv pip install --python "$PY" -e "$MONOREPO_ROOT/applications/cytoland[metrics]"
+# --- 3. Install cytoland + viscy + tutorial extras -------------------------
+if [[ "$INSTALL_MODE" == "workspace" ]]; then
+    echo "Installing cytoland (editable) from $MONOREPO_ROOT ..."
+    uv pip install --python "$PY" -e "$MONOREPO_ROOT/applications/cytoland[metrics]"
+else
+    echo "Installing cytoland + viscy from PyPI (>=0.5.0a0) ..."
+    uv pip install --python "$PY" --prerelease=allow \
+        "viscy>=0.5.0a0" \
+        "cytoland[metrics]>=0.5.0a0"
+fi
 uv pip install --python "$PY" \
     cellpose \
     torchview \
