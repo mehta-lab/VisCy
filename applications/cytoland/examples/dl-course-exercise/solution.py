@@ -268,7 +268,7 @@ dataset = open_ome_zarr(data_path)
 # ### Task 1.1
 # Look at a couple different fields of view (FOVs) by changing the `field` variable.
 # Check the cell density, the cell morphologies, and fluorescence signal.
-# HINT: look at the HCS Plate format to see what are your options.
+# HINT: look at the HCS Plate format to see what your options are.
 # </div>
 # %% tags=[]
 # Use the field and pyramid_level below to visualize data.
@@ -1796,12 +1796,13 @@ plt.show()
 # </div>
 
 # %% [markdown]
+# ### Plotting the predictions and segmentations
 # <div class="alert alert-info">
 #
-# ### Plotting the predictions and segmentations
+# <h3> Task 2.4: Visualize the predictions and segmentations </h3>
 # Here we will plot the predictions and segmentations side by side for the pretrained and trained models.<br>
 # <ul>
-# <li>How do yout model, the pretrained model and the ground truth compare?</li>
+# <li>How does your model, the pretrained model and the ground truth compare?</li>
 # <li>How do the segmentations compare? </li>
 # </ul>
 # Feel free to modify the crop size and Y,X slicing to view different areas of the FOV
