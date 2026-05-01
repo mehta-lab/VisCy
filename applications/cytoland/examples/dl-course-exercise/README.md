@@ -41,11 +41,29 @@ VisCy exploits recent advances in data and metadata formats
 
 ## Setup
 
-From the exercise folder, run:
+There are two setup scripts depending on your role:
+
+- **Students:** run [`setup_student.sh`](setup_student.sh) — creates a per-user
+  Python venv, registers a Jupyter kernel, and downloads the data only if it
+  isn't already on disk.
+- **TAs / course operators:** run [`setup_TA.sh`](setup_TA.sh) before the
+  course to pre-stage the ~14 GB of data + checkpoint onto a shared
+  filesystem so each student doesn't have to re-download it.
+
+### Student
+
+From the exercise folder:
 
 ```bash
 cd applications/cytoland/examples/dl-course-exercise
-bash setup.sh
+bash setup_student.sh
+```
+
+If your TA pre-staged the data on a shared mount, point `DATA_ROOT` at it to
+skip the download:
+
+```bash
+DATA_ROOT=/mnt/shared/image_translation bash setup_student.sh
 ```
 
 The script will:
@@ -58,9 +76,23 @@ The script will:
 - Register the venv as a Jupyter kernel named **`06_image_translation`**
   (display name: *Python (06_image_translation)*).
 - Download the training / test OME-Zarr datasets and the VSCyto2D
-  pretrained checkpoint into `~/data/06_image_translation/`.
+  pretrained checkpoint into `$DATA_ROOT` (default `~/data/06_image_translation/`),
+  unless the data is already present.
 
 Everything is self-contained inside this folder — no conda required.
+
+### TA / course operator
+
+Run once before the course, ideally targeting a shared mount:
+
+```bash
+cd applications/cytoland/examples/dl-course-exercise
+DATA_ROOT=/mnt/shared/image_translation bash setup_TA.sh
+```
+
+This downloads the OME-Zarr datasets (~14 GB) and the pretrained checkpoint
+into `$DATA_ROOT`. Typical runtime is 20–40 min. It does **not** create a
+Python environment — students do that themselves with `setup_student.sh`.
 
 ## Use VSCode
 

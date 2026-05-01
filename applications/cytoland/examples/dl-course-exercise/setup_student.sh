@@ -1,28 +1,32 @@
 #!/usr/bin/env -S bash -i
 #
-# DL@MBL image-translation exercise — environment + data setup.
+# Image-translation exercise — STUDENT setup.
 #
 # This script:
 #   1. Installs uv if missing (user-level, no sudo).
 #   2. Creates a Python 3.11 venv under this folder (./.venv).
 #   3. Installs cytoland (from the VisCy monorepo) plus the tutorial
-#      extras: cellpose, torchview, jupyter, ipywidgets, jupytext.
-#   4. Registers the venv as a Jupyter kernel named "06_image_translation"
+#      extras: cellpose, torchview, microssim, jupyter, ipywidgets, jupytext.
+#   4. Registers the venv as a Jupyter kernel named "image_translation"
 #      so students see it in VSCode / JupyterLab.
 #   5. Downloads the training / test OME-Zarr datasets and the VSCyto2D
-#      pretrained checkpoint into ~/data/06_image_translation/.
+#      pretrained checkpoint into $DATA_ROOT (default ~/data/image_translation),
+#      ONLY IF the data is not already there. If a TA has pre-staged data
+#      on a shared filesystem, point DATA_ROOT at it to skip the download:
+#
+#        DATA_ROOT=/mnt/shared/image_translation bash setup_student.sh
 #
 # Run this from the exercise folder:
 #   cd applications/cytoland/examples/dl-course-exercise
-#   bash setup.sh
+#   bash setup_student.sh
 
 set -euo pipefail
 
 START_DIR=$(pwd)
-KERNEL_NAME="06_image_translation"
-PYTHON_VERSION="3.11"
+KERNEL_NAME="${KERNEL_NAME:-06_image_translation}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
 
-# --- Resolve VisCy monorepo root (two levels up from this script) -----------
+# --- Resolve VisCy monorepo root (four levels up from this script) ----------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MONOREPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 if [[ ! -f "$MONOREPO_ROOT/pyproject.toml" ]]; then
@@ -63,29 +67,38 @@ uv pip install --python "$PY" \
     --display-name "Python ($KERNEL_NAME)"
 echo "Registered Jupyter kernel: $KERNEL_NAME"
 
-# --- 5. Download data + pretrained checkpoint ------------------------------
-DATA_ROOT="$HOME/data/$KERNEL_NAME"
+# --- 5. Download data + pretrained checkpoint (skip if already present) ----
+DATA_ROOT="${DATA_ROOT:-$HOME/data/$KERNEL_NAME}"
+TRAINING_ZARR="$DATA_ROOT/training/a549_hoechst_cellmask_train_val.zarr"
+TEST_ZARR="$DATA_ROOT/test/a549_hoechst_cellmask_test.zarr"
+CHECKPOINT="$DATA_ROOT/pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
+
 mkdir -p "$DATA_ROOT/training" "$DATA_ROOT/test" "$DATA_ROOT/pretrained_models"
 
-cd "$DATA_ROOT/training"
-wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/training/zarrv3/a549_hoechst_cellmask_train_val.zarr/"
+if [[ -d "$TRAINING_ZARR" && -d "$TEST_ZARR" && -f "$CHECKPOINT" ]]; then
+    echo "Data already present at $DATA_ROOT — skipping download."
+else
+    echo "Downloading data + checkpoint to $DATA_ROOT ..."
+    cd "$DATA_ROOT/training"
+    wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/training/zarrv3/a549_hoechst_cellmask_train_val.zarr/"
 
-cd "$DATA_ROOT/test"
-wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/test/zarrv3/a549_hoechst_cellmask_test.zarr/"
+    cd "$DATA_ROOT/test"
+    wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/test/zarrv3/a549_hoechst_cellmask_test.zarr/"
 
-cd "$DATA_ROOT/pretrained_models"
-wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
+    cd "$DATA_ROOT/pretrained_models"
+    wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
+fi
 
 cd "$START_DIR"
 
 cat <<EOF
 
 --------------------------------------------------------------------
-Setup complete.
+Student setup complete.
 
-  - venv: $VENV_DIR
+  - venv:           $VENV_DIR
   - jupyter kernel: $KERNEL_NAME
-  - data: $DATA_ROOT
+  - data:           $DATA_ROOT
 
 To start the exercise:
   1. Launch Jupyter or open solution.py in VSCode.
