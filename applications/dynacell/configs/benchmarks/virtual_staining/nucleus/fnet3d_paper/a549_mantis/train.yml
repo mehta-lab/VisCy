@@ -69,7 +69,8 @@ trainer:
 launcher:
   job_name: FNet3DPaper_A549_NUCL
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fnet3d_paper
-  # cell.zarr-backed preload pushes MaxVMSize past the shared 256G cap
-  # (observed 264G on the first launch; worker OOM-killed in validation).
+  # H2B_all.zarr (30 FOVs * T=10 timepoints, ~71 GB dense) mmap_preload
+  # peaks at MaxRSS ~498 GB cgroup (J31817942 OOM'd at 512G cap).
+  # Empirical amplification factor for T>1 zarrs is ~7x dense theoretical.
   sbatch:
-    mem: "512G"
+    mem: "1024G"
