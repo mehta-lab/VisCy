@@ -25,5 +25,9 @@ models:
   - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated
 
+  # DynaCLR-2D-BagOfChannels-v3 (SEC61/TOMM20/G3BP1/Sensor, time-interval pretrain)
+  - name: DynaCLR-2D-BagOfChannels-v3
+    eval_dir: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/v3/evaluations/infectomics-annotated
+
 output_dir: /hpc/projects/organelle_phenotyping/comparisons/infectomics-annotated
 fdr_threshold: 0.05
