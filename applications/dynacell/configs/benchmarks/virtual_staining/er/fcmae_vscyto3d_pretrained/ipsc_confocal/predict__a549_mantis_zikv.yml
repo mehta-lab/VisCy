@@ -22,8 +22,11 @@ benchmark:
 
 model:
   init_args:
-    # TODO: fill before submit (see header).
-    ckpt_path: /TODO_FILL_BEFORE_SUBMIT/fcmae_vscyto3d_pretrained/sec61b/last.ckpt
+    # Best checkpoint from J31523022 (FCMAE_VSCyto3D_Pretrained_iPSC_SEC61B_ws8500):
+    # ep 123 / val_loss 0.40979 (49-epoch plateau, scancelled at 3d 1h elapsed).
+    # Hardlink alias at run_root; the underlying checkpoints/epoch=123-step=32736.ckpt
+    # is also preserved in checkpoints_frozen_ep123_20260501_004946/.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500/best_ep123_val0.40979.ckpt
 
 data:
   init_args:
