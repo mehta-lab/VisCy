@@ -739,7 +739,7 @@ log_batch_jupyter(augmented_batch)
 # %% [markdown]
 # <div class="alert alert-info">
 #
-# ### Task 1.5
+# ### Task 1.4
 # - Run the next cell to instantiate the `UNeXt2_2D` model
 #   - Configure the network for the phase (source) to fluorescence cell nuclei and membrane (targets) regression task.
 #   - Call the VSUNet with the `"UNeXt2_2D"` architecture.
@@ -748,7 +748,7 @@ log_batch_jupyter(augmented_batch)
 # - Start the training <br>
 #
 # <b> Note </b> <br>
-# See ``viscy.unet.networks.Unet2D.Unet2d`` ([source code](https://github.com/mehta-lab/VisCy/blob/7c5e4c1d68e70163cf514d22c475da8ea7dc3a88/viscy/unet/networks/Unet2D.py#L7)) to learn more about the configuration.
+# See ``viscy.translation.engine.VSUNet`` ([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/translation/engine.py)) and ``viscy.unet.networks.fcmae`` ([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/unet/networks/fcmae.py)) to learn more about the configuration parameters and FCMAE architecture.
 # </div>
 
 # %% tags=["task"]
@@ -1480,13 +1480,13 @@ sample_membrane_crop = min_max_scale(sample_membrane[0, 0, y_start:y_end, x_star
 
 # Generate virtual stained data from phase (trained model)
 sample_phase_tensor = torch.tensor(sample_phase, dtype=torch.float32).to(device)
-with torch.no_grad():
+with torch.inference_mode():
     predicted_image = phase2fluor_model(sample_phase_tensor)
 predicted_nuc_crop = min_max_scale(predicted_image.cpu().numpy()[0, 0, 0, y_start:y_end, x_start:x_end])
 predicted_mem_crop = min_max_scale(predicted_image.cpu().numpy()[0, 1, 0, y_start:y_end, x_start:x_end])
 
 # Generate virtual stained data from pretrained model
-with torch.no_grad():
+with torch.inference_mode():
     predicted_image_pretrained = pretrained_phase2fluor(sample_phase_tensor)
 predicted_nuc_pretrained_crop = min_max_scale(
     predicted_image_pretrained.cpu().numpy()[0, 0, 0, y_start:y_end, x_start:x_end]
