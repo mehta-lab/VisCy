@@ -42,9 +42,8 @@ wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.
 
 cd "$DATA_ROOT/pretrained_models"
 wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
-# Optional second checkpoint used in the AIMBL_Demo (fluor->phase). Uncomment
-# to also stage it:
-# wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/AIMBL_Demo/fluor2phase_step668.ckpt"
+# Second checkpoint used in Task 2.5 (fluorescence -> phase reverse model).
+wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/AIMBL_Demo/fluor2phase_step668.ckpt"
 
 cd "$START_DIR"
 

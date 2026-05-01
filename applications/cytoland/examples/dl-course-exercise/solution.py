@@ -1875,6 +1875,543 @@ plt.show()
 # </div>
 
 # %% [markdown] tags=[]
+# <div class="alert alert-info">
+#
+# ### Task 2.5: Evaluate a fluorescence to phase model
+# In this section, we will explore the inverse transformation using fluorescence images
+# (nuclei + membrane) to predict the phase image.
+#
+# <h3>Learning Goals:</h3>
+# <ul>
+# <li> Understand the concept of fluorescence to phase transformations in image translation </li>
+# <li> Load a pretrained model for the reverse task (fluor → phase) </li>
+# <li> Compare input fluorescence channels with predicted phase </li>
+# <li> Analyze why the phase prediction is not perfect </li>
+# </ul>
+# We'll use a pretrained model that was trained to predict phase from fluorescence channels.
+# </div>
+
+# %% [markdown] tags=[]
+# <div class="alert alert-warning">
+#
+# <h3>Questions</h3>
+# <ul>
+# <li> How much information is lost in the phase to fluorescence transformation? </li>
+# <li> Why might perfect reconstruction not be possible? </li>
+# <li> Can multiple phase patterns produce similar fluorescence signals? </li>
+# </ul>
+# </div>
+
+# %%
+# Path to the pretrained fluorescence to phase model checkpoint
+fluor2phase_model_path = top_dir / "06_image_translation/pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
+
+
+# %% tags=["task"]
+# Load a pretrained model for fluorescence to phase translation
+from pathlib import Path
+
+import torch
+
+# #######################
+# ##### TODO ########
+# #######################
+# TODO: Load the pretrained fluorescence to phase model
+# HINT: Look for pretrained models in the VisCy repository or use a model checkpoint
+# HINT: The model should take 2 input channels (nuclei + membrane) and output 1 channel (phase)
+# HINT: Use similar architecture as before but with different input/output channels
+
+# For now, we'll create a placeholder - replace with actual model loading
+print("Loading pretrained fluorescence-to-phase model...")
+
+# TODO: Replace this with actual model loading code
+fluor2phase_config = dict(
+    in_channels=...,  # Nuclei + Membrane channels
+    out_channels=...,  # Phase channel
+    encoder_blocks=[3, 3, 9, 3],
+    dims=[96, 192, 384, 768],
+    decoder_conv_blocks=2,
+    stem_kernel_size=(1, 2, 2),
+    in_stack_depth=1,
+)
+fluor2phase_model = VSUNet.load_from_checkpoint(
+    fluor2phase_model_path, model_config=fluor2phase_config, architecture="fcmae"
+)
+assert fluor2phase_model is not None, (
+    "Fluorescence to phase model not loaded. Check the model config,and the path to the model checkpoint."
+)
+fluor2phase_model.eval()
+
+# %% tags=["task"]
+# Test the fluorescence to phase model on our test data
+
+source_channel_fluor = ["TODO", "TODO"]
+target_channel_labelfree = ["TODO"]
+
+test_data_fluor2phase = HCSDataModule(
+    test_data_path,
+    source_channel=source_channel_fluor,
+    target_channel=target_channel_labelfree,
+    z_window_size=1,
+    batch_size=1,
+    num_workers=8,
+)
+test_data_fluor2phase.setup("test")
+
+
+# Get a test sample
+sample = next(iter(test_data_fluor2phase.test_dataloader()))
+
+# #######################
+# ##### TODO ########
+# #######################
+# TODO: Extract the input channels (fluorescence) and target (phase)
+# HINT: Print the keys of the `sample` dictionary
+# HINT: Input should be nuclei and membrane channels concatenated
+# HINT: Target should be the original phase image
+
+fluor_input = ...  # TODO: Source
+target_phase = ...  # TODO: Target
+
+# TODO: Make prediction with the fluorescence to phase model
+# NOTE: The `fluor2phase_model`, returns a tuple. Select the first item with `[0]`
+with torch.inference_mode():
+    predicted_phase = ...
+
+# #######################
+# ##### TODO ########
+# #######################
+# Calculate metrics between predicted and target phase
+# HINT: Use SSIM and Pearson correlation as before
+
+# TODO: Normalize data range to 0-1
+###### YOUR CODE HERE ######
+
+# TODO: Calculate SSIM and Pearson correlation
+###### YOUR CODE HERE ######
+
+# TODO: Print metrics
+print("Phase Reconstruction Metrics:")
+print(f"SSIM: {ssim_phase:.3f}")
+print(f"Pearson Correlation: {pearson_phase:.3f}")
+
+
+# %% tags=["solution"]
+# Load a pretrained model for fluorescence to phase translation
+from pathlib import Path
+
+import torch
+
+# Load the pretrained fluorescence to phase model
+print("Loading pretrained fluorescence-to-phase model...")
+
+# Note: This assumes a pretrained model is available. In practice, you would:
+# 1. Download from VisCy releases or train your own
+# 2. Adjust the path accordingly
+
+# For demonstration, we'll create a model with the correct architecture
+fluor2phase_config = dict(
+    in_channels=2,  # Nuclei + Membrane channels
+    out_channels=1,  # Phase channel
+    encoder_blocks=[3, 3, 9, 3],
+    dims=[96, 192, 384, 768],
+    decoder_conv_blocks=2,
+    stem_kernel_size=(1, 2, 2),
+    in_stack_depth=1,
+)
+
+# Create the fluorescence to phase model architecture
+print("Fluorescence-to-phase model created (note: using untrained model for demonstration)")
+print("In practice, load a pretrained checkpoint for meaningful results")
+
+print("\nLoading pretrained fluorescence-to-phase model...")
+fluor2phase_model_path = top_dir / "06_image_translation/pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
+assert fluor2phase_model_path.exists(), "Fluorescence-to-phase model checkpoint not found. Please check the path."
+fluor2phase_model = VSUNet.load_from_checkpoint(
+    fluor2phase_model_path, model_config=fluor2phase_config, architecture="fcmae"
+)
+fluor2phase_model.eval()
+
+# %% tags=["solution"]
+# Test the fluorescence to phase model on our test data
+
+source_channel_fluor = ["Nucl", "Mem"]
+target_channel_labelfree = ["Phase3D"]
+
+test_data_fluor2phase = HCSDataModule(
+    test_data_path,
+    source_channel=source_channel_fluor,
+    target_channel=target_channel_labelfree,
+    z_window_size=1,
+    batch_size=1,
+    num_workers=8,
+)
+test_data_fluor2phase.setup("test")
+
+# Get a test sample
+sample = next(iter(test_data_fluor2phase.test_dataloader()))
+
+# Extract input channels (fluorescence nuclei and membrane) and target (phase)
+fluor_input = sample["source"].to(fluor2phase_model.device)
+target_image = sample["target"].cpu().numpy().squeeze(0)
+
+# Run inference
+with torch.inference_mode():
+    predicted_phase = fluor2phase_model(fluor_input)[0]
+
+fluor_input = fluor_input.cpu().numpy()
+predicted_image = predicted_phase.cpu().numpy().squeeze(0)
+target_phase = rescale_intensity(target_image[0, 0], out_range=(0, 1))
+predicted_phase = rescale_intensity(predicted_image[0, 0], out_range=(0, 1))
+ssim_phase = metrics.structural_similarity(target_phase, predicted_phase, data_range=1)
+pearson_phase = np.corrcoef(target_phase.flatten(), predicted_phase.flatten())[0, 1]
+
+print("Phase Reconstruction Metrics:")
+print(f"SSIM: {ssim_phase:.3f}")
+print(f"Pearson Correlation: {pearson_phase:.3f}")
+
+# %%
+# Visualize the fluorescence to phase transformation results
+# TODO: Visualize the fluorescence to phase transformation results. Modify is as you see fit.
+
+fig, axs = plt.subplots(2, 3, figsize=(15, 10))
+
+axs[0, 0].imshow(fluor_input[0, 0, 0], cmap="gray")
+axs[0, 0].set_title("Input: Nuclei Channel")
+axs[0, 1].imshow(fluor_input[0, 1, 0], cmap="gray")
+axs[0, 1].set_title("Input: Membrane Channel")
+axs[0, 2].imshow(fluor_input[0, 0, 0] + fluor_input[0, 1, 0], cmap="gray")
+axs[0, 2].set_title("Combined Fluorescence\n(Nuclei + Membrane)")
+
+axs[1, 0].imshow(target_phase, cmap="gray")
+axs[1, 0].set_title("Target Phase Image")
+axs[1, 1].imshow(predicted_phase, cmap="gray")
+axs[1, 1].set_title(f"Predicted Phase\nSSIM: {ssim_phase:.3f}")
+axs[1, 2].imshow(np.abs(target_phase - predicted_phase), cmap="magma")
+axs[1, 2].set_title("Absolute Difference\n|Target - Predicted|")
+
+for ax in axs.flat:
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+plt.tight_layout()
+plt.show()
+
+# %% [markdown] tags=[]
+# <div class="alert alert-warning">
+# <h3>Analysis Questions: Why is Phase Reconstruction Imperfect?</h3>
+#
+# Looking at your results, consider these questions:
+#
+# <ul>
+# <li>Does the fluorescence image contain all the information needed to reconstruct the phase?</li>
+# <li>What structures are visible in phase but not in fluorescence channels?</li>
+# <li>Which has higher information content: phase or fluorescence images?</li>
+# <li>What does the reconstruction error map tell you about what's difficult to predict?</li>
+# </ul>
+# </div>
+
+# %% [markdown] tags=[]
+# <div class="alert alert-success">
+# <h3>Key Insights from Fluorescence to Phase Model</h3>
+#
+# This exploration reveals fundamental limitations in image-to-image translation:
+# <ul>
+# <li> Phase images contain rich structural information about unlabeled cellular components </li>
+# <li> Fluorescence only captures specific labeled structures (nuclei, membranes,etc.) </li>
+# <li> The fluorescence to phase model is an ill-posed problem - multiple phase images could produce similar fluorescence patterns </li>
+# <li> Models can only predict based on correlations learned during training </li>
+# <li> Structural details not correlated with fluorescence signals cannot be recovered </li>
+# </ul>
+#
+# #### Now, let's return to the `phase2fluor` model!
+#
+# </div>
+
+# %% [markdown] tags=[]
+# <div class="alert alert-info">
+# <h3>Bonus: Test Time Augmentation (TTA)</h3>
+#
+# Test Time Augmentation is a technique where you apply multiple augmentations to a single test image,
+# make predictions on each augmented version, and then combine the results (usually by averaging).
+#
+# **In this section we will:**
+# <ul>
+# <li> Use `Rotate90d` and `Flipd` for deterministic transformations </li>
+# <li> Apply transforms, make predictions, then apply inverse transforms </li>
+# <li> Average all predictions to get the final TTA result that is more robust to geometric variations. </li>
+# </ul>
+#
+# Reference: N.Moshkov (2020) https://www.nature.com/articles/s41598-020-61808-3
+#
+# Hint: You can use the `Rotate90` and `Flip` transforms from MONAI.
+# Example forward transform: `Rotate90(k=1, spatial_axes=(-1, -2))`
+# Example inverse transform: `Rotate90(k=3, spatial_axes=(-1, -2))`
+#
+# </div>
+
+# %% tags=["task"]
+from monai.transforms import (
+    Flip,
+    Rotate90,
+)
+
+# Get a test sample
+sample = next(iter(test_data.test_dataloader()))
+source_tensor = sample["source"].to(phase2fluor_model.device)
+target_tensor = sample["target"]
+target_nuc = target_tensor[0, 0].cpu().numpy()
+target_mem = target_tensor[0, 1].cpu().numpy()
+
+# Saving the single prediction without TTA for later comparison
+with torch.inference_mode():
+    single_pred = phase2fluor_model(source_tensor)
+    single_pred_nuc = single_pred[0, 0].cpu().numpy()
+    single_pred_mem = single_pred[0, 1].cpu().numpy()
+
+# TODO: Define TTA transforms using MONAI as a list of tuples (forward, inverse)
+###### YOUR CODE HERE ######
+transform_list = [("TODO", "TODO")]
+
+# TODO: Apply test-time augmentation
+# 1. Get original prediction (no augmentation)
+# 2. For each transform:
+#    - Apply transform to input
+#    - Run inference
+#    - De-apply transform to prediction
+# 3. Average all predictions
+
+predictions = []
+
+for forward_transform, inverse_transform in transform_list:
+    # Apply transform to each sample in batch
+    augmented_batch = []
+    for i in range(source_tensor.shape[0]):
+        # Apply the forward and store them
+        ###### YOUR CODE HERE ######
+        aug_img = ...
+        augmented_batch.append(aug_img)
+    augmented_source = torch.stack(augmented_batch).to(source_tensor.device)
+
+    # TODO: Run inference on augmented input
+    with torch.inference_mode():
+        ###### YOUR CODE HERE ######
+        augmented_pred = ...
+
+    # TODO: De-apply transform to prediction
+    deaugmented_batch = []
+    for i in range(augmented_pred.shape[0]):
+        ###### YOUR CODE HERE ######
+        deaug_pred = ...
+    deaugmented_pred = torch.stack(deaugmented_batch)
+
+    predictions.append(deaugmented_pred.cpu().numpy())
+
+# TODO: Average all predictions or take the median
+###### YOUR CODE HERE ######
+averaged_pred = ...
+
+# TODO: Extract nucleus and membrane predictions
+###### YOUR CODE HERE ######
+tta_pred_nuc = ...
+tta_pred_mem = ...
+
+# %% tags=["task"]
+# TODO: Compare TTA results with single prediction
+# Calculate metrics (SSIM, Pearson correlation) for both approaches. Do not forget to normalize the data range to 0-1.
+
+# TODO Normalize data range to 0-1
+###### YOUR CODE HERE ######
+
+# TODO Calculate metrics
+###### YOUR CODE HERE ######
+
+# TODO # TTA prediction metrics
+###### YOUR CODE HERE ######
+
+# Print comparison
+print("\nMetrics Comparison:")
+print(f"{'Metric':<20} {'Single':<10} {'TTA':<10} {'Improvement':<12}")
+print("-" * 55)
+print(f"{'SSIM Nucleus':<20} {ssim_nuc_single:.3f}     {ssim_nuc_tta:.3f}     {ssim_nuc_tta - ssim_nuc_single:+.3f}")
+print(f"{'SSIM Membrane':<20} {ssim_mem_single:.3f}     {ssim_mem_tta:.3f}     {ssim_mem_tta - ssim_mem_single:+.3f}")
+print(
+    f"{'Pearson Nucleus':<20} {pearson_nuc_single:.3f}     {pearson_nuc_tta:.3f}     {pearson_nuc_tta - pearson_nuc_single:+.3f}"
+)
+print(
+    f"{'Pearson Membrane':<20} {pearson_mem_single:.3f}     {pearson_mem_tta:.3f}     {pearson_mem_tta - pearson_mem_single:+.3f}"
+)
+
+# %% tags=["solution"]
+
+# Normalize data range to 0-1
+target_nuc[0] = rescale_intensity(target_nuc[0], in_range="image", out_range=(0, 1))
+single_pred_nuc[0] = rescale_intensity(single_pred_nuc[0], in_range="image", out_range=(0, 1))
+target_mem[0] = rescale_intensity(target_mem[0], in_range="image", out_range=(0, 1))
+single_pred_mem[0] = rescale_intensity(single_pred_mem[0], in_range="image", out_range=(0, 1))
+target_nuc[0] = rescale_intensity(target_nuc[0], in_range="image", out_range=(0, 1))
+tta_pred_nuc[0] = rescale_intensity(tta_pred_nuc[0], in_range="image", out_range=(0, 1))
+tta_pred_mem[0] = rescale_intensity(tta_pred_mem[0], in_range="image", out_range=(0, 1))
+tta_pred_nuc[0] = rescale_intensity(tta_pred_nuc[0], in_range="image", out_range=(0, 1))
+
+# Calculate metrics
+ssim_nuc_single = metrics.structural_similarity(target_nuc[0], single_pred_nuc[0], data_range=1)
+ssim_mem_single = metrics.structural_similarity(target_mem[0], single_pred_mem[0], data_range=1)
+pearson_nuc_single = np.corrcoef(target_nuc[0].flatten(), single_pred_nuc[0].flatten())[0, 1]
+pearson_mem_single = np.corrcoef(target_mem[0].flatten(), single_pred_mem[0].flatten())[0, 1]
+
+# TTA prediction metrics
+ssim_nuc_tta = metrics.structural_similarity(target_nuc[0], tta_pred_nuc[0], data_range=1)
+ssim_mem_tta = metrics.structural_similarity(target_mem[0], tta_pred_mem[0], data_range=1)
+pearson_nuc_tta = np.corrcoef(target_nuc[0].flatten(), tta_pred_nuc[0].flatten())[0, 1]
+pearson_mem_tta = np.corrcoef(target_mem[0].flatten(), tta_pred_mem[0].flatten())[0, 1]
+
+# Print comparison
+print("\nMetrics Comparison:")
+print(f"{'Metric':<20} {'Single':<10} {'TTA':<10} {'Improvement':<12}")
+print("-" * 55)
+print(f"{'SSIM Nucleus':<20} {ssim_nuc_single:.3f}     {ssim_nuc_tta:.3f}     {ssim_nuc_tta - ssim_nuc_single:+.3f}")
+print(f"{'SSIM Membrane':<20} {ssim_mem_single:.3f}     {ssim_mem_tta:.3f}     {ssim_mem_tta - ssim_mem_single:+.3f}")
+print(
+    f"{'Pearson Nucleus':<20} {pearson_nuc_single:.3f}     {pearson_nuc_tta:.3f}     {pearson_nuc_tta - pearson_nuc_single:+.3f}"
+)
+print(
+    f"{'Pearson Membrane':<20} {pearson_mem_single:.3f}     {pearson_mem_tta:.3f}     {pearson_mem_tta - pearson_mem_single:+.3f}"
+)
+
+# %%
+# TODO: Modify as you see fit to compute the metrics on the full FOV.
+# Visualize the comparison
+# Modify as you see fit to visualize the results
+
+fig, axs = plt.subplots(3, 3, figsize=(15, 15))
+
+# First row: Input phase and targets
+axs[0, 0].imshow(source_tensor[0, 0, 0].cpu().numpy(), cmap="gray")
+axs[0, 0].set_title("Input Phase")
+axs[0, 1].imshow(target_nuc[0], cmap="gray")
+axs[0, 1].set_title("Target Nucleus")
+axs[0, 2].imshow(target_mem[0], cmap="gray")
+axs[0, 2].set_title("Target Membrane")
+
+# Second row: Single predictions
+axs[1, 0].imshow(source_tensor[0, 0, 0].cpu().numpy(), cmap="gray")
+axs[1, 0].set_title("Input Phase")
+axs[1, 1].imshow(single_pred_nuc[0], cmap="gray")
+axs[1, 1].set_title(f"Single Pred Nucleus\nSSIM: {ssim_nuc_single:.3f}")
+axs[1, 2].imshow(single_pred_mem[0], cmap="gray")
+axs[1, 2].set_title(f"Single Pred Membrane\nSSIM: {ssim_mem_single:.3f}")
+
+# Third row: TTA predictions
+axs[2, 0].imshow(source_tensor[0, 0, 0].cpu().numpy(), cmap="gray")
+axs[2, 0].set_title("Input Phase")
+axs[2, 1].imshow(tta_pred_nuc[0], cmap="gray")
+axs[2, 1].set_title(f"TTA Pred Nucleus\nSSIM: {ssim_nuc_tta:.3f}")
+axs[2, 2].imshow(tta_pred_mem[0], cmap="gray")
+axs[2, 2].set_title(f"TTA Pred Membrane\nSSIM: {ssim_mem_tta:.3f}")
+
+# Remove ticks
+for ax in axs.flat:
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+plt.tight_layout()
+plt.show()
+
+# %% tags=["solution"]
+# Import additional MONAI transforms for TTA
+
+# Get a test sample
+sample = next(iter(test_data.test_dataloader()))
+source_tensor = sample["source"].to(phase2fluor_model.device)
+target_tensor = sample["target"]
+target_nuc = target_tensor[0, 0].cpu().numpy()
+target_mem = target_tensor[0, 1].cpu().numpy()
+
+predictions = []
+
+# Original prediction without augmentation
+with torch.inference_mode():
+    original_pred = phase2fluor_model(source_tensor)
+    predictions.append(original_pred.cpu().numpy())
+
+# Define the TTA transforms and the inverse transforms as a list of tuples (forward, inverse)
+transform_list = [
+    (Rotate90(k=1, spatial_axes=(-1, -2)), Rotate90(k=3, spatial_axes=(-1, -2))),
+    (Rotate90(k=2, spatial_axes=(-1, -2)), Rotate90(k=2, spatial_axes=(-1, -2))),
+    (Rotate90(k=3, spatial_axes=(-1, -2)), Rotate90(k=1, spatial_axes=(-1, -2))),
+    (Flip(spatial_axis=-2), Flip(spatial_axis=-2)),
+    (Flip(spatial_axis=-1), Flip(spatial_axis=-1)),
+]
+
+for forward_transform, inverse_transform in transform_list:
+    # Apply transform to each sample in batch
+    augmented_batch = []
+    for i in range(source_tensor.shape[0]):
+        img = source_tensor[i].cpu().numpy()
+        aug_img = forward_transform(img)
+        augmented_batch.append(aug_img)
+    augmented_source = torch.stack(augmented_batch).to(source_tensor.device)
+
+    # Run inference on augmented input
+    with torch.inference_mode():
+        augmented_pred = phase2fluor_model(augmented_source)
+
+    # De-apply transform to prediction
+    deaugmented_batch = []
+    for i in range(augmented_pred.shape[0]):
+        pred = augmented_pred[i].cpu().numpy()
+        deaug_pred = inverse_transform(pred)
+        deaugmented_batch.append(deaug_pred)
+    deaugmented_pred = torch.stack(deaugmented_batch)
+
+    predictions.append(deaugmented_pred.cpu().numpy())
+
+# Average all predictions
+averaged_pred = np.stack(predictions).mean(axis=0)
+
+# Extract nucleus and membrane predictions
+tta_pred_nuc = averaged_pred[0, 0]
+tta_pred_mem = averaged_pred[0, 1]
+
+# Compare with single prediction (no TTA)
+with torch.inference_mode():
+    single_pred = phase2fluor_model(source_tensor)
+    single_pred_nuc = single_pred[0, 0].cpu().numpy()
+    single_pred_mem = single_pred[0, 1].cpu().numpy()
+
+
+# %% [markdown] tags=[]
+# <div class="alert alert-warning">
+#
+# <h3>Discussion Questions for Test Time Augmentation</h3>
+#
+# <ul>
+# <li>Did TTA improve the metrics? By how much?</li>
+# <li>What are the trade-offs of using TTA? (hint: think about computation time vs. accuracy)</li>
+# <li>When would TTA be most beneficial in fluorescence microscopy?</li>
+# <li>How could you modify the TTA strategy to be more effective for this specific virtual staining task?</li>
+# <li>What other MONAI transforms could be useful for TTA in this context? (e.g., slight rotations, scaling)</li>
+# <li>Is there any hallucinations that are removed with TTA?</li>
+# </ul>
+# </div>
+
+# %% [markdown] tags=[]
+# <div class="alert alert-success">
+# <h3>Bonus Section Complete!</h3>
+#
+# You have successfully implemented Test Time Augmentation using MONAI transforms!
+#
+# Key takeaways:
+# <ul>
+# <li> TTA is particularly useful when prediction quality is critical and computational budget allows </li>
+# <li> Multiple geometric augmentations can reduce prediction variance and improve robustness </li>
+# <li> TTA leverages deterministic transforms (`Rotate90d`, `Flipd`) instead of random ones </li>
+# <li> The computational cost increases linearly with the number of TTA transforms </li>
+# </ul>
+# </div>
+
+# %% [markdown] tags=[]
 # # Part 3: Visualizing the encoder and decoder features & exploring the model's range of validity
 #
 # - In this section, we will visualize the encoder and decoder features of the model you trained.

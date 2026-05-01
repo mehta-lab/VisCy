@@ -85,18 +85,19 @@ uv pip install --python "$PY" \
     --display-name "Python ($KERNEL_NAME)"
 echo "Registered Jupyter kernel: $KERNEL_NAME"
 
-# --- 5. Download data + pretrained checkpoint (skip if already present) ----
+# --- 5. Download data + pretrained checkpoints (skip if already present) ----
 DATA_ROOT="${DATA_ROOT:-$HOME/data/$KERNEL_NAME}"
 TRAINING_ZARR="$DATA_ROOT/training/a549_hoechst_cellmask_train_val.zarr"
 TEST_ZARR="$DATA_ROOT/test/a549_hoechst_cellmask_test.zarr"
 CHECKPOINT="$DATA_ROOT/pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
+FLUOR2PHASE_CKPT="$DATA_ROOT/pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
 
 mkdir -p "$DATA_ROOT/training" "$DATA_ROOT/test" "$DATA_ROOT/pretrained_models"
 
-if [[ -d "$TRAINING_ZARR" && -d "$TEST_ZARR" && -f "$CHECKPOINT" ]]; then
+if [[ -d "$TRAINING_ZARR" && -d "$TEST_ZARR" && -f "$CHECKPOINT" && -f "$FLUOR2PHASE_CKPT" ]]; then
     echo "Data already present at $DATA_ROOT — skipping download."
 else
-    echo "Downloading data + checkpoint to $DATA_ROOT ..."
+    echo "Downloading data + checkpoints to $DATA_ROOT ..."
     cd "$DATA_ROOT/training"
     wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/training/zarrv3/a549_hoechst_cellmask_train_val.zarr/"
 
@@ -105,6 +106,8 @@ else
 
     cd "$DATA_ROOT/pretrained_models"
     wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
+    # Second checkpoint used in Task 2.5 (fluorescence -> phase reverse model).
+    wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/AIMBL_Demo/fluor2phase_step668.ckpt"
 fi
 
 cd "$START_DIR"
