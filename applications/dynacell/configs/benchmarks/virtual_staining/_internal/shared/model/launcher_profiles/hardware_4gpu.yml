@@ -1,18 +1,26 @@
-# Hardware profile: 4 GPU DDP, A100 excluded (NCCL coordination hangs).
+# Hardware profile: 4 GPU DDP on H100/H200, A100 excluded.
 #
-# 4 GPUs, DDP strategy, 1024G host mem, 4-day wall-time per restart.
-# Bumped from 512G after OOM on jobs 31287777 (ER scratch, died at 26h)
-# and 31297033 (mito scratch, died at 23h): ~80 GiB /dev/shm mmap_preload
-# + 4 × 58 GiB rank RSS + persistent-worker headroom was tight against
-# 512G and tipped over on validation-time transients. 1024G on a 2 TB
-# H200 node gives ~700 GiB of headroom for the same workload.
+# 4 GPUs, DDP strategy, 512G host mem, 4-day wall-time per restart.
 #
-# constraint excludes A100 nodes after repeat NCCL BROADCAST/ALLREDUCE
-# hangs at first-batch coordination on this cluster's A100 partition.
-# Alternation to non-A100 GPUs (h100/h200/a40/a6000/l40s) is the verified
-# workaround. Baking the exclusion in applies to every 4-GPU consumer of
-# this profile by default; leaves that need A100 must opt out via
-# `--override launcher.sbatch.constraint=null`.
+# host mem rationale (post-mmap_preload-fix, commit 6ec0d6f7):
+#   The earlier 1024G ceiling was sized for the oindex/CoordinateIndexer
+#   broadcast bloat in HCSDataModule.prepare_data, which inflated heap
+#   ~7x for sharded zarr reads. With per-channel BasicIndexer reads,
+#   joint cell.zarr + A549-pooled preload now peaks at ~185 GB
+#   (cell.zarr 500 FOVs ≈110 GB + a549 30 FOVs ≈75 GB tmpfs files in
+#   /dev/shm + small process baseline). 512G gives ~325 GB of headroom
+#   for worker buffers, persistent_workers transients, and validation-
+#   time spikes. Single-set workloads peak at ~110 GB of the 512G cap.
+#
+# GPU constraint rationale:
+#   Restricted to H100/H200 (80–96 GB VRAM) because FCMAE/UNeXt2 train
+#   at large spatial patches (e.g. 20×600×600) where a single DDP rank
+#   already needs 30–50 GB; A40/A6000/L40S (48 GB) leave no headroom
+#   for activation transients. A100 nodes are excluded separately due
+#   to repeat NCCL BROADCAST/ALLREDUCE hangs at first-batch coordination
+#   on this cluster's A100 partition. Leaves that intentionally want
+#   the smaller cards must opt out via
+#   `--override launcher.sbatch.constraint=h100|h200|a40|a6000|l40s`.
 launcher:
   sbatch:
     partition: gpu
@@ -20,6 +28,6 @@ launcher:
     ntasks_per_node: 4
     cpus_per_task: 8
     gpus: 4
-    mem: "1024G"
-    constraint: "h100|h200|a40|a6000|l40s"
+    mem: "512G"
+    constraint: "h100|h200"
     time: "4-00:00:00"
