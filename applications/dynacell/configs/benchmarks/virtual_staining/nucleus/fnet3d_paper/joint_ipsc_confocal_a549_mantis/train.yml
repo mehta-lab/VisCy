@@ -51,7 +51,13 @@ _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
   target_channel: Nuclei
   z_window_size: 32
-  batch_size: 48
+  # batch_size in joint mode is NOT divided by RandWeightedCropd
+  # num_samples (BatchedConcatDataModule.train_dataloader uses
+  # batch_size as-is, unlike HCSDataModule.train_dataloader which
+  # divides by train_patches_per_stack). To match single-set's
+  # effective on-GPU batch of 48 (single-set's batch_size 48 / 8),
+  # use 6 here so 6 indices * 8 num_samples = 48 GPU samples.
+  batch_size: 6
   num_workers: 8
   yx_patch_size: [64, 64]
   split_ratio: 0.8
