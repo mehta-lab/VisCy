@@ -63,7 +63,11 @@ _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
   target_channel: Nuclei
   z_window_size: 20
-  batch_size: 32
+  # batch_size is NOT divided by num_samples in joint mode (see
+  # nucleus/fnet3d_paper/joint_*/train.yml for the rationale): 8
+  # indices * num_samples=4 = 32 GPU samples per DDP rank, matching
+  # single-set's effective batch.
+  batch_size: 8
   num_workers: 4
   yx_patch_size: [384, 384]
   split_ratio: 0.8
