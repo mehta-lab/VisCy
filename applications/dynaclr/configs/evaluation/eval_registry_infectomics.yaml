@@ -1,0 +1,29 @@
+# Registry for compare_evals.py over the infectomics-annotated eval.
+# Lists every model that has produced
+#   {model_root}/evaluations/infectomics-annotated/linear_classifiers/metrics_summary.csv
+# under /hpc/projects/organelle_phenotyping/models/. Add new entries here as
+# more models are run. Each `name` is the legend label in the comparison plots.
+#
+# Usage:
+#   uv run python applications/dynaclr/scripts/evaluation/compare_evals.py \
+#     -c applications/dynaclr/configs/evaluation/eval_registry_infectomics.yaml
+
+models:
+  # Baselines
+  - name: DINOv3-frozen
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-frozen/evaluations/infectomics-annotated
+  - name: DINOv3-temporal-MLP-v1
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluations/infectomics-annotated
+
+  # DynaCLR-2D-MIP-BagOfChannels variants
+  - name: DynaCLR-2D-BoC (192to160, zext11)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/infectomics-annotated
+  - name: DynaCLR-2D-BoC (192to160, single-marker-fix)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated
+  - name: DynaCLR-2D-BoC (192to160, mixed-markers-fix)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated
+  - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated
+
+output_dir: /hpc/projects/organelle_phenotyping/comparisons/infectomics-annotated
+fdr_threshold: 0.05
