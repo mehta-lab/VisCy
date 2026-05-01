@@ -3,7 +3,7 @@
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
-    data_path: /hpc/projects/intracellular_dashboard/virtual_stain_ft_infected/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV/3-VS_train_test/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV.zarr
+    data_path: /hpc/projects/virtual_staining/training/a549/2026_05_infected_cell/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV.zarr
     source_channel: Phase3D
     target_channel: [DAPI_Density3D, TXR_Density3D]
     z_window_size: 20

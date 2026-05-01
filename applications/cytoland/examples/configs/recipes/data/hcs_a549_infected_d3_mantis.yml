@@ -5,7 +5,7 @@
 data:
   class_path: viscy_data.hcs.HCSDataModule
   init_args:
-    data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/2-assemble/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
+    data_path: /hpc/projects/virtual_staining/training/a549/2026_05_infected_cell/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
     source_channel: Phase3D
     target_channel:
       - "raw mCherry EX561 EM600-37"

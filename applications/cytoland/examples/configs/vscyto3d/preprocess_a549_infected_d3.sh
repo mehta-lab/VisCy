@@ -15,7 +15,7 @@ cd "$REPO_ROOT"
 mkdir -p .tmp/preprocess_logs
 
 uv run viscy preprocess \
-  --data_path /hpc/projects/intracellular_dashboard/organelle_dynamics/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/2-assemble/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr \
+  --data_path /hpc/projects/virtual_staining/training/a549/2026_05_infected_cell/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr \
   --channel_names+ "Phase3D" \
   --channel_names+ "raw mCherry EX561 EM600-37" \
   --channel_names+ "raw Cy5 EX639 EM698-70" \
