@@ -271,8 +271,13 @@ class HCSDataModule(LightningDataModule):
                 positions = self._filtered_positions(plate)
                 ch_idx = [positions[0].get_channel_index(c) for c in all_ch]
                 arr0 = positions[0][self.array_key]
-                T = arr0.frames
-                total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
+                # Per-FOV T may vary across positions in a pooled zarr (e.g.,
+                # a549 mantis pools mix T=7 and T=10 conditions). Compute a
+                # cumulative offset table so each FOV occupies its own slab
+                # in the mmap buffer.
+                offsets = self._fov_t_offsets(positions, self.array_key)
+                total_T = offsets[-1]
+                total_shape = (total_T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
                 data_path = cache_dir / "data.mmap"
                 data_buf = MemoryMappedTensor.empty(
                     total_shape,
@@ -293,7 +298,7 @@ class HCSDataModule(LightningDataModule):
                         [np.asarray(pos[self.array_key][:, c : c + 1, :, :, :]) for c in ch_idx],
                         axis=1,
                     )
-                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(src)
+                    data_buf[offsets[i] : offsets[i + 1]] = torch.from_numpy(src)
 
                 n_threads = min(len(positions), 16)
                 _logger.info(f"Mmap preload: staging {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
@@ -306,7 +311,11 @@ class HCSDataModule(LightningDataModule):
                     mask_ch_idx = ForegroundMaskSupport.resolve_mask_ch_indices(
                         mask_arr_0.channels, arr0.channels, n_target, target_ch_idx, self.fg_mask_key
                     )
-                    mask_shape = (len(positions) * T, n_target, arr0.slices, arr0.height, arr0.width)
+                    # fg_mask must align row-for-row with the data buffer.
+                    # Use the same offsets table from the data array, not a
+                    # fresh one from the mask array; if they ever drift the
+                    # split is silently wrong.
+                    mask_shape = (total_T, n_target, arr0.slices, arr0.height, arr0.width)
                     mask_buf = MemoryMappedTensor.empty(
                         mask_shape,
                         dtype=self._torch_dtype_from_numpy(mask_arr_0.dtype),
@@ -320,7 +329,7 @@ class HCSDataModule(LightningDataModule):
                             [np.asarray(pos[self.fg_mask_key][:, c : c + 1, :, :, :]) for c in mask_ch_idx],
                             axis=1,
                         )
-                        mask_buf[i * T : (i + 1) * T] = torch.from_numpy(mask_src)
+                        mask_buf[offsets[i] : offsets[i + 1]] = torch.from_numpy(mask_src)
 
                     with ThreadPoolExecutor(max_workers=n_threads) as pool:
                         list(pool.map(_write_mask, enumerate(positions)))
@@ -332,6 +341,36 @@ class HCSDataModule(LightningDataModule):
             if cache_dir.exists():
                 shutil.rmtree(cache_dir)
             raise
+
+    @staticmethod
+    def _fov_t_offsets(positions: list[Position], array_key: str) -> list[int]:
+        """Cumulative T-axis offsets per FOV.
+
+        Pooled zarrs (e.g., mantis_v1 a549 SEC61B / TOMM20) mix FOVs with
+        different ``T`` along axis 0. The mmap buffer concatenates FOVs
+        along that axis, so each FOV needs its own ``[start, end)`` slot
+        rather than a uniform ``i*T``. This helper produces those slots
+        from the on-disk array shape — cheap because ``arr.frames`` only
+        reads zarr metadata.
+
+        Parameters
+        ----------
+        positions : list[Position]
+            Positions in the order they will be written to the buffer.
+        array_key : str
+            Array key whose first axis defines T per FOV.
+
+        Returns
+        -------
+        list[int]
+            ``len(positions) + 1`` offsets where ``offsets[i]`` is the
+            buffer row of FOV ``i`` and ``offsets[-1]`` is the total
+            number of rows.
+        """
+        offsets = [0]
+        for pos in positions:
+            offsets.append(offsets[-1] + pos[array_key].frames)
+        return offsets
 
     def _open_mmap_buffer(
         self,
@@ -358,38 +397,43 @@ class HCSDataModule(LightningDataModule):
         Returns
         -------
         MemoryMappedTensor
-            Memory-mapped tensor of shape ``(N*T, C, Z, Y, X)``.
+            Memory-mapped tensor of shape ``(sum(T_i), C, Z, Y, X)``,
+            where ``T_i`` is the per-FOV frame count from
+            ``self.array_key`` (the canonical layout key — both data
+            and fg_mask buffers are written with this layout in
+            ``prepare_data``).
         """
-        key = array_key if array_key is not None else self.array_key
-        arr = positions[0][key]
-        arr_shape = arr.shape
-        T = arr_shape[0]
+        dtype_key = array_key if array_key is not None else self.array_key
+        dtype_arr = positions[0][dtype_key]
+        offsets = self._fov_t_offsets(positions, self.array_key)
         C = n_channels or (len(self.source_channel) + len(self.target_channel))
-        total_shape = (len(positions) * T, C, *arr_shape[2:])
+        total_shape = (offsets[-1], C, *dtype_arr.shape[2:])
         return MemoryMappedTensor.from_filename(
             filename,
-            dtype=self._torch_dtype_from_numpy(arr.dtype),
+            dtype=self._torch_dtype_from_numpy(dtype_arr.dtype),
             shape=total_shape,
         )
 
-    @staticmethod
-    def _fov_views(buffer: torch.Tensor, positions: list[Position]) -> list[torch.Tensor]:
+    def _fov_views(self, buffer: torch.Tensor, positions: list[Position]) -> list[torch.Tensor]:
         """Split a contiguous mmap buffer into per-FOV tensor views.
 
         Parameters
         ----------
         buffer : Tensor
-            Contiguous buffer of shape ``(N*T, C, Z, Y, X)``.
+            Contiguous buffer of shape ``(sum(T_i), C, Z, Y, X)``.
         positions : list[Position]
-            All positions (used to determine T per FOV).
+            All positions, in the same order they were written to the
+            buffer.
 
         Returns
         -------
         list[Tensor]
-            Per-FOV views, each of shape ``(T, C, Z, Y, X)``.
+            Per-FOV views, each of shape ``(T_i, C, Z, Y, X)``. Offsets
+            are derived from ``self.array_key`` to match the layout
+            that ``prepare_data`` writes for both data and fg_mask.
         """
-        T = buffer.shape[0] // len(positions)
-        return [buffer[i * T : (i + 1) * T] for i in range(len(positions))]
+        offsets = self._fov_t_offsets(positions, self.array_key)
+        return [buffer[offsets[i] : offsets[i + 1]] for i in range(len(positions))]
 
     @property
     def _base_dataset_settings(self) -> dict:

@@ -1021,6 +1021,92 @@ def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path)
     assert batch["fg_mask"].dtype == torch.float32
 
 
+@fixture(scope="function")
+def hcs_heterogeneous_t(tmp_path):
+    """HCS dataset where positions have different T along axis 0.
+
+    Mirrors the layout of the a549 mantis_v1 pooled stores
+    (``SEC61B_all.zarr``, ``TOMM20_all.zarr``) where each FOV is one
+    condition's time-lapse and conditions have different frame counts.
+    """
+    dataset_path = tmp_path / "het_t.zarr"
+    ch_names = ["Phase", "Fluorescence"]
+    rng = np.random.default_rng(42)
+    # Three positions with T=2, T=3, T=4 — heterogeneous.
+    fov_t = [("0", 2), ("1", 3), ("2", 4)]
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names) as dataset:
+        for fov, t in fov_t:
+            pos = dataset.create_position("A", "1", fov)
+            img = rng.random((t, len(ch_names), 8, 32, 32)).astype(np.float32)
+            pos.create_image("0", img, chunks=(1, 1, 1, 32, 32))
+        norm = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29}} for ch in ch_names}
+        for _, pos in dataset.positions():
+            pos.zattrs["normalization"] = norm
+    return dataset_path, fov_t
+
+
+def test_mmap_preload_heterogeneous_t(hcs_heterogeneous_t, tmp_path):
+    """prepare_data() + setup() + dataloader works when T varies per FOV.
+
+    Regression guard for the bug that hit a549 mantis SEC61B/TOMM20:
+    the buffer was sized as ``len(positions) * T_pos0`` and indexed by
+    ``i * T``, which crashed at the first FOV with a different T. The
+    fix uses a per-FOV cumulative offsets table; this test exercises
+    that path end-to-end (write, re-open, slice into per-FOV views,
+    sliding-window iteration).
+    """
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    data_path, fov_t = hcs_heterogeneous_t
+    expected_total_T = sum(t for _, t in fov_t)
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=2 / 3,  # 2 FOVs train, 1 FOV val
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    # On-disk buffer must be sized at sum(T_i), not n * T_pos0.
+    with open_ome_zarr(data_path) as plate:
+        positions = [p for _, p in plate.positions()]
+    arr0 = positions[0]["0"]
+    buf = MemoryMappedTensor.from_filename(
+        dm._mmap_cache_dir / "data.mmap",
+        dtype=torch.float32,
+        shape=(expected_total_T, 2, arr0.slices, arr0.height, arr0.width),
+    )
+    assert buf.shape[0] == expected_total_T
+
+    # Per-FOV slabs in the buffer must equal each FOV's full-channel oindex read.
+    offsets = [0]
+    for _, t in fov_t:
+        offsets.append(offsets[-1] + t)
+    ch_idx = [positions[0].get_channel_index(c) for c in ("Phase", "Fluorescence")]
+    for i, pos in enumerate(positions):
+        staged = np.asarray(buf[offsets[i] : offsets[i + 1]])
+        expected = np.asarray(pos["0"].oindex[:, ch_idx, :])
+        assert staged.shape == expected.shape
+        np.testing.assert_array_equal(staged, expected)
+
+    # End-to-end: setup + iterate the train loader without crashing.
+    dm.setup(stage="fit")
+    saw_batch = False
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape[1] == 1
+        assert batch["target"].shape[1] == 1
+        saw_batch = True
+        break
+    assert saw_batch
+
+
 def test_mmap_preload_matches_oindex(preprocessed_hcs_dataset, tmp_path):
     """Staged buffer is byte-equal to ``arr.oindex[:, ch_idx, :]`` per FOV.
 
