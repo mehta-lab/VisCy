@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -26,6 +27,7 @@ from viscy_data._typing import (
     CELL_INDEX_CORE_COLUMNS,
     CELL_INDEX_GROUPING_COLUMNS,
     CELL_INDEX_IMAGING_COLUMNS,
+    CELL_INDEX_NORMALIZATION_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
 )
@@ -37,6 +39,7 @@ __all__ = [
     "build_ops_cell_index",
     "build_timelapse_cell_index",
     "convert_ops_parquet",
+    "preprocess_cell_index",
     "read_cell_index",
     "validate_cell_index",
     "write_cell_index",
@@ -74,6 +77,18 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("organelle", pa.string()),
         ("pixel_size_xy_um", pa.float32()),
         ("pixel_size_z_um", pa.float32()),
+        ("T_shape", pa.int32()),
+        ("C_shape", pa.int32()),
+        ("Z_shape", pa.int32()),
+        ("Y_shape", pa.int32()),
+        ("X_shape", pa.int32()),
+        ("z_focus_mean", pa.float32()),
+        ("norm_mean", pa.float32()),
+        ("norm_std", pa.float32()),
+        ("norm_median", pa.float32()),
+        ("norm_iqr", pa.float32()),
+        ("norm_max", pa.float32()),
+        ("norm_min", pa.float32()),
     ]
 )
 
@@ -85,6 +100,7 @@ _ALL_COLUMNS = set(
     + CELL_INDEX_TIMELAPSE_COLUMNS
     + CELL_INDEX_OPS_COLUMNS
     + CELL_INDEX_IMAGING_COLUMNS
+    + CELL_INDEX_NORMALIZATION_COLUMNS
 )
 
 # ---------------------------------------------------------------------------
@@ -168,6 +184,13 @@ def write_cell_index(
 def read_cell_index(path: str | Path) -> pd.DataFrame:
     """Read a cell index parquet into a pandas DataFrame.
 
+    String columns are materialized as NumPy ``object`` arrays instead of
+    ``ArrowStringArray``. ArrowStringArray-backed columns route every
+    boolean mask slice through ``pyarrow.compute.take``, which allocates
+    a fresh buffer per string column and can spike peak RSS by 50+ GiB
+    on 80M-row indices during train/val FOV partitioning. NumPy object
+    columns make ``df[mask]`` a cheap gather.
+
     Parameters
     ----------
     path : str | Path
@@ -179,7 +202,155 @@ def read_cell_index(path: str | Path) -> pd.DataFrame:
         Cell index with correct dtypes.
     """
     table = pq.read_table(str(path), schema=CELL_INDEX_SCHEMA)
-    return table.to_pandas()
+    df = table.to_pandas(use_threads=True)
+    # ArrowStringArray columns with low cardinality (experiment, fov_name,
+    # marker, store_path, well, microscope, organelle, reporter) become
+    # Categorical to make ``df[mask]`` a fast int-code gather. Other string
+    # columns (cell_id, tracks_path, global_track_id, lineage_id, etc.) are
+    # high cardinality and are already read via the NumPy column cache in
+    # the dataset, so leave them as ArrowStringArray to avoid allocating
+    # millions of Python string objects here.
+    # NB: ``fov`` and ``well`` are NOT cast here because ``_align_parquet_columns``
+    # downstream rewrites ``fov_name`` via string concatenation, which pandas
+    # does not support on Categorical. We cast ``fov_name`` later, after the
+    # prefix rewrite, in the runtime index layer.
+    _categorical_cols = (
+        "experiment",
+        "marker",
+        "store_path",
+        "microscope",
+        "organelle",
+        "reporter",
+        "channel_name",
+    )
+    for col in _categorical_cols:
+        if col in df.columns:
+            df[col] = df[col].astype("category")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Preprocessing (clean up an existing cell index parquet)
+# ---------------------------------------------------------------------------
+
+
+def preprocess_cell_index(
+    parquet_path: str | Path,
+    output_path: str | Path | None = None,
+    focus_channel: str | None = None,
+) -> None:
+    """Add normalization stats, focus slice, and remove invalid rows.
+
+    Reads precomputed metadata from each FOV's ``zattrs`` (written by
+    ``viscy preprocess``) and writes them as parquet columns:
+
+    - ``norm_mean``, ``norm_std``, ``norm_median``, ``norm_iqr``,
+      ``norm_max``, ``norm_min`` — per-timepoint, per-channel statistics
+    - ``z_focus_mean`` — per-FOV focus plane from ``focus_slice``
+
+    Drops rows where timepoint stats are missing or ``norm_max == 0.0``
+    (empty frames). The processed parquet is written to ``output_path``;
+    the function returns nothing — callers that need the dataframe should
+    ``read_cell_index`` afterwards.
+
+    Parameters
+    ----------
+    parquet_path : str | Path
+        Path to the cell index parquet to preprocess.
+    output_path : str | Path | None
+        Destination path. When ``None``, overwrites *parquet_path* in place.
+    focus_channel : str | None
+        Channel name for ``focus_slice`` lookup (e.g. ``"Phase3D"``).
+        When ``None``, uses the first channel_name in each FOV's group.
+
+    Raises
+    ------
+    ValueError
+        If a FOV has no normalization metadata (run ``viscy preprocess`` first).
+    """
+    if output_path is None:
+        output_path = parquet_path
+
+    df = read_cell_index(parquet_path)
+    n_before = len(df)
+
+    fov_col = "fov" if "fov" in df.columns else "fov_name"
+
+    # Build lookups from zarr zattrs (one open per unique FOV)
+    stat_lookup: dict[tuple[str, str, str, int], dict[str, float]] = {}
+    focus_lookup: dict[tuple[str, str], float] = {}
+    focus_per_t_lookup: dict[tuple[str, str], dict[int, int]] = {}
+
+    for (store_path, fov), group in df.groupby(["store_path", fov_col]):
+        fov_path = f"{group['well'].iloc[0]}/{fov}" if "/" not in str(fov) else str(fov)
+        with open_ome_zarr(f"{store_path}/{fov_path}", mode="r") as pos:
+            norm_meta = pos.zattrs.get("normalization", None)
+            focus_meta = pos.zattrs.get("focus_slice", {})
+        if norm_meta is None:
+            raise ValueError(
+                f"FOV '{fov_path}' in store '{store_path}' has no normalization metadata. "
+                "Run `viscy preprocess` on this dataset first."
+            )
+        for ch_name, ch_stats in norm_meta.items():
+            for t_str, tp_stats in ch_stats.get("timepoint_statistics", {}).items():
+                stat_lookup[(str(store_path), str(fov), ch_name, int(t_str))] = tp_stats
+
+        fc = focus_channel or group["channel_name"].iloc[0]
+        ch_focus = focus_meta.get(fc, {})
+        fov_stats = ch_focus.get("fov_statistics", {})
+        z_focus = fov_stats.get("z_focus_mean")
+        if z_focus is not None:
+            focus_lookup[(str(store_path), str(fov))] = float(z_focus)
+        per_timepoint = ch_focus.get("per_timepoint", {})
+        if per_timepoint:
+            focus_per_t_lookup[(str(store_path), str(fov))] = {
+                int(t_str): int(z_idx) for t_str, z_idx in per_timepoint.items()
+            }
+
+    # Vectorized lookup: build norm + focus column arrays
+    stat_keys = ["mean", "std", "median", "iqr", "max", "min"]
+    store_arr = df["store_path"].astype(str).to_numpy()
+    fov_arr = df[fov_col].astype(str).to_numpy()
+    ch_arr = df["channel_name"].astype(str).to_numpy()
+    t_arr = df["t"].astype(int).to_numpy()
+
+    norm_arrays = {stat: np.full(len(df), float("nan"), dtype=np.float32) for stat in stat_keys}
+    focus_arr = np.full(len(df), float("nan"), dtype=np.float32)
+    z_arr = df["z"].to_numpy(dtype=np.int16).copy()
+    valid_mask = np.ones(len(df), dtype=bool)
+
+    for i in range(len(df)):
+        tp_stats = stat_lookup.get((store_arr[i], fov_arr[i], ch_arr[i], t_arr[i]))
+        if tp_stats is None or tp_stats.get("max", 1.0) == 0.0:
+            valid_mask[i] = False
+            continue
+        for stat in stat_keys:
+            norm_arrays[stat][i] = float(tp_stats[stat])
+        fov_key = (store_arr[i], fov_arr[i])
+        z_focus = focus_lookup.get(fov_key)
+        if z_focus is not None:
+            focus_arr[i] = z_focus
+        z_t = focus_per_t_lookup.get(fov_key, {}).get(t_arr[i])
+        if z_t is not None:
+            z_arr[i] = z_t
+
+    for stat in stat_keys:
+        df[f"norm_{stat}"] = norm_arrays[stat]
+    df["z_focus_mean"] = focus_arr
+    df["z"] = z_arr
+
+    df = df[valid_mask].reset_index(drop=True)
+    n_dropped = n_before - len(df)
+
+    write_cell_index(df, output_path)
+    if n_dropped > 0:
+        _logger.info("Dropped %d invalid rows (%.1f%%).", n_dropped, 100 * n_dropped / n_before)
+    _logger.info(
+        "Wrote %d rows to %s (dropped %d, added norm + focus columns)",
+        len(df),
+        output_path,
+        n_dropped,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -194,11 +365,17 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
     ancestor.  Tracks without a ``parent_track_id`` (or whose parent is not
     present in the data) are their own root.
 
+    The lineage walk is scoped per ``(experiment, well, fov)`` when the
+    ``well`` column is available. Scoping on ``(experiment, fov)`` alone
+    collapses cells across wells that share an FOV number (e.g. B/2/002001
+    and C/2/002001), producing cross-well lineage_id aliasing that later
+    crashes the temporal positive lookup with "No positive found".
+
     Parameters
     ----------
     tracks : pd.DataFrame
         Must contain ``global_track_id``, ``experiment``, ``fov``, ``track_id``.
-        Optionally ``parent_track_id``.
+        Optionally ``parent_track_id`` and ``well``.
 
     Returns
     -------
@@ -216,8 +393,9 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
 
     lineage_series = tracks["lineage_id"].copy()
 
-    groups = list(tracks.groupby(["experiment", "fov"]))
-    for (exp, fov), group in tqdm(groups, desc="Reconstructing lineages", unit="fov"):
+    group_keys = ["experiment", "well", "fov"] if "well" in tracks.columns else ["experiment", "fov"]
+    groups = list(tracks.groupby(group_keys))
+    for _key, group in tqdm(groups, desc="Reconstructing lineages", unit="fov"):
         tid_to_gtid: dict[int, str] = dict(zip(group["track_id"], group["global_track_id"]))
 
         parent_map: dict[str, str] = {}
@@ -274,8 +452,8 @@ def _build_experiment_tracks(
     if exclude_fovs is not None:
         all_exclude.update(exclude_fovs)
 
-    # Channel-marker pairs from per-experiment channels list
-    channel_marker_pairs = [(ch.name, ch.marker) for ch in exp.channels]
+    # Channel entries from per-experiment channels list
+    channel_entries = [(ch.name, ch.marker, set(ch.wells)) for ch in exp.channels]
 
     exp_tracks: list[pd.DataFrame] = []
 
@@ -305,6 +483,10 @@ def _build_experiment_tracks(
             raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
         tracks_df = pd.read_csv(csv_files[0])
 
+        # TCZYX shape from zarr metadata (same for all positions in a well)
+        img_arr = position["0"]
+        t_shape, c_shape, z_shape, y_shape, x_shape = img_arr.shape
+
         # Base columns (shared across channel rows)
         tracks_df["cell_id"] = (
             exp.name + "_" + fov_path + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
@@ -322,12 +504,19 @@ def _build_experiment_tracks(
         tracks_df["organelle"] = exp.organelle
         tracks_df["pixel_size_xy_um"] = exp.pixel_size_xy_um
         tracks_df["pixel_size_z_um"] = exp.pixel_size_z_um
+        tracks_df["T_shape"] = t_shape
+        tracks_df["C_shape"] = c_shape
+        tracks_df["Z_shape"] = z_shape
+        tracks_df["Y_shape"] = y_shape
+        tracks_df["X_shape"] = x_shape
 
         if "z" not in tracks_df.columns:
             tracks_df["z"] = 0
 
-        # Explode: one row per channel
-        for zarr_ch, marker in channel_marker_pairs:
+        # Explode: one row per channel (skip channels restricted to other wells)
+        for zarr_ch, marker, valid_wells in channel_entries:
+            if valid_wells and well_name not in valid_wells:
+                continue
             ch_df = tracks_df.copy()
             ch_df["channel_name"] = zarr_ch
             ch_df["marker"] = marker
@@ -370,7 +559,7 @@ def build_timelapse_cell_index(
     experiments = collection.experiments
     n_workers = os.cpu_count() if num_workers == -1 else num_workers
 
-    print(f"Building cell index: {len(experiments)} experiments, {n_workers} workers")
+    _logger.info("Building cell index: %d experiments, %s workers", len(experiments), n_workers)
 
     all_tracks: list[pd.DataFrame] = []
 
@@ -379,7 +568,7 @@ def build_timelapse_cell_index(
             df = _build_experiment_tracks(exp, include_wells, exclude_fovs)
             if not df.empty:
                 all_tracks.append(df)
-                print(f"  {exp.name}: {len(df):,} rows")
+                _logger.info("  %s: %d rows", exp.name, len(df))
     else:
         futures = {}
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
@@ -398,7 +587,7 @@ def build_timelapse_cell_index(
                     df = future.result()
                     if not df.empty:
                         all_tracks.append(df)
-                        print(f"  {exp_name}: {len(df):,} rows")
+                        _logger.info("  %s: %d rows", exp_name, len(df))
                     pbar.update(1)
 
     if not all_tracks:
@@ -411,7 +600,7 @@ def build_timelapse_cell_index(
         df[col] = None
 
     write_cell_index(df, output_path)
-    print(f"Wrote {len(df):,} rows to {output_path}")
+    _logger.info("Wrote %d rows to %s", len(df), output_path)
     return df
 
 

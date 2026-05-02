@@ -66,3 +66,6 @@ slurm*.out
 lightning_logs/
 
 # NOTE: uv.lock is NOT ignored - it should be tracked for reproducibility
+
+# Local-only planning docs (not for upstream)
+applications/dynaclr/docs/DAGs/evaluation_matrix.md

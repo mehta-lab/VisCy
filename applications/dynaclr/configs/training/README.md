@@ -1,96 +1,110 @@
 # DynaCLR Training Configs
 
-Composable training configuration using LightningCLI `--config` stacking.
-Each layer is a YAML fragment; later configs deep-merge into earlier ones
-(dicts merge, lists replace).
+Training configuration stack for LightningCLI `--config`. Later configs
+deep-merge into earlier ones (dicts merge, lists replace). Each leaf
+YAML declares a `base:` list of recipes to compose on top of.
 
-## Structure
+## Directory layout
 
 ```
 configs/training/
-  _base.yml          Trainer + model defaults (callbacks, optimizer, encoder)
-  arch/              Encoder geometry (stem, z_depth, patch size)
-    2d_z1.yml        stem=[1,4,4], z_window=1
-    3d_z16.yml       stem=[4,4,4], z_window=16, random Z crop
-    3d_z30.yml       stem=[5,4,4], z_window=30, 192px patch
-  data/              Data pipeline: sampling + normalization + augmentations
-    boc_{dim}_{positive_pair}_{batch_composition}.yml
-  demo/              Self-contained configs for smoke tests (single --config)
-  slurm/             SLURM experiment scripts (sbatch entry points)
-    train.sh         Shared launcher (sourced, not sbatch'd directly)
-  _legacy/           Old monolithic configs (reference only)
+  DynaCLR-2D/          # 2D (and MIP) time-lapse contrastive runs
+    DynaCLR-2D-BagOfChannels-v3.{yml,sh}
+    DynaCLR-2D-MIP-BagOfChannels.{yml,sh}
+    DynaCLR-2D-MIP-BagOfChannels-single-marker.{yml,sh}
+    DynaCLR-2D-MIP-BagOfChannels-single-marker-A40.{yml,sh}
+  DynaCLR-3D/          # 3D time-lapse contrastive runs
+    DynaCLR-3D-BagOfChannels-v2.{yml,sh}
+    DynaCLR-3D-BagOfChannels-v2-single-marker.{yml,sh}
+  DINOv3/              # DINOv3 frozen-encoder + MLP probes
+    DINOv3-temporal-MLP-2D-BagOfChannels.{yml,sh}
+  Phase-contrastive/
+    Phase-contrastive-timeaware.{yml,sh}
+
+  recipes/             # Reusable building blocks (referenced via base:)
+    trainer.yml        Trainer + logger + common callbacks
+    model/             Encoder and head architectures
+    data/              Sampling / positive-pair strategies
+    augmentations/     Augmentation pipelines (ops_2d_mild, etc.)
+
+  debug/               # Fast-dev-run / tiny configs for reproducing hangs / OOMs
+  demo/                # Self-contained single-file demos for smoke tests
+  slurm/
+    train.sh           Shared launcher sourced by every sbatch script
+  preprocess.yml       Preprocessing config (not a training run)
 ```
 
-## Data config naming convention
+Each top-level model family lives in its own folder. The `yml` and `sh`
+for a given run share a name and a directory so `CONFIGS=` references
+stay local.
 
+## Composition via `base:`
+
+Each leaf YAML starts with a `base:` list pointing at recipe fragments
+(paths are relative to the YAML's directory; since all leaf YAMLs live
+one level below `recipes/`, they use `../recipes/...`):
+
+```yaml
+# DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.yml
+base:
+  - ../recipes/trainer.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
 ```
-{channel_mode}_{dim}_{positive_pair_strategy}_{batch_composition}.yml
-```
 
-| Segment | Values | Meaning |
-|---------|--------|---------|
-| channel_mode | `boc` | bag-of-channels (1 random channel per sample) |
-| dim | `2d`, `3d` | spatial dimensionality |
-| positive_pair | `temporal` | same cell lineage at t+tau |
-|  | `gene-reporter` | same gene + same reporter (OPS) |
-|  | `self` | SimCLR-style (same crop, different augmentation) |
-| batch_composition | `stratify-perturbation` | balance infected/uninfected |
-|  | `stratify-perturbation-marker` | balance perturbation and organelle marker |
-|  | `stratify-marker` | balance by reporter/marker only |
-
-## Composition
-
-Stack three configs: `_base.yml` + `arch/*.yml` + `data/*.yml`, then
-pass experiment-specific values as CLI overrides in the SLURM script.
-
-```bash
-viscy fit \
-  --config _base.yml \
-  --config arch/3d_z16.yml \
-  --config data/boc_3d_temporal_stratify-perturbation.yml \
-  --trainer.devices 4 \
-  --data.init_args.batch_size 512 \
-  --data.init_args.collection_path path/to/collection.yml
-```
+`viscy_utils.compose.load_composed_config` walks the `base:` chain,
+deep-merges dicts, and replaces lists.
 
 ## SLURM scripts
 
-Each experiment is a thin `.sh` that sets `PROJECT`, `RUN_NAME`, `CONFIGS`,
-experiment-specific `EXTRA_ARGS`, and sources `train.sh`:
+Each experiment is a thin `.sh` that sets `PROJECT`, `RUN_NAME`,
+`CONFIGS`, optional `EXTRA_ARGS`, and sources `slurm/train.sh`:
 
 ```bash
-# Submit
-sbatch slurm/DynaCLR-3D-BagOfChannels-v2.sh
+sbatch applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2.sh
 
-# Override run name
-RUN_NAME=phase2-hcl sbatch slurm/DynaCLR-3D-BagOfChannels-v2.sh
+RUN_NAME=phase2-hcl sbatch applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2.sh
 
-# Parameter sweep
 for TEMP in 0.1 0.2 0.5; do
   RUN_NAME="sweep-temp${TEMP}" \
   EXTRA_ARGS="--model.init_args.loss_function.init_args.temperature ${TEMP}" \
-  sbatch slurm/DynaCLR-3D-BagOfChannels-v2.sh
+  sbatch applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2.sh
 done
 ```
 
 `train.sh` handles:
-- `PYTHONNOUSERSITE=1` (prevents `~/.local/` shadowing conda)
-- Creates `${MODEL_ROOT}/${PROJECT}/${RUN_NAME}/` output directory
-- Copies config files into the run directory for reproducibility
-- Sets WandB logger project/name/save_dir via CLI overrides
-- Sets checkpoint dirpath via CLI override
+- `export PYTHONNOUSERSITE=1` (prevents `~/.local/` shadowing conda)
+- Creates `${MODEL_ROOT}/${PROJECT}/${RUN_NAME}/` output dir
+- Rotates `config.yaml` from any previous run
+- Copies the calling sbatch script into the run dir for reproducibility
+- Sets WandB logger project / name / save_dir via CLI overrides
+- Optional `CKPT_PATH` resume and `WANDB_RUN_ID` to continue a run
+
+## Resuming a run
+
+```bash
+CKPT_PATH=/hpc/projects/.../checkpoints/last.ckpt \
+WANDB_RUN_ID=<wandb_run_id> \
+  sbatch --export=ALL,CKPT_PATH,WANDB_RUN_ID \
+  applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-BagOfChannels-v2.sh
+```
+
+`WANDB_RUN_ID` appends `--trainer.logger.init_args.id=<id>
+--trainer.logger.init_args.resume=must` so metrics land on the same
+W&B timeline.
 
 ## Adding a new experiment
 
-1. Check if an existing `data/*.yml` matches your sampling strategy.
-   If not, create a new one following the naming convention.
-2. Create a new `slurm/<experiment>.sh` with SBATCH directives and overrides.
-3. Submit with `sbatch slurm/<experiment>.sh`.
+1. Find the closest existing run in the matching model family
+   folder. Copy the `.yml` and `.sh` alongside it with a new name.
+2. Edit `base:` in the YAML to pick the right recipes.
+3. Override training-specific values in the YAML (or via `EXTRA_ARGS`
+   in the sbatch script for one-off sweeps).
+4. `sbatch applications/dynaclr/configs/training/<FAMILY>/<NAME>.sh`.
 
-## Demo configs
+## Debug / demo configs
 
-Self-contained single-file configs for quick testing:
-
-```bash
-viscy fit --config demo/demo_3d_fit.yml --trainer.fast_dev_run true
-```
+- `debug/` — fastdev, tiny, and DDP-reproducer configs used to isolate
+  SLURM hangs, memory spikes, and DDP sync issues. Launched with
+  `uv run viscy fit --config <base>.yml --config debug/<debug>.yml`.
+- `demo/` — self-contained single-file configs for quick local smoke
+  tests (no base chain).

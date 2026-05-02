@@ -1,0 +1,51 @@
+# Dataset recipe: alfi (mitosis)
+# =============================================================================
+# Wave-2 column of the evaluation matrix. Applies LC pipelines published by the
+# same model's infectomics-annotated run (central registry). No LC training,
+# no MMD. Leaves override training_config + ckpt_path + output_dir +
+# append_predictions.pipelines_dir (per-model registry path).
+#
+# Cell index covers HeLa (MI06), RPE1 (MI07/MI08), U2OS (MI01-MI05) — DIC channel.
+# Annotations: ALFI_combined_annotations.csv (cell_division_state, cell_death_state).
+#
+# Leaves merge this via:
+#   base:
+#     - recipes/predict.yml
+#     - recipes/reduce.yml
+#     - recipes/alfi.yml
+
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/alfi-eval.parquet
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - smoothness
+  - append_annotations
+  - append_predictions
+  - plot
+
+append_annotations:
+  annotations:
+    - experiment: "ALFI_HeLa_DMSO_MLN8237"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
+    - experiment: "ALFI_RPE1_untreated"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
+    - experiment: "ALFI_U2OS_DMSO_MLN8237"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/ALFI/ALFI_combined_annotations.csv
+
+plot:
+  embedding_keys:
+    - X_pca
+  combined_embedding_keys:
+    - X_pca_combined
+    - X_phate_combined
+  color_by:
+    - cell_division_state
+    - cell_death_state
+    - experiment
+    - marker
+  point_size: 1.0
+  components: [0, 1]
+  format: pdf

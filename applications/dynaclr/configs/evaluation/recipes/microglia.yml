@@ -1,0 +1,42 @@
+# Dataset recipe: microglia (dynamorph)
+# =============================================================================
+# Wave-2 column of the evaluation matrix. Applies LC pipelines published by the
+# same model's infectomics-annotated run (central registry). Microglia has no
+# annotation CSVs, so append_annotations is omitted; append_predictions still
+# runs and silently skips cells whose markers (Brightfield, Retardance) are
+# absent from the registry manifest.
+#
+# Data: 20191107_1209_1_GW23_dynamorph (Brightfield, Phase3D, Retardance).
+# Perturbations: untreated, IL17, IFN-beta, Rubella, Glioblastoma_supernatant.
+#
+# Leaves merge this via:
+#   base:
+#     - recipes/predict.yml
+#     - recipes/reduce.yml
+#     - recipes/microglia.yml
+
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/microglia-eval.parquet
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - smoothness
+  - append_predictions
+  - plot
+
+plot:
+  embedding_keys:
+    - X_pca
+  combined_embedding_keys:
+    - X_pca_combined
+    - X_phate_combined
+  color_by:
+    - perturbation
+    - hours_post_perturbation
+    - experiment
+    - marker
+  point_size: 1.0
+  components: [0, 1]
+  format: pdf

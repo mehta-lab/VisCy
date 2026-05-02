@@ -182,6 +182,107 @@ class TestExperimentAware:
 
 
 # ---------------------------------------------------------------------------
+# Marker-aware batching (bag-of-channels regime)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def multi_marker_anchors() -> pd.DataFrame:
+    """DataFrame with 1 experiment, 4 markers, 2 conditions, 320 rows total.
+
+    Represents the bag-of-channels regime where each row is one (cell,
+    timepoint, channel) observation and ``marker`` identifies which
+    channel/protein the patch came from.
+    """
+    rng = np.random.default_rng(7)
+    rows = []
+    for marker in ["Phase3D", "TOMM20", "SEC61B", "Brightfield"]:
+        for cond in ["infected", "uninfected"]:
+            for i in range(40):
+                rows.append(
+                    {
+                        "experiment": "exp_boc",
+                        "condition": cond,
+                        "marker": marker,
+                        "hours_post_perturbation": rng.uniform(0, 24),
+                        "global_track_id": f"{marker}_{cond}_{i}",
+                        "t": rng.integers(0, 20),
+                    }
+                )
+    df = pd.DataFrame(rows)
+    return df.reset_index(drop=True)
+
+
+class TestMarkerAware:
+    """batch_group_by="marker" produces single-marker batches shuffled across markers.
+
+    This is the bag-of-channels training regime — the config asks for one
+    marker per batch so contrastive pairs stay within the same channel,
+    while different batches traverse the full marker pool across an
+    epoch.
+    """
+
+    def test_every_batch_is_single_marker(self, multi_marker_anchors: pd.DataFrame):
+        """Every batch must contain rows from exactly one marker."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=multi_marker_anchors,
+            batch_size=16,
+            batch_group_by="marker",
+            stratify_by=None,
+            leaky=0.0,
+            seed=42,
+        )
+        batches = list(sampler)
+        assert batches, "Sampler should yield batches"
+        for batch in batches:
+            markers = multi_marker_anchors.iloc[batch]["marker"].unique()
+            assert len(markers) == 1, f"batch_group_by='marker' batch has {len(markers)} markers: {markers}"
+
+    def test_all_markers_appear_across_epoch(self, multi_marker_anchors: pd.DataFrame):
+        """Across one epoch every marker surfaces in at least one batch."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=multi_marker_anchors,
+            batch_size=16,
+            batch_group_by="marker",
+            stratify_by=None,
+            leaky=0.0,
+            seed=42,
+        )
+        seen: set[str] = set()
+        for batch in sampler:
+            seen.update(multi_marker_anchors.iloc[batch]["marker"].unique())
+        expected = {"Phase3D", "TOMM20", "SEC61B", "Brightfield"}
+        assert seen == expected, f"Not all markers surfaced in one epoch: {seen} vs {expected}"
+
+    def test_batches_shuffled_across_markers(self, multi_marker_anchors: pd.DataFrame):
+        """Consecutive batches should not all be the same marker — the sampler
+        must interleave marker groups rather than drain them sequentially.
+
+        We require at least half of the marker-to-marker batch transitions
+        to be a change (pathological samplers that yield all Phase3D
+        batches first, then all TOMM20, etc., would get a change-ratio
+        close to ``1/num_batches`` which this threshold catches).
+        """
+        sampler = FlexibleBatchSampler(
+            valid_anchors=multi_marker_anchors,
+            batch_size=16,
+            batch_group_by="marker",
+            stratify_by=None,
+            leaky=0.0,
+            seed=42,
+        )
+        per_batch_marker: list[str] = []
+        for batch in sampler:
+            per_batch_marker.append(multi_marker_anchors.iloc[batch]["marker"].iloc[0])
+        transitions = [a != b for a, b in zip(per_batch_marker[:-1], per_batch_marker[1:], strict=False)]
+        change_ratio = sum(transitions) / len(transitions)
+        assert change_ratio >= 0.5, (
+            f"Only {change_ratio:.1%} of consecutive batches changed marker; "
+            "sampler appears to drain groups sequentially instead of shuffling"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Stratified sampling (SAMP-02)
 # ---------------------------------------------------------------------------
 
@@ -390,6 +491,22 @@ class TestDeterminism:
         sampler.set_epoch(5)
         batches_b = list(sampler)
         assert batches_a == batches_b
+
+    def test_iter_auto_advances_epoch(self, two_experiment_anchors: pd.DataFrame):
+        """Consecutive iterations must yield different sequences without set_epoch.
+
+        PL does not call ``set_epoch`` on ``batch_sampler`` instances, so the
+        sampler must self-advance. Regression guard for the frozen-dataset bug.
+        """
+        sampler = FlexibleBatchSampler(
+            valid_anchors=two_experiment_anchors,
+            batch_size=8,
+            batch_group_by="experiment",
+            stratify_by=None,
+            leaky=0.0,
+            seed=42,
+        )
+        assert list(sampler) != list(sampler)
 
 
 # ---------------------------------------------------------------------------

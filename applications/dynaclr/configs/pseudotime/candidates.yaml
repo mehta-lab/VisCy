@@ -1,0 +1,92 @@
+# Stage 0 config — candidate selection, lineage reconnection, cohort tagging.
+# Load via: --datasets datasets.yaml --config candidates.yaml
+#
+# Defines candidate sets that select the productive cohort (and optionally
+# a mock cohort from uninfected wells via well_pattern). Bystander and
+# abortive cohorts are derived from the productive set's wells using the
+# LC predictions (per discussion §3.2 and the locked execution plan).
+
+candidate_sets:
+  zikv_productive_07_24:
+    description: |
+      Productive ZIKV cohort from 07_24, SEC61 (A/2) + G3BP1 (C/2) wells.
+      The `productive` cohort uses the existing transitioning filter as
+      the anchor source. `bystander` and `abortive` are LC-derived from
+      the same wells. `mock` comes from uninfected control wells (A/1, C/1).
+    datasets: ["2025_07_24_SEC61", "2025_07_24_G3BP1"]
+    productive_filter:
+      anchor_label: infection_state
+      anchor_positive: infected
+      anchor_negative: uninfected
+      min_pre_minutes: 240         # discussion §3.6: target h_pre = 240–360 min
+      min_post_minutes: 360
+      crop_window_minutes: 360     # generous; readout windows pick within this
+    cohort_rules:
+      bystander_uninfected_fraction: 0.8
+      abortive_min_run: 3
+      mock_well_patterns:
+        # Uninfected control wells per dataset entries. Read from
+        # datasets.yaml control_fov_pattern when available; this list
+        # overrides for explicitness.
+        - "A/1"
+        - "C/1"
+    lineage_rules:
+      reconnect: true
+      return_both_branches: true   # keep both daughters; daughter handling regime-dependent downstream
+      transition_window_k_pre_minutes: 60
+      transition_window_k_post_minutes: 120
+    max_lineages: 200              # cap; longer lineages preferred when over
+
+  zikv_productive_pooled:
+    description: |
+      Pooled productive cohort across 07_24 (SEC61 + G3BP1), 07_22 (G3BP1
+      only), and 08_26 (SEC61 only). Used to increase n for
+      compare_phase_to_fluor — the 07_24-only set was n=6/7.
+
+      Filter is loosened to a 300-min track-length floor (10 frames at
+      30 min/frame, 30 frames at 10 min/frame) to recover 07_22 cells
+      that the strict 600-min filter excluded. 08_26 uses
+      ``productive_source: lc_zarr`` because its annotation CSV is
+      per-frame rather than track-linked. Mock cohort uses
+      ``min_non_productive_minutes`` decoupled from the productive
+      filter so short tracks can still serve as null distributions.
+    datasets:
+      - "2025_07_24_SEC61"
+      - "2025_07_24_G3BP1"
+      - "2025_07_22_G3BP1"
+      - "2025_08_26_SEC61"
+    productive_filter:
+      anchor_label: infection_state
+      anchor_positive: infected
+      anchor_negative: uninfected
+      min_pre_minutes: 120         # was 240; loosened to 300-min total floor
+      min_post_minutes: 180        # was 360; loosened to 300-min total floor
+      crop_window_minutes: 360
+    cohort_rules:
+      bystander_uninfected_fraction: 0.8
+      abortive_min_run: 3
+      min_non_productive_minutes: 300   # decoupled from productive pre/post; lets
+                                        # short tracks contribute as bystander/mock
+      mock_well_patterns:
+        - "A/1"
+        - "C/1"
+    lineage_rules:
+      reconnect: true
+      return_both_branches: true
+      transition_window_k_pre_minutes: 60
+      transition_window_k_post_minutes: 120
+    max_lineages: 400
+
+  manual_debug_zikv:
+    description: "Manual debug: 4 hand-picked tracks from manual_candidates.py, ZIKV 07_24 A/2"
+    source: manual                  # tells select_candidates.py to skip auto path
+    manual_script: manual_candidates.py
+    cohort_rules:
+      mock_well_patterns:
+        - "A/1"
+        - "C/1"
+    lineage_rules:
+      reconnect: true
+      return_both_branches: true
+      transition_window_k_pre_minutes: 60
+      transition_window_k_post_minutes: 120

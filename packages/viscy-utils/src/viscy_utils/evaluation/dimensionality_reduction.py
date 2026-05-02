@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 from xarray import Dataset
@@ -18,6 +19,10 @@ def compute_phate(
     knn_dist: str = "cosine",
     update_dataset: bool = False,
     random_state: int = 42,
+    n_pca: int = 50,
+    subsample: int | None = None,
+    lineage_ids: NDArray | None = None,
+    n_jobs: int = 1,
     **phate_kwargs,
 ) -> tuple[object, NDArray]:
     """Compute PHATE embeddings.
@@ -72,11 +77,30 @@ def compute_phate(
         decay=decay,
         knn_dist=knn_dist,
         random_state=random_state,
-        n_jobs=-1,
+        n_jobs=n_jobs,
+        n_pca=n_pca,
         **phate_kwargs,
     )
 
-    phate_embedding = phate_model.fit_transform(embeddings_scaled)
+    n_samples = embeddings_scaled.shape[0]
+    if subsample is not None and subsample < n_samples:
+        rng = np.random.default_rng(random_state)
+        if lineage_ids is not None:
+            unique_lineages = np.unique(lineage_ids)
+            n_lineages = min(subsample, len(unique_lineages))
+            chosen_lineages = rng.choice(unique_lineages, size=n_lineages, replace=False)
+            idx = np.where(np.isin(lineage_ids, chosen_lineages))[0]
+            _logger.info(
+                f"PHATE: fitting on {len(idx):,} cells ({n_lineages:,} lineages) "
+                f"/ {n_samples:,} total, projecting the rest"
+            )
+        else:
+            idx = rng.choice(n_samples, size=subsample, replace=False)
+            _logger.info(f"PHATE: fitting on {subsample:,} / {n_samples:,} cells, projecting the rest")
+        phate_model.fit(embeddings_scaled[idx])
+        phate_embedding = phate_model.transform(embeddings_scaled)
+    else:
+        phate_embedding = phate_model.fit_transform(embeddings_scaled)
 
     if update_dataset and isinstance(embedding_dataset, Dataset):
         for i in range(min(2, phate_embedding.shape[1])):

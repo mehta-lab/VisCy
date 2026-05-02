@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from iohub.core.config import TensorStoreConfig
-from iohub.ngff import Plate, Position, open_ome_zarr
+from iohub.ngff import Plate, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
 from viscy_data.cell_index import read_cell_index
@@ -185,10 +185,12 @@ class MultiExperimentIndex:
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
         cell_index_path: str | Path | None = None,
+        cell_index_df: pd.DataFrame | None = None,
         num_workers: int = 1,
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
+        fit: bool = True,
         tensorstore_config: TensorStoreConfig | None = None,
     ) -> None:
         self.registry = registry
@@ -217,44 +219,53 @@ class MultiExperimentIndex:
         else:
             all_exclude_fovs = None
 
-        if cell_index_path is not None:
-            _logger.info("Loading cell index from parquet: %s", cell_index_path)
-            tracks = read_cell_index(cell_index_path)
-            tracks = self._align_parquet_columns(tracks)
+        if cell_index_df is not None or cell_index_path is not None:
+            if cell_index_df is not None:
+                _logger.info(
+                    "Using pre-loaded cell index DataFrame (%d rows)",
+                    len(cell_index_df),
+                )
+                tracks = self._align_parquet_columns(cell_index_df.copy())
+            else:
+                _logger.info("Loading cell index from parquet: %s", cell_index_path)
+                tracks = read_cell_index(cell_index_path)
+                tracks = self._align_parquet_columns(tracks)
             if include_wells is not None:
                 tracks = tracks[tracks["well_name"].isin(include_wells)].copy()
             if all_exclude_fovs is not None:
                 tracks = tracks[~tracks["fov_name"].isin(all_exclude_fovs)].copy()
             tracks = self._filter_to_registry_experiments(tracks)
-            positions, tracks = self._resolve_positions_and_dims(tracks)
-            self.positions = positions
+            tracks = self._resolve_dims(tracks)
             # lineage_id already present from build step — skip _reconstruct_lineage
-            tracks = self._filter_empty_frames(tracks)
+            # Empty frames already filtered at parquet build time — skip _filter_empty_frames
         else:
             all_tracks = self._load_all_experiments(
-                include_wells=include_wells, exclude_fovs=all_exclude_fovs, num_workers=num_workers
+                include_wells=include_wells,
+                exclude_fovs=all_exclude_fovs,
+                num_workers=num_workers,
             )
             tracks = pd.concat(all_tracks, ignore_index=True) if all_tracks else pd.DataFrame()
             tracks = self._reconstruct_lineage(tracks)
-            positions, tracks = self._resolve_positions_and_dims(tracks)
-            self.positions = positions
-            tracks = self._filter_empty_frames(tracks)
+            tracks = self._resolve_dims(tracks)
 
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
-        self.valid_anchors = self._compute_valid_anchors(
-            tau_range_hours,
-            positive_cell_source=positive_cell_source,
-            positive_match_columns=positive_match_columns,
-        )
-        if self.valid_anchors.empty and not self.tracks.empty:
-            raise ValueError(
-                f"No valid anchors found from {len(self.tracks)} tracks. "
-                f"positive_cell_source={positive_cell_source!r}, "
-                f"positive_match_columns={positive_match_columns!r}, "
-                f"tau_range_hours={tau_range_hours}. "
-                "Check that tracks have matching positives under these settings."
+        if fit:
+            self.valid_anchors = self._compute_valid_anchors(
+                tau_range_hours,
+                positive_cell_source=positive_cell_source,
+                positive_match_columns=positive_match_columns,
             )
+            if self.valid_anchors.empty and not self.tracks.empty:
+                raise ValueError(
+                    f"No valid anchors found from {len(self.tracks)} tracks. "
+                    f"positive_cell_source={positive_cell_source!r}, "
+                    f"positive_match_columns={positive_match_columns!r}, "
+                    f"tau_range_hours={tau_range_hours}. "
+                    "Check that tracks have matching positives under these settings."
+                )
+        else:
+            self.valid_anchors = self.tracks
 
     # ------- internal methods -------
 
@@ -344,6 +355,15 @@ class MultiExperimentIndex:
                 )
         if "microscope" not in tracks.columns:
             tracks["microscope"] = ""
+        # Cast low-cardinality string columns to Categorical to make
+        # downstream boolean-mask slicing (train/val split) a fast int-code
+        # gather instead of a pyarrow.compute.take over Arrow string buffers.
+        # Deferred from read_cell_index because ``fov_name`` is rewritten by
+        # the prefix logic above and Categorical columns don't support string
+        # concatenation.
+        for col in ("fov_name", "well_name"):
+            if col in tracks.columns and tracks[col].dtype == object:
+                tracks[col] = tracks[col].astype("category")
         return tracks
 
     def _filter_to_registry_experiments(self, tracks: pd.DataFrame) -> pd.DataFrame:
@@ -351,22 +371,30 @@ class MultiExperimentIndex:
         registry_names = {exp.name for exp in self.registry.experiments}
         return tracks[tracks["experiment"].isin(registry_names)].copy()
 
-    def _resolve_positions_and_dims(self, tracks: pd.DataFrame) -> tuple[list[Position], pd.DataFrame]:
-        """Open zarr stores for unique (store_path, fov_name) pairs.
+    def _resolve_dims(self, tracks: pd.DataFrame) -> pd.DataFrame:
+        """Attach image dimensions to tracks for border clamping.
 
-        Attaches ``position``, ``_img_height``, ``_img_width`` columns to
-        *tracks* and returns the list of resolved Position objects.
+        When the parquet has ``Y_shape`` / ``X_shape`` columns (built with the
+        latest ``build_timelapse_cell_index``), reads dimensions directly — no
+        zarr opens needed.  Falls back to opening stores when the columns are
+        missing (old parquets).
         """
-        all_positions: list[Position] = []
-        pos_lookup: dict[tuple[str, str], Position] = {}
-        dim_lookup: dict[tuple[str, str], tuple[int, int]] = {}
-
         if tracks.empty:
-            tracks["position"] = pd.Series(dtype=object)
             tracks["_img_height"] = pd.Series(dtype=int)
             tracks["_img_width"] = pd.Series(dtype=int)
-            return all_positions, tracks
+            return tracks
 
+        if "Y_shape" in tracks.columns and "X_shape" in tracks.columns:
+            tracks["_img_height"] = tracks["Y_shape"]
+            tracks["_img_width"] = tracks["X_shape"]
+            return tracks
+
+        _logger.warning(
+            "Parquet missing Y_shape/X_shape columns. Falling back to opening "
+            "zarr stores for image dimensions. Rebuild the parquet with "
+            "`build-cell-index` for faster startup."
+        )
+        dim_lookup: dict[tuple[str, str], tuple[int, int]] = {}
         for (store_path, well_name, fov_name), _group in tracks.groupby(["store_path", "well_name", "fov_name"]):
             if store_path not in self._store_cache:
                 self._store_cache[store_path] = open_ome_zarr(
@@ -376,60 +404,17 @@ class MultiExperimentIndex:
                     implementation_config=self.tensorstore_config,
                 )
             plate = self._store_cache[store_path]
-            # fov_name may be just the FOV id (e.g. "000000") or the full
-            # position path (e.g. "C/1/000000"). Prepend well_name when needed.
             if "/" in fov_name:
                 position_path = fov_name
             else:
                 position_path = f"{well_name}/{fov_name}"
             position = plate[position_path]
-            pos_lookup[(store_path, fov_name)] = position
             image = position["0"]
             dim_lookup[(store_path, fov_name)] = (image.height, image.width)
-            all_positions.append(position)
 
-        tracks["position"] = [pos_lookup[(sp, fn)] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
         tracks["_img_height"] = [dim_lookup[(sp, fn)][0] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
         tracks["_img_width"] = [dim_lookup[(sp, fn)][1] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
-
-        return all_positions, tracks
-
-    @staticmethod
-    def _filter_empty_frames(tracks: pd.DataFrame) -> pd.DataFrame:
-        """Remove rows whose image frame is all zeros (missing acquisition).
-
-        For each unique (store_path, fov_name, t) combination, reads a small
-        center crop of channel 0 to detect empty frames. Rows with an all-zero
-        frame are dropped.
-        """
-        if tracks.empty or "t" not in tracks.columns:
-            return tracks
-
-        valid_mask = pd.Series(True, index=tracks.index)
-
-        for (store_path, fov_name), group in tracks.groupby(["store_path", "fov_name"]):
-            pos = group["position"].iloc[0]
-            image = pos["0"]
-            h, w = image.shape[-2], image.shape[-1]
-            cy, cx = h // 2, w // 2
-            crop = 16  # 32x32 center crop is enough to detect empty frames
-
-            for t in group["t"].unique():
-                try:
-                    patch = np.asarray(image[int(t), 0, :, cy - crop : cy + crop, cx - crop : cx + crop])
-                    if patch.max() == 0:
-                        row_mask = (
-                            (tracks["store_path"] == store_path) & (tracks["fov_name"] == fov_name) & (tracks["t"] == t)
-                        )
-                        valid_mask[row_mask] = False
-                except Exception:
-                    pass  # if we can't read, keep the row
-
-        n_dropped = (~valid_mask).sum()
-        if n_dropped > 0:
-            _logger.info("Excluded %d observations from empty frames", n_dropped)
-
-        return tracks[valid_mask].copy()
+        return tracks
 
     @staticmethod
     def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
@@ -538,7 +523,11 @@ class MultiExperimentIndex:
 
         n_dropped = n_before - len(tracks)
         if n_dropped > 0:
-            _logger.info("Excluded %d border cells (%.1f%%)", n_dropped, 100 * n_dropped / n_before)
+            _logger.info(
+                "Excluded %d border cells (%.1f%%)",
+                n_dropped,
+                100 * n_dropped / n_before,
+            )
 
         tracks = tracks.drop(columns=["_img_height", "_img_width"])
 
@@ -591,33 +580,43 @@ class MultiExperimentIndex:
 
         # Temporal mode: keep only anchors that have a positive at t+tau.
         # For each experiment, check whether (lineage_id, t+tau) exists
-        # for any tau in [min_f, max_f] (excluding 0).
+        # for any tau in [min_f, max_f] (excluding 0). In flat-parquet
+        # mode (one row per cell × channel), the dataset restricts
+        # candidates to the same marker at t+tau, so ``marker`` must be
+        # part of the match key here. Otherwise an anchor at (lid, marker=A, t)
+        # could pass validation because (lid, marker=B, t+1) exists, but
+        # fail at sample time because no (lid, marker=A, t+1) exists.
+        filter_by_marker = "marker" in self.tracks.columns
+        key_cols = ["lineage_id", "marker", "t"] if filter_by_marker else ["lineage_id", "t"]
         valid_mask = np.zeros(len(self.tracks), dtype=bool)
 
         for exp in self.registry.experiments:
             min_f, max_f = self.registry.tau_range_frames(exp.name, tau_range_hours)
-            exp_mask = self.tracks["experiment"].to_numpy() == exp.name
-            exp_indices = np.where(exp_mask)[0]
-            if len(exp_indices) == 0:
+            exp_mask = self.tracks["experiment"] == exp.name
+            exp_df = self.tracks.loc[exp_mask, key_cols]
+            if exp_df.empty:
                 continue
 
-            lineage_ids = self.tracks["lineage_id"].to_numpy()[exp_indices]
-            t_values = self.tracks["t"].to_numpy()[exp_indices]
-            existing_pairs: set[tuple] = set(zip(lineage_ids, t_values))
+            taus = [tau for tau in range(min_f, max_f + 1) if tau != 0]
 
-            # Collect all anchor (lineage_id, t) that have any valid positive
-            valid_anchors: set[tuple] = set()
-            for tau in range(min_f, max_f + 1):
-                if tau == 0:
-                    continue
-                for lid, t in existing_pairs:
-                    if (lid, t + tau) in existing_pairs:
-                        valid_anchors.add((lid, t))
+            # Unique key tuples as a MultiIndex for O(1) isin checks.
+            existing = exp_df.drop_duplicates()
+            existing_mi = pd.MultiIndex.from_frame(existing)
 
-            # Mark matching rows
-            for i, idx in enumerate(exp_indices):
-                if (lineage_ids[i], t_values[i]) in valid_anchors:
-                    valid_mask[idx] = True
+            # For each unique anchor key, check if the shifted key (same
+            # lineage_id/marker, t+tau) exists for any tau.
+            found_any = np.zeros(len(existing), dtype=bool)
+            t_vals = existing["t"].to_numpy()
+            non_t_arrays = [existing[c].to_numpy() for c in key_cols if c != "t"]
+            for tau in taus:
+                shifted_arrays = non_t_arrays + [t_vals + tau]
+                targets = pd.MultiIndex.from_arrays(shifted_arrays)
+                found_any |= targets.isin(existing_mi)
+
+            # Map valid unique pairs back to all rows in the experiment.
+            valid_pairs_mi = pd.MultiIndex.from_frame(existing[found_any])
+            row_keys = pd.MultiIndex.from_frame(exp_df)
+            valid_mask[exp_mask.to_numpy()] = row_keys.isin(valid_pairs_mi)
 
         return self.tracks[valid_mask].reset_index(drop=True)
 
@@ -651,11 +650,13 @@ class MultiExperimentIndex:
         positive_cell_source: str = "lookup",
         positive_match_columns: list[str] | None = None,
         max_border_shift: int = -1,
+        precomputed_valid_anchors: pd.DataFrame | None = None,
     ) -> "MultiExperimentIndex":
         """Create a shallow copy with a different tracks DataFrame.
 
         Reuses the parent's registry, positions, and store cache so no
-        zarr stores are re-opened.  Recomputes ``valid_anchors``.
+        zarr stores are re-opened.  Recomputes ``valid_anchors`` unless
+        ``precomputed_valid_anchors`` is provided.
 
         Parameters
         ----------
@@ -667,20 +668,27 @@ class MultiExperimentIndex:
             Forwarded to ``_compute_valid_anchors``.
         max_border_shift : int
             Forwarded to ``self.max_border_shift``. -1 inherits from parent.
+        precomputed_valid_anchors : pd.DataFrame | None
+            When provided, skip recomputing valid anchors. Pass the already-
+            filtered valid_anchors subset for this tracks_subset. Avoids
+            redundant O(N * tau_range) computation in FOV split mode.
         """
         clone = object.__new__(MultiExperimentIndex)
         clone.registry = self.registry
         clone.yx_patch_size = self.yx_patch_size
         clone.tau_range_hours = self.tau_range_hours
         clone._store_cache = self._store_cache
-        clone.positions = self.positions
+        clone.tensorstore_config = self.tensorstore_config
         clone.max_border_shift = self.max_border_shift if max_border_shift < 0 else max_border_shift
         clone.tracks = tracks_subset.reset_index(drop=True)
-        clone.valid_anchors = clone._compute_valid_anchors(
-            tau_range_hours=self.tau_range_hours,
-            positive_cell_source=positive_cell_source,
-            positive_match_columns=positive_match_columns,
-        )
+        if precomputed_valid_anchors is not None:
+            clone.valid_anchors = precomputed_valid_anchors.reset_index(drop=True)
+        else:
+            clone.valid_anchors = clone._compute_valid_anchors(
+                tau_range_hours=self.tau_range_hours,
+                positive_cell_source=positive_cell_source,
+                positive_match_columns=positive_match_columns,
+            )
         if clone.valid_anchors.empty and not clone.tracks.empty:
             raise ValueError(
                 f"No valid anchors found from {len(clone.tracks)} tracks in subset. "

@@ -1,0 +1,35 @@
+# Trainer recipe: DynaCLR shared trainer defaults.
+# Includes WandB logger (project/name/save_dir set by train.sh CLI overrides),
+# LR monitor, and model checkpoint. Config is saved to trainer.log_dir by
+# Lightning's default SaveConfigCallback; the wandb files tab picks it up
+# automatically when save_dir matches.
+#
+# Leaf configs override: strategy, devices, precision, max_epochs,
+# logger.init_args.project/name, and optionally re-list callbacks
+# to add OnlineEvalCallback (callbacks is a list — it replaces entirely).
+
+seed_everything: 42
+
+trainer:
+  accelerator: gpu
+  num_nodes: 1
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  enable_model_summary: false
+  inference_mode: true
+  use_distributed_sampler: false
+  benchmark: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      entity: computational_imaging
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true

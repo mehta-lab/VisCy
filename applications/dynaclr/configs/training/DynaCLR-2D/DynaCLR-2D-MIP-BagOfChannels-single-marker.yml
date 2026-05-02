@@ -1,0 +1,30 @@
+# Override: single-marker batches for DynaCLR-2D-MIP-BoC.
+# Matches the OPS strategy — every batch is one marker, forcing the model
+# to learn cellular features instead of channel-filter shortcuts.
+
+data:
+  init_args:
+    # v3 parquet drops dynamorph Brightfield + Retardance (same physical
+    # cells as Phase3D, were inflating that experiment's row count).
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v3.parquet
+    batch_group_by: marker
+    # Within a marker's draw, balance across the experiments containing
+    # that marker. Without this, Phase3D batches were 74% dynamorph cells
+    # because dynamorph is by far the largest Phase3D experiment.
+    stratify_by: experiment
+    # Marker-uniform weights. Without these, batch_group_by + stratify_by
+    # weights marker draws by the (marker, experiment) cross-product cell
+    # counts — Retardance/Brightfield-dominant experiments would skew the
+    # marker distribution. Setting equal weights per marker forces uniform
+    # P(marker)=1/n_markers per batch. Diagnostic:
+    # applications/dynaclr/scripts/dataloader_inspection/check_marker_experiment_stratify.py
+    group_weights:
+      Phase3D: 1.0
+      pAL10: 1.0
+      viral_sensor: 1.0
+      G3BP1: 1.0
+      SEC61B: 1.0
+      TOMM20: 1.0
+      CAAX: 1.0
+      HIST2H2BE: 1.0
+      DIC: 1.0

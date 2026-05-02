@@ -1,0 +1,31 @@
+datasets:
+  "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV":
+    hcs_plate: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_2.zarr
+    anndata: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_phase_160patch_104ckpt.zarr
+  "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV":
+    hcs_plate: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    anndata: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_phase_160patch_104ckpt.zarr
+
+# Usage:
+#   dynaclr combined-dim-reduction -c multi-dataset-dim-reduction.yml
+#
+# Notes:
+# - `datasets[*].anndata` are the AnnData zarrs that will be concatenated to fit the joint reductions.
+# - Remove any method section (pca/umap/phate) to skip computing it.
+reduce_combined:
+  overwrite_keys: false
+
+  # PCA configuration (remove this section to skip PCA)
+  pca:
+    # Number of components. null = keep all components.
+    n_components: 32
+    normalize_features: true
+
+  # PHATE configuration (remove this section to skip PHATE)
+  phate:
+    n_components: 2
+    knn: 5
+    decay: 40
+    scale_embeddings: true
+    random_state: 42
+    n_jobs: -1

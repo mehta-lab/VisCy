@@ -35,6 +35,8 @@ dependencies = [
   "lightning>=2.3",
   "matplotlib>=3.10",
   "numpy>=2.4.1",
+  "onnx",
+  "onnxscript",
   "pyyaml",
   "scikit-image",
   "scipy",
@@ -46,8 +48,13 @@ dependencies = [
 ]
 
 optional-dependencies.all = [ "viscy-utils[anndata,eval]" ]
-optional-dependencies.anndata = [ "anndata", "natsort" ]
+# Cap anndata to <0.12.9 — 0.12.9 hard-requires pandas<3, but the rest of
+# the stack runs on pandas 3 (see ArrowStringArray downcast workaround in
+# callbacks/embedding_writer.py). Lift this cap once anndata 0.13 lands
+# with native pandas-3 support.
+optional-dependencies.anndata = [ "anndata<0.12.9", "natsort" ]
 optional-dependencies.eval = [
+  "copairs",
   "phate",
   "scikit-learn",
   "umap-learn",
@@ -61,7 +68,7 @@ scripts.viscy = "viscy_utils.cli:main"
 [dependency-groups]
 dev = [ { include-group = "test" } ]
 test = [
-  "anndata",
+  "anndata<0.12.9",
   "natsort",
   "pytest>=9.0.2",
   "pytest-cov>=7",

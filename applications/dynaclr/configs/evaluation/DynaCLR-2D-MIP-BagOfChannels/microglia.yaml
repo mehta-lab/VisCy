@@ -1,0 +1,34 @@
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels × microglia (Wave 2)
+# Applies LC pipelines from the central registry (trained on infectomics-annotated).
+# Data: 20191107_1209_1_GW23_dynamorph — Brightfield, Phase3D, Retardance.
+# Perturbations: untreated, IL17, IFN-beta, Rubella, Glioblastoma_supernatant.
+# Microglia has no annotations, so append_annotations is omitted; markers absent
+# from the registry manifest (Brightfield, Retardance) are skipped silently.
+#
+# Usage:
+#   nextflow run applications/dynaclr/nextflow/main.nf -entry evaluation \
+#     --eval_config applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/microglia.yaml \
+#     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+#     -resume
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/microglia.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/microglia/
+
+predict:
+  batch_size: 256
+  num_workers: 4
+  precision: 32-true
+  devices: 1
+
+append_predictions:
+  # Microglia has Brightfield/Retardance markers that aren't in the
+  # infectomics manifest, so the coverage report will log "missing" for
+  # those. Phase3D may overlap. Switching to a microglia-trained
+  # sub-registry (e.g. `.../microglia/latest`) is a future option.
+  pipelines_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/infectomics/latest

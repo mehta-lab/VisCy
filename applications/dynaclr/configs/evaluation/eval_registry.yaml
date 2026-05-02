@@ -1,0 +1,58 @@
+# Eval registry — input to `compare_evals.py` for cross-model comparison.
+#
+# Each entry points to a model's eval `output_dir` (where smoothness/,
+# linear_classifiers/, mmd/ artifacts land). One entry per (model x dataset)
+# pair you want overlaid in the comparison plots / CSVs.
+#
+# Mental model:
+#   - Each leaf YAML at configs/evaluation/{model}/{dataset}.yaml declares an
+#     `output_dir`. After `nextflow run -entry evaluation` finishes, that
+#     directory is the `eval_dir` listed here.
+#   - To compare 3 models on infectomics-annotated, list 3 entries — all with
+#     the same dataset suffix in their `eval_dir`.
+#   - To compare 1 model across 3 datasets, list 3 entries — different dataset
+#     suffixes.
+#
+# Usage:
+#   python applications/dynaclr/scripts/evaluation/compare_evals.py \
+#       -c applications/dynaclr/configs/evaluation/eval_registry.yaml
+#
+# Status:
+#   ✅ = eval has run, artifacts exist
+#   ⏳ = eval queued / running
+#   ⬜ = leaf YAML exists but no run yet — uncomment after first successful run
+
+output_dir: /hpc/projects/organelle_phenotyping/comparisons/infectomics-annotated/
+fdr_threshold: 0.05
+
+models:
+  # --- DynaCLR-2D-MIP-BagOfChannels family (siblings: same recipe, different ckpt) ---
+  # Baseline: pre fix-shuffler mixed-markers, 192->160, zext11.
+  - name: DynaCLR-2D-MIP-BagOfChannels
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/infectomics-annotated/
+
+  # Single-marker batching (batch_group_by=marker), 192->160, zext11.
+  - name: DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/
+
+  # Mixed-markers post fix-shuffler, 192->160, zext11.
+  - name: DynaCLR-2D-MIP-BagOfChannels-mixed-markers-fix-shuffler
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated/
+
+  # Single-marker, larger patch (384->216->192) with zext16 — tests whether more
+  # subcellular detail at the cost of fewer samples per batch helps.
+  - name: DynaCLR-2D-MIP-BagOfChannels-single-marker-192
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated/
+
+  # --- Other architectures ---
+  - name: DynaCLR-2D-BagOfChannels-v3
+    eval_dir: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/v3/evaluations/infectomics-annotated/
+
+  - name: DINOv3-temporal-MLP-2D-BagOfChannels-v1
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluations/infectomics-annotated/
+
+  # DINOv3-frozen baseline: raw HuggingFace DINOv3 convnext-tiny weights, no
+  # fine-tuning, no projection. Tests whether contrastive training adds value
+  # over pre-trained features alone.
+  - name: DINOv3-frozen
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-frozen/evaluations/infectomics-annotated/

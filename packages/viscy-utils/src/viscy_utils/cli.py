@@ -13,9 +13,8 @@ import torch
 import yaml
 from jsonargparse import Namespace, lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
-from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.cli import LightningCLI
-from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import WandbLogger
 
 from viscy_utils.compose import load_composed_config
 from viscy_utils.trainer import VisCyTrainer
@@ -84,18 +83,12 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
-        """Set default logger and progress bar."""
-        defaults = {
-            "trainer.logger": lazy_instance(
-                TensorBoardLogger,
-                save_dir="",
-                version=datetime.now().strftime(r"%Y%m%d-%H%M%S"),
-                log_graph=True,
-            ),
-        }
-        if not sys.stdout.isatty():
-            defaults["trainer.callbacks"] = [lazy_instance(TQDMProgressBar, refresh_rate=10, leave=True)]
-        parser.set_defaults(defaults)
+        """Set default logger."""
+        parser.set_defaults(
+            {
+                "trainer.logger": lazy_instance(WandbLogger),
+            }
+        )
 
     def _parse_ckpt_path(self) -> None:
         try:

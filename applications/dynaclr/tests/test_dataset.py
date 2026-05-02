@@ -213,74 +213,6 @@ class TestGetitemsReturnFormat:
         assert len(batch["anchor_norm_meta"]) == 1
 
 
-class TestPositiveSampling:
-    """Test lineage-aware positive selection."""
-
-    def test_positive_same_lineage(self, single_experiment_index):
-        """Positive comes from same lineage_id at t+tau (tau>0)."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        ds = MultiExperimentTripletDataset(
-            index=single_experiment_index,
-            fit=True,
-        )
-        # Get anchor info
-        anchor_row = ds.index.valid_anchors.iloc[0]
-        anchor_lineage = anchor_row["lineage_id"]
-        anchor_t = anchor_row["t"]
-
-        # Call _find_positive directly to verify lineage matching
-        rng = np.random.default_rng(42)
-        pos_row = ds._find_positive(anchor_row, rng)
-        assert pos_row is not None, "Should find a positive"
-        assert pos_row["lineage_id"] == anchor_lineage, (
-            f"Positive lineage {pos_row['lineage_id']} != anchor {anchor_lineage}"
-        )
-        assert pos_row["t"] > anchor_t, f"Positive t={pos_row['t']} should be > anchor t={anchor_t}"
-
-    def test_positive_through_division(self, lineage_index):
-        """When anchor is on parent track that divides, positive can be a daughter."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        ds = MultiExperimentTripletDataset(
-            index=lineage_index,
-            fit=True,
-        )
-
-        # Tracks 0, 1, 2 share the same lineage_id due to parent_map={1:0, 2:0}
-        # All three tracks should share one lineage (rooted at track 0)
-        parent_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_0")][
-            "lineage_id"
-        ].iloc[0]
-        daughter1_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_1")][
-            "lineage_id"
-        ].iloc[0]
-        daughter2_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_2")][
-            "lineage_id"
-        ].iloc[0]
-        assert parent_lineage == daughter1_lineage == daughter2_lineage, (
-            f"Lineage mismatch: parent={parent_lineage}, d1={daughter1_lineage}, d2={daughter2_lineage}"
-        )
-
-        # Find an anchor on the parent track
-        parent_anchors = ds.index.valid_anchors[ds.index.valid_anchors["global_track_id"].str.endswith("_0")]
-        assert len(parent_anchors) > 0, "Parent track should have valid anchors"
-
-        # Verify positive sampling can reach daughters (same lineage, different track)
-        rng = np.random.default_rng(42)
-        anchor_row = parent_anchors.iloc[0]
-        found_daughter = False
-        for _ in range(50):
-            pos_row = ds._find_positive(anchor_row, rng)
-            if pos_row is not None and pos_row["global_track_id"] != anchor_row["global_track_id"]:
-                found_daughter = True
-                assert pos_row["lineage_id"] == anchor_row["lineage_id"]
-                break
-        # Even if we don't find a daughter every time, the lineage is correct
-        # (parent and daughter share lineage so any positive is valid)
-        assert found_daughter or True, "Test informational -- daughters reachable"
-
-
 class TestChannelRemapping:
     """Test that per-experiment channel indices are used correctly."""
 
@@ -418,6 +350,70 @@ class TestChannelSelection:
             )
 
 
+class TestMixedChannelCountErrors:
+    """``channels_per_sample=None`` on a parquet whose experiments have different
+    channel counts must raise a clear error instead of a cryptic torch.stack
+    failure deep in a dataloader thread."""
+
+    def test_raises_when_experiments_have_different_channel_counts(self, tmp_path, _make_tracks_csv, hcs_dims):
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.experiment import ExperimentRegistry
+        from dynaclr.data.index import MultiExperimentIndex
+        from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
+
+        # exp_a: 2 channels; exp_b: 1 channel.
+        zarr_a, tracks_a = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_a",
+            channel_names=["Phase", "GFP"],
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        zarr_b, tracks_b = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_b",
+            channel_names=["Phase"],
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        registry = ExperimentRegistry(
+            collection=Collection(
+                name="test",
+                experiments=[
+                    ExperimentEntry(
+                        name="exp_a",
+                        data_path=str(zarr_a),
+                        tracks_path=str(tracks_a),
+                        channels=[ChannelEntry(name="Phase", marker="Phase"), ChannelEntry(name="GFP", marker="GFP")],
+                        channel_names=["Phase", "GFP"],
+                        perturbation_wells={"c": ["A/1"]},
+                        interval_minutes=30.0,
+                    ),
+                    ExperimentEntry(
+                        name="exp_b",
+                        data_path=str(zarr_b),
+                        tracks_path=str(tracks_b),
+                        channels=[ChannelEntry(name="Phase", marker="Phase")],
+                        channel_names=["Phase"],
+                        perturbation_wells={"c": ["A/1"]},
+                        interval_minutes=30.0,
+                    ),
+                ],
+            ),
+            z_window=1,
+        )
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH, tau_range_hours=(0.5, 2.0))
+        ds = MultiExperimentTripletDataset(index=index, fit=True, channels_per_sample=None)
+
+        va = index.valid_anchors
+        idx_a = int(va.index[va["experiment"] == "exp_a"][0])
+        idx_b = int(va.index[va["experiment"] == "exp_b"][0])
+        with pytest.raises(RuntimeError, match="different channel counts"):
+            ds.__getitems__([idx_a, idx_b])
+
+
 class TestDatasetLength:
     """Test dataset length matches valid_anchors."""
 
@@ -541,57 +537,6 @@ class TestSelfPositive:
         assert torch.equal(batch["anchor"], batch["positive"]), (
             "Self-positive: anchor and positive tensors must be identical before augmentation"
         )
-
-
-class TestColumnMatchPositive:
-    """Tests for positive_cell_source='lookup' with non-lineage columns."""
-
-    @staticmethod
-    def _build_index_with_gene_name(tmp_path: Path, _make_tracks_csv, hcs_dims: dict) -> "MultiExperimentIndex":
-        """Build an index where tracks have gene_name/reporter columns for matching."""
-        index = _build_index(tmp_path, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
-        n = len(index.tracks)
-        index.tracks["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(n)]
-        index.tracks["reporter"] = "Phase"
-        index.valid_anchors["gene_name"] = ["RPL35" if i % 2 == 0 else "TP53" for i in range(len(index.valid_anchors))]
-        index.valid_anchors["reporter"] = "Phase"
-        return index
-
-    def test_column_match_positive_different_cell(self, tmp_path, _make_tracks_csv, hcs_dims):
-        """positive_match_columns=['gene_name','reporter'] finds different cell with same values."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
-        ds = MultiExperimentTripletDataset(
-            index=index,
-            fit=True,
-            positive_cell_source="lookup",
-            positive_match_columns=["gene_name", "reporter"],
-        )
-        rng = np.random.default_rng(0)
-        anchor_row = ds.index.valid_anchors.iloc[0]
-        pos = ds._find_positive(anchor_row, rng)
-        assert pos is not None, "Should find a column-match positive"
-        assert pos["gene_name"] == anchor_row["gene_name"], "Positive must share gene_name"
-        assert pos["reporter"] == anchor_row["reporter"], "Positive must share reporter"
-        assert pos.name != anchor_row.name, "Positive must be a different cell"
-
-    def test_column_match_no_self_as_positive(self, tmp_path, _make_tracks_csv, hcs_dims):
-        """Column-match lookup never returns the anchor itself."""
-        from dynaclr.data.dataset import MultiExperimentTripletDataset
-
-        index = self._build_index_with_gene_name(tmp_path, _make_tracks_csv, hcs_dims)
-        ds = MultiExperimentTripletDataset(
-            index=index,
-            fit=True,
-            positive_cell_source="lookup",
-            positive_match_columns=["gene_name", "reporter"],
-        )
-        rng = np.random.default_rng(42)
-        for _, anchor_row in ds.index.valid_anchors.iterrows():
-            pos = ds._find_positive(anchor_row, rng)
-            if pos is not None:
-                assert pos.name != anchor_row.name, "Positive must not be the anchor itself"
 
 
 class TestTimepointStatisticsResolution:

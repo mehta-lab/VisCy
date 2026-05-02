@@ -1,0 +1,24 @@
+# Default dimensionality reduction settings for DynaCLR evaluation.
+# PHATE runs only in reduce_combined; per-experiment reduce_dimensionality uses PCA only.
+# Override n_jobs for reduce_combined.phate in the leaf config if needed.
+reduce_dimensionality:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+
+reduce_combined:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+  # PHATE temporarily disabled. With scipy 1.17.1 + sklearn 1.8.0, PHATE's
+  # internal PCA pre-reduction (graphtools -> sklearn -> scipy.lu) deadlocks
+  # silently — process sits at ~0% CPU forever in scipy LU decomposition,
+  # not affected by BLAS thread caps. Even small inputs (33k cells x 768
+  # features after lineage-aware subsampling) hang. PCA-only reductions are
+  # sufficient for Table 1 + matrix comparison plots. Re-enable when:
+  #   (a) downgrade scipy < 1.17 OR
+  #   (b) wire X_pca_combined back into PHATE (skip its internal PCA) OR
+  #   (c) upstream graphtools/phate fix lands.
+  phate: null
