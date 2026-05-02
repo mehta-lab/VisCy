@@ -376,6 +376,7 @@ class HCSDataModule(LightningDataModule):
         self,
         filename: Path,
         positions: list[Position],
+        offsets: list[int],
         n_channels: int | None = None,
         array_key: str | None = None,
     ) -> "MemoryMappedTensor":
@@ -386,26 +387,29 @@ class HCSDataModule(LightningDataModule):
         filename : Path
             Path to the ``.mmap`` file.
         positions : list[Position]
-            All positions in the plate (used to compute buffer shape).
+            All positions in the plate, used only to read dtype and
+            spatial dims from ``positions[0][array_key]``.
+        offsets : list[int]
+            Cumulative T offsets from :meth:`_fov_t_offsets`. The buffer
+            is sized as ``(offsets[-1], C, Z, Y, X)``.
         n_channels : int or None
             Number of channels in the buffer. Defaults to
             ``len(source_channel) + len(target_channel)``.
         array_key : str or None
-            Array key that defines the on-disk dtype and spatial shape.
-            Defaults to ``self.array_key``.
+            Array key whose dtype and spatial dims (Z, Y, X) describe
+            this buffer's layout. Defaults to ``self.array_key``. Only
+            governs dtype + spatial shape — T offsets must come from
+            ``self.array_key`` via the ``offsets`` argument because both
+            data and fg_mask buffers are written with that layout in
+            ``prepare_data``.
 
         Returns
         -------
         MemoryMappedTensor
-            Memory-mapped tensor of shape ``(sum(T_i), C, Z, Y, X)``,
-            where ``T_i`` is the per-FOV frame count from
-            ``self.array_key`` (the canonical layout key — both data
-            and fg_mask buffers are written with this layout in
-            ``prepare_data``).
+            Memory-mapped tensor of shape ``(sum(T_i), C, Z, Y, X)``.
         """
         dtype_key = array_key if array_key is not None else self.array_key
         dtype_arr = positions[0][dtype_key]
-        offsets = self._fov_t_offsets(positions, self.array_key)
         C = n_channels or (len(self.source_channel) + len(self.target_channel))
         total_shape = (offsets[-1], C, *dtype_arr.shape[2:])
         return MemoryMappedTensor.from_filename(
@@ -414,26 +418,24 @@ class HCSDataModule(LightningDataModule):
             shape=total_shape,
         )
 
-    def _fov_views(self, buffer: torch.Tensor, positions: list[Position]) -> list[torch.Tensor]:
+    @staticmethod
+    def _fov_views(buffer: torch.Tensor, offsets: list[int]) -> list[torch.Tensor]:
         """Split a contiguous mmap buffer into per-FOV tensor views.
 
         Parameters
         ----------
         buffer : Tensor
             Contiguous buffer of shape ``(sum(T_i), C, Z, Y, X)``.
-        positions : list[Position]
-            All positions, in the same order they were written to the
-            buffer.
+        offsets : list[int]
+            Cumulative T offsets from :meth:`_fov_t_offsets` matching
+            the order ``prepare_data`` wrote.
 
         Returns
         -------
         list[Tensor]
-            Per-FOV views, each of shape ``(T_i, C, Z, Y, X)``. Offsets
-            are derived from ``self.array_key`` to match the layout
-            that ``prepare_data`` writes for both data and fg_mask.
+            Per-FOV views, each of shape ``(T_i, C, Z, Y, X)``.
         """
-        offsets = self._fov_t_offsets(positions, self.array_key)
-        return [buffer[offsets[i] : offsets[i + 1]] for i in range(len(positions))]
+        return [buffer[offsets[i] : offsets[i + 1]] for i in range(len(offsets) - 1)]
 
     @property
     def _base_dataset_settings(self) -> dict:
@@ -576,9 +578,10 @@ class HCSDataModule(LightningDataModule):
         if self.mmap_preload:
             cache_dir = self._mmap_cache_dir
             self._check_mmap_cache_ready(cache_dir)
+            offsets = self._fov_t_offsets(orig_positions, self.array_key)
             all_views = self._fov_views(
-                self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions),
-                orig_positions,
+                self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions, offsets),
+                offsets,
             )
             shuffled_views = [all_views[i] for i in shuffled_indices]
             train_preloaded = shuffled_views[:num_train_fovs]
@@ -602,10 +605,11 @@ class HCSDataModule(LightningDataModule):
                 self._open_mmap_buffer(
                     cache_dir / "fg_mask.mmap",
                     orig_positions,
+                    offsets,
                     n_channels=n_target,
                     array_key=self.fg_mask_key,
                 ),
-                orig_positions,
+                offsets,
             )
             shuffled_mask = [all_mask_views[i] for i in shuffled_indices]
             self.train_dataset.fg_mask_support._preloaded_masks = shuffled_mask[:num_train_fovs]

@@ -1086,9 +1086,9 @@ def test_mmap_preload_heterogeneous_t(hcs_heterogeneous_t, tmp_path):
     assert buf.shape[0] == expected_total_T
 
     # Per-FOV slabs in the buffer must equal each FOV's full-channel oindex read.
-    offsets = [0]
-    for _, t in fov_t:
-        offsets.append(offsets[-1] + t)
+    # Use the same helper the production code uses, so test divergence on a
+    # later refactor is impossible.
+    offsets = HCSDataModule._fov_t_offsets(positions, "0")
     ch_idx = [positions[0].get_channel_index(c) for c in ("Phase", "Fluorescence")]
     for i, pos in enumerate(positions):
         staged = np.asarray(buf[offsets[i] : offsets[i + 1]])
