@@ -32,14 +32,14 @@ run_eval () {
 }
 
 # SEC61B (ER)
-run_eval er   mock SEC61B_mock sec61b_unetvit3d__sec61b_mock.zarr Structure_prediction Structure "${V1_SPACING}"
-run_eval er   denv SEC61B_DENV sec61b_unetvit3d__sec61b_denv.zarr Structure_prediction Structure "${V1_SPACING}"
-run_eval er   zikv SEC61B_ZIKV sec61b_unetvit3d__sec61b_zikv.zarr Structure_prediction Structure "${V1_SPACING}"
+# run_eval er   mock SEC61B_mock sec61b_unetvit3d__sec61b_mock.zarr Structure_prediction Structure "${V1_SPACING}"
+# run_eval er   denv SEC61B_DENV sec61b_unetvit3d__sec61b_denv.zarr Structure_prediction Structure "${V1_SPACING}"
+# run_eval er   zikv SEC61B_ZIKV sec61b_unetvit3d__sec61b_zikv.zarr Structure_prediction Structure "${V1_SPACING}"
 
 # CAAX (membrane)
-run_eval memb mock CAAX_mock memb_unetvit3d_mock.zarr Membrane_prediction Membrane "${V1_SPACING}"
-run_eval memb denv CAAX_DENV memb_unetvit3d_denv.zarr Membrane_prediction Membrane "${V1_SPACING}"
-run_eval memb zikv CAAX_ZIKV memb_unetvit3d_zikv.zarr Membrane_prediction Membrane "${V1_SPACING}"
+run_eval membrane mock CAAX_mock memb_unetvit3d_mock.zarr Membrane_prediction Membrane "${V1_SPACING}"
+run_eval membrane denv CAAX_DENV memb_unetvit3d_denv.zarr Membrane_prediction Membrane "${V1_SPACING}"
+run_eval membrane zikv CAAX_ZIKV memb_unetvit3d_zikv.zarr Membrane_prediction Membrane "${V1_SPACING}"
 
 # H2B (nucleus)
 run_eval nucleus mock H2B_mock nucleus_unetvit3d_mock.zarr Nuclei_prediction Nuclei "${V1_SPACING}"
@@ -47,6 +47,6 @@ run_eval nucleus denv H2B_DENV nucleus_unetvit3d_denv.zarr Nuclei_prediction Nuc
 run_eval nucleus zikv H2B_ZIKV nucleus_unetvit3d_zikv.zarr Nuclei_prediction Nuclei "${V1_SPACING}"
 
 # TOMM20 (mitochondria)
-run_eval mito mock TOMM20_mock tomm20_unetvit3d__tomm20_mock.zarr Structure_prediction Structure "${V1_SPACING}"
-run_eval mito denv TOMM20_DENV tomm20_unetvit3d__tomm20_denv.zarr Structure_prediction Structure "${V1_SPACING}"
-run_eval mito zikv TOMM20_ZIKV tomm20_unetvit3d__tomm20_zikv.zarr Structure_prediction Structure "${V1_SPACING}"
+run_eval mitochondria mock TOMM20_mock tomm20_unetvit3d__tomm20_mock.zarr Structure_prediction Structure "${V1_SPACING}"
+run_eval mitochondria denv TOMM20_DENV tomm20_unetvit3d__tomm20_denv.zarr Structure_prediction Structure "${V1_SPACING}"
+run_eval mitochondria zikv TOMM20_ZIKV tomm20_unetvit3d__tomm20_zikv.zarr Structure_prediction Structure "${V1_SPACING}"
