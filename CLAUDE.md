@@ -55,6 +55,27 @@ Invariant: `#SBATCH --ntasks-per-node=N` must equal `trainer.devices` in the YAM
 
 The dynacell launcher (`applications/dynacell/tools/submit_benchmark_job.py`) already emits `--ntasks-per-node` correctly; this note is for hand-written scripts (e.g., `applications/cytoland/examples/configs/*/run_*.slurm`).
 
+### Joint vs single-set training batch semantics
+
+`HCSDataModule` and `BatchedConcatDataModule` produce the same number of GPU samples per training step — but the YAML `batch_size` value that gets there is **different by a factor of `num_samples`**. Easy to misread either by skimming.
+
+| DataModule | `train_dataloader` divides by `num_samples`? | Samples per step |
+|---|---|---|
+| `HCSDataModule` (single-set) | yes (`hcs.py` `train_dataloader`) | `batch_size` |
+| `ConcatDataModule` (parent class) | yes (`combined.py` `train_dataloader`) | `batch_size` |
+| `BatchedConcatDataModule` (joint) | **no** (`combined.py` overrides; uses `batch_size` as-is) | `batch_size * num_samples` |
+
+To match the same effective per-step samples between a single-set and a joint config, **set `joint.batch_size = single_set.batch_size / num_samples`**.
+
+Examples (verified against the `applications/dynacell/configs/benchmarks/virtual_staining/_internal/shared/model/data_overlays/` overlays + their joint leaves):
+
+- FCMAE (`fcmae_vscyto3d_*`): single-set `batch_size: 32, num_samples: 4` → joint `batch_size: 8, num_samples: 4` → both yield **32 samples/step**.
+- FNet3D (`fnet3d_paper`): single-set `batch_size: 48, num_samples: 8` → joint `batch_size: 6, num_samples: 8` → both yield **48 samples/step**.
+
+`HCSDataModule._train_transform` enforces `batch_size % num_samples == 0` for single-set use because `train_dataloader` would otherwise round down silently. The check is suppressed for `BatchedConcatDataModule` children via the `_is_batched_concat_child` flag set in the wrapper's `setup()` — joint configs are free to pick any `(batch_size, num_samples)` pair as long as the product is the desired sample count. **Do not** "fix" a joint config by raising `batch_size` to satisfy the divisibility rule; it would multiply effective samples by `num_samples`.
+
+When in doubt, read both `train_dataloader` overrides directly — they are short. Don't infer from comments alone.
+
 ### Common Commands
 
 ```sh
