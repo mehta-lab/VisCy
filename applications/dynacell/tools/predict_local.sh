@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run a sequence of A549 predict leaves locally on the current host's GPU.
+# Run a predict leaf (or per-plate leaf set) locally on the current host's GPU.
 #
 # Stages each leaf through submit_benchmark_job.py --dry-run (so the
 # resolved YAML lands under launcher.run_root/resolved/ with a
@@ -7,35 +7,50 @@
 # `uv run dynacell predict -c <resolved>` directly — no sbatch.
 #
 # Usage:
-#   predict_local_a549.sh <organelle> <model> [--overwrite] [--parallel N]
+#   predict_local.sh <organelle> <model> <train_set> <test_set> [--overwrite] [--parallel N]
+#
+# Args:
+#   <organelle>  e.g. nucleus, membrane, er, mito
+#   <model>      e.g. fnet3d_paper, fcmae_vscyto3d_scratch, fcmae_vscyto3d_pretrained,
+#                unetvit3d, celldiff_*
+#   <train_set>  ipsc | a549 | joint  (or full names: ipsc_confocal,
+#                a549_mantis, joint_ipsc_confocal_a549_mantis)
+#   <test_set>   ipsc | a549          (or full names: ipsc_confocal, a549_mantis)
 #
 # Examples:
-#   predict_local_a549.sh er  fnet3d_paper                  # serial
-#   predict_local_a549.sh er  fnet3d_paper --parallel 2     # 2 plates concurrent on one GPU
-#   predict_local_a549.sh er  fnet3d_paper --overwrite      # force-replace existing channels
-#   predict_local_a549.sh mito celldiff --overwrite --parallel 2
+#   predict_local.sh er    fnet3d_paper             ipsc  ipsc
+#   predict_local.sh er    fnet3d_paper             ipsc  a549  --parallel 2
+#   predict_local.sh nucleus fcmae_vscyto3d_scratch a549  ipsc  --overwrite
+#   predict_local.sh nucleus fcmae_vscyto3d_scratch a549  a549  --parallel 2
+#   predict_local.sh nucleus fcmae_vscyto3d_scratch joint a549  --parallel 2
 #
 # Notes:
-# - Discovers all `predict__a549_mantis_*.yml` leaves under
-#     configs/benchmarks/virtual_staining/<organelle>/<model>/ipsc_confocal/
+# - Discovers leaves under
+#     configs/benchmarks/virtual_staining/<organelle>/<model>/<train_set>/
+#   matching `predict__<test_set>.yml` (1 leaf for ipsc) or
+#   `predict__<test_set>_*.yml` (per-plate leaves for a549, typically 3:
+#   mock, denv, zikv).
 # - --overwrite passes through to submit_benchmark_job.py, which sets
 #   HCSPredictionWriter.init_args.overwrite=True in the resolved YAML.
 # - --parallel N runs N predicts concurrently on the same GPU, waiting
 #   between batches of N. Tune to fit VRAM (~2 fnet predicts fit on an A40).
+#   Single-leaf runs (test_set=ipsc) ignore --parallel above 1.
 # - Logs land at $run_root/slurm/local_<TS>_<organelle>_<model>_<plate>.log
 # - Fail-fast: a failing plate aborts the script. Re-run remaining plates
 #   manually if needed.
 
 set -euo pipefail
 
-if [ $# -lt 2 ]; then
-  echo "usage: $0 <organelle> <model> [--overwrite] [--parallel N]" >&2
+if [ $# -lt 4 ]; then
+  echo "usage: $0 <organelle> <model> <train_set> <test_set> [--overwrite] [--parallel N]" >&2
   exit 2
 fi
 
 ORGANELLE=$1
 MODEL=$2
-shift 2
+TRAIN_RAW=$3
+TEST_RAW=$4
+shift 4
 
 OVERWRITE=""
 PARALLEL=1
@@ -53,16 +68,39 @@ if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
+# Map shorthand to the directory / filename names actually on disk.
+case "$TRAIN_RAW" in
+  ipsc)        TRAIN_SET=ipsc_confocal ;;
+  a549)        TRAIN_SET=a549_mantis ;;
+  joint)       TRAIN_SET=joint_ipsc_confocal_a549_mantis ;;
+  ipsc_confocal|a549_mantis|joint_ipsc_confocal_a549_mantis) TRAIN_SET="$TRAIN_RAW" ;;
+  *) echo "error: unknown train_set '$TRAIN_RAW' (want ipsc | a549 | joint)" >&2; exit 2 ;;
+esac
+case "$TEST_RAW" in
+  ipsc)         TEST_SET=ipsc_confocal ;;
+  a549)         TEST_SET=a549_mantis ;;
+  ipsc_confocal|a549_mantis) TEST_SET="$TEST_RAW" ;;
+  *) echo "error: unknown test_set '$TEST_RAW' (want ipsc | a549)" >&2; exit 2 ;;
+esac
+
 VISCY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-LEAF_DIR=$VISCY_ROOT/applications/dynacell/configs/benchmarks/virtual_staining/$ORGANELLE/$MODEL/ipsc_confocal
+LEAF_DIR=$VISCY_ROOT/applications/dynacell/configs/benchmarks/virtual_staining/$ORGANELLE/$MODEL/$TRAIN_SET
 if [ ! -d "$LEAF_DIR" ]; then
   echo "error: leaf directory does not exist: $LEAF_DIR" >&2
+  echo "       (no $MODEL trained on $TRAIN_SET for $ORGANELLE?)" >&2
   exit 1
 fi
 
-mapfile -t LEAVES < <(ls "$LEAF_DIR"/predict__a549_mantis_*.yml 2>/dev/null | sort)
+# Single-leaf for ipsc test set, glob for a549 (per-plate: mock/denv/zikv).
+if [ "$TEST_SET" = "ipsc_confocal" ]; then
+  GLOB="$LEAF_DIR/predict__ipsc_confocal.yml"
+else
+  GLOB="$LEAF_DIR/predict__${TEST_SET}_*.yml"
+fi
+mapfile -t LEAVES < <(ls $GLOB 2>/dev/null | sort)
 if [ ${#LEAVES[@]} -eq 0 ]; then
-  echo "error: no per-plate predict__a549_mantis_*.yml leaves in $LEAF_DIR" >&2
+  echo "error: no leaves match $GLOB" >&2
+  echo "       (expected predict__${TEST_SET}*.yml under $LEAF_DIR/)" >&2
   exit 1
 fi
 
@@ -103,10 +141,7 @@ done <<< "$META"
 RUN_ROOT=$(echo "$META" | head -1 | cut -f3)
 mkdir -p "$RUN_ROOT/slurm"
 
-# Stage every resolved YAML up-front (so resolved/ is populated before any
-# predict starts). One pass means we tolerate timestamp collisions across
-# leaves cleanly: each call writes a distinct {mode}_{job_name}_{TS}.yml.
-echo "[stage] composing ${#LEAVES[@]} leaves ($ORGANELLE/$MODEL)${OVERWRITE:+ + overwrite}"
+echo "[stage] composing ${#LEAVES[@]} leaves ($ORGANELLE/$MODEL/$TRAIN_SET → $TEST_SET)${OVERWRITE:+ + overwrite}"
 for leaf in "${LEAVES[@]}"; do
   uv run python applications/dynacell/tools/submit_benchmark_job.py \
     "$leaf" $OVERWRITE --dry-run >/dev/null
@@ -165,7 +200,14 @@ while IFS=$'\t' read -r leaf job_name _run_root _ckpt; do
     echo "error: no resolved yaml found for job_name=$job_name" >&2
     exit 1
   fi
-  plate=$(basename "$leaf" .yml | sed 's/^predict__a549_mantis_//')
+  # Strip the predict__<test_set>_ prefix to get a per-plate label;
+  # for the single ipsc leaf this leaves an empty label so use the bare
+  # test_set name instead.
+  base=$(basename "$leaf" .yml)
+  plate=${base#predict__${TEST_SET}_}
+  if [ "$plate" = "$base" ]; then  # no prefix stripped → ipsc single leaf
+    plate=$TEST_SET
+  fi
   log="$RUN_ROOT/slurm/local_${TS}_${ORGANELLE}_${MODEL}_${plate}.log"
 
   echo "  [start] plate=$plate log=$(basename "$log")"
