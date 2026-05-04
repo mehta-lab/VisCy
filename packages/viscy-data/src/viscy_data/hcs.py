@@ -804,13 +804,9 @@ class HCSDataModule(LightningDataModule):
                     # this trait does not have any concrete interface
                     # so this attribute may not be the same for other transforms
                     num_samples = aug.cropper.num_samples
-                    # Standalone HCSDataModule.train_dataloader divides
-                    # batch_size by num_samples (line ~723) and would round
-                    # down silently if not divisible. BatchedConcatDataModule
-                    # uses batch_size as-is (loads N indices, each yielding
-                    # num_samples patches → N*num_samples GPU samples per
-                    # step), so the constraint does not apply when this
-                    # module is a child of that joint wrapper.
+                    # Skip when wrapped in BatchedConcatDataModule — its
+                    # train_dataloader does not divide batch_size by
+                    # num_samples, so the constraint does not apply.
                     if not self._is_batched_concat_child and self.batch_size % num_samples != 0:
                         raise ValueError(
                             "Batch size must be divisible by `num_samples` per stack. "

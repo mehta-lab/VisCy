@@ -29,18 +29,27 @@ def _fake_ddp(monkeypatch, world_size: int = 2, rank: int = 0) -> None:
     monkeypatch.setattr("torch.distributed.get_rank", lambda: rank)
 
 
-def _make_dm(data_path, batch_size=4, num_workers=0):
+def _make_dm(
+    data_path,
+    batch_size=4,
+    num_workers=0,
+    augmentations=None,
+    yx_patch_size=(128, 96),
+    source_channel=None,
+    target_channel=None,
+):
     with open_ome_zarr(data_path) as dataset:
         ch = dataset.channel_names
     return HCSDataModule(
         data_path=data_path,
-        source_channel=ch[:2],
-        target_channel=ch[2:],
+        source_channel=source_channel if source_channel is not None else ch[:2],
+        target_channel=target_channel if target_channel is not None else ch[2:],
         z_window_size=5,
         batch_size=batch_size,
         num_workers=num_workers,
         split_ratio=0.5,
-        yx_patch_size=(128, 96),
+        yx_patch_size=yx_patch_size,
+        augmentations=augmentations,
     )
 
 
@@ -330,39 +339,24 @@ def test_batched_concat_skips_divisibility_check_with_indivisible_num_samples(
     """
     with open_ome_zarr(preprocessed_hcs_dataset) as ds:
         ch = ds.channel_names
-
-    def _dm():
-        return HCSDataModule(
-            data_path=preprocessed_hcs_dataset,
-            source_channel=ch[:1],
-            target_channel=ch[1:2],
-            z_window_size=5,
-            batch_size=6,
-            num_workers=0,
-            split_ratio=0.5,
-            yx_patch_size=(32, 32),
-            augmentations=[
-                RandWeightedCropd(
-                    keys=ch[:2],
-                    w_key=ch[1],
-                    spatial_size=(5, 32, 32),
-                    num_samples=8,
-                )
-            ],
-        )
+    dm_kwargs = dict(
+        batch_size=6,
+        yx_patch_size=(32, 32),
+        source_channel=ch[:1],
+        target_channel=ch[1:2],
+        augmentations=[RandWeightedCropd(keys=ch[:2], w_key=ch[1], spatial_size=(5, 32, 32), num_samples=8)],
+    )
 
     # Standalone child must still raise — guard against silently
     # disabling the check for non-joint use.
     with pytest.raises(ValueError, match="must be divisible"):
-        _dm().setup(stage="fit")
+        _make_dm(preprocessed_hcs_dataset, **dm_kwargs).setup(stage="fit")
 
     # Joint mode: setup succeeds, dataloader yields 6*8 = 48 GPU
     # samples per training step (summed across both children's micro-
     # batches after on_after_batch_transfer cats them on dim 0).
-    batched = BatchedConcatDataModule(data_modules=[_dm(), _dm()])
+    batched = BatchedConcatDataModule(data_modules=[_make_dm(preprocessed_hcs_dataset, **dm_kwargs) for _ in range(2)])
     batched.setup(stage="fit")
     batch = next(iter(batched.train_dataloader()))
     combined = batched.on_after_batch_transfer(batch, dataloader_idx=0)
-    assert combined["source"].shape[0] == 48, (
-        f"expected 48 samples per step (bs=6 * num_samples=8), got {combined['source'].shape[0]}"
-    )
+    assert combined["source"].shape[0] == 48
