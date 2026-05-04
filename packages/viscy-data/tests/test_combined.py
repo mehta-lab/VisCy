@@ -13,7 +13,7 @@ from viscy_data import (
     HCSDataModule,
     ShardedDistributedSampler,
 )
-from viscy_transforms import BatchedCenterSpatialCropd
+from viscy_transforms import BatchedCenterSpatialCropd, RandWeightedCropd
 
 
 def _fake_ddp(monkeypatch, world_size: int = 2, rank: int = 0) -> None:
@@ -311,4 +311,58 @@ def test_concat_setup_propagates_trainer_to_children(preprocessed_hcs_dataset):
     combined = batched.on_after_batch_transfer(batch, dataloader_idx=0)
     assert combined["source"].shape[2:] == (3, 64, 48), (
         f"gpu_augmentation did not run; got shape {combined['source'].shape}"
+    )
+
+
+def test_batched_concat_skips_divisibility_check_with_indivisible_num_samples(
+    preprocessed_hcs_dataset,
+):
+    """bs % num_samples != 0 is allowed when wrapped in BatchedConcatDataModule.
+
+    Regression guard for the fnet3d_paper joint configs (bs=6,
+    num_samples=8). Standalone HCSDataModule.train_dataloader divides
+    bs by num_samples and would round down silently, so the
+    divisibility check raises. BatchedConcatDataModule.train_dataloader
+    uses bs as-is — it loads ``bs`` indices, each yielding
+    ``num_samples`` patches via the per-child transform — so the
+    constraint does not apply, and ``BatchedConcatDataModule.setup``
+    sets a flag on each child to suppress the check.
+    """
+    with open_ome_zarr(preprocessed_hcs_dataset) as ds:
+        ch = ds.channel_names
+
+    def _dm():
+        return HCSDataModule(
+            data_path=preprocessed_hcs_dataset,
+            source_channel=ch[:1],
+            target_channel=ch[1:2],
+            z_window_size=5,
+            batch_size=6,
+            num_workers=0,
+            split_ratio=0.5,
+            yx_patch_size=(32, 32),
+            augmentations=[
+                RandWeightedCropd(
+                    keys=ch[:2],
+                    w_key=ch[1],
+                    spatial_size=(5, 32, 32),
+                    num_samples=8,
+                )
+            ],
+        )
+
+    # Standalone child must still raise — guard against silently
+    # disabling the check for non-joint use.
+    with pytest.raises(ValueError, match="must be divisible"):
+        _dm().setup(stage="fit")
+
+    # Joint mode: setup succeeds, dataloader yields 6*8 = 48 GPU
+    # samples per training step (summed across both children's micro-
+    # batches after on_after_batch_transfer cats them on dim 0).
+    batched = BatchedConcatDataModule(data_modules=[_dm(), _dm()])
+    batched.setup(stage="fit")
+    batch = next(iter(batched.train_dataloader()))
+    combined = batched.on_after_batch_transfer(batch, dataloader_idx=0)
+    assert combined["source"].shape[0] == 48, (
+        f"expected 48 samples per step (bs=6 * num_samples=8), got {combined['source'].shape[0]}"
     )

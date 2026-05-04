@@ -288,6 +288,21 @@ class BatchedConcatDataModule(ConcatDataModule):
 
     _ConcatDataset = BatchedConcatDataset
 
+    def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+        """Mark each child as a BatchedConcat child before parent setup.
+
+        ``train_dataloader`` here uses ``batch_size`` as-is (loads N
+        indices, each yielding ``num_samples`` patches via the child's
+        ``RandWeightedCropd``), so the divisibility constraint enforced
+        by ``HCSDataModule._train_transform`` for standalone use does
+        not apply. Setting the flag on each child before calling
+        ``super().setup`` (which iterates children's ``setup``) lets
+        the check skip itself.
+        """
+        for dm in self.data_modules:
+            dm._is_batched_concat_child = True
+        super().setup(stage)
+
     def _maybe_sampler(self, dataset: Dataset, shuffle: bool) -> ShardedDistributedSampler | None:
         """Return a distributed sampler if DDP is initialized, else None."""
         return ShardedDistributedSampler(dataset, shuffle=shuffle) if torch.distributed.is_initialized() else None
