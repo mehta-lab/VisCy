@@ -1,0 +1,107 @@
+# FCMAE scratch joint smoke — minimal repro for the [N,2,48,640,960]
+# val-shape mismatch hitting all 8 ER/MITO submissions (jobs 31857838-41
+# joint + 31858456-61 a549-only). Use:
+#   uv run python applications/dynacell/tools/submit_benchmark_job.py \
+#     applications/dynacell/configs/benchmarks/virtual_staining/er/fcmae_vscyto3d_scratch/joint_ipsc_confocal_a549_mantis/train_smoke.yml \
+#     --dry-run --print-resolved > /tmp/fcmae_er_smoke.yaml
+#   uv run python -m dynacell fit --config /tmp/fcmae_er_smoke.yaml \
+#     --trainer.devices=1 --trainer.strategy=auto
+base:
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  gene: SEC61B
+  target: er
+  target_id: er_sec61b
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: er__joint_ipsc_confocal_a549_mantis__fcmae_vscyto3d_scratch__smoke
+
+trainer:
+  devices: 1
+  num_nodes: 1
+  strategy: auto
+  max_steps: 2
+  limit_val_batches: 1
+  num_sanity_val_steps: 1
+  logger: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        save_last: true
+        dirpath: /tmp/fcmae_er_smoke/checkpoints
+
+_hcs_init_args: &hcs_init_args
+  source_channel: Phase3D
+  target_channel: Structure
+  z_window_size: 20
+  batch_size: 4
+  num_workers: 0
+  pin_memory: false
+  yx_patch_size: [384, 384]
+  split_ratio: 0.8
+  mmap_preload: false
+  persistent_workers: false
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Structure]
+        level: fov_statistics
+        subtrahend: median
+        divisor: iqr
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Structure]
+        w_key: Structure
+        spatial_size: [20, 600, 600]
+        num_samples: 4
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandAffined
+      init_args:
+        keys: [source, target]
+        prob: 0.8
+        rotate_range: [3.14, 0, 0]
+        shear_range: [0.0, 0.05, 0.05]
+        scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [15, 384, 384]
+  val_gpu_augmentations:
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [15, 384, 384]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc SEC61B test48 zarr (48 FOVs).
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B_test48.zarr
+      # a549_mantis — pooled SEC61B all-conditions train store (T=7).
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_JOINT_SEC61B_SMOKE
+  run_root: /tmp/fcmae_er_smoke
