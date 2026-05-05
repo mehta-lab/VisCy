@@ -48,8 +48,8 @@ output_dir/configs/
   ├── reduce.yaml                  # template: dynaclr reduce-dimensionality (per-experiment)
   ├── reduce_combined.yaml         # CPU step: dynaclr combined-dim-reduction (joint)
   ├── smoothness.yaml              # template: dynaclr evaluate-smoothness (per-experiment)
-  ├── plot.yaml                    # template: dynaclr plot-embeddings (per-experiment)
-  ├── plot_combined.yaml           # CPU step: dynaclr plot-embeddings (all experiments)
+  ├── plot.yaml                    # template: dynaclr plot-embeddings (per-experiment) — only when "plot" in steps
+  ├── plot_combined.yaml           # CPU step: dynaclr plot-embeddings (all experiments) — only when "plot_combined" in steps
   ├── {block_name}.yaml            # template: dynaclr compute-mmd (per-experiment, per-block)
   ├── {block_name}_cross_exp.yaml  # CPU step: dynaclr compute-mmd --combined (per-block)
   └── linear_classifiers.yaml      # CPU step (optional)
@@ -95,12 +95,12 @@ configs/viewer.yaml               # nd-embedding viewer config (also valid input
   │
   │  (after combined-dim-reduction finishes)
   │
-  ├──► dynaclr plot-embeddings            # per-experiment PCA scatter (X_pca)
+  ├──► dynaclr plot-embeddings            # per-experiment PCA scatter (X_pca) — when "plot" in steps
   │        -c plot.yaml                   # parallel SLURM jobs, one per experiment
   │        → plots/{experiment}/*.pdf
   │
   ├──► dynaclr plot-embeddings            # all-experiments combined (X_pca_combined, X_phate_combined)
-  │        -c plot_combined.yaml          # concatenates all zarrs into one figure
+  │        -c plot_combined.yaml          # only when "plot_combined" in steps; one job
   │        → plots/combined/*.pdf
   │
   ├──► dynaclr evaluate-smoothness        # temporal smoothness + dynamic range
@@ -288,8 +288,8 @@ SPLIT (CPU light)                                              TRACKING_ACCURACY
   │                                                              → results.csv
   ├─[scatter]─► REDUCE ─[gather]─► REDUCE_COMBINED ─┐
   │                                                   │
-  ├─► APPEND_ANNOTATIONS ───────────────────────────►├─[scatter]─► PLOT
-  │                                                   │ [gather]─► PLOT_COMBINED
+  ├─► APPEND_ANNOTATIONS ───────────────────────────►├─[scatter]─► PLOT          (only if "plot" in steps)
+  │                                                   │ [gather] ─► PLOT_COMBINED (only if "plot_combined" in steps)
   ├─► LINEAR_CLASSIFIERS ─► APPEND_PREDICTIONS ─────►┘
   │
   ├─[scatter]─► SMOOTHNESS ─[gather]─► SMOOTHNESS_GATHER
@@ -302,8 +302,12 @@ Key: **scatter** = one SLURM job per experiment (parallel). **gather** = waits f
 `TRACKING_ACCURACY` is independent of the embedding pipeline — it reads directly from an ONNX
 model and CTC-format data. Run it manually or as a separate Nextflow job alongside the main DAG.
 
-`APPEND_ANNOTATIONS` and `APPEND_PREDICTIONS` emit a `'skip'` signal when not present in
-`steps`, so `PLOT` and `PLOT_COMBINED` always proceed once `REDUCE_COMBINED` finishes.
+`PLOT` (per-experiment fan-out) and `PLOT_COMBINED` (single combined figure) are
+**independently togglable** via `steps:`. List `plot` for per-experiment scatter only,
+`plot_combined` for the joint figure only, both for both, or neither for a metrics-only
+run. `APPEND_ANNOTATIONS` and `APPEND_PREDICTIONS` emit a `'skip'` signal when not
+present in `steps`, so plotting always proceeds once `REDUCE_COMBINED` finishes —
+whichever plotting steps are listed.
 
 ## CTC Tracking Accuracy Benchmark
 
@@ -395,6 +399,103 @@ Prints a grouped summary (mean over sequences) at the end.
 2. CTC datasets must have `{seq}_ERR_SEG/`, `{seq}/`, and `{seq}_GT/TRA/` subdirectories.
 3. Install eval dependencies: `uv sync --all-packages --extra eval`
 
+## Pseudotime alignment benchmark
+
+Standalone benchmark that quantifies how well DTW on DynaCLR embeddings recovers per-cell biological
+event onsets (e.g. infection onset from the NS3 sensor channel). **Not part of the Nextflow embedding
+pipeline** — runs after `linear_classifiers` + `append_predictions` so it can use either human
+`infection_state` or model-predicted `predicted_infection_state` as ground truth.
+
+Full pipeline (template build + DTW alignment) lives in `applications/dynaclr/scripts/pseudotime/` —
+see [`pseudotime.md`](pseudotime.md). The scoring step described below consumes the Stage 2a
+alignment parquet that pipeline produces.
+
+### Approach
+
+```
+embeddings/{experiment}.zarr (with ground-truth obs)
+  │
+  ▼
+pseudotime/2-align_cells/alignments/
+  {template}_{flavor}_on_{query_set}.parquet
+  │   (per-frame: pseudotime, estimated_t_rel_minutes, alignment_region)
+  ▼
+score_alignment.py --method {dtw | no_align}
+  │
+  │   Per cell: onset_error_minutes = estimated_t_rel_minutes at the first
+  │             aligned positive frame preceded by a negative frame
+  │   Population: AUROC + F1@0 over (cell, frame) pairs in aligned region
+  ▼
+scoring/{template}_{flavor}_on_{query_set}_{method}_per_cell.parquet
+scoring/{template}_{flavor}_on_{query_set}_{method}_summary.md
+scoring/results.csv             (one row per run, accumulates across runs)
+  │
+  ▼
+compare_methods.py
+  │
+  ▼
+scoring/compare_methods.md      (paper table)
+scoring/compare_methods.png     (4-panel bar chart: med|Δt|, IQR, AUROC, F1@0)
+```
+
+### Method comparison philosophy
+
+The benchmark compares **alignment methods on the same DynaCLR embedding**, not different
+embeddings. Two methods are bundled:
+
+- **`dtw`** — uses `estimated_t_rel_minutes` from the Stage 2a parquet (DBA template + subsequence
+  DTW on the embedding trajectory).
+- **`no_align`** — substitutes `estimated_t_rel_minutes` with each cell's frame index relative to
+  its track midpoint, no learning. The lower bound DTW must beat.
+
+This is the right comparison for the paper claim *"DTW on DynaCLR embeddings recovers infection
+onset"* — the embedding is held fixed, so the metric attributes the gain to the alignment step,
+not to representation quality.
+
+### Usage
+
+```bash
+cd applications/dynaclr/scripts/pseudotime/2-align_cells
+# Score one alignment parquet (DTW)
+uv run python score_alignment.py \
+    --datasets ../../../configs/pseudotime/datasets.yaml \
+    --config   ../../../configs/pseudotime/align_cells.yaml \
+    --template infection_nondividing_sensor --flavor raw \
+    --query-set sensor_all_07_24 \
+    --truth-column infection_state --truth-positive infected \
+    --method dtw
+
+# No-align baseline on the same parquet
+uv run python score_alignment.py ... --method no_align
+
+# Render comparison artifacts
+uv run python compare_methods.py
+```
+
+### Output schema (`scoring/results.csv`)
+
+| Column | Description |
+|---|---|
+| `template`, `flavor`, `query_set` | identifies the alignment parquet |
+| `method` | `dtw` or `no_align` |
+| `truth_column`, `truth_positive` | which obs column was the ground truth |
+| `n_cells_scored` | cells with a usable negative→positive transition in the aligned region |
+| `median_abs_onset_error_minutes` | robust center of \|Δt_onset\|; **primary metric** |
+| `iqr_abs_onset_error_minutes` | spread of \|Δt_onset\| |
+| `median_signed_onset_error_minutes` | systematic bias (≈0 if unbiased) |
+| `auroc` | over aligned (cell, frame) pairs ranked by warped time; chance = 0.5 |
+| `f1_at_zero` | F1 at the threshold `estimated_t_rel_minutes ≥ 0` |
+| `n_pairs` | aligned (cell, frame) pairs used by AUROC/F1 |
+| `timestamp_utc` | run timestamp |
+
+### Prerequisites
+
+1. A built template under `1-build_template/templates/` (see `pseudotime.md`).
+2. A Stage 2a alignment parquet under `2-align_cells/alignments/`.
+3. The query embedding zarrs must carry the requested `--truth-column` (human `infection_state`
+   on 07_22/07_24; `predicted_infection_state` on 08_26/01_28 — populated by
+   `APPEND_PREDICTIONS`).
+
 ## Cross-model comparison
 
 After running evals for multiple models, compare results with:
@@ -408,15 +509,20 @@ Registry format:
 ```yaml
 models:
   - name: DynaCLR-v3
-    eval_dir: /path/to/eval_v3
+    eval_dir: /path/to/eval_v3       # = output_dir of that model's eval run
   - name: DINOv3-MLP
     eval_dir: /path/to/eval_dino
 output_dir: /path/to/comparison_output
 fdr_threshold: 0.05
 ```
 
-Auto-discovers results from each `eval_dir` and produces overlaid plots and summary CSVs for
-smoothness, linear classifiers, and MMD.
+`eval_dir` is the **`output_dir`** declared in each leaf eval YAML (where
+`smoothness/`, `linear_classifiers/`, `mmd/` land). One row per model × dataset
+pair you want to compare side-by-side. Auto-discovers results and produces
+overlaid plots and summary CSVs for smoothness, linear classifiers, and MMD.
+
+The shipping registry at `applications/dynaclr/configs/evaluation/eval_registry.yaml`
+is checked into git and updated as new (model × dataset) eval runs complete.
 
 ## Key commands
 

@@ -53,9 +53,6 @@ linear_classifiers:
         - G3BP1
         - SEC61B
     - task: cell_death_state
-      marker_filters:
-        - G3BP1
-        - SEC61B
   use_scaling: true
   use_pca: false
   split_train_data: 0.8

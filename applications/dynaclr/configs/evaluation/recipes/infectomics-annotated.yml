@@ -9,7 +9,8 @@
 #   - cell_index_path           — shared infectomics parquet (14 experiments)
 #   - steps                     — full pipeline incl. LC + append_annotations + append_predictions
 #   - linear_classifiers        — annotations + tasks (inherited from linear_classifiers_infectomics.yml)
-#   - plot                      — infectomics defaults (inherited from plot_infectomics.yml)
+#   - plot_combined             — combined-only scatter (skips per-exp fan-out);
+#                                 inherits combined_embedding_keys from plot_infectomics.yml
 #
 # Leaves merge this via:
 #   base:
@@ -30,4 +31,4 @@ steps:
   - linear_classifiers
   - append_annotations
   - append_predictions
-  - plot
+  - plot_combined
