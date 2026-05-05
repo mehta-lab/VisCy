@@ -6,7 +6,7 @@ a new cell-level AnnData zarr where each row is one segmented cell.
 
 Usage
 -----
-uv run python embed_dinov3.py config.yaml
+uv run python embed_dinov3.py data_paths.yml embed_dinov3.yml
 """
 
 import argparse
@@ -20,7 +20,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import yaml
-import zarr
+from iohub.ngff import open_ome_zarr
 from tqdm import tqdm
 
 from viscy_models.foundation import DINOv3Model
@@ -36,80 +36,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def load_primary_analysis(
-    analysis_base: str,
-    scan_ids: list[int] | None = None,
-    lane_ids: list[int] | None = None,
-) -> pd.DataFrame:
-    """Load and concatenate primary_analysis.csv for all scans/lanes.
+def load_cells_anndata(cells_anndata: str) -> pd.DataFrame:
+    """Load per-object metadata from the cells AnnData zarr.
 
     Parameters
     ----------
-    analysis_base : str
-        Path to the image_analysis_output directory.
-    scan_ids : list[int] or None
-        Scan IDs to include. If None, auto-discover.
-    lane_ids : list[int] or None
-        Lane IDs to include. If None, auto-discover.
+    cells_anndata : str
+        Path to the cells AnnData zarr (e.g., ``dinov2.zarr``). Index is
+        ``object_uuid``; the ``fov_name`` column is used directly as the
+        zarr path (e.g., ``"1/10/005175003667"``).
 
     Returns
     -------
     pd.DataFrame
-        Concatenated primary analysis with all columns.
+        Obs table with ``object_uuid`` as a column and ``fov_name`` renamed
+        to ``zarr_path``.
     """
-    base = Path(analysis_base)
-    if scan_ids is None:
-        scan_ids = sorted(int(p.name.split("_")[1]) for p in base.glob("scan_*") if p.is_dir())
-    if lane_ids is None:
-        all_lanes = set()
-        for scan_id in scan_ids:
-            scan_dir = base / f"scan_{scan_id}"
-            all_lanes.update(int(p.name.split("_")[1]) for p in scan_dir.glob("lane_*") if p.is_dir())
-        lane_ids = sorted(all_lanes)
-
-    frames = []
-    for scan_id in scan_ids:
-        for lane_id in lane_ids:
-            csv_path = (
-                base
-                / f"scan_{scan_id}"
-                / f"lane_{lane_id}"
-                / "processed"
-                / "CAGE_REGISTRATION"
-                / "primary_analysis.csv"
-            )
-            if not csv_path.exists():
-                logger.warning(f"Missing: {csv_path}")
-                continue
-            df = pd.read_csv(csv_path)
-            frames.append(df)
-            logger.info(f"scan_{scan_id}/lane_{lane_id}: {len(df)} objects")
-
-    combined = pd.concat(frames, ignore_index=True)
-    logger.info(f"Total: {len(combined)} objects across {len(frames)} scan/lane combinations")
-    return combined
-
-
-def derive_zarr_paths(df: pd.DataFrame) -> pd.DataFrame:
-    """Derive zarr position and path from cage_crop_file_name.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Must have columns: cage_crop_file_name, lane_id, scan_id.
-
-    Returns
-    -------
-    pd.DataFrame
-        With added zarr_position and zarr_path columns.
-    """
-
-    def _parse_position(cage_crop: str) -> str:
-        parts = str(cage_crop).split("_")
-        return f"{parts[4]}{parts[5]}"
-
-    df["zarr_position"] = df["cage_crop_file_name"].apply(_parse_position)
-    df["zarr_path"] = df["lane_id"].astype(str) + "/" + df["scan_id"].astype(str) + "/" + df["zarr_position"]
+    adata = ad.read_zarr(cells_anndata)
+    df = adata.obs.copy()
+    df["object_uuid"] = df.index.astype(str)
+    df = df.rename(columns={"fov_name": "zarr_path"}).reset_index(drop=True)
+    logger.info(f"Loaded {len(df)} objects from {cells_anndata}")
     return df
 
 
@@ -194,34 +141,6 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     return df
 
 
-def resolve_channel_indices(store: zarr.Group, zarr_path: str, channel_names: list[str]) -> list[int]:
-    """Resolve integer indices for named channels in an OME-Zarr FOV.
-
-    Parameters
-    ----------
-    store : zarr.Group
-        Opened zarr store.
-    zarr_path : str
-        Relative path to the FOV group.
-    channel_names : list[str]
-        Channel labels to look up.
-
-    Returns
-    -------
-    list[int]
-        Zero-based channel indices.
-    """
-    fov_group = store[zarr_path]
-    channels = fov_group.attrs["omero"]["channels"]
-    labels = [ch.get("label", ch.get("name", "")) for ch in channels]
-    indices = []
-    for name in channel_names:
-        if name not in labels:
-            raise ValueError(f"Channel '{name}' not found. Available: {labels}")
-        indices.append(labels.index(name))
-    return indices
-
-
 def crop_cell(
     fov_array: np.ndarray,
     cy: int,
@@ -263,16 +182,20 @@ def crop_cell(
 def main():
     """Extract DINOv3 embeddings for cellanome cells."""
     parser = argparse.ArgumentParser(description="Extract DINOv3 embeddings for cellanome cells.")
-    parser.add_argument("config", help="Path to YAML config file")
+    parser.add_argument("data_paths", help="Path to shared data_paths.yml")
+    parser.add_argument("model_config", help="Path to per-model embed_<model>.yml")
     args = parser.parse_args()
 
-    with open(args.config) as f:
+    with open(args.data_paths) as f:
         cfg = yaml.safe_load(f)
+    with open(args.model_config) as f:
+        cfg.update(yaml.safe_load(f))
 
     zarr_store = cfg["zarr_store"]
-    analysis_base = cfg["analysis_base"]
-    transcriptome_anndata = cfg.get("transcriptome_anndata", None)
-    output_path = cfg["output_path"]
+    anndata_dir = Path(cfg["anndata_dir"])
+    cells_anndata = anndata_dir / "dinov2.zarr"
+    transcriptome_anndata = anndata_dir / "rna.zarr"
+    output_path = str(Path(cfg["output_dir"]) / cfg["output_name"])
     model_name = cfg.get("model_name", "facebook/dinov2-base")
     channels = cfg.get("channels", None)
     output_key = cfg.get("output_key", None)
@@ -281,24 +204,26 @@ def main():
     source_pixel_size = cfg.get("source_pixel_size", 1.0)
     batch_size = cfg.get("batch_size", 128)
     device_str = cfg.get("device", "cuda")
-    scan_ids = cfg.get("scan_ids", None)
-    lane_ids = cfg.get("lane_ids", None)
     filters = cfg.get("filters", {})
+    max_cells = cfg.get("max_cells", None)
 
     # --- Load and prepare data ---
-    df = load_primary_analysis(analysis_base, scan_ids, lane_ids)
+    df = load_cells_anndata(str(cells_anndata))
     n_raw = len(df)
     df = apply_filters(df, filters)
     logger.info(f"After filtering: {len(df)} cells (removed {n_raw - len(df)})")
 
-    df = derive_zarr_paths(df)
-    if transcriptome_anndata is not None:
-        lookup = build_barcode_lookup(transcriptome_anndata)
+    if max_cells is not None:
+        df = df.head(max_cells).reset_index(drop=True)
+        logger.info(f"Smoke test: truncated to {len(df)} cells")
+
+    if transcriptome_anndata.exists():
+        lookup = build_barcode_lookup(str(transcriptome_anndata))
         df = join_barcodes(df, lookup)
         n_matched = df["in_anndata"].sum()
         logger.info(f"Barcode match: {n_matched}/{len(df)} cells ({100 * n_matched / len(df):.1f}%)")
     else:
-        logger.info("No transcriptome_anndata provided; skipping barcode join")
+        logger.info(f"No rna.zarr at {transcriptome_anndata}; skipping barcode join")
 
     # --- Pixel size rescaling ---
     # raw_crop covers the same physical area as patch_size at reference resolution.
@@ -306,22 +231,6 @@ def main():
     raw_half = round(patch_size * reference_pixel_size / source_pixel_size) // 2
     raw_crop_size = 2 * raw_half
     logger.info(f"Raw crop: {raw_crop_size}x{raw_crop_size} -> model input: {patch_size}x{patch_size}")
-
-    # --- Resolve channels ---
-    store = zarr.open(zarr_store, mode="r")
-    first_zarr_path = df["zarr_path"].iloc[0]
-    if channels is not None:
-        channel_indices = resolve_channel_indices(store, first_zarr_path, channels)
-        channel_labels = channels
-    else:
-        fov_group = store[first_zarr_path]
-        omero_channels = fov_group.attrs["omero"]["channels"]
-        channel_labels = [ch.get("label", ch.get("name", "")) for ch in omero_channels]
-        channel_indices = list(range(len(channel_labels)))
-    logger.info(f"Channels: {channel_labels} (indices {channel_indices})")
-
-    short_names = [CHANNEL_SHORT_NAMES.get(ch, ch) for ch in channel_labels]
-    output_key = output_key or "dinov3_" + "_".join(short_names)
 
     # --- Load model ---
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
@@ -332,57 +241,71 @@ def main():
 
     # --- Inference ---
     df = df.sort_values("zarr_path").reset_index(drop=True)
-    current_fov_path: str | None = None
-    current_fov: np.ndarray | None = None
     all_embeddings = []
     valid_indices = []
     skipped_border = 0
 
-    n_batches = math.ceil(len(df) / batch_size)
-    pbar = tqdm(range(0, len(df), batch_size), total=n_batches, desc="Embedding", unit="batch")
-    for batch_start in pbar:
-        batch_df = df.iloc[batch_start : batch_start + batch_size]
-        patches = []
-        batch_valid = []
+    with open_ome_zarr(zarr_store, mode="r") as plate:
+        available_channels = plate.channel_names
+        if channels is not None:
+            channel_indices = [available_channels.index(name) for name in channels]
+            channel_labels = channels
+        else:
+            channel_labels = available_channels
+            channel_indices = list(range(len(channel_labels)))
+        logger.info(f"Channels: {channel_labels} (indices {channel_indices})")
 
-        for idx, row in batch_df.iterrows():
-            zarr_path = row["zarr_path"]
-            cy, cx = int(row["object_y_fov"]), int(row["object_x_fov"])
+        short_names = [CHANNEL_SHORT_NAMES.get(ch, ch) for ch in channel_labels]
+        output_key = output_key or "dinov3_" + "_".join(short_names)
 
-            if zarr_path != current_fov_path:
-                current_fov = store[zarr_path]["0"][0, :, 0]
-                current_fov_path = zarr_path
+        current_fov_path: str | None = None
+        current_fov: np.ndarray | None = None
 
-            patch = crop_cell(current_fov, cy, cx, raw_half, channels=channel_indices)
-            if patch is None:
-                skipped_border += 1
+        n_batches = math.ceil(len(df) / batch_size)
+        pbar = tqdm(range(0, len(df), batch_size), total=n_batches, desc="Embedding", unit="batch")
+        for batch_start in pbar:
+            batch_df = df.iloc[batch_start : batch_start + batch_size]
+            patches = []
+            batch_valid = []
+
+            for idx, row in batch_df.iterrows():
+                zarr_path = row["zarr_path"]
+                cy, cx = int(row["object_y_fov"]), int(row["object_x_fov"])
+
+                if zarr_path != current_fov_path:
+                    current_fov = plate[zarr_path].data[0, :, 0]
+                    current_fov_path = zarr_path
+
+                patch = crop_cell(current_fov, cy, cx, raw_half, channels=channel_indices)
+                if patch is None:
+                    skipped_border += 1
+                    continue
+
+                patches.append(patch)
+                batch_valid.append(idx)
+
+            if not patches:
                 continue
 
-            patches.append(patch)
-            batch_valid.append(idx)
+            batch_tensor = torch.from_numpy(np.stack(patches)).float()
+            if raw_crop_size != patch_size:
+                batch_tensor = F.interpolate(
+                    batch_tensor, size=(patch_size, patch_size), mode="bilinear", align_corners=False
+                )
 
-        if not patches:
-            continue
+            # Per-sample z-score: zero mean, unit std
+            mean = batch_tensor.flatten(1).mean(dim=1, keepdim=True).unsqueeze(-1).unsqueeze(-1)
+            std = batch_tensor.flatten(1).std(dim=1, keepdim=True).unsqueeze(-1).unsqueeze(-1).clamp(min=1e-8)
+            batch_tensor = (batch_tensor - mean) / std
 
-        batch_tensor = torch.from_numpy(np.stack(patches)).float()
-        if raw_crop_size != patch_size:
-            batch_tensor = F.interpolate(
-                batch_tensor, size=(patch_size, patch_size), mode="bilinear", align_corners=False
-            )
+            batch_tensor = batch_tensor.unsqueeze(2).to(device)
 
-        # Per-sample z-score: zero mean, unit std
-        mean = batch_tensor.flatten(1).mean(dim=1, keepdim=True).unsqueeze(-1).unsqueeze(-1)
-        std = batch_tensor.flatten(1).std(dim=1, keepdim=True).unsqueeze(-1).unsqueeze(-1).clamp(min=1e-8)
-        batch_tensor = (batch_tensor - mean) / std
+            with torch.inference_mode():
+                features, _ = model(batch_tensor)
 
-        batch_tensor = batch_tensor.unsqueeze(2).to(device)
-
-        with torch.inference_mode():
-            features, _ = model(batch_tensor)
-
-        all_embeddings.append(features.cpu().numpy())
-        valid_indices.extend(batch_valid)
-        pbar.set_postfix(cells=len(valid_indices), skipped=skipped_border)
+            all_embeddings.append(features.cpu().numpy())
+            valid_indices.extend(batch_valid)
+            pbar.set_postfix(cells=len(valid_indices), skipped=skipped_border)
 
     if skipped_border > 0:
         logger.warning(f"Skipped {skipped_border} cells too close to FOV border")
@@ -394,9 +317,20 @@ def main():
 
     pd.options.future.infer_string = False
     obs = valid_df.copy()
-    for col in obs.select_dtypes(include=["string", "string[pyarrow]"]).columns:
-        obs[col] = obs[col].astype(object)
+    for col in obs.columns:
+        series = obs[col]
+        if isinstance(series.dtype, pd.CategoricalDtype):
+            cats = series.cat.categories
+            cats_arr = np.asarray(cats.to_numpy(dtype=object, na_value=None))
+            obs[col] = pd.Categorical(
+                np.asarray(series.to_numpy(dtype=object, na_value=None)),
+                categories=cats_arr,
+                ordered=series.cat.ordered,
+            )
+        elif str(series.dtype).startswith("string") or "Arrow" in type(series.array).__name__:
+            obs[col] = np.asarray(series.to_numpy(dtype=object, na_value=None))
     obs.index = obs["object_uuid"].astype(str)
+    obs.index.name = None
 
     cell_adata = ad.AnnData(X=embeddings.astype(np.float32), obs=obs)
     cell_adata.write_zarr(output_path)
