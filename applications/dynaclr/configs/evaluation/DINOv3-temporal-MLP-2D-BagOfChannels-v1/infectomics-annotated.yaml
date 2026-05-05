@@ -18,3 +18,10 @@ base:
 training_config: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/config_updated.yaml
 ckpt_path: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/DINOv3-temporal-MLP-2D-BagOfChannels-v1/20260319-235942/checkpoints/epoch=71-step=14040.ckpt
 output_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluations/infectomics-annotated/
+
+# Use the trained 128-dim MLP projection head as adata.X. Without this, the
+# EmbeddingWriter defaults to "features" and writes the frozen DINOv3 backbone
+# output — making this row a duplicate of DINOv3-frozen. The MLP head carries
+# all the learned task signal here; the backbone is frozen during training.
+predict:
+  embedding_key: projections
