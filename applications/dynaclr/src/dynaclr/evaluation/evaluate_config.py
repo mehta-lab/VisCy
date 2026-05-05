@@ -23,12 +23,22 @@ class PredictStepConfig(BaseModel):
         Mixed-precision setting for Lightning Trainer. Default: "bf16-mixed".
     devices : int
         Number of GPUs. Default: 1.
+    embedding_key : {"features", "projections"}
+        Which array the EmbeddingWriter stores as the primary embedding in
+        ``adata.X``. ``"features"`` (default) writes the encoder backbone
+        output. ``"projections"`` writes the trained projection-head output —
+        required when the projection head is the only finetuned component
+        (e.g. DINOv3-temporal-MLP, where the DINOv3 backbone is frozen and the
+        MLP head carries all the learned task signal). The unselected array
+        is still saved to ``obsm["X_projections"]`` / ``obsm["X_backbone"]``
+        as a sidecar.
     """
 
     batch_size: int = 128
     num_workers: int = 2
     precision: str = "32-true"
     devices: int = 1
+    embedding_key: Literal["features", "projections"] = "features"
 
 
 class ReduceCombinedStepConfig(BaseModel):

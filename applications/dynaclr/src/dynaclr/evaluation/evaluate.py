@@ -106,6 +106,7 @@ def _generate_predict_yaml(eval_cfg: EvaluationConfig, training_cfg: dict, outpu
         "init_args": {
             "output_path": embeddings_path,
             "overwrite": True,
+            "embedding_key": eval_cfg.predict.embedding_key,
         },
     }
 
