@@ -12,7 +12,6 @@ train/val split.
 from __future__ import annotations
 
 import logging
-import os
 
 import numpy as np
 import pandas as pd
@@ -30,6 +29,7 @@ from viscy_data._utils import BatchedCenterSpatialCropd, _transform_channel_wise
 from viscy_data.channel_dropout import ChannelDropout
 from viscy_data.channel_utils import parse_channel_name
 from viscy_data.sampler import FlexibleBatchSampler
+from viscy_utils.mp_utils import available_cpus
 
 _logger = logging.getLogger(__name__)
 
@@ -235,8 +235,7 @@ class MultiExperimentDataModule(LightningDataModule):
         # Loss hyperparameters (informational)
         # Other
         self.cache_pool_bytes = cache_pool_bytes
-        cpus = os.environ.get("SLURM_CPUS_PER_TASK")
-        cpus = int(cpus) if cpus is not None else (os.cpu_count() or 4)
+        cpus = available_cpus(default=4)
         self.tensorstore_config = TensorStoreConfig(
             data_copy_concurrency=cpus,
             cache_pool_bytes=cache_pool_bytes or None,
