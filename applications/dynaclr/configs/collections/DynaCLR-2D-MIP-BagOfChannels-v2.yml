@@ -530,31 +530,11 @@ experiments:
     pixel_size_z_um: 0.2878
 
   # ══════════════════════════════════════════════════════════════════════
-  # Microglia dynamorph — 2D label-free (BF, Phase3D, Retardance)
+  # Microglia dynamorph — 2D label-free (Phase3D only).
+  # Brightfield + Retardance dropped: same physical cells as the Phase3D
+  # entry, so they tripled this experiment's row count and biased
+  # marker/experiment sampling without adding biological signal.
   # ══════════════════════════════════════════════════════════════════════
-
-  - name: 20191107_GW23_dynamorph_Brightfield
-    data_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/20191107_1209_1_GW23_dynamorph.zarr
-    tracks_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/tracking.zarr
-    channels:
-      - name: Brightfield
-        marker: Brightfield
-    perturbation_wells:
-      untreated:
-        - C/5
-      IL17:
-        - B/4
-      IFN-beta:
-        - B/5
-      Rubella:
-        - C/4
-      Glioblastoma_supernatant:
-        - B/2
-    interval_minutes: 9.0
-    start_hpi: 0.0
-    marker: Brightfield
-    organelle: Brightfield
-    pixel_size_xy_um: 0.325
 
   - name: 20191107_GW23_dynamorph_Phase3D
     data_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/20191107_1209_1_GW23_dynamorph.zarr
@@ -577,29 +557,6 @@ experiments:
     start_hpi: 0.0
     marker: Phase3D
     organelle: Phase3D
-    pixel_size_xy_um: 0.325
-
-  - name: 20191107_GW23_dynamorph_Retardance
-    data_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/20191107_1209_1_GW23_dynamorph.zarr
-    tracks_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/tracking.zarr
-    channels:
-      - name: Retardance
-        marker: Retardance
-    perturbation_wells:
-      untreated:
-        - C/5
-      IL17:
-        - B/4
-      IFN-beta:
-        - B/5
-      Rubella:
-        - C/4
-      Glioblastoma_supernatant:
-        - B/2
-    interval_minutes: 9.0
-    start_hpi: 0.0
-    marker: Retardance
-    organelle: Retardance
     pixel_size_xy_um: 0.325
 
   # ══════════════════════════════════════════════════════════════════════
