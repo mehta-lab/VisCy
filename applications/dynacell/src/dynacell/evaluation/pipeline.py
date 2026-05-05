@@ -32,6 +32,23 @@ from dynacell.evaluation.pipeline_cache import (
 from dynacell.evaluation.utils import plot_metrics
 
 
+def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]]) -> None:
+    """Save concatenated single-cell embeddings with FOV and Timepoint metadata."""
+    embed_dir = save_dir / "embeddings"
+    embed_dir.mkdir(parents=True, exist_ok=True)
+    for name, (feats, fovs, ts) in groups.items():
+        if not feats:
+            continue
+        out_path = embed_dir / f"{name}_single_cell_embeddings.npz"
+        np.savez(
+            out_path,
+            embeddings=np.concatenate(feats, axis=0),
+            fov=np.concatenate(fovs, axis=0),
+            timepoint=np.concatenate(ts, axis=0),
+        )
+        print(f"Saved embeddings → {out_path}")
+
+
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
     from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
@@ -78,11 +95,23 @@ def evaluate_predictions(config: DictConfig):
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
     pred_cp_feats: list[np.ndarray] = []
+    pred_cp_fovs: list[np.ndarray] = []
+    pred_cp_ts: list[np.ndarray] = []
     gt_cp_feats: list[np.ndarray] = []
+    gt_cp_fovs: list[np.ndarray] = []
+    gt_cp_ts: list[np.ndarray] = []
     pred_dinov3_feats: list[np.ndarray] = []
+    pred_dinov3_fovs: list[np.ndarray] = []
+    pred_dinov3_ts: list[np.ndarray] = []
     gt_dinov3_feats: list[np.ndarray] = []
+    gt_dinov3_fovs: list[np.ndarray] = []
+    gt_dinov3_ts: list[np.ndarray] = []
     pred_dynaclr_feats: list[np.ndarray] = []
+    pred_dynaclr_fovs: list[np.ndarray] = []
+    pred_dynaclr_ts: list[np.ndarray] = []
     gt_dynaclr_feats: list[np.ndarray] = []
+    gt_dynaclr_fovs: list[np.ndarray] = []
+    gt_dynaclr_ts: list[np.ndarray] = []
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
@@ -195,12 +224,27 @@ def evaluate_predictions(config: DictConfig):
                         if pred_cp.size > 0:
                             pred_cp_feats.append(pred_cp)
                             gt_cp_feats.append(gt_cp_per_t[t])
+                            n = len(pred_cp)
+                            pred_cp_fovs.append(np.full(n, pos_name_pred))
+                            pred_cp_ts.append(np.full(n, t, dtype=np.int32))
+                            gt_cp_fovs.append(np.full(n, pos_name_pred))
+                            gt_cp_ts.append(np.full(n, t, dtype=np.int32))
                         if pred_dinov3.size > 0:
                             pred_dinov3_feats.append(pred_dinov3)
                             gt_dinov3_feats.append(gt_dinov3_per_t[t])
+                            n = len(pred_dinov3)
+                            pred_dinov3_fovs.append(np.full(n, pos_name_pred))
+                            pred_dinov3_ts.append(np.full(n, t, dtype=np.int32))
+                            gt_dinov3_fovs.append(np.full(n, pos_name_pred))
+                            gt_dinov3_ts.append(np.full(n, t, dtype=np.int32))
                         if pred_dynaclr.size > 0:
                             pred_dynaclr_feats.append(pred_dynaclr)
                             gt_dynaclr_feats.append(gt_dynaclr_per_t[t])
+                            n = len(pred_dynaclr)
+                            pred_dynaclr_fovs.append(np.full(n, pos_name_pred))
+                            pred_dynaclr_ts.append(np.full(n, t, dtype=np.int32))
+                            gt_dynaclr_fovs.append(np.full(n, pos_name_pred))
+                            gt_dynaclr_ts.append(np.full(n, t, dtype=np.int32))
 
                 seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
                 row, col, fov = pos_name_pred.split("/")
@@ -228,6 +272,17 @@ def evaluate_predictions(config: DictConfig):
         }
         for row in all_feature_metrics:
             row.update(dataset_fid_kid)
+        _save_embeddings(
+            save_dir,
+            {
+                "pred_cp": (pred_cp_feats, pred_cp_fovs, pred_cp_ts),
+                "gt_cp": (gt_cp_feats, gt_cp_fovs, gt_cp_ts),
+                "pred_dinov3": (pred_dinov3_feats, pred_dinov3_fovs, pred_dinov3_ts),
+                "gt_dinov3": (gt_dinov3_feats, gt_dinov3_fovs, gt_dinov3_ts),
+                "pred_dynaclr": (pred_dynaclr_feats, pred_dynaclr_fovs, pred_dynaclr_ts),
+                "gt_dynaclr": (gt_dynaclr_feats, gt_dynaclr_fovs, gt_dynaclr_ts),
+            },
+        )
 
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 
