@@ -22,6 +22,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
 from viscy_utils.cli_utils import load_config
+from viscy_utils.mp_utils import available_cpus
 
 
 class PlotEmbeddingsConfig(BaseModel):
@@ -265,13 +266,28 @@ def main(config: Path) -> None:
             fig = _scatter_2d(emb, adata.obs, valid_color_cols, cfg.point_size, emb_key)
             _save_fig(fig, output_dir, f"scatter_{emb_key}", cfg.format)
         else:
-            # Pairplot per color variable (PCA)
-            for col in valid_color_cols:
+            # Pairplot per color variable (PCA) — render colorings in parallel.
+            # matplotlib isn't thread-safe but is fine across processes; loky
+            # spawns one worker per coloring, each with its own figure context.
+            # Workers re-import matplotlib + seaborn (~1s overhead) so this only
+            # pays off when the per-pairplot render time exceeds that cost,
+            # which it does for any pairplot_components >= 4 on >100k cells.
+            from joblib import Parallel, delayed
+
+            n_jobs = min(len(valid_color_cols), available_cpus(default=1))
+
+            def _render_one(col):
                 try:
                     fig = _pairplot(emb, adata.obs, col, cfg.pairplot_components, cfg.point_size, emb_key)
                     _save_fig(fig, output_dir, f"pairplot_{emb_key}_{col}", cfg.format)
                 except Exception as e:
-                    click.echo(f"  Warning: pairplot {emb_key}/{col} failed: {e}", err=True)
+                    return f"  Warning: pairplot {emb_key}/{col} failed: {e}"
+                return None
+
+            messages = Parallel(n_jobs=n_jobs, backend="loky")(delayed(_render_one)(col) for col in valid_color_cols)
+            for msg in messages:
+                if msg is not None:
+                    click.echo(msg, err=True)
 
 
 if __name__ == "__main__":

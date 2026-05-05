@@ -12,4 +12,5 @@ plot:
     - marker
   point_size: 1.0
   components: [0, 1]
+  pairplot_components: 4     # render PC1..PC4 grid (4x4 = 16 panels per coloring); bump for paper figures
   format: pdf
