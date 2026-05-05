@@ -49,7 +49,7 @@ _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
   target_channel: Membrane
   z_window_size: 13
-  batch_size: 4
+  batch_size: 2
   num_workers: 4
   yx_patch_size: [512, 512]
   split_ratio: 0.8
