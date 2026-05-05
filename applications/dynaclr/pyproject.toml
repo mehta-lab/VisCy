@@ -59,6 +59,13 @@ optional-dependencies.tracking = [
   "tabulate",
   "tracksdata",
 ]
+# Visualization extras: PCA-RGB timelapse MP4 export needs the FFmpeg
+# plugin for imageio. Without it the timelapse CLI silently falls back
+# to writing an animated GIF.
+optional-dependencies.viz = [
+  "imageio-ffmpeg",
+  "matplotlib",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
