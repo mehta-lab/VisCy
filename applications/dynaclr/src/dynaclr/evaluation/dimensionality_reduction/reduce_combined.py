@@ -16,8 +16,114 @@ import numpy as np
 from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
 
-from .config import CombinedDimensionalityReductionConfig
+from .config import CombinedDimensionalityReductionConfig, PHATEConfig
 from .reduce_dimensionality import _run_pca, _run_phate, _run_umap
+
+
+def _phate_per_store_fit_idx(
+    sample_counts: list[int],
+    lineage_ids: np.ndarray | None,
+    cap: int | None,
+    random_state: int,
+) -> tuple[np.ndarray, list[dict]]:
+    """Build the PHATE fit-set with a per-store lineage cap.
+
+    For each store, draw up to ``cap`` whole lineages (random sample without
+    replacement). Stores with fewer lineages contribute all of theirs. The
+    returned indices are global row indices into the concatenated feature
+    matrix; PHATE is later transformed on the full matrix.
+
+    Parameters
+    ----------
+    sample_counts : list[int]
+        Row count contributed by each store, in concatenation order.
+    lineage_ids : np.ndarray or None
+        Per-row lineage identifier (already store-prefixed so namespaces are
+        disjoint). When None, falls back to per-store random row sampling.
+    cap : int or None
+        Maximum lineages drawn per store. ``None`` keeps every row.
+    random_state : int
+        Seed for reproducibility.
+
+    Returns
+    -------
+    fit_idx : np.ndarray
+        Global row indices used to fit PHATE.
+    per_store_stats : list[dict]
+        One row per store with ``store_idx``, ``n_lineages_total``,
+        ``n_lineages_kept``, ``n_rows_total``, ``n_rows_kept``.
+    """
+    rng = np.random.default_rng(random_state)
+    fit_indices: list[np.ndarray] = []
+    per_store_stats: list[dict] = []
+    offset = 0
+    for store_idx, n_rows in enumerate(sample_counts):
+        store_slice = slice(offset, offset + n_rows)
+        if lineage_ids is None:
+            # No lineage info: cap rows directly.
+            if cap is None or n_rows <= cap:
+                idx = np.arange(offset, offset + n_rows)
+                kept_lineages = -1  # sentinel: unknown
+                total_lineages = -1
+            else:
+                local = rng.choice(n_rows, size=cap, replace=False)
+                idx = local + offset
+                kept_lineages = -1
+                total_lineages = -1
+        else:
+            store_lineages = lineage_ids[store_slice]
+            unique_lineages = np.unique(store_lineages)
+            total_lineages = len(unique_lineages)
+            if cap is None or total_lineages <= cap:
+                idx = np.arange(offset, offset + n_rows)
+                kept_lineages = total_lineages
+            else:
+                chosen = rng.choice(unique_lineages, size=cap, replace=False)
+                local_mask = np.isin(store_lineages, chosen)
+                idx = np.where(local_mask)[0] + offset
+                kept_lineages = cap
+
+        fit_indices.append(idx)
+        per_store_stats.append(
+            {
+                "store_idx": store_idx,
+                "n_lineages_total": total_lineages,
+                "n_lineages_kept": kept_lineages,
+                "n_rows_total": n_rows,
+                "n_rows_kept": int(idx.size),
+            }
+        )
+        offset += n_rows
+
+    return np.concatenate(fit_indices), per_store_stats
+
+
+def _select_phate_input(
+    combined: np.ndarray,
+    results: dict[str, np.ndarray],
+    phate_cfg: PHATEConfig,
+) -> tuple[np.ndarray, str]:
+    """Choose what PHATE fits and transforms on.
+
+    When ``phate.n_pca`` is None, the recipe is signalling that PHATE should
+    *not* run its own internal PCA — feed the already-PCA-reduced input
+    directly. We require ``X_pca_combined`` to exist in ``results`` (PCA
+    runs first when both are configured) and use it.
+
+    When ``phate.n_pca`` is an int, fall back to the raw concatenated
+    embeddings — PHATE will run its internal PCA on them.
+    """
+    if phate_cfg.n_pca is None:
+        if "X_pca_combined" not in results:
+            raise click.ClickException(
+                "PHATE is configured with n_pca=null (skip internal PCA), "
+                "but X_pca_combined is not available. Add `pca:` to the "
+                "reduce_combined recipe so PCA runs before PHATE, or set "
+                "phate.n_pca to an int to use PHATE's internal PCA "
+                "(warning: hangs on scipy 1.17.1)."
+            )
+        return results["X_pca_combined"], "X_pca_combined"
+    return combined, "raw .X (PHATE will run internal PCA)"
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -102,12 +208,38 @@ def main(config: str):
         )
 
     # Compute reductions on joint data
+    #
+    # Order matters: PCA runs first when both PCA and PHATE are requested,
+    # so PHATE can be fit on the already-PCA-reduced X_pca_combined. This
+    # avoids PHATE's internal PCA pre-reduction (sklearn -> scipy.linalg.lu),
+    # which deadlocks silently on scipy 1.17.1 + sklearn 1.8.0. Pass
+    # n_pca=None in the recipe to skip the internal PCA when feeding
+    # PCA-reduced input.
     results: dict[str, np.ndarray] = {}
 
     runner_map = {"pca": _run_pca, "umap": _run_umap, "phate": _run_phate}
     for method_name, method_cfg in methods_to_run:
         if method_name == "phate":
-            _, embedding = _run_phate(combined, method_cfg, lineage_ids=combined_lineage_ids)
+            assert isinstance(method_cfg, PHATEConfig)
+            phate_input, source_label = _select_phate_input(combined, results, method_cfg)
+            click.echo(f"  PHATE fitting on {source_label} ({phate_input.shape[1]} dims)")
+
+            fit_idx, per_store_stats = _phate_per_store_fit_idx(
+                sample_counts=sample_counts,
+                lineage_ids=combined_lineage_ids,
+                cap=method_cfg.subsample,
+                random_state=method_cfg.random_state,
+            )
+            click.echo(
+                "\n"
+                + format_markdown_table(per_store_stats, title=f"PHATE per-store fit cap (cap={method_cfg.subsample})")
+            )
+            _, embedding = _run_phate(
+                phate_input,
+                method_cfg,
+                lineage_ids=combined_lineage_ids,
+                fit_idx=fit_idx,
+            )
         else:
             _, embedding = runner_map[method_name](combined, method_cfg)
         out_key = key_map[method_name]
