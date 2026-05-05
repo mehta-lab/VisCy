@@ -426,6 +426,14 @@ class OnlineEvalCallback(Callback):
             if int(available.min().item()) == 0:
                 return None
             arr_local = arr[:n_min]
+            # String/object dtypes cannot be converted to a torch tensor,
+            # so gather them via torch.distributed.all_gather_object as
+            # Python lists, then re-pack to a numpy array. Numeric dtypes
+            # take the fast tensor-based path.
+            if arr_local.dtype.kind in {"U", "S", "O"}:
+                gathered_list: list[np.ndarray] = [None] * world_size  # type: ignore[list-item]
+                torch.distributed.all_gather_object(gathered_list, arr_local)
+                return np.concatenate(gathered_list, axis=0)
             tensor = torch.as_tensor(arr_local, device=pl_module.device)
             gathered = pl_module.all_gather(tensor)
             # all_gather returns shape (world_size, n_min, *rest) for
