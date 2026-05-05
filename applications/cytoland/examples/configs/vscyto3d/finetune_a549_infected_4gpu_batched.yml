@@ -1,0 +1,237 @@
+# Production 4-GPU finetune of VSCyto3D on A549 infected-cell data.
+# Mirrors the dynacell joint training pattern (see
+# applications/dynacell/configs/benchmarks/virtual_staining/nucleus/
+# fcmae_vscyto3d_pretrained/joint_ipsc_confocal_a549_mantis/train.yml).
+#
+# Architecture: BatchedConcatDataModule pools D1+D2+D3 cropped zarrs
+# (~323 GB total) into a single shuffled dataset with one
+# ShardedDistributedSampler. Per dynacell joint convention, batch_size is
+# NOT divided by num_samples in joint mode — bs=16 indices × num_samples=4
+# = 64 patches/step/rank × 4 ranks = 256 patches/step total.
+#
+# Backend: zarr-python with mmap_preload to /tmp. Stages all FOVs to a
+# MemoryMappedTensor on local /tmp (28 TB) during prepare_data, then
+# closes the zarr handles. DataLoader workers fork from a parent with no
+# live zarr asyncio loop and read from the mmap'd tensor — fork-safe.
+# /dev/shm (~126 GB) is too small even for the cropped 323 GB dataset.
+#
+# Cropped zarrs (zarrv3_cropped/) shrink each FOV from
+# (T, 3ch, Z=126, 2048, 2048) full-tile down to (T, 3ch, Z=50, ~1500-2048,
+# ~1300-2048) so total staging fits well under /tmp.
+#
+# Standalone (does NOT inherit finetune_a549_infected.yml) because the
+# parent's data: block authors a CombinedDataModule with
+# train_mode/val_mode init_args that BatchedConcatDataModule rejects.
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
+
+model:
+  class_path: cytoland.engine.VSUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    # Smaller lr than the published VSCyto3D recipe because we're
+    # finetuning from a strong ckpt onto a smaller dataset (~50 FOVs)
+    # for a focused domain shift (A549 infected-cell phenotype).
+    lr: 2.0e-5
+    schedule: WarmupCosine
+    # ~50 train FOVs × ~5 T (avg) × (50-19)=31 Z windows = ~7700 patches
+    # per epoch dataset-wide. At 256 patches/step (joint, 4 ranks) →
+    # ~30 steps/epoch. ~1 epoch warmup = 30.
+    warmup_steps: 30
+    warmup_multiplier: 1e-3
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/fcmae-cyto3d-sensor/vscyto3d-logs/hek-a549-ipsc-finetune/checkpoints/epoch=83-step=14532-loss=0.492.ckpt
+
+trainer:
+  strategy: ddp_find_unused_parameters_true
+  precision: bf16-mixed
+  # Finetune budget per user spec: 30 epochs is plenty for adapting from
+  # a converged ckpt onto this small domain-shifted set.
+  max_epochs: 30
+  logger:
+    init_args:
+      project: cytoland
+      name: VSCyto3D_ft_A549_infected_4gpu_batched
+      save_dir: /hpc/mydata/eduardo.hirata/cytoland/a549_infected_4gpu_batched
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/mydata/eduardo.hirata/cytoland/a549_infected_4gpu_batched/checkpoints
+
+# Shared HCS init args — mirrors dynacell joint config defaults.
+_hcs_init_args: &hcs_init_args
+  z_window_size: 20
+  split_ratio: 0.8
+  # Joint mode: batch_size is NOT divided by num_samples (see
+  # BatchedConcatDataModule.train_dataloader). 16 indices × num_samples=4
+  # = 64 patches/step/rank × 4 ranks = 256 patches/step.
+  batch_size: 16
+  # OOM-tuned for the cropped 459 GB mmap working set: each worker pulls
+  # full-FOV slabs (~660 MB read per index) before cropping. 16 indices
+  # × num_workers × prefetch_factor batches in-flight = the binding
+  # constraint, not the mmap virtual size. Halving each cuts ~4× per
+  # rank.
+  num_workers: 2
+  prefetch_factor: 1
+  persistent_workers: true
+  mmap_preload: true
+  scratch_dir: /tmp
+  pin_memory: false
+  yx_patch_size: [384, 384]
+
+# CPU-side weighted crop — dynacell pattern. RandWeightedCropd with
+# num_samples=4 yields 4 patches per stack, all weighted by the nuclear
+# marker channel. Runs in DataLoader workers (fork-safe because mmap_
+# preload closed zarr handles before fork).
+_d1_d2_normalizations: &d1_d2_normalizations
+  - class_path: viscy_transforms.NormalizeSampled
+    init_args:
+      keys: [Phase3D]
+      level: timepoint_statistics
+      subtrahend: mean
+      divisor: std
+  - class_path: viscy_transforms.NormalizeSampled
+    init_args:
+      keys: [DAPI_Density3D, TXR_Density3D]
+      level: timepoint_statistics
+      subtrahend: median
+      divisor: iqr
+
+_d1_d2_augmentations: &d1_d2_augmentations
+  - class_path: viscy_transforms.RandWeightedCropd
+    init_args:
+      keys: [Phase3D, DAPI_Density3D, TXR_Density3D]
+      w_key: DAPI_Density3D
+      spatial_size: [20, 600, 600]
+      num_samples: 4
+
+_gpu_augmentations: &gpu_augmentations
+  - class_path: viscy_transforms.BatchedRandAffined
+    init_args:
+      keys: [source, target]
+      prob: 0.8
+      rotate_range: [3.14, 0, 0]
+      shear_range: [0.0, 0.05, 0.05]
+      scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+  - class_path: viscy_transforms.BatchedCenterSpatialCropd
+    init_args:
+      keys: [source, target]
+      roi_size: [15, 384, 384]
+  - class_path: viscy_transforms.BatchedRandAdjustContrastd
+    init_args:
+      keys: [source]
+      prob: 0.5
+      gamma: [0.8, 1.2]
+  - class_path: viscy_transforms.BatchedRandScaleIntensityd
+    init_args:
+      keys: [source]
+      prob: 0.5
+      factors: 0.5
+  - class_path: viscy_transforms.BatchedRandGaussianNoised
+    init_args:
+      keys: [source]
+      prob: 0.5
+      mean: 0.0
+      std: 0.3
+  - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+    init_args:
+      keys: [source]
+      prob: 0.5
+      sigma_x: [0.25, 0.75]
+      sigma_y: [0.25, 0.75]
+      sigma_z: [0.25, 0.75]
+
+_val_gpu_augmentations: &val_gpu_augmentations
+  - class_path: viscy_transforms.BatchedCenterSpatialCropd
+    init_args:
+      keys: [source, target]
+      roi_size: [15, 384, 384]
+
+data:
+  class_path: viscy_data.combined.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # D1 — Hummingbird 2026-01-29 (cropped: 15 FOVs, T=3, Z=50, 2048×2048)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/a549/2026_05_infected_cell/zarrv3_cropped/2026_01_29_A549_H2B_CAAX_DAPI_DENV_ZIKV.zarr
+          source_channel: Phase3D
+          target_channel: [DAPI_Density3D, TXR_Density3D]
+          normalizations: *d1_d2_normalizations
+          augmentations: *d1_d2_augmentations
+          gpu_augmentations: *gpu_augmentations
+          val_gpu_augmentations: *val_gpu_augmentations
+
+      # D2 — Hummingbird 2026-03-10 (cropped: 15 FOVs, T=3, Z=50, 2025×1998)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/a549/2026_05_infected_cell/zarrv3_cropped/2026_03_10_A549_H2B_CAXX_DAPI_DENV_ZIKV.zarr
+          source_channel: Phase3D
+          target_channel: [DAPI_Density3D, TXR_Density3D]
+          normalizations: *d1_d2_normalizations
+          augmentations: *d1_d2_augmentations
+          gpu_augmentations: *gpu_augmentations
+          val_gpu_augmentations: *val_gpu_augmentations
+
+      # D3 — Mantis 2026-03-26 (cropped: 17 FOVs, T=11, Z=50, 1600×1332).
+      # 27 FOVs held out for test on the un-cropped store.
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/a549/2026_05_infected_cell/zarrv3_cropped/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
+          source_channel: Phase3D
+          target_channel:
+            - "raw Cy5 EX639 EM698-70"
+            - "raw mCherry EX561 EM600-37"
+          normalizations:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: timepoint_statistics
+                subtrahend: mean
+                divisor: std
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys:
+                  - "raw mCherry EX561 EM600-37"
+                  - "raw Cy5 EX639 EM698-70"
+                level: timepoint_statistics
+                subtrahend: median
+                divisor: iqr
+          augmentations:
+            - class_path: viscy_transforms.RandWeightedCropd
+              init_args:
+                keys:
+                  - Phase3D
+                  - "raw mCherry EX561 EM600-37"
+                  - "raw Cy5 EX639 EM698-70"
+                w_key: "raw Cy5 EX639 EM698-70"   # H2B nuclear marker; mCherry is membrane on D3
+                spatial_size: [20, 600, 600]
+                num_samples: 4
+          gpu_augmentations: *gpu_augmentations
+          val_gpu_augmentations: *val_gpu_augmentations
