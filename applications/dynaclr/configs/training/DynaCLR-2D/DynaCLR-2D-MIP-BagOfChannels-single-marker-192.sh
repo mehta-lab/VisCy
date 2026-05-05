@@ -8,15 +8,19 @@
 
 #SBATCH --job-name=dynaclr_2d_sm192
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4
-#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=2
+#SBATCH --gres=gpu:2
 #SBATCH --constraint="h100|h200"
 #SBATCH --partition=gpu
 #SBATCH --cpus-per-task=15
-# 14 GB/CPU × 15 CPUs = 210 GB/rank, 840 GB/node. Bumped from 8G after
-# rank 2 OOM'd on the 384² patches × prefetch buffers (job 31447592).
-# Matches the OPS sbatch which has the same multi-GB-batch profile.
-#SBATCH --mem-per-cpu=14G
+# 17 GB/CPU × 15 CPUs = 255 GB/rank, 510 GB/node on 2 GPUs. Bumped from 14G
+# after rank 3 host-RAM OOM on 384² patches (job 31449149). Combined with
+# prefetch_factor=1 in datamodule. Dropped from 4 GPUs to 2 to ease queueing;
+# batch_size kept at 256/rank — host RAM was the OOM driver (cgroup), not
+# VRAM, and that scales with workers × prefetch, not batch_size. If this
+# still OOMs, suspect a real leak (loky semaphores, tensorstore decoder
+# scratch) — investigate rather than papering over with more RAM.
+#SBATCH --mem-per-cpu=17G
 #SBATCH --time=3-00:00:00
 
 export PROJECT="DynaCLR-2D-MIP-BagOfChannels"

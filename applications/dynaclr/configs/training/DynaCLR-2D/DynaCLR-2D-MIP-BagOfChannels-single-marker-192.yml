@@ -8,6 +8,9 @@
 #   --config applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.yml
 #   --config applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker-192.yml
 
+trainer:
+  devices: 2
+
 model:
   init_args:
     example_input_array_shape: [1, 1, 1, 192, 192]

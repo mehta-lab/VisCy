@@ -90,9 +90,9 @@ data:
     # 26 plates × 500 MB per-plate cache pools = ~13 GB of dead weight (iohub
     # 0.3.x creates one ts.Context per open_ome_zarr; random sampling across
     # plates → near-zero hit rate). Disable. Cap ThreadBuffer queue to one
-    # batch and let prefetch_factor=2 do modest pipelining without runaway
-    # in-flight memory.
-    prefetch_factor: 2
+    # batch. prefetch_factor=1 (was 2) after rank 3 host-RAM OOM on 384²
+    # patches (job 31449149) — halves in-flight batch count per worker.
+    prefetch_factor: 1
     buffer_size: 1
     cache_pool_bytes: 0
     # Match historical iohub default; the 128 we tried for +8.6% A/B amplifies
