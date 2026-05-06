@@ -1,0 +1,45 @@
+# FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: cell membrane trained on joint
+# iPSC+A549, predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from job 31822529 (epoch 111, loss/validate=0.3754).
+# Wandb run 20260501-004706_FCMAE_VSCyto3D_Pretrained_JOINT_MEMB (state=finished,
+# 119 ep / 63,179 steps).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: membrane__joint_ipsc_confocal_a549_mantis__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=111-step=59360.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_pretrained_jointtrained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_MEMB_JOINTTR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
