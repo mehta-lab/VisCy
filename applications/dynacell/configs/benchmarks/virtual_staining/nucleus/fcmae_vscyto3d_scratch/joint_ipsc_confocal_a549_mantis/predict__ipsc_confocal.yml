@@ -1,0 +1,45 @@
+# FCMAE_VSCyto3D_Scratch (UNeXt2) predict: nucleus trained on joint iPSC+A549,
+# predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from job 31822521 (epoch 92, loss/validate=0.6448).
+# Job hit the 4-day SLURM wall at 2026-05-05 00:43 (TIMEOUT); 5 best-val ckpts
+# saved by top-K — ep92 is the best of the 5.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__fcmae_vscyto3d_scratch__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fcmae_vscyto3d_scratch/checkpoints/epoch=92-step=49290.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_scratch_jointtrained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_NUCL_JOINTTR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
