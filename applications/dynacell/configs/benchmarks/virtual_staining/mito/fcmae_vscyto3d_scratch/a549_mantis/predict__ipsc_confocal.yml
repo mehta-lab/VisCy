@@ -1,0 +1,53 @@
+# FCMAE_VSCyto3D_Scratch (UNeXt2) predict: mito trained on a549_mantis (tomm20),
+# predicting against ipsc_confocal test_cropped.
+# Pinned to checkpoint epoch=113-step=18012 from the original training
+# (J31910360, wandb display 20260502-204546_FCMAE_VSCyto3D_Scratch_A549_TOMM20).
+# Best-val ckpt per resume's re-evaluation: 0.7329 (ep113) — virtually tied
+# with ep118 at 0.7327. NOTE: the wandb run id `20260502-204536` collided with
+# the simultaneous SEC61B training (J31910346 on the same node gpu-f-5);
+# wandb's history values for that run are SEC61B's metrics, not TOMM20's, so
+# the original-training's true val trajectory is not recoverable from wandb.
+# The 0.7327/0.7329 figures come from the resume Lightning trainer's local
+# best_k_models block in last.ckpt — that is the only TOMM20-pipeline number
+# we have. Both iPSC and a549 manifests use `tomm20`; targets/mito_tomm20.yml
+# handles both natively, no dataset_ref override needed.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: mito__a549_mantis__fcmae_vscyto3d_scratch__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fcmae_vscyto3d_scratch/checkpoints/epoch=113-step=18012.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_fcmae_vscyto3d_scratch_a549trained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_TOMM20_A549TR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
