@@ -1,0 +1,45 @@
+# FNet3D paper-baseline predict: cell membrane trained on joint iPSC+A549,
+# predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from job 31962519 (epoch 116, val 0.5759).
+# Wandb run 20260503-181142_FNet3D_JOINT_MEMB_paper (state=finished, 129 ep /
+# 199,999 steps; final val 0.6751 — drifted slightly past ep116 best).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fnet3d_paper
+  experiment_id: membrane__joint_ipsc_confocal_a549_mantis__fnet3d_paper__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fnet3d_paper/checkpoints/epoch=116-step=180882.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fnet3d_paper_jointtrained.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_MEMB_JOINTTR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
