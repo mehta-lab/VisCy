@@ -43,8 +43,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_celldiff_joint_zikv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_celldiff_joint_zikv.zarr
 
 launcher:
   job_name: CELLDiff_JOINT_PRED_NUCL_ON_A549_ZIKV
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions
