@@ -19,6 +19,12 @@ base:
 trainer:
   precision: bf16-mixed
   max_epochs: 100
+  # Cap epoch length so wall time stays bounded and the val signal lands
+  # often. Matches DynaCLR-2D-MIP-BagOfChannels. Also avoids host-OOM
+  # observed at ~2h elapsed on the prior unbounded run (job 32536880),
+  # likely from accumulated MetaTensors in training-step logging.
+  limit_train_batches: 800
+  limit_val_batches: 200
   logger:
     init_args:
       project: CELL-DINO-temporal-MLP-2D-BagOfChannels-v1
