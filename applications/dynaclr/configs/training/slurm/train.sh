@@ -12,7 +12,7 @@
 # Optional env vars:
 #   WORKSPACE_DIR  Repo root (default: /hpc/mydata/eduardo.hirata/repos/viscy)
 #   MODEL_ROOT     Model output root (default: /hpc/projects/organelle_phenotyping/models)
-#   EXTRA_ARGS     Extra CLI args passed to viscy fit
+#   EXTRA_ARGS     Extra CLI args passed to dynaclr fit
 #   CKPT_PATH      Path to checkpoint to resume from (appends --ckpt_path)
 #   WANDB_RUN_ID   W&B run ID to resume (continues metrics on same run)
 #   CALLER_SCRIPT  Set automatically by train.sh — the sbatch script that sourced us
@@ -71,7 +71,7 @@ if [ -n "${WANDB_RUN_ID:-}" ]; then
   WANDB_ID_FLAG="--trainer.logger.init_args.id=${WANDB_RUN_ID} --trainer.logger.init_args.resume=must"
 fi
 
-srun uv run --project "$WORKSPACE_DIR" viscy fit \
+srun uv run --project "$WORKSPACE_DIR" dynaclr fit \
   ${CONFIG_FLAGS} \
   --trainer.default_root_dir="${RUN_DIR}" \
   --trainer.logger.init_args.project="${PROJECT}" \
