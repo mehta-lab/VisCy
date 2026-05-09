@@ -126,12 +126,11 @@ Training configs use Lightning CLI `base:` inheritance:
 
 ```yaml
 base:
-  - recipes/trainer.yml                              # seed, accelerator, logger, callbacks
-  - recipes/model/contrastive_encoder_convnext_tiny.yml  # or dinov3_frozen_mlp.yml
+  - ../recipes/trainer/fit.yml                              # seed, logger, callbacks
+  - ../recipes/topology/ddp_2gpu.yml                        # accelerator/strategy/devices
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml  # or dinov3_frozen_mlp.yml, cell_dino_frozen_mlp.yml
 
 trainer:
-  strategy: ddp
-  devices: 2
   precision: bf16-mixed
   max_epochs: 150
 
@@ -139,6 +138,10 @@ data:
   cell_index_path: /hpc/.../collections/<collection>.parquet
   ...
 ```
+
+Recipes are split into orthogonal axes (`trainer/`, `topology/`,
+`data/`, `augmentations/`, `model/`) so leaves only re-declare what
+varies per experiment.
 
 SLURM `.sh` scripts export `PYTHONNOUSERSITE=1` and launch via `srun` for DDP.
 

@@ -47,9 +47,25 @@ one level below `recipes/`, they use `../recipes/...`):
 ```yaml
 # DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.yml
 base:
-  - ../recipes/trainer.yml
+  - ../recipes/trainer/fit.yml          # logger, callbacks, log cadence
+  - ../recipes/topology/ddp_4gpu.yml    # accelerator/strategy/devices
   - ../recipes/model/contrastive_encoder_convnext_tiny.yml
 ```
+
+Recipes are split into orthogonal axes so leaves only re-declare what
+varies per experiment:
+
+| Axis        | Path                  | Examples                              |
+|-------------|-----------------------|---------------------------------------|
+| trainer     | `recipes/trainer/`    | `fit.yml` (logger/callbacks/log cadence) |
+| topology    | `recipes/topology/`   | `single_gpu.yml`, `ddp_2gpu.yml`, `ddp_4gpu.yml`, `ddp_8gpu.yml` |
+| data        | `recipes/data/`       | `ops_gene_reporter.yml`               |
+| augmentations | `recipes/augmentations/` | `ops_2d_mild.yml`               |
+| model       | `recipes/model/`      | `contrastive_encoder_convnext_tiny.yml`, `dinov3_frozen_mlp.yml`, `cell_dino_frozen_mlp.yml` |
+
+Leaves typically override only `precision`, `max_epochs`,
+`logger.init_args.project/name`, and (when needed) re-list `callbacks`
+to add `OnlineEvalCallback`.
 
 `viscy_utils.compose.load_composed_config` walks the `base:` chain,
 deep-merges dicts, and replaces lists.
