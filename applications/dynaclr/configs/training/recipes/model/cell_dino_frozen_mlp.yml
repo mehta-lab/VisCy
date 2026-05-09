@@ -1,0 +1,37 @@
+# Model recipe: Frozen CELL-DINO (channel-adaptive ViT-L/16) backbone +
+# trainable MLP projection.
+#
+# CELL-DINO is a DINOv2 ViT-L/16 pretrained on Human Protein Atlas
+# fluorescence microscopy. Weights are loaded from a local .pth in
+# CellDinoModel.__init__ (no network fetch).
+#
+# Backbone feature dim: 1024 (ViT-L cls token after channel mean-pool).
+#
+# Leaf configs override: pca_color_keys, example_input_array_shape.
+
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.foundation.CellDinoModel
+      init_args:
+        weights_path: /hpc/projects/organelle_phenotyping/models/CELL-DINO/model_weights/weights/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth
+        img_size: 224
+        patch_size: 16
+        freeze: true
+        projection:
+          class_path: viscy_models.components.heads.MLP
+          init_args:
+            in_dims: 1024
+            hidden_dims: 1024
+            out_dims: 128
+            norm: ln
+            activation: relu
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentLoss
+      init_args:
+        temperature: 0.5
+    lr: 0.0001
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 3
+    log_embeddings_every_n_epochs: 10
