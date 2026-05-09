@@ -1,8 +1,18 @@
-"""Click-based CLI for DynaCLR evaluation and analysis tools."""
+"""DynaCLR command-line entry point.
+
+Routes Lightning subcommands (``fit``, ``predict``, ``test``, ``validate``) to
+:func:`viscy_utils.cli.main` so leaf YAMLs composed via ``base:`` recipe
+inheritance can be trained directly with ``dynaclr fit -c …``. All other
+subcommands (eval tooling, plotting, etc.) dispatch through the Click group
+defined below.
+"""
 
 import importlib
+import sys
 
 import click
+
+_LIGHTNING_SUBCOMMANDS = frozenset({"fit", "predict", "test", "validate"})
 
 
 class LazyCommand(click.Command):
@@ -256,7 +266,18 @@ dynaclr.add_command(
 
 
 def main():
-    """Run the DynaCLR CLI."""
+    """Run the DynaCLR CLI.
+
+    Lightning subcommands (``fit``, ``predict``, ``test``, ``validate``)
+    are routed to :func:`viscy_utils.cli.main`, which handles ``base:``
+    recipe composition before LightningCLI parses the resolved config.
+    All other subcommands dispatch through the Click group.
+    """
+    if len(sys.argv) >= 2 and sys.argv[1] in _LIGHTNING_SUBCOMMANDS:
+        from viscy_utils.cli import main as viscy_main
+
+        viscy_main()
+        return
     dynaclr()
 
 
