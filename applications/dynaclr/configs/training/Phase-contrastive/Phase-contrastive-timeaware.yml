@@ -8,12 +8,11 @@
 #   sbatch applications/dynaclr/configs/training/Phase-contrastive/Phase-contrastive-timeaware.sh
 
 base:
-  - ../recipes/trainer.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/single_gpu.yml
   - ../recipes/model/dinov3_frozen_mlp.yml
 
 trainer:
-  strategy: auto
-  devices: 1
   precision: 32-true
   max_epochs: 150
   callbacks:

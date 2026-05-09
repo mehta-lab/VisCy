@@ -15,12 +15,11 @@
 #   CKPT_PATH=.../last.ckpt sbatch .../DynaCLR-3D-BagOfChannels-v2.sh
 
 base:
-  - ../recipes/trainer.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_2gpu.yml
   - ../recipes/model/contrastive_encoder_convnext_tiny.yml
 
 trainer:
-  strategy: ddp
-  devices: 2
   precision: bf16-mixed
   max_epochs: 150
   logger:

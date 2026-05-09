@@ -11,12 +11,11 @@
 #   CKPT_PATH=.../last.ckpt sbatch .../DINOv3-temporal-MLP-2D-BagOfChannels.sh
 
 base:
-  - ../recipes/trainer.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_2gpu.yml
   - ../recipes/model/dinov3_frozen_mlp.yml
 
 trainer:
-  strategy: ddp
-  devices: 2
   precision: bf16-mixed
   max_epochs: 100
   logger:

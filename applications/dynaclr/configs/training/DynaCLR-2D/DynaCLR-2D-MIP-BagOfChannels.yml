@@ -13,12 +13,11 @@
 #   CKPT_PATH=.../last.ckpt sbatch .../DynaCLR-2D-MIP-BagOfChannels.sh
 
 base:
-  - ../recipes/trainer.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
   - ../recipes/model/contrastive_encoder_convnext_tiny.yml
 
 trainer:
-  strategy: ddp
-  devices: 4
   precision: bf16-mixed
   max_epochs: 150
   # 2.7M train anchors × bs=256 = ~10.5k full-epoch batches → 85 min/epoch
