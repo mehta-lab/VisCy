@@ -29,7 +29,7 @@ trainer:
   logger:
     init_args:
       name: CELLDiff_JOINT_TOMM20
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff_r2
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -39,10 +39,10 @@ trainer:
         every_n_epochs: 1
         save_top_k: -1
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff_r2/checkpoints
 
 # `_`-prefixed top-level keys are stripped by load_composed_config; see
-# er/celldiff/joint_*/train.yml for the full anchor-convention rationale.
+# er/celldiff_r2/joint_*/train.yml for the full anchor-convention rationale.
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
   target_channel: Structure
@@ -55,18 +55,14 @@ _hcs_init_args: &hcs_init_args
   scratch_dir: /dev/shm
   persistent_workers: true
   normalizations:
-    - class_path: viscy_transforms.NormalizeSampled
+    - class_path: viscy_transforms.MinMaxSampled
       init_args:
         keys: [Phase3D]
-        level: fov_statistics
-        subtrahend: mean
-        divisor: std
-    - class_path: viscy_transforms.NormalizeSampled
+        level: timepoint_statistics
+    - class_path: viscy_transforms.MinMaxSampled
       init_args:
         keys: [Structure]
-        level: fov_statistics
-        subtrahend: median
-        divisor: iqr
+        level: timepoint_statistics
   augmentations:
     - class_path: viscy_transforms.RandWeightedCropd
       init_args:
@@ -134,7 +130,7 @@ data:
 
 launcher:
   job_name: CELLDiff_JOINT_TOMM20
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/celldiff_r2
   # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; the default
   # 256G cap is too tight (256G iPSC mem + ~50G A549 + worker peak OOMs).
   # 512G is the smallest tier that fits joint preload + worker overhead.

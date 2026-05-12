@@ -1,7 +1,7 @@
 # CellDiff fit on membrane (Membrane channel of cell.zarr) — A549 mantis-lightsheet pooled (mock + DENV + ZIKV).
 base:
   - ../../../_internal/shared/model/train_sets/a549_mantis.yml
-  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/targets/membrane_celldiff.yml
   - ../../../_internal/shared/model/data_overlays/celldiff_fit.yml
   - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
@@ -19,7 +19,7 @@ trainer:
   logger:
     init_args:
       name: CELLDiff_A549_MEMB
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff_r2
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -29,7 +29,7 @@ trainer:
         every_n_epochs: 1
         save_top_k: -1
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff_r2/checkpoints
 
 data:
   init_args:
@@ -39,4 +39,4 @@ data:
 
 launcher:
   job_name: CELLDiff_A549_MEMB
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff_r2
