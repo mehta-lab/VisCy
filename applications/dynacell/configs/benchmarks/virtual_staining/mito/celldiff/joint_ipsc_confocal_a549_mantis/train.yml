@@ -47,7 +47,10 @@ _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
   target_channel: Structure
   z_window_size: 13
-  batch_size: 4
+  # batch_size=2 (not the celldiff_fit.yml default of 4): BatchedConcatDataModule
+  # does NOT divide by num_samples (see CLAUDE.md), so 4 × num_samples=2 = 8 GPU
+  # samples/step OOMs H200 140 GiB at unet/blocks.py:187 (h + res_conv(x)).
+  batch_size: 2
   num_workers: 4
   yx_patch_size: [512, 512]
   split_ratio: 0.8
