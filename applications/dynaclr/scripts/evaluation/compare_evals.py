@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import anndata as ad
 import click
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,24 +42,62 @@ _PER_CLASS_METRIC_RE = re.compile(r"^val_(?P<cls>.+)_(?P<metric>precision|recall
 # ---------------------------------------------------------------------------
 
 
-def _load_registry(path: Path) -> tuple[list[dict], Path, float]:
+def _load_registry(
+    path: Path,
+) -> tuple[list[dict], Path, float, list[str] | None, tuple[float, float] | None]:
     with open(path) as f:
         raw = yaml.safe_load(f)
     output_dir = Path(raw["output_dir"])
     fdr_threshold = float(raw.get("fdr_threshold", 0.05))
-    return raw["models"], output_dir, fdr_threshold
+    palette_anchor = raw.get("palette_anchor")
+    tw_raw = raw.get("time_window")
+    time_window: tuple[float, float] | None = None
+    if tw_raw is not None:
+        if not (isinstance(tw_raw, list) and len(tw_raw) == 2):
+            raise ValueError(f"time_window must be a [lo, hi] list, got {tw_raw!r}")
+        time_window = (float(tw_raw[0]), float(tw_raw[1]))
+    return raw["models"], output_dir, fdr_threshold, palette_anchor, time_window
 
 
-def _build_model_palette(model_names: list[str]) -> dict[str, tuple[float, float, float, float]]:
+def _build_model_palette(
+    model_names: list[str],
+    palette_anchor: list[str] | None = None,
+) -> dict[str, tuple[float, float, float, float]]:
     """Map model name → RGBA color, stable across all plots in one run.
 
     Uses ``tab10`` for ≤10 models (10 visually distinct hues) and ``tab20``
     for 11–20 models. Colors are picked from discrete colormap indices so
     they don't blur into each other when many models are compared.
+
+    Parameters
+    ----------
+    model_names
+        Models present in the current registry.
+    palette_anchor
+        Optional canonical ordering of model names to source colors from.
+        When provided, each model picks its color by its index in this
+        anchor list — so the same model gets the same color across multiple
+        registries that share the anchor (e.g. infectomics + alfi). Models
+        not in the anchor fall back to the next available colormap slot
+        after the anchor's length.
     """
-    n = len(model_names)
-    cmap = plt.cm.tab10 if n <= 10 else plt.cm.tab20
-    return {name: cmap(i % cmap.N) for i, name in enumerate(sorted(model_names))}
+    if palette_anchor is None:
+        n = len(model_names)
+        cmap = plt.cm.tab10 if n <= 10 else plt.cm.tab20
+        return {name: cmap(i % cmap.N) for i, name in enumerate(sorted(model_names))}
+
+    anchor_idx = {name: i for i, name in enumerate(sorted(palette_anchor))}
+    n_anchor = len(palette_anchor)
+    cmap = plt.cm.tab10 if n_anchor <= 10 else plt.cm.tab20
+    palette: dict[str, tuple[float, float, float, float]] = {}
+    next_extra = n_anchor
+    for name in sorted(model_names):
+        if name in anchor_idx:
+            palette[name] = cmap(anchor_idx[name] % cmap.N)
+        else:
+            palette[name] = cmap(next_extra % cmap.N)
+            next_extra += 1
+    return palette
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +508,384 @@ def _build_mmd_summary(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Infection kinetics — percent infected over time per channel
+# ---------------------------------------------------------------------------
+
+
+_INFECTION_COLS = (
+    "experiment",
+    "marker",
+    "perturbation",
+    "hours_post_perturbation",
+    "infection_state",
+    "predicted_infection_state",
+)
+
+
+def _load_infection_kinetics(models: list[dict]) -> pd.DataFrame | None:
+    """Load per-cell infection state + predictions from per-experiment zarrs.
+
+    Each ``{eval_dir}/embeddings/*.zarr`` carries a single marker. We pull
+    only the obs columns needed for the kinetics plot and tag rows with the
+    model name. Ground truth (``infection_state``) is identical across
+    models for the same cell, so we keep the model tag and dedupe at plot
+    time.
+    """
+    frames = []
+    for entry in models:
+        emb_dir = Path(entry["eval_dir"]) / "embeddings"
+        zarrs = sorted(emb_dir.glob("*.zarr"))
+        if not zarrs:
+            click.echo(f"[infection] No per-experiment zarrs for {entry['name']}: {emb_dir}", err=True)
+            continue
+        per_model = []
+        for zpath in zarrs:
+            adata = ad.read_zarr(zpath)
+            present = [c for c in _INFECTION_COLS if c in adata.obs.columns]
+            missing = set(_INFECTION_COLS) - set(present)
+            if "infection_state" in missing or "predicted_infection_state" in missing:
+                continue
+            df = adata.obs[present].copy()
+            for col in missing:
+                df[col] = pd.NA
+            per_model.append(df)
+        if not per_model:
+            click.echo(f"[infection] No usable zarrs for {entry['name']}", err=True)
+            continue
+        df_model = pd.concat(per_model, ignore_index=True)
+        df_model["model"] = entry["name"]
+        frames.append(df_model)
+    if not frames:
+        return None
+    out = pd.concat(frames, ignore_index=True)
+    out["hours_post_perturbation"] = pd.to_numeric(out["hours_post_perturbation"], errors="coerce")
+    return out.dropna(subset=["hours_post_perturbation", "marker"])
+
+
+def _infection_curve(
+    df: pd.DataFrame, label_col: str, bin_edges: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Bin cells by ``hours_post_perturbation`` and compute % infected per bin.
+
+    Treats both real NA and the literal string ``'nan'`` as missing — the
+    annotation columns in the per-experiment zarrs use the string ``'nan'``
+    placeholder for un-annotated cells, and a naive ``.dropna()`` would
+    keep those rows and inflate the denominator.
+    """
+    centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    pct = np.full(len(centers), np.nan)
+    n = np.zeros(len(centers), dtype=int)
+    bin_idx = np.digitize(df["hours_post_perturbation"].to_numpy(), bin_edges) - 1
+    labels = df[label_col].astype(object)
+    for i in range(len(centers)):
+        mask = bin_idx == i
+        if not mask.any():
+            continue
+        slab = labels[mask].dropna().astype(str)
+        slab = slab[slab != "nan"]
+        if slab.empty:
+            continue
+        pct[i] = 100.0 * (slab == "infected").mean()
+        n[i] = len(slab)
+    return centers, pct, n
+
+
+_MARKER_COLORS: dict[str, str] = {
+    "Phase3D": "#1f77b4",
+    "viral_sensor": "#d62728",
+    "SEC61B": "#2ca02c",
+    "G3BP1": "#9467bd",
+    "TOMM20": "#ff7f0e",
+}
+
+
+def _marker_color(marker: str, fallback_idx: int) -> str:
+    if marker in _MARKER_COLORS:
+        return _MARKER_COLORS[marker]
+    cmap = plt.cm.tab10
+    return cmap(fallback_idx % cmap.N)
+
+
+def _plot_infection_kinetics(
+    df: pd.DataFrame,
+    output_dir: Path,
+    model_color: dict,
+    time_window: tuple[float, float] | None = None,
+) -> None:
+    """Plot percent infected over time, one subplot per model.
+
+    Layout
+    ------
+    One subplot per model. Inside each subplot:
+
+    - A dashed line per channel = canonical ``infection_state`` annotation
+      curve. The canonical source is the model with the largest non-null
+      annotation count for that channel; the same curve is drawn on every
+      subplot so models are compared against the same ground truth.
+    - A solid line per channel = ``predicted_infection_state`` from that
+      model's per-channel linear classifier.
+
+    Models whose annotation curve diverges from canonical (different
+    `n_cells` or different mean pct) are logged so stale append_annotations
+    runs and FOV-inclusion drift are still discoverable from the CSV/stdout
+    even though they no longer pollute the plot.
+
+    Restricted to ``perturbation == 'infected'`` cells — uninfected wells
+    are a flat-line background by construction.
+    """
+    df = df[df["perturbation"].astype(str) == "infected"].copy()
+    if df.empty:
+        click.echo("[infection] No cells with perturbation='infected' — skipping", err=True)
+        return
+
+    # Clip to a common time window before binning. The infectomics-annotated
+    # cohort pools experiments with very different durations (e.g. ZIKV
+    # series ends at ~25h, DENV runs to 66h). Without a common window, late
+    # bins are dominated by long-running experiments and early bins by short
+    # ones — the "cohort composition over time" artifact, not biology.
+    if time_window is not None:
+        lo, hi = time_window
+        before = len(df)
+        df = df[(df["hours_post_perturbation"] >= lo) & (df["hours_post_perturbation"] <= hi)]
+        click.echo(
+            f"[infection] time_window={lo}-{hi}h: kept {len(df)}/{before} cells",
+            err=True,
+        )
+        if df.empty:
+            click.echo("[infection] time_window filter dropped all cells — skipping", err=True)
+            return
+
+    markers = sorted(df["marker"].dropna().astype(str).unique())
+    models = sorted(df["model"].unique())
+    if not markers or not models:
+        return
+
+    hmin = float(df["hours_post_perturbation"].min())
+    hmax = float(df["hours_post_perturbation"].max())
+    n_bins = 12
+    bin_edges = np.linspace(hmin, hmax, n_bins + 1)
+
+    marker_color = {m: _marker_color(m, i) for i, m in enumerate(markers)}
+
+    def _real_annotated(s: pd.Series) -> int:
+        ss = s.dropna().astype(str)
+        return int((ss != "nan").sum())
+
+    # The `infection_state` annotation is viral-sensor-derived and
+    # propagated to every channel zarr of the same cell — it is a
+    # per-(track, timepoint) call, not a per-channel call. Compute ONE
+    # canonical annotation curve and draw it on every subplot as the
+    # shared ground truth.
+    #
+    # Canonical selection: each model has a different annotation set
+    # depending on (a) which FOVs the SSL/inference pipeline kept and
+    # (b) whether append_annotations was re-run after the canonical
+    # annotation CSV updated. Picking "most labels" is wrong — a stale
+    # bundle with an outdated CSV can have more rows but disagree with
+    # everyone else. Instead pick the model whose annotation curve agrees
+    # MOST with the others (smallest mean pairwise |Δpct|). Ties broken
+    # by larger n_annotated, then by model name.
+    annotated_per_model = df.groupby("model")["infection_state"].apply(_real_annotated)
+    if annotated_per_model.empty or annotated_per_model.max() == 0:
+        click.echo("[infection] No infection_state annotations found — skipping", err=True)
+        return
+
+    per_model_curve: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    for model in models:
+        sub = df[df["model"] == model]
+        per_model_curve[model] = _infection_curve(sub, "infection_state", bin_edges)
+
+    pairwise_delta: dict[str, float] = {}
+    for m in models:
+        _, m_pct, _ = per_model_curve[m]
+        deltas: list[float] = []
+        for other in models:
+            if other == m:
+                continue
+            _, o_pct, _ = per_model_curve[other]
+            deltas.append(float(np.nanmean(np.abs(m_pct - o_pct))))
+        pairwise_delta[m] = float(np.mean(deltas)) if deltas else 0.0
+
+    canonical_model = min(
+        models,
+        key=lambda m: (
+            pairwise_delta[m],
+            -int(annotated_per_model.get(m, 0)),
+            m,
+        ),
+    )
+    canon_centers, canon_pct, canon_n = per_model_curve[canonical_model]
+
+    click.echo(
+        f"[infection] canonical annotation source: model={canonical_model} "
+        f"n_annotated={int(annotated_per_model.max())}",
+        err=True,
+    )
+
+    # Surface bundles whose annotation curve disagrees with canonical —
+    # either different denominator (FOV-inclusion drift) or different
+    # numerator (stale append_annotations).
+    canon_total = int(np.nansum(canon_n))
+    for model in models:
+        sub = df[df["model"] == model]
+        _, m_pct, m_n = _infection_curve(sub, "infection_state", bin_edges)
+        m_total = int(np.nansum(m_n))
+        mean_delta = float(np.nanmean(np.abs(m_pct - canon_pct)))
+        if m_total != canon_total or mean_delta > 0.5:
+            click.echo(
+                f"[infection] annotation drift: model={model} "
+                f"n_cells={m_total} (canonical={canon_total}) "
+                f"mean|Δpct|={mean_delta:.2f}",
+                err=True,
+            )
+
+    ncols = min(3, len(models))
+    nrows = int(np.ceil(len(models) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5.5 * ncols, 4 * nrows), squeeze=False)
+    axes_flat = axes.flatten()
+
+    rows_long: list[dict] = []
+
+    # Log canonical annotation rows once to the CSV (model="annotation").
+    for c, p, nv in zip(canon_centers, canon_pct, canon_n):
+        rows_long.append(
+            {
+                "model": "annotation",
+                "marker": "ALL",
+                "source": "annotation",
+                "hours": c,
+                "pct_infected": p,
+                "n_cells": nv,
+                "canonical_source_model": canonical_model,
+            }
+        )
+
+    for ax_idx, model in enumerate(models):
+        ax = axes_flat[ax_idx]
+        sub_model = df[df["model"] == model]
+
+        # Shared annotation curve — same on every subplot.
+        ax.plot(
+            canon_centers,
+            canon_pct,
+            color="black",
+            linewidth=2.0,
+            linestyle="--",
+            marker="o",
+            markersize=4,
+            alpha=0.9,
+            zorder=5,
+        )
+
+        for marker in markers:
+            sub = sub_model[sub_model["marker"].astype(str) == marker]
+            if sub.empty:
+                continue
+            color = marker_color[marker]
+
+            # 1:1 comparison: predicted curve restricted to cells that
+            # carry a human annotation. Without this restriction the
+            # predicted curve runs on ~98% unannotated cells (different
+            # population than the annotation curve) and amplitudes diverge
+            # for reasons that have nothing to do with classifier quality.
+            sub_ann = sub.dropna(subset=["infection_state"])
+            sub_ann = sub_ann[sub_ann["infection_state"].astype(str) != "nan"]
+            if sub_ann.empty:
+                continue
+            pc, pp, pn = _infection_curve(sub_ann, "predicted_infection_state", bin_edges)
+            ax.plot(
+                pc,
+                pp,
+                color=color,
+                linewidth=2.0,
+                linestyle="-",
+                marker="s",
+                markersize=3,
+            )
+            for c, p, nv in zip(pc, pp, pn):
+                rows_long.append(
+                    {
+                        "model": model,
+                        "marker": marker,
+                        "source": "predicted_on_annotated",
+                        "hours": c,
+                        "pct_infected": p,
+                        "n_cells": nv,
+                        "canonical_source_model": canonical_model,
+                    }
+                )
+
+            # Also log predicted on the full infected-well cohort to the
+            # CSV (not plotted) so deployment-time behavior is recoverable.
+            pc_all, pp_all, pn_all = _infection_curve(sub, "predicted_infection_state", bin_edges)
+            for c, p, nv in zip(pc_all, pp_all, pn_all):
+                rows_long.append(
+                    {
+                        "model": model,
+                        "marker": marker,
+                        "source": "predicted_all",
+                        "hours": c,
+                        "pct_infected": p,
+                        "n_cells": nv,
+                        "canonical_source_model": canonical_model,
+                    }
+                )
+
+        ax.set_title(model, fontsize=9)
+        ax.set_xlabel("Hours post perturbation")
+        ax.set_ylabel("Percent infected")
+        ax.set_ylim(-2, 102)
+        ax.axhline(0, color="gray", linewidth=0.6, linestyle=":")
+        ax.axhline(100, color="gray", linewidth=0.6, linestyle=":")
+
+    for ax in axes_flat[len(models) :]:
+        ax.set_visible(False)
+
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            linewidth=2.0,
+            linestyle="--",
+            marker="o",
+            label=f"annotation (viral-sensor derived, n={canon_total})",
+        )
+    ]
+    for marker in markers:
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=marker_color[marker],
+                linewidth=2.0,
+                marker="s",
+                label=f"{marker} prediction",
+            )
+        )
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=min(len(legend_handles), 4),
+        fontsize=8,
+        bbox_to_anchor=(0.5, 0),
+    )
+    suptitle = "Percent infected over time per model (perturbation=infected)"
+    if time_window is not None:
+        suptitle += f"  |  time window: {time_window[0]}–{time_window[1]}h"
+    fig.suptitle(suptitle, fontsize=10)
+    fig.tight_layout(rect=[0, 0.08, 1, 0.97])
+
+    out_pdf = output_dir / "infection_kinetics.pdf"
+    fig.savefig(out_pdf, bbox_inches="tight")
+    plt.close(fig)
+    click.echo(f"[infection] Saved: {out_pdf}", err=True)
+
+    long_df = pd.DataFrame(rows_long)
+    long_df.to_csv(output_dir / "infection_kinetics.csv", index=False)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -479,12 +896,15 @@ def _build_mmd_summary(df: pd.DataFrame) -> pd.DataFrame:
 )
 def main(config: Path) -> None:
     """Compare evaluation results across model runs."""
-    models, output_dir, fdr_threshold = _load_registry(config)
+    models, output_dir, fdr_threshold, palette_anchor, time_window = _load_registry(config)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Build the model→color palette once from the registry's model list so
-    # every plot in this run uses the same color for the same model.
-    model_color = _build_model_palette([m["name"] for m in models])
+    # every plot in this run uses the same color for the same model. When
+    # the registry declares `palette_anchor:` (a canonical model ordering),
+    # colors are assigned by anchor position so they stay stable across
+    # registries that share the anchor (e.g. infectomics + alfi).
+    model_color = _build_model_palette([m["name"] for m in models], palette_anchor)
 
     # Smoothness
     smoothness_df = _load_smoothness(models)
@@ -513,6 +933,11 @@ def main(config: Path) -> None:
         _plot_mmd_summary_heatmap(mmd_summary, output_dir)
         click.echo("\n## MMD activity z-score\n")
         click.echo(mmd_summary.to_markdown(index=False))
+
+    # Infection kinetics — % infected over time per channel
+    inf_df = _load_infection_kinetics(models)
+    if inf_df is not None:
+        _plot_infection_kinetics(inf_df, output_dir, model_color, time_window=time_window)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,58 @@
+# Grouped-split version of eval_registry_infectomics.yaml. Same models,
+# same SSL embeddings, but linear classifiers were re-trained with a
+# GroupShuffleSplit keyed on (experiment, fov_name, track_id) so no
+# track lands in both train and val. Honest val AUROC; honest kinetics.
+#
+# Inputs: each model's `<eval_dir>_grouped/` sibling, produced by
+#   .ed_planning/dynaclr/scripts/regroup_infectomics_lcs.sh
+#
+# See .ed_planning/dynaclr/lc_track_leakage_finding.md for context.
+
+models:
+  - name: DINOv3-frozen
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-frozen/evaluations/infectomics-annotated_grouped
+  - name: CELL-DINO-frozen
+    eval_dir: /hpc/projects/organelle_phenotyping/models/CELL-DINO-frozen/evaluations/infectomics-annotated_grouped
+  - name: DINOv3-temporal-MLP-v1
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluations/infectomics-annotated_grouped
+  - name: CELL-DINO-temporal-MLP-v1 (ep49)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/cell-dino-mlp-2d-mip-ntxent-t0p5-lr1e4-bs512/evaluations/infectomics-annotated_epoch49_step40000_grouped
+  - name: DynaCLR-2D-BoC (192to160, zext11)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/infectomics-annotated_grouped
+  - name: DynaCLR-2D-BoC (192to160, single-marker-fix)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_grouped
+  - name: DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800_grouped
+  - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch91_step73600_grouped
+  - name: DynaCLR-2D-BoC (192to160, mixed-markers-fix)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated_grouped
+  - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated_grouped
+  - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated_2026-05-08_grouped
+  - name: DynaCLR-2D-BagOfChannels-v3
+    eval_dir: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/v3/evaluations/infectomics-annotated_grouped
+
+output_dir: /hpc/projects/organelle_phenotyping/comparisons/infectomics-annotated-grouped
+
+# Common time window where ZIKV + DENV cohorts both contribute. ZIKV
+# series end around 25h; staying at <=25h prevents the late-DENV
+# composition artifact in the kinetics plot.
+time_window: [4.0, 25.0]
+
+# Keep model colors stable with the leaky registry's anchor list so
+# comparisons across PDFs use the same color per model.
+palette_anchor:
+  - DINOv3-frozen
+  - CELL-DINO-frozen
+  - DINOv3-temporal-MLP-v1
+  - CELL-DINO-temporal-MLP-v1 (ep49)
+  - DynaCLR-2D-BoC (192to160, zext11)
+  - DynaCLR-2D-BoC (192to160, single-marker-fix)
+  - DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
+  - DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+  - DynaCLR-2D-BoC (192to160, mixed-markers-fix)
+  - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
+  - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)
+  - DynaCLR-2D-BagOfChannels-v3
