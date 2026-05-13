@@ -258,6 +258,15 @@ class LinearClassifiersStepConfig(BaseModel):
         Fraction for training. Default: 0.8.
     random_seed : int
         Random seed for reproducibility. Default: 42.
+    split_groups_by : list[str] or None
+        obs columns whose concatenation defines a "group" that must not
+        be split across train and val. When set (e.g. ``["experiment",
+        "fov_name", "track_id"]``), the train/val split is a
+        ``GroupShuffleSplit`` keyed on the concatenated group id — no
+        track lands in both halves. This kills track-level temporal
+        leakage for SSL embeddings that pull same-track cells together
+        (DynaCLR's positive pairs). When None, behavior is the legacy
+        cell-level stratified ``train_test_split``. Default: None.
     """
 
     annotations: list[AnnotationSource]
@@ -271,6 +280,7 @@ class LinearClassifiersStepConfig(BaseModel):
     solver: str = "liblinear"
     split_train_data: float = 0.8
     random_seed: int = 42
+    split_groups_by: Optional[list[str]] = None
 
 
 class AppendPredictionsStepConfig(BaseModel):

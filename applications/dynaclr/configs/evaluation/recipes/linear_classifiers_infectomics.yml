@@ -57,3 +57,11 @@ linear_classifiers:
   use_pca: false
   split_train_data: 0.8
   random_seed: 42
+  # Track-level split — no track lands in both train/val. Required for
+  # honest val AUROC on temporal-contrastive SSL embeddings (DynaCLR
+  # pulls same-track embeddings together, so cell-level splits leak).
+  # See .ed_planning/dynaclr/lc_track_leakage_finding.md.
+  split_groups_by:
+    - experiment
+    - fov_name
+    - track_id

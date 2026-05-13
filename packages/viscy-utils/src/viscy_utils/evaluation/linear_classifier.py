@@ -13,7 +13,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from viscy_utils.evaluation.annotation import load_annotation_anndata
@@ -203,6 +203,7 @@ def train_linear_classifier(
     classifier_params: Optional[dict[str, Any]] = None,
     split_train_data: float = 0.8,
     random_seed: int = 42,
+    groups: Optional[np.ndarray] = None,
 ) -> tuple[LinearClassifierPipeline, dict[str, float], dict[str, Any]]:
     """Train a linear classifier on embeddings with preprocessing and evaluation.
 
@@ -224,6 +225,14 @@ def train_linear_classifier(
         Fraction of data to use for training (rest for validation).
     random_seed : int
         Random seed for reproducibility.
+    groups : np.ndarray or None
+        Per-cell group id used to define a leakage-free train/val split.
+        When provided, the split is a ``GroupShuffleSplit`` so no group
+        (e.g. track) lands in both halves. Stratification by ``y`` is not
+        applied when groups are used — group identity dominates and
+        stratification across groups is enforced loosely by drawing
+        multiple seeds (here just the first). When None, falls back to
+        ``train_test_split(stratify=y)``. Default: None.
 
     Returns
     -------
@@ -266,15 +275,33 @@ def train_linear_classifier(
         print("\n✓ Using full feature space (no PCA)")
 
     if split_train_data < 1.0:
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_full_transformed,
-            y_full,
-            train_size=split_train_data,
-            random_state=random_seed,
-            stratify=y_full,
-            shuffle=True,
-        )
-        print(f"\n✓ Split data: train ({len(X_train)}) / validation ({len(X_val)})")
+        if groups is not None:
+            if len(groups) != len(y_full):
+                raise ValueError(f"groups length {len(groups)} != n_cells {len(y_full)}")
+            gss = GroupShuffleSplit(
+                n_splits=1,
+                train_size=split_train_data,
+                random_state=random_seed,
+            )
+            idx_train, idx_val = next(gss.split(X_full_transformed, y_full, groups=groups))
+            X_train, X_val = X_full_transformed[idx_train], X_full_transformed[idx_val]
+            y_train, y_val = y_full[idx_train], y_full[idx_val]
+            n_train_groups = len(np.unique(groups[idx_train]))
+            n_val_groups = len(np.unique(groups[idx_val]))
+            print(
+                f"\n✓ Group-aware split: train ({len(X_train)} cells / {n_train_groups} groups) "
+                f"/ validation ({len(X_val)} cells / {n_val_groups} groups)"
+            )
+        else:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_full_transformed,
+                y_full,
+                train_size=split_train_data,
+                random_state=random_seed,
+                stratify=y_full,
+                shuffle=True,
+            )
+            print(f"\n✓ Split data: train ({len(X_train)}) / validation ({len(X_val)})")
     else:
         X_train = X_full_transformed
         y_train = y_full

@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
@@ -163,6 +163,24 @@ def run_linear_classifiers(
             class_dist = combined.obs[task].value_counts().to_dict()
             click.echo(f"  Total: {combined.n_obs} cells, class distribution: {class_dist}")
 
+            # Build the per-cell group id when split_groups_by is set, so
+            # GroupShuffleSplit can guarantee no group (e.g. track) lands
+            # in both train and val. This kills track-level temporal
+            # leakage that inflates val AUROC for temporal-contrastive
+            # SSL embeddings.
+            groups: np.ndarray | None = None
+            if config.split_groups_by:
+                missing = [c for c in config.split_groups_by if c not in combined.obs.columns]
+                if missing:
+                    raise ValueError(f"split_groups_by columns missing from obs: {missing}")
+                group_series = combined.obs[config.split_groups_by[0]].astype(str)
+                for col in config.split_groups_by[1:]:
+                    group_series = group_series + "::" + combined.obs[col].astype(str)
+                groups = group_series.to_numpy()
+                click.echo(
+                    f"  Group-aware split keyed on {config.split_groups_by}: {pd.unique(groups).size} unique groups"
+                )
+
             classifier_params = {
                 "max_iter": config.max_iter,
                 "class_weight": config.class_weight,
@@ -180,6 +198,7 @@ def run_linear_classifiers(
                     classifier_params=classifier_params,
                     split_train_data=config.split_train_data,
                     random_seed=config.random_seed,
+                    groups=groups,
                 )
             except ValueError as exc:
                 click.echo(f"  Skipping {label}: {exc}")
@@ -194,19 +213,29 @@ def run_linear_classifiers(
             trained_pipelines.append((task, marker_filter, pipeline))
             click.echo(f"  Pipeline saved: {pipeline_filename}")
 
-            # Replay the same split to recover val obs (hours_post_perturbation)
+            # Replay the same split to recover val obs (hours_post_perturbation).
+            # Must mirror train_linear_classifier exactly — same seed, same
+            # splitter (Group-aware when groups is set, cell-level otherwise).
             y_full = combined.obs[task].to_numpy(dtype=object)
             val_hours: np.ndarray | None = None
             if config.split_train_data < 1.0 and "hours_post_perturbation" in combined.obs.columns:
                 try:
                     idx = np.arange(len(combined))
-                    _, idx_val = train_test_split(
-                        idx,
-                        train_size=config.split_train_data,
-                        random_state=config.random_seed,
-                        stratify=y_full,
-                        shuffle=True,
-                    )
+                    if groups is not None:
+                        gss = GroupShuffleSplit(
+                            n_splits=1,
+                            train_size=config.split_train_data,
+                            random_state=config.random_seed,
+                        )
+                        _, idx_val = next(gss.split(idx, y_full, groups=groups))
+                    else:
+                        _, idx_val = train_test_split(
+                            idx,
+                            train_size=config.split_train_data,
+                            random_state=config.random_seed,
+                            stratify=y_full,
+                            shuffle=True,
+                        )
                     val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
                 except ValueError:
                     click.echo("  Could not replay stratified split for val_hours; F1-over-time plot skipped.")
