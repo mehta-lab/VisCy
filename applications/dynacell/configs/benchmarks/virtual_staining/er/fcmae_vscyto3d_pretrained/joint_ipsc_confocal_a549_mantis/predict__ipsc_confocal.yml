@@ -1,0 +1,51 @@
+# FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: ER (SEC61B) trained on joint
+# iPSC+A549, predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from J31910331 (epoch 111, loss/validate=0.5164).
+# Wandb run 20260502-142508_FCMAE_VSCyto3D_Pretrained_JOINT_SEC61B_ws8500
+# (TIMEOUT @ 4d, wandb state=crashed; 60,489 steps; final val 0.5253 — drifted
+# up from ep111 best). ws8500 = 8,500-step warmup variant.
+# Both iPSC and a549 manifests use `sec61b`; targets/er_sec61b.yml handles
+# both natively, no dataset_ref override needed.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: er__joint_ipsc_confocal_a549_mantis__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    # ckpt lives under the _ws8500 training-output subdir; config namespace
+    # uses fcmae_vscyto3d_pretrained (no _ws8500 suffix) for consistency with
+    # iPSC + a549 single-set predict configs.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fcmae_vscyto3d_pretrained_ws8500/checkpoints/epoch=111-step=48496.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fcmae_vscyto3d_pretrained_jointtrained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_SEC61B_JOINTTR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
