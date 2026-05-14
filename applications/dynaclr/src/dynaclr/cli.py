@@ -173,6 +173,14 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="compute-mmd",
+        import_path="dynaclr.evaluation.mmd.compute_mmd.main",
+        short_help="Compute MMD² between two pooled groups of cell embeddings",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI."""
