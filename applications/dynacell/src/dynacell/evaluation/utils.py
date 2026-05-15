@@ -56,7 +56,8 @@ def _require_cell_dino():
     if CellDinoModel is None:
         raise ImportError(
             "viscy_models.foundation.CellDinoModel is required for CellDinoFeatureExtractor. "
-            "Install it with: pip install viscy-models"
+            "Install the in-tree workspace package via `uv sync --all-packages --all-extras` "
+            "from the VisCy repo root, or `pip install -e packages/viscy-models`."
         )
 
 
