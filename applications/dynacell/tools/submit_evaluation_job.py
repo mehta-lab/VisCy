@@ -66,6 +66,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "regenerate metrics already present in save_dir.",
     )
     ap.add_argument(
+        "--regen-metrics",
+        action="store_true",
+        help="add ``force_recompute.final_metrics=true`` only — re-runs the metric "
+        "loop and rewrites embeddings, but leaves cached GT masks / CP / deep "
+        "features intact. Use when new metric columns are added but underlying "
+        "features and segmentations are unchanged. Mutually exclusive with --overwrite.",
+    )
+    ap.add_argument(
         "--run-root",
         type=Path,
         default=None,
@@ -141,7 +149,10 @@ def submit(argv: list[str] | None = None) -> int:
     # Predict leaves are named predict__<test_set>[_<cond>].yml. Extract the
     # trailing condition for a549; the bare ipsc_confocal predict leaf is iPSC.
     leaf_stem = leaf_path.stem  # predict__a549_mantis_mock
-    if leaf_stem == "predict__ipsc_confocal":
+    # CellDiff iPSC predict configs are variant-suffixed (`__iterative`,
+    # `__sliding_window`, `__denoise`); save_paths collapses them to one paper
+    # key, so all three resolve to the same test_plate="ipsc" eval dir.
+    if leaf_stem == "predict__ipsc_confocal" or leaf_stem.startswith("predict__ipsc_confocal__"):
         test_plate = "ipsc"
     elif leaf_stem.endswith("_mock"):
         test_plate = "mock"
@@ -152,7 +163,7 @@ def submit(argv: list[str] | None = None) -> int:
     else:
         raise SystemExit(
             f"cannot infer test plate from leaf filename: {leaf_path.name} "
-            f"(expected predict__ipsc_confocal.yml or predict__*_{{mock,denv,zikv}}.yml)"
+            f"(expected predict__ipsc_confocal[__<variant>].yml or predict__*_{{mock,denv,zikv}}.yml)"
         )
 
     save_dir = eval_save_dir(
@@ -185,8 +196,12 @@ def submit(argv: list[str] | None = None) -> int:
         "save.save_dir": str(save_dir),
         "compute_feature_metrics": True,
     }
+    if args.overwrite and args.regen_metrics:
+        raise SystemExit("--overwrite and --regen-metrics are mutually exclusive")
     if args.overwrite:
         overrides["force_recompute.all"] = True
+    elif args.regen_metrics:
+        overrides["force_recompute.final_metrics"] = True
 
     cmd_tokens = ["uv", "run", "dynacell", "evaluate"]
     for k, v in overrides.items():

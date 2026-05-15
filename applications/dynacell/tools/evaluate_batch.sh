@@ -24,6 +24,9 @@
 #
 # Extra args are forwarded verbatim to submit_evaluation_batch.py —
 # including --overwrite (force_recompute.all=true on every leaf),
+# --regen-metrics (force_recompute.final_metrics=true only — re-runs the
+# metric loop and rewrites embeddings, reuses cached GT masks / CP / deep
+# features; mutually exclusive with --overwrite),
 # --cross-condition-probe (handled by the python tool / runner), and
 # --dry-run.
 

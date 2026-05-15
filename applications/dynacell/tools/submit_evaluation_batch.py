@@ -82,6 +82,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="add force_recompute.all=true to every per-leaf eval invocation.",
     )
+    ap.add_argument(
+        "--regen-metrics",
+        action="store_true",
+        help="add force_recompute.final_metrics=true to every per-leaf eval invocation. "
+        "Re-runs the metric loop and rewrites embeddings while reusing cached GT "
+        "masks / CP / deep features. Mutually exclusive with --overwrite.",
+    )
     ap.add_argument("--dry-run", action="store_true", help="render sbatch script but do not submit")
     ap.add_argument("--print-script", action="store_true", help="print rendered sbatch to stdout, no writes")
     ap.add_argument("--parsable", action="store_true", help="invoke sbatch with --parsable")
@@ -142,7 +149,10 @@ def _resolve_one_leaf(
         raise SystemExit(f"eval target group YAML missing: {target_yaml}")
 
     leaf_stem = leaf_path.stem
-    if leaf_stem == "predict__ipsc_confocal":
+    # CellDiff iPSC variants (`predict__ipsc_confocal__<variant>.yml`) all map
+    # to test_plate="ipsc" — save_paths collapses celldiff variants to one
+    # paper key, so the eval save_dir is shared across variants.
+    if leaf_stem == "predict__ipsc_confocal" or leaf_stem.startswith("predict__ipsc_confocal__"):
         test_plate = "ipsc"
     elif leaf_stem.endswith("_mock"):
         test_plate = "mock"
@@ -234,6 +244,9 @@ def submit(argv: list[str] | None = None) -> int:
     os.umask(0o002)
     args = _parse_args(argv)
 
+    if args.overwrite and args.regen_metrics:
+        raise SystemExit("--overwrite and --regen-metrics are mutually exclusive")
+
     overrides_list: list[dict[str, object]] = []
     organelles: list[str] = []
     code_models: list[str] = []
@@ -244,6 +257,8 @@ def submit(argv: list[str] | None = None) -> int:
         overrides, organelle, code_model, trained_on, save_dir, test_plate = _resolve_one_leaf(leaf)
         if args.overwrite:
             overrides["force_recompute.all"] = True
+        elif args.regen_metrics:
+            overrides["force_recompute.final_metrics"] = True
         overrides_list.append(overrides)
         organelles.append(organelle)
         code_models.append(code_model)

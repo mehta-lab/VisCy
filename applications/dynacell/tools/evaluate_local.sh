@@ -7,7 +7,7 @@
 #
 # Usage:
 #   evaluate_local.sh <organelle> <model> <train_set> <test_set> \
-#       [--overwrite] [--parallel N] [--cross-condition-probe]
+#       [--overwrite | --regen-metrics] [--parallel N] [--cross-condition-probe]
 #
 # Args:
 #   <organelle>  e.g. nucleus, membrane, er, mito
@@ -20,6 +20,11 @@
 #
 # Flags:
 #   --overwrite               adds force_recompute.all=true on every leaf
+#                             (regenerates GT masks + features + metrics)
+#   --regen-metrics           adds force_recompute.final_metrics=true on every
+#                             leaf — recomputes metrics + rewrites embeddings,
+#                             reuses cached GT masks / CP / deep features.
+#                             Mutually exclusive with --overwrite.
 #   --parallel N              run N evals concurrently on the same GPU
 #   --cross-condition-probe   after all per-plate evals succeed AND
 #                             test_set=a549_mantis, run
@@ -47,17 +52,23 @@ TEST_RAW=$4
 shift 4
 
 OVERWRITE=""
+REGEN_METRICS=""
 PARALLEL=1
 CROSS_PROBE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --overwrite)              OVERWRITE="--overwrite"; shift ;;
+    --regen-metrics)          REGEN_METRICS="--regen-metrics"; shift ;;
     --parallel)               PARALLEL="$2"; shift 2 ;;
     --parallel=*)             PARALLEL="${1#--parallel=}"; shift ;;
     --cross-condition-probe)  CROSS_PROBE=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+if [ -n "$OVERWRITE" ] && [ -n "$REGEN_METRICS" ]; then
+  echo "error: --overwrite and --regen-metrics are mutually exclusive" >&2
+  exit 2
+fi
 
 if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
   echo "error: --parallel must be a positive integer (got '$PARALLEL')" >&2
@@ -116,7 +127,7 @@ for leaf in "${LEAVES[@]}"; do
 
   # Capture the literal eval command tokens (one per line).
   cmd_text=$(uv run python applications/dynacell/tools/submit_evaluation_job.py \
-    "$leaf" $OVERWRITE --dry-run --print-cmd 2>/dev/null | grep -v '^\[dry-run\]')
+    "$leaf" $OVERWRITE $REGEN_METRICS --dry-run --print-cmd 2>/dev/null | grep -v '^\[dry-run\]')
   CMDS+=("$cmd_text")
 
   # Extract save.save_dir override from the printed command.
