@@ -216,6 +216,11 @@ def submit(argv: list[str] | None = None) -> int:
             print(f"[dry-run] save_dir:  {save_dir}")
         return 0
 
+    if args.print_cmd:
+        # `--print-cmd` alone (without `--dry-run`) emits the resolved command
+        # to stdout for shell-level chaining (used by evaluate_local.sh).
+        return 0
+
     # Execute. Surface stdout/stderr live; raise on non-zero.
     subprocess.run(cmd_tokens, check=True)
     return 0
