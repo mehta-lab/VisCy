@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig
+from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
@@ -43,7 +44,7 @@ def _zscore_per_side(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, 
     return pred_z, target_z
 
 
-def _cp_pairwise_preprocess(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _cp_dropzero_zscore(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-(FOV, timepoint) CP cleanup: drop target-zero columns then z-score.
 
     Returns ``(np.empty(...), np.empty(...))`` when all columns drop, so
@@ -267,7 +268,7 @@ def evaluate_predictions(config: DictConfig):
                         # Per-timepoint CP: drop target-zero columns + per-side z-score.
                         # Deep features stay untouched.
                         if pred_cp.size and gt_cp_per_t[t].size:
-                            pred_cp_z, gt_cp_z = _cp_pairwise_preprocess(pred_cp, gt_cp_per_t[t])
+                            pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_per_t[t])
                         else:
                             pred_cp_z, gt_cp_z = pred_cp, gt_cp_per_t[t]
                         pairwise_metrics = {
@@ -383,8 +384,12 @@ def evaluate_predictions(config: DictConfig):
 
         if prefix_inputs:
             # Threads suffice: torch-fidelity, sklearn LBFGS, and numpy BLAS
-            # all release the GIL inside their hot loops.
-            with ThreadPoolExecutor(max_workers=min(3, len(prefix_inputs))) as pool:
+            # all release the GIL inside their hot loops. Cap inner BLAS to
+            # 1 thread so the 3 outer threads don't oversubscribe cores.
+            with (
+                threadpool_limits(limits=1),
+                ThreadPoolExecutor(max_workers=min(3, len(prefix_inputs))) as pool,
+            ):
                 for result in pool.map(_compute_one, prefix_inputs):
                     dataset_row.update(result)
 
