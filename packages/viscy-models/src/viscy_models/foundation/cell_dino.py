@@ -8,9 +8,9 @@ mean-pools the cls token across channels to produce a fixed-dimension
 embedding regardless of the input channel count.
 
 Weights are loaded from a local ``.pth`` state_dict; nothing is fetched
-from the network.  See
-``/hpc/projects/organelle_phenotyping/models/CELL-DINO/model_weights/weights/``
-for the published checkpoints.
+from the network.  The caller passes the path explicitly via
+``weights_path``; one example location (Biohub HPC) is
+``/hpc/projects/organelle_phenotyping/models/CELL-DINO/model_weights/weights/``.
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ class CellDinoModel(nn.Module):
     Parameters
     ----------
     weights_path : str
-        Path to the local ``.pth`` state_dict.  The default
-        ``channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth`` is a
-        single-channel ViT-L/16 trained at 224 px with ``init_values=1.0``
+        Path to a local ``.pth`` state_dict (required, no default). An
+        example is ``channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth``
+        — a single-channel ViT-L/16 trained at 224 px with ``init_values=1.0``
         and ``block_chunks=4``.
     img_size : int
         Spatial size after :meth:`preprocess_2d`, by default ``224``.
