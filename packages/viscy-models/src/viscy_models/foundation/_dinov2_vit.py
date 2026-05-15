@@ -249,6 +249,11 @@ class DinoVisionTransformer(nn.Module):
             for _ in range(depth)
         ]
         if block_chunks > 0:
+            if depth % block_chunks != 0:
+                # `range(0, depth, depth // block_chunks)` produces more than
+                # `block_chunks` iterations when this divides unevenly, which
+                # silently breaks the published state_dict layout.
+                raise ValueError(f"depth ({depth}) must be divisible by block_chunks ({block_chunks}).")
             self.chunked_blocks = True
             chunked = []
             chunksize = depth // block_chunks
