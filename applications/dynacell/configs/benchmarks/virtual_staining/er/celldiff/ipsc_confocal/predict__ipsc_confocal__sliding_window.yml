@@ -1,7 +1,7 @@
-# CellDiff predict: nucleus against ipsc_confocal test_cropped.
+# CellDiff r2 predict: ER (SEC61B) on ipsc_confocal — sliding_window method.
 base:
   - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
-  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
   - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
@@ -9,36 +9,34 @@ base:
 
 benchmark:
   task: virtual_staining
-  organelle: nucleus
+  organelle: er
   trained_on: ipsc_confocal
   predict_set: ipsc_confocal
   model_name: celldiff
-  experiment_id: nucleus__ipsc_confocal__celldiff__ipsc_confocal
+  experiment_id: er__ipsc_confocal__celldiff__ipsc_confocal__sliding_window
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/celldiff/checkpoints/last.ckpt
-    predict_method: denoise # denoise, generate, sliding_window, or iterative
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/celldiff_r2/checkpoints/last.ckpt
+    predict_method: sliding_window
     predict_overlap: [4, 256, 256]
 
 data:
   init_args:
     normalizations:
-      - class_path: viscy_transforms.NormalizeSampled
+      - class_path: viscy_transforms.MinMaxSampled
         init_args:
           keys: [Phase3D]
-          level: fov_statistics
-          subtrahend: mean
-          divisor: std
+          level: timepoint_statistics
     augmentations: []
-    z_window_size: 8 # 8 for denoise and generate, 40 for iterative and sliding_window.
+    z_window_size: 40
 
 trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_celldiff_denoise.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_r2_sliding_window.zarr
 
 launcher:
-  job_name: CELLDiff_PRED_NUCL
+  job_name: CELLDiff_PRED_SEC61B_SW
   run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
