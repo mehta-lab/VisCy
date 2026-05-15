@@ -17,7 +17,12 @@ from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
 )
-from dynacell.evaluation.feature_select import select_features
+from dynacell.evaluation.feature_select import (
+    DEFAULT_CORR_THRESHOLD,
+    DEFAULT_FREQ_CUT,
+    DEFAULT_UNIQUE_CUT,
+    select_features,
+)
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
     build_pred_crops,
@@ -376,7 +381,11 @@ def evaluate_predictions(config: DictConfig):
                 "keep_mask": [bool(b) for b in cp_keep_mask],
                 "n_kept": int(cp_keep_mask.sum()),
                 "n_total": int(cp_keep_mask.size),
-                "criteria": {"freq_cut": 0.05, "unique_cut": 0.01, "corr_threshold": 0.9},
+                "criteria": {
+                    "freq_cut": DEFAULT_FREQ_CUT,
+                    "unique_cut": DEFAULT_UNIQUE_CUT,
+                    "corr_threshold": DEFAULT_CORR_THRESHOLD,
+                },
             }
             (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
             if pred_cp_filtered.size and target_cp_filtered.size:

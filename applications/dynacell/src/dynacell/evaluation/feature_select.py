@@ -15,11 +15,19 @@ from __future__ import annotations
 
 import numpy as np
 
+# Defaults shared with downstream consumers (e.g. the cp_selected_feature_mask
+# JSON sidecar emitted by the evaluation pipeline). Keep `select_features`,
+# `variance_threshold`, and `correlation_threshold` keyword defaults aligned
+# with these constants so the sidecar cannot drift from the actual call.
+DEFAULT_FREQ_CUT = 0.05
+DEFAULT_UNIQUE_CUT = 0.01
+DEFAULT_CORR_THRESHOLD = 0.9
+
 
 def variance_threshold(
     X_pooled: np.ndarray,
-    freq_cut: float = 0.05,
-    unique_cut: float = 0.01,
+    freq_cut: float = DEFAULT_FREQ_CUT,
+    unique_cut: float = DEFAULT_UNIQUE_CUT,
 ) -> np.ndarray:
     """Drop near-constant columns.
 
@@ -46,6 +54,13 @@ def variance_threshold(
     np.ndarray
         Boolean keep-mask of shape ``(n_features,)``. ``True`` entries are
         kept.
+
+    Notes
+    -----
+    Iterates columns and calls :func:`numpy.unique` per column —
+    ``O(n_features * n_samples log n_samples)``. Designed for the
+    ~30-column CP regionprops matrix; do not feed deep-feature matrices
+    (1024+ columns) through this without vectorizing first.
     """
     n_samples, n_features = X_pooled.shape
     keep = np.ones(n_features, dtype=bool)
@@ -65,7 +80,7 @@ def variance_threshold(
 
 def correlation_threshold(
     X_pooled: np.ndarray,
-    threshold: float = 0.9,
+    threshold: float = DEFAULT_CORR_THRESHOLD,
     method: str = "pearson",
 ) -> np.ndarray:
     """Greedy iterative drop of correlated columns.
@@ -148,9 +163,9 @@ def correlation_threshold(
 def select_features(
     gt: np.ndarray,
     pred: np.ndarray,
-    freq_cut: float = 0.05,
-    unique_cut: float = 0.01,
-    corr_threshold: float = 0.9,
+    freq_cut: float = DEFAULT_FREQ_CUT,
+    unique_cut: float = DEFAULT_UNIQUE_CUT,
+    corr_threshold: float = DEFAULT_CORR_THRESHOLD,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Pool ``(gt, pred)``, apply both filters in sequence, return filtered pair + mask.
 

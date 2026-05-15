@@ -44,6 +44,9 @@ def _import_pipeline_with_stubs(monkeypatch):
         pred,
         np.ones(gt.shape[1] if gt is not None and gt.ndim >= 2 else 0, dtype=bool),
     )
+    feature_select_module.DEFAULT_FREQ_CUT = 0.05
+    feature_select_module.DEFAULT_UNIQUE_CUT = 0.01
+    feature_select_module.DEFAULT_CORR_THRESHOLD = 0.9
 
     linear_probe_module = types.ModuleType("dynacell.evaluation.linear_probe")
     _nan_auroc = {"auroc_mean": float("nan"), "auroc_std": float("nan"), "n_folds": 0}
