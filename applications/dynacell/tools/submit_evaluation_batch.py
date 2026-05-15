@@ -90,7 +90,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _resolve_one_leaf(
     leaf_path: Path,
-) -> tuple[dict[str, object], str, str, Path, str]:
+) -> tuple[dict[str, object], str, str, str, Path, str]:
     """Compose a predict leaf and derive its eval-side overrides + identifiers.
 
     Returns
@@ -101,6 +101,8 @@ def _resolve_one_leaf(
         Config-side organelle key.
     code_model : str
         Config-side model name.
+    trained_on : str
+        Config-side train-set key (e.g. ``ipsc_confocal``).
     save_dir : Path
         Canonical eval save_dir.
     test_plate : str
@@ -164,7 +166,7 @@ def _resolve_one_leaf(
         "save.save_dir": str(save_dir),
         "compute_feature_metrics": True,
     }
-    return overrides, organelle, code_model, save_dir, test_plate
+    return overrides, organelle, code_model, trained_on, save_dir, test_plate
 
 
 def _composite_job_name(organelle: str, code_model: str, trained_on: str, test_plates: list[str]) -> str:
@@ -235,15 +237,17 @@ def submit(argv: list[str] | None = None) -> int:
     overrides_list: list[dict[str, object]] = []
     organelles: list[str] = []
     code_models: list[str] = []
+    trained_ons: list[str] = []
     save_dirs: list[Path] = []
     test_plates: list[str] = []
     for leaf in args.leaves:
-        overrides, organelle, code_model, save_dir, test_plate = _resolve_one_leaf(leaf)
+        overrides, organelle, code_model, trained_on, save_dir, test_plate = _resolve_one_leaf(leaf)
         if args.overwrite:
             overrides["force_recompute.all"] = True
         overrides_list.append(overrides)
         organelles.append(organelle)
         code_models.append(code_model)
+        trained_ons.append(trained_on)
         save_dirs.append(save_dir)
         test_plates.append(test_plate)
 
@@ -251,14 +255,11 @@ def submit(argv: list[str] | None = None) -> int:
         raise SystemExit(f"all leaves must share benchmark.organelle (got {sorted(set(organelles))})")
     if len(set(code_models)) != 1:
         raise SystemExit(f"all leaves must share benchmark.model_name (got {sorted(set(code_models))})")
+    if len(set(trained_ons)) != 1:
+        raise SystemExit(f"all leaves must share benchmark.trained_on (got {sorted(set(trained_ons))})")
     organelle = organelles[0]
     code_model = code_models[0]
-    # Re-pull trained_on from first leaf for naming (already validated above per-leaf).
-    from dynacell._compose_hook import _dynacell_ref_resolver  # noqa: PLC0415
-    from viscy_utils.compose import load_composed_config  # noqa: PLC0415
-
-    head_composed = load_composed_config(args.leaves[0], resolver=_dynacell_ref_resolver)
-    trained_on = head_composed["benchmark"]["trained_on"]
+    trained_on = trained_ons[0]
 
     job_name = args.job_name or _composite_job_name(organelle, code_model, trained_on, test_plates)
 
