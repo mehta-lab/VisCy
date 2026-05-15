@@ -214,3 +214,53 @@ def test_deep_target_features_shape_mismatch_raises(monkeypatch) -> None:
     cell_seg = np.zeros((1, 4, 5), dtype=np.int32)
     with pytest.raises(ValueError, match="Shape mismatch"):
         metrics.deep_target_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
+
+
+class _BatchAwareExtractor:
+    """Extractor that records whether ``extract_features_batch`` was used.
+
+    Returns the flattened crop as the embedding, same as ``_IdentityExtractor``,
+    so the row alignment of the batched path is checkable against the per-cell
+    path.
+    """
+
+    def __init__(self) -> None:
+        self.batch_calls = 0
+        self.per_cell_calls = 0
+
+    def extract_features(self, img: np.ndarray):  # pragma: no cover - exercised via fallback path
+        self.per_cell_calls += 1
+        return torch.from_numpy(np.asarray(img, dtype=np.float32).reshape(-1))
+
+    def extract_features_batch(self, images: list[np.ndarray]):
+        self.batch_calls += 1
+        stacked = np.stack([np.asarray(img, dtype=np.float32).reshape(-1) for img in images], axis=0)
+        return torch.from_numpy(stacked)
+
+
+def test_features_from_crops_prefers_batched_path(monkeypatch) -> None:
+    """When the extractor exposes ``extract_features_batch``, it is used once per call."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    crops = [np.ones((4, 4), dtype=np.float32) * k for k in range(1, 4)]
+    extractor = _BatchAwareExtractor()
+    out = metrics.features_from_crops(crops, extractor)
+    assert out.shape == (3, 16)
+    # One batched call covers all three crops; no per-cell fallback.
+    assert extractor.batch_calls == 1
+    assert extractor.per_cell_calls == 0
+
+
+def test_features_from_crops_falls_back_when_no_batch(monkeypatch) -> None:
+    """Extractors without ``extract_features_batch`` get one ``extract_features`` per crop."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    crops = [np.ones((4, 4), dtype=np.float32) * k for k in range(1, 4)]
+    extractor = _IdentityExtractor()
+    out = metrics.features_from_crops(crops, extractor)
+    assert out.shape == (3, 16)
+
+
+def test_features_from_crops_empty_returns_empty(monkeypatch) -> None:
+    """No crops -> empty (0, 0) feature matrix."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    out = metrics.features_from_crops([], _IdentityExtractor())
+    assert out.shape == (0, 0)

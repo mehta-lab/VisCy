@@ -326,14 +326,14 @@ def cp_pred_regionprops(prediction, cell_segmentation, spacing):
     return _cp_raw_regionprops(_minmax_norm(prediction), cell_segmentation, spacing)
 
 
-def _extract_per_cell_features(img_2d, cell_segmentation_3d, feature_extractor, patch_size):
-    """Iterate cells in the shared 3-D segmentation and extract 2-D per-cell features.
+def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):
+    """Build per-cell masked 2-D crops shared across deep-feature extractors.
 
     Iteration order is ``np.unique(cell_segmentation_3d)`` with the
-    background label ``0`` skipped. Both GT and prediction loops use the
-    same segmentation, so their returned arrays align row-by-row.
+    background label ``0`` skipped. The result is a list of
+    ``(patch_size, patch_size)`` arrays, one per non-background cell.
     """
-    feats = []
+    crops: list[np.ndarray] = []
     for idx in np.unique(cell_segmentation_3d):
         if idx == 0:
             continue
@@ -355,29 +355,68 @@ def _extract_per_cell_features(img_2d, cell_segmentation_3d, feature_extractor, 
         if pad_y_before or pad_y_after or pad_x_before or pad_x_after:
             pad = ((pad_y_before, pad_y_after), (pad_x_before, pad_x_after))
             cell_crop = np.pad(cell_crop, pad, mode="constant")
-        feat = feature_extractor.extract_features(cell_crop).detach().cpu().numpy().reshape(-1)
-        feats.append(feat)
-    if not feats:
+        crops.append(cell_crop)
+    return crops
+
+
+def features_from_crops(crops, feature_extractor):
+    """Run a deep-feature extractor over a list of masked 2-D crops.
+
+    Uses ``feature_extractor.extract_features_batch(crops)`` when the
+    extractor provides it; otherwise falls back to per-cell calls. The
+    batch path lets each extractor stack all cells of a (FOV, t) into a
+    single forward, amortizing Python overhead and letting cuDNN pick
+    wider kernels.
+    """
+    if not crops:
         return np.empty((0, 0), dtype=np.float32)
+    batch_fn = getattr(feature_extractor, "extract_features_batch", None)
+    if batch_fn is not None:
+        out = batch_fn(crops)
+        return np.asarray(out.detach().cpu()).reshape(len(crops), -1).astype(np.float32, copy=False)
+    feats = [feature_extractor.extract_features(c).detach().cpu().numpy().reshape(-1) for c in crops]
     return np.stack(feats, axis=0)
+
+
+def build_pred_crops(prediction, cell_segmentation, patch_size):
+    """Compute the 2-D max-z projection + per-cell crops on the prediction side.
+
+    Shared by every deep-feature extractor in the eval pipeline so the
+    max-projection, cell iteration, and crop construction run once per
+    (FOV, timepoint) instead of once per backbone.
+    """
+    if prediction.shape != cell_segmentation.shape:
+        raise ValueError(
+            f"Shape mismatch: prediction {prediction.shape} vs cell_segmentation {cell_segmentation.shape}"
+        )
+    prediction_2d = _minmax_norm(np.max(prediction, axis=0))
+    return _build_per_cell_crops_2d(prediction_2d, cell_segmentation, patch_size)
+
+
+def build_target_crops(target, cell_segmentation, patch_size):
+    """Compute the 2-D max-z projection + per-cell crops on the GT side."""
+    if target.shape != cell_segmentation.shape:
+        raise ValueError(f"Shape mismatch: target {target.shape} vs cell_segmentation {cell_segmentation.shape}")
+    target_2d = _minmax_norm(np.max(target, axis=0))
+    return _build_per_cell_crops_2d(target_2d, cell_segmentation, patch_size)
 
 
 def deep_target_features(target, cell_segmentation, feature_extractor, patch_size):
     """GT-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
 
     Cacheable per ``(gt_path, cell_segmentation_path, patch_size, feature_extractor_identity)``.
+    Backward-compat wrapper: prefer :func:`build_target_crops` +
+    :func:`features_from_crops` when the same crops feed multiple extractors.
     """
-    if target.shape != cell_segmentation.shape:
-        raise ValueError(f"Shape mismatch: target {target.shape} vs cell_segmentation {cell_segmentation.shape}")
-    target_2d = _minmax_norm(np.max(target, axis=0))
-    return _extract_per_cell_features(target_2d, cell_segmentation, feature_extractor, patch_size)
+    crops = build_target_crops(target, cell_segmentation, patch_size)
+    return features_from_crops(crops, feature_extractor)
 
 
 def deep_pred_features(prediction, cell_segmentation, feature_extractor, patch_size):
-    """Prediction-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``."""
-    if prediction.shape != cell_segmentation.shape:
-        raise ValueError(
-            f"Shape mismatch: prediction {prediction.shape} vs cell_segmentation {cell_segmentation.shape}"
-        )
-    prediction_2d = _minmax_norm(np.max(prediction, axis=0))
-    return _extract_per_cell_features(prediction_2d, cell_segmentation, feature_extractor, patch_size)
+    """Prediction-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
+
+    Backward-compat wrapper: prefer :func:`build_pred_crops` +
+    :func:`features_from_crops` when the same crops feed multiple extractors.
+    """
+    crops = build_pred_crops(prediction, cell_segmentation, patch_size)
+    return features_from_crops(crops, feature_extractor)

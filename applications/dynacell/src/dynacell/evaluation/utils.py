@@ -99,6 +99,21 @@ class DynaCLRFeatureExtractor:
             features, _ = self.model(image)
         return features
 
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 64) -> torch.Tensor:
+        """Run the encoder over a batch of 2-D crops in one or more chunks.
+
+        Stacks the crops to ``(N, 1, 1, H, W)`` so the contrastive encoder
+        sees a real batch. Chunks at ``batch_size`` to bound VRAM.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = np.stack(images[i : i + batch_size], axis=0)
+            batch = torch.as_tensor(chunk, device=self.model.device)[:, None, None, ...]
+            with torch.inference_mode():
+                features, _ = self.model(batch)
+            out_chunks.append(features)
+        return torch.cat(out_chunks, dim=0)
+
 
 class DinoV3FeatureExtractor:
     """DINOv3-based feature extractor for cell images."""
@@ -138,6 +153,21 @@ class DinoV3FeatureExtractor:
         with torch.inference_mode():
             outputs = self.model(**inputs)
         return outputs.pooler_output
+
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 32) -> torch.Tensor:
+        """Run the ViT backbone over a batch of 2-D crops in one or more chunks.
+
+        AutoImageProcessor accepts a list of 3-channel images and produces
+        a stacked tensor; we chunk at ``batch_size`` to bound VRAM.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = [np.stack([img] * 3, axis=0) for img in images[i : i + batch_size]]
+            inputs = self.processor(images=chunk, return_tensors="pt").to(self.model.device)
+            with torch.inference_mode():
+                outputs = self.model(**inputs)
+            out_chunks.append(outputs.pooler_output)
+        return torch.cat(out_chunks, dim=0)
 
 
 class CellDinoFeatureExtractor:
@@ -189,6 +219,23 @@ class CellDinoFeatureExtractor:
         with torch.inference_mode():
             features, _ = self.model(x)
         return features
+
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 32) -> torch.Tensor:
+        """Run CELL-DINO over a batch of 2-D crops in one or more chunks.
+
+        Stacks the crops to ``(N, 1, H, W)`` so the ViT-L/16 backbone runs
+        once per chunk. Chunks at ``batch_size`` to bound VRAM — at
+        ``img_size=224, patch_size=16``, ViT-L activations are ~1 GB per
+        32 cells in fp32.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = np.stack(images[i : i + batch_size], axis=0)
+            batch = torch.as_tensor(chunk, device=self.device, dtype=torch.float32)[:, None, ...]
+            with torch.inference_mode():
+                features, _ = self.model(batch)
+            out_chunks.append(features)
+        return torch.cat(out_chunks, dim=0)
 
 
 def _minmax_norm(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:

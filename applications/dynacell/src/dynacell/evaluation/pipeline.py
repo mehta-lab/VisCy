@@ -20,11 +20,12 @@ from dynacell.evaluation.feature_metrics import (
 from dynacell.evaluation.feature_select import select_features
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
+    build_pred_crops,
     calculate_microssim,
     compute_pixel_metrics,
     cp_pred_regionprops,
-    deep_pred_features,
     evaluate_segmentations,
+    features_from_crops,
 )
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
@@ -130,11 +131,9 @@ def evaluate_predictions(config: DictConfig):
             checkpoint=dynaclr_config.checkpoint,
             encoder_config=dynaclr_encoder_cfg,
         )
-        # CELL-DINO is opt-in: only instantiate when `weights_path` is set.
-        celldino_cfg = getattr(config.feature_extractor, "celldino", None)
-        weights_path = getattr(celldino_cfg, "weights_path", None) if celldino_cfg is not None else None
-        if weights_path is not None:
-            celldino_weights_path = str(weights_path)
+        celldino_cfg = config.feature_extractor.celldino
+        if celldino_cfg.weights_path is not None:
+            celldino_weights_path = str(celldino_cfg.weights_path)
             celldino_feature_extractor = CellDinoFeatureExtractor(
                 weights_path=celldino_weights_path,
                 img_size=int(celldino_cfg.img_size),
@@ -279,25 +278,17 @@ def evaluate_predictions(config: DictConfig):
 
                     if config.compute_feature_metrics:
                         pred_cp = cp_pred_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
-                        pred_dinov3 = deep_pred_features(
-                            predict[t],
-                            cell_segmentation[t],
-                            dinov3_feature_extractor,
-                            config.feature_metrics.patch_size,
+                        # Build the per-cell 2-D crops once per timepoint and
+                        # reuse them across all 3-4 deep backbones (max-z
+                        # projection + cell-iteration + crop construction
+                        # are otherwise redundant per backbone).
+                        pred_crops_2d = build_pred_crops(
+                            predict[t], cell_segmentation[t], config.feature_metrics.patch_size
                         )
-                        pred_dynaclr = deep_pred_features(
-                            predict[t],
-                            cell_segmentation[t],
-                            dynaclr_feature_extractor,
-                            config.feature_metrics.patch_size,
-                        )
+                        pred_dinov3 = features_from_crops(pred_crops_2d, dinov3_feature_extractor)
+                        pred_dynaclr = features_from_crops(pred_crops_2d, dynaclr_feature_extractor)
                         pred_celldino = (
-                            deep_pred_features(
-                                predict[t],
-                                cell_segmentation[t],
-                                celldino_feature_extractor,
-                                config.feature_metrics.patch_size,
-                            )
+                            features_from_crops(pred_crops_2d, celldino_feature_extractor)
                             if celldino_feature_extractor is not None
                             else None
                         )
