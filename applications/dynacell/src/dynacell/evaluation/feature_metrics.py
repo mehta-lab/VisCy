@@ -197,6 +197,17 @@ def compute_feature_similarity(
         Number of bootstrap resamples for Precision / Recall / F1.
     prc_bootstrap_size : int, optional
         Per-resample size; defaults to ``min(n_pred, n_target)``.
+
+    Notes
+    -----
+    Precision / Recall / F1 are bootstrap *means* over resamples drawn
+    with replacement at ``prc_bootstrap_size`` rows per side. At the
+    default ``prc_bootstrap_size == min(n_pred, n_target)``, each draw
+    omits ~37% of unique source rows, so the reported values are
+    systematically lower than the single-shot all-cells PRC computed by
+    the paper script. They are still directly comparable across models /
+    plates / conditions evaluated with the same bootstrap scheme — but
+    do not compare them to non-bootstrap PRC tables.
     mind_num_projections : int
         Number of random projections for MIND.
     rng_seed : int

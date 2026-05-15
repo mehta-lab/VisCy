@@ -367,6 +367,13 @@ def features_from_crops(crops, feature_extractor):
     batch path lets each extractor stack all cells of a (FOV, t) into a
     single forward, amortizing Python overhead and letting cuDNN pick
     wider kernels.
+
+    Extractor contract
+    ------------------
+    Both code paths require the extractor to return a ``torch.Tensor``
+    (``.detach().cpu()`` is called on the result). ``extract_features``
+    must return one tensor per crop; ``extract_features_batch`` must
+    return a stacked tensor whose leading dim equals ``len(crops)``.
     """
     if not crops:
         return np.empty((0, 0), dtype=np.float32)
