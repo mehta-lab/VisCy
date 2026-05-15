@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Mapping from code-side model key (config dir name) to paper key.
 # Source of truth: applications/dynacell/CLAUDE.md
-_PAPER_KEY: dict[str, str] = {
+PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
@@ -32,7 +32,7 @@ _PAPER_KEY: dict[str, str] = {
 # Organelle-name translation: code config dir → paper-script organelle key.
 # Mito uses the long form `mitochondria` in paper outputs (paper script
 # lines 41-44).
-_ORGANELLE_PAPER: dict[str, str] = {
+ORGANELLE_PAPER: dict[str, str] = {
     "nucleus": "nucleus",
     "membrane": "membrane",
     "er": "er",
@@ -97,9 +97,9 @@ def extract_predict_output_store(composed: dict, leaf_path: Path) -> Path:
 
 def paper_key(code_model: str) -> str:
     """Translate the code-side model key (e.g. config dir name) to the paper key."""
-    if code_model not in _PAPER_KEY:
-        raise ValueError(f"unknown model key {code_model!r}; expected one of {sorted(_PAPER_KEY)}")
-    return _PAPER_KEY[code_model]
+    if code_model not in PAPER_KEY:
+        raise ValueError(f"unknown model key {code_model!r}; expected one of {sorted(PAPER_KEY)}")
+    return PAPER_KEY[code_model]
 
 
 def _a549trained_key(code_model: str) -> str:
@@ -156,8 +156,8 @@ def eval_save_dir(
         If any of ``organelle``, ``code_model``, ``train_set``, or ``test_plate``
         is not one of the supported values.
     """
-    if organelle not in _ORGANELLE_PAPER:
-        raise ValueError(f"unknown organelle {organelle!r}; expected one of {sorted(_ORGANELLE_PAPER)}")
+    if organelle not in ORGANELLE_PAPER:
+        raise ValueError(f"unknown organelle {organelle!r}; expected one of {sorted(ORGANELLE_PAPER)}")
     if test_plate not in {"ipsc", "mock", "denv", "zikv"}:
         raise ValueError(f"unknown test_plate {test_plate!r}; expected one of 'ipsc' | 'mock' | 'denv' | 'zikv'")
     if train_set not in {
@@ -169,7 +169,7 @@ def eval_save_dir(
             f"unknown train_set {train_set!r}; expected one of "
             f"'ipsc_confocal' | 'a549_mantis' | 'joint_ipsc_confocal_a549_mantis'"
         )
-    organelle_paper = _ORGANELLE_PAPER[organelle]
+    organelle_paper = ORGANELLE_PAPER[organelle]
     root = Path(data_root)
     if test_plate == "ipsc":
         if train_set == "ipsc_confocal":
