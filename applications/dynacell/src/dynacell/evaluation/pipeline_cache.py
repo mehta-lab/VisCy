@@ -84,7 +84,7 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "gt_cp": all_flag or bool(force.gt_cp),
         "gt_dinov3": all_flag or bool(force.gt_dinov3),
         "gt_dynaclr": all_flag or bool(force.gt_dynaclr),
-        "gt_celldino": all_flag or bool(getattr(force, "gt_celldino", False)),
+        "gt_celldino": all_flag or bool(force.gt_celldino),
         "final_metrics": all_flag or bool(force.final_metrics),
     }
 
@@ -379,8 +379,8 @@ def fov_gt_deep_features(
 ) -> list[np.ndarray]:
     """Return target-side deep embeddings per timepoint for one feature family.
 
-    ``kind`` is ``"dinov3"`` or ``"dynaclr"``. The cache key (model name or
-    checkpoint hash) is pulled from *ctx*.
+    ``kind`` is ``"dinov3"``, ``"dynaclr"``, or ``"celldino"``. The cache key
+    (model name or checkpoint/weights hash) is pulled from *ctx*.
     """
     if kind == "dinov3":
         force_key = "gt_dinov3"

@@ -28,13 +28,15 @@ import argparse
 import csv
 import sys
 from pathlib import Path
+from typing import get_args
 
 import numpy as np
 
+from dynacell.evaluation.cache import FeatureKind
 from dynacell.evaluation.feature_select import select_features
 from dynacell.evaluation.linear_probe import MADScaler, paired_auroc
 
-_FEATURE_TYPES = ("cp", "dinov3", "dynaclr", "celldino")
+_FEATURE_TYPES: tuple[str, ...] = get_args(FeatureKind)
 _SOURCES = ("pred", "gt")
 _CONDITION_TOKENS = ("mock", "denv", "zikv")
 _DEFAULT_PAIRS = (("mock", "denv"), ("mock", "zikv"))

@@ -63,9 +63,7 @@ feature_extractor:
       embedding_dim: 768
       projection_dim: 32
       drop_path_rate: 0.0
-  # Optional CELL-DINO foundation backbone (DINOv2 ViT-L/16 pretrained on
-  # the Human Protein Atlas). Leave `weights_path` null to skip the
-  # backbone entirely; set to a local `.pth` state_dict to enable.
+  # CELL-DINO (DINOv2 ViT-L/16 pretrained on HPA). `weights_path: null` disables.
   celldino:
     weights_path: null
     img_size: 224
