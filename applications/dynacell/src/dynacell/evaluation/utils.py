@@ -21,6 +21,11 @@ try:
 except ImportError:
     ContrastiveEncoder = None  # type: ignore[assignment, misc]
 
+try:
+    from viscy_models.foundation import CellDinoModel
+except ImportError:
+    CellDinoModel = None  # type: ignore[assignment, misc]
+
 matplotlib.use("Agg")
 from pathlib import Path
 
@@ -44,6 +49,14 @@ def _require_viscy_models():
     if ContrastiveEncoder is None:
         raise ImportError(
             "viscy_models is required for DynaCLRFeatureExtractor. Install it with: pip install viscy-models"
+        )
+
+
+def _require_cell_dino():
+    if CellDinoModel is None:
+        raise ImportError(
+            "viscy_models.foundation.CellDinoModel is required for CellDinoFeatureExtractor. "
+            "Install it with: pip install viscy-models"
         )
 
 
@@ -125,6 +138,57 @@ class DinoV3FeatureExtractor:
         with torch.inference_mode():
             outputs = self.model(**inputs)
         return outputs.pooler_output
+
+
+class CellDinoFeatureExtractor:
+    """CELL-DINO foundation model (DINOv2 ViT-L/16 pretrained on HPA) for cell images.
+
+    Wraps :class:`viscy_models.foundation.CellDinoModel` so the eval pipeline
+    can use it via the same ``extract_features(image_2d)`` contract as the
+    DINOv3 and DynaCLR extractors. The underlying model's ``preprocess_2d``
+    handles the 224×224 resize and per-image min/max scaling, so the caller
+    can feed the same masked 2-D cell crop used for the other backbones.
+    """
+
+    def __init__(self, weights_path: str, img_size: int = 224, patch_size: int = 16):
+        """Load a CELL-DINO checkpoint from a local ``.pth`` state_dict.
+
+        Parameters
+        ----------
+        weights_path :
+            Absolute path to the CELL-DINO ``.pth`` state_dict (e.g. the
+            ``channel_adaptive_dino_vitl16_pretrain_cells-*.pth`` published
+            at ``/hpc/projects/organelle_phenotyping/models/CELL-DINO/``).
+        img_size :
+            Spatial size the model interpolates inputs to, by default 224.
+        patch_size :
+            ViT patch size, by default 16.
+        """
+        _require_cell_dino()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = CellDinoModel(weights_path=weights_path, img_size=img_size, patch_size=patch_size, freeze=True)
+        self.model.to(device)
+        self.model.eval()
+        self.device = device
+
+    def extract_features(self, image: np.ndarray) -> torch.Tensor:
+        """Extract the channel-mean cls token from a 2-D image patch.
+
+        Parameters
+        ----------
+        image :
+            2-D array (H, W); wrapped to ``(1, 1, H, W)`` so CellDinoModel
+            treats it as a single-channel, single-batch input.
+
+        Returns
+        -------
+        torch.Tensor
+            1-D embedding vector of shape ``(1024,)``.
+        """
+        x = torch.as_tensor(image, device=self.device, dtype=torch.float32)[None, None, ...]
+        with torch.inference_mode():
+            features, _ = self.model(x)
+        return features
 
 
 def _minmax_norm(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:

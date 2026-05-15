@@ -96,7 +96,7 @@ def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]])
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
     from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
-    from dynacell.evaluation.utils import DinoV3FeatureExtractor, DynaCLRFeatureExtractor
+    from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
     all_pixel_metrics = []
     all_mask_metrics = []
@@ -113,8 +113,10 @@ def evaluate_predictions(config: DictConfig):
     dinov3_model_name = None
     dynaclr_ckpt_path = None
     dynaclr_encoder_cfg = None
+    celldino_weights_path = None
     dinov3_feature_extractor = None
     dynaclr_feature_extractor = None
+    celldino_feature_extractor = None
 
     if config.compute_feature_metrics:
         if io_config.cell_segmentation_path is None:
@@ -128,12 +130,23 @@ def evaluate_predictions(config: DictConfig):
             checkpoint=dynaclr_config.checkpoint,
             encoder_config=dynaclr_encoder_cfg,
         )
+        # CELL-DINO is opt-in: only instantiate when `weights_path` is set.
+        celldino_cfg = getattr(config.feature_extractor, "celldino", None)
+        weights_path = getattr(celldino_cfg, "weights_path", None) if celldino_cfg is not None else None
+        if weights_path is not None:
+            celldino_weights_path = str(weights_path)
+            celldino_feature_extractor = CellDinoFeatureExtractor(
+                weights_path=celldino_weights_path,
+                img_size=int(celldino_cfg.img_size),
+                patch_size=int(celldino_cfg.patch_size),
+            )
 
     cache_ctx = init_cache_context(
         config,
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+        celldino_weights_path=celldino_weights_path,
     )
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
@@ -156,6 +169,12 @@ def evaluate_predictions(config: DictConfig):
     gt_dynaclr_feats: list[np.ndarray] = []
     gt_dynaclr_fovs: list[np.ndarray] = []
     gt_dynaclr_ts: list[np.ndarray] = []
+    pred_celldino_feats: list[np.ndarray] = []
+    pred_celldino_fovs: list[np.ndarray] = []
+    pred_celldino_ts: list[np.ndarray] = []
+    gt_celldino_feats: list[np.ndarray] = []
+    gt_celldino_fovs: list[np.ndarray] = []
+    gt_celldino_ts: list[np.ndarray] = []
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
@@ -221,6 +240,13 @@ def evaluate_predictions(config: DictConfig):
                     gt_dynaclr_per_t = fov_gt_deep_features(
                         cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
                     )
+                    gt_celldino_per_t = (
+                        fov_gt_deep_features(
+                            cache_ctx, pos_name_pred, target, cell_segmentation, celldino_feature_extractor, "celldino"
+                        )
+                        if celldino_feature_extractor is not None
+                        else None
+                    )
 
                 microssim_data = []
                 fov_pixel_metrics = []
@@ -265,6 +291,16 @@ def evaluate_predictions(config: DictConfig):
                             dynaclr_feature_extractor,
                             config.feature_metrics.patch_size,
                         )
+                        pred_celldino = (
+                            deep_pred_features(
+                                predict[t],
+                                cell_segmentation[t],
+                                celldino_feature_extractor,
+                                config.feature_metrics.patch_size,
+                            )
+                            if celldino_feature_extractor is not None
+                            else None
+                        )
                         # Per-timepoint CP: drop target-zero columns + per-side z-score.
                         # Deep features stay untouched.
                         if pred_cp.size and gt_cp_per_t[t].size:
@@ -276,6 +312,10 @@ def evaluate_predictions(config: DictConfig):
                             **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
                             **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
                         }
+                        if pred_celldino is not None:
+                            pairwise_metrics.update(
+                                compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
+                            )
                         all_feature_metrics.append({**data_info, **pairwise_metrics})
                         if pred_cp.size > 0:
                             pred_cp_feats.append(pred_cp)
@@ -301,6 +341,14 @@ def evaluate_predictions(config: DictConfig):
                             pred_dynaclr_ts.append(np.full(n, t, dtype=np.int32))
                             gt_dynaclr_fovs.append(np.full(n, pos_name_pred))
                             gt_dynaclr_ts.append(np.full(n, t, dtype=np.int32))
+                        if pred_celldino is not None and pred_celldino.size > 0:
+                            pred_celldino_feats.append(pred_celldino)
+                            gt_celldino_feats.append(gt_celldino_per_t[t])
+                            n = len(pred_celldino)
+                            pred_celldino_fovs.append(np.full(n, pos_name_pred))
+                            pred_celldino_ts.append(np.full(n, t, dtype=np.int32))
+                            gt_celldino_fovs.append(np.full(n, pos_name_pred))
+                            gt_celldino_ts.append(np.full(n, t, dtype=np.int32))
 
                 seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
                 row, col, fov = pos_name_pred.split("/")
@@ -356,10 +404,15 @@ def evaluate_predictions(config: DictConfig):
                 )
             )
 
-        for name, pred_feats, gt_feats, pred_fovs, gt_fovs in (
+        deep_tracks = [
             ("DINOv3", pred_dinov3_feats, gt_dinov3_feats, pred_dinov3_fovs, gt_dinov3_fovs),
             ("DynaCLR", pred_dynaclr_feats, gt_dynaclr_feats, pred_dynaclr_fovs, gt_dynaclr_fovs),
-        ):
+        ]
+        if celldino_feature_extractor is not None:
+            deep_tracks.append(
+                ("CellDINO", pred_celldino_feats, gt_celldino_feats, pred_celldino_fovs, gt_celldino_fovs)
+            )
+        for name, pred_feats, gt_feats, pred_fovs, gt_fovs in deep_tracks:
             if pred_feats:
                 pred_arr = np.concatenate(pred_feats, axis=0)
                 target_arr = np.concatenate(gt_feats, axis=0)
@@ -385,17 +438,20 @@ def evaluate_predictions(config: DictConfig):
         if prefix_inputs:
             # Threads suffice: torch-fidelity, sklearn LBFGS, and numpy BLAS
             # all release the GIL inside their hot loops. Cap inner BLAS to
-            # 1 thread so the 3 outer threads don't oversubscribe cores.
+            # 1 thread so the outer threads don't oversubscribe cores.
             with (
                 threadpool_limits(limits=1),
-                ThreadPoolExecutor(max_workers=min(3, len(prefix_inputs))) as pool,
+                ThreadPoolExecutor(max_workers=min(4, len(prefix_inputs))) as pool,
             ):
                 for result in pool.map(_compute_one, prefix_inputs):
                     dataset_row.update(result)
 
         # NaN-fill any prefix that had no cells (parallel pool would
         # otherwise skip it). Cheap; runs on empty arrays.
-        for name in ("CP", "DINOv3", "DynaCLR"):
+        expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
+        if celldino_feature_extractor is not None:
+            expected_prefixes.append("CellDINO")
+        for name in expected_prefixes:
             if f"{name}_FID" not in dataset_row:
                 dataset_row.update(compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name))
                 dataset_row.update(
@@ -404,17 +460,18 @@ def evaluate_predictions(config: DictConfig):
 
         for row in all_feature_metrics:
             row.update(dataset_row)
-        _save_embeddings(
-            save_dir,
-            {
-                "pred_cp": (pred_cp_feats, pred_cp_fovs, pred_cp_ts),
-                "gt_cp": (gt_cp_feats, gt_cp_fovs, gt_cp_ts),
-                "pred_dinov3": (pred_dinov3_feats, pred_dinov3_fovs, pred_dinov3_ts),
-                "gt_dinov3": (gt_dinov3_feats, gt_dinov3_fovs, gt_dinov3_ts),
-                "pred_dynaclr": (pred_dynaclr_feats, pred_dynaclr_fovs, pred_dynaclr_ts),
-                "gt_dynaclr": (gt_dynaclr_feats, gt_dynaclr_fovs, gt_dynaclr_ts),
-            },
-        )
+        embedding_groups = {
+            "pred_cp": (pred_cp_feats, pred_cp_fovs, pred_cp_ts),
+            "gt_cp": (gt_cp_feats, gt_cp_fovs, gt_cp_ts),
+            "pred_dinov3": (pred_dinov3_feats, pred_dinov3_fovs, pred_dinov3_ts),
+            "gt_dinov3": (gt_dinov3_feats, gt_dinov3_fovs, gt_dinov3_ts),
+            "pred_dynaclr": (pred_dynaclr_feats, pred_dynaclr_fovs, pred_dynaclr_ts),
+            "gt_dynaclr": (gt_dynaclr_feats, gt_dynaclr_fovs, gt_dynaclr_ts),
+        }
+        if celldino_feature_extractor is not None:
+            embedding_groups["pred_celldino"] = (pred_celldino_feats, pred_celldino_fovs, pred_celldino_ts)
+            embedding_groups["gt_celldino"] = (gt_celldino_feats, gt_celldino_fovs, gt_celldino_ts)
+        _save_embeddings(save_dir, embedding_groups)
 
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 

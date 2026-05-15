@@ -19,6 +19,7 @@ def _import_pipeline_with_stubs(monkeypatch):
     utils_module = types.ModuleType("dynacell.evaluation.utils")
     utils_module.DinoV3FeatureExtractor = object
     utils_module.DynaCLRFeatureExtractor = object
+    utils_module.CellDinoFeatureExtractor = object
     utils_module.plot_metrics = lambda *args, **kwargs: None
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")

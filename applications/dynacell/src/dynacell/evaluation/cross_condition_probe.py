@@ -34,7 +34,7 @@ import numpy as np
 from dynacell.evaluation.feature_select import select_features
 from dynacell.evaluation.linear_probe import MADScaler, paired_auroc
 
-_FEATURE_TYPES = ("cp", "dinov3", "dynaclr")
+_FEATURE_TYPES = ("cp", "dinov3", "dynaclr", "celldino")
 _SOURCES = ("pred", "gt")
 _CONDITION_TOKENS = ("mock", "denv", "zikv")
 _DEFAULT_PAIRS = (("mock", "denv"), ("mock", "zikv"))

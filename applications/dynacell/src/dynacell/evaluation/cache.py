@@ -25,7 +25,7 @@ import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
-FeatureKind = Literal["cp", "dinov3", "dynaclr"]
+FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino"]
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -60,6 +60,10 @@ class CachePaths:
     def dynaclr_features(self, ckpt_sha12: str) -> Path:
         """Return the zarr group path for DynaCLR features keyed by *ckpt_sha12*."""
         return self.features_dir / "dynaclr" / f"{ckpt_sha12}.zarr"
+
+    def celldino_features(self, weights_sha12: str) -> Path:
+        """Return the zarr group path for CELL-DINO features keyed by *weights_sha12*."""
+        return self.features_dir / "celldino" / f"{weights_sha12}.zarr"
 
 
 def cache_paths(gt_cache_dir: Path | str) -> CachePaths:
@@ -275,6 +279,7 @@ def _features_group_path(
     *,
     model_name: str | None = None,
     ckpt_sha12: str | None = None,
+    weights_sha12: str | None = None,
 ) -> Path:
     """Resolve the zarr group path for a feature cache entry."""
     if kind == "cp":
@@ -287,6 +292,10 @@ def _features_group_path(
         if ckpt_sha12 is None:
             raise ValueError("ckpt_sha12 is required for kind='dynaclr'")
         return paths.dynaclr_features(ckpt_sha12)
+    if kind == "celldino":
+        if weights_sha12 is None:
+            raise ValueError("weights_sha12 is required for kind='celldino'")
+        return paths.celldino_features(weights_sha12)
     raise ValueError(f"Unknown feature kind: {kind!r}")
 
 
@@ -316,13 +325,16 @@ def open_features_group(
     mode: Literal["r", "a"] = "a",
     model_name: str | None = None,
     ckpt_sha12: str | None = None,
+    weights_sha12: str | None = None,
 ):
     """Yield an open zarr group for one feature-cache artifact.
 
     Use this for per-FOV batch reads/writes so the underlying store is opened
     once per FOV instead of once per timepoint.
     """
-    group_path = _features_group_path(paths, kind, model_name=model_name, ckpt_sha12=ckpt_sha12)
+    group_path = _features_group_path(
+        paths, kind, model_name=model_name, ckpt_sha12=ckpt_sha12, weights_sha12=weights_sha12
+    )
     if mode == "r" and not group_path.exists():
         yield None
         return
@@ -338,6 +350,7 @@ def read_features(
     *,
     model_name: str | None = None,
     ckpt_sha12: str | None = None,
+    weights_sha12: str | None = None,
 ) -> np.ndarray | None:
     """Read cached target-side features for one (position, timepoint).
 
@@ -345,7 +358,9 @@ def read_features(
     :func:`open_features_group` + :func:`read_features_from_group` for
     per-FOV batch reads.
     """
-    with open_features_group(paths, kind, mode="r", model_name=model_name, ckpt_sha12=ckpt_sha12) as group:
+    with open_features_group(
+        paths, kind, mode="r", model_name=model_name, ckpt_sha12=ckpt_sha12, weights_sha12=weights_sha12
+    ) as group:
         if group is None:
             return None
         return read_features_from_group(group, pos_name, t)
@@ -360,6 +375,7 @@ def write_features(
     *,
     model_name: str | None = None,
     ckpt_sha12: str | None = None,
+    weights_sha12: str | None = None,
 ) -> None:
     """Write target-side features for one (position, timepoint).
 
@@ -367,7 +383,9 @@ def write_features(
     :func:`open_features_group` + :func:`write_features_to_group` for
     per-FOV batch writes.
     """
-    with open_features_group(paths, kind, mode="a", model_name=model_name, ckpt_sha12=ckpt_sha12) as group:
+    with open_features_group(
+        paths, kind, mode="a", model_name=model_name, ckpt_sha12=ckpt_sha12, weights_sha12=weights_sha12
+    ) as group:
         write_features_to_group(group, pos_name, t, features)
 
 
