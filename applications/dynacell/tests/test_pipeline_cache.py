@@ -52,6 +52,7 @@ def _make_config(**overrides: Any):
             "gt_cp": False,
             "gt_dinov3": False,
             "gt_dynaclr": False,
+            "gt_celldino": False,
             "final_metrics": False,
         },
     }
@@ -95,6 +96,7 @@ def test_resolve_force_all_propagates() -> None:
             "gt_cp": False,
             "gt_dinov3": False,
             "gt_dynaclr": False,
+            "gt_celldino": False,
             "final_metrics": False,
         }
     )
@@ -111,6 +113,7 @@ def test_resolve_force_individual() -> None:
             "gt_cp": True,
             "gt_dinov3": False,
             "gt_dynaclr": False,
+            "gt_celldino": False,
             "final_metrics": False,
         }
     )

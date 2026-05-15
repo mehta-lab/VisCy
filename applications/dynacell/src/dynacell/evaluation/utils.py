@@ -1,10 +1,9 @@
 # ruff: noqa: I001 — matplotlib.use() must be called before pyplot import
-"""Feature extraction utilities and metric helpers for evaluation."""
+"""Feature extraction utilities and plotting helpers for evaluation."""
 
 import numpy as np
 import torch
 import matplotlib
-from scipy import linalg
 
 try:
     from transformers import AutoModel, AutoImageProcessor
@@ -21,6 +20,11 @@ try:
     from viscy_models.contrastive import ContrastiveEncoder
 except ImportError:
     ContrastiveEncoder = None  # type: ignore[assignment, misc]
+
+try:
+    from viscy_models.foundation import CellDinoModel
+except ImportError:
+    CellDinoModel = None  # type: ignore[assignment, misc]
 
 matplotlib.use("Agg")
 from pathlib import Path
@@ -45,6 +49,15 @@ def _require_viscy_models():
     if ContrastiveEncoder is None:
         raise ImportError(
             "viscy_models is required for DynaCLRFeatureExtractor. Install it with: pip install viscy-models"
+        )
+
+
+def _require_cell_dino():
+    if CellDinoModel is None:
+        raise ImportError(
+            "viscy_models.foundation.CellDinoModel is required for CellDinoFeatureExtractor. "
+            "Install the in-tree workspace package via `uv sync --all-packages --all-extras` "
+            "from the VisCy repo root, or `pip install -e packages/viscy-models`."
         )
 
 
@@ -87,6 +100,21 @@ class DynaCLRFeatureExtractor:
             features, _ = self.model(image)
         return features
 
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 64) -> torch.Tensor:
+        """Run the encoder over a batch of 2-D crops in one or more chunks.
+
+        Stacks the crops to ``(N, 1, 1, H, W)`` so the contrastive encoder
+        sees a real batch. Chunks at ``batch_size`` to bound VRAM.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = np.stack(images[i : i + batch_size], axis=0)
+            batch = torch.as_tensor(chunk, device=self.model.device)[:, None, None, ...]
+            with torch.inference_mode():
+                features, _ = self.model(batch)
+            out_chunks.append(features)
+        return torch.cat(out_chunks, dim=0)
+
 
 class DinoV3FeatureExtractor:
     """DINOv3-based feature extractor for cell images."""
@@ -127,110 +155,93 @@ class DinoV3FeatureExtractor:
             outputs = self.model(**inputs)
         return outputs.pooler_output
 
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 32) -> torch.Tensor:
+        """Run the ViT backbone over a batch of 2-D crops in one or more chunks.
 
-def _frechet_distance(features_a: np.ndarray, features_b: np.ndarray) -> float:
-    """Compute Frechet distance between two feature distributions."""
-    if features_a.shape[0] == 0 or features_b.shape[0] == 0:
-        return float("nan")
-
-    mean_a = features_a.mean(axis=0)
-    mean_b = features_b.mean(axis=0)
-
-    if features_a.shape[0] > 1:
-        cov_a = np.cov(features_a, rowvar=False)
-    else:
-        cov_a = np.zeros((features_a.shape[1], features_a.shape[1]), dtype=np.float64)
-
-    if features_b.shape[0] > 1:
-        cov_b = np.cov(features_b, rowvar=False)
-    else:
-        cov_b = np.zeros((features_b.shape[1], features_b.shape[1]), dtype=np.float64)
-
-    cov_a = np.atleast_2d(np.asarray(cov_a, dtype=np.float64))
-    cov_b = np.atleast_2d(np.asarray(cov_b, dtype=np.float64))
-
-    eps = 1e-3
-    offset = np.eye(cov_a.shape[0]) * eps
-    cov_prod_sqrt, _ = linalg.sqrtm((cov_a + offset) @ (cov_b + offset), disp=False)
-
-    if np.iscomplexobj(cov_prod_sqrt):
-        cov_prod_sqrt = cov_prod_sqrt.real
-
-    mean_diff = mean_a - mean_b
-    fid = mean_diff @ mean_diff + np.trace(cov_a + cov_b - 2.0 * cov_prod_sqrt)
-
-    return float(max(fid, 0.0))
+        AutoImageProcessor accepts a list of 3-channel images and produces
+        a stacked tensor; we chunk at ``batch_size`` to bound VRAM.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = [np.stack([img] * 3, axis=0) for img in images[i : i + batch_size]]
+            inputs = self.processor(images=chunk, return_tensors="pt").to(self.model.device)
+            with torch.inference_mode():
+                outputs = self.model(**inputs)
+            out_chunks.append(outputs.pooler_output)
+        return torch.cat(out_chunks, dim=0)
 
 
-def _polynomial_mmd(features_a: np.ndarray, features_b: np.ndarray) -> float:
-    """Compute biased KID estimate with a degree-3 polynomial kernel."""
-    features_a = np.asarray(features_a, dtype=np.float64)
-    features_b = np.asarray(features_b, dtype=np.float64)
+class CellDinoFeatureExtractor:
+    """CELL-DINO foundation model (DINOv2 ViT-L/16 pretrained on HPA) for cell images.
 
-    if features_a.ndim != 2 or features_b.ndim != 2:
-        raise ValueError("features_a and features_b must be 2D arrays")
-    if features_a.shape[1] != features_b.shape[1]:
-        raise ValueError("Feature dimensions must match")
+    Wraps :class:`viscy_models.foundation.CellDinoModel` so the eval pipeline
+    can use it via the same ``extract_features(image_2d)`` contract as the
+    DINOv3 and DynaCLR extractors. The underlying model's ``preprocess_2d``
+    handles the 224×224 resize and per-image min/max scaling, so the caller
+    can feed the same masked 2-D cell crop used for the other backbones.
+    """
 
-    num_a = features_a.shape[0]
-    num_b = features_b.shape[0]
-    if num_a == 0 or num_b == 0:
-        return float("nan")
+    def __init__(self, weights_path: str, img_size: int = 224, patch_size: int = 16):
+        """Load a CELL-DINO checkpoint from a local ``.pth`` state_dict.
 
-    feature_dim = features_a.shape[1]
-    gamma = 1.0 / feature_dim
+        Parameters
+        ----------
+        weights_path :
+            Absolute path to the CELL-DINO ``.pth`` state_dict (e.g. the
+            ``channel_adaptive_dino_vitl16_pretrain_cells-*.pth`` published
+            at ``/hpc/projects/organelle_phenotyping/models/CELL-DINO/``).
+        img_size :
+            Spatial size the model interpolates inputs to, by default 224.
+        patch_size :
+            ViT patch size, by default 16.
+        """
+        _require_cell_dino()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = CellDinoModel(weights_path=weights_path, img_size=img_size, patch_size=patch_size, freeze=True)
+        self.model.to(device)
+        self.model.eval()
+        self.device = device
 
-    kernel_aa = (gamma * (features_a @ features_a.T) + 1.0) ** 3
-    kernel_bb = (gamma * (features_b @ features_b.T) + 1.0) ** 3
-    kernel_ab = (gamma * (features_a @ features_b.T) + 1.0) ** 3
+    def extract_features(self, image: np.ndarray) -> torch.Tensor:
+        """Extract the channel-mean cls token from a 2-D image patch.
 
-    sum_aa = kernel_aa.mean()
-    sum_bb = kernel_bb.mean()
-    sum_ab = kernel_ab.mean()
+        Parameters
+        ----------
+        image :
+            2-D array (H, W); wrapped to ``(1, 1, H, W)`` so CellDinoModel
+            treats it as a single-channel, single-batch input.
 
-    kid = sum_aa + sum_bb - 2.0 * sum_ab
-    return float(kid)
+        Returns
+        -------
+        torch.Tensor
+            1-D embedding vector of shape ``(1024,)``.
+        """
+        x = torch.as_tensor(image, device=self.device, dtype=torch.float32)[None, None, ...]
+        with torch.inference_mode():
+            features, _ = self.model(x)
+        return features
+
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 32) -> torch.Tensor:
+        """Run CELL-DINO over a batch of 2-D crops in one or more chunks.
+
+        Stacks the crops to ``(N, 1, H, W)`` so the ViT-L/16 backbone runs
+        once per chunk. Chunks at ``batch_size`` to bound VRAM — at
+        ``img_size=224, patch_size=16``, ViT-L activations are ~1 GB per
+        32 cells in fp32.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = np.stack(images[i : i + batch_size], axis=0)
+            batch = torch.as_tensor(chunk, device=self.device, dtype=torch.float32)[:, None, ...]
+            with torch.inference_mode():
+                features, _ = self.model(batch)
+            out_chunks.append(features)
+        return torch.cat(out_chunks, dim=0)
 
 
 def _minmax_norm(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     """Min-max normalize array to [0, 1]."""
     return (x - x.min()) / (x.max() - x.min() + eps)
-
-
-def _pairwise_feature_metrics(pred_features: np.ndarray, target_features: np.ndarray, prefix: str) -> dict[str, float]:
-    """Compute median cosine similarity, FID, and KID between two feature matrices.
-
-    Filters out rows with non-finite values and zero-norm vectors before
-    computing metrics. Returns NaN for all metrics if no valid rows remain.
-    """
-    nan_result = {
-        f"{prefix}_Median_Cosine_Similarity": float("nan"),
-        f"{prefix}_FID": float("nan"),
-        f"{prefix}_KID": float("nan"),
-    }
-
-    valid_rows = np.isfinite(pred_features).all(axis=1) & np.isfinite(target_features).all(axis=1)
-    if not np.any(valid_rows):
-        return nan_result
-
-    pred_features = pred_features[valid_rows]
-    target_features = target_features[valid_rows]
-
-    numerator = np.einsum("ij,ij->i", pred_features, target_features)
-    denominator = np.linalg.norm(pred_features, axis=1) * np.linalg.norm(target_features, axis=1)
-    nonzero = denominator > 0
-    if not np.any(nonzero):
-        return nan_result
-
-    cosine_similarities = np.clip(numerator[nonzero] / denominator[nonzero], -1.0, 1.0)
-    pred_features = pred_features[nonzero]
-    target_features = target_features[nonzero]
-
-    return {
-        f"{prefix}_Median_Cosine_Similarity": float(np.median(cosine_similarities)),
-        f"{prefix}_FID": _frechet_distance(pred_features, target_features),
-        f"{prefix}_KID": _polynomial_mmd(pred_features, target_features),
-    }
 
 
 def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:

@@ -56,6 +56,7 @@ class _CacheContext:
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
+    celldino_weights_sha12: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -83,6 +84,7 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "gt_cp": all_flag or bool(force.gt_cp),
         "gt_dinov3": all_flag or bool(force.gt_dinov3),
         "gt_dynaclr": all_flag or bool(force.gt_dynaclr),
+        "gt_celldino": all_flag or bool(force.gt_celldino),
         "final_metrics": all_flag or bool(force.final_metrics),
     }
 
@@ -93,6 +95,7 @@ def init_cache_context(
     dinov3_model_name: str | None = None,
     dynaclr_ckpt_path: str | None = None,
     dynaclr_encoder_cfg: dict[str, Any] | None = None,
+    celldino_weights_path: str | None = None,
 ) -> _CacheContext:
     """Open and validate the GT cache for the current run.
 
@@ -106,6 +109,9 @@ def init_cache_context(
         DynaCLR checkpoint path; ``None`` when feature metrics are disabled.
     dynaclr_encoder_cfg
         DynaCLR encoder config (resolved dict); ``None`` when disabled.
+    celldino_weights_path
+        CELL-DINO ``.pth`` state_dict path; ``None`` when the CELL-DINO
+        backbone is not configured.
     """
     io = config.io
     force = _resolve_force(config.force_recompute)
@@ -114,13 +120,13 @@ def init_cache_context(
     spacing = list(config.pixel_metrics.spacing)
     patch_size = int(config.feature_metrics.patch_size)
 
+    dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
+    dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
+    celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
+
     if io.gt_cache_dir is None:
         if require_complete:
             raise ValueError("io.require_complete_cache=true requires io.gt_cache_dir to be set")
-        dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
-        dynaclr_encoder_sha12 = (
-            encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
-        )
         return _CacheContext(
             paths=None,
             manifest={},
@@ -132,6 +138,7 @@ def init_cache_context(
             dinov3_model_name=dinov3_model_name,
             dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
             dynaclr_encoder_sha12=dynaclr_encoder_sha12,
+            celldino_weights_sha12=celldino_weights_sha12,
         )
 
     paths = cache_paths(Path(io.gt_cache_dir))
@@ -151,9 +158,6 @@ def init_cache_context(
         cell_segmentation_path=cell_seg_path,
     )
 
-    dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
-    dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
-
     ctx = _CacheContext(
         paths=paths,
         manifest=manifest,
@@ -165,6 +169,7 @@ def init_cache_context(
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
+        celldino_weights_sha12=celldino_weights_sha12,
     )
     _validate_artifact_params(ctx)
     return ctx
@@ -203,6 +208,16 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
                 "patch_size": ctx.patch_size,
             },
             artifact_label=f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
+        )
+    if ctx.celldino_weights_sha12 is not None:
+        celldino_section = artifacts.get("celldino_features", {})
+        check_artifact_params(
+            celldino_section.get(ctx.celldino_weights_sha12),
+            {
+                "weights_sha256_12": ctx.celldino_weights_sha12,
+                "patch_size": ctx.patch_size,
+            },
+            artifact_label=f"celldino_features[{ctx.celldino_weights_sha12}]",
         )
 
 
@@ -364,8 +379,8 @@ def fov_gt_deep_features(
 ) -> list[np.ndarray]:
     """Return target-side deep embeddings per timepoint for one feature family.
 
-    ``kind`` is ``"dinov3"`` or ``"dynaclr"``. The cache key (model name or
-    checkpoint hash) is pulled from *ctx*.
+    ``kind`` is ``"dinov3"``, ``"dynaclr"``, or ``"celldino"``. The cache key
+    (model name or checkpoint/weights hash) is pulled from *ctx*.
     """
     if kind == "dinov3":
         force_key = "gt_dinov3"
@@ -388,6 +403,17 @@ def fov_gt_deep_features(
             "path": f"features/dynaclr/{ctx.dynaclr_ckpt_sha12}.zarr",
             "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
             "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
+            "patch_size": ctx.patch_size,
+            "built_at": built_at_now(),
+        }
+    elif kind == "celldino":
+        force_key = "gt_celldino"
+        artifact_label = f"celldino_features[{ctx.celldino_weights_sha12}]"
+        cache_kwargs = {"weights_sha12": ctx.celldino_weights_sha12}
+        manifest_keys = ["celldino_features", ctx.celldino_weights_sha12]
+        entry = {
+            "path": f"features/celldino/{ctx.celldino_weights_sha12}.zarr",
+            "weights_sha256_12": ctx.celldino_weights_sha12,
             "patch_size": ctx.patch_size,
             "built_at": built_at_now(),
         }

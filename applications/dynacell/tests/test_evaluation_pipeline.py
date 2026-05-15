@@ -19,6 +19,7 @@ def _import_pipeline_with_stubs(monkeypatch):
     utils_module = types.ModuleType("dynacell.evaluation.utils")
     utils_module.DinoV3FeatureExtractor = object
     utils_module.DynaCLRFeatureExtractor = object
+    utils_module.CellDinoFeatureExtractor = object
     utils_module.plot_metrics = lambda *args, **kwargs: None
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
@@ -27,10 +28,31 @@ def _import_pipeline_with_stubs(monkeypatch):
     metrics_module.evaluate_segmentations = lambda *args, **kwargs: {}
     metrics_module.cp_target_regionprops = lambda *args, **kwargs: None
     metrics_module.cp_pred_regionprops = lambda *args, **kwargs: None
-    metrics_module.cp_pairwise = lambda *args, **kwargs: {}
     metrics_module.deep_target_features = lambda *args, **kwargs: None
     metrics_module.deep_pred_features = lambda *args, **kwargs: None
-    metrics_module.deep_pairwise = lambda *args, **kwargs: {}
+    metrics_module.build_pred_crops = lambda *args, **kwargs: []
+    metrics_module.build_target_crops = lambda *args, **kwargs: []
+    metrics_module.features_from_crops = lambda *args, **kwargs: np.empty((0, 0), dtype=np.float32)
+
+    feature_metrics_module = types.ModuleType("dynacell.evaluation.feature_metrics")
+    feature_metrics_module.compute_feature_similarity = lambda *args, **kwargs: {}
+    feature_metrics_module.compute_feature_similarity_pairwise = lambda *args, **kwargs: {}
+
+    feature_select_module = types.ModuleType("dynacell.evaluation.feature_select")
+    feature_select_module.select_features = lambda gt, pred, **kw: (
+        gt,
+        pred,
+        np.ones(gt.shape[1] if gt is not None and gt.ndim >= 2 else 0, dtype=bool),
+    )
+    feature_select_module.DEFAULT_FREQ_CUT = 0.05
+    feature_select_module.DEFAULT_UNIQUE_CUT = 0.01
+    feature_select_module.DEFAULT_CORR_THRESHOLD = 0.9
+
+    linear_probe_module = types.ModuleType("dynacell.evaluation.linear_probe")
+    _nan_auroc = {"auroc_mean": float("nan"), "auroc_std": float("nan"), "n_folds": 0}
+    linear_probe_module.fov_stratified_auroc = lambda *a, **kw: _nan_auroc
+    linear_probe_module.paired_auroc = lambda *a, **kw: _nan_auroc
+    linear_probe_module.indistinguishability = lambda auroc: float("nan")
 
     segmentation_module = types.ModuleType("dynacell.evaluation.segmentation")
     segmentation_module.segment = lambda *args, **kwargs: None
@@ -44,6 +66,9 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "dynacell.evaluation.utils", utils_module)
     monkeypatch.setitem(sys.modules, "dynacell.evaluation.metrics", metrics_module)
+    monkeypatch.setitem(sys.modules, "dynacell.evaluation.feature_metrics", feature_metrics_module)
+    monkeypatch.setitem(sys.modules, "dynacell.evaluation.feature_select", feature_select_module)
+    monkeypatch.setitem(sys.modules, "dynacell.evaluation.linear_probe", linear_probe_module)
     monkeypatch.setitem(sys.modules, "dynacell.evaluation.segmentation", segmentation_module)
     # Don't stub iohub globally — it's used by viscy_data in the same process
     sys.modules.pop("dynacell.evaluation.pipeline", None)

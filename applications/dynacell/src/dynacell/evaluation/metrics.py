@@ -21,7 +21,7 @@ except ImportError:
     spectral_pcc = None  # type: ignore[assignment]
 
 from dynacell.evaluation.torch_ssim import ssim as torch_ssim
-from dynacell.evaluation.utils import _frechet_distance, _minmax_norm, _pairwise_feature_metrics, _polynomial_mmd
+from dynacell.evaluation.utils import _minmax_norm
 
 
 def _require_microssim():
@@ -64,6 +64,7 @@ def _normalize_to_target_scale(
 
     return (y_true - target_min) / denom, (y_pred - target_min) / denom
 
+
 @torch.inference_mode()
 def _min_max_normalize(
     x: torch.Tensor,
@@ -75,6 +76,7 @@ def _min_max_normalize(
     x = (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
 
     return x
+
 
 @torch.inference_mode()
 def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -324,35 +326,14 @@ def cp_pred_regionprops(prediction, cell_segmentation, spacing):
     return _cp_raw_regionprops(_minmax_norm(prediction), cell_segmentation, spacing)
 
 
-def cp_pairwise(pred_raw, target_raw):
-    """Pair raw CP regionprops into CP_FID / CP_KID / CP_Median_Cosine_Similarity.
-
-    Applies the target-side all-zero column drop and per-matrix z-score that
-    the original monolithic ``cp_feature_similarity`` applied, then delegates
-    to :func:`_pairwise_feature_metrics`. Returns NaN metrics for empty inputs.
-    """
-    if pred_raw.shape != target_raw.shape:
-        raise ValueError(f"Feature shape mismatch: pred {pred_raw.shape} vs target {target_raw.shape}")
-    if pred_raw.size == 0:
-        return _nan_pairwise("CP")
-    non_zero_cols = ~np.all(target_raw == 0, axis=0)
-    pred_mat = pred_raw[:, non_zero_cols]
-    target_mat = target_raw[:, non_zero_cols]
-    pred_mat = (pred_mat - pred_mat.mean(axis=0)) / (pred_mat.std(axis=0) + 1e-8)
-    target_mat = (target_mat - target_mat.mean(axis=0)) / (target_mat.std(axis=0) + 1e-8)
-    if pred_mat.size == 0:
-        return _nan_pairwise("CP")
-    return _pairwise_feature_metrics(pred_mat, target_mat, "CP")
-
-
-def _extract_per_cell_features(img_2d, cell_segmentation_3d, feature_extractor, patch_size):
-    """Iterate cells in the shared 3-D segmentation and extract 2-D per-cell features.
+def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):
+    """Build per-cell masked 2-D crops shared across deep-feature extractors.
 
     Iteration order is ``np.unique(cell_segmentation_3d)`` with the
-    background label ``0`` skipped. Both GT and prediction loops use the
-    same segmentation, so their returned arrays align row-by-row.
+    background label ``0`` skipped. The result is a list of
+    ``(patch_size, patch_size)`` arrays, one per non-background cell.
     """
-    feats = []
+    crops: list[np.ndarray] = []
     for idx in np.unique(cell_segmentation_3d):
         if idx == 0:
             continue
@@ -374,87 +355,75 @@ def _extract_per_cell_features(img_2d, cell_segmentation_3d, feature_extractor, 
         if pad_y_before or pad_y_after or pad_x_before or pad_x_after:
             pad = ((pad_y_before, pad_y_after), (pad_x_before, pad_x_after))
             cell_crop = np.pad(cell_crop, pad, mode="constant")
-        feat = feature_extractor.extract_features(cell_crop).detach().cpu().numpy().reshape(-1)
-        feats.append(feat)
-    if not feats:
+        crops.append(cell_crop)
+    return crops
+
+
+def features_from_crops(crops, feature_extractor):
+    """Run a deep-feature extractor over a list of masked 2-D crops.
+
+    Uses ``feature_extractor.extract_features_batch(crops)`` when the
+    extractor provides it; otherwise falls back to per-cell calls. The
+    batch path lets each extractor stack all cells of a (FOV, t) into a
+    single forward, amortizing Python overhead and letting cuDNN pick
+    wider kernels.
+
+    Extractor contract
+    ------------------
+    Both code paths require the extractor to return a ``torch.Tensor``
+    (``.detach().cpu()`` is called on the result). ``extract_features``
+    must return one tensor per crop; ``extract_features_batch`` must
+    return a stacked tensor whose leading dim equals ``len(crops)``.
+    """
+    if not crops:
         return np.empty((0, 0), dtype=np.float32)
+    batch_fn = getattr(feature_extractor, "extract_features_batch", None)
+    if batch_fn is not None:
+        out = batch_fn(crops)
+        return np.asarray(out.detach().cpu()).reshape(len(crops), -1).astype(np.float32, copy=False)
+    feats = [feature_extractor.extract_features(c).detach().cpu().numpy().reshape(-1) for c in crops]
     return np.stack(feats, axis=0)
+
+
+def build_pred_crops(prediction, cell_segmentation, patch_size):
+    """Compute the 2-D max-z projection + per-cell crops on the prediction side.
+
+    Shared by every deep-feature extractor in the eval pipeline so the
+    max-projection, cell iteration, and crop construction run once per
+    (FOV, timepoint) instead of once per backbone.
+    """
+    if prediction.shape != cell_segmentation.shape:
+        raise ValueError(
+            f"Shape mismatch: prediction {prediction.shape} vs cell_segmentation {cell_segmentation.shape}"
+        )
+    prediction_2d = _minmax_norm(np.max(prediction, axis=0))
+    return _build_per_cell_crops_2d(prediction_2d, cell_segmentation, patch_size)
+
+
+def build_target_crops(target, cell_segmentation, patch_size):
+    """Compute the 2-D max-z projection + per-cell crops on the GT side."""
+    if target.shape != cell_segmentation.shape:
+        raise ValueError(f"Shape mismatch: target {target.shape} vs cell_segmentation {cell_segmentation.shape}")
+    target_2d = _minmax_norm(np.max(target, axis=0))
+    return _build_per_cell_crops_2d(target_2d, cell_segmentation, patch_size)
 
 
 def deep_target_features(target, cell_segmentation, feature_extractor, patch_size):
     """GT-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
 
     Cacheable per ``(gt_path, cell_segmentation_path, patch_size, feature_extractor_identity)``.
+    Backward-compat wrapper: prefer :func:`build_target_crops` +
+    :func:`features_from_crops` when the same crops feed multiple extractors.
     """
-    if target.shape != cell_segmentation.shape:
-        raise ValueError(f"Shape mismatch: target {target.shape} vs cell_segmentation {cell_segmentation.shape}")
-    target_2d = _minmax_norm(np.max(target, axis=0))
-    return _extract_per_cell_features(target_2d, cell_segmentation, feature_extractor, patch_size)
+    crops = build_target_crops(target, cell_segmentation, patch_size)
+    return features_from_crops(crops, feature_extractor)
 
 
 def deep_pred_features(prediction, cell_segmentation, feature_extractor, patch_size):
-    """Prediction-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``."""
-    if prediction.shape != cell_segmentation.shape:
-        raise ValueError(
-            f"Shape mismatch: prediction {prediction.shape} vs cell_segmentation {cell_segmentation.shape}"
-        )
-    prediction_2d = _minmax_norm(np.max(prediction, axis=0))
-    return _extract_per_cell_features(prediction_2d, cell_segmentation, feature_extractor, patch_size)
+    """Prediction-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
 
-
-def deep_pairwise(pred_feats, target_feats, name):
-    """Pair per-cell deep features into ``{name}_FID`` / ``_KID`` / ``_Median_Cosine_Similarity``.
-
-    Empty inputs (no cells) produce NaN metrics.
+    Backward-compat wrapper: prefer :func:`build_pred_crops` +
+    :func:`features_from_crops` when the same crops feed multiple extractors.
     """
-    if name not in ("DINOv3", "DynaCLR"):
-        raise ValueError(f"Unsupported feature extractor: {name}")
-    if pred_feats.shape != target_feats.shape:
-        raise ValueError(f"Feature shape mismatch: pred {pred_feats.shape} vs target {target_feats.shape}")
-    if pred_feats.size == 0:
-        return _nan_pairwise(name)
-    return _pairwise_feature_metrics(pred_feats, target_feats, name)
-
-
-def _nan_pairwise(name):
-    """Return a dict of NaN placeholders matching the pairwise-metrics schema."""
-    return {
-        f"{name}_Median_Cosine_Similarity": float("nan"),
-        f"{name}_FID": float("nan"),
-        f"{name}_KID": float("nan"),
-    }
-
-
-def cp_dataset_fid_kid(pred_raw_all: list[np.ndarray], target_raw_all: list[np.ndarray]) -> dict[str, float]:
-    """FID and KID for CP features pooled across the full dataset."""
-    if not pred_raw_all:
-        return {"CP_FID": float("nan"), "CP_KID": float("nan")}
-    pred_raw = np.concatenate(pred_raw_all, axis=0)
-    target_raw = np.concatenate(target_raw_all, axis=0)
-    non_zero_cols = ~np.all(target_raw == 0, axis=0)
-    pred_mat = pred_raw[:, non_zero_cols]
-    target_mat = target_raw[:, non_zero_cols]
-    if pred_mat.size == 0:
-        return {"CP_FID": float("nan"), "CP_KID": float("nan")}
-    pred_mat = (pred_mat - pred_mat.mean(axis=0)) / (pred_mat.std(axis=0) + 1e-8)
-    target_mat = (target_mat - target_mat.mean(axis=0)) / (target_mat.std(axis=0) + 1e-8)
-    return {
-        "CP_FID": _frechet_distance(pred_mat, target_mat),
-        "CP_KID": _polynomial_mmd(pred_mat, target_mat),
-    }
-
-
-def deep_dataset_fid_kid(
-    pred_feats_all: list[np.ndarray], target_feats_all: list[np.ndarray], name: str
-) -> dict[str, float]:
-    """FID and KID for deep embeddings pooled across the full dataset."""
-    if name not in ("DINOv3", "DynaCLR"):
-        raise ValueError(f"Unsupported feature extractor: {name}")
-    if not pred_feats_all:
-        return {f"{name}_FID": float("nan"), f"{name}_KID": float("nan")}
-    pred_feats = np.concatenate(pred_feats_all, axis=0)
-    target_feats = np.concatenate(target_feats_all, axis=0)
-    return {
-        f"{name}_FID": _frechet_distance(pred_feats, target_feats),
-        f"{name}_KID": _polynomial_mmd(pred_feats, target_feats),
-    }
+    crops = build_pred_crops(prediction, cell_segmentation, patch_size)
+    return features_from_crops(crops, feature_extractor)

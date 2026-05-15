@@ -168,51 +168,6 @@ class _IdentityExtractor:
         return torch.from_numpy(np.asarray(img, dtype=np.float32).reshape(-1))
 
 
-def test_cp_pairwise_empty_returns_nan(monkeypatch) -> None:
-    """Empty feature matrices produce NaN metrics without touching downstream code."""
-    metrics = _import_metrics_with_stubs(monkeypatch)
-    empty = np.empty((0, 0), dtype=np.float32)
-    result = metrics.cp_pairwise(empty, empty)
-    assert np.isnan(result["CP_Median_Cosine_Similarity"])
-    assert np.isnan(result["CP_FID"])
-    assert np.isnan(result["CP_KID"])
-
-
-def test_cp_pairwise_shape_mismatch_raises(monkeypatch) -> None:
-    """Mismatched pred and target shapes raise ValueError."""
-    metrics = _import_metrics_with_stubs(monkeypatch)
-    with pytest.raises(ValueError, match="Feature shape mismatch"):
-        metrics.cp_pairwise(np.zeros((3, 4)), np.zeros((2, 4)))
-
-
-def test_cp_pairwise_drops_target_zero_columns(monkeypatch) -> None:
-    """All-zero target columns are dropped before z-scoring."""
-    metrics = _import_metrics_with_stubs(monkeypatch)
-    # cols 0, 2 vary; col 1 is all-zero on the target side and must be dropped.
-    pred = np.array([[1.0, 9.0, 2.0], [3.0, 8.0, 5.0], [2.0, 7.0, 4.0]], dtype=np.float32)
-    target = pred.copy()
-    target[:, 1] = 0.0
-    result = metrics.cp_pairwise(pred, target)
-    # After dropping col 1, surviving cols are identical between pred and target.
-    # Per-side z-score preserves that identity → near-perfect median cosine similarity.
-    assert result["CP_Median_Cosine_Similarity"] == pytest.approx(1.0, abs=1e-3)
-
-
-def test_deep_pairwise_empty_returns_nan(monkeypatch) -> None:
-    """Zero-cell timepoint produces NaN for deep feature metrics."""
-    metrics = _import_metrics_with_stubs(monkeypatch)
-    empty = np.empty((0, 0), dtype=np.float32)
-    result = metrics.deep_pairwise(empty, empty, "DINOv3")
-    assert np.isnan(result["DINOv3_FID"])
-
-
-def test_deep_pairwise_rejects_unknown_name(monkeypatch) -> None:
-    """Unknown extractor name raises."""
-    metrics = _import_metrics_with_stubs(monkeypatch)
-    with pytest.raises(ValueError, match="Unsupported feature extractor"):
-        metrics.deep_pairwise(np.zeros((2, 4)), np.zeros((2, 4)), "Bogus")
-
-
 def test_deep_target_and_pred_features_same_cell_order(monkeypatch) -> None:
     """GT and pred iterate the shared cell_segmentation → rows align by cell."""
     metrics = _import_metrics_with_stubs(monkeypatch)
@@ -261,42 +216,51 @@ def test_deep_target_features_shape_mismatch_raises(monkeypatch) -> None:
         metrics.deep_target_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
 
 
-# --- Golden-value regression tests for the split-feature pairing stages ---
+class _BatchAwareExtractor:
+    """Extractor that records whether ``extract_features_batch`` was used.
 
-
-def test_cp_pairwise_pinned_values(monkeypatch) -> None:
-    """Regression guard: pinned CP metrics on a seeded synthetic input.
-
-    Catches drift in the column-drop, per-side z-score, and FID/KID/cosine
-    stages after the GT/pred split. If this test starts failing, either the
-    pairing pipeline changed (intentional → update the pinned values and
-    note it in the commit) or a dependency shifted numerics (investigate).
+    Returns the flattened crop as the embedding, same as ``_IdentityExtractor``,
+    so the row alignment of the batched path is checkable against the per-cell
+    path.
     """
+
+    def __init__(self) -> None:
+        self.batch_calls = 0
+        self.per_cell_calls = 0
+
+    def extract_features(self, img: np.ndarray):  # pragma: no cover - exercised via fallback path
+        self.per_cell_calls += 1
+        return torch.from_numpy(np.asarray(img, dtype=np.float32).reshape(-1))
+
+    def extract_features_batch(self, images: list[np.ndarray]):
+        self.batch_calls += 1
+        stacked = np.stack([np.asarray(img, dtype=np.float32).reshape(-1) for img in images], axis=0)
+        return torch.from_numpy(stacked)
+
+
+def test_features_from_crops_prefers_batched_path(monkeypatch) -> None:
+    """When the extractor exposes ``extract_features_batch``, it is used once per call."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    rng = np.random.default_rng(42)
-    n_cells, n_props = 8, 6
-    target_raw = rng.standard_normal((n_cells, n_props)).astype(np.float32)
-    pred_raw = target_raw + 0.5 * rng.standard_normal((n_cells, n_props)).astype(np.float32)
-
-    result = metrics.cp_pairwise(pred_raw, target_raw)
-    assert result["CP_Median_Cosine_Similarity"] == pytest.approx(0.93217182, rel=1e-5)
-    assert result["CP_FID"] == pytest.approx(0.19191332, rel=1e-5)
-    assert result["CP_KID"] == pytest.approx(0.10570750, rel=1e-5)
+    crops = [np.ones((4, 4), dtype=np.float32) * k for k in range(1, 4)]
+    extractor = _BatchAwareExtractor()
+    out = metrics.features_from_crops(crops, extractor)
+    assert out.shape == (3, 16)
+    # One batched call covers all three crops; no per-cell fallback.
+    assert extractor.batch_calls == 1
+    assert extractor.per_cell_calls == 0
 
 
-def test_deep_pairwise_pinned_values(monkeypatch) -> None:
-    """Regression guard: pinned deep-feature metrics on a seeded synthetic input."""
+def test_features_from_crops_falls_back_when_no_batch(monkeypatch) -> None:
+    """Extractors without ``extract_features_batch`` get one ``extract_features`` per crop."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    rng = np.random.default_rng(42)
-    # Consume the same RNG draws as the CP test so CP and deep fixtures stay in one seed.
-    rng.standard_normal((8, 6))
-    rng.standard_normal((8, 6))
+    crops = [np.ones((4, 4), dtype=np.float32) * k for k in range(1, 4)]
+    extractor = _IdentityExtractor()
+    out = metrics.features_from_crops(crops, extractor)
+    assert out.shape == (3, 16)
 
-    dim = 32
-    gt_deep = rng.standard_normal((5, dim)).astype(np.float32)
-    pred_deep = gt_deep + 0.1 * rng.standard_normal((5, dim)).astype(np.float32)
 
-    result = metrics.deep_pairwise(pred_deep, gt_deep, "DINOv3")
-    assert result["DINOv3_Median_Cosine_Similarity"] == pytest.approx(0.99563897, rel=1e-5)
-    assert result["DINOv3_FID"] == pytest.approx(0.29004036, rel=1e-5)
-    assert result["DINOv3_KID"] == pytest.approx(0.02735842, rel=1e-5)
+def test_features_from_crops_empty_returns_empty(monkeypatch) -> None:
+    """No crops -> empty (0, 0) feature matrix."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    out = metrics.features_from_crops([], _IdentityExtractor())
+    assert out.shape == (0, 0)

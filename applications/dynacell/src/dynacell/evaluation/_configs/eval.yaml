@@ -63,6 +63,11 @@ feature_extractor:
       embedding_dim: 768
       projection_dim: 32
       drop_path_rate: 0.0
+  # CELL-DINO (DINOv2 ViT-L/16 pretrained on HPA). `weights_path: null` disables.
+  celldino:
+    weights_path: null
+    img_size: 224
+    patch_size: 16
 
 use_gpu: true
 compute_microssim: true
@@ -75,6 +80,7 @@ force_recompute:
   gt_cp: false
   gt_dinov3: false
   gt_dynaclr: false
+  gt_celldino: false
   final_metrics: false
 
 save:
