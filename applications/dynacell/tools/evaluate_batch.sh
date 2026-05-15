@@ -74,28 +74,17 @@ if [ ${#LEAVES[@]} -eq 0 ]; then
   exit 1
 fi
 
-# Composite job name follows the EVAL_<ORG>_<MODEL>_<TRAIN>_ON_<TEST> shape.
-# Uppercase paper key mapping done inside submit_evaluation_batch.py; here we
-# only emit the train/test scope (the python tool defaults to the same shape).
-case "$TRAIN_SET" in
-  ipsc_confocal) TRAIN_KEY=IPSC ;;
-  a549_mantis)   TRAIN_KEY=A549 ;;
-  joint_ipsc_confocal_a549_mantis) TRAIN_KEY=JOINT ;;
-esac
-case "$TEST_SET" in
-  ipsc_confocal) TEST_KEY=IPSC ;;
-  a549_mantis)   TEST_KEY=A549 ;;
-esac
-JOB_NAME="EVAL_${ORGANELLE^^}_${MODEL^^}_${TRAIN_KEY}_ON_${TEST_KEY}"
-
 echo "[evaluate_batch] organelle=$ORGANELLE model=$MODEL train=$TRAIN_SET test=$TEST_SET leaves=${#LEAVES[@]}"
 for leaf in "${LEAVES[@]}"; do
   echo "  - $(basename "$leaf")"
 done
-echo "[evaluate_batch] composite job_name=$JOB_NAME"
 
+# Job name is composed inside submit_evaluation_batch.py via
+# `_composite_job_name`, which applies `paper_key()` to the code-side model
+# (e.g. fcmae_vscyto3d_scratch -> UNEXT2). Don't override here — the bash
+# shorthand `${MODEL^^}` would keep the raw config key and produce a
+# different SLURM job name than the Python tool's default.
 cd "$VISCY_ROOT"
 exec uv run python applications/dynacell/tools/submit_evaluation_batch.py \
   "${LEAVES[@]}" \
-  --job-name "$JOB_NAME" \
   "$@"
