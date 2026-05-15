@@ -52,8 +52,13 @@ optional-dependencies.eval = [
   "microssim @ git+https://github.com/juglab/microssim.git@8bccb17d",
   "pandas",
   "scikit-image",
+  "scikit-learn>=1.4",
   "scipy",
   "segmenter-model-zoo",
+  # Pinned to a commit on toshas/torch-fidelity master that includes MIND
+  # (commit a51aa64 "add Monge Inception Distance") on top of v0.4.0.
+  # MIND is not in any tagged release yet.
+  "torch-fidelity @ git+https://github.com/toshas/torch-fidelity.git@5e211a9",
   "tqdm",
   "transformers",
 ]
