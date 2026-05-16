@@ -19,7 +19,7 @@ model:
   init_args:
     ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/celldiff_r2/checkpoints/last.ckpt
     predict_method: sliding_window
-    predict_overlap: [4, 256, 256]
+    predict_overlap: [0, 0, 0]
 
 data:
   init_args:
