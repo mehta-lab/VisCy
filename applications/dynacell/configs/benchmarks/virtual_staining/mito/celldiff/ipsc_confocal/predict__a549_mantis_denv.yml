@@ -17,19 +17,17 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/celldiff_r2/checkpoints/last.ckpt
     predict_method: iterative # denoise, generate, sliding_window, or iterative
     predict_overlap: [4, 256, 256]
 
 data:
   init_args:
     normalizations:
-      - class_path: viscy_transforms.NormalizeSampled
+      - class_path: viscy_transforms.MinMaxSampled
         init_args:
           keys: [Phase3D]
-          level: fov_statistics
-          subtrahend: mean
-          divisor: std
+          level: timepoint_statistics
     augmentations: []
     z_window_size: 48 # 8 for denoise and generate, 40 for iterative and sliding_window.
 
@@ -37,7 +35,7 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_celldiff_iterative__tomm20_denv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_celldiff_r2_iterative__tomm20_denv.zarr
 
 launcher:
   job_name: CELLDiff_PRED_TOMM20_ON_A549_tomm20_denv
