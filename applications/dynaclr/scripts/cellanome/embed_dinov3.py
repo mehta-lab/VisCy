@@ -1,8 +1,9 @@
 """Extract DINOv3 embeddings for cellanome cells → cell-level AnnData.
 
-Reads primary_analysis.csv from the Cellanome pipeline, crops cell patches
-from the OME-Zarr store, runs them through a frozen DINOv3 model, and writes
-a new cell-level AnnData zarr where each row is one segmented cell.
+Reads per-object metadata from either ``cells_anndata`` (dinov2.zarr) or
+``analysis_base`` (primary_analysis.csv tree), crops cell patches from the
+OME-Zarr store, runs them through a frozen DINOv3 model, and writes a new
+cell-level AnnData zarr where each row is one segmented cell.
 
 Usage
 -----
@@ -34,6 +35,30 @@ CHANNEL_SHORT_NAMES = {
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def load_cells_anndata(cells_anndata: str) -> pd.DataFrame:
+    """Load per-object metadata from the cells AnnData zarr.
+
+    Parameters
+    ----------
+    cells_anndata : str
+        Path to the cells AnnData zarr (e.g., ``dinov2.zarr``). The ``fov_name``
+        column is used as the zarr path (e.g., ``"1/10/005175003667"``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Obs table with ``object_uuid`` as a column and ``zarr_path`` mirroring
+        ``fov_name`` (both columns are preserved).
+    """
+    adata = ad.read_zarr(cells_anndata)
+    df = adata.obs.copy()
+    df["object_uuid"] = df.index.astype(str)
+    df = df.reset_index(drop=True)
+    df["zarr_path"] = df["fov_name"].astype(str)
+    logger.info(f"Loaded {len(df)} objects from {cells_anndata}")
+    return df
 
 
 def load_primary_analysis(
@@ -212,7 +237,11 @@ def resolve_channel_indices(store: zarr.Group, zarr_path: str, channel_names: li
         Zero-based channel indices.
     """
     fov_group = store[zarr_path]
-    channels = fov_group.attrs["omero"]["channels"]
+    attrs = fov_group.attrs
+    if "omero" in attrs:
+        channels = attrs["omero"]["channels"]
+    else:
+        channels = attrs["ome"]["omero"]["channels"]
     labels = [ch.get("label", ch.get("name", "")) for ch in channels]
     indices = []
     for name in channel_names:
@@ -270,7 +299,10 @@ def main():
         cfg = yaml.safe_load(f)
 
     zarr_store = cfg["zarr_store"]
-    analysis_base = cfg["analysis_base"]
+    cells_anndata = cfg.get("cells_anndata", None)
+    analysis_base = cfg.get("analysis_base", None)
+    if (cells_anndata is None) == (analysis_base is None):
+        raise ValueError("Config must set exactly one of `cells_anndata` or `analysis_base`.")
     transcriptome_anndata = cfg.get("transcriptome_anndata", None)
     output_path = cfg["output_path"]
     model_name = cfg.get("model_name", "facebook/dinov2-base")
@@ -286,12 +318,16 @@ def main():
     filters = cfg.get("filters", {})
 
     # --- Load and prepare data ---
-    df = load_primary_analysis(analysis_base, scan_ids, lane_ids)
+    if cells_anndata is not None:
+        df = load_cells_anndata(cells_anndata)
+    else:
+        df = load_primary_analysis(analysis_base, scan_ids, lane_ids)
     n_raw = len(df)
     df = apply_filters(df, filters)
     logger.info(f"After filtering: {len(df)} cells (removed {n_raw - len(df)})")
 
-    df = derive_zarr_paths(df)
+    if analysis_base is not None:
+        df = derive_zarr_paths(df)
     if transcriptome_anndata is not None:
         lookup = build_barcode_lookup(transcriptome_anndata)
         df = join_barcodes(df, lookup)
@@ -315,7 +351,11 @@ def main():
         channel_labels = channels
     else:
         fov_group = store[first_zarr_path]
-        omero_channels = fov_group.attrs["omero"]["channels"]
+        attrs = fov_group.attrs
+        if "omero" in attrs:
+            omero_channels = attrs["omero"]["channels"]
+        else:
+            omero_channels = attrs["ome"]["omero"]["channels"]
         channel_labels = [ch.get("label", ch.get("name", "")) for ch in omero_channels]
         channel_indices = list(range(len(channel_labels)))
     logger.info(f"Channels: {channel_labels} (indices {channel_indices})")
@@ -396,6 +436,11 @@ def main():
     obs = valid_df.copy()
     for col in obs.select_dtypes(include=["string", "string[pyarrow]"]).columns:
         obs[col] = obs[col].astype(object)
+    for col in obs.select_dtypes(include=["category"]).columns:
+        cats = obs[col].cat.categories
+        if not isinstance(cats, pd.Index) or cats.dtype != object:
+            new_cats = pd.Index(cats.astype(str).to_numpy(dtype=object))
+            obs[col] = obs[col].cat.rename_categories(new_cats)
     obs.index = obs["object_uuid"].astype(str)
 
     cell_adata = ad.AnnData(X=embeddings.astype(np.float32), obs=obs)
