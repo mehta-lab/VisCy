@@ -15,15 +15,11 @@ Usage
 
 from __future__ import annotations
 
-import sys
 from collections import Counter
-from pathlib import Path
 
 import pandas as pd
 
-CELL_INDEX_PARQUET = (
-    "/hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v3.parquet"
-)
+CELL_INDEX_PARQUET = "/hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v3.parquet"
 BATCH_SIZE = 256
 N_BATCHES_TO_SHOW = 16
 SEED = 42
@@ -54,6 +50,12 @@ UNIFORM_WEIGHTS = {
 
 CONFIGS = [
     _config("current (stratify_by=null)", batch_group_by="marker", stratify_by=None),
+    _config(
+        "stratify_by=null + uniform group_weights",
+        batch_group_by="marker",
+        stratify_by=None,
+        group_weights=UNIFORM_WEIGHTS,
+    ),
     _config("proposed (stratify_by=experiment)", batch_group_by="marker", stratify_by="experiment"),
     _config(
         "proposed + uniform group_weights",
@@ -65,11 +67,14 @@ CONFIGS = [
 
 
 def main() -> None:
+    """Run each CONFIGS entry through FlexibleBatchSampler and report group/marker mixes."""
     from viscy_data.sampler import FlexibleBatchSampler
 
     print(f"Loading parquet: {CELL_INDEX_PARQUET}")
     df = pd.read_parquet(CELL_INDEX_PARQUET)
-    print(f"  rows={len(df):,}  unique markers={df['marker'].nunique()}  unique experiments={df['experiment'].nunique()}")
+    print(
+        f"  rows={len(df):,}  unique markers={df['marker'].nunique()}  unique experiments={df['experiment'].nunique()}"
+    )
     print()
 
     # FlexibleBatchSampler expects valid_anchors with the relevant columns;

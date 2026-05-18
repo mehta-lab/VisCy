@@ -162,13 +162,31 @@ print(f"Saved: {save_path}")
 
 # %%
 from dynaclr.data.datamodule import MultiExperimentDataModule
+from viscy_transforms import ScaleIntensityRangePercentilesd
 
 Z_WINDOW = 1
 YX_PATCH_SIZE = (256, 256)
 FINAL_YX_PATCH_SIZE = (224, 224)
 BATCH_SIZE = 8
 NUM_WORKERS = 4
-N_BATCHES = 2
+N_BATCHES = 8
+
+# Per-patch percentile normalization — no precomputed stats needed.
+# DataModule scatters channels into a dict keyed by channel_name before
+# applying transforms, so keys must match channel names. Maps the 1st-99th
+# percentile of each patch to [0, 1], handling per-FOV brightness variation
+# without zattrs write access.
+normalizations = [
+    ScaleIntensityRangePercentilesd(
+        keys=CHANNEL_NAMES,
+        lower=1.0,
+        upper=99.0,
+        b_min=0.0,
+        b_max=1.0,
+        clip=True,
+        allow_missing_keys=True,
+    )
+]
 
 print("Building DataModule (self-positive, marker-grouped)...")
 dm = MultiExperimentDataModule(
@@ -183,6 +201,7 @@ dm = MultiExperimentDataModule(
     channels_per_sample=1,
     batch_group_by=["marker"],
     stratify_by="perturbation",
+    normalizations=normalizations,
 )
 dm.setup("fit")
 print("Done.\n")
