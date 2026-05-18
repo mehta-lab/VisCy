@@ -92,6 +92,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Re-runs the metric loop and rewrites embeddings while reusing cached GT "
         "masks / CP / deep features. Mutually exclusive with --overwrite.",
     )
+    ap.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        help="Number of eval processes to run concurrently on the single allocated "
+        "GPU (default 1 = serial, current behavior). Eval is GPU-light (~2 GB of "
+        "~80 GB observed, 0–17%% utilization), so 2–4 parallel processes typically "
+        "fit on one GPU without contention. CPU and memory allocations scale "
+        "linearly with this value (4 × parallel CPUs, 16G × parallel mem). "
+        "Auto-capped at len(leaves) — has no effect on single-leaf iPSC tuples.",
+    )
     ap.add_argument("--dry-run", action="store_true", help="render sbatch script but do not submit")
     ap.add_argument("--print-script", action="store_true", help="print rendered sbatch to stdout, no writes")
     ap.add_argument("--parsable", action="store_true", help="invoke sbatch with --parsable")
@@ -202,16 +213,24 @@ def _composite_job_name(organelle: str, code_model: str, trained_on: str, test_p
 # Single-GPU sbatch profile. Eval is single-process Hydra; no DDP.
 # CPU/mem right-sized from in-flight sample (33009706 / 33009742 / 33009751 /
 # 33009818 / 33009859 / 33009873 / 33009924, all on the regen-metrics path):
-# observed peak RSS 2.7–4.0 GB and AveCPU ≈ 1.4 cores. 4 CPUs / 16 GB gives
-# 2.5× / 4× headroom and quarters our fairshare drain per job.
-_SBATCH_DIRECTIVES = (
-    ("--partition", "gpu"),
-    ("--nodes", "1"),
-    ("--ntasks-per-node", "1"),
-    ("--gpus", "1"),
-    ("--cpus-per-task", "4"),
-    ("--mem", "16G"),
-)
+# observed peak RSS 2.7–4.0 GB and AveCPU ≈ 1.4 cores. 4 CPUs / 16 GB per
+# concurrent eval gives 2.5× / 4× headroom. With --parallel N, CPU and mem
+# scale linearly while a single GPU stays shared across N processes (GPU is
+# the slack resource at ~2 GB / 0–17% per eval).
+_CPUS_PER_EVAL = 4
+_MEM_GB_PER_EVAL = 16
+
+
+def _sbatch_directives(parallel: int) -> tuple[tuple[str, str], ...]:
+    """Build SBATCH directives, scaling CPU/mem with the parallel multiplier."""
+    return (
+        ("--partition", "gpu"),
+        ("--nodes", "1"),
+        ("--ntasks-per-node", "1"),
+        ("--gpus", "1"),
+        ("--cpus-per-task", str(_CPUS_PER_EVAL * parallel)),
+        ("--mem", f"{_MEM_GB_PER_EVAL * parallel}G"),
+    )
 
 
 def _render_sbatch(
@@ -219,11 +238,27 @@ def _render_sbatch(
     walltime: str,
     run_root: Path,
     cmds: list[list[str]],
+    test_plates: list[str],
+    parallel: int,
 ) -> str:
+    """Render the sbatch script.
+
+    With ``parallel == 1`` (default), leaves run serially via ``srun``. With
+    ``parallel > 1``, leaves are grouped into waves of up to ``parallel``
+    bare-background processes that share the single allocated GPU; each wave
+    waits for all of its processes before the next wave starts. Each parallel
+    process gets its own per-leaf stdout/stderr log file under
+    ``run_root/slurm`` so output doesn't interleave.
+    """
+    if parallel < 1:
+        raise ValueError(f"parallel must be >= 1, got {parallel}")
+    if len(test_plates) != len(cmds):
+        raise ValueError(f"test_plates / cmds length mismatch: {len(test_plates)} vs {len(cmds)}")
+
     lines = ["#!/bin/bash", ""]
     lines.append(f"#SBATCH --job-name={job_name}")
     lines.append(f"#SBATCH --time={walltime}")
-    for flag, val in _SBATCH_DIRECTIVES:
+    for flag, val in _sbatch_directives(parallel):
         lines.append(f"#SBATCH {flag}={val}")
     lines.append(f"#SBATCH --output={run_root}/slurm/%j.out")
     lines.append(f"#SBATCH --error={run_root}/slurm/%j.err")
@@ -238,11 +273,31 @@ def _render_sbatch(
     lines.append("scontrol show job $SLURM_JOB_ID || true")
     lines.append("nvidia-smi || true")
     lines.append("")
-    for i, cmd in enumerate(cmds, 1):
-        joined = " ".join(cmd)
-        lines.append(f"echo '[batch] step {i}/{len(cmds)}'")
-        lines.append(f"srun {joined}")
-        lines.append("")
+
+    if parallel == 1:
+        for i, cmd in enumerate(cmds, 1):
+            joined = " ".join(cmd)
+            lines.append(f"echo '[batch] step {i}/{len(cmds)}'")
+            lines.append(f"srun {joined}")
+            lines.append("")
+    else:
+        # Wave the leaves into chunks of `parallel`. Each chunk runs concurrently
+        # as bare background processes on the shared allocation (no per-process
+        # `srun` step — that would try to subdivide the GRES). Each process gets
+        # its own log file keyed by test_plate so output is debuggable.
+        n_waves = (len(cmds) + parallel - 1) // parallel
+        for wave_idx in range(n_waves):
+            start = wave_idx * parallel
+            end = min(start + parallel, len(cmds))
+            wave_cmds = cmds[start:end]
+            wave_plates = test_plates[start:end]
+            lines.append(f"echo '[batch] wave {wave_idx + 1}/{n_waves} ({len(wave_cmds)} concurrent)'")
+            for plate, cmd in zip(wave_plates, wave_cmds, strict=True):
+                joined = " ".join(cmd)
+                log = f"{run_root}/slurm/${{SLURM_JOB_ID}}_{plate}.log"
+                lines.append(f"{joined} > {log} 2>&1 &")
+            lines.append("wait")
+            lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -300,7 +355,16 @@ def submit(argv: list[str] | None = None) -> int:
             cmd.append(f"{k}={token}")
         cmds.append(cmd)
 
-    rendered = _render_sbatch(job_name, args.time, run_root, cmds)
+    # Cap parallelism at the number of leaves — no point allocating CPU/mem for
+    # idle slots on a single-leaf iPSC tuple.
+    parallel = max(1, min(args.parallel, len(cmds)))
+    if args.parallel > parallel:
+        print(
+            f"[submit] --parallel {args.parallel} capped to {parallel} (only {len(cmds)} leaf(s))",
+            file=sys.stderr,
+        )
+
+    rendered = _render_sbatch(job_name, args.time, run_root, cmds, test_plates, parallel)
 
     if args.print_script:
         sys.stdout.write(rendered)
