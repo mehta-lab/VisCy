@@ -73,17 +73,16 @@ Z, Y, X = image.shape[-3:]
 figure, axes = plt.subplots(1, n_channels, figsize=(9, 3))
 title_names = ["PhC", "TXR", "Y5"]
 for i in range(n_channels):
-    for i in range(n_channels):
-        channel_image = image[0, i, Z // 2]
-        # Invert the phase contrast channel
-        if i == 0:
-            channel_image = channel_image * -1
-        # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
-        p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
-        channel_image = np.clip(channel_image, p_low, p_high)
-        axes[i].imshow(channel_image, cmap="gray")
-        axes[i].axis("off")
-        axes[i].set_title(title_names[i])
+    channel_image = image[0, i, Z // 2]
+    # Invert the phase contrast channel
+    if i == 0:
+        channel_image = channel_image * -1
+    # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
+    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+    channel_image = np.clip(channel_image, p_low, p_high)
+    axes[i].imshow(channel_image, cmap="gray")
+    axes[i].axis("off")
+    axes[i].set_title(title_names[i])
 plt.tight_layout()
 
 # %% [markdown] tags=[]
@@ -117,7 +116,6 @@ data_module = HCSDataModule(
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
-    architecture="UNeXt2",
     normalizations=[
         NormalizeSampled(
             [source_channel_name],

@@ -147,7 +147,7 @@ vs_membrane = vs_store[0][0, 1, z_slice]  # (t,c,z,y,x)
 # Open the experimental fluorescence
 fluor_store = open_ome_zarr(input_data_path, mode="r")
 # Get the 2D images
-# NOTE: Channel indeces hardcoded for this dataset
+# NOTE: Channel indices hardcoded for this dataset
 fluor_nucleus = fluor_store[0][0, 2, z_slice]  # (t,c,z,y,x)
 fluor_membrane = fluor_store[0][0, 1, z_slice]  # (t,c,z,y,x)
 

@@ -19,7 +19,7 @@
 """
 # Prerequisites
 
-Python>=3.11
+Python>=3.12
 """
 
 # %% [markdown]
@@ -63,10 +63,10 @@ On Windows, the files can be downloaded manually from the URLs.
 """
 
 # %%
-# Install VisCy with the optional dependencies for this example
+# Install the modular Cytoland/VisCy packages required for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
-# Here stackview and ipycanvas are installed for visualization
-# !pip install -U "viscy[metrics,visual]==0.4.0a3"
+# Here stackview and ipycanvas are installed for visualization, and iohub provides OME-Zarr access
+# !pip install -U cytoland viscy iohub stackview ipycanvas
 
 # %%
 # Restart kernel if running in Google Colab
