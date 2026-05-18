@@ -4,7 +4,7 @@ START_DIR=$(pwd)
 
 conda deactivate
 # Create conda environment
-conda create -y --name vs_Phc python=3.11
+conda create -y --name vs_Phc python=3.12
 
 # Install ipykernel in the environment.
 conda install -y ipykernel nbformat nbconvert ruff jupytext ipywidgets --name vs_Phc
