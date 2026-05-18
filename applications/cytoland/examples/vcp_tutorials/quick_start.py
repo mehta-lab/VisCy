@@ -158,7 +158,7 @@ data_module = HCSDataModule(
     # Name of the input phase channel
     source_channel="Phase3D",
     # Desired name of the output channels
-    target_channel=["Membrane", "Nuclei"],
+    target_channel=["Nuclei", "Membrane"],
     # Axial input size, 1 for 2D models
     z_window_size=1,
     # Batch size
