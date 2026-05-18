@@ -97,21 +97,13 @@ This downloads the OME-Zarr datasets (~14 GB) and the pretrained checkpoint
 into `$DATA_ROOT`. Typical runtime is 20–40 min. It does **not** create a
 Python environment — students do that themselves with `setup_student.sh`.
 
-## Use VSCode
+## Run the exercise
 
-Install VSCode and the Python + Jupyter extensions, then open
-[`solution.py`](solution.py) and pick the **Python (06_image_translation)**
-kernel from the top-right kernel selector. The script uses
-[cell mode](https://code.visualstudio.com/docs/python/jupyter-support-py), so
-you can execute the solution `# %%` blocks interactively. Do **not** run the
-file strictly top-to-bottom: skip any cells tagged `tags=["task"]` or cells
-containing `TODO` / `...` placeholders. If you want to execute the exercise
-sequentially as a notebook, generate and open [`solution.ipynb`](solution.ipynb)
-as described below.
+The recommended workflow is to generate the notebook from `solution.py` and
+run it in Jupyter — the notebook strips the `tags=["task"]` placeholder cells
+so it executes top-to-bottom without `NameError`s.
 
-## Use Jupyter Notebook
-
-Generate a notebook from the solution script and launch Jupyter:
+### Generate and launch the notebook
 
 ```bash
 ./.venv/bin/jupytext --to ipynb solution.py
@@ -119,6 +111,16 @@ Generate a notebook from the solution script and launch Jupyter:
 ```
 
 Pick **Python (06_image_translation)** as the kernel.
+
+### (Advanced) Run `solution.py` directly in VSCode
+
+If you prefer to step through the raw script in VSCode with the Python +
+Jupyter extensions, open [`solution.py`](solution.py) and pick the
+**Python (06_image_translation)** kernel from the top-right selector. The
+script uses [cell mode](https://code.visualstudio.com/docs/python/jupyter-support-py).
+Do **not** run the file strictly top-to-bottom — **skip any cell tagged
+`tags=["task"]`** (they contain `TODO` / `...` placeholders that raise
+`NameError`). The generated `solution.ipynb` does this stripping for you.
 
 If the kernel is missing (e.g. you reinstalled the venv), re-register it:
 
