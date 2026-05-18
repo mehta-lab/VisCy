@@ -66,8 +66,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     ap.add_argument(
         "--time",
-        default="8:00:00",
-        help="SLURM walltime (default 8:00:00). PRC bootstrap + 3 plates × DINOv3/DynaCLR/CP is generous.",
+        default="2:00:00",
+        help="SLURM walltime (default 2:00:00). Right-sized from sample of the "
+        "regen-metrics path: a 3-plate A549 chain typically finishes in ~30 min; 2h "
+        "leaves 4× headroom. Bump to 4:00:00+ for a first-time run that has to "
+        "recompute cached GT masks / CP / deep features (no --regen-metrics).",
     )
     ap.add_argument(
         "--run-root",
@@ -197,13 +200,17 @@ def _composite_job_name(organelle: str, code_model: str, trained_on: str, test_p
 
 
 # Single-GPU sbatch profile. Eval is single-process Hydra; no DDP.
+# CPU/mem right-sized from in-flight sample (33009706 / 33009742 / 33009751 /
+# 33009818 / 33009859 / 33009873 / 33009924, all on the regen-metrics path):
+# observed peak RSS 2.7–4.0 GB and AveCPU ≈ 1.4 cores. 4 CPUs / 16 GB gives
+# 2.5× / 4× headroom and quarters our fairshare drain per job.
 _SBATCH_DIRECTIVES = (
     ("--partition", "gpu"),
     ("--nodes", "1"),
     ("--ntasks-per-node", "1"),
     ("--gpus", "1"),
-    ("--cpus-per-task", "8"),
-    ("--mem", "64G"),
+    ("--cpus-per-task", "4"),
+    ("--mem", "16G"),
 )
 
 
