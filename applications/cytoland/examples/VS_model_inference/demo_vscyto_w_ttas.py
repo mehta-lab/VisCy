@@ -50,11 +50,19 @@ vs = (
     .eval()
 )
 
-# Load data
+# Load data and apply the same precomputed FOV statistics (median / IQR)
+# normalization that ``viscy predict`` performs via ``NormalizeSampled``.
+# Without this step the in-memory path is not comparable to the CLI output.
 path = Path("/path/to/your.zarr/0/1/000000")
+source_channel = "Phase3D"
 with open_ome_zarr(path) as ds:
-    vol_np = np.asarray(ds.data[0:1, 0:1])  # (1, 1, Z, Y, X)
+    channel_index = ds.channel_names.index(source_channel)
+    vol_np = np.asarray(ds.data[0:1, channel_index : channel_index + 1])  # (1, 1, Z, Y, X)
+    fov_stats = ds.zattrs["normalization"][source_channel]["fov_statistics"]
+    median = float(fov_stats["median"])
+    iqr = float(fov_stats["iqr"])
 
+vol_np = (vol_np - median) / iqr
 vol = torch.from_numpy(vol_np).float().to(DEVICE)
 
 # Run inference with sliding windows and linear feathering blending
