@@ -180,9 +180,21 @@ workflow EVALUATION {
         .filter { it.containsKey('append_annotations') }
         .map { it.append_annotations }
 
+    // Extract annotation CSV paths from the YAML so Nextflow content-hashes
+    // them as task inputs. Without this the resume cache only sees the YAML
+    // path string and misses content changes in the referenced CSVs.
+    // Dedupe by absolute path because the recipe references the same CSV
+    // file from multiple experiments (one annotation file feeds many channels);
+    // staging would otherwise fail with basename collisions.
+    aa_csv_ch = aa_yaml_ch.map { yaml_path ->
+        def yaml_data = new org.yaml.snakeyaml.Yaml().load(new File(yaml_path.toString()).text)
+        def paths = (yaml_data.annotations ?: []).collect { it.path }.unique()
+        return paths.collect { file(it) }
+    }
+
     aa_ready_ch = split_done_ch.mix(reduce_combined_done_ch).collect().map { 'ready' }
 
-    APPEND_ANNOTATIONS(aa_ready_ch, aa_yaml_ch, workspace_dir)
+    APPEND_ANNOTATIONS(aa_ready_ch, aa_yaml_ch, aa_csv_ch, workspace_dir)
 
     aa_done_ch = APPEND_ANNOTATIONS.out.done
         .ifEmpty('skip')
@@ -195,7 +207,15 @@ workflow EVALUATION {
         .filter { it.containsKey('linear_classifiers') }
         .map { it.linear_classifiers }
 
-    LINEAR_CLASSIFIERS(aa_done_ch, lc_yaml_ch, workspace_dir)
+    // Same annotation-CSV staging as APPEND_ANNOTATIONS so LC cache keys
+    // also depend on the actual CSV contents. Dedupe (see comment above).
+    lc_csv_ch = lc_yaml_ch.map { yaml_path ->
+        def yaml_data = new org.yaml.snakeyaml.Yaml().load(new File(yaml_path.toString()).text)
+        def paths = (yaml_data.annotations ?: []).collect { it.path }.unique()
+        return paths.collect { file(it) }
+    }
+
+    LINEAR_CLASSIFIERS(aa_done_ch, lc_yaml_ch, lc_csv_ch, workspace_dir)
 
     // -----------------------------------------------------------------------
     // Step 9: Append predictions — after linear classifiers AND split
@@ -218,7 +238,21 @@ workflow EVALUATION {
     // Combine the two upstream signals into one barrier value.
     ap_ready_ch = lc_done_ch.mix(split_done_ch).collect().map { 'ready' }
 
-    APPEND_PREDICTIONS(ap_ready_ch, ap_yaml_ch, workspace_dir)
+    // Stage the LC pipeline files so Nextflow content-hashes them. The pipelines
+    // are produced by LINEAR_CLASSIFIERS just above, so the channel must wait
+    // for lc_done before reading the pipelines_dir glob (otherwise the dir
+    // doesn't exist yet on first run). Falls back to an empty list if no
+    // pipelines_dir is configured (Wave-2 external-registry use case).
+    ap_pipelines_ch = ap_ready_ch.combine(ap_yaml_ch).map { _ready, yaml_path ->
+        def yaml_data = new org.yaml.snakeyaml.Yaml().load(new File(yaml_path.toString()).text)
+        def pipelines_dir = yaml_data.pipelines_dir
+        if (pipelines_dir == null || !new File(pipelines_dir.toString()).exists()) {
+            return []
+        }
+        return file("${pipelines_dir}/*.joblib")
+    }
+
+    APPEND_PREDICTIONS(ap_ready_ch, ap_yaml_ch, ap_pipelines_ch, workspace_dir)
 
     ap_done_ch = APPEND_PREDICTIONS.out.done
         .ifEmpty('skip')
