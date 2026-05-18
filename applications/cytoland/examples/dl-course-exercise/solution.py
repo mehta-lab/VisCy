@@ -276,13 +276,13 @@ row = 0
 col = 0
 field = 9  # TODO: Change this to explore data.
 
-pyaramid_level = 0
+pyramid_level = 0
 
 # `channel_names` is the metadata that is stored with data according to the OME-NGFF spec.
 n_channels = len(dataset.channel_names)
 
-image = dataset[f"{row}/{col}/{field}/{pyaramid_level}"].numpy()
-print(f"data shape: {image.shape}, FOV: {field}, pyramid level: {pyaramid_level}")
+image = dataset[f"{row}/{col}/{field}/{pyramid_level}"].numpy()
+print(f"data shape: {image.shape}, FOV: {field}, pyramid level: {pyramid_level}")
 
 figure, axes = plt.subplots(1, n_channels, figsize=(9, 3))
 
