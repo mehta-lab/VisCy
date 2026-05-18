@@ -114,6 +114,66 @@ def test_fov_name_filters_applied(preprocessed_hcs_dataset):
     assert n_positions == len(all_fovs) - len(dropped)
 
 
+def test_fov_name_filters_applied_in_predict(preprocessed_hcs_dataset):
+    """exclude_fov_names is honored during predict (used to resume crashed predicts)."""
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+
+    # Mock target stand-in: predict path doesn't strictly need a target channel,
+    # but the datamodule constructor requires one.
+    dropped = all_fovs[:2]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        exclude_fov_names=dropped,
+    )
+    dm.setup(stage="predict")
+    selected = {str(p.zgroup.path) for p in dm.predict_dataset.positions}
+    assert len(selected) == len(all_fovs) - len(dropped)
+    assert not any(name.endswith(d) for name in selected for d in dropped)
+
+    kept = all_fovs[:3]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        include_fov_names=kept,
+    )
+    dm.setup(stage="predict")
+    selected = {str(p.zgroup.path) for p in dm.predict_dataset.positions}
+    assert len(selected) == len(kept)
+
+
+def test_fov_name_filters_raise_when_empty_predict(preprocessed_hcs_dataset):
+    """Predict with a filter that excludes everything raises a clear ValueError."""
+    data_path = preprocessed_hcs_dataset
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        include_fov_names=["does/not/exist"],
+    )
+    with raises(ValueError, match="No positions"):
+        dm.setup(stage="predict")
+
+
 def test_fov_name_filters_raise_when_empty(preprocessed_hcs_dataset):
     """Filtering to zero positions raises a clear ValueError."""
     data_path = preprocessed_hcs_dataset

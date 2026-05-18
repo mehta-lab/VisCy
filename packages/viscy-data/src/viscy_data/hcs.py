@@ -109,15 +109,16 @@ class HCSDataModule(LightningDataModule):
         If given, only positions whose plate-relative name (e.g.
         ``"B/2/000000"``) is in this collection are used. Applied before
         the train/val split. Stored as a ``set`` for O(1) lookup.
-        Honored during fit/validate (including mmap staging). Predict
-        and test stages use all plate positions.
+        Honored during fit/validate (including mmap staging) and predict.
+        Test stage uses all plate positions.
     exclude_fov_names : Iterable[str] or None, optional
         If given, positions whose plate-relative name is in this
         collection are skipped. Useful to hold out test FOVs from a plate
-        that also contains training FOVs. Applied after
+        that also contains training FOVs, or to resume a predict run
+        without redoing already-written positions. Applied after
         ``include_fov_names``. Stored as a ``set`` for O(1) lookup.
-        Honored during fit/validate (including mmap staging). Predict
-        and test stages use all plate positions.
+        Honored during fit/validate (including mmap staging) and predict.
+        Test stage uses all plate positions.
     """
 
     def __init__(
@@ -658,7 +659,11 @@ class HCSDataModule(LightningDataModule):
                 except (OSError, ValueError):
                     raise FileNotFoundError("Parent HCS store not found for single FOV input.")
             elif isinstance(dataset, Plate):
-                positions = [p for _, p in dataset.positions()]
+                positions = [p for name, p in dataset.positions() if self._keep_position(name)]
+        if not positions:
+            raise ValueError(
+                f"No positions left in {self.data_path} after applying include_fov_names / exclude_fov_names filters"
+            )
         return positions
 
     def _setup_predict(
