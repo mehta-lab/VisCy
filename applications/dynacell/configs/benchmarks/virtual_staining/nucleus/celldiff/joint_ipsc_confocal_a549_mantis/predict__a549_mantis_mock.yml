@@ -1,4 +1,4 @@
-# CellDiff predict: nucleus trained on joint iPSC+A549, predicting against a549-mantis-h2b-mock test.
+# CellDiff r2 predict: nucleus trained on joint iPSC+A549, predicting against a549-mantis-h2b-mock test.
 # A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side `nucleus`
 # target_id from targets/nucleus.yml so the resolver finds the h2b target on
 # a549-mantis-h2b-mock.
@@ -23,27 +23,25 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/nucl/celldiff/checkpoints/last.ckpt
-    predict_method: iterative # denoise, generate, sliding_window, or iterative
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/nucl/celldiff_r2/checkpoints/last.ckpt
+    predict_method: iterative
     predict_overlap: [4, 256, 256]
 
 data:
   init_args:
     normalizations:
-      - class_path: viscy_transforms.NormalizeSampled
+      - class_path: viscy_transforms.MinMaxSampled
         init_args:
           keys: [Phase3D]
-          level: fov_statistics
-          subtrahend: mean
-          divisor: std
+          level: timepoint_statistics
     augmentations: []
-    z_window_size: 48 # 8 for denoise and generate, 40 for iterative and sliding_window.
+    z_window_size: 48
 
 trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_celldiff_joint_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_celldiff_r2_mock.zarr
 
 launcher:
   job_name: CELLDiff_JOINT_PRED_NUCL_ON_A549_MOCK
