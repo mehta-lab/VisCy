@@ -428,12 +428,20 @@ def evaluate_predictions(config: DictConfig):
                     )
                 )
 
+        # Dataset-level columns are renamed with a "Dataset_" prefix before
+        # merging into per-(FOV, timepoint) rows. Without this rename, four
+        # keys (FID, KID, KID_std, Median_Cosine_Similarity) collide with the
+        # per-FOV values and dict.update would silently clobber them.
+        # Per-FOV cohorts are tiny (~3–28 cells) so FID is statistically
+        # broken there regardless, but KID and cosine carry real per-FOV
+        # signal worth preserving; interpretation belongs to downstream code.
         def _compute_one(args):
             name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
-            return {
+            raw = {
                 **compute_feature_similarity(p_metric, t_metric, name),
                 **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
             }
+            return {f"Dataset_{k}": v for k, v in raw.items()}
 
         if prefix_inputs:
             # Threads suffice: torch-fidelity, sklearn LBFGS, and numpy BLAS
@@ -452,11 +460,12 @@ def evaluate_predictions(config: DictConfig):
         if celldino_feature_extractor is not None:
             expected_prefixes.append("CellDINO")
         for name in expected_prefixes:
-            if f"{name}_FID" not in dataset_row:
-                dataset_row.update(compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name))
-                dataset_row.update(
-                    _real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name)
-                )
+            if f"Dataset_{name}_FID" not in dataset_row:
+                raw = {
+                    **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
+                    **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
+                }
+                dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
 
         for row in all_feature_metrics:
             row.update(dataset_row)
