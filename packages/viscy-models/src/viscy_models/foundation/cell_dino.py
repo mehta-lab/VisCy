@@ -94,18 +94,27 @@ class CellDinoModel(nn.Module):
             self.model.eval()
         return self
 
-    def preprocess_2d(self, x: Tensor) -> Tensor:
+    def preprocess_2d(self, x: Tensor, normalize: bool = False) -> Tensor:
         """Convert a raw dataloader tensor to CELL-DINO input.
 
-        Squeezes singleton Z (or takes the middle slice if Z>1), resizes to
-        ``self.target_size``, and per-image min/max scales each
-        ``(B*C)`` map to ``[0, 1]``.  No ImageNet mean/std is applied —
-        CELL-DINO uses simple ``[0,1]`` normalization in training.
+        Squeezes singleton Z (or takes the middle slice if Z>1), resizes
+        to ``self.target_size``, and (when ``normalize=True``) per-image
+        min/max scales each ``(B*C)`` map to ``[0, 1]``.
+
+        ``normalize`` defaults to ``False`` because the production path
+        feeds dataloader-normalized input (``NormalizeSampled`` per-FOV
+        stats), and per-image min-max on top of that washes out the cell
+        signal by stretching outliers to ``[0, 1]``.  Set to ``True``
+        only when the caller is feeding raw zarr values without any
+        upstream normalization.
 
         Parameters
         ----------
         x : Tensor
             ``(B, C, D, H, W)`` or ``(B, C, H, W)``.
+        normalize : bool
+            Apply per-image min-max to ``[0, 1]`` before forwarding.
+            Default ``False`` (dataloader is expected to handle this).
 
         Returns
         -------
@@ -122,12 +131,14 @@ class CellDinoModel(nn.Module):
 
         x = F.interpolate(x, size=self.target_size, mode="bilinear", align_corners=False)
 
-        b, c, h, w = x.shape
-        x = x.view(b * c, 1, h, w)
-        x_min = x.amin(dim=(2, 3), keepdim=True)
-        x_max = x.amax(dim=(2, 3), keepdim=True)
-        x = (x - x_min) / (x_max - x_min).clamp(min=1e-8)
-        return x.view(b, c, h, w)
+        if normalize:
+            b, c, h, w = x.shape
+            x = x.view(b * c, 1, h, w)
+            x_min = x.amin(dim=(2, 3), keepdim=True)
+            x_max = x.amax(dim=(2, 3), keepdim=True)
+            x = (x - x_min) / (x_max - x_min).clamp(min=1e-8)
+            x = x.view(b, c, h, w)
+        return x
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Run CELL-DINO on an image batch and mean-pool over channels.
