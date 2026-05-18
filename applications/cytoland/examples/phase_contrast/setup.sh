@@ -6,8 +6,8 @@ conda deactivate
 # Create conda environment
 conda create -y --name vs_Phc python=3.12
 
-# Install ipykernel in the environment.
-conda install -y ipykernel nbformat nbconvert ruff jupytext ipywidgets --name vs_Phc
+# Install Jupyter kernel, notebook server, and related tooling in the environment.
+conda install -y ipykernel notebook nbformat nbconvert ruff jupytext ipywidgets --name vs_Phc
 # Specifying the environment explicitly.
 # conda activate sometimes doesn't work from within shell scripts.
 

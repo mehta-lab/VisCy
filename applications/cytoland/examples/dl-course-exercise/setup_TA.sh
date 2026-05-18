@@ -9,7 +9,7 @@
 #
 # Usage:
 #
-#   # Default: stage to ~/data/image_translation/
+#   # Default: stage to ~/data/06_image_translation/
 #   bash setup_TA.sh
 #
 #   # Stage to a shared mount (recommended for courses):

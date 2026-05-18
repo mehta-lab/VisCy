@@ -103,7 +103,11 @@ Install VSCode and the Python + Jupyter extensions, then open
 [`solution.py`](solution.py) and pick the **Python (06_image_translation)**
 kernel from the top-right kernel selector. The script uses
 [cell mode](https://code.visualstudio.com/docs/python/jupyter-support-py), so
-you can execute each `# %%` block interactively.
+you can execute the solution `# %%` blocks interactively. Do **not** run the
+file strictly top-to-bottom: skip any cells tagged `tags=["task"]` or cells
+containing `TODO` / `...` placeholders. If you want to execute the exercise
+sequentially as a notebook, generate and open [`solution.ipynb`](solution.ipynb)
+as described below.
 
 ## Use Jupyter Notebook
 

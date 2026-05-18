@@ -77,6 +77,7 @@ uv pip install --python "$PY" \
     ipywidgets \
     jupytext \
     nbformat \
+    scikit-learn \
     nbconvert
 
 # --- 4. Register the venv as a Jupyter kernel ------------------------------

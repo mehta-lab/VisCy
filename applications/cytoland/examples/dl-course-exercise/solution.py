@@ -12,9 +12,9 @@
 #
 # In this exercise, you will:
 # - Train a model to predict the fluorescence images of nuclei and plasma membranes from QPI images
-# - Make it robust to variations in imaging conditions using data augmentions
+# - Make it robust to variations in imaging conditions using data augmentations
 # - Segment the cells using Cellpose
-# - Use regression and segmentation metrics to evalute the models
+# - Use regression and segmentation metrics to evaluate the models
 # - Visualize the image transform learned by the model
 # - Understand the failure modes of the trained model
 #
@@ -541,7 +541,7 @@ log_batch_jupyter(batch)
 # ### Task 1.3
 # Add the following augmentations:
 # - Add augmentations to rotate about $\pi$ around z-axis, 30% scale in (y,x),
-# shearing of 1% in (y,x), and no padding with zeros with a probablity of 80%.
+# shearing of 1% in (y,x), and no padding with zeros with a probability of 80%.
 # - Add a Gaussian noise with a mean of 0.0 and standard deviation of 0.3 with a probability of 50%.
 #
 # HINT: `RandAffined()` and `RandGaussianNoised()` are MONAI dictionary
@@ -1698,7 +1698,7 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
             "mAR_100": coco_metrics["mar_100"].item(),
         }
 
-        pred_label, target_label = cellpose_segmentation(predicted_nuc_pretrained, target_nucleus)
+        pred_label, target_label = cellpose_segmentation(predicted_nuc_pretrained, target_nuc)
 
         # Binary labels
         pred_label_binary = pred_label > 0

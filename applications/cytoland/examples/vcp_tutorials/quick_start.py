@@ -17,7 +17,7 @@
 # %% [markdown]
 """
 # Prerequisites
-Python>=3.11
+Python>=3.12
 
 """
 
@@ -86,9 +86,9 @@ On Windows, the files can be downloaded manually from the URLs.
 """
 
 # %%
-# Install VisCy with the optional dependencies for this example
-# See the [repository](https://github.com/mehta-lab/VisCy) for more details
-# !pip install "viscy[metrics,visual]==0.4.0a3"
+# Install the modular packages required for this example
+# See the repositories/package indexes for the latest compatibility details
+# !pip install cytoland viscy_data viscy_transforms viscy_utils torchview cmap iohub
 
 # %%
 # restart kernel if running in Google Colab
