@@ -67,7 +67,7 @@ def plot_vs_n_fluor(vs_nucleus, vs_membrane, fluor_nucleus, fluor_membrane):
     ax[1, 2].imshow(merged_fluor)
     ax[1, 2].set_title("Experimental Fluorescence Nuclei+Membrane")
 
-    # turnoff axis
+    # turn off axis
     for a in ax.flatten():
         a.axis("off")
     plt.margins(0, 0)
