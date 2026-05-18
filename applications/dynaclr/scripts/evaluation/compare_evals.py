@@ -591,8 +591,8 @@ def _infection_curve(
 
 
 _MARKER_COLORS: dict[str, str] = {
-    "Phase3D": "#1f77b4",
-    "viral_sensor": "#d62728",
+    "Phase3D": "#595959",
+    "viral_sensor": "#d000d0",
     "SEC61B": "#2ca02c",
     "G3BP1": "#9467bd",
     "TOMM20": "#ff7f0e",
