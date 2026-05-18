@@ -6,10 +6,12 @@ Generalization to Zernike phase contrast images. This demo showcases the use of 
 
 ## Setup
 
-Run the setup script to create the environment for this exercise and download the dataset.
+Run the setup script from this examples folder to create the environment and download the dataset:
 ```bash
+cd applications/cytoland/examples/phase_contrast
 source setup.sh
 ```
+The script resolves the cytoland package relative to its own location, so it works regardless of the current working directory.
 
 Activate your environment
 ```bash

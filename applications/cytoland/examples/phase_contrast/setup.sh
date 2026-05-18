@@ -2,6 +2,12 @@
 
 START_DIR=$(pwd)
 
+# Resolve this script's directory so install paths work regardless of cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Cytoland package lives two levels up from this examples folder
+# (applications/cytoland/examples/phase_contrast -> applications/cytoland).
+CYTOLAND_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 conda deactivate
 # Create conda environment
 conda create -y --name vs_Phc python=3.12
@@ -12,10 +18,9 @@ conda install -y ipykernel notebook nbformat nbconvert ruff jupytext ipywidgets 
 # conda activate sometimes doesn't work from within shell scripts.
 
 # Install cytoland (pulls in viscy-data, viscy-models, viscy-transforms, viscy-utils).
-# Run this from the root of the VisCy monorepo checkout.
 # Find path to the environment - conda activate doesn't work from within shell scripts.
 ENV_PATH=$(conda info --envs | grep vs_Phc | awk '{print $NF}')
-$ENV_PATH/bin/pip install -e "applications/cytoland[metrics]"
+$ENV_PATH/bin/pip install -e "${CYTOLAND_DIR}[metrics]"
 
 # Create the directory structure
 mkdir -p ~/data/vs_PhC/test
