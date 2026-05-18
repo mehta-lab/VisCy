@@ -82,7 +82,7 @@ for configuration details.
 data_module = HCSDataModule(
     data_path=input_data_path,
     source_channel=phase_channel_name,
-    target_channel=["Membrane", "Nuclei"],
+    target_channel=["Nuclei", "Membrane"],
     z_window_size=5,
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
