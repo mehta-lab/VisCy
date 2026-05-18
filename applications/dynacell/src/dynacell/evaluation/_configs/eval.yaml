@@ -8,6 +8,7 @@ defaults:
   # supply their own via --config-dir.
   - optional feature_extractor/dinov3: lvd1689m
   - optional feature_extractor/dynaclr: default
+  - optional feature_extractor/celldino: default
   - optional leaf: null
 
 # Placeholder so struct-mode merges accept benchmark.dataset_ref contributions
