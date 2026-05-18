@@ -212,7 +212,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click" },
-    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088" },
+    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100" },
     { name = "pandas" },
     { name = "pyairtable" },
     { name = "pydantic" },
@@ -1205,8 +1205,8 @@ requires-dist = [
     { name = "dynaclr", marker = "extra == 'eval'", editable = "applications/dynaclr" },
     { name = "hydra-core", marker = "extra == 'eval'", specifier = ">=1.2" },
     { name = "hydra-core", marker = "extra == 'report'", specifier = ">=1.2" },
-    { name = "iohub", marker = "extra == 'eval'", git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088" },
-    { name = "iohub", marker = "extra == 'preprocess'", git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088" },
+    { name = "iohub", marker = "extra == 'eval'", git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100" },
+    { name = "iohub", marker = "extra == 'preprocess'", git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100" },
     { name = "itk", marker = "extra == 'eval'" },
     { name = "lightning", url = "https://files.pythonhosted.org/packages/4a/6d/42640e15a8c34b57dc7ea922152440c0c6692214a08d5282b6e3eb46ddf4/lightning-2.6.1-py3-none-any.whl" },
     { name = "matplotlib", marker = "extra == 'eval'" },
@@ -1296,7 +1296,7 @@ test = [
 requires-dist = [
     { name = "anndata", marker = "extra == 'eval'" },
     { name = "click" },
-    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088" },
+    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100" },
     { name = "natsort", marker = "extra == 'eval'" },
     { name = "phate", marker = "extra == 'eval'" },
     { name = "pytorch-metric-learning" },
@@ -1916,8 +1916,8 @@ wheels = [
 
 [[package]]
 name = "iohub"
-version = "0.3.4.dev1+53b10ac"
-source = { git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088#53b10acb7a30a2c7e8dfd9b04258dea073e14088" }
+version = "0.3.5.dev2+afe11f6"
+source = { git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100#afe11f6a0f7d06b2105fac40c1ef4bb053417100" }
 dependencies = [
     { name = "blosc2" },
     { name = "dask", extra = ["array"] },
@@ -6039,7 +6039,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "imageio" },
-    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088" },
+    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100" },
     { name = "lightning", url = "https://files.pythonhosted.org/packages/4a/6d/42640e15a8c34b57dc7ea922152440c0c6692214a08d5282b6e3eb46ddf4/lightning-2.6.1-py3-none-any.whl" },
     { name = "monai", specifier = ">=1.5.2" },
     { name = "numpy", specifier = ">=2.4.1" },
@@ -6251,7 +6251,7 @@ test = [
 requires-dist = [
     { name = "anndata", marker = "extra == 'all'" },
     { name = "anndata", marker = "extra == 'anndata'" },
-    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=53b10acb7a30a2c7e8dfd9b04258dea073e14088" },
+    { name = "iohub", git = "https://github.com/czbiohub-sf/iohub.git?rev=afe11f6a0f7d06b2105fac40c1ef4bb053417100" },
     { name = "jsonargparse", extras = ["signatures"], specifier = ">=4.26" },
     { name = "lightning", url = "https://files.pythonhosted.org/packages/4a/6d/42640e15a8c34b57dc7ea922152440c0c6692214a08d5282b6e3eb46ddf4/lightning-2.6.1-py3-none-any.whl" },
     { name = "matplotlib", specifier = ">=3.10" },
