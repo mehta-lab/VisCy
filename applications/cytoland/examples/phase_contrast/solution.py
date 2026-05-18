@@ -53,7 +53,7 @@ data_path = top_dir / "test/HEK_H2B_CAAX_PhC_40x_registered.zarr"
 # - The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
 # - These datasets only have 1 level in the pyramid (highest resolution) which is '0'.
 # %%
-# Open dataset and look at it's structure
+# Open dataset and look at its structure
 dataset = open_ome_zarr(data_path)
 dataset.print_tree()
 # %%
