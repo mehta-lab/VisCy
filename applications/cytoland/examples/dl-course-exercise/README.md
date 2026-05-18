@@ -19,7 +19,7 @@ This is an example of an image translation task. We will apply spatial and inten
 
 ### Part 1: Learn to use iohub (I/O library), VisCy dataloaders, and TensorBoard.
 
-  - Use a OME-Zarr dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549),
+  - Use an OME-Zarr dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549),
   each FOV has 3 channels (phase, nuclei, and cell membrane).
   The nuclei were stained with DAPI and the cell membrane with Cellmask.
   - Explore OME-Zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html)
