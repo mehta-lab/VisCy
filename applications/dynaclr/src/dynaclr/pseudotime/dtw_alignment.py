@@ -18,6 +18,7 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 from dtaidistance import dtw, dtw_ndim
+from dtaidistance.subsequence.dtw import SubsequenceAlignment
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import normalize
 
@@ -55,8 +56,90 @@ class TemplateResult(NamedTuple):
     template_cell_ids: list[tuple[str, str, int]]
     n_input_tracks: int
     explained_variance: float | None
-    template_labels: dict[str, np.ndarray] | None  # {col: (T,) fraction} per label column
+    template_labels: dict[str, dict[str, np.ndarray]] | None
+    # {col: {class_value: (T,) fraction}} — multiclass propagation.
+    # For each label column, each observed class gets its own (T,) array
+    # giving the fraction of build cells at that template position with
+    # that class. The per-template-position class fractions sum to 1.
     time_calibration: np.ndarray | None = None  # (T,) mean t_relative_minutes per template position
+
+
+def resample_template_to_frame_interval(
+    template_result: TemplateResult,
+    target_frame_interval_minutes: float,
+) -> TemplateResult:
+    """Linearly resample a template along its time-calibration axis.
+
+    Templates are built at one frame interval (e.g., 30 min/frame on 07_24)
+    but DTW alignment may need to score against queries at a different
+    frame interval (e.g., 10 min/frame on 07_22). Since the SubsequenceAlignment
+    solver works in frame units, applying the native template to a faster-
+    sampled query causes the matched window to span ``template_len``
+    query frames — i.e. a *shorter real-time interval* than the template's
+    real-time span. This helper interpolates the template's embedding rows
+    and time_calibration onto a frame grid spaced at
+    ``target_frame_interval_minutes`` so a frame-unit warp is also a
+    real-time-unit warp.
+
+    Parameters
+    ----------
+    template_result : TemplateResult
+        Source template, with ``time_calibration`` populated.
+    target_frame_interval_minutes : float
+        Desired spacing of the output template's frames in real minutes.
+
+    Returns
+    -------
+    TemplateResult
+        A new TemplateResult whose ``template`` and ``time_calibration``
+        are resampled to ``target_frame_interval_minutes`` spacing. All
+        other fields (PCA, zscore_params, template_cell_ids, etc.) are
+        copied unchanged. ``template_labels``, if present, are also
+        interpolated onto the new grid.
+
+    Raises
+    ------
+    ValueError
+        If the source template has no ``time_calibration`` to interpolate
+        along, or the resampled length would be less than 2 frames.
+    """
+    tc = template_result.time_calibration
+    if tc is None or len(tc) < 2:
+        raise ValueError(
+            "Template has no usable time_calibration; cannot resample. Did the builder populate t_key_event_per_cell?"
+        )
+    src_span_minutes = float(tc[-1] - tc[0])
+    n_new = int(round(src_span_minutes / float(target_frame_interval_minutes))) + 1
+    if n_new < 2:
+        raise ValueError(
+            f"Resample to interval={target_frame_interval_minutes} min would yield "
+            f"only {n_new} frames from a {src_span_minutes:.0f}-min span."
+        )
+    tc_new = np.linspace(tc[0], tc[-1], n_new)
+    # Linear interp each embedding dimension along the time axis.
+    new_template = np.empty((n_new, template_result.template.shape[1]), dtype=template_result.template.dtype)
+    for d in range(template_result.template.shape[1]):
+        new_template[:, d] = np.interp(tc_new, tc, template_result.template[:, d])
+    # Re-L2-normalize each new template position so the cosine metric remains valid.
+    norms = np.linalg.norm(new_template, axis=1, keepdims=True)
+    new_template = new_template / np.maximum(norms, 1e-12)
+    new_labels: dict[str, dict[str, np.ndarray]] | None = None
+    if template_result.template_labels is not None:
+        new_labels = {
+            col: {cls: np.interp(tc_new, tc, arr) for cls, arr in class_dict.items()}
+            for col, class_dict in template_result.template_labels.items()
+        }
+    return TemplateResult(
+        template=new_template,
+        template_id=f"{template_result.template_id}_resampled_{target_frame_interval_minutes:.0f}min",
+        pca=template_result.pca,
+        zscore_params=template_result.zscore_params,
+        template_cell_ids=template_result.template_cell_ids,
+        n_input_tracks=template_result.n_input_tracks,
+        explained_variance=template_result.explained_variance,
+        template_labels=new_labels,
+        time_calibration=tc_new,
+    )
 
 
 class AlignmentResult(NamedTuple):
@@ -81,7 +164,8 @@ class AlignmentResult(NamedTuple):
     path_skew: float
     warping_path: np.ndarray
     warping_speed: np.ndarray
-    propagated_labels: dict[str, np.ndarray] | None  # {col: (T,) fraction} per label column
+    propagated_labels: dict[str, dict[str, np.ndarray]] | None
+    # {col: {class_value: (T,) fraction}} — per-class propagation per cell frame.
     alignment_region: np.ndarray  # per-frame: "pre", "aligned", or "post"
 
 
@@ -140,7 +224,6 @@ def _extract_track_trajectories(
     min_track_timepoints: int = 3,
     crop_window: int | None = None,
     label_cols: list[str] | None = None,
-    positive_classes: dict[str, str] | None = None,
 ) -> list[tuple[str, int, np.ndarray, np.ndarray, dict[str, np.ndarray] | None]]:
     """Extract per-track embedding trajectories from AnnData.
 
@@ -157,17 +240,16 @@ def _extract_track_trajectories(
         If set, crop each track to [t_perturb - crop_window, t_perturb + crop_window].
         Requires t_perturb column in df. None = use full track.
     label_cols : list[str] or None
-        Label columns to extract (e.g., ["infection_state", "organelle_state"]).
-        Each is binarized using ``positive_classes``.
-    positive_classes : dict[str, str] or None
-        Mapping from label column name to its positive class value.
-        Required when ``label_cols`` is provided.
+        Label columns to extract (e.g., ``["infection_state", "cell_division_state"]``).
+        Raw categorical values are returned per timepoint — multiclass-aware
+        binarization happens in :func:`build_template` where the full class
+        vocabulary is known across all tracks.
 
     Returns
     -------
     list[tuple[str, int, np.ndarray, np.ndarray, dict[str, np.ndarray] | None]]
-        Each element: (fov_name, track_id, embeddings (T, D), timepoints (T,),
-        labels {col: (T,)} or None).
+        Each element: ``(fov_name, track_id, embeddings (T, D), timepoints (T,),
+        labels {col: (T,) object array of class strings or NaN})``.
     """
     valid_tracks = df.groupby(["fov_name", "track_id"]).filter(lambda x: len(x) >= min_track_timepoints)
     valid_keys = set(zip(valid_tracks["fov_name"], valid_tracks["track_id"]))
@@ -180,22 +262,17 @@ def _extract_track_trajectories(
         for (fov, tid), grp in df.groupby(["fov_name", "track_id"]):
             t_perturb_lookup[(fov, tid)] = int(grp["t_perturb"].iloc[0])
 
-    # Build label lookups per column
-    label_lookups: dict[str, dict[tuple, int]] = {}
+    # Build per-column lookups of raw categorical values (no binarization here)
+    label_lookups: dict[str, dict[tuple, str]] = {}
     if label_cols:
-        if positive_classes is None:
-            raise ValueError("positive_classes is required when label_cols is set")
         for col in label_cols:
             if col not in df.columns:
                 continue
-            if col not in positive_classes:
-                raise KeyError(f"positive_classes is missing entry for label column {col!r}")
-            positive_val = positive_classes[col]
-            lookup: dict[tuple, int] = {}
+            lookup: dict[tuple, str] = {}
             for _, row in df.iterrows():
                 val = row[col]
                 if pd.notna(val) and val != "":
-                    lookup[(row["fov_name"], row["track_id"], int(row["t"]))] = 1 if val == positive_val else 0
+                    lookup[(row["fov_name"], row["track_id"], int(row["t"]))] = str(val)
             label_lookups[col] = lookup
 
     obs = adata.obs.copy()
@@ -222,12 +299,13 @@ def _extract_track_trajectories(
             emb = emb.toarray()
         timepoints = sorted_group["t"].to_numpy().astype(int)
 
-        labels = None
+        labels: dict[str, np.ndarray] | None = None
         if label_lookups:
             labels = {}
             for col, lookup in label_lookups.items():
                 labels[col] = np.array(
-                    [lookup.get((fov_name, track_id, int(t)), 0) for t in timepoints], dtype=np.float64
+                    [lookup.get((fov_name, track_id, int(t)), None) for t in timepoints],
+                    dtype=object,
                 )
 
         trajectories.append((str(fov_name), int(track_id), np.asarray(emb, dtype=np.float64), timepoints, labels))
@@ -322,15 +400,14 @@ def build_template(
     dba_init: str = "medoid",
     control_adata_dict: dict[str, ad.AnnData] | None = None,
     crop_window: int | dict[str, int] | None = None,
-    positive_classes: dict[str, str] | None = None,
+    propagate_columns: list[str] | None = None,
     random_state: int = 42,
 ) -> TemplateResult:
     """Build a DTW pseudotime template from annotated single-cell trajectories.
 
-    Generic over the underlying biology — what was previously called
-    ``build_infection_template`` works for any anchored event (infection
-    onset, mitotic entry, immune activation) provided the caller supplies
-    the appropriate label-to-positive-class mapping via ``positive_classes``.
+    Generic over the underlying biology — works for any anchored event
+    (infection onset, mitotic entry, immune activation) provided the caller
+    supplies the annotation columns to propagate via ``propagate_columns``.
 
     Parameters
     ----------
@@ -358,11 +435,12 @@ def build_template(
         datasets have different frame intervals and crop_window was
         derived from a fixed duration in minutes). None = use full
         tracks (variable length).
-    positive_classes : dict[str, str] or None
-        Mapping from label column name to its positive-class value.
-        Defaults to :data:`DEFAULT_POSITIVE_CLASSES` (infection labels).
-        Pass ``{"cell_division_state": "mitosis"}`` for ALFI division
-        templates.
+    propagate_columns : list[str] or None
+        Annotation column names (one per concept, e.g.
+        ``["cell_division_state", "infection_state"]``) whose **per-class
+        fractions** are computed at each template position. Every observed
+        category in the build candidates gets its own per-template-position
+        ``(T,)`` array. When ``None``, no labels are propagated.
     random_state : int
         Seed for reproducible PCA / medoid subsampling. Default 42.
 
@@ -370,9 +448,8 @@ def build_template(
     -------
     TemplateResult
         Template array, PCA model, z-score params, and metadata.
+        ``template_labels`` is ``{col: {class_value: (T,) fractions}}``.
     """
-    if positive_classes is None:
-        positive_classes = DEFAULT_POSITIVE_CLASSES
     raw_embeddings = {}
     for dataset_id, adata in adata_dict.items():
         emb = adata.X
@@ -412,8 +489,13 @@ def build_template(
     track_t_rels: list[np.ndarray] = []
     cell_ids: list[tuple[str, str, int]] = []
 
-    # Detect which label columns are available across all datasets
-    label_cols = [col for col in positive_classes if any(col in df.columns for df in aligned_df_dict.values())]
+    # Restrict propagation to columns that actually appear in at least one dataset's df
+    label_cols: list[str] = []
+    if propagate_columns:
+        label_cols = [c for c in propagate_columns if any(c in df.columns for df in aligned_df_dict.values())]
+        missing = set(propagate_columns) - set(label_cols)
+        if missing:
+            _logger.warning("propagate_columns missing from all aligned dfs: %s", sorted(missing))
     label_cols_or_none = label_cols if label_cols else None
 
     for dataset_id, adata in adata_dict.items():
@@ -438,7 +520,6 @@ def build_template(
             min_track_timepoints=1,
             crop_window=ds_crop_window,
             label_cols=label_cols_or_none,
-            positive_classes=positive_classes,
         )
         for fov_name, track_id, emb, timepoints, labels in tracks:
             processed = _preprocess_embeddings(emb, pca=pca)
@@ -458,15 +539,32 @@ def build_template(
     # Compute template labels and time calibration via DTW alignment back to template.
     # One DTW path per track; labels and t_relative_minutes mapped through the same path.
     n_template = template.shape[0]
-    template_labels = None
+    template_labels: dict[str, dict[str, np.ndarray]] | None = None
     time_calibration = None
 
-    has_labels = label_cols and all(lb is not None for lb in track_labels)
+    has_labels = bool(label_cols) and all(lb is not None for lb in track_labels)
     has_t_rel = any(np.any(np.isfinite(t)) for t in track_t_rels)
 
     if has_labels or has_t_rel:
-        label_sums = {col: np.zeros(n_template) for col in label_cols} if has_labels else {}
-        label_counts = {col: np.zeros(n_template) for col in label_cols} if has_labels else {}
+        # Multiclass propagation: per column, count cells of each class at
+        # each template position. Discover class vocabulary from the build
+        # candidates (only non-null observed values).
+        class_vocab: dict[str, list[str]] = {}
+        if has_labels:
+            for col in label_cols:
+                seen: set[str] = set()
+                for labels_dict in track_labels:
+                    if labels_dict is None or col not in labels_dict:
+                        continue
+                    for v in labels_dict[col]:
+                        if v is not None:
+                            seen.add(str(v))
+                class_vocab[col] = sorted(seen)
+
+        class_counts: dict[str, dict[str, np.ndarray]] = {
+            col: {cls: np.zeros(n_template) for cls in vocab} for col, vocab in class_vocab.items()
+        }
+        col_totals: dict[str, np.ndarray] = {col: np.zeros(n_template) for col in class_vocab}
         time_sums = np.zeros(n_template)
         time_counts = np.zeros(n_template)
 
@@ -479,9 +577,15 @@ def build_template(
                         continue
                     col_labels = labels_dict[col]
                     for idx_template, idx_seq in path:
-                        if idx_seq < len(col_labels):
-                            label_sums[col][idx_template] += col_labels[idx_seq]
-                            label_counts[col][idx_template] += 1
+                        if idx_seq >= len(col_labels):
+                            continue
+                        v = col_labels[idx_seq]
+                        if v is None:
+                            continue
+                        v_str = str(v)
+                        if v_str in class_counts[col]:
+                            class_counts[col][v_str][idx_template] += 1
+                            col_totals[col][idx_template] += 1
             for idx_template, idx_seq in path:
                 if idx_seq < len(t_rel_arr) and np.isfinite(t_rel_arr[idx_seq]):
                     time_sums[idx_template] += t_rel_arr[idx_seq]
@@ -490,14 +594,19 @@ def build_template(
         if has_labels:
             template_labels = {}
             for col in label_cols:
-                counts = np.maximum(label_counts[col], 1)
-                template_labels[col] = label_sums[col] / counts
+                totals = col_totals[col]
+                safe_totals = np.where(totals > 0, totals, 1.0)
+                template_labels[col] = {cls: class_counts[col][cls] / safe_totals for cls in class_vocab[col]}
+                summary = ", ".join(
+                    f"{cls}=[{template_labels[col][cls].min():.2f}, {template_labels[col][cls].max():.2f}]"
+                    for cls in class_vocab[col]
+                )
                 _logger.info(
-                    "Template labels [%s]: %d positions, fraction range [%.2f, %.2f]",
+                    "Template labels [%s]: %d positions, classes %s, ranges %s",
                     col,
                     n_template,
-                    template_labels[col].min(),
-                    template_labels[col].max(),
+                    class_vocab[col],
+                    summary,
                 )
 
         if has_t_rel and time_counts.sum() > 0:
@@ -536,7 +645,7 @@ def dtw_align_tracks(
     dataset_id: str,
     min_track_timepoints: int = 3,
     psi: int | None = None,
-    subsequence: bool = False,
+    subsequence: bool = True,
 ) -> list[AlignmentResult]:
     """Align cell tracks to a template using DTW.
 
@@ -553,15 +662,28 @@ def dtw_align_tracks(
     min_track_timepoints : int
         Minimum timepoints per track.
     psi : int or None
-        Psi relaxation for DTW. If None, auto-computed:
-        - subsequence=True: psi = max(track_len - template_len, 0)
-        - subsequence=False: psi = template_len // 2
+        Psi relaxation for the global-DTW (subsequence=False) path. Only
+        used when ``subsequence=False``. If None, auto-computed:
+        ``psi = template_len // 2``. Has no effect on the subsequence
+        path, which uses :class:`SubsequenceAlignment` instead of
+        psi-slacked global DTW.
     subsequence : bool
-        If True, use subsequence DTW: sweep the (short) template across
-        the (long) cell track to find the best-matching segment.
-        Frames before the matched region get pseudotime=0,
-        frames after get pseudotime=1.
-        Use this when the template was built with crop_window.
+        If True (default), use subsequence DTW
+        (:class:`dtaidistance.subsequence.dtw.SubsequenceAlignment`):
+        find the best-matching segment of the query for the full
+        template. Every template position must participate in the warp;
+        segment endpoints come from the boundary cost matrix. Frames
+        before the matched region get pseudotime=0, frames after get
+        pseudotime=1. This is the right mode when the query track is
+        longer than the template and the goal is to locate the event
+        within it — i.e. the typical alignment case.
+
+        If False, use global (full) DTW with optional psi slack. Use
+        this only when the query has been pre-cropped so its length
+        matches the template (e.g., build-time self-alignment of
+        already-cropped reference cells). The historic default was
+        False; it is now True because the common case is searching
+        for a short event in a long track.
 
     Returns
     -------
@@ -593,21 +715,33 @@ def dtw_align_tracks(
         processed = _preprocess_embeddings(track_emb, pca=template_result.pca)
         n_track = len(processed)
 
-        # Compute psi (must be < min(template_len, track_len))
-        max_psi = min(n_track - 1, t_template - 1)
-        if psi is not None:
-            track_psi = min(psi, max_psi)
-        elif subsequence:
-            # Allow template to float anywhere within the track
-            track_psi = max_psi
+        # Subsequence DTW (the build-time crop_window case): use the dedicated
+        # SubsequenceAlignment solver. The previous implementation simulated
+        # subsequence DTW by setting psi = template_len - 1 on dtw_ndim's
+        # symmetric warping_paths, which is broken for short templates: with
+        # every template position skippable at zero cost the solver collapses
+        # the entire query onto 1-2 template positions ("flat warp"), giving
+        # a low cost but a meaningless match. SubsequenceAlignment requires
+        # every template position to participate; segment endpoints are
+        # determined by the boundary cost matrix, not by psi slack.
+        if subsequence:
+            sa = SubsequenceAlignment(template, processed, use_ndim=True)
+            sa.align()
+            best = sa.best_match()
+            path = best.path
+            path_arr = np.array([(int(i), int(j)) for i, j in path])
+            cost = float(best.value)
         else:
-            track_psi = min(t_template // 2, max_psi)
-
-        _, paths = dtw_ndim.warping_paths(template, processed, psi=track_psi)
-        path = dtw.best_path(paths)
-        path_arr = np.array(path)
-
-        cost = paths[path_arr[-1, 0], path_arr[-1, 1]]
+            # Standard (global) DTW path, used only when subsequence=False.
+            max_psi = min(n_track - 1, t_template - 1)
+            if psi is not None:
+                track_psi = min(psi, max_psi)
+            else:
+                track_psi = min(t_template // 2, max_psi)
+            _, paths = dtw_ndim.warping_paths(template, processed, psi=track_psi)
+            path = dtw.best_path(paths)
+            path_arr = np.array(path)
+            cost = paths[path_arr[-1, 0], path_arr[-1, 1]]
 
         # length-normalized cost: divide raw DTW cost by the warp path
         # length so longer matches don't accumulate more cost simply by
@@ -681,28 +815,39 @@ def dtw_align_tracks(
                     template_positions[idx_query] = idx_template
             pseudotime = template_positions / (t_template - 1)
 
-        # Propagate template labels to cell frames via warping path
-        propagated_labels = None
+        # Propagate template labels to cell frames via warping path.
+        # template_labels is {col: {class_value: (T_template,) fractions}}.
+        # For each (col, class), we propagate the template fraction onto the
+        # query frame via the warp. Pre/post regions in subsequence mode are
+        # pinned to the template's first/last valid position to preserve the
+        # multiclass distribution at the boundary.
+        propagated_labels: dict[str, dict[str, np.ndarray]] | None = None
         if template_result.template_labels is not None:
             propagated_labels = {}
-            for col, tl in template_result.template_labels.items():
-                col_propagated = np.full(n_track, np.nan)
-                for idx_template, idx_query in path:
-                    if idx_query < n_track and idx_template < len(tl):
-                        col_propagated[idx_query] = tl[idx_template]
+            for col, class_dict in template_result.template_labels.items():
+                col_out: dict[str, np.ndarray] = {}
+                for cls, tl in class_dict.items():
+                    col_propagated = np.full(n_track, np.nan)
+                    for idx_template, idx_query in path:
+                        if idx_query < n_track and idx_template < len(tl):
+                            col_propagated[idx_query] = tl[idx_template]
 
-                if subsequence:
-                    matched_mask_lbl = matched_template_pos >= 0
-                    if matched_mask_lbl.any():
-                        first_m = np.argmax(matched_mask_lbl)
-                        last_m = n_track - 1 - np.argmax(matched_mask_lbl[::-1])
-                        for i in range(first_m + 1, last_m + 1):
-                            if np.isnan(col_propagated[i]):
-                                col_propagated[i] = col_propagated[i - 1]
-                        col_propagated[:first_m] = 0.0
-                        col_propagated[last_m + 1 :] = 1.0
+                    if subsequence:
+                        matched_mask_lbl = matched_template_pos >= 0
+                        if matched_mask_lbl.any():
+                            first_m = int(np.argmax(matched_mask_lbl))
+                            last_m = n_track - 1 - int(np.argmax(matched_mask_lbl[::-1]))
+                            # forward-fill any NaN inside the matched window
+                            for i in range(first_m + 1, last_m + 1):
+                                if np.isnan(col_propagated[i]):
+                                    col_propagated[i] = col_propagated[i - 1]
+                            # pre-window: pin to template[0] for this class
+                            col_propagated[:first_m] = float(tl[0])
+                            # post-window: pin to template[-1] for this class
+                            col_propagated[last_m + 1 :] = float(tl[-1])
 
-                propagated_labels[col] = col_propagated
+                    col_out[cls] = col_propagated
+                propagated_labels[col] = col_out
 
         # Compute warping speed (discrete derivative of pseudotime)
         for i in range(n_track):
@@ -859,7 +1004,8 @@ def alignment_results_to_dataframe(
     pd.DataFrame
         Columns: cell_uid, dataset_id, fov_name, track_id, t,
         pseudotime, dtw_cost, warping_speed, template_id,
-        plus propagated_{label}_label for each label column,
+        plus ``propagated_{col_clean}_{class}_label`` for each
+        (annotation column, class) pair (one per observed level),
         plus estimated_t_rel_minutes if time_calibration is provided.
     """
     rows = []
@@ -880,9 +1026,11 @@ def alignment_results_to_dataframe(
                 "template_id": template_id,
             }
             if r.propagated_labels is not None:
-                for col, arr in r.propagated_labels.items():
+                for col, class_arrs in r.propagated_labels.items():
                     col_clean = col.replace("_state", "")
-                    row[f"propagated_{col_clean}_label"] = float(arr[i])
+                    for cls, arr in class_arrs.items():
+                        cls_clean = str(cls).replace(" ", "_")
+                        row[f"propagated_{col_clean}_{cls_clean}_label"] = float(arr[i])
             rows.append(row)
     df = pd.DataFrame(rows)
     if time_calibration is not None and len(df) > 0:
@@ -905,6 +1053,7 @@ def extract_dtw_pseudotime(
     speed_clustering_method: str = "quantile",
     speed_quantile: float = 0.5,
     psi: int | None = None,
+    subsequence: bool = True,
 ) -> pd.DataFrame:
     """Run align + classify + flatten in one call (convenience wrapper).
 
@@ -926,6 +1075,13 @@ def extract_dtw_pseudotime(
         "quantile" or "kmeans".
     speed_quantile : float
         Speed split quantile.
+    psi : int or None
+        Boundary slack for the global-DTW path. Only consulted when
+        ``subsequence=False``.
+    subsequence : bool
+        Forwarded to :func:`dtw_align_tracks`. Default True
+        (subsequence DTW), correct when query tracks are longer than
+        the template. Set False for pre-cropped queries.
 
     Returns
     -------
@@ -933,7 +1089,15 @@ def extract_dtw_pseudotime(
         Flat DataFrame with pseudotime renamed to "signal" for metrics
         compatibility, plus dtw_cost, warping_speed, response_group columns.
     """
-    results = dtw_align_tracks(adata, df, template_result, dataset_id, min_track_timepoints, psi=psi)
+    results = dtw_align_tracks(
+        adata,
+        df,
+        template_result,
+        dataset_id,
+        min_track_timepoints,
+        psi=psi,
+        subsequence=subsequence,
+    )
     flat = alignment_results_to_dataframe(
         results, template_result.template_id, time_calibration=template_result.time_calibration
     )

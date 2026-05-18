@@ -49,8 +49,9 @@ from dynaclr.pseudotime import (
     find_embedding_zarr,
     load_template_flavor,
     read_template_attrs,
+    resample_template_to_frame_interval,
 )
-from dynaclr.pseudotime.alignment import filter_tracks
+from dynaclr.pseudotime.alignment import filter_tracks, identify_lineages
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = SCRIPT_DIR.parent / "1-build_template" / "templates"
@@ -64,12 +65,131 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 _logger = logging.getLogger(__name__)
 
 
+def _stitch_lineages(
+    adata: ad.AnnData,
+    df: pd.DataFrame,
+    dataset_id: str,
+) -> tuple[ad.AnnData, pd.DataFrame, dict[tuple[str, int], list[int]]]:
+    """Build virtual lineage tracks: each branch gets its own copy of every member.
+
+    A division produces two daughters that share a parent. Biologically, the
+    mitosis event is a single thing that the tracker happens to split across
+    parent + daughters. To align lineages, each branch ``[parent, daughter]``
+    becomes one virtual track containing the parent's embedding rows followed
+    by that daughter's. Crucially, when a parent has TWO daughters we emit the
+    parent's rows TWICE — once into each daughter's virtual lineage — so both
+    daughters get the full pre-mitosis interphase context.
+
+    The output adata is row-expanded relative to the input. Each output row
+    carries:
+
+    - ``track_id``: virtual lineage id (the leaf daughter's track_id)
+    - ``t``: virtual time, strictly monotone within the virtual lineage
+    - ``original_track_id``, ``original_t``: real coordinates for unmapping
+
+    Singleton tracks (no parent, no children) pass through unchanged but with
+    virtual_t reset to 0..N-1 for consistency with stitched lineages.
+    """
+    obs = adata.obs.copy()
+    obs["track_id"] = obs["track_id"].astype(int)
+    obs["fov_name"] = obs["fov_name"].astype(str)
+    obs["t"] = obs["t"].astype(int)
+    if "parent_track_id" not in obs.columns:
+        raise KeyError(f"[{dataset_id}] obs missing parent_track_id; cannot stitch lineages")
+    obs["parent_track_id"] = obs["parent_track_id"].astype(int)
+
+    # Many trackers (ultrack, btrack) use parent_track_id == track_id to denote
+    # "track continues with no division" rather than -1. Treat self-parent
+    # rows as no-parent for lineage purposes; only true parent-child links
+    # (parent_track_id != track_id and != -1) define divisions.
+    tdf = obs[["fov_name", "track_id", "parent_track_id"]].drop_duplicates().copy()
+    tdf.loc[tdf["parent_track_id"] == tdf["track_id"], "parent_track_id"] = -1
+
+    branches = identify_lineages(tdf, return_both_branches=True)
+
+    fov_arr = obs["fov_name"].to_numpy()
+    tid_arr = obs["track_id"].to_numpy()
+    t_arr = obs["t"].to_numpy()
+    n_obs_orig = len(obs)
+    X_orig = adata.X
+    if hasattr(X_orig, "toarray"):
+        X_orig = X_orig.toarray()
+    X_orig = np.asarray(X_orig)
+
+    # Track which (fov, track_id) appear in any multi-track branch — we'll skip
+    # those when emitting singletons so each row is only stitched, not also
+    # passed through unstitched.
+    multi_branch_keys: set[tuple[str, int]] = set()
+    for fov, tids in branches:
+        if len(tids) > 1:
+            for tid in tids:
+                multi_branch_keys.add((fov, int(tid)))
+
+    out_rows: list[int] = []  # original row indices to copy into the new adata
+    out_track_ids: list[int] = []
+    out_virtual_t: list[int] = []
+    virtual_to_real: dict[tuple[str, int], list[int]] = {}
+
+    # Multi-track branches: emit each member's rows fresh into this branch's
+    # virtual lineage (so a parent shared by two daughters appears twice in
+    # the output, once per branch).
+    for fov, tids in branches:
+        if len(tids) <= 1:
+            continue
+        leaf_tid = int(tids[-1])
+        offset = 0
+        for tid in tids:
+            mask = (fov_arr == fov) & (tid_arr == int(tid))
+            if not mask.any():
+                continue
+            order = np.argsort(t_arr[mask])
+            row_indices = np.flatnonzero(mask)[order]
+            for k, ri in enumerate(row_indices):
+                out_rows.append(int(ri))
+                out_track_ids.append(leaf_tid)
+                out_virtual_t.append(offset + k)
+            offset += len(row_indices)
+        virtual_to_real[(fov, leaf_tid)] = [int(t) for t in tids]
+
+    # Singleton tracks: unchanged track_id, virtual t starts at 0.
+    singleton_mask = np.array([(fov_arr[i], int(tid_arr[i])) not in multi_branch_keys for i in range(n_obs_orig)])
+    if singleton_mask.any():
+        singleton_obs = obs[singleton_mask].copy()
+        singleton_obs["_row_idx"] = np.flatnonzero(singleton_mask)
+        for (fov, tid), g in singleton_obs.groupby(["fov_name", "track_id"]):
+            order = g["t"].to_numpy().argsort()
+            row_indices = g["_row_idx"].to_numpy()[order]
+            for k, ri in enumerate(row_indices):
+                out_rows.append(int(ri))
+                out_track_ids.append(int(tid))
+                out_virtual_t.append(k)
+            virtual_to_real.setdefault((str(fov), int(tid)), [int(tid)])
+
+    out_rows_arr = np.asarray(out_rows, dtype=np.int64)
+    new_obs = obs.iloc[out_rows_arr].copy().reset_index(drop=True)
+    new_obs["original_track_id"] = new_obs["track_id"].to_numpy()
+    new_obs["original_t"] = new_obs["t"].to_numpy()
+    new_obs["track_id"] = np.asarray(out_track_ids, dtype=np.int64)
+    new_obs["t"] = np.asarray(out_virtual_t, dtype=np.int64)
+    new_X = X_orig[out_rows_arr]
+
+    # Final sort so each virtual track's rows are in t order (DTW expects this).
+    sort_idx = np.lexsort((new_obs["t"].to_numpy(), new_obs["track_id"].to_numpy(), new_obs["fov_name"].to_numpy()))
+    new_obs = new_obs.iloc[sort_idx].reset_index(drop=True)
+    new_X = new_X[sort_idx]
+
+    stitched = ad.AnnData(X=new_X, obs=new_obs)
+    df_new = stitched.obs[["fov_name", "track_id", "t"]].copy()
+    return stitched, df_new, virtual_to_real
+
+
 def _load_query_embeddings(
     query_cfg: dict,
     dataset_cfgs: dict[str, dict],
     embedding_pattern: str,
     min_track_timepoints: int,
     template_len_frames: int,
+    defer_length_filter: bool = False,
 ) -> tuple[dict[str, ad.AnnData], dict[str, pd.DataFrame]]:
     """Load query embedding zarrs and build per-dataset filtered track dfs.
 
@@ -87,6 +207,13 @@ def _load_query_embeddings(
         (e.g. ``"*_viral_sensor_*.zarr"``).
     min_track_timepoints : int
         CLI-level floor on track length, passed to :func:`filter_tracks`.
+    defer_length_filter : bool
+        If True, skip the per-track length filter (``min_track_minutes``,
+        ``min_track_timepoints``, ``template_len + headroom``). Use this
+        when a downstream step (e.g. lineage stitching) will assemble
+        short tracks into longer virtual ones, and the length floor
+        should be applied to the assembled lineages instead. The track-
+        filter columns and FOV pattern are still applied here.
 
     Returns
     -------
@@ -141,21 +268,26 @@ def _load_query_embeddings(
         # the template itself plus any required pre/post headroom. The sufficient
         # condition — that the match actually lands inside the track with that
         # headroom on either side — is enforced post-DTW in main().
+        # When ``defer_length_filter`` is True (lineage-aware mode), skip this
+        # gate entirely so short parent tracks survive long enough to be
+        # stitched into virtual lineages with their daughters; the length
+        # floor is applied to stitched lineages downstream instead.
         if min_track_minutes is not None:
             min_frames = int(np.ceil(float(min_track_minutes) / frame_interval))
         else:
             min_frames = min_track_timepoints
         headroom_frames = int(np.ceil((min_pre_minutes + min_post_minutes) / frame_interval))
         min_frames = max(min_frames, min_track_timepoints, template_len_frames + headroom_frames)
-        df = filter_tracks(df, min_timepoints=min_frames)
+        if not defer_length_filter:
+            df = filter_tracks(df, min_timepoints=min_frames)
 
-        # Subset adata to surviving (fov, track, t) rows.
-        keep_keys = set(zip(df["fov_name"], df["track_id"], df["t"]))
-        keep_mask = [
-            (str(f), int(tid), int(t)) in keep_keys
-            for f, tid, t in zip(adata.obs["fov_name"], adata.obs["track_id"], adata.obs["t"])
-        ]
-        adata = adata[np.asarray(keep_mask)].copy()
+            # Subset adata to surviving (fov, track, t) rows.
+            keep_keys = set(zip(df["fov_name"], df["track_id"], df["t"]))
+            keep_mask = [
+                (str(f), int(tid), int(t)) in keep_keys
+                for f, tid, t in zip(adata.obs["fov_name"], adata.obs["track_id"], adata.obs["t"])
+            ]
+            adata = adata[np.asarray(keep_mask)].copy()
 
         if len(adata) == 0:
             _logger.warning(f"[{dataset_id}] no tracks survived filters; skipping")
@@ -166,7 +298,8 @@ def _load_query_embeddings(
         _logger.info(
             f"[{dataset_id}] {adata.n_obs} rows, "
             f"{df.groupby(['fov_name', 'track_id']).ngroups} tracks "
-            f"(min {min_frames} frames = {min_frames * frame_interval} min)"
+            f"(min {min_frames} frames = {min_frames * frame_interval} min, "
+            f"length filter {'DEFERRED' if defer_length_filter else 'applied'})"
         )
 
     return adata_dict, df_dict
@@ -176,6 +309,8 @@ def _enrich_with_cohort_metadata(
     flat: pd.DataFrame,
     candidate_set: str,
     frame_interval_minutes: dict[str, float],
+    anchor_label: str = "infection_state",
+    anchor_positive: str = "infected",
 ) -> pd.DataFrame:
     """Join Path B alignment frame with Stage 0 cohort metadata.
 
@@ -188,6 +323,14 @@ def _enrich_with_cohort_metadata(
     Path B alignment runs only on the productive cohort. Cells not
     matched in the cohort CSV get ``cohort="productive"`` (default for
     Path B input), ``lineage_id=""`` (orphan sentinel), ``t_zero=NaN``.
+
+    Parameters
+    ----------
+    anchor_label, anchor_positive : str
+        Column name + positive value used to derive ``t_zero`` per
+        lineage (first frame where ``anchor_label == anchor_positive``).
+        Defaults match the infection pipeline; the division template
+        passes ``cell_division_state`` / ``mitosis``.
     """
     flat = flat.copy()
     cand_csv = CANDIDATES_DIR / f"{candidate_set}_productive.csv"
@@ -221,8 +364,15 @@ def _enrich_with_cohort_metadata(
     flat["divides"] = flat["divides"].fillna("none")
     flat["cohort"] = "productive"
 
-    # t_zero: per-lineage first frame where infection_state == "infected".
-    productive_pos = productive[productive["infection_state"] == "infected"]
+    # t_zero: per-lineage first frame where anchor_label == anchor_positive.
+    if anchor_label not in productive.columns:
+        _logger.warning(
+            f"Anchor label {anchor_label!r} not in productive CSV columns "
+            f"({list(productive.columns)}); t_zero will be NaN for all lineages."
+        )
+        productive_pos = productive.iloc[0:0]
+    else:
+        productive_pos = productive[productive[anchor_label] == anchor_positive]
     t_zero_lookup = productive_pos.groupby("lineage_id")["t"].min().to_dict() if not productive_pos.empty else {}
     flat["t_zero"] = flat["lineage_id"].map(t_zero_lookup)
 
@@ -350,6 +500,21 @@ def main() -> None:
             "frame intervals."
         ),
     )
+    parser.add_argument(
+        "--lineage-aware",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Stitch parent + daughter tracks into single virtual lineage tracks before DTW. "
+            "On by default — a biological event (mitosis, infection) belongs to the lineage, "
+            "not to a single track_id, so this matches biology and improves recall when the "
+            "tracker breaks at cell-cycle morphology changes. Concatenates the embedding rows "
+            "in t-order across the branch, runs subsequence DTW on the stitched lineage, then "
+            "maps the matched window back to the original (fov, track_id, t) keys. Pass "
+            "--no-lineage-aware to disable (useful when parent_track_id is not in obs, or for "
+            "comparing per-track vs per-lineage recall)."
+        ),
+    )
     args = parser.parse_args()
 
     config = load_stage_config(args.datasets, args.config)
@@ -362,12 +527,15 @@ def main() -> None:
     if not template_path.exists():
         raise FileNotFoundError(f"Template zarr not found: {template_path}")
 
-    # Template channel is recorded in the zarr's config_snapshot attrs by build_template.py.
+    # Template channel + anchor are recorded in the zarr attrs by build_template.py.
     # Reading from the zarr (rather than requiring the build-template config) keeps Stage 2
     # self-contained: a template zarr is all you need to know what it aligns to.
-    snapshot = read_template_attrs(template_path).get("config_snapshot", {})
+    template_attrs = read_template_attrs(template_path)
+    snapshot = template_attrs.get("config_snapshot", {})
     template_entry = snapshot.get("templates", {}).get(args.template, {})
     template_channel = template_entry.get("channel")
+    template_anchor_label = template_attrs.get("anchor_label", "infection_state")
+    template_anchor_positive = template_attrs.get("anchor_positive", "infected")
     if template_channel is None:
         raise ValueError(
             f"Template zarr {template_path} has no recorded channel in config_snapshot; "
@@ -389,12 +557,18 @@ def main() -> None:
     dataset_cfgs = {d["dataset_id"]: d for d in config["datasets"]}
 
     _logger.info(f"Loading query set {args.query_set!r} ({len(query_cfg['datasets'])} datasets)")
+    # In lineage-aware mode, defer the per-track length filter so short parent
+    # tracks (e.g., a 4-frame all-mitosis parent) survive into the stitching
+    # step where they get concatenated with their daughters into a long virtual
+    # lineage. Without this, the parent is filtered out before stitching has
+    # a chance to assemble it.
     adata_dict, df_dict = _load_query_embeddings(
         query_cfg,
         dataset_cfgs,
         embedding_pattern,
         args.min_track_timepoints,
         template_len_frames=template_result.template.shape[0],
+        defer_length_filter=bool(args.lineage_aware),
     )
     if not adata_dict:
         raise RuntimeError(f"Query set {args.query_set!r} produced no usable tracks")
@@ -402,16 +576,84 @@ def main() -> None:
     all_results: list[AlignmentResult] = []
     frame_interval_by_ds = {d["dataset_id"]: float(d["frame_interval_minutes"]) for d in config["datasets"]}
 
-    # psi is a TEMPLATE-axis budget (frames of the cost matrix), not a query-time
-    # budget. The frame-unit default (t_template // 2) inside dtw_align_tracks is
-    # the right value regardless of query frame rate. We don't scale psi by the
-    # query's frame interval — see dtw_align_tracks' inline note.
+    # When --lineage-aware is set, parent + daughter tracks are stitched into one
+    # virtual track per lineage branch before DTW. This recovers cells where the
+    # tracker broke at the round-up morphology change — a known failure mode on
+    # ALFI U2OS where 83% of mitosis tracks end at the round-up frame with no
+    # daughters linked to the parent track_id (lineage_utils reconnects them).
+    virt_to_real_by_ds: dict[str, dict[tuple[str, int], list[int]]] = {}
+    if args.lineage_aware:
+        _logger.info("Lineage-aware mode: stitching parent + daughter tracks before DTW")
+        stitched_dict: dict[str, ad.AnnData] = {}
+        stitched_df_dict: dict[str, pd.DataFrame] = {}
+        # Apply the length floor to the STITCHED virtual tracks (parent + daughter
+        # merged). Done here, after _load_query_embeddings deferred the per-track
+        # filter, so a short parent contributes its frames to its daughters'
+        # virtual lineages before being filtered out.
+        min_pre_minutes = float(query_cfg.get("min_pre_minutes", 0))
+        min_post_minutes = float(query_cfg.get("min_post_minutes", 0))
+        for ds_id, ad_in in adata_dict.items():
+            stitched, sdf, vmap = _stitch_lineages(ad_in, df_dict[ds_id], ds_id)
+            ds_cfg = dataset_cfgs[ds_id]
+            frame_interval = float(ds_cfg["frame_interval_minutes"])
+            min_track_minutes = query_cfg.get("min_track_minutes")
+            if min_track_minutes is not None:
+                min_frames = int(np.ceil(float(min_track_minutes) / frame_interval))
+            else:
+                min_frames = args.min_track_timepoints
+            headroom_frames = int(np.ceil((min_pre_minutes + min_post_minutes) / frame_interval))
+            min_frames = max(min_frames, args.min_track_timepoints, template_result.template.shape[0] + headroom_frames)
+            sdf = filter_tracks(sdf, min_timepoints=min_frames)
+            keep_keys = set(zip(sdf["fov_name"], sdf["track_id"], sdf["t"]))
+            keep_mask = [
+                (str(f), int(tid), int(t)) in keep_keys
+                for f, tid, t in zip(stitched.obs["fov_name"], stitched.obs["track_id"], stitched.obs["t"])
+            ]
+            stitched = stitched[np.asarray(keep_mask)].copy()
+            n_branches = sum(1 for k, v in vmap.items() if len(v) > 1)
+            n_kept = sdf.groupby(["fov_name", "track_id"]).ngroups
+            _logger.info(
+                f"  [{ds_id}] {n_branches} multi-track lineages stitched, "
+                f"{n_kept} virtual lineages survived length filter (≥{min_frames} fr)"
+            )
+            stitched_dict[ds_id] = stitched
+            stitched_df_dict[ds_id] = sdf
+            virt_to_real_by_ds[ds_id] = vmap
+        adata_dict = stitched_dict
+        df_dict = stitched_df_dict
+
+    # subsequence=True invokes dtaidistance.subsequence.dtw.SubsequenceAlignment
+    # inside dtw_align_tracks. That solver requires every template position to
+    # participate in the warp, so the historic "flat collapse onto 1-2 template
+    # positions" pathology can no longer occur — psi is unused on this path.
+    #
+    # Cross-frame-rate handling: if the query dataset's frame interval differs
+    # from the template's build interval, the frame-unit DTW solver would
+    # match the same number of FRAMES (not the same span of MINUTES) — so a
+    # 17-frame template aligned to a 10-min/frame query matches a 170-min
+    # window instead of the 510-min biological event. Resample the template
+    # to the query's frame interval before alignment so a frame-unit warp is
+    # also a real-time warp. Build intervals are read from the template attrs.
+    build_intervals = template_attrs.get("build_frame_intervals_minutes", {}) or {}
+    build_interval_native = None
+    if build_intervals:
+        # Use the median of build intervals as the template's native interval.
+        build_interval_native = float(np.median(list(build_intervals.values())))
     for dataset_id, adata in adata_dict.items():
+        query_fi = frame_interval_by_ds[dataset_id]
+        tpl_for_query = template_result
+        if build_interval_native is not None and not np.isclose(query_fi, build_interval_native, rtol=0.05):
+            tpl_for_query = resample_template_to_frame_interval(template_result, query_fi)
+            _logger.info(
+                f"  [{dataset_id}] resampled template "
+                f"{template_result.template.shape[0]} fr @ {build_interval_native:.0f} min "
+                f"-> {tpl_for_query.template.shape[0]} fr @ {query_fi:.0f} min"
+            )
         _logger.info(f"Aligning {dataset_id} (subsequence DTW)")
         results = dtw_align_tracks(
             adata=adata,
             df=df_dict[dataset_id],
-            template_result=template_result,
+            template_result=tpl_for_query,
             dataset_id=dataset_id,
             min_track_timepoints=args.min_track_timepoints,
             subsequence=True,
@@ -567,8 +809,69 @@ def main() -> None:
     # cohort + lineage_id + t_zero by reading the candidate-set CSVs
     # from Stage 0. The candidate-set name is taken from --candidate-set
     # if provided, else inferred from the query_set name.
+    # Unmap virtual lineage coordinates back to real (fov, track_id, t) so the
+    # parquet always references frames the montage script can locate in the
+    # source image zarr. The virtual track_id was set to the lineage's leaf
+    # track_id during stitching; recover the original via original_track_id /
+    # original_t stored in the stitched adata's obs.
+    if args.lineage_aware:
+        for ds_id, stitched_adata in adata_dict.items():
+            obs = stitched_adata.obs
+            key_to_real: dict[tuple[str, str, int, int], tuple[int, int]] = {
+                (ds_id, str(r["fov_name"]), int(r["track_id"]), int(r["t"])): (
+                    int(r["original_track_id"]),
+                    int(r["original_t"]),
+                )
+                for _, r in obs.iterrows()
+            }
+            mask = flat["dataset_id"] == ds_id
+            real = flat.loc[mask].apply(
+                lambda r: key_to_real.get(
+                    (str(r["dataset_id"]), str(r["fov_name"]), int(r["track_id"]), int(r["t"])),
+                    (int(r["track_id"]), int(r["t"])),
+                ),
+                axis=1,
+            )
+            flat.loc[mask, "track_id"] = [v[0] for v in real]
+            flat.loc[mask, "t"] = [v[1] for v in real]
+        # match_q_start / match_q_end were computed on virtual t — recompute
+        # them per real (fov, track_id) using the per-track aligned-region rows.
+        aligned = flat[flat["alignment_region"] == "aligned"]
+        match_real = aligned.groupby(["dataset_id", "fov_name", "track_id"], as_index=False).agg(
+            match_q_start_real=("t", "min"), match_q_end_real=("t", "max")
+        )
+        flat = flat.drop(columns=["match_q_start", "match_q_end"]).merge(
+            match_real, on=["dataset_id", "fov_name", "track_id"], how="left"
+        )
+        flat = flat.rename(columns={"match_q_start_real": "match_q_start", "match_q_end_real": "match_q_end"})
+        flat["match_duration_minutes"] = (flat["match_q_end"] - flat["match_q_start"]) * flat["dataset_id"].map(
+            frame_interval_by_ds
+        )
+        # Drop real tracks that contributed no aligned frames after unmap.
+        # When a virtual lineage's matched window falls entirely on the parent's
+        # frames, the daughter track inherits the lineage's cost but has zero
+        # aligned rows in its own real coordinates. Without this filter the
+        # cost-ranked top-N is dominated by partner tracks that have no
+        # biological content to render in the montage.
+        n_before_unmap_drop = flat.groupby(["dataset_id", "fov_name", "track_id"]).ngroups
+        flat = flat[flat["match_q_start"].notna()].copy()
+        n_after_unmap_drop = flat.groupby(["dataset_id", "fov_name", "track_id"]).ngroups
+        n_unmap_dropped = n_before_unmap_drop - n_after_unmap_drop
+        if n_unmap_dropped:
+            _logger.info(
+                f"Dropped {n_unmap_dropped} real tracks whose lineage's matched "
+                "window fell entirely on a partner track (lineage-aware unmap)"
+            )
+            drop_log["n_dropped_lineage_partner_only"] = int(n_unmap_dropped)
+
     candidate_set = getattr(args, "candidate_set", None) or args.query_set
-    flat = _enrich_with_cohort_metadata(flat, candidate_set, frame_interval_by_ds)
+    flat = _enrich_with_cohort_metadata(
+        flat,
+        candidate_set,
+        frame_interval_by_ds,
+        anchor_label=template_anchor_label,
+        anchor_positive=template_anchor_positive,
+    )
     flat["track_path"] = "B"
 
     OUTPUT_ALIGNMENTS_DIR.mkdir(parents=True, exist_ok=True)
