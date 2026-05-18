@@ -66,11 +66,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     ap.add_argument(
         "--time",
-        default="2:00:00",
-        help="SLURM walltime (default 2:00:00). Right-sized from sample of the "
-        "regen-metrics path: a 3-plate A549 chain typically finishes in ~30 min; 2h "
-        "leaves 4× headroom. Bump to 4:00:00+ for a first-time run that has to "
-        "recompute cached GT masks / CP / deep features (no --regen-metrics).",
+        default="4:00:00",
+        help="SLURM walltime (default 4:00:00). One completed regen-metrics single-"
+        "leaf iPSC eval (33009553) took 40 min, so a serial 3-plate A549 chain "
+        "runs ~2h; 4h gives ~2× headroom for jitter / larger cohorts. With "
+        "--parallel N, total elapsed drops by N× — the cap is then trivially "
+        "comfortable. Walltime is billed at actual elapsed (not allocated), so "
+        "bumping this is free insurance.",
     )
     ap.add_argument(
         "--run-root",
