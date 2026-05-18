@@ -62,11 +62,11 @@ col = 3
 field = "000000"  # TODO Change this for a different FOV
 
 # NOTE: this dataset only has one level
-pyaramid_level = 0
+pyramid_level = 0
 
 fov_path = f"{row}/{col}/{field}"
 input_data_path = Path(data_path) / fov_path
-image = dataset[fov_path][pyaramid_level].numpy()
+image = dataset[fov_path][pyramid_level].numpy()
 
 n_channels = len(dataset.channel_names)
 Z, Y, X = image.shape[-3:]
