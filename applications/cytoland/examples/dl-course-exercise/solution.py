@@ -169,7 +169,7 @@ from viscy_utils.trainer import VisCyTrainer
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
-top_dir = Path("~/data").expanduser()  # If this fails, point to your data directory (e.g. a shared course mount).
+top_dir = Path(os.environ.get("DATA_ROOT", "~/data")).expanduser()
 
 # Path to the training data
 data_path = top_dir / "06_image_translation/training/a549_hoechst_cellmask_train_val.zarr"
