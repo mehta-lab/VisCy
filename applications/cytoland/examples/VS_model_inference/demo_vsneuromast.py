@@ -79,7 +79,7 @@ See ``viscy.unet.networks.unext2`` ([source code](https://github.com/mehta-lab/V
 data_module = HCSDataModule(
     data_path=input_data_path,
     source_channel=phase_channel_name,
-    target_channel=["Membrane", "Nuclei"],
+    target_channel=["Nuclei", "Membrane"],
     z_window_size=21,
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
