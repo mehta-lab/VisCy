@@ -79,7 +79,6 @@ data_module = HCSDataModule(
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
-    architecture="fcmae",
     normalizations=[
         NormalizeSampled(
             [phase_channel_name],
