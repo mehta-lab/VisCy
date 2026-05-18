@@ -168,11 +168,14 @@ from viscy_utils.trainer import VisCyTrainer
 # seed random number generators for reproducibility.
 seed_everything(42, workers=True)
 
-# Paths to data and log directory
-top_dir = Path(os.environ.get("DATA_ROOT", "~/data")).expanduser()
+# Paths to data and log directory.
+# DATA_ROOT (set by setup_student.sh / setup_TA.sh) points directly at the
+# folder containing training/, test/, pretrained_models/. When unset, fall
+# back to the default ~/data/06_image_translation layout.
+top_dir = Path(os.environ.get("DATA_ROOT", "~/data/06_image_translation")).expanduser()
 
 # Path to the training data
-data_path = top_dir / "06_image_translation/training/a549_hoechst_cellmask_train_val.zarr"
+data_path = top_dir / "training/a549_hoechst_cellmask_train_val.zarr"
 
 # Path where we will save our training logs
 training_top_dir = Path(f"{os.getcwd()}/data/")
@@ -1114,7 +1117,7 @@ phase2fluor_model.to(device)
 # </div>
 # %%
 # Setup the test data module.
-test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
+test_data_path = top_dir / "test/a549_hoechst_cellmask_test.zarr"
 source_channel = ["Phase3D"]
 target_channel = ["Nucl", "Mem"]
 
@@ -1269,7 +1272,12 @@ pretrained_phase2fluor = VSUNet.load_from_checkpoint(
     pretrained_model_ckpt,
     architecture=...,
     model_config=phase2fluor_config,
-    accelerator="gpu",
+)
+# Move the loaded model to GPU (VSUNet does not take an accelerator kwarg;
+# Lightning's trainer handles that for fit/predict, but for manual inference
+# we move the module ourselves).
+pretrained_phase2fluor = pretrained_phase2fluor.to(
+    torch.device(f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu")
 )
 # TODO: Setup the dataloader in evaluation/predict mode
 #
@@ -1279,7 +1287,7 @@ pretrained_phase2fluor = VSUNet.load_from_checkpoint(
 # ##### SOLUTION ########
 # #######################
 
-pretrained_model_ckpt = top_dir / "06_image_translation/pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
+pretrained_model_ckpt = top_dir / "pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
 
 phase2fluor_config = dict(
     in_channels=1,
@@ -1324,13 +1332,15 @@ phase2fluor_config = dict(
     in_stack_depth=1,
     pretraining=False,
 )
-# Load the model checkpoint
+# Load the model checkpoint, then move it to GPU for manual inference.
+# (VSUNet does not accept an accelerator kwarg — Lightning's Trainer handles
+# device placement automatically for fit/predict, but here we call the model
+# directly, so we move it explicitly.)
 phase2fluor_model = VSUNet.load_from_checkpoint(
     phase2fluor_model_ckpt,
     architecture="UNeXt2_2D",
     model_config=phase2fluor_config,
-    accelerator="gpu",
-)
+).to(torch.device(f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"))
 phase2fluor_model.eval()
 # %% [markdown] tags=[]
 # <div class="alert alert-warning">
@@ -1398,7 +1408,7 @@ def cellpose_segmentation(prediction: ArrayLike, target: ArrayLike) -> Tuple[tor
 
 # %%
 # Setting the paths for the test data and the output segmentation
-test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
+test_data_path = top_dir / "test/a549_hoechst_cellmask_test.zarr"
 output_segmentation_path = training_top_dir / "06_image_translation/pretrained_model_segmentations.zarr"
 
 # Creating the dataframes to store the pixel and segmentation metrics
@@ -1906,7 +1916,7 @@ plt.show()
 
 # %%
 # Path to the pretrained fluorescence to phase model checkpoint
-fluor2phase_model_path = top_dir / "06_image_translation/pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
+fluor2phase_model_path = top_dir / "pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
 
 
 # %% tags=["task"]
@@ -2027,7 +2037,7 @@ print("Fluorescence-to-phase model created (note: using untrained model for demo
 print("In practice, load a pretrained checkpoint for meaningful results")
 
 print("\nLoading pretrained fluorescence-to-phase model...")
-fluor2phase_model_path = top_dir / "06_image_translation/pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
+fluor2phase_model_path = top_dir / "pretrained_models/AIMBL_Demo/fluor2phase_step668.ckpt"
 assert fluor2phase_model_path.exists(), "Fluorescence-to-phase model checkpoint not found. Please check the path."
 fluor2phase_model = VSUNet.load_from_checkpoint(
     fluor2phase_model_path, model_config=fluor2phase_config, architecture="fcmae"
@@ -2036,6 +2046,11 @@ fluor2phase_model.eval()
 
 # %% tags=["solution"]
 # Test the fluorescence to phase model on our test data
+
+# First-use imports for this cell (kept here so the solution notebook works
+# top-to-bottom even when earlier task-tagged cells are stripped).
+from skimage import metrics  # noqa: E402
+from skimage.exposure import rescale_intensity  # noqa: E402
 
 source_channel_fluor = ["Nucl", "Mem"]
 target_channel_labelfree = ["Phase3D"]
@@ -2245,16 +2260,82 @@ print(
 )
 
 # %% tags=["solution"]
+# TTA implementation + metrics in one cell: the metrics below reference
+# tta_pred_nuc/tta_pred_mem, so we run the TTA prediction first within the
+# same solution cell. (When the notebook is generated, task-tagged cells are
+# stripped, so we cannot rely on a later cell to populate these variables.)
 
-# Normalize data range to 0-1
+from monai.transforms import (  # noqa: E402, F811
+    Flip,
+    Rotate90,
+)
+
+# Get a test sample
+sample = next(iter(test_data.test_dataloader()))
+source_tensor = sample["source"].to(phase2fluor_model.device)
+target_tensor = sample["target"]
+target_nuc = target_tensor[0, 0].cpu().numpy()
+target_mem = target_tensor[0, 1].cpu().numpy()
+
+predictions = []
+
+# Original prediction without augmentation
+with torch.inference_mode():
+    original_pred = phase2fluor_model(source_tensor)
+    predictions.append(original_pred.cpu().numpy())
+
+# Define the TTA transforms and the inverse transforms as a list of tuples (forward, inverse)
+transform_list = [
+    (Rotate90(k=1, spatial_axes=(-1, -2)), Rotate90(k=3, spatial_axes=(-1, -2))),
+    (Rotate90(k=2, spatial_axes=(-1, -2)), Rotate90(k=2, spatial_axes=(-1, -2))),
+    (Rotate90(k=3, spatial_axes=(-1, -2)), Rotate90(k=1, spatial_axes=(-1, -2))),
+    (Flip(spatial_axis=-2), Flip(spatial_axis=-2)),
+    (Flip(spatial_axis=-1), Flip(spatial_axis=-1)),
+]
+
+for forward_transform, inverse_transform in transform_list:
+    # Apply transform to each sample in batch
+    augmented_batch = []
+    for i in range(source_tensor.shape[0]):
+        img = source_tensor[i].cpu().numpy()
+        aug_img = forward_transform(img)
+        augmented_batch.append(aug_img)
+    augmented_source = torch.stack(augmented_batch).to(source_tensor.device)
+
+    # Run inference on augmented input
+    with torch.inference_mode():
+        augmented_pred = phase2fluor_model(augmented_source)
+
+    # De-apply transform to prediction
+    deaugmented_batch = []
+    for i in range(augmented_pred.shape[0]):
+        pred = augmented_pred[i].cpu().numpy()
+        deaug_pred = inverse_transform(pred)
+        deaugmented_batch.append(deaug_pred)
+    deaugmented_pred = torch.stack(deaugmented_batch)
+
+    predictions.append(deaugmented_pred.cpu().numpy())
+
+# Average all predictions
+averaged_pred = np.stack(predictions).mean(axis=0)
+
+# Extract nucleus and membrane predictions
+tta_pred_nuc = averaged_pred[0, 0]
+tta_pred_mem = averaged_pred[0, 1]
+
+# Compare with single prediction (no TTA)
+with torch.inference_mode():
+    single_pred = phase2fluor_model(source_tensor)
+    single_pred_nuc = single_pred[0, 0].cpu().numpy()
+    single_pred_mem = single_pred[0, 1].cpu().numpy()
+
+# Normalize data range to 0-1 before computing metrics
 target_nuc[0] = rescale_intensity(target_nuc[0], in_range="image", out_range=(0, 1))
 single_pred_nuc[0] = rescale_intensity(single_pred_nuc[0], in_range="image", out_range=(0, 1))
 target_mem[0] = rescale_intensity(target_mem[0], in_range="image", out_range=(0, 1))
 single_pred_mem[0] = rescale_intensity(single_pred_mem[0], in_range="image", out_range=(0, 1))
-target_nuc[0] = rescale_intensity(target_nuc[0], in_range="image", out_range=(0, 1))
 tta_pred_nuc[0] = rescale_intensity(tta_pred_nuc[0], in_range="image", out_range=(0, 1))
 tta_pred_mem[0] = rescale_intensity(tta_pred_mem[0], in_range="image", out_range=(0, 1))
-tta_pred_nuc[0] = rescale_intensity(tta_pred_nuc[0], in_range="image", out_range=(0, 1))
 
 # Calculate metrics
 ssim_nuc_single = metrics.structural_similarity(target_nuc[0], single_pred_nuc[0], data_range=1)
@@ -2319,69 +2400,6 @@ for ax in axs.flat:
 
 plt.tight_layout()
 plt.show()
-
-# %% tags=["solution"]
-# Import additional MONAI transforms for TTA
-
-# Get a test sample
-sample = next(iter(test_data.test_dataloader()))
-source_tensor = sample["source"].to(phase2fluor_model.device)
-target_tensor = sample["target"]
-target_nuc = target_tensor[0, 0].cpu().numpy()
-target_mem = target_tensor[0, 1].cpu().numpy()
-
-predictions = []
-
-# Original prediction without augmentation
-with torch.inference_mode():
-    original_pred = phase2fluor_model(source_tensor)
-    predictions.append(original_pred.cpu().numpy())
-
-# Define the TTA transforms and the inverse transforms as a list of tuples (forward, inverse)
-transform_list = [
-    (Rotate90(k=1, spatial_axes=(-1, -2)), Rotate90(k=3, spatial_axes=(-1, -2))),
-    (Rotate90(k=2, spatial_axes=(-1, -2)), Rotate90(k=2, spatial_axes=(-1, -2))),
-    (Rotate90(k=3, spatial_axes=(-1, -2)), Rotate90(k=1, spatial_axes=(-1, -2))),
-    (Flip(spatial_axis=-2), Flip(spatial_axis=-2)),
-    (Flip(spatial_axis=-1), Flip(spatial_axis=-1)),
-]
-
-for forward_transform, inverse_transform in transform_list:
-    # Apply transform to each sample in batch
-    augmented_batch = []
-    for i in range(source_tensor.shape[0]):
-        img = source_tensor[i].cpu().numpy()
-        aug_img = forward_transform(img)
-        augmented_batch.append(aug_img)
-    augmented_source = torch.stack(augmented_batch).to(source_tensor.device)
-
-    # Run inference on augmented input
-    with torch.inference_mode():
-        augmented_pred = phase2fluor_model(augmented_source)
-
-    # De-apply transform to prediction
-    deaugmented_batch = []
-    for i in range(augmented_pred.shape[0]):
-        pred = augmented_pred[i].cpu().numpy()
-        deaug_pred = inverse_transform(pred)
-        deaugmented_batch.append(deaug_pred)
-    deaugmented_pred = torch.stack(deaugmented_batch)
-
-    predictions.append(deaugmented_pred.cpu().numpy())
-
-# Average all predictions
-averaged_pred = np.stack(predictions).mean(axis=0)
-
-# Extract nucleus and membrane predictions
-tta_pred_nuc = averaged_pred[0, 0]
-tta_pred_mem = averaged_pred[0, 1]
-
-# Compare with single prediction (no TTA)
-with torch.inference_mode():
-    single_pred = phase2fluor_model(source_tensor)
-    single_pred_nuc = single_pred[0, 0].cpu().numpy()
-    single_pred_mem = single_pred[0, 1].cpu().numpy()
-
 
 # %% [markdown] tags=[]
 # <div class="alert alert-warning">
@@ -2465,7 +2483,7 @@ def pcs_to_rgb(feat: np.ndarray, n_components: int = 8) -> np.ndarray:
 
 # %%
 # Load the test dataset
-test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
+test_data_path = top_dir / "test/a549_hoechst_cellmask_test.zarr"
 test_dataset = open_ome_zarr(test_data_path)
 
 # Looking at the test dataset
@@ -2522,7 +2540,7 @@ plt.imshow(phase_img[0, 0, 0], cmap="gray")
 # %%
 
 # Loading the pretrained model
-pretrained_model_ckpt = top_dir / "06_image_translation/pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
+pretrained_model_ckpt = top_dir / "pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
 # model config as before
 phase2fluor_config = dict(
     in_channels=1,
