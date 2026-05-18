@@ -21,11 +21,10 @@ import torch
 from iohub import open_ome_zarr
 from lightning.pytorch import seed_everything
 
-# Cytoland and VisCy modular classes for the trainer and model
+# Cytoland and VisCy modular classes for the model and data module
 from cytoland.engine import VSUNet
 from viscy_data.hcs import HCSDataModule
 from viscy_transforms import NormalizeSampled
-from viscy_utils.trainer import VisCyTrainer
 
 # seed random number generators for reproducibility.
 seed_everything(42, workers=True)
@@ -156,17 +155,20 @@ config_VSCyto3D = {
 
 # Select the device used for direct model inference.
 inference_device = torch.device(f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu")
+print(f"Running inference on {inference_device}")
 
 # Model without augmentation
-model_VSCyto3D_no_augmentation = VSUNet.load_from_checkpoint(
-    no_augmentation_model_ckpt, architecture="UNeXt2", model_config=config_VSCyto3D
-).to(inference_device)
-model_VSCyto3D_no_augmentation.eval()
+model_VSCyto3D_no_augmentation = (
+    VSUNet.load_from_checkpoint(no_augmentation_model_ckpt, architecture="UNeXt2", model_config=config_VSCyto3D)
+    .to(inference_device)
+    .eval()
+)
 # Model with augmentation
-model_VSCyto3D_w_augmentation = VSUNet.load_from_checkpoint(
-    VSCyto3D_model_ckpt, architecture="UNeXt2", model_config=config_VSCyto3D
-).to(inference_device)
-model_VSCyto3D_w_augmentation.eval()
+model_VSCyto3D_w_augmentation = (
+    VSUNet.load_from_checkpoint(VSCyto3D_model_ckpt, architecture="UNeXt2", model_config=config_VSCyto3D)
+    .to(inference_device)
+    .eval()
+)
 
 n = 5
 patch_size = 256
