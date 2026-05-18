@@ -6,7 +6,10 @@
 # append_predictions.pipelines_dir (per-model registry path).
 #
 # Cell index covers HeLa (MI06), RPE1 (MI07/MI08), U2OS (MI01-MI05) — DIC channel.
-# Annotations: ALFI_combined_annotations.csv (cell_division_state, cell_death_state).
+# Annotations: ALFI_combined_annotations.csv (cell_division_state,
+# cell_death_state). fov_name is suffixed with "/0/0" to match the HCS-style
+# fov paths the v3 zarr datamodule writes onto obs (rewritten 2026-05-07);
+# without the suffix the join would produce all-NaN labels.
 #
 # Leaves merge this via:
 #   base:
@@ -14,7 +17,7 @@
 #     - recipes/reduce.yml
 #     - recipes/alfi.yml
 
-cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/alfi-eval.parquet
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/alfi-eval-v2.parquet
 
 steps:
   - predict

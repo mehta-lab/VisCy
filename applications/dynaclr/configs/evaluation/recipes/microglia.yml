@@ -1,12 +1,14 @@
 # Dataset recipe: microglia (dynamorph)
 # =============================================================================
-# Wave-2 column of the evaluation matrix. Applies LC pipelines published by the
-# same model's infectomics-annotated run (central registry). Microglia has no
-# annotation CSVs, so append_annotations is omitted; append_predictions still
-# runs and silently skips cells whose markers (Brightfield, Retardance) are
-# absent from the registry manifest.
+# Embed-only dataset: no annotations exist for microglia, and its markers
+# don't overlap with any LC registry, so linear_classifiers and
+# append_predictions are intentionally omitted. We only compute embeddings,
+# dimensionality reductions, and smoothness for cross-model comparison plots.
 #
-# Data: 20191107_1209_1_GW23_dynamorph (Brightfield, Phase3D, Retardance).
+# Data: 20191107_1209_1_GW23_dynamorph, **Phase3D channel only** (filtered
+# 2026-05-07 — the original microglia-eval.parquet covers Brightfield +
+# Phase3D + Retardance ≈ 2.58M cells, but we only embed Phase3D for
+# comparability with infectomics' Phase3D and to keep eval cost manageable).
 # Perturbations: untreated, IL17, IFN-beta, Rubella, Glioblastoma_supernatant.
 #
 # Leaves merge this via:
@@ -15,7 +17,7 @@
 #     - recipes/reduce.yml
 #     - recipes/microglia.yml
 
-cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/microglia-eval.parquet
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/microglia-eval-phase3d.parquet
 
 steps:
   - predict
@@ -23,7 +25,6 @@ steps:
   - reduce_dimensionality
   - reduce_combined
   - smoothness
-  - append_predictions
   - plot
 
 plot:
@@ -32,11 +33,12 @@ plot:
   combined_embedding_keys:
     - X_pca_combined
     - X_phate_combined
+  # Dropped `experiment` and `marker` from color_by — both are constant
+  # after the Phase3D-only filter (single experiment, single marker), so
+  # coloring by them produces a single-color scatter.
   color_by:
     - perturbation
     - hours_post_perturbation
-    - experiment
-    - marker
   point_size: 1.0
   components: [0, 1]
   format: pdf

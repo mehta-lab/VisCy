@@ -1,6 +1,6 @@
 # Evaluation: DynaCLR-2D-MIP-BagOfChannels (single-marker, 384->192, zext16) x infectomics-annotated.
 # Variant: single-marker batching at the larger 384->216->192 patch with zext16.
-# Checkpoint: p6vlebcu/last.ckpt (2026-04-28).
+# Checkpoint: p6vlebcu/last.ckpt (epoch=88-step=71200, 2026-05-08).
 #
 # Submit:
 #   sbatch applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-single-marker-192/run_infectomics_annotated.sh

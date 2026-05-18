@@ -22,9 +22,20 @@ models:
   - name: DINOv3-frozen
     eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-frozen/evaluations/infectomics-annotated
 
+  # ✅ CELL-DINO-frozen — channel-adaptive ViT-L/16 pretrained on Human Protein
+  # Atlas single-cell fluorescence. Biology-pretrained foundation, 1024-dim cls.
+  # Wave-1 landed 2026-05-05 (job 32160496).
+  - name: CELL-DINO-frozen
+    eval_dir: /hpc/projects/organelle_phenotyping/models/CELL-DINO-frozen/evaluations/infectomics-annotated
+
   # ✅ DINOv3-temporal-MLP-v1 — fairly-matched SSL baseline (HF DINOv3 + MLP head)
   - name: DINOv3-temporal-MLP-v1
     eval_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1/evaluations/infectomics-annotated
+
+  # ✅ CELL-DINO-temporal-MLP-v1 — same MLP recipe but CELL-DINO (HPA) backbone (run id 0ne38zcc, epoch=49-step=40000)
+  # Completed 2026-05-11 (job 32665252) after annotation.py spatial-NN patch landed.
+  - name: CELL-DINO-temporal-MLP-v1 (ep49)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/cell-dino-mlp-2d-mip-ntxent-t0p5-lr1e4-bs512/evaluations/infectomics-annotated_epoch49_step40000
 
   # ⬜ DynaCLR-classical — historical 150-epoch ckpt (older dataset).
   # Leaf scaffolded 2026-05-05; submit once Wave-1 head runs.
@@ -40,13 +51,28 @@ models:
   - name: DynaCLR-2D-BoC (192to160, single-marker-fix)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated
 
+  # ✅ Same run, later checkpoint (epoch=105-step=84800, run id jbrwhzr3) — completed 2026-05-11 (job 32657626)
+  - name: DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800
+
+  # ✅ Classical (non-temporal) NTXent, 192→160, zext11, single-marker — epoch=91-step=73600 (run id dt0ln63r)
+  # Completed 2026-05-11 (job 32665175) after annotation.py spatial-NN patch landed. The patch handles
+  # mitotic-split frames where two daughter cells briefly share the parent's track_id; the join now
+  # resolves duplicates via (y, x) nearest within a 4-pixel Chebyshev kernel.
+  - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch91_step73600
+
   # ✅ Mixed-markers post fix-shuffler, 192→160, zext11
   - name: DynaCLR-2D-BoC (192to160, mixed-markers-fix)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated
 
-  # ✅ Single-marker, larger patch (384→216→192) with zext16
+  # ✅ Single-marker, larger patch (384→216→192) with zext16 — early ckpt (~Apr 29 last.ckpt)
   - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated
+
+  # ✅ Same run, later checkpoint (epoch=88-step=71200, 2026-05-08) — A/B vs the early ckpt above
+  - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated_2026-05-08
 
   # --- DynaCLR-2D-BagOfChannels-v3 (SEC61/TOMM20/G3BP1/Sensor, time-interval) ---
   # ✅ Legacy ContrastiveModule, wrapped via dynaclr.engine for inference
@@ -55,3 +81,22 @@ models:
 
 output_dir: /hpc/projects/organelle_phenotyping/comparisons/infectomics-annotated
 fdr_threshold: 0.05
+
+# Color stability: same palette anchor as eval_registry_alfi-annotated.yaml
+# so each model gets the same color in both comparisons. Keep this list in
+# sync across the two registries — anything we plot anywhere should appear
+# here in the canonical order.
+palette_anchor:
+  - DINOv3-frozen
+  - CELL-DINO-frozen
+  - DINOv3-temporal-MLP-v1
+  - CELL-DINO-temporal-MLP-v1 (ep49)
+  - DynaCLR-classical (historical)
+  - DynaCLR-2D-BoC (192to160, zext11)
+  - DynaCLR-2D-BoC (192to160, single-marker-fix)
+  - DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
+  - DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+  - DynaCLR-2D-BoC (192to160, mixed-markers-fix)
+  - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
+  - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)
+  - DynaCLR-2D-BagOfChannels-v3
