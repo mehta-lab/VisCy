@@ -1669,7 +1669,7 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
         # Load the manually curated nuclei target label
         pbar.set_description(f"Processing FOV {fov} - Computing Segmentation Metrics")
         pbar.refresh()
-        pred_label, target_label = cellpose_segmentation(predicted_nuc_phase2fluor, target_nucleus)
+        pred_label, target_label = cellpose_segmentation(predicted_nuc_phase2fluor, target_nuc)
         # Binary labels
         pred_label_binary = pred_label > 0
         target_label_binary = target_label > 0
