@@ -920,7 +920,7 @@ trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 # visualize graph of phase2fluor model as image.
 model_graph_phase2fluor = torchview.draw_graph(
     phase2fluor_model,
-    phase2fluor_2D_data.train_dataset[0]["source"][0].unsqueeze(dim=0),
+    phase2fluor_2D_data.train_dataset[0]["source"].unsqueeze(dim=0),
     roll=True,
     depth=3,  # adjust depth to zoom in.
     device="cpu",
