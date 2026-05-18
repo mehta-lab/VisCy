@@ -34,6 +34,15 @@ dependencies = [
   "iohub>=0.3.3",
   "pytorch-metric-learning",
   "pyyaml",
+  # seaborn and tabulate are required by core eval pipeline code that runs
+  # unconditionally (evaluate_smoothness plots, compare_evals to_markdown,
+  # mmd plotting). Hiding them under optional extras caused silent runtime
+  # failures (SMOOTHNESS_GATHER discarding valid metrics when seaborn is
+  # absent, compare_evals.py crashing on the markdown print). Promoted to
+  # required deps 2026-05-05 after a SLURM job dropped these on a node
+  # whose venv view was missing the extras.
+  "seaborn",
+  "tabulate",
   "torchvision",
   "viscy-data[triplet]",
   "viscy-models",
@@ -47,7 +56,6 @@ optional-dependencies.eval = [
   "natsort",
   "phate",
   "scikit-learn",
-  "seaborn",
   "statsmodels",
   "umap-learn",
   "wandb",
@@ -56,7 +64,6 @@ optional-dependencies.tracking = [
   "gurobipy>=12.0.1,<13",
   "onnxruntime-gpu",
   "py-ctcmetrics",
-  "tabulate",
   "tracksdata",
 ]
 # Visualization extras: PCA-RGB timelapse MP4 export needs the FFmpeg
