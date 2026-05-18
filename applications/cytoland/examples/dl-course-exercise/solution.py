@@ -1292,12 +1292,14 @@ phase2fluor_config = dict(
     pretraining=False,
 )
 # Load the model checkpoint
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 pretrained_phase2fluor = VSUNet.load_from_checkpoint(
     pretrained_model_ckpt,
     architecture="UNeXt2_2D",
     model_config=phase2fluor_config,
-    accelerator="gpu",
+    map_location=device,
 )
+pretrained_phase2fluor = pretrained_phase2fluor.to(device)
 pretrained_phase2fluor.eval()
 
 ### Re-load your trained model
