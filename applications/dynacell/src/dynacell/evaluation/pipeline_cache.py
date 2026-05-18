@@ -9,6 +9,8 @@ otherwise computes and writes them — while honoring the per-artifact
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -249,6 +251,43 @@ def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
         positions.append(pos_name)
 
 
+@contextlib.contextmanager
+def _pos_write_lock(ctx: _CacheContext, kind: str, pos_name: str):
+    """Exclusive advisory file lock for one (kind, pos_name) cache slot.
+
+    Concurrent eval jobs on the same (organelle, plate) all write to the
+    same GT cache zarrs. Without locking, two writers race: writer A
+    starts creating the position group, writer B reads the OME plate
+    metadata before A finishes updating it (read_mask → None), then B
+    calls create_position → zarr.errors.ContainsGroupError because the
+    underlying group already exists from A. The lock serializes writers
+    of the same slot; cache hits stay lock-free in the callers.
+
+    ``kind`` is a short tag distinguishing artifact families (e.g.
+    ``"masks_sec61b"``, ``"features_dinov3_<slug>"``) so different
+    families don't contend on each other's locks.
+    """
+    if ctx.paths is None:
+        raise RuntimeError("_pos_write_lock requires a cache-enabled context")
+    locks_dir = ctx.paths.root / ".locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+
+    def _flatten(s: str) -> str:
+        return s.replace("/", "_").replace("\\", "_")
+
+    lock_path = locks_dir / f"{_flatten(kind)}_{_flatten(pos_name)}.lock"
+    # Hold the file open for the lifetime of the lock; fcntl.flock is
+    # released either explicitly or on file close. Use an "r+" open so the
+    # file is not truncated on each acquisition (we don't write to it).
+    lock_path.touch(exist_ok=True)
+    with open(lock_path, "r+") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 def fov_gt_masks(
     ctx: _CacheContext,
     pos_name: str,
@@ -264,23 +303,22 @@ def fov_gt_masks(
 
     t_count = target_arr.shape[0]
 
-    if ctx.enabled and not ctx.force["gt_masks"]:
-        cached = read_mask(ctx.paths, ctx.target_name, pos_name)
-        if cached is not None:
-            if cached.shape[0] != t_count:
-                raise StaleCacheError(
-                    f"Cached mask timepoint count mismatch for {pos_name}: "
-                    f"cached={cached.shape[0]} vs current={t_count}"
-                )
-            return cached
-        _raise_if_require_complete(ctx, f"organelle_masks[{ctx.target_name}]", pos_name)
+    def _compute_masks() -> np.ndarray:
+        return np.stack(
+            [
+                np.asarray(segment(target_arr[t], ctx.target_name, seg_model=seg_model)).astype(bool)
+                for t in range(t_count)
+            ]
+        )
 
-    masks = np.stack(
-        [np.asarray(segment(target_arr[t], ctx.target_name, seg_model=seg_model)).astype(bool) for t in range(t_count)]
-    )
+    def _validate_cached_shape(arr: np.ndarray) -> np.ndarray:
+        if arr.shape[0] != t_count:
+            raise StaleCacheError(
+                f"Cached mask timepoint count mismatch for {pos_name}: cached={arr.shape[0]} vs current={t_count}"
+            )
+        return arr
 
-    if ctx.enabled:
-        write_mask(ctx.paths, ctx.target_name, pos_name, masks)
+    def _record_write() -> None:
         _update_manifest_entry(
             ctx.manifest,
             ["organelle_masks", ctx.target_name],
@@ -293,6 +331,35 @@ def fov_gt_masks(
         _add_position(ctx.manifest, ["organelle_masks", ctx.target_name], pos_name)
         ctx.mark_manifest_dirty()
 
+    # Cache disabled — compute fresh, no locking, no caching.
+    if not ctx.enabled:
+        return _compute_masks()
+
+    # Force-recompute: take the lock so we don't race against a concurrent
+    # cache-miss writer for the same slot, then overwrite.
+    if ctx.force["gt_masks"]:
+        with _pos_write_lock(ctx, f"masks_{ctx.target_name}", pos_name):
+            masks = _compute_masks()
+            write_mask(ctx.paths, ctx.target_name, pos_name, masks)
+            _record_write()
+        return masks
+
+    # Fast-path: cache hit without taking a lock.
+    cached = read_mask(ctx.paths, ctx.target_name, pos_name)
+    if cached is not None:
+        return _validate_cached_shape(cached)
+
+    # Cache miss — take the lock and re-check inside it. A concurrent writer
+    # may have populated the slot between our fast-path read and the lock
+    # acquisition; if so, the re-read returns a hit and we skip recomputation.
+    with _pos_write_lock(ctx, f"masks_{ctx.target_name}", pos_name):
+        cached = read_mask(ctx.paths, ctx.target_name, pos_name)
+        if cached is not None:
+            return _validate_cached_shape(cached)
+        _raise_if_require_complete(ctx, f"organelle_masks[{ctx.target_name}]", pos_name)
+        masks = _compute_masks()
+        write_mask(ctx.paths, ctx.target_name, pos_name, masks)
+        _record_write()
     return masks
 
 
@@ -320,8 +387,16 @@ def _load_or_compute_feature_timepoints(
             per_t.append(np.asarray(compute_fn(t)))
         return per_t, False
 
+    # Lock domain: per (feature family, position). Different families have
+    # separate backing zarrs, so they don't contend on each other's slots;
+    # different positions within one family can write concurrently.
+    lock_tag = "_".join(["features", kind, *(str(v) for v in cache_kwargs.values())])
+
     manifest_updated = False
-    with open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group:
+    with (
+        _pos_write_lock(ctx, lock_tag, pos_name),
+        open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group,
+    ):
         for t in range(t_count):
             feats = None
             if not ctx.force[force_key]:
@@ -442,9 +517,56 @@ def fov_gt_deep_features(
 
 
 def flush_manifest(ctx: _CacheContext) -> None:
-    """Persist the manifest to disk if it has been mutated since last flush."""
-    if ctx.enabled and ctx.consume_manifest_dirty():
-        save_manifest(ctx.paths, ctx.manifest)
+    """Persist the manifest to disk if it has been mutated since last flush.
+
+    Concurrent eval jobs sharing the same cache dir would otherwise race on
+    the manifest YAML — last writer wins, all earlier additions are lost.
+    Under the lock we reload the on-disk manifest, merge our pending edits
+    on top, then save. This preserves additions from concurrent writers
+    even though zarr-level cache correctness doesn't depend on the manifest.
+    """
+    if not (ctx.enabled and ctx.consume_manifest_dirty()):
+        return
+    with _pos_write_lock(ctx, "manifest", "global"):
+        on_disk = load_manifest(ctx.paths)
+        merged = _merge_manifests(on_disk, ctx.manifest)
+        save_manifest(ctx.paths, merged)
+        ctx.manifest = merged
+
+
+def _merge_manifests(on_disk: dict[str, Any], in_memory: dict[str, Any]) -> dict[str, Any]:
+    """Merge an in-memory manifest on top of the on-disk one, unioning position lists.
+
+    Identity fields and per-artifact metadata (``built_at``, ``path``, model
+    identifiers) are taken from the in-memory copy. ``positions`` lists are
+    unioned so additions from concurrent writers are preserved.
+    """
+    merged = {**on_disk, **{k: v for k, v in in_memory.items() if k != "artifacts"}}
+    merged["artifacts"] = dict(on_disk.get("artifacts", {}))
+    in_artifacts = in_memory.get("artifacts", {})
+    for top_key, top_val in in_artifacts.items():
+        if not isinstance(top_val, dict):
+            merged["artifacts"][top_key] = top_val
+            continue
+        existing = merged["artifacts"].setdefault(top_key, {})
+        if not isinstance(existing, dict):
+            merged["artifacts"][top_key] = top_val
+            continue
+        for sub_key, sub_val in top_val.items():
+            if not isinstance(sub_val, dict):
+                existing[sub_key] = sub_val
+                continue
+            target = existing.setdefault(sub_key, {})
+            if not isinstance(target, dict):
+                existing[sub_key] = sub_val
+                continue
+            on_disk_positions = target.get("positions", [])
+            in_mem_positions = sub_val.get("positions", [])
+            unioned = list(dict.fromkeys([*on_disk_positions, *in_mem_positions]))
+            target.update(sub_val)
+            if unioned:
+                target["positions"] = unioned
+    return merged
 
 
 def resolve_dynaclr_encoder_cfg(config: DictConfig) -> dict[str, Any] | None:
