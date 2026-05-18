@@ -35,6 +35,7 @@ from dynaclr.pseudotime.dtw_alignment import (
     classify_response_groups,
     dtw_align_tracks,
     extract_dtw_pseudotime,
+    resample_template_to_frame_interval,
 )
 from dynaclr.pseudotime.io import (
     compute_tau_event_band,
@@ -65,5 +66,6 @@ __all__ = [
     "read_tau_event_band",
     "read_template_attrs",
     "read_time_calibration",
+    "resample_template_to_frame_interval",
     "save_template_zarr",
 ]

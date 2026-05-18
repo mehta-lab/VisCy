@@ -74,8 +74,23 @@ def find_embedding_zarr(pred_dir: str | Path, pattern: str) -> str:
     ------
     FileNotFoundError
         If zero or more than one zarr matches the pattern.
+
+    Notes
+    -----
+    A ``pattern`` ending in ``"_*.zarr"`` is also retried with the trailing
+    underscore dropped (``"*.zarr"``). Some dataset_ids exactly equal the
+    embedding zarr's basename (e.g. ``ALFI_RPE1_untreated``) so the
+    derived prefix ``ALFI_RPE1_untreated_`` produces a non-matching glob
+    even though the file exists. The retry rule covers that case without
+    requiring per-dataset config overrides.
     """
     matches = glob.glob(str(Path(pred_dir) / pattern))
+    if len(matches) == 0 and pattern.endswith("_*.zarr"):
+        # Retry without the trailing underscore so prefixes that already match
+        # the full filename still resolve (e.g., ALFI_RPE1_untreated.zarr when
+        # the prefix is ALFI_RPE1_untreated_).
+        relaxed = pattern[: -len("_*.zarr")] + "*.zarr"
+        matches = glob.glob(str(Path(pred_dir) / relaxed))
     if len(matches) == 0:
         raise FileNotFoundError(f"No zarr matching {pattern} in {pred_dir}")
     if len(matches) > 1:
@@ -188,8 +203,12 @@ def _save_flavor(group, result: TemplateResult, flavor_name: str) -> None:
         group.create_array("time_calibration", data=result.time_calibration)
     if result.template_labels is not None:
         labels_grp = group.create_group("template_labels")
-        for col, fractions in result.template_labels.items():
-            labels_grp.create_array(col, data=fractions)
+        # Multiclass: {col: {class_value: (T,) fractions}} — write each class
+        # as its own array inside a per-column subgroup.
+        for col, class_dict in result.template_labels.items():
+            col_grp = labels_grp.create_group(col)
+            for cls, fractions in class_dict.items():
+                col_grp.create_array(cls, data=fractions)
     if result.pca is not None:
         group.create_array("components", data=result.pca.components_)
         group.create_array("mean", data=result.pca.mean_)
@@ -323,10 +342,19 @@ def load_template_flavor(template_path: str | Path, flavor: str) -> tuple[Templa
     template = np.asarray(grp["template"])
     time_calibration = np.asarray(grp["time_calibration"]) if "time_calibration" in grp else None
 
-    template_labels = None
+    template_labels: dict[str, dict[str, np.ndarray]] | None = None
     if "template_labels" in grp:
         tl_grp = grp["template_labels"]
-        template_labels = {col: np.asarray(tl_grp[col]) for col in tl_grp}
+        template_labels = {}
+        for col in tl_grp:
+            entry = tl_grp[col]
+            # New schema: per-column subgroup of {class_value: (T,)}.
+            # Legacy: flat array (T,) of the positive-class fraction.
+            if hasattr(entry, "keys") and not hasattr(entry, "shape"):
+                template_labels[col] = {cls: np.asarray(entry[cls]) for cls in entry}
+            else:
+                arr = np.asarray(entry)
+                template_labels[col] = {"positive": arr, "negative": 1.0 - arr}
 
     pca = None
     if flavor == "pca" and "components" in grp:
