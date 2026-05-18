@@ -177,7 +177,7 @@ x_slice = slice(X // 2 - patch_size * n // 2, X // 2 + patch_size * n // 2)
 
 # Get the Phase Contrast channel
 c_idx = dataset.channel_names.index(source_channel_name)
-phase_image = image[0:1, c_idx : c_idx + 1, Z // 2 - 3 : Z // 2 + 3, y_slice, x_slice]
+phase_image = image[0:1, c_idx : c_idx + 1, Z // 2 - 2 : Z // 2 + 3, y_slice, x_slice]
 # Normalize the image
 median = dataset[fov_path].zattrs["normalization"][source_channel_name]["fov_statistics"]["median"]
 iqr = dataset[fov_path].zattrs["normalization"][source_channel_name]["fov_statistics"]["iqr"]
