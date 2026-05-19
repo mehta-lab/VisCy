@@ -655,16 +655,10 @@ class HCSDataModule(LightningDataModule):
                     plate_path = self.data_path.parent.parent.parent
                     fov_name = self.data_path.relative_to(plate_path).as_posix()
                     with open_ome_zarr(plate_path, mode="r") as plate:
-                        positions = [plate[fov_name]]
+                        return [plate[fov_name]]
                 except (OSError, ValueError):
                     raise FileNotFoundError("Parent HCS store not found for single FOV input.")
-            elif isinstance(dataset, Plate):
-                positions = [p for name, p in dataset.positions() if self._keep_position(name)]
-        if not positions:
-            raise ValueError(
-                f"No positions left in {self.data_path} after applying include_fov_names / exclude_fov_names filters"
-            )
-        return positions
+            return self._filtered_positions(dataset)
 
     def _setup_predict(
         self,
