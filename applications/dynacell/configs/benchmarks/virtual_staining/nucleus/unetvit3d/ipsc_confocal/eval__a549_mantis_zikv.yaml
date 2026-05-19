@@ -6,7 +6,6 @@ defaults:
   - override /target: nucleus
   - override /predict_set: a549_mantis_h2b_zikv
 
-target_name: h2b
 benchmark:
   dataset_ref:
     target: h2b

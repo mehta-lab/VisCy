@@ -6,7 +6,6 @@ defaults:
   - override /target: membrane
   - override /predict_set: a549_mantis_caax_zikv
 
-target_name: caax
 benchmark:
   dataset_ref:
     target: caax

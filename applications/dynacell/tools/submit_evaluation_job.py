@@ -204,9 +204,11 @@ def submit(argv: list[str] | None = None) -> int:
     # looks up the right entry in the per-condition A549 manifests (where the
     # target is keyed by gene, not by organelle). For iPSC predicts, this is
     # idempotent (the eval target group already declares the same slug).
+    # Note: only ``benchmark.dataset_ref.target`` is forwarded — ``target_name``
+    # is consumed by ``prepare_segmentation_model`` and must remain the
+    # organelle slug provided by the eval-side target group.
     if dataset_target:
         overrides["benchmark.dataset_ref.target"] = dataset_target
-        overrides["target_name"] = dataset_target
     if args.overwrite and args.regen_metrics:
         raise SystemExit("--overwrite and --regen-metrics are mutually exclusive")
     if args.overwrite:
