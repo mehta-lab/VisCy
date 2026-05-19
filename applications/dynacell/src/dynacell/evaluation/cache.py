@@ -281,10 +281,6 @@ def write_mask(
     plate_path = paths.mask_plate(target_name)
     plate_path.parent.mkdir(parents=True, exist_ok=True)
     data = masks.astype(bool)[:, None]  # (T, 1, D, H, W)
-    # Fast recovery path: if the position's NGFF group exists on disk
-    # but its inner array's metadata is missing (partial write from a
-    # crashed prior run), rewrite just the inner array via zarr. Avoids
-    # iohub's plate API entirely for this case — see _rewrite_inner_array.
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return
