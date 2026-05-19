@@ -1,10 +1,13 @@
 """Smoke tests for dynacell engine."""
 
+import copy
+
 import pytest
 import torch
+from lightning.pytorch import Trainer, seed_everything
 from monai.data import MetaTensor
 
-from dynacell.engine import DynacellFlowMatching, DynacellUNet
+from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
 
 # Small model configs for tests (not production sizes).
 VIT_TEST_CONFIG = {
@@ -372,3 +375,208 @@ def test_unetvit3d_sliding_window_supports_multi_channel_output():
     with torch.no_grad():
         prediction = model.predict_step({"source": source}, batch_idx=0)
     assert prediction.shape == (1, 2, 16, 48, 48)
+
+
+# ---- DynacellGAN tests ----
+
+# Small generator config sized for the GAN tests. The discriminator's five
+# strided convs collapse YX by ~16x; YX=64 keeps the bottom feature map a
+# valid 3-4 voxels wide. 8x32x32 would degenerate the D output. ``dims``
+# must have length ``len(num_res_block)+1``, so we keep dims=[16,32,64]
+# (length 3) paired with num_res_block=[1,1] (length 2). With two
+# (1,2,2) downsample levels the latent is (8,16,16); patch_size=4 yields
+# 2*4*4 = 32 tokens — small but non-degenerate for the ViT bottleneck.
+GAN_GEN_TEST_CONFIG = {
+    "input_spatial_size": [8, 64, 64],
+    "in_channels": 1,
+    "out_channels": 1,
+    "dims": [16, 32, 64],
+    "num_res_block": [1, 1],
+    "hidden_size": 64,
+    "num_heads": 2,
+    "dim_head": 32,
+    "num_hidden_layers": 1,
+    "patch_size": 4,
+}
+
+GAN_DISC_TEST_CONFIG = {
+    "in_channels": 2,
+    "base_channels": 8,
+    "num_layers": 5,
+    "num_scales": 2,
+}
+
+
+def _make_gan_batch(batch_size: int = 2) -> dict:
+    """Build a synthetic batch matching ``GAN_GEN_TEST_CONFIG`` spatial size."""
+    shape = (batch_size, 1, 8, 64, 64)
+    return {
+        "source": torch.randn(*shape),
+        "target": torch.randn(*shape),
+    }
+
+
+def test_dynacell_gan_init():
+    """DynacellGAN constructs with small generator + discriminator configs."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    assert model.generator is not None
+    assert model.discriminator is not None
+    assert model.discriminator.num_scales == 2
+    assert model.automatic_optimization is False
+    assert model.lambda_l1 == 100.0
+    assert model.example_input_array.shape == (1, 1, 8, 64, 64)
+
+
+def test_dynacell_gan_forward():
+    """``forward`` runs G only and preserves spatial shape."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    model.eval()
+    batch = _make_gan_batch()
+    with torch.no_grad():
+        output = model(batch["source"])
+    assert output.shape == batch["source"].shape
+
+
+def test_dynacell_gan_training_step(tmp_path):
+    """Three training_steps step both nets and leave D with zero grads.
+
+    Runs an actual Lightning fit so optimizers and step-interval
+    schedulers are configured through Lightning's normal path
+    (``estimated_stepping_batches`` is only resolvable inside fit). Asserts:
+
+    1. all four logged GAN losses are finite at each step,
+    2. at least one G and at least one D parameter changes across the run,
+    3. after the final G step every D parameter has either ``None`` grad or
+       a zero-summed grad — the ``requires_grad`` toggle is the key
+       correctness check for Phase 2 DDP.
+    """
+    seed_everything(42)
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        warmup_steps=2,
+        log_batches_per_epoch=0,
+    )
+
+    captured_losses: list[dict[str, float]] = []
+    real_log_dict = model.log_dict
+
+    def _capture_log_dict(d, *args, **kwargs):
+        captured_losses.append({k: float(v.detach()) for k, v in d.items()})
+        return real_log_dict(d, *args, **kwargs)
+
+    model.log_dict = _capture_log_dict  # type: ignore[method-assign]
+
+    g_before = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
+    d_before = {n: p.detach().clone() for n, p in model.discriminator.named_parameters()}
+
+    batch = _make_gan_batch()
+
+    class _BatchDataset(torch.utils.data.Dataset):
+        def __init__(self, n: int):
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"source": batch["source"][0], "target": batch["target"][0]}
+
+    # Use 6 samples / batch_size=2 -> 3 batches per epoch, and limit to 1
+    # epoch so exactly 3 training_step calls happen. Manual optimization +
+    # max_steps interaction in Lightning can drop the final step due to
+    # how the loop counts before/after manual_backward; max_epochs=1 with
+    # exactly 3 batches per epoch is robust.
+    train_loader = torch.utils.data.DataLoader(_BatchDataset(6), batch_size=2)
+
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, train_dataloaders=train_loader)
+
+    assert len(captured_losses) == 3, f"expected 3 logged steps, got {len(captured_losses)}"
+    expected_keys = {"loss/d_train", "loss/g_train", "loss/g_adv_train", "loss/g_l1_train"}
+    for step_idx, logged in enumerate(captured_losses):
+        assert expected_keys <= set(logged.keys()), (
+            f"step {step_idx} missing keys: {expected_keys - set(logged.keys())}"
+        )
+        for key in expected_keys:
+            value = logged[key]
+            assert torch.isfinite(torch.tensor(value)), f"step {step_idx} key {key!r} is not finite: {value}"
+
+    # Params on both sides must change across the 3 steps.
+    g_changed = any(not torch.equal(g_before[n], p.detach()) for n, p in model.generator.named_parameters())
+    d_changed = any(not torch.equal(d_before[n], p.detach()) for n, p in model.discriminator.named_parameters())
+    assert g_changed, "no generator parameter changed across 3 training steps"
+    assert d_changed, "no discriminator parameter changed across 3 training steps"
+
+    # After the final G step, D grads must be empty / zero. This is the
+    # ``requires_grad`` toggle correctness check.
+    for name, p in model.discriminator.named_parameters():
+        if p.grad is not None:
+            assert p.grad.abs().sum().item() == 0.0, f"discriminator param {name!r} has non-zero grad after G step"
+
+
+def test_dynacell_gan_predict_step():
+    """``predict_step`` runs G only and returns an input-shape tensor."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    model.eval()
+    model.on_predict_start()
+    batch = _make_gan_batch(batch_size=1)
+    batch_meta = {"source": MetaTensor(batch["source"])}
+    with torch.no_grad():
+        prediction = model.predict_step(batch_meta, batch_idx=0)
+    assert prediction.shape == batch["source"].shape
+
+
+def test_dynacell_gan_validate_logs_alias():
+    """``on_validation_epoch_end`` logs the ``loss/validate`` weighted mean."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    model.eval()
+
+    logged: dict[str, torch.Tensor] = {}
+
+    def _capture(name, value, *args, **kwargs):
+        logged[name] = value if isinstance(value, torch.Tensor) else torch.tensor(value)
+
+    model.log = _capture  # type: ignore[method-assign]
+    # Skip the real Trainer-bound _log_samples — no logger attached here.
+    model._log_samples = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    batch = _make_gan_batch()
+    with torch.no_grad():
+        model.validation_step(batch, batch_idx=0)
+        model.validation_step(batch, batch_idx=1)
+    # Stash the snapshot of losses for the weighted-mean reference.
+    losses_snapshot = copy.deepcopy(model.validation_losses)
+    model.on_validation_epoch_end()
+
+    assert "loss/validate" in logged, "loss/validate must be logged at validation_epoch_end"
+    # Verify the value matches a hand-computed weighted mean to confirm it's
+    # the aggregated alias and not just a passthrough of the last batch.
+    total_loss = sum(loss.item() * n for dl in losses_snapshot for loss, n in dl)
+    total_n = sum(n for dl in losses_snapshot for _, n in dl)
+    expected = total_loss / total_n
+    assert pytest.approx(expected, rel=1e-5) == logged["loss/validate"].item()
