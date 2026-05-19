@@ -20,6 +20,8 @@ from torch_fidelity.metric_kid import kid_features_to_metric
 from torch_fidelity.metric_mind import mind_features_to_metric
 from torch_fidelity.metric_prc import prc_features_to_metric
 
+from dynacell.evaluation.metrics import drop_paired_nonfinite_rows
+
 _KID_MIN_SUBSET_SIZE = 16
 
 
@@ -28,11 +30,9 @@ def _median_cosine_similarity(pred: np.ndarray, target: np.ndarray) -> float:
 
     Returns ``nan`` when no row pair has non-zero norms on both sides.
     """
-    valid_rows = np.isfinite(pred).all(axis=1) & np.isfinite(target).all(axis=1)
-    if not np.any(valid_rows):
+    pred, target = drop_paired_nonfinite_rows(pred, target)
+    if pred.shape[0] == 0:
         return float("nan")
-    pred = pred[valid_rows]
-    target = target[valid_rows]
     numerator = np.einsum("ij,ij->i", pred, target)
     denominator = np.linalg.norm(pred, axis=1) * np.linalg.norm(target, axis=1)
     nonzero = denominator > 0

@@ -310,17 +310,20 @@ def _cp_raw_regionprops(img, cell_segmentation, spacing):
     return np.array(list(feats.values())).T
 
 
-def cp_drop_invalid_cells(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Drop cell rows where pred or target has any non-finite CP feature.
+def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Drop rows where either side has any non-finite value.
 
-    ``regionprops_table`` returns NaN for degenerate cells (eg ddof=1
-    intensity_std on a 1-voxel region). Those rows propagate NaN into the
-    FID covariance and crash ``np.linalg.eigvals``. Drop them in
-    lock-step so downstream paired metrics (median cosine sim) stay
-    aligned to the same cell IDs on both sides.
+    Used to sanitize CP regionprops outputs (NaN intensity_std on
+    degenerate 1-voxel regions crashes FID covariance via
+    ``np.linalg.eigvals``) and to align paired metrics (median cosine
+    similarity) to the same row IDs on both sides.
     """
-    valid = np.isfinite(pred_raw).all(axis=1) & np.isfinite(target_raw).all(axis=1)
-    return pred_raw[valid], target_raw[valid]
+    if pred.shape[0] == 0:
+        return pred, target
+    valid = np.isfinite(pred).all(axis=1) & np.isfinite(target).all(axis=1)
+    if valid.all():
+        return pred, target
+    return pred[valid], target[valid]
 
 
 def cp_target_regionprops(target, cell_segmentation, spacing):

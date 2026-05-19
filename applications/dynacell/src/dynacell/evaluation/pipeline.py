@@ -28,8 +28,8 @@ from dynacell.evaluation.metrics import (
     build_pred_crops,
     calculate_microssim,
     compute_pixel_metrics,
-    cp_drop_invalid_cells,
     cp_pred_regionprops,
+    drop_paired_nonfinite_rows,
     evaluate_segmentations,
     features_from_crops,
 )
@@ -284,11 +284,7 @@ def evaluate_predictions(config: DictConfig):
 
                     if config.compute_feature_metrics:
                         pred_cp = cp_pred_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
-                        # Drop cells with non-finite regionprops on either side
-                        # before any downstream use. Degenerate cells (1-voxel
-                        # regions etc.) yield NaN intensity_std / moments and
-                        # crash FID covariance via np.linalg.eigvals.
-                        pred_cp, gt_cp_t = cp_drop_invalid_cells(pred_cp, gt_cp_per_t[t])
+                        pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                         # Build the per-cell 2-D crops once per timepoint and
                         # reuse them across all 3-4 deep backbones (max-z
                         # projection + cell-iteration + crop construction
@@ -434,13 +430,8 @@ def evaluate_predictions(config: DictConfig):
                     )
                 )
 
-        # Dataset-level columns are renamed with a "Dataset_" prefix before
-        # merging into per-(FOV, timepoint) rows. Without this rename, four
-        # keys (FID, KID, KID_std, Median_Cosine_Similarity) collide with the
-        # per-FOV values and dict.update would silently clobber them.
-        # Per-FOV cohorts are tiny (~3–28 cells) so FID is statistically
-        # broken there regardless, but KID and cosine carry real per-FOV
-        # signal worth preserving; interpretation belongs to downstream code.
+        # Prefix with "Dataset_" so dataset-level FID/KID/cosine don't clobber
+        # per-FOV columns of the same name when merged into per-FOV rows.
         def _compute_one(args):
             name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
             raw = {
