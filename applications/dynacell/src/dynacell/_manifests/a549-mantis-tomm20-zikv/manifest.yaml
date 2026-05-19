@@ -22,4 +22,6 @@ targets:
     stores:
       train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/TOMM20_ZIKV.ozx
       test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/TOMM20_ZIKV.ozx
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/TOMM20_ZIKV_seg_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/tomm20
     splits: splits/tomm20_train_test.yaml

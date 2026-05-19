@@ -22,4 +22,6 @@ targets:
     stores:
       train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/CAAX_DENV.ozx
       test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/CAAX_DENV.ozx
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/CAAX_DENV_seg_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/caax
     splits: splits/caax_train_test.yaml
