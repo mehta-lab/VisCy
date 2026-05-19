@@ -28,6 +28,7 @@ from dynacell.evaluation.metrics import (
     build_pred_crops,
     calculate_microssim,
     compute_pixel_metrics,
+    cp_drop_invalid_cells,
     cp_pred_regionprops,
     evaluate_segmentations,
     features_from_crops,
@@ -283,6 +284,11 @@ def evaluate_predictions(config: DictConfig):
 
                     if config.compute_feature_metrics:
                         pred_cp = cp_pred_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
+                        # Drop cells with non-finite regionprops on either side
+                        # before any downstream use. Degenerate cells (1-voxel
+                        # regions etc.) yield NaN intensity_std / moments and
+                        # crash FID covariance via np.linalg.eigvals.
+                        pred_cp, gt_cp_t = cp_drop_invalid_cells(pred_cp, gt_cp_per_t[t])
                         # Build the per-cell 2-D crops once per timepoint and
                         # reuse them across all 3-4 deep backbones (max-z
                         # projection + cell-iteration + crop construction
@@ -299,10 +305,10 @@ def evaluate_predictions(config: DictConfig):
                         )
                         # Per-timepoint CP: drop target-zero columns + per-side z-score.
                         # Deep features stay untouched.
-                        if pred_cp.size and gt_cp_per_t[t].size:
-                            pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_per_t[t])
+                        if pred_cp.size and gt_cp_t.size:
+                            pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
                         else:
-                            pred_cp_z, gt_cp_z = pred_cp, gt_cp_per_t[t]
+                            pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
                         pairwise_metrics = {
                             **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
                             **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
@@ -315,7 +321,7 @@ def evaluate_predictions(config: DictConfig):
                         all_feature_metrics.append({**data_info, **pairwise_metrics})
                         if pred_cp.size > 0:
                             pred_cp_feats.append(pred_cp)
-                            gt_cp_feats.append(gt_cp_per_t[t])
+                            gt_cp_feats.append(gt_cp_t)
                             n = len(pred_cp)
                             pred_cp_fovs.append(np.full(n, pos_name_pred))
                             pred_cp_ts.append(np.full(n, t, dtype=np.int32))
