@@ -53,7 +53,7 @@ _DEFAULT_DATA_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell")
 DEFAULT_EVAL_RUN_ROOT = _DEFAULT_DATA_ROOT / "eval_runs"
 
 
-def eval_predict_set_group(organelle: str, dataset_name: str) -> str:
+def eval_predict_set_group(dataset_name: str) -> str:
     """Return the eval-side Hydra ``predict_set`` group name for one leaf.
 
     iPSC composes back to itself; A549 leaves carry the per-condition dataset

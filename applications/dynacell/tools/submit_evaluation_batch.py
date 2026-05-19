@@ -67,12 +67,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--time",
         default="4:00:00",
-        help="SLURM walltime (default 4:00:00). One completed regen-metrics single-"
-        "leaf iPSC eval (33009553) took 40 min, so a serial 3-plate A549 chain "
-        "runs ~2h; 4h gives ~2× headroom for jitter / larger cohorts. With "
-        "--parallel N, total elapsed drops by N× — the cap is then trivially "
-        "comfortable. Walltime is billed at actual elapsed (not allocated), so "
-        "bumping this is free insurance.",
+        help="SLURM walltime (default 4:00:00). Sized for a serial 3-plate A549 chain (~2h) with 2x headroom.",
     )
     ap.add_argument(
         "--run-root",
@@ -98,12 +93,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--parallel",
         type=int,
         default=1,
-        help="Number of eval processes to run concurrently on the single allocated "
-        "GPU (default 1 = serial, current behavior). Eval is GPU-light (~2 GB of "
-        "~80 GB observed, 0–17%% utilization), so 2–4 parallel processes typically "
-        "fit on one GPU without contention. CPU and memory allocations scale "
-        "linearly with this value (4 × parallel CPUs, 16G × parallel mem). "
-        "Auto-capped at len(leaves) — has no effect on single-leaf iPSC tuples.",
+        help="Concurrent eval processes per GPU (default 1). CPU/mem scale linearly with this value; "
+        "GPU is shared. Capped at len(leaves).",
     )
     ap.add_argument("--dry-run", action="store_true", help="render sbatch script but do not submit")
     ap.add_argument("--print-script", action="store_true", help="print rendered sbatch to stdout, no writes")
@@ -143,6 +134,7 @@ def _resolve_one_leaf(
     trained_on = benchmark.get("trained_on")
     dataset_ref = benchmark.get("dataset_ref") or {}
     dataset_name = dataset_ref.get("dataset")
+    dataset_target = dataset_ref.get("target")
     if not organelle or not code_model or not trained_on:
         raise SystemExit(f"{leaf_path}: missing benchmark.{{organelle, model_name, trained_on}}")
     if not dataset_name:
@@ -154,7 +146,7 @@ def _resolve_one_leaf(
         )
 
     target_group = _ORGANELLE_EVAL_TARGET[organelle]
-    predict_set_group = _eval_predict_set_group(organelle, dataset_name)
+    predict_set_group = _eval_predict_set_group(dataset_name)
 
     target_yaml = (
         _REPO_ROOT
@@ -192,6 +184,12 @@ def _resolve_one_leaf(
         "save.save_dir": str(save_dir),
         "compute_feature_metrics": True,
     }
+    # Forward the manifest's gene-keyed target slug (e.g. h2b for A549 nucleus);
+    # iPSC predicts already match the eval target group so the override is a no-op.
+    # Do NOT forward target_name — that's consumed by prepare_segmentation_model
+    # and must be the organelle slug from the eval target group.
+    if dataset_target:
+        overrides["benchmark.dataset_ref.target"] = dataset_target
     return overrides, organelle, code_model, trained_on, save_dir, test_plate
 
 
@@ -213,12 +211,7 @@ def _composite_job_name(organelle: str, code_model: str, trained_on: str, test_p
 
 
 # Single-GPU sbatch profile. Eval is single-process Hydra; no DDP.
-# CPU/mem right-sized from in-flight sample (33009706 / 33009742 / 33009751 /
-# 33009818 / 33009859 / 33009873 / 33009924, all on the regen-metrics path):
-# observed peak RSS 2.7–4.0 GB and AveCPU ≈ 1.4 cores. 4 CPUs / 16 GB per
-# concurrent eval gives 2.5× / 4× headroom. With --parallel N, CPU and mem
-# scale linearly while a single GPU stays shared across N processes (GPU is
-# the slack resource at ~2 GB / 0–17% per eval).
+# Per-eval CPU/mem right-sized from observed peaks (~3 GB RSS, ~1.4 cores).
 _CPUS_PER_EVAL = 4
 _MEM_GB_PER_EVAL = 16
 
