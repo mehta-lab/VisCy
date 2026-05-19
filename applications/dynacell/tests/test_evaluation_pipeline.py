@@ -33,6 +33,7 @@ def _import_pipeline_with_stubs(monkeypatch):
     metrics_module.build_pred_crops = lambda *args, **kwargs: []
     metrics_module.build_target_crops = lambda *args, **kwargs: []
     metrics_module.features_from_crops = lambda *args, **kwargs: np.empty((0, 0), dtype=np.float32)
+    metrics_module.drop_paired_nonfinite_rows = lambda p, t: (p, t)
 
     feature_metrics_module = types.ModuleType("dynacell.evaluation.feature_metrics")
     feature_metrics_module.compute_feature_similarity = lambda *args, **kwargs: {}
