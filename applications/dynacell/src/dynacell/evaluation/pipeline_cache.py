@@ -376,16 +376,28 @@ def _load_or_compute_feature_timepoints(
 ) -> tuple[list[np.ndarray], bool]:
     """Per-timepoint load-or-compute loop for one feature family.
 
-    Opens the backing zarr group once per FOV (not per timepoint) and funnels
-    every read/write through it. Returns ``(per_t_features, manifest_updated)``.
-    ``compute_fn`` is called as ``compute_fn(t)`` on misses and must return a
-    2-D ``(n_cells_t, feature_dim)`` array.
+    Reads from the backing zarr group lockless (concurrent readers are
+    safe on append-only feature zarrs); only acquires the per-FOV write
+    lock when at least one timepoint is missing or force-recompute is
+    set. Returns ``(per_t_features, manifest_updated)``.
     """
-    per_t: list[np.ndarray] = []
     if not ctx.enabled:
-        for t in range(t_count):
-            per_t.append(np.asarray(compute_fn(t)))
-        return per_t, False
+        return [np.asarray(compute_fn(t)) for t in range(t_count)], False
+
+    force_recompute = ctx.force[force_key]
+    per_t: list[np.ndarray | None] = [None] * t_count
+
+    # Lockless prefetch pass. Skipped under force_recompute because we'll
+    # rewrite every timepoint anyway.
+    if not force_recompute:
+        with open_features_group(ctx.paths, kind, mode="r", **cache_kwargs) as group:
+            if group is not None:
+                for t in range(t_count):
+                    per_t[t] = read_features_from_group(group, pos_name, t)
+
+    pending = [t for t in range(t_count) if per_t[t] is None] if not force_recompute else list(range(t_count))
+    if not pending:
+        return per_t, False  # type: ignore[return-value]
 
     # Lock domain: per (feature family, position). Different families have
     # separate backing zarrs, so they don't contend on each other's slots;
@@ -398,18 +410,20 @@ def _load_or_compute_feature_timepoints(
         _pos_write_lock(ctx, lock_tag, pos_name),
         open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group,
     ):
-        for t in range(t_count):
-            feats = None
-            if not ctx.force[force_key]:
+        for t in pending:
+            if not force_recompute:
+                # A concurrent writer may have populated this slot between
+                # the lockless prefetch and the lock acquisition.
                 feats = read_features_from_group(group, pos_name, t)
-                if feats is None:
-                    _raise_if_require_complete(ctx, artifact_label, pos_name, t)
-            if feats is None:
-                feats = np.asarray(compute_fn(t))
-                write_features_to_group(group, pos_name, t, feats)
-                manifest_updated = True
-            per_t.append(feats)
-    return per_t, manifest_updated
+                if feats is not None:
+                    per_t[t] = feats
+                    continue
+                _raise_if_require_complete(ctx, artifact_label, pos_name, t)
+            feats = np.asarray(compute_fn(t))
+            write_features_to_group(group, pos_name, t, feats)
+            per_t[t] = feats
+            manifest_updated = True
+    return per_t, manifest_updated  # type: ignore[return-value]
 
 
 def fov_gt_cp_features(
