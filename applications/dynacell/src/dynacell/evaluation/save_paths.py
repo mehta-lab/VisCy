@@ -49,15 +49,6 @@ ORGANELLE_EVAL_TARGET: dict[str, str] = {
     "mito": "mito_tomm20",
 }
 
-# Organelle → A549 date-plate hosting that gene's antibody. Also mirrored in
-# `applications/dynacell/tests/test_evaluate_compose.py::_A549_PLATES`.
-ORGANELLE_A549_PLATE: dict[str, str] = {
-    "er": "2024_11_07",
-    "mito": "2024_11_21",
-    "nucleus": "2026_03_26",
-    "membrane": "2026_03_26",
-}
-
 _DEFAULT_DATA_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell")
 DEFAULT_EVAL_RUN_ROOT = _DEFAULT_DATA_ROOT / "eval_runs"
 
@@ -65,17 +56,17 @@ DEFAULT_EVAL_RUN_ROOT = _DEFAULT_DATA_ROOT / "eval_runs"
 def eval_predict_set_group(organelle: str, dataset_name: str) -> str:
     """Return the eval-side Hydra ``predict_set`` group name for one leaf.
 
-    iPSC composes back to itself; A549 plates are keyed by the date of the
-    physical plate that hosts the organelle's antibody (see
-    :data:`ORGANELLE_A549_PLATE`).
+    iPSC composes back to itself; A549 leaves carry the per-condition dataset
+    slug ``a549-mantis-<marker>-<cond>`` and the group name uses underscores.
     """
     if dataset_name == "aics-hipsc":
         return "ipsc_confocal"
-    if organelle not in ORGANELLE_A549_PLATE:
-        raise ValueError(
-            f"cannot map organelle {organelle!r} to an A549 plate; expected one of {sorted(ORGANELLE_A549_PLATE)}"
-        )
-    return f"a549_mantis_{ORGANELLE_A549_PLATE[organelle]}"
+    if dataset_name.startswith("a549-mantis-"):
+        return "a549_mantis_" + dataset_name.removeprefix("a549-mantis-").replace("-", "_")
+    raise ValueError(
+        f"cannot map dataset {dataset_name!r} to a predict_set group; "
+        f"expected 'aics-hipsc' or 'a549-mantis-<marker>-<cond>'"
+    )
 
 
 def extract_predict_output_store(composed: dict, leaf_path: Path) -> Path:
