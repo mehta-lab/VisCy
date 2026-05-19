@@ -255,6 +255,34 @@ def test_write_mask_multiple_positions_same_plate(tmp_path: Path) -> None:
     np.testing.assert_array_equal(read_mask(paths, "er", "A/1/1"), m1)
 
 
+def test_write_mask_recovers_from_malformed_position(tmp_path: Path) -> None:
+    """``write_mask`` rewrites a position whose inner array metadata is missing.
+
+    Simulates the failure mode where a prior eval crashed mid-position-write,
+    leaving the position group on disk with the chunk file present but no
+    inner ``0/zarr.json``. The next ``write_mask`` call must clean up the
+    orphan and produce a position that round-trips cleanly through
+    ``read_mask``, without touching unrelated wells.
+    """
+    paths = cache_paths(tmp_path)
+    m_keep = np.ones((1, 2, 3, 3), dtype=bool)
+    write_mask(paths, "er", "1/100/01", m_keep)
+    write_mask(paths, "er", "1/200/02", m_keep)
+    write_mask(paths, "er", "1/300/03", m_keep)
+    plate_path = paths.mask_plate("er")
+    broken_pos_dir = plate_path / "1" / "300" / "03"
+    inner_meta = broken_pos_dir / "0" / "zarr.json"
+    stale_chunk = broken_pos_dir / "0" / "c" / "0" / "0" / "0" / "0" / "0"
+    assert inner_meta.exists() and stale_chunk.exists()
+    inner_meta.unlink()
+
+    m_new = np.zeros((1, 2, 3, 3), dtype=bool)
+    write_mask(paths, "er", "1/300/03", m_new)
+    np.testing.assert_array_equal(read_mask(paths, "er", "1/300/03"), m_new)
+    np.testing.assert_array_equal(read_mask(paths, "er", "1/100/01"), m_keep)
+    np.testing.assert_array_equal(read_mask(paths, "er", "1/200/02"), m_keep)
+
+
 @pytest.mark.parametrize(
     ("kind", "extras"),
     [

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -229,6 +230,33 @@ def read_mask(paths: CachePaths, target_name: str, pos_name: str) -> np.ndarray 
     return data
 
 
+def _is_position_malformed(plate_path: Path, pos_name: str) -> bool:
+    """Detect the partial-write signature on disk.
+
+    A crashed prior eval can leave a position whose group dir exists
+    (``pos/zarr.json`` present, listed in the well's NGFF ``images``) but
+    whose inner data array is missing its metadata (``pos/0/zarr.json``
+    absent). iohub's ``Plate[pos_name]`` raises ``KeyError`` for this state
+    and zarr v3 then poisons the parent well's lookup in the same session.
+    """
+    pos_dir = plate_path / pos_name
+    return pos_dir.exists() and not (pos_dir / "0" / "zarr.json").exists()
+
+
+def _rewrite_inner_array(pos_dir: Path, data: np.ndarray) -> None:
+    """Replace just the ``0`` inner array of a position, leaving NGFF metadata alone.
+
+    iohub can't fix the malformed state from inside the plate API because
+    cleaning the position dir empties the well, and zarr v3 marks an empty
+    group falsy — which iohub interprets as a missing well. The position
+    group's own multiscales metadata is intact, so the cheapest recovery
+    is to rewrite the inner array directly via zarr.
+    """
+    shutil.rmtree(pos_dir / "0", ignore_errors=True)
+    pos_group = zarr.open_group(str(pos_dir), mode="r+")
+    pos_group.create_array("0", data=data)
+
+
 def write_mask(
     paths: CachePaths,
     target_name: str,
@@ -252,8 +280,15 @@ def write_mask(
         raise ValueError(f"masks must be 4-D (T, D, H, W); got shape {masks.shape}")
     plate_path = paths.mask_plate(target_name)
     plate_path.parent.mkdir(parents=True, exist_ok=True)
-    mode = "r+" if plate_path.exists() else "w"
     data = masks.astype(bool)[:, None]  # (T, 1, D, H, W)
+    # Fast recovery path: if the position's NGFF group exists on disk
+    # but its inner array's metadata is missing (partial write from a
+    # crashed prior run), rewrite just the inner array via zarr. Avoids
+    # iohub's plate API entirely for this case — see _rewrite_inner_array.
+    if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
+        _rewrite_inner_array(plate_path / pos_name, data)
+        return
+    mode = "r+" if plate_path.exists() else "w"
     with open_ome_zarr(
         plate_path,
         mode=mode,
