@@ -120,6 +120,7 @@ Prefer `{file}_test.py` in the same directory as `{file}.py`, unless there are i
 - `D` rules are ignored in `**/tests/**` and notebooks.
 - Format: double quotes, spaces, 120 char line length.
 - Use a subagent to run tests and complex bash commands, especially those expected to return complex output.
+- Run independent tasks (multi-file edits across separate concerns, cross-cutting verifications, distinct review angles) in parallel via concurrent subagents in a single message. Subagent startup overhead is negligible relative to sequential blocking. Only sequence subagents when a later task needs an earlier task's output.
 
 #### Avoid Backwards Compatibility
 
