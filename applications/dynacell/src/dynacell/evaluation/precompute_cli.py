@@ -33,17 +33,18 @@ from dynacell.evaluation.pipeline_cache import (
 def precompute_gt_artifacts(config: DictConfig) -> None:
     """Build every GT-side artifact toggled on in ``config.build``."""
     from dynacell.evaluation.segmentation import prepare_segmentation_model
-    from dynacell.evaluation.utils import DinoV3FeatureExtractor, DynaCLRFeatureExtractor
+    from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
     if config.io.gt_cache_dir is None:
         raise ValueError("io.gt_cache_dir is required for dynacell precompute-gt")
 
     build = config.build
-    build_any_features = bool(build.cp or build.dinov3 or build.dynaclr)
+    build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino)
 
     if build_any_features and config.io.cell_segmentation_path is None:
         raise ValueError(
-            "io.cell_segmentation_path is required when any of build.cp / build.dinov3 / build.dynaclr is true"
+            "io.cell_segmentation_path is required when any of "
+            "build.cp / build.dinov3 / build.dynaclr / build.celldino is true"
         )
 
     seg_model = prepare_segmentation_model(config) if build.masks else None
@@ -51,8 +52,10 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     dinov3_model_name = None
     dynaclr_ckpt_path = None
     dynaclr_encoder_cfg = None
+    celldino_weights_path = None
     dinov3_feature_extractor = None
     dynaclr_feature_extractor = None
+    celldino_feature_extractor = None
 
     if build.dinov3:
         dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
@@ -65,12 +68,23 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
             checkpoint=dynaclr_config.checkpoint,
             encoder_config=dynaclr_encoder_cfg,
         )
+    if build.celldino:
+        celldino_cfg = config.feature_extractor.celldino
+        if celldino_cfg.weights_path is None:
+            raise ValueError("feature_extractor.celldino.weights_path is required when build.celldino=true")
+        celldino_weights_path = str(celldino_cfg.weights_path)
+        celldino_feature_extractor = CellDinoFeatureExtractor(
+            weights_path=celldino_weights_path,
+            img_size=int(celldino_cfg.img_size),
+            patch_size=int(celldino_cfg.patch_size),
+        )
 
     cache_ctx = init_cache_context(
         config,
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+        celldino_weights_path=celldino_weights_path,
     )
 
     gt_path = Path(config.io.gt_path)
@@ -115,6 +129,10 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 if build.dynaclr:
                     fov_gt_deep_features(
                         cache_ctx, pos_name_gt, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+                    )
+                if build.celldino:
+                    fov_gt_deep_features(
+                        cache_ctx, pos_name_gt, target, cell_segmentation, celldino_feature_extractor, "celldino"
                     )
 
                 flush_manifest(cache_ctx)
