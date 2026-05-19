@@ -390,7 +390,8 @@ def _load_or_compute_feature_timepoints(
     # Lock domain: per (feature family, position). Different families have
     # separate backing zarrs, so they don't contend on each other's slots;
     # different positions within one family can write concurrently.
-    lock_tag = "_".join(["features", kind, *(str(v) for v in cache_kwargs.values())])
+    kwargs_tag = "_".join(str(v) for _, v in sorted(cache_kwargs.items()))
+    lock_tag = f"features_{kind}_{kwargs_tag}" if kwargs_tag else f"features_{kind}"
 
     manifest_updated = False
     with (
