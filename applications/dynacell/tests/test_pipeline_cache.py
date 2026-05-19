@@ -27,7 +27,11 @@ from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     fov_gt_cp_features,
     fov_gt_deep_features,
     fov_gt_masks,
+    fov_pred_cp_features,
+    fov_pred_deep_features,
+    fov_pred_masks,
     init_cache_context,
+    init_pred_cache_context,
 )
 
 
@@ -40,6 +44,7 @@ def _make_config(**overrides: Any):
             "gt_path": "/tmp/gt.zarr",
             "cell_segmentation_path": "/tmp/seg.zarr",
             "gt_cache_dir": None,
+            "pred_cache_dir": None,
             "pred_channel_name": "prediction",
             "gt_channel_name": "target",
             "require_complete_cache": False,
@@ -53,6 +58,11 @@ def _make_config(**overrides: Any):
             "gt_dinov3": False,
             "gt_dynaclr": False,
             "gt_celldino": False,
+            "pred_masks": False,
+            "pred_cp": False,
+            "pred_dinov3": False,
+            "pred_dynaclr": False,
+            "pred_celldino": False,
             "final_metrics": False,
         },
     }
@@ -97,6 +107,11 @@ def test_resolve_force_all_propagates() -> None:
             "gt_dinov3": False,
             "gt_dynaclr": False,
             "gt_celldino": False,
+            "pred_masks": False,
+            "pred_cp": False,
+            "pred_dinov3": False,
+            "pred_dynaclr": False,
+            "pred_celldino": False,
             "final_metrics": False,
         }
     )
@@ -114,6 +129,11 @@ def test_resolve_force_individual() -> None:
             "gt_dinov3": False,
             "gt_dynaclr": False,
             "gt_celldino": False,
+            "pred_masks": False,
+            "pred_cp": False,
+            "pred_dinov3": False,
+            "pred_dynaclr": False,
+            "pred_celldino": False,
             "final_metrics": False,
         }
     )
@@ -142,6 +162,35 @@ def test_init_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
     assert ctx.manifest["cell_segmentation"] == {"plate_path": "/tmp/seg.zarr"}
 
 
+def test_init_pred_cache_disabled_when_no_cache_dir() -> None:
+    """Null pred_cache_dir leaves prediction caching disabled, even in strict GT-cache runs."""
+    ctx = init_pred_cache_context(_make_config(**{"io.require_complete_cache": True}))
+    assert ctx.enabled is False
+    assert ctx.require_complete is False
+
+
+def test_init_pred_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
+    """Fresh pred cache dir gets pred/cell_segmentation identity fields seeded."""
+    ctx = init_pred_cache_context(_make_config(**{"io.pred_cache_dir": str(tmp_path)}))
+    assert ctx.enabled
+    assert ctx.manifest["gt"] is None
+    assert ctx.manifest["pred"] == {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"}
+    assert ctx.manifest["cell_segmentation"] == {"plate_path": "/tmp/seg.zarr"}
+
+
+def test_init_pred_cache_rejects_gt_cache_dir_reuse(tmp_path: Path) -> None:
+    """GT and prediction caches must not share one artifact root."""
+    with pytest.raises(ValueError, match="pred_cache_dir"):
+        init_pred_cache_context(
+            _make_config(
+                **{
+                    "io.gt_cache_dir": str(tmp_path),
+                    "io.pred_cache_dir": str(tmp_path),
+                }
+            )
+        )
+
+
 def test_init_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
     """Cache seeded with one channel name rejects a later run with a different name."""
     init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}))
@@ -164,6 +213,32 @@ def test_init_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
                 **{
                     "io.gt_cache_dir": str(tmp_path),
                     "io.gt_channel_name": "fluorescence",
+                }
+            )
+        )
+
+
+def test_init_pred_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
+    """Prediction cache seeded with one channel name rejects a different prediction channel."""
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="pred.channel_name mismatch"):
+        init_pred_cache_context(
+            _make_config(
+                **{
+                    "io.pred_cache_dir": str(tmp_path),
+                    "io.pred_channel_name": "other_prediction",
                 }
             )
         )
@@ -234,6 +309,31 @@ def test_fov_gt_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> No
     assert call_count["n"] == 0
 
 
+def test_fov_pred_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> None:
+    """Cached prediction masks short-circuit prediction-side segmentation."""
+    import dynacell.evaluation.segmentation as segmentation
+
+    paths = cache_paths(tmp_path)
+    masks = np.ones((2, 3, 4, 4), dtype=bool)
+    write_mask(paths, "er", "A/1/0", masks)
+
+    call_count = {"n": 0}
+
+    def fail_segment(*args, **kwargs):
+        call_count["n"] += 1
+        raise AssertionError("segment() should not be called on a pred-cache hit")
+
+    monkeypatch.setattr(segmentation, "segment", fail_segment)
+
+    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
+    ctx = init_pred_cache_context(cfg)
+    prediction = np.zeros((2, 3, 4, 4), dtype=np.float32)
+    result = fov_pred_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
+
+    np.testing.assert_array_equal(result, masks)
+    assert call_count["n"] == 0
+
+
 def test_fov_gt_masks_force_recompute_overrides_cache(tmp_path: Path, monkeypatch) -> None:
     """force_recompute.gt_masks=true bypasses cache and calls segment() again."""
     import dynacell.evaluation.segmentation as segmentation
@@ -277,6 +377,23 @@ def test_fov_gt_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypatc
         fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
 
 
+def test_fov_pred_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypatch) -> None:
+    """require_complete_cache=true turns a prediction-mask miss into StaleCacheError."""
+    import dynacell.evaluation.segmentation as segmentation
+
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    cfg = _make_config(
+        **{
+            "io.pred_cache_dir": str(tmp_path),
+            "io.require_complete_cache": True,
+        }
+    )
+    ctx = init_pred_cache_context(cfg)
+    prediction = np.zeros((1, 2, 3, 3), dtype=np.float32)
+    with pytest.raises(StaleCacheError, match="pred_organelle_masks"):
+        fov_pred_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
+
+
 def test_fov_gt_masks_no_cache_always_computes(tmp_path: Path, monkeypatch) -> None:
     """With caching disabled (gt_cache_dir=null), masks are always recomputed."""
     import dynacell.evaluation.segmentation as segmentation
@@ -303,6 +420,22 @@ def test_flush_manifest_persists_entries(tmp_path: Path, monkeypatch) -> None:
     assert er_entry["target_name"] == "er"
     assert "A/1/0" in er_entry["positions"]
     assert "built_at" in er_entry
+
+
+def test_fov_pred_masks_writes_manifest_source(tmp_path: Path, monkeypatch) -> None:
+    """Prediction mask writes are marked as prediction-side artifacts in the manifest."""
+    import dynacell.evaluation.segmentation as segmentation
+
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
+    ctx = init_pred_cache_context(cfg)
+    fov_pred_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
+    flush_manifest(ctx)
+
+    reloaded = load_manifest(cache_paths(tmp_path))
+    er_entry = reloaded["artifacts"]["organelle_masks"]["er"]
+    assert er_entry["source"] == "prediction"
+    assert "A/1/0" in er_entry["positions"]
 
 
 def test_fov_gt_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
@@ -337,6 +470,36 @@ def test_fov_gt_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
     np.testing.assert_array_equal(results[1], precomputed + 1)
 
 
+def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
+    """Pre-populated prediction DINOv3 cache is returned without calling the extractor."""
+    cfg = _make_config(
+        **{
+            "io.pred_cache_dir": str(tmp_path),
+            "compute_feature_metrics": True,
+            "feature_extractor": {"dinov3": {"pretrained_model_name": "facebook/test-dinov3"}},
+        }
+    )
+    ctx = init_pred_cache_context(cfg, dinov3_model_name="facebook/test-dinov3")
+
+    pos_name = "A/1/0"
+    paths = cache_paths(tmp_path)
+    precomputed = np.arange(6, dtype=np.float32).reshape(3, 2)
+    for t in (0, 1):
+        write_features(paths, "dinov3", pos_name, t, precomputed + t, model_name="facebook/test-dinov3")
+
+    class ExplodingExtractor:
+        def extract_features(self, img):
+            raise AssertionError("extractor should not be called on pred-cache hit")
+
+    prediction = np.zeros((2, 1, 4, 4), dtype=np.float32)
+    cell_seg = np.zeros((2, 1, 4, 4), dtype=np.int32)
+
+    results = fov_pred_deep_features(ctx, pos_name, prediction, cell_seg, ExplodingExtractor(), "dinov3")
+    assert len(results) == 2
+    np.testing.assert_array_equal(results[0], precomputed)
+    np.testing.assert_array_equal(results[1], precomputed + 1)
+
+
 def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """CP feature miss computes via cp_target_regionprops and writes per timepoint."""
 
@@ -362,3 +525,30 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
             read_features(paths, "cp", "A/1/0", t),
             results[t],
         )
+
+
+def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
+    """Prediction CP feature miss computes via cp_pred_regionprops and writes per timepoint."""
+
+    def fake_cp(prediction, cell_seg, spacing):
+        del cell_seg, spacing
+        return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
+
+    monkeypatch.setitem(fov_pred_cp_features.__globals__, "cp_pred_regionprops", fake_cp)
+
+    cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
+    ctx = init_pred_cache_context(cfg)
+    prediction = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
+    cell_seg = np.ones_like(prediction, dtype=np.int32)
+
+    results = fov_pred_cp_features(ctx, "A/1/0", prediction, cell_seg)
+    assert len(results) == 2
+    flush_manifest(ctx)
+    paths = cache_paths(tmp_path)
+    for t in (0, 1):
+        np.testing.assert_array_equal(
+            read_features(paths, "cp", "A/1/0", t),
+            results[t],
+        )
+    manifest = load_manifest(paths)
+    assert manifest["artifacts"]["cp_features"]["source"] == "prediction"

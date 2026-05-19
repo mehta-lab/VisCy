@@ -38,7 +38,11 @@ from dynacell.evaluation.pipeline_cache import (
     fov_gt_cp_features,
     fov_gt_deep_features,
     fov_gt_masks,
+    fov_pred_cp_features,
+    fov_pred_deep_features,
+    fov_pred_masks,
     init_cache_context,
+    init_pred_cache_context,
     resolve_dynaclr_encoder_cfg,
 )
 from dynacell.evaluation.utils import plot_metrics
@@ -153,6 +157,13 @@ def evaluate_predictions(config: DictConfig):
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,
         celldino_weights_path=celldino_weights_path,
     )
+    pred_cache_ctx = init_pred_cache_context(
+        config,
+        dinov3_model_name=dinov3_model_name,
+        dynaclr_ckpt_path=dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+        celldino_weights_path=celldino_weights_path,
+    )
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
@@ -236,6 +247,11 @@ def evaluate_predictions(config: DictConfig):
                 T = predict.shape[0]
 
                 gt_mask_stack = fov_gt_masks(cache_ctx, pos_name_pred, target, seg_model)
+                pred_mask_stack = (
+                    fov_pred_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+                    if pred_cache_ctx.enabled
+                    else None
+                )
 
                 if config.compute_feature_metrics:
                     gt_cp_per_t = fov_gt_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
@@ -252,6 +268,36 @@ def evaluate_predictions(config: DictConfig):
                         if celldino_feature_extractor is not None
                         else None
                     )
+                    if pred_cache_ctx.enabled:
+                        pred_cp_per_t = fov_pred_cp_features(pred_cache_ctx, pos_name_pred, predict, cell_segmentation)
+                        pred_dinov3_per_t = fov_pred_deep_features(
+                            pred_cache_ctx,
+                            pos_name_pred,
+                            predict,
+                            cell_segmentation,
+                            dinov3_feature_extractor,
+                            "dinov3",
+                        )
+                        pred_dynaclr_per_t = fov_pred_deep_features(
+                            pred_cache_ctx,
+                            pos_name_pred,
+                            predict,
+                            cell_segmentation,
+                            dynaclr_feature_extractor,
+                            "dynaclr",
+                        )
+                        pred_celldino_per_t = (
+                            fov_pred_deep_features(
+                                pred_cache_ctx,
+                                pos_name_pred,
+                                predict,
+                                cell_segmentation,
+                                celldino_feature_extractor,
+                                "celldino",
+                            )
+                            if celldino_feature_extractor is not None
+                            else None
+                        )
 
                 microssim_data = []
                 fov_pixel_metrics = []
@@ -272,10 +318,11 @@ def evaluate_predictions(config: DictConfig):
                         microssim_data.append({"target": target[t], "predict": predict[t]})
                     fov_pixel_metrics.append({**data_info, **pixel_metrics})
 
-                    # Mask: target side from cache/precompute; predict side always fresh.
                     segmented_target = gt_mask_stack[t]
-                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
-                        bool
+                    segmented_predict = (
+                        pred_mask_stack[t]
+                        if pred_mask_stack is not None
+                        else np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(bool)
                     )
                     all_mask_metrics.append(
                         {**data_info, **evaluate_segmentations(segmented_predict, segmented_target)}
@@ -283,22 +330,30 @@ def evaluate_predictions(config: DictConfig):
                     segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
                     if config.compute_feature_metrics:
-                        pred_cp = cp_pred_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
+                        if pred_cache_ctx.enabled:
+                            pred_cp = pred_cp_per_t[t]
+                            pred_dinov3 = pred_dinov3_per_t[t]
+                            pred_dynaclr = pred_dynaclr_per_t[t]
+                            pred_celldino = pred_celldino_per_t[t] if pred_celldino_per_t is not None else None
+                        else:
+                            pred_cp = cp_pred_regionprops(
+                                predict[t], cell_segmentation[t], config.pixel_metrics.spacing
+                            )
+                            # Build the per-cell 2-D crops once per timepoint and
+                            # reuse them across all 3-4 deep backbones (max-z
+                            # projection + cell-iteration + crop construction
+                            # are otherwise redundant per backbone).
+                            pred_crops_2d = build_pred_crops(
+                                predict[t], cell_segmentation[t], config.feature_metrics.patch_size
+                            )
+                            pred_dinov3 = features_from_crops(pred_crops_2d, dinov3_feature_extractor)
+                            pred_dynaclr = features_from_crops(pred_crops_2d, dynaclr_feature_extractor)
+                            pred_celldino = (
+                                features_from_crops(pred_crops_2d, celldino_feature_extractor)
+                                if celldino_feature_extractor is not None
+                                else None
+                            )
                         pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
-                        # Build the per-cell 2-D crops once per timepoint and
-                        # reuse them across all 3-4 deep backbones (max-z
-                        # projection + cell-iteration + crop construction
-                        # are otherwise redundant per backbone).
-                        pred_crops_2d = build_pred_crops(
-                            predict[t], cell_segmentation[t], config.feature_metrics.patch_size
-                        )
-                        pred_dinov3 = features_from_crops(pred_crops_2d, dinov3_feature_extractor)
-                        pred_dynaclr = features_from_crops(pred_crops_2d, dynaclr_feature_extractor)
-                        pred_celldino = (
-                            features_from_crops(pred_crops_2d, celldino_feature_extractor)
-                            if celldino_feature_extractor is not None
-                            else None
-                        )
                         # Per-timepoint CP: drop target-zero columns + per-side z-score.
                         # Deep features stay untouched.
                         if pred_cp.size and gt_cp_t.size:
@@ -369,6 +424,7 @@ def evaluate_predictions(config: DictConfig):
 
                 # Flush manifest after each position so interrupted runs preserve progress.
                 flush_manifest(cache_ctx)
+                flush_manifest(pred_cache_ctx)
         finally:
             if seg_plate is not None:
                 seg_plate.close()

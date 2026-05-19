@@ -1,9 +1,9 @@
-"""Pipeline-level helpers for the GT artifact cache.
+"""Pipeline-level helpers for evaluation artifact caches.
 
 Sits between :mod:`dynacell.evaluation.cache` (filesystem layout + raw
 read/write) and :mod:`dynacell.evaluation.pipeline` (per-FOV orchestration).
-Each per-FOV helper loads target-side artifacts from cache when present,
-otherwise computes and writes them — while honoring the per-artifact
+Each per-FOV helper loads target- or prediction-side artifacts from cache
+when present, otherwise computes and writes them — while honoring the per-artifact
 ``force_recompute`` flags and the ``io.require_complete_cache`` contract.
 """
 
@@ -13,7 +13,7 @@ import contextlib
 import fcntl
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
@@ -39,9 +39,13 @@ from dynacell.evaluation.cache import (
     write_mask,
 )
 from dynacell.evaluation.metrics import (
+    cp_pred_regionprops,
     cp_target_regionprops,
+    deep_pred_features,
     deep_target_features,
 )
+
+_MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
 
 
 @dataclass
@@ -52,6 +56,7 @@ class _CacheContext:
     manifest: dict[str, Any]
     force: dict[str, bool]
     require_complete: bool
+    side: Literal["gt", "pred"]
     target_name: str
     spacing: list[float]
     patch_size: int
@@ -87,8 +92,19 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "gt_dinov3": all_flag or bool(force.gt_dinov3),
         "gt_dynaclr": all_flag or bool(force.gt_dynaclr),
         "gt_celldino": all_flag or bool(force.gt_celldino),
+        "pred_masks": all_flag or bool(force.pred_masks),
+        "pred_cp": all_flag or bool(force.pred_cp),
+        "pred_dinov3": all_flag or bool(force.pred_dinov3),
+        "pred_dynaclr": all_flag or bool(force.pred_dynaclr),
+        "pred_celldino": all_flag or bool(force.pred_celldino),
         "final_metrics": all_flag or bool(force.final_metrics),
     }
+
+
+def _ensure_cache_side(ctx: _CacheContext, expected: Literal["gt", "pred"]) -> None:
+    """Fail fast when a helper is called with the wrong cache context."""
+    if ctx.side != expected:
+        raise ValueError(f"Expected a {expected!r} cache context, got {ctx.side!r}")
 
 
 def init_cache_context(
@@ -134,6 +150,7 @@ def init_cache_context(
             manifest={},
             force=force,
             require_complete=False,
+            side="gt",
             target_name=config.target_name,
             spacing=spacing,
             patch_size=patch_size,
@@ -165,6 +182,94 @@ def init_cache_context(
         manifest=manifest,
         force=force,
         require_complete=require_complete,
+        side="gt",
+        target_name=config.target_name,
+        spacing=spacing,
+        patch_size=patch_size,
+        dinov3_model_name=dinov3_model_name,
+        dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
+        dynaclr_encoder_sha12=dynaclr_encoder_sha12,
+        celldino_weights_sha12=celldino_weights_sha12,
+    )
+    _validate_artifact_params(ctx)
+    return ctx
+
+
+def init_pred_cache_context(
+    config: DictConfig,
+    *,
+    dinov3_model_name: str | None = None,
+    dynaclr_ckpt_path: str | None = None,
+    dynaclr_encoder_cfg: dict[str, Any] | None = None,
+    celldino_weights_path: str | None = None,
+) -> _CacheContext:
+    """Open and validate the prediction-side cache for the current run.
+
+    ``io.pred_cache_dir=null`` disables prediction artifact caching. When a
+    pred cache dir is configured, it must be distinct from ``io.gt_cache_dir``
+    because both caches use the same artifact layout under their respective
+    roots.
+    """
+    io = config.io
+    force = _resolve_force(config.force_recompute)
+    pred_cache_dir = OmegaConf.select(config, "io.pred_cache_dir", default=None)
+    gt_cache_dir = OmegaConf.select(config, "io.gt_cache_dir", default=None)
+
+    spacing = list(config.pixel_metrics.spacing)
+    patch_size = int(config.feature_metrics.patch_size)
+
+    dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
+    dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
+    celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
+
+    if pred_cache_dir is None:
+        return _CacheContext(
+            paths=None,
+            manifest={},
+            force=force,
+            require_complete=False,
+            side="pred",
+            target_name=config.target_name,
+            spacing=spacing,
+            patch_size=patch_size,
+            dinov3_model_name=dinov3_model_name,
+            dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
+            dynaclr_encoder_sha12=dynaclr_encoder_sha12,
+            celldino_weights_sha12=celldino_weights_sha12,
+        )
+
+    if gt_cache_dir is not None and Path(pred_cache_dir).expanduser().resolve(strict=False) == Path(
+        gt_cache_dir
+    ).expanduser().resolve(strict=False):
+        raise ValueError("io.pred_cache_dir must be distinct from io.gt_cache_dir")
+
+    paths = cache_paths(Path(pred_cache_dir))
+    manifest = load_manifest(paths)
+    if manifest.get("gt") is not None:
+        raise StaleCacheError(
+            f"io.pred_cache_dir={pred_cache_dir!r} contains a GT cache manifest; use a separate prediction cache dir"
+        )
+
+    cell_seg_path = str(io.cell_segmentation_path) if io.cell_segmentation_path is not None else None
+    check_cache_identity(
+        manifest,
+        pred_plate_path=str(io.pred_path),
+        pred_channel_name=str(io.pred_channel_name),
+        cell_segmentation_path=cell_seg_path,
+    )
+    seed_cache_identity(
+        manifest,
+        pred_plate_path=str(io.pred_path),
+        pred_channel_name=str(io.pred_channel_name),
+        cell_segmentation_path=cell_seg_path,
+    )
+
+    ctx = _CacheContext(
+        paths=paths,
+        manifest=manifest,
+        force=force,
+        require_complete=bool(io.require_complete_cache),
+        side="pred",
         target_name=config.target_name,
         spacing=spacing,
         patch_size=patch_size,
@@ -180,24 +285,26 @@ def init_cache_context(
 def _validate_artifact_params(ctx: _CacheContext) -> None:
     """Raise if any existing per-artifact manifest entry disagrees with ctx params."""
     artifacts = ctx.manifest.get("artifacts", {})
+    source = {"source": "prediction"} if ctx.side == "pred" else {}
+    label_prefix = "pred_" if ctx.side == "pred" else ""
 
     masks_section = artifacts.get("organelle_masks", {})
     check_artifact_params(
         masks_section.get(ctx.target_name),
-        {"target_name": ctx.target_name},
+        {"target_name": ctx.target_name, **source},
         artifact_label=f"organelle_masks[{ctx.target_name}]",
     )
     check_artifact_params(
         artifacts.get("cp_features"),
-        {"spacing": ctx.spacing},
-        artifact_label="cp_features",
+        {"spacing": ctx.spacing, **source},
+        artifact_label=f"{label_prefix}cp_features",
         numeric_keys=("spacing",),
     )
     if ctx.dinov3_model_name is not None:
         dinov3_section = artifacts.get("dinov3_features", {})
         check_artifact_params(
             dinov3_section.get(feature_slug(ctx.dinov3_model_name)),
-            {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size},
+            {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **source},
             artifact_label=f"dinov3_features[{ctx.dinov3_model_name}]",
         )
     if ctx.dynaclr_ckpt_sha12 is not None:
@@ -208,6 +315,7 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
                 "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
                 "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
                 "patch_size": ctx.patch_size,
+                **source,
             },
             artifact_label=f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
         )
@@ -218,6 +326,7 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
             {
                 "weights_sha256_12": ctx.celldino_weights_sha12,
                 "patch_size": ctx.patch_size,
+                **source,
             },
             artifact_label=f"celldino_features[{ctx.celldino_weights_sha12}]",
         )
@@ -255,8 +364,8 @@ def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
 def _pos_write_lock(ctx: _CacheContext, kind: str, pos_name: str):
     """Exclusive advisory file lock for one (kind, pos_name) cache slot.
 
-    Concurrent eval jobs on the same (organelle, plate) all write to the
-    same GT cache zarrs. Without locking, two writers race: writer A
+    Concurrent eval jobs on the same (organelle, source plate) all write to
+    the same cache zarrs. Without locking, two writers race: writer A
     starts creating the position group, writer B reads the OME plate
     metadata before A finishes updating it (read_mask → None), then B
     calls create_position → zarr.errors.ContainsGroupError because the
@@ -299,14 +408,66 @@ def fov_gt_masks(
     When caching is disabled (``ctx.enabled == False``), the masks are
     computed fresh from *target_arr* without any cache interaction.
     """
+    _ensure_cache_side(ctx, "gt")
+    return _fov_masks(
+        ctx,
+        pos_name=pos_name,
+        image_arr=target_arr,
+        seg_model=seg_model,
+        force_key="gt_masks",
+        artifact_label=f"organelle_masks[{ctx.target_name}]",
+        manifest_entry={
+            "path": f"organelle_masks/{ctx.target_name}.zarr",
+            "target_name": ctx.target_name,
+            "built_at": built_at_now(),
+        },
+    )
+
+
+def fov_pred_masks(
+    ctx: _CacheContext,
+    pos_name: str,
+    prediction_arr: np.ndarray,
+    seg_model,
+) -> np.ndarray:
+    """Return prediction-side organelle masks, loading from cache or computing+writing."""
+    _ensure_cache_side(ctx, "pred")
+    return _fov_masks(
+        ctx,
+        pos_name=pos_name,
+        image_arr=prediction_arr,
+        seg_model=seg_model,
+        force_key="pred_masks",
+        artifact_label=f"pred_organelle_masks[{ctx.target_name}]",
+        manifest_entry={
+            "path": f"organelle_masks/{ctx.target_name}.zarr",
+            "target_name": ctx.target_name,
+            "source": "prediction",
+            "built_at": built_at_now(),
+        },
+    )
+
+
+def _fov_masks(
+    ctx: _CacheContext,
+    *,
+    pos_name: str,
+    image_arr: np.ndarray,
+    seg_model,
+    force_key: str,
+    artifact_label: str,
+    manifest_entry: dict[str, Any],
+) -> np.ndarray:
+    """Shared load-or-compute implementation for one side's organelle masks."""
     from dynacell.evaluation.segmentation import segment
 
-    t_count = target_arr.shape[0]
+    t_count = image_arr.shape[0]
+    channel_name = _MASK_CHANNEL_BY_SIDE[ctx.side]
 
     def _compute_masks() -> np.ndarray:
         return np.stack(
             [
-                np.asarray(segment(target_arr[t], ctx.target_name, seg_model=seg_model)).astype(bool)
+                np.asarray(segment(image_arr[t], ctx.target_name, seg_model=seg_model)).astype(bool)
                 for t in range(t_count)
             ]
         )
@@ -322,14 +483,13 @@ def fov_gt_masks(
         _update_manifest_entry(
             ctx.manifest,
             ["organelle_masks", ctx.target_name],
-            {
-                "path": f"organelle_masks/{ctx.target_name}.zarr",
-                "target_name": ctx.target_name,
-                "built_at": built_at_now(),
-            },
+            manifest_entry,
         )
         _add_position(ctx.manifest, ["organelle_masks", ctx.target_name], pos_name)
         ctx.mark_manifest_dirty()
+
+    def _write_masks(masks: np.ndarray) -> None:
+        write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name)
 
     # Cache disabled — compute fresh, no locking, no caching.
     if not ctx.enabled:
@@ -337,10 +497,10 @@ def fov_gt_masks(
 
     # Force-recompute: take the lock so we don't race against a concurrent
     # cache-miss writer for the same slot, then overwrite.
-    if ctx.force["gt_masks"]:
-        with _pos_write_lock(ctx, f"masks_{ctx.target_name}", pos_name):
+    if ctx.force[force_key]:
+        with _pos_write_lock(ctx, f"{ctx.side}_masks_{ctx.target_name}", pos_name):
             masks = _compute_masks()
-            write_mask(ctx.paths, ctx.target_name, pos_name, masks)
+            _write_masks(masks)
             _record_write()
         return masks
 
@@ -352,13 +512,13 @@ def fov_gt_masks(
     # Cache miss — take the lock and re-check inside it. A concurrent writer
     # may have populated the slot between our fast-path read and the lock
     # acquisition; if so, the re-read returns a hit and we skip recomputation.
-    with _pos_write_lock(ctx, f"masks_{ctx.target_name}", pos_name):
+    with _pos_write_lock(ctx, f"{ctx.side}_masks_{ctx.target_name}", pos_name):
         cached = read_mask(ctx.paths, ctx.target_name, pos_name)
         if cached is not None:
             return _validate_cached_shape(cached)
-        _raise_if_require_complete(ctx, f"organelle_masks[{ctx.target_name}]", pos_name)
+        _raise_if_require_complete(ctx, artifact_label, pos_name)
         masks = _compute_masks()
-        write_mask(ctx.paths, ctx.target_name, pos_name, masks)
+        _write_masks(masks)
         _record_write()
     return masks
 
@@ -436,6 +596,7 @@ def fov_gt_cp_features(
 
     Result is a list of ``T`` arrays, each shape ``(n_cells_t, n_props_raw)``.
     """
+    _ensure_cache_side(ctx, "gt")
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
         kind="cp",
@@ -459,6 +620,42 @@ def fov_gt_cp_features(
     return per_t
 
 
+def fov_pred_cp_features(
+    ctx: _CacheContext,
+    pos_name: str,
+    prediction_arr: np.ndarray,
+    cell_segmentation_arr: np.ndarray,
+) -> list[np.ndarray]:
+    """Return prediction-side CP regionprops per timepoint, loading from cache or computing+writing."""
+    _ensure_cache_side(ctx, "pred")
+    per_t, manifest_updated = _load_or_compute_feature_timepoints(
+        ctx,
+        kind="cp",
+        pos_name=pos_name,
+        t_count=prediction_arr.shape[0],
+        force_key="pred_cp",
+        artifact_label="pred_cp_features",
+        cache_kwargs={},
+        compute_fn=lambda t: cp_pred_regionprops(prediction_arr[t], cell_segmentation_arr[t], ctx.spacing),
+    )
+
+    if ctx.enabled and manifest_updated:
+        _update_manifest_entry(
+            ctx.manifest,
+            ["cp_features"],
+            {
+                "path": "features/cp.zarr",
+                "spacing": ctx.spacing,
+                "source": "prediction",
+                "built_at": built_at_now(),
+            },
+        )
+        _add_position(ctx.manifest, ["cp_features"], pos_name)
+        ctx.mark_manifest_dirty()
+
+    return per_t
+
+
 def fov_gt_deep_features(
     ctx: _CacheContext,
     pos_name: str,
@@ -472,9 +669,51 @@ def fov_gt_deep_features(
     ``kind`` is ``"dinov3"``, ``"dynaclr"``, or ``"celldino"``. The cache key
     (model name or checkpoint/weights hash) is pulled from *ctx*.
     """
+    _ensure_cache_side(ctx, "gt")
+    return _fov_deep_features(
+        ctx,
+        pos_name=pos_name,
+        image_arr=target_arr,
+        kind=kind,
+        compute_fn=lambda t: deep_target_features(
+            target_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
+        ),
+    )
+
+
+def fov_pred_deep_features(
+    ctx: _CacheContext,
+    pos_name: str,
+    prediction_arr: np.ndarray,
+    cell_segmentation_arr: np.ndarray,
+    feature_extractor,
+    kind: FeatureKind,
+) -> list[np.ndarray]:
+    """Return prediction-side deep embeddings per timepoint for one feature family."""
+    _ensure_cache_side(ctx, "pred")
+    return _fov_deep_features(
+        ctx,
+        pos_name=pos_name,
+        image_arr=prediction_arr,
+        kind=kind,
+        compute_fn=lambda t: deep_pred_features(
+            prediction_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
+        ),
+    )
+
+
+def _deep_feature_cache_metadata(
+    ctx: _CacheContext,
+    kind: FeatureKind,
+) -> tuple[str, str, dict[str, Any], list[str], dict[str, Any]]:
+    """Return force key, artifact label, cache kwargs, manifest path, and manifest entry."""
+    source = {"source": "prediction"} if ctx.side == "pred" else {}
+    label_prefix = "pred_" if ctx.side == "pred" else ""
     if kind == "dinov3":
-        force_key = "gt_dinov3"
-        artifact_label = f"dinov3_features[{ctx.dinov3_model_name}]"
+        if ctx.dinov3_model_name is None:
+            raise ValueError("dinov3_model_name is required for DINOv3 feature caching")
+        force_key = f"{ctx.side}_dinov3"
+        artifact_label = f"{label_prefix}dinov3_features[{ctx.dinov3_model_name}]"
         cache_kwargs = {"model_name": ctx.dinov3_model_name}
         slug = feature_slug(ctx.dinov3_model_name)
         manifest_keys = ["dinov3_features", slug]
@@ -482,11 +721,14 @@ def fov_gt_deep_features(
             "path": f"features/dinov3/{slug}.zarr",
             "model_name": ctx.dinov3_model_name,
             "patch_size": ctx.patch_size,
+            **source,
             "built_at": built_at_now(),
         }
     elif kind == "dynaclr":
-        force_key = "gt_dynaclr"
-        artifact_label = f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]"
+        if ctx.dynaclr_ckpt_sha12 is None:
+            raise ValueError("dynaclr_ckpt_sha12 is required for DynaCLR feature caching")
+        force_key = f"{ctx.side}_dynaclr"
+        artifact_label = f"{label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]"
         cache_kwargs = {"ckpt_sha12": ctx.dynaclr_ckpt_sha12}
         manifest_keys = ["dynaclr_features", ctx.dynaclr_ckpt_sha12]
         entry = {
@@ -494,33 +736,48 @@ def fov_gt_deep_features(
             "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
             "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
             "patch_size": ctx.patch_size,
+            **source,
             "built_at": built_at_now(),
         }
     elif kind == "celldino":
-        force_key = "gt_celldino"
-        artifact_label = f"celldino_features[{ctx.celldino_weights_sha12}]"
+        if ctx.celldino_weights_sha12 is None:
+            raise ValueError("celldino_weights_sha12 is required for CELL-DINO feature caching")
+        force_key = f"{ctx.side}_celldino"
+        artifact_label = f"{label_prefix}celldino_features[{ctx.celldino_weights_sha12}]"
         cache_kwargs = {"weights_sha12": ctx.celldino_weights_sha12}
         manifest_keys = ["celldino_features", ctx.celldino_weights_sha12]
         entry = {
             "path": f"features/celldino/{ctx.celldino_weights_sha12}.zarr",
             "weights_sha256_12": ctx.celldino_weights_sha12,
             "patch_size": ctx.patch_size,
+            **source,
             "built_at": built_at_now(),
         }
     else:
         raise ValueError(f"Unknown deep-feature kind: {kind!r}")
+    return force_key, artifact_label, cache_kwargs, manifest_keys, entry
+
+
+def _fov_deep_features(
+    ctx: _CacheContext,
+    *,
+    pos_name: str,
+    image_arr: np.ndarray,
+    kind: FeatureKind,
+    compute_fn,
+) -> list[np.ndarray]:
+    """Shared load-or-compute implementation for one side's deep embeddings."""
+    force_key, artifact_label, cache_kwargs, manifest_keys, entry = _deep_feature_cache_metadata(ctx, kind)
 
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
         kind=kind,
         pos_name=pos_name,
-        t_count=target_arr.shape[0],
+        t_count=image_arr.shape[0],
         force_key=force_key,
         artifact_label=artifact_label,
         cache_kwargs=cache_kwargs,
-        compute_fn=lambda t: deep_target_features(
-            target_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
-        ),
+        compute_fn=compute_fn,
     )
 
     if ctx.enabled and manifest_updated:

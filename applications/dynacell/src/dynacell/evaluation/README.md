@@ -9,8 +9,8 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 | `pipeline.py` | Hydra-driven orchestrator. Loads prediction/GT OME-Zarr plates, computes per-FOV per-timepoint metrics, saves CSVs + NPYs + plots. CLI entrypoint: `dynacell evaluate`. |
 | `metrics.py` | Pixel metrics (PCC, SSIM, NRMSE, PSNR, FSC resolution, spectral PCC, MicroMS3IM), mask metrics (Dice, IoU, precision, recall, accuracy, TP/FP/FN/TN), feature metrics split into `*_target_*` / `*_pred_*` / `*_pairwise` so GT-side work can be cached separately from predictions. |
 | `segmentation.py` | Organelle-specific classical-CV segmentation via `aicssegmentation` workflows (`nucleus`, `membrane`, `nucleoli`, `lysosomes`, `er`, `mitochondria`). Used for mask metrics. |
-| `cache.py` | GT artifact cache: on-disk layout, manifest I/O, read/write helpers, staleness check. Keyed by `(cache_schema_version, gt_path, gt_channel_name, cell_segmentation_path)`. |
-| `pipeline_cache.py` | Per-FOV load-or-compute wrappers (`fov_gt_masks`, `fov_gt_cp_features`, `fov_gt_deep_features`). Honor `force_recompute.*` flags and the `io.require_complete_cache` contract. |
+| `cache.py` | Artifact cache: on-disk layout, manifest I/O, read/write helpers, staleness check. Keyed by source plate/channel plus `cell_segmentation_path` where relevant. |
+| `pipeline_cache.py` | Per-FOV load-or-compute wrappers for GT and prediction masks/features. Honor `force_recompute.*` flags and the `io.require_complete_cache` contract. |
 | `precompute_cli.py` | Hydra entrypoint for `dynacell precompute-gt`. Iterates GT positions and fills the cache; no eval loop. |
 | `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, pairwise feature-similarity helpers, `plot_metrics()` bar/violin plots. |
 | `io.py` | OME-Zarr / tiff readers and writers, prediction preprocessing transforms. |
@@ -26,6 +26,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 - `io.gt_path` — fluorescence ground truth, HCS OME-Zarr (channel: `io.gt_channel_name`)
 - `io.cell_segmentation_path` — *optional* precomputed cell segmentation, HCS OME-Zarr. Required only when `compute_feature_metrics=true` or when building CP/DINOv3/DynaCLR cache entries. Position layout must match GT/pred 1:1.
 - `io.gt_cache_dir` — *optional* directory for the GT artifact cache. `null` (default) disables caching; set to a writable path to opt in. Required for `dynacell precompute-gt` and for `io.require_complete_cache=true`.
+- `io.pred_cache_dir` — *optional* directory for the prediction artifact cache. `null` (default) preserves the old behavior. Must be distinct from `io.gt_cache_dir`.
 
 ## Running an evaluation
 
@@ -251,6 +252,12 @@ The `force_recompute` block has one flag per cacheable artifact plus a shortcut:
 | `force_recompute.gt_cp` | Cached target-side CP regionprops features. |
 | `force_recompute.gt_dinov3` | Cached target-side DINOv3 features for the current model name. |
 | `force_recompute.gt_dynaclr` | Cached target-side DynaCLR features for the current `(ckpt_sha256, encoder_config_sha256)`. |
+| `force_recompute.gt_celldino` | Cached target-side CELL-DINO features for the current weights. |
+| `force_recompute.pred_masks` | Cached prediction-side organelle masks for `target_name`. |
+| `force_recompute.pred_cp` | Cached prediction-side CP regionprops features. |
+| `force_recompute.pred_dinov3` | Cached prediction-side DINOv3 features for the current model name. |
+| `force_recompute.pred_dynaclr` | Cached prediction-side DynaCLR features for the current `(ckpt_sha256, encoder_config_sha256)`. |
+| `force_recompute.pred_celldino` | Cached prediction-side CELL-DINO features for the current weights. |
 | `force_recompute.all` | All of the above. |
 
 Examples:
@@ -263,39 +270,32 @@ uv run dynacell evaluate ... io.gt_cache_dir=/path/to/cache force_recompute.gt_d
 uv run dynacell evaluate ... io.gt_cache_dir=/path/to/cache force_recompute.all=true
 ```
 
-Without `io.gt_cache_dir`, the cache layer is a no-op (same behavior as before the cache landed), and only `force_recompute.final_metrics` / `.all` have any effect — they control whether the saved CSVs are rebuilt.
+Without `io.gt_cache_dir` / `io.pred_cache_dir`, that side's cache layer is a no-op. Only `force_recompute.final_metrics` / `.all` affect uncached runs.
 
-## GT artifact cache
+## Artifact caches
 
-Set `io.gt_cache_dir` to write and read back GT-side artifacts so subsequent eval runs skip the expensive per-FOV segmentation and per-cell feature extraction. Typical speedup on SEC61B: ~2× on the second eval run, and scaling with the number of evaluations against the same GT.
+Set `io.gt_cache_dir` to write and read back GT-side artifacts. Set `io.pred_cache_dir` to do the same for prediction-side organelle masks and per-cell features. Keep them as separate directories; sharing one root is rejected to avoid artifact collisions.
+
+GT caches are reusable across model checkpoints for the same dataset/target. Prediction caches are reusable for repeated evaluations of the same prediction store/channel, for example when changing dataset-level feature comparisons or re-running reports.
 
 ### Layout
 
 ```
-{gt_cache_dir}/
+{cache_dir}/
   manifest.yaml                          # built_at, params, positions per artifact
-  organelle_masks/{target_name}.zarr     # HCS plate; channel target_seg (bool)
+  organelle_masks/{target_name}.zarr     # HCS plate; channel target_seg or prediction_seg
   features/cp.zarr                       # zarr group, arrays at {row}/{col}/{fov}/t{t}
   features/dinov3/{model_slug}.zarr      # one plate per model name
   features/dynaclr/{ckpt_sha12}.zarr     # one plate per (checkpoint, encoder_config)
+  features/celldino/{weights_sha12}.zarr # one plate per CELL-DINO weights file
 ```
 
-Cache identity is the tuple `(cache_schema_version, gt_path, gt_channel_name, cell_segmentation_path)`. A mismatch raises `StaleCacheError` — no silent mis-serving when you change GT channel, swap segmentations, or bump the computation-logic version.
+GT cache identity is `(cache_schema_version, gt_path, gt_channel_name, cell_segmentation_path)`. Prediction cache identity is `(cache_schema_version, pred_path, pred_channel_name, cell_segmentation_path)`. A mismatch raises `StaleCacheError` — no silent mis-serving when you change channels, swap segmentations, or bump the computation-logic version.
 
 The DynaCLR checkpoint hash (`ckpt_sha256_12`) is memoized to a
 `<ckpt>.sha256` sidecar next to the checkpoint and reused across eval
 runs as long as the sidecar's mtime is ≥ the checkpoint's. Touch or
 replace the checkpoint and the hash recomputes automatically.
-
-### Shared `gt_cache_dir` race
-
-Resolving `io.gt_cache_dir` from the manifest means the default workflow writes to a shared location like `/hpc/projects/.../eval_cache/SEC61B`. `flush_manifest` and the per-artifact writers in `pipeline_cache.py` are not lock-protected, so two concurrent `dynacell precompute-gt` runs on the same target will race on the manifest.
-
-Workarounds:
-- Serialize your precompute runs manually per target (the current paper workflow).
-- Override `io.gt_cache_dir=/scratch/me/cache/X` at the CLI to write to a private directory. The hook's strict collision check accepts this override as long as no conflicting value from the manifest is in play.
-
-Adding an `flock` on the manifest is a follow-up, not blocking for the paper workflow.
 
 ### Priming the cache
 
@@ -335,17 +335,30 @@ mask-only:
 uv run dynacell precompute-gt ... build.cp=false build.dinov3=false build.dynaclr=false
 ```
 
-### Parallel sweeps
+### Prediction cache
 
-After a full precompute, launch many `dynacell evaluate` jobs in parallel against the same cache with `io.require_complete_cache=true`. Missing entries now raise `StaleCacheError` instead of triggering concurrent writes (zarr `mode="a"` is not safe under concurrent write).
+There is no separate `precompute-pred` command yet. The first `dynacell evaluate` run with `io.pred_cache_dir` set fills prediction masks/features; later runs hit that cache.
 
 ```bash
-uv run dynacell evaluate ... io.gt_cache_dir=/hpc/.../cache/SEC61B io.require_complete_cache=true
+uv run dynacell evaluate ... \
+  io.pred_cache_dir=/hpc/.../pred_cache/sec61b_fcmae_v1 \
+  force_recompute.final_metrics=true
+```
+
+### Parallel sweeps
+
+After a full GT precompute and one prediction-cache fill, launch many `dynacell evaluate` jobs in parallel against the same caches with `io.require_complete_cache=true`. Missing entries raise `StaleCacheError` instead of being built opportunistically.
+
+```bash
+uv run dynacell evaluate ... \
+  io.gt_cache_dir=/hpc/.../cache/SEC61B \
+  io.pred_cache_dir=/hpc/.../pred_cache/sec61b_fcmae_v1 \
+  io.require_complete_cache=true
 ```
 
 ### Cache invalidation
 
-We deliberately do **not** fingerprint the GT or cell_segmentation zarr *contents*. If you modify them in place, either bump `cache_schema_version` in `cache.py`, set the appropriate `force_recompute.*` flag, or delete `{gt_cache_dir}/`.
+We deliberately do **not** fingerprint the GT, prediction, or cell_segmentation zarr *contents*. If you modify them in place, either bump `cache_schema_version` in `cache.py`, set the appropriate `force_recompute.*` flag, or delete the affected cache directory.
 
 ## Outputs
 
