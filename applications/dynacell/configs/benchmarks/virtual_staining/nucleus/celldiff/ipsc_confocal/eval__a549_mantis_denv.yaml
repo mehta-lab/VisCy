@@ -14,9 +14,5 @@ benchmark:
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_celldiff_denoise_denv.zarr
 
-# A549 manifests don't carry cell_segmentation paths (no segmentation
-# pipeline yet). Skip feature metrics until segmentation lands.
-compute_feature_metrics: false
-
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_nucl_celldiff_denoise_denv
