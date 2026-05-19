@@ -115,6 +115,10 @@ def submit(argv: list[str] | None = None) -> int:
     trained_on = benchmark.get("trained_on")
     dataset_ref = benchmark.get("dataset_ref") or {}
     dataset_name = dataset_ref.get("dataset")
+    # Per-manifest target key (e.g. "h2b" for A549 nucleus, "nucleus" for iPSC).
+    # The predict leaf carries this when the dataset's manifest uses a gene-keyed
+    # target slug that differs from the organelle name (all A549 plates do).
+    dataset_target = dataset_ref.get("target")
     if not organelle or not code_model or not trained_on:
         raise SystemExit(
             f"{leaf_path}: missing benchmark.{{organelle, model_name, trained_on}} "
@@ -196,6 +200,13 @@ def submit(argv: list[str] | None = None) -> int:
         "save.save_dir": str(save_dir),
         "compute_feature_metrics": True,
     }
+    # Forward the predict-side manifest target slug so the eval-side resolver
+    # looks up the right entry in the per-condition A549 manifests (where the
+    # target is keyed by gene, not by organelle). For iPSC predicts, this is
+    # idempotent (the eval target group already declares the same slug).
+    if dataset_target:
+        overrides["benchmark.dataset_ref.target"] = dataset_target
+        overrides["target_name"] = dataset_target
     if args.overwrite and args.regen_metrics:
         raise SystemExit("--overwrite and --regen-metrics are mutually exclusive")
     if args.overwrite:
