@@ -1,0 +1,10 @@
+# Stage C entries — G3BP1 timing parquets to cross-validate.
+
+entries:
+  - name: 07_22_ZIKV
+    organelle: G3BP1
+    timing_filename: 07_22_ZIKV_event_timing.parquet
+
+  - name: 07_24_ZIKV
+    organelle: G3BP1
+    timing_filename: 07_24_ZIKV_event_timing.parquet
