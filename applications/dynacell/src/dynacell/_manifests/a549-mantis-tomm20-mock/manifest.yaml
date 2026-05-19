@@ -23,5 +23,5 @@ targets:
       train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/TOMM20_mock.ozx
       test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/TOMM20_mock.ozx
       cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/TOMM20_mock_seg_cleaned.zarr
-      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/tomm20
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/tomm20_mock
     splits: splits/tomm20_train_test.yaml

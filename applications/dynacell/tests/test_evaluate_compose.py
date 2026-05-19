@@ -287,7 +287,7 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
 
     gt_suffix = f"{gene_token}_{cond_token}.ozx"
     seg_suffix = f"{gene_token}_{cond_token}_seg_cleaned.zarr"
-    cache_suffix = f"eval_cache/{marker}"
+    cache_suffix = f"eval_cache/{marker}_{cond_slug}"
 
     assert str(cfg.io.gt_path).endswith(gt_suffix), (
         f"{organelle}/{model}/{cond_slug}: cfg.io.gt_path={cfg.io.gt_path} does not end with {gt_suffix}"

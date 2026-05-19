@@ -23,5 +23,5 @@ targets:
       train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_mock.ozx
       test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/SEC61B_mock.ozx
       cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/SEC61B_mock_seg_cleaned.zarr
-      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/sec61b
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/sec61b_mock
     splits: splits/sec61b_train_test.yaml
