@@ -440,9 +440,11 @@ def gpu_serialization_lock(gate: bool = True) -> Iterator[None]:
         usage tracks the ``use_gpu`` flag, so CPU-only runs don't
         serialize across workers needlessly.
 
-    Other no-op conditions: ``_GPU_LOCK_PATH`` unset (parent / serial
-    mode) or no CUDA available in the worker. Used to wrap model loads
-    and per-FOV GPU operations under ``executor=process``.
+    Other no-op condition: ``_GPU_LOCK_PATH`` unset (parent / serial
+    mode). Used to wrap model loads and per-FOV GPU operations under
+    ``executor=process``. CPU-only execution is opted into at the call
+    site by passing ``gate=False`` (typically ``gate=config.use_gpu``);
+    the lock itself does NOT probe ``torch.cuda.is_available()``.
     """
     if not gate or _GPU_LOCK_PATH is None:
         yield
