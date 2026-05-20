@@ -51,6 +51,7 @@ def test_load_manifest_missing_returns_skeleton(tmp_path: Path) -> None:
     assert manifest["cache_schema_version"] == CACHE_SCHEMA_VERSION
     assert manifest["artifacts"] == {}
     assert manifest["gt"] is None
+    assert manifest["pred"] is None
     assert manifest["cell_segmentation"] is None
 
 
@@ -60,6 +61,7 @@ def test_save_and_load_manifest_roundtrip(tmp_path: Path) -> None:
     manifest = {
         "cache_schema_version": CACHE_SCHEMA_VERSION,
         "gt": {"plate_path": "/data/gt.zarr", "channel_name": "target"},
+        "pred": None,
         "cell_segmentation": {"plate_path": "/data/seg.zarr"},
         "artifacts": {
             "organelle_masks": {"er": {"path": "organelle_masks/er.zarr", "target_name": "er"}},
@@ -77,8 +79,9 @@ def test_check_cache_identity_version_mismatch(tmp_path: Path) -> None:
     with pytest.raises(StaleCacheError, match="schema version mismatch"):
         check_cache_identity(
             manifest,
-            gt_plate_path="/x.zarr",
-            gt_channel_name="target",
+            source="gt",
+            plate_path="/x.zarr",
+            channel_name="target",
             cell_segmentation_path=None,
         )
 
@@ -93,8 +96,9 @@ def test_check_cache_identity_gt_path_mismatch() -> None:
     with pytest.raises(StaleCacheError, match="gt.plate_path mismatch"):
         check_cache_identity(
             manifest,
-            gt_plate_path="/new.zarr",
-            gt_channel_name="target",
+            source="gt",
+            plate_path="/new.zarr",
+            channel_name="target",
             cell_segmentation_path=None,
         )
 
@@ -109,8 +113,9 @@ def test_check_cache_identity_channel_name_mismatch() -> None:
     with pytest.raises(StaleCacheError, match="gt.channel_name mismatch"):
         check_cache_identity(
             manifest,
-            gt_plate_path="/g.zarr",
-            gt_channel_name="fluorescence",
+            source="gt",
+            plate_path="/g.zarr",
+            channel_name="fluorescence",
             cell_segmentation_path=None,
         )
 
@@ -125,9 +130,46 @@ def test_check_cache_identity_cell_seg_mismatch() -> None:
     with pytest.raises(StaleCacheError, match="cell_segmentation.plate_path mismatch"):
         check_cache_identity(
             manifest,
-            gt_plate_path="/g.zarr",
-            gt_channel_name="target",
+            source="gt",
+            plate_path="/g.zarr",
+            channel_name="target",
             cell_segmentation_path="/seg_v2.zarr",
+        )
+
+
+def test_check_cache_identity_pred_path_mismatch() -> None:
+    """A different pred_path against an existing pred entry raises."""
+    manifest = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "gt": None,
+        "pred": {"plate_path": "/old_pred.zarr", "channel_name": "prediction"},
+        "cell_segmentation": None,
+    }
+    with pytest.raises(StaleCacheError, match="pred.plate_path mismatch"):
+        check_cache_identity(
+            manifest,
+            source="pred",
+            plate_path="/new_pred.zarr",
+            channel_name="prediction",
+            cell_segmentation_path=None,
+        )
+
+
+def test_check_cache_identity_pred_channel_mismatch() -> None:
+    """A different pred_channel_name raises — prevents silent mis-serving."""
+    manifest = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "gt": None,
+        "pred": {"plate_path": "/p.zarr", "channel_name": "prediction"},
+        "cell_segmentation": None,
+    }
+    with pytest.raises(StaleCacheError, match="pred.channel_name mismatch"):
+        check_cache_identity(
+            manifest,
+            source="pred",
+            plate_path="/p.zarr",
+            channel_name="other_prediction",
+            cell_segmentation_path=None,
         )
 
 
@@ -136,26 +178,43 @@ def test_check_cache_identity_empty_manifest_is_noop() -> None:
     manifest = {
         "cache_schema_version": CACHE_SCHEMA_VERSION,
         "gt": None,
+        "pred": None,
         "cell_segmentation": None,
     }
     check_cache_identity(
         manifest,
-        gt_plate_path="/g.zarr",
-        gt_channel_name="target",
+        source="gt",
+        plate_path="/g.zarr",
+        channel_name="target",
         cell_segmentation_path="/seg.zarr",
     )
 
 
 def test_seed_cache_identity_populates_empty() -> None:
     """seed_cache_identity fills missing gt / cell_segmentation entries."""
-    manifest: dict = {"cache_schema_version": CACHE_SCHEMA_VERSION, "gt": None, "cell_segmentation": None}
+    manifest: dict = {"cache_schema_version": CACHE_SCHEMA_VERSION, "gt": None, "pred": None, "cell_segmentation": None}
     seed_cache_identity(
         manifest,
-        gt_plate_path="/g.zarr",
-        gt_channel_name="target",
+        source="gt",
+        plate_path="/g.zarr",
+        channel_name="target",
         cell_segmentation_path="/seg.zarr",
     )
     assert manifest["gt"] == {"plate_path": "/g.zarr", "channel_name": "target"}
+    assert manifest["cell_segmentation"] == {"plate_path": "/seg.zarr"}
+
+
+def test_seed_cache_identity_populates_prediction() -> None:
+    """seed_cache_identity fills missing prediction source entries."""
+    manifest: dict = {"cache_schema_version": CACHE_SCHEMA_VERSION, "gt": None, "pred": None, "cell_segmentation": None}
+    seed_cache_identity(
+        manifest,
+        source="pred",
+        plate_path="/p.zarr",
+        channel_name="prediction",
+        cell_segmentation_path="/seg.zarr",
+    )
+    assert manifest["pred"] == {"plate_path": "/p.zarr", "channel_name": "prediction"}
     assert manifest["cell_segmentation"] == {"plate_path": "/seg.zarr"}
 
 
@@ -164,15 +223,24 @@ def test_seed_cache_identity_preserves_existing() -> None:
     manifest = {
         "cache_schema_version": CACHE_SCHEMA_VERSION,
         "gt": {"plate_path": "/orig.zarr", "channel_name": "target"},
+        "pred": {"plate_path": "/orig_pred.zarr", "channel_name": "prediction"},
         "cell_segmentation": {"plate_path": "/orig_seg.zarr"},
     }
     seed_cache_identity(
         manifest,
-        gt_plate_path="/new.zarr",
-        gt_channel_name="target",
+        source="gt",
+        plate_path="/new.zarr",
+        channel_name="target",
         cell_segmentation_path="/new_seg.zarr",
     )
+    seed_cache_identity(
+        manifest,
+        source="pred",
+        plate_path="/new_pred.zarr",
+        channel_name="other_prediction",
+    )
     assert manifest["gt"]["plate_path"] == "/orig.zarr"
+    assert manifest["pred"]["plate_path"] == "/orig_pred.zarr"
     assert manifest["cell_segmentation"]["plate_path"] == "/orig_seg.zarr"
 
 

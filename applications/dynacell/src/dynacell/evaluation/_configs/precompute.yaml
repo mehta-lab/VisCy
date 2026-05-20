@@ -10,6 +10,7 @@ build:
   cp: true
   dinov3: true
   dynaclr: true
+  celldino: true
 
 # precompute-gt only fills the GT cache; no eval loop runs and no prediction
 # plate is read. These flags stay off by default so save_dir / pred_path are
