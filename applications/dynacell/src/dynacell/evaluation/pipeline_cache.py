@@ -803,13 +803,7 @@ class DeepFeatureBatcher:
             self._pending[kind].append((pos_name, t, crops_stack))
             self._pending_counts[kind] += n
             if self._pending_counts[kind] >= self.flush_threshold:
-                _flush_kind(
-                    self.ctx,
-                    self.ctx.side,
-                    kind,
-                    self.extractors[kind],
-                    self._pending[kind],
-                )
+                _flush_kind(self.ctx, kind, self.extractors[kind], self._pending[kind])
                 self._flushed_kinds.add(kind)
                 self._pending[kind].clear()
                 self._pending_counts[kind] = 0
@@ -824,13 +818,7 @@ class DeepFeatureBatcher:
         """
         for kind, items in self._pending.items():
             if items:
-                _flush_kind(
-                    self.ctx,
-                    self.ctx.side,
-                    kind,
-                    self.extractors[kind],
-                    items,
-                )
+                _flush_kind(self.ctx, kind, self.extractors[kind], items)
                 self._flushed_kinds.add(kind)
                 items.clear()
                 self._pending_counts[kind] = 0
@@ -843,7 +831,6 @@ class DeepFeatureBatcher:
 
 def _flush_kind(
     ctx: _CacheContext,
-    side: Literal["gt", "pred"],
     kind: FeatureKind,
     extractor,
     items: list[tuple[str, int, np.ndarray]],
@@ -855,7 +842,6 @@ def _flush_kind(
     Empty ``(pos, t)`` slots (zero cells) write ``np.empty((0, 0))`` to match
     the per-FOV path's ``features_from_crops([])`` output.
     """
-    del side  # carried for symmetry with the batcher; identity is in ctx.side
     flat: list[np.ndarray] = []
     counts: list[int] = []
     for _, _, crops_stack in items:

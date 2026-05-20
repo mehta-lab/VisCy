@@ -324,12 +324,8 @@ def evaluate_predictions(config: DictConfig):
                 desc="Processing positions",
             ):
                 pos_name_pred, pos_pred = p1
-                pos_name_gt, pos_gt = p2
-                pos_name_seg, pos_seg = p3
-                if pos_name_pred != pos_name_gt:
-                    raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, gt={pos_name_gt!r}")
-                if seg_plate is not None and pos_name_seg != pos_name_pred:
-                    raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
+                _, pos_gt = p2
+                _, pos_seg = p3
 
                 pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
                 gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
