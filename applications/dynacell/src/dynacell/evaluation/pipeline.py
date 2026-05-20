@@ -641,6 +641,11 @@ def evaluate_predictions(config: DictConfig):
     # frozen across phases for parent/worker BLAS-cap consistency.
     runtime = resolve_runtime(config)
     apply_thread_budget(runtime.threads_per_worker)
+    # Resolve ${...} interpolations in-place so spawn workers don't lazy-resolve
+    # refs in their child interpreters. ??? MISSING fields stay unresolved
+    # (OmegaConf 2.3 _resolve walks only interpolation nodes, not value nodes),
+    # so this is safe under feature-metrics-disabled runs.
+    OmegaConf.resolve(config)
     reset_timings()
 
     all_pixel_metrics = []
