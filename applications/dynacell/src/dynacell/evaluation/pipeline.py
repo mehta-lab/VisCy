@@ -118,15 +118,20 @@ def _fov_pred_features_per_t(
             ),
         }
     t_count = predict.shape[0]
-    cp = [cp_regionprops(predict[t], cell_segmentation[t], spacing) for t in range(t_count)]
-    crops = [build_crops(predict[t], cell_segmentation[t], patch_size) for t in range(t_count)]
-    dinov3 = [features_from_crops(crops[t], dinov3_feature_extractor) for t in range(t_count)]
-    dynaclr = [features_from_crops(crops[t], dynaclr_feature_extractor) for t in range(t_count)]
-    celldino = (
-        [features_from_crops(crops[t], celldino_feature_extractor) for t in range(t_count)]
-        if celldino_feature_extractor is not None
-        else None
-    )
+    # Single per-t pass: build crops once per timepoint, fan out to every
+    # deep backbone, then drop them before moving to the next t — avoids
+    # holding ``t_count`` crop tensors in memory at once.
+    cp: list[np.ndarray] = []
+    dinov3: list[np.ndarray] = []
+    dynaclr: list[np.ndarray] = []
+    celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    for t in range(t_count):
+        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing))
+        crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
+        dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
+        dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
+        if celldino is not None:
+            celldino.append(features_from_crops(crops_t, celldino_feature_extractor))
     return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino}
 
 
