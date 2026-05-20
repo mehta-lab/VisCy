@@ -35,12 +35,9 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
-    fov_gt_cp_features,
-    fov_gt_deep_features,
-    fov_gt_masks,
-    fov_pred_cp_features,
-    fov_pred_deep_features,
-    fov_pred_masks,
+    fov_cp_features,
+    fov_deep_features,
+    fov_masks,
     init_cache_context,
     resolve_dynaclr_encoder_cfg,
 )
@@ -247,31 +244,29 @@ def evaluate_predictions(config: DictConfig):
 
                 T = predict.shape[0]
 
-                gt_mask_stack = fov_gt_masks(cache_ctx, pos_name_pred, target, seg_model)
+                gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
                 pred_mask_stack = (
-                    fov_pred_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
-                    if pred_cache_ctx.enabled
-                    else None
+                    fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model) if pred_cache_ctx.enabled else None
                 )
 
                 if config.compute_feature_metrics:
-                    gt_cp_per_t = fov_gt_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
-                    gt_dinov3_per_t = fov_gt_deep_features(
+                    gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
+                    gt_dinov3_per_t = fov_deep_features(
                         cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
                     )
-                    gt_dynaclr_per_t = fov_gt_deep_features(
+                    gt_dynaclr_per_t = fov_deep_features(
                         cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
                     )
                     gt_celldino_per_t = (
-                        fov_gt_deep_features(
+                        fov_deep_features(
                             cache_ctx, pos_name_pred, target, cell_segmentation, celldino_feature_extractor, "celldino"
                         )
                         if celldino_feature_extractor is not None
                         else None
                     )
                     if pred_cache_ctx.enabled:
-                        pred_cp_per_t = fov_pred_cp_features(pred_cache_ctx, pos_name_pred, predict, cell_segmentation)
-                        pred_dinov3_per_t = fov_pred_deep_features(
+                        pred_cp_per_t = fov_cp_features(pred_cache_ctx, pos_name_pred, predict, cell_segmentation)
+                        pred_dinov3_per_t = fov_deep_features(
                             pred_cache_ctx,
                             pos_name_pred,
                             predict,
@@ -279,7 +274,7 @@ def evaluate_predictions(config: DictConfig):
                             dinov3_feature_extractor,
                             "dinov3",
                         )
-                        pred_dynaclr_per_t = fov_pred_deep_features(
+                        pred_dynaclr_per_t = fov_deep_features(
                             pred_cache_ctx,
                             pos_name_pred,
                             predict,
@@ -288,7 +283,7 @@ def evaluate_predictions(config: DictConfig):
                             "dynaclr",
                         )
                         pred_celldino_per_t = (
-                            fov_pred_deep_features(
+                            fov_deep_features(
                                 pred_cache_ctx,
                                 pos_name_pred,
                                 predict,

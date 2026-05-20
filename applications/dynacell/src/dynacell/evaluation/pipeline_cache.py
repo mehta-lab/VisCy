@@ -39,9 +39,7 @@ from dynacell.evaluation.cache import (
     write_mask,
 )
 from dynacell.evaluation.metrics import (
-    cp_pred_regionprops,
     cp_target_regionprops,
-    deep_pred_features,
     deep_target_features,
 )
 
@@ -99,12 +97,6 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "pred_celldino": all_flag or bool(force.pred_celldino),
         "final_metrics": all_flag or bool(force.final_metrics),
     }
-
-
-def _ensure_cache_side(ctx: _CacheContext, expected: Literal["gt", "pred"]) -> None:
-    """Fail fast when a helper is called with the wrong cache context."""
-    if ctx.side != expected:
-        raise ValueError(f"Expected a {expected!r} cache context, got {ctx.side!r}")
 
 
 def init_cache_context(
@@ -328,54 +320,35 @@ def _pos_write_lock(ctx: _CacheContext, kind: str, pos_name: str):
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
-def fov_gt_masks(
+def fov_masks(
     ctx: _CacheContext,
     pos_name: str,
-    target_arr: np.ndarray,
+    image_arr: np.ndarray,
     seg_model,
 ) -> np.ndarray:
     """Return a ``(T, D, H, W)`` bool mask stack, loading from cache or computing+writing.
 
-    When caching is disabled (``ctx.enabled == False``), the masks are
-    computed fresh from *target_arr* without any cache interaction.
+    The cache side (GT vs prediction) is taken from ``ctx.side``; the
+    artifact label, force-recompute flag, and manifest entry are derived
+    from it. When caching is disabled (``ctx.enabled == False``), the masks
+    are computed fresh from *image_arr* without any cache interaction.
     """
-    _ensure_cache_side(ctx, "gt")
+    label_prefix = "pred_" if ctx.side == "pred" else ""
+    manifest_entry: dict[str, Any] = {
+        "path": f"organelle_masks/{ctx.target_name}.zarr",
+        "target_name": ctx.target_name,
+        "built_at": built_at_now(),
+    }
+    if ctx.side == "pred":
+        manifest_entry["source"] = "prediction"
     return _fov_masks(
         ctx,
         pos_name=pos_name,
-        image_arr=target_arr,
+        image_arr=image_arr,
         seg_model=seg_model,
-        force_key="gt_masks",
-        artifact_label=f"organelle_masks[{ctx.target_name}]",
-        manifest_entry={
-            "path": f"organelle_masks/{ctx.target_name}.zarr",
-            "target_name": ctx.target_name,
-            "built_at": built_at_now(),
-        },
-    )
-
-
-def fov_pred_masks(
-    ctx: _CacheContext,
-    pos_name: str,
-    prediction_arr: np.ndarray,
-    seg_model,
-) -> np.ndarray:
-    """Return prediction-side organelle masks, loading from cache or computing+writing."""
-    _ensure_cache_side(ctx, "pred")
-    return _fov_masks(
-        ctx,
-        pos_name=pos_name,
-        image_arr=prediction_arr,
-        seg_model=seg_model,
-        force_key="pred_masks",
-        artifact_label=f"pred_organelle_masks[{ctx.target_name}]",
-        manifest_entry={
-            "path": f"organelle_masks/{ctx.target_name}.zarr",
-            "target_name": ctx.target_name,
-            "source": "prediction",
-            "built_at": built_at_now(),
-        },
+        force_key=f"{ctx.side}_masks",
+        artifact_label=f"{label_prefix}organelle_masks[{ctx.target_name}]",
+        manifest_entry=manifest_entry,
     )
 
 
@@ -517,118 +490,65 @@ def _load_or_compute_feature_timepoints(
     return per_t, manifest_updated  # type: ignore[return-value]
 
 
-def fov_gt_cp_features(
+def fov_cp_features(
     ctx: _CacheContext,
     pos_name: str,
-    target_arr: np.ndarray,
+    image_arr: np.ndarray,
     cell_segmentation_arr: np.ndarray,
 ) -> list[np.ndarray]:
-    """Return target-side CP regionprops per timepoint, loading from cache or computing+writing.
+    """Return CP regionprops per timepoint for one FOV, loading from cache or computing+writing.
 
-    Result is a list of ``T`` arrays, each shape ``(n_cells_t, n_props_raw)``.
+    The cache side is taken from ``ctx.side``. Result is a list of ``T``
+    arrays, each shape ``(n_cells_t, n_props_raw)``.
     """
-    _ensure_cache_side(ctx, "gt")
+    label_prefix = "pred_" if ctx.side == "pred" else ""
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
         kind="cp",
         pos_name=pos_name,
-        t_count=target_arr.shape[0],
-        force_key="gt_cp",
-        artifact_label="cp_features",
+        t_count=image_arr.shape[0],
+        force_key=f"{ctx.side}_cp",
+        artifact_label=f"{label_prefix}cp_features",
         cache_kwargs={},
-        compute_fn=lambda t: cp_target_regionprops(target_arr[t], cell_segmentation_arr[t], ctx.spacing),
+        compute_fn=lambda t: cp_target_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing),
     )
 
     if ctx.enabled and manifest_updated:
-        _update_manifest_entry(
-            ctx.manifest,
-            ["cp_features"],
-            {"path": "features/cp.zarr", "spacing": ctx.spacing, "built_at": built_at_now()},
-        )
+        entry: dict[str, Any] = {
+            "path": "features/cp.zarr",
+            "spacing": ctx.spacing,
+            "built_at": built_at_now(),
+        }
+        if ctx.side == "pred":
+            entry["source"] = "prediction"
+        _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
         _add_position(ctx.manifest, ["cp_features"], pos_name)
         ctx.mark_manifest_dirty()
 
     return per_t
 
 
-def fov_pred_cp_features(
+def fov_deep_features(
     ctx: _CacheContext,
     pos_name: str,
-    prediction_arr: np.ndarray,
-    cell_segmentation_arr: np.ndarray,
-) -> list[np.ndarray]:
-    """Return prediction-side CP regionprops per timepoint, loading from cache or computing+writing."""
-    _ensure_cache_side(ctx, "pred")
-    per_t, manifest_updated = _load_or_compute_feature_timepoints(
-        ctx,
-        kind="cp",
-        pos_name=pos_name,
-        t_count=prediction_arr.shape[0],
-        force_key="pred_cp",
-        artifact_label="pred_cp_features",
-        cache_kwargs={},
-        compute_fn=lambda t: cp_pred_regionprops(prediction_arr[t], cell_segmentation_arr[t], ctx.spacing),
-    )
-
-    if ctx.enabled and manifest_updated:
-        _update_manifest_entry(
-            ctx.manifest,
-            ["cp_features"],
-            {
-                "path": "features/cp.zarr",
-                "spacing": ctx.spacing,
-                "source": "prediction",
-                "built_at": built_at_now(),
-            },
-        )
-        _add_position(ctx.manifest, ["cp_features"], pos_name)
-        ctx.mark_manifest_dirty()
-
-    return per_t
-
-
-def fov_gt_deep_features(
-    ctx: _CacheContext,
-    pos_name: str,
-    target_arr: np.ndarray,
+    image_arr: np.ndarray,
     cell_segmentation_arr: np.ndarray,
     feature_extractor,
     kind: FeatureKind,
 ) -> list[np.ndarray]:
-    """Return target-side deep embeddings per timepoint for one feature family.
+    """Return per-cell deep embeddings per timepoint for one FOV.
 
-    ``kind`` is ``"dinov3"``, ``"dynaclr"``, or ``"celldino"``. The cache key
-    (model name or checkpoint/weights hash) is pulled from *ctx*.
+    The cache side is taken from ``ctx.side``. ``kind`` is ``"dinov3"``,
+    ``"dynaclr"``, or ``"celldino"``; the cache key (model name or
+    checkpoint/weights hash) is pulled from *ctx*.
     """
-    _ensure_cache_side(ctx, "gt")
     return _fov_deep_features(
         ctx,
         pos_name=pos_name,
-        image_arr=target_arr,
+        image_arr=image_arr,
         kind=kind,
         compute_fn=lambda t: deep_target_features(
-            target_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
-        ),
-    )
-
-
-def fov_pred_deep_features(
-    ctx: _CacheContext,
-    pos_name: str,
-    prediction_arr: np.ndarray,
-    cell_segmentation_arr: np.ndarray,
-    feature_extractor,
-    kind: FeatureKind,
-) -> list[np.ndarray]:
-    """Return prediction-side deep embeddings per timepoint for one feature family."""
-    _ensure_cache_side(ctx, "pred")
-    return _fov_deep_features(
-        ctx,
-        pos_name=pos_name,
-        image_arr=prediction_arr,
-        kind=kind,
-        compute_fn=lambda t: deep_pred_features(
-            prediction_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
+            image_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
         ),
     )
 

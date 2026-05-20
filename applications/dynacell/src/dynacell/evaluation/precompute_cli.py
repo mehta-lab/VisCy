@@ -22,9 +22,9 @@ from tqdm import tqdm
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
-    fov_gt_cp_features,
-    fov_gt_deep_features,
-    fov_gt_masks,
+    fov_cp_features,
+    fov_deep_features,
+    fov_masks,
     init_cache_context,
     resolve_dynaclr_encoder_cfg,
 )
@@ -120,19 +120,19 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
 
                 if build.masks:
-                    fov_gt_masks(cache_ctx, pos_name_gt, target, seg_model)
+                    fov_masks(cache_ctx, pos_name_gt, target, seg_model)
                 if build.cp:
-                    fov_gt_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
+                    fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
                 if build.dinov3:
-                    fov_gt_deep_features(
+                    fov_deep_features(
                         cache_ctx, pos_name_gt, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
                     )
                 if build.dynaclr:
-                    fov_gt_deep_features(
+                    fov_deep_features(
                         cache_ctx, pos_name_gt, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
                     )
                 if build.celldino:
-                    fov_gt_deep_features(
+                    fov_deep_features(
                         cache_ctx, pos_name_gt, target, cell_segmentation, celldino_feature_extractor, "celldino"
                     )
 

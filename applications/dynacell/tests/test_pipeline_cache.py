@@ -24,12 +24,9 @@ from dynacell.evaluation.cache import (  # noqa: E402
 from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     _resolve_force,
     flush_manifest,
-    fov_gt_cp_features,
-    fov_gt_deep_features,
-    fov_gt_masks,
-    fov_pred_cp_features,
-    fov_pred_deep_features,
-    fov_pred_masks,
+    fov_cp_features,
+    fov_deep_features,
+    fov_masks,
     init_cache_context,
 )
 
@@ -274,7 +271,7 @@ def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch
     ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((2, 3, 4, 4), dtype=np.float32)
 
-    masks = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
+    masks = fov_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
     assert masks.shape == target.shape
     assert masks.dtype == bool
     assert masks.all()
@@ -305,7 +302,7 @@ def test_fov_gt_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> No
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((2, 3, 4, 4), dtype=np.float32)
-    result = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
+    result = fov_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
 
     np.testing.assert_array_equal(result, masks)
     assert call_count["n"] == 0
@@ -330,7 +327,7 @@ def test_fov_pred_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> 
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")
     prediction = np.zeros((2, 3, 4, 4), dtype=np.float32)
-    result = fov_pred_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
+    result = fov_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
 
     np.testing.assert_array_equal(result, masks)
     assert call_count["n"] == 0
@@ -352,7 +349,7 @@ def test_fov_gt_masks_force_recompute_overrides_cache(tmp_path: Path, monkeypatc
     )
     ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((1, 2, 3, 3), dtype=np.float32)
-    result = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
+    result = fov_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
 
     # Recomputed value is all-False (segment returned zeros), overwriting the cached all-True.
     assert result.shape == target.shape
@@ -376,7 +373,7 @@ def test_fov_gt_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypatc
     ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((1, 2, 3, 3), dtype=np.float32)
     with pytest.raises(StaleCacheError, match="organelle_masks"):
-        fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
+        fov_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
 
 
 def test_fov_pred_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypatch) -> None:
@@ -393,7 +390,7 @@ def test_fov_pred_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypa
     ctx = init_cache_context(cfg, side="pred")
     prediction = np.zeros((1, 2, 3, 3), dtype=np.float32)
     with pytest.raises(StaleCacheError, match="pred_organelle_masks"):
-        fov_pred_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
+        fov_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
 
 
 def test_fov_gt_masks_no_cache_always_computes(tmp_path: Path, monkeypatch) -> None:
@@ -403,7 +400,7 @@ def test_fov_gt_masks_no_cache_always_computes(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
     ctx = init_cache_context(_make_config(), side="gt")
     target = np.zeros((1, 2, 3, 3), dtype=np.float32)
-    masks = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
+    masks = fov_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
     assert masks.all()
 
 
@@ -414,7 +411,7 @@ def test_flush_manifest_persists_entries(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="gt")
-    fov_gt_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
+    fov_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
     flush_manifest(ctx)
 
     reloaded = load_manifest(cache_paths(tmp_path))
@@ -431,7 +428,7 @@ def test_fov_pred_masks_writes_manifest_source(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")
-    fov_pred_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
+    fov_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
     flush_manifest(ctx)
 
     reloaded = load_manifest(cache_paths(tmp_path))
@@ -466,7 +463,7 @@ def test_fov_gt_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
     target = np.zeros((2, 1, 4, 4), dtype=np.float32)
     cell_seg = np.zeros((2, 1, 4, 4), dtype=np.int32)
 
-    results = fov_gt_deep_features(ctx, pos_name, target, cell_seg, ExplodingExtractor(), "dinov3")
+    results = fov_deep_features(ctx, pos_name, target, cell_seg, ExplodingExtractor(), "dinov3")
     assert len(results) == 2
     np.testing.assert_array_equal(results[0], precomputed)
     np.testing.assert_array_equal(results[1], precomputed + 1)
@@ -496,7 +493,7 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
     prediction = np.zeros((2, 1, 4, 4), dtype=np.float32)
     cell_seg = np.zeros((2, 1, 4, 4), dtype=np.int32)
 
-    results = fov_pred_deep_features(ctx, pos_name, prediction, cell_seg, ExplodingExtractor(), "dinov3")
+    results = fov_deep_features(ctx, pos_name, prediction, cell_seg, ExplodingExtractor(), "dinov3")
     assert len(results) == 2
     np.testing.assert_array_equal(results[0], precomputed)
     np.testing.assert_array_equal(results[1], precomputed + 1)
@@ -509,16 +506,16 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
         del cell_seg, spacing
         return np.full((2, 3), float(target.sum()), dtype=np.float32)
 
-    # Patch the globals of fov_gt_cp_features itself — robust against sys.modules
+    # Patch the globals of fov_cp_features itself — robust against sys.modules
     # churn from other tests (e.g. test_lazy_init.py) that pop dynacell modules.
-    monkeypatch.setitem(fov_gt_cp_features.__globals__, "cp_target_regionprops", fake_cp)
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_target_regionprops", fake_cp)
 
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="gt")
     target = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
     cell_seg = np.ones_like(target, dtype=np.int32)
 
-    results = fov_gt_cp_features(ctx, "A/1/0", target, cell_seg)
+    results = fov_cp_features(ctx, "A/1/0", target, cell_seg)
     assert len(results) == 2
     flush_manifest(ctx)
     paths = cache_paths(tmp_path)
@@ -530,20 +527,20 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
-    """Prediction CP feature miss computes via cp_pred_regionprops and writes per timepoint."""
+    """Prediction CP feature miss computes via cp_target_regionprops (side-agnostic) and writes per timepoint."""
 
     def fake_cp(prediction, cell_seg, spacing):
         del cell_seg, spacing
         return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
 
-    monkeypatch.setitem(fov_pred_cp_features.__globals__, "cp_pred_regionprops", fake_cp)
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_target_regionprops", fake_cp)
 
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")
     prediction = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
     cell_seg = np.ones_like(prediction, dtype=np.int32)
 
-    results = fov_pred_cp_features(ctx, "A/1/0", prediction, cell_seg)
+    results = fov_cp_features(ctx, "A/1/0", prediction, cell_seg)
     assert len(results) == 2
     flush_manifest(ctx)
     paths = cache_paths(tmp_path)
