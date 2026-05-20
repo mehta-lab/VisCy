@@ -81,6 +81,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
 
     cache_ctx = init_cache_context(
         config,
+        side="gt",
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,

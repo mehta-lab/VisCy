@@ -42,7 +42,6 @@ from dynacell.evaluation.pipeline_cache import (
     fov_pred_deep_features,
     fov_pred_masks,
     init_cache_context,
-    init_pred_cache_context,
     resolve_dynaclr_encoder_cfg,
 )
 from dynacell.evaluation.utils import plot_metrics
@@ -152,13 +151,15 @@ def evaluate_predictions(config: DictConfig):
 
     cache_ctx = init_cache_context(
         config,
+        side="gt",
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,
         celldino_weights_path=celldino_weights_path,
     )
-    pred_cache_ctx = init_pred_cache_context(
+    pred_cache_ctx = init_cache_context(
         config,
+        side="pred",
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,

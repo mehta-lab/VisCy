@@ -110,17 +110,24 @@ def _ensure_cache_side(ctx: _CacheContext, expected: Literal["gt", "pred"]) -> N
 def init_cache_context(
     config: DictConfig,
     *,
+    side: Literal["gt", "pred"],
     dinov3_model_name: str | None = None,
     dynaclr_ckpt_path: str | None = None,
     dynaclr_encoder_cfg: dict[str, Any] | None = None,
     celldino_weights_path: str | None = None,
 ) -> _CacheContext:
-    """Open and validate the GT cache for the current run.
+    """Open and validate the *side*-specific artifact cache for the run.
 
     Parameters
     ----------
     config
         Full Hydra config.
+    side
+        ``"gt"`` opens the GT-side cache at ``io.gt_cache_dir``; ``"pred"``
+        opens the prediction-side cache at ``io.pred_cache_dir``. The GT
+        cache is mandatory when ``io.require_complete_cache=true``; the pred
+        cache stays opt-in (a missing ``io.pred_cache_dir`` returns a
+        disabled context).
     dinov3_model_name
         DINOv3 pretrained name; ``None`` when feature metrics are disabled.
     dynaclr_ckpt_path
@@ -133,8 +140,7 @@ def init_cache_context(
     """
     io = config.io
     force = _resolve_force(config.force_recompute)
-    require_complete = bool(io.require_complete_cache)
-
+    require_complete_requested = bool(io.require_complete_cache)
     spacing = list(config.pixel_metrics.spacing)
     patch_size = int(config.feature_metrics.patch_size)
 
@@ -142,145 +148,66 @@ def init_cache_context(
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
     celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
 
-    if io.gt_cache_dir is None:
-        if require_complete:
+    cache_dir_key = "gt_cache_dir" if side == "gt" else "pred_cache_dir"
+    cache_dir = OmegaConf.select(config, f"io.{cache_dir_key}", default=None)
+
+    base_kwargs: dict[str, Any] = dict(
+        force=force,
+        target_name=config.target_name,
+        spacing=spacing,
+        patch_size=patch_size,
+        dinov3_model_name=dinov3_model_name,
+        dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
+        dynaclr_encoder_sha12=dynaclr_encoder_sha12,
+        celldino_weights_sha12=celldino_weights_sha12,
+    )
+
+    if cache_dir is None:
+        if side == "gt" and require_complete_requested:
             raise ValueError("io.require_complete_cache=true requires io.gt_cache_dir to be set")
-        return _CacheContext(
-            paths=None,
-            manifest={},
-            force=force,
-            require_complete=False,
-            side="gt",
-            target_name=config.target_name,
-            spacing=spacing,
-            patch_size=patch_size,
-            dinov3_model_name=dinov3_model_name,
-            dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
-            dynaclr_encoder_sha12=dynaclr_encoder_sha12,
-            celldino_weights_sha12=celldino_weights_sha12,
-        )
+        return _CacheContext(paths=None, manifest={}, require_complete=False, side=side, **base_kwargs)
 
-    paths = cache_paths(Path(io.gt_cache_dir))
+    if side == "pred":
+        gt_cache_dir = OmegaConf.select(config, "io.gt_cache_dir", default=None)
+        if gt_cache_dir is not None and Path(cache_dir).expanduser().resolve(strict=False) == Path(
+            gt_cache_dir
+        ).expanduser().resolve(strict=False):
+            raise ValueError("io.pred_cache_dir must be distinct from io.gt_cache_dir")
+
+    paths = cache_paths(Path(cache_dir))
     manifest = load_manifest(paths)
 
-    cell_seg_path = str(io.cell_segmentation_path) if io.cell_segmentation_path is not None else None
-    check_cache_identity(
-        manifest,
-        source="gt",
-        plate_path=str(io.gt_path),
-        channel_name=str(io.gt_channel_name),
-        cell_segmentation_path=cell_seg_path,
-    )
-    seed_cache_identity(
-        manifest,
-        source="gt",
-        plate_path=str(io.gt_path),
-        channel_name=str(io.gt_channel_name),
-        cell_segmentation_path=cell_seg_path,
-    )
-
-    ctx = _CacheContext(
-        paths=paths,
-        manifest=manifest,
-        force=force,
-        require_complete=require_complete,
-        side="gt",
-        target_name=config.target_name,
-        spacing=spacing,
-        patch_size=patch_size,
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
-        dynaclr_encoder_sha12=dynaclr_encoder_sha12,
-        celldino_weights_sha12=celldino_weights_sha12,
-    )
-    _validate_artifact_params(ctx)
-    return ctx
-
-
-def init_pred_cache_context(
-    config: DictConfig,
-    *,
-    dinov3_model_name: str | None = None,
-    dynaclr_ckpt_path: str | None = None,
-    dynaclr_encoder_cfg: dict[str, Any] | None = None,
-    celldino_weights_path: str | None = None,
-) -> _CacheContext:
-    """Open and validate the prediction-side cache for the current run.
-
-    ``io.pred_cache_dir=null`` disables prediction artifact caching. When a
-    pred cache dir is configured, it must be distinct from ``io.gt_cache_dir``
-    because both caches use the same artifact layout under their respective
-    roots.
-    """
-    io = config.io
-    force = _resolve_force(config.force_recompute)
-    pred_cache_dir = OmegaConf.select(config, "io.pred_cache_dir", default=None)
-    gt_cache_dir = OmegaConf.select(config, "io.gt_cache_dir", default=None)
-
-    spacing = list(config.pixel_metrics.spacing)
-    patch_size = int(config.feature_metrics.patch_size)
-
-    dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
-    dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
-    celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
-
-    if pred_cache_dir is None:
-        return _CacheContext(
-            paths=None,
-            manifest={},
-            force=force,
-            require_complete=False,
-            side="pred",
-            target_name=config.target_name,
-            spacing=spacing,
-            patch_size=patch_size,
-            dinov3_model_name=dinov3_model_name,
-            dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
-            dynaclr_encoder_sha12=dynaclr_encoder_sha12,
-            celldino_weights_sha12=celldino_weights_sha12,
-        )
-
-    if gt_cache_dir is not None and Path(pred_cache_dir).expanduser().resolve(strict=False) == Path(
-        gt_cache_dir
-    ).expanduser().resolve(strict=False):
-        raise ValueError("io.pred_cache_dir must be distinct from io.gt_cache_dir")
-
-    paths = cache_paths(Path(pred_cache_dir))
-    manifest = load_manifest(paths)
-    if manifest.get("gt") is not None:
+    other_side = "gt" if side == "pred" else "pred"
+    if manifest.get(other_side) is not None:
         raise StaleCacheError(
-            f"io.pred_cache_dir={pred_cache_dir!r} contains a GT cache manifest; use a separate prediction cache dir"
+            f"io.{cache_dir_key}={cache_dir!r} contains a {other_side.upper()} cache manifest; "
+            f"use a separate {side} cache dir"
         )
 
     cell_seg_path = str(io.cell_segmentation_path) if io.cell_segmentation_path is not None else None
+    plate_path = str(io.gt_path if side == "gt" else io.pred_path)
+    channel_name = str(io.gt_channel_name if side == "gt" else io.pred_channel_name)
     check_cache_identity(
         manifest,
-        source="pred",
-        plate_path=str(io.pred_path),
-        channel_name=str(io.pred_channel_name),
+        source=side,
+        plate_path=plate_path,
+        channel_name=channel_name,
         cell_segmentation_path=cell_seg_path,
     )
     seed_cache_identity(
         manifest,
-        source="pred",
-        plate_path=str(io.pred_path),
-        channel_name=str(io.pred_channel_name),
+        source=side,
+        plate_path=plate_path,
+        channel_name=channel_name,
         cell_segmentation_path=cell_seg_path,
     )
 
     ctx = _CacheContext(
         paths=paths,
         manifest=manifest,
-        force=force,
-        require_complete=bool(io.require_complete_cache),
-        side="pred",
-        target_name=config.target_name,
-        spacing=spacing,
-        patch_size=patch_size,
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
-        dynaclr_encoder_sha12=dynaclr_encoder_sha12,
-        celldino_weights_sha12=celldino_weights_sha12,
+        require_complete=require_complete_requested,
+        side=side,
+        **base_kwargs,
     )
     _validate_artifact_params(ctx)
     return ctx

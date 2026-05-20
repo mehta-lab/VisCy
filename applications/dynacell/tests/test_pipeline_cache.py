@@ -31,7 +31,6 @@ from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     fov_pred_deep_features,
     fov_pred_masks,
     init_cache_context,
-    init_pred_cache_context,
 )
 
 
@@ -144,19 +143,19 @@ def test_resolve_force_individual() -> None:
 
 def test_init_cache_disabled_when_no_cache_dir() -> None:
     """Null gt_cache_dir produces a disabled context (enabled=False)."""
-    ctx = init_cache_context(_make_config())
+    ctx = init_cache_context(_make_config(), side="gt")
     assert ctx.enabled is False
 
 
 def test_init_require_complete_without_cache_raises() -> None:
     """require_complete_cache=true without a cache dir raises ValueError."""
     with pytest.raises(ValueError, match="require_complete_cache"):
-        init_cache_context(_make_config(**{"io.require_complete_cache": True}))
+        init_cache_context(_make_config(**{"io.require_complete_cache": True}), side="gt")
 
 
 def test_init_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
     """Fresh cache dir gets gt/cell_segmentation identity fields seeded."""
-    ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}))
+    ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
     assert ctx.enabled
     assert ctx.manifest["gt"] == {"plate_path": "/tmp/gt.zarr", "channel_name": "target"}
     assert ctx.manifest["cell_segmentation"] == {"plate_path": "/tmp/seg.zarr"}
@@ -164,14 +163,14 @@ def test_init_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
 
 def test_init_pred_cache_disabled_when_no_cache_dir() -> None:
     """Null pred_cache_dir leaves prediction caching disabled, even in strict GT-cache runs."""
-    ctx = init_pred_cache_context(_make_config(**{"io.require_complete_cache": True}))
+    ctx = init_cache_context(_make_config(**{"io.require_complete_cache": True}), side="pred")
     assert ctx.enabled is False
     assert ctx.require_complete is False
 
 
 def test_init_pred_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
     """Fresh pred cache dir gets pred/cell_segmentation identity fields seeded."""
-    ctx = init_pred_cache_context(_make_config(**{"io.pred_cache_dir": str(tmp_path)}))
+    ctx = init_cache_context(_make_config(**{"io.pred_cache_dir": str(tmp_path)}), side="pred")
     assert ctx.enabled
     assert ctx.manifest["gt"] is None
     assert ctx.manifest["pred"] == {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"}
@@ -181,19 +180,20 @@ def test_init_pred_cache_seeds_identity_on_fresh_dir(tmp_path: Path) -> None:
 def test_init_pred_cache_rejects_gt_cache_dir_reuse(tmp_path: Path) -> None:
     """GT and prediction caches must not share one artifact root."""
     with pytest.raises(ValueError, match="pred_cache_dir"):
-        init_pred_cache_context(
+        init_cache_context(
             _make_config(
                 **{
                     "io.gt_cache_dir": str(tmp_path),
                     "io.pred_cache_dir": str(tmp_path),
                 }
-            )
+            ),
+            side="pred",
         )
 
 
 def test_init_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
     """Cache seeded with one channel name rejects a later run with a different name."""
-    init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}))
+    init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
     # Simulate a prior run by flushing the manifest:
     paths = cache_paths(tmp_path)
     from dynacell.evaluation.cache import save_manifest
@@ -214,7 +214,8 @@ def test_init_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
                     "io.gt_cache_dir": str(tmp_path),
                     "io.gt_channel_name": "fluorescence",
                 }
-            )
+            ),
+            side="gt",
         )
 
 
@@ -234,13 +235,14 @@ def test_init_pred_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
         },
     )
     with pytest.raises(StaleCacheError, match="pred.channel_name mismatch"):
-        init_pred_cache_context(
+        init_cache_context(
             _make_config(
                 **{
                     "io.pred_cache_dir": str(tmp_path),
                     "io.pred_channel_name": "other_prediction",
                 }
-            )
+            ),
+            side="pred",
         )
 
 
@@ -259,7 +261,7 @@ def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
         },
     )
     with pytest.raises(StaleCacheError, match="spacing mismatch"):
-        init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}))
+        init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
 
 
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
@@ -269,7 +271,7 @@ def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
 
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
-    ctx = init_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((2, 3, 4, 4), dtype=np.float32)
 
     masks = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
@@ -301,7 +303,7 @@ def test_fov_gt_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setattr(segmentation, "segment", fail_segment)
 
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
-    ctx = init_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((2, 3, 4, 4), dtype=np.float32)
     result = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
 
@@ -326,7 +328,7 @@ def test_fov_pred_masks_cache_hit_skips_segment(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(segmentation, "segment", fail_segment)
 
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
-    ctx = init_pred_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="pred")
     prediction = np.zeros((2, 3, 4, 4), dtype=np.float32)
     result = fov_pred_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
 
@@ -348,7 +350,7 @@ def test_fov_gt_masks_force_recompute_overrides_cache(tmp_path: Path, monkeypatc
             "force_recompute.gt_masks": True,
         }
     )
-    ctx = init_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((1, 2, 3, 3), dtype=np.float32)
     result = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
 
@@ -371,7 +373,7 @@ def test_fov_gt_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypatc
             "io.require_complete_cache": True,
         }
     )
-    ctx = init_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="gt")
     target = np.zeros((1, 2, 3, 3), dtype=np.float32)
     with pytest.raises(StaleCacheError, match="organelle_masks"):
         fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
@@ -388,7 +390,7 @@ def test_fov_pred_masks_require_complete_raises_on_miss(tmp_path: Path, monkeypa
             "io.require_complete_cache": True,
         }
     )
-    ctx = init_pred_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="pred")
     prediction = np.zeros((1, 2, 3, 3), dtype=np.float32)
     with pytest.raises(StaleCacheError, match="pred_organelle_masks"):
         fov_pred_masks(ctx, "A/1/0", prediction, seg_model=_FakeSegModel())
@@ -399,7 +401,7 @@ def test_fov_gt_masks_no_cache_always_computes(tmp_path: Path, monkeypatch) -> N
     import dynacell.evaluation.segmentation as segmentation
 
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
-    ctx = init_cache_context(_make_config())
+    ctx = init_cache_context(_make_config(), side="gt")
     target = np.zeros((1, 2, 3, 3), dtype=np.float32)
     masks = fov_gt_masks(ctx, "A/1/0", target, seg_model=_FakeSegModel())
     assert masks.all()
@@ -411,7 +413,7 @@ def test_flush_manifest_persists_entries(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
-    ctx = init_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="gt")
     fov_gt_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
     flush_manifest(ctx)
 
@@ -428,7 +430,7 @@ def test_fov_pred_masks_writes_manifest_source(tmp_path: Path, monkeypatch) -> N
 
     monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
-    ctx = init_pred_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="pred")
     fov_pred_masks(ctx, "A/1/0", np.zeros((1, 2, 3, 3), dtype=np.float32), seg_model=_FakeSegModel())
     flush_manifest(ctx)
 
@@ -448,7 +450,7 @@ def test_fov_gt_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
         }
     )
     # init with dinov3 model name so the ctx has it set
-    ctx = init_cache_context(cfg, dinov3_model_name="facebook/test-dinov3")
+    ctx = init_cache_context(cfg, side="gt", dinov3_model_name="facebook/test-dinov3")
 
     # Prime the cache:
     pos_name = "A/1/0"
@@ -479,7 +481,7 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
             "feature_extractor": {"dinov3": {"pretrained_model_name": "facebook/test-dinov3"}},
         }
     )
-    ctx = init_pred_cache_context(cfg, dinov3_model_name="facebook/test-dinov3")
+    ctx = init_cache_context(cfg, side="pred", dinov3_model_name="facebook/test-dinov3")
 
     pos_name = "A/1/0"
     paths = cache_paths(tmp_path)
@@ -512,7 +514,7 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(fov_gt_cp_features.__globals__, "cp_target_regionprops", fake_cp)
 
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
-    ctx = init_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="gt")
     target = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
     cell_seg = np.ones_like(target, dtype=np.int32)
 
@@ -537,7 +539,7 @@ def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setitem(fov_pred_cp_features.__globals__, "cp_pred_regionprops", fake_cp)
 
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
-    ctx = init_pred_cache_context(cfg)
+    ctx = init_cache_context(cfg, side="pred")
     prediction = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
     cell_seg = np.ones_like(prediction, dtype=np.int32)
 
