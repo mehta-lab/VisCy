@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -39,8 +40,10 @@ from dynacell.evaluation.cache import (
     write_mask,
 )
 from dynacell.evaluation.metrics import (
+    build_crops,
     cp_regionprops,
     deep_features,
+    features_from_crops,
 )
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
@@ -441,6 +444,22 @@ def _fov_masks(
     return masks
 
 
+def _kind_cache_kwargs(ctx: _CacheContext, kind: FeatureKind) -> dict[str, Any]:
+    """Per-kind kwargs for ``open_features_group``."""
+    return _deep_feature_cache_metadata(ctx, kind)[2]
+
+
+def _kind_lock_tag(kind: FeatureKind, cache_kwargs: dict[str, Any]) -> str:
+    """Per-(family, model identity) lock tag for ``_pos_write_lock``.
+
+    Shared by :func:`_load_or_compute_feature_timepoints` and
+    :func:`_flush_kind` so the per-(pos, kind) write lock is identical
+    regardless of which path produced the write.
+    """
+    kwargs_tag = "_".join(str(v) for _, v in sorted(cache_kwargs.items()))
+    return f"features_{kind}_{kwargs_tag}" if kwargs_tag else f"features_{kind}"
+
+
 def _load_or_compute_feature_timepoints(
     ctx: _CacheContext,
     *,
@@ -480,8 +499,7 @@ def _load_or_compute_feature_timepoints(
     # Lock domain: per (feature family, position). Different families have
     # separate backing zarrs, so they don't contend on each other's slots;
     # different positions within one family can write concurrently.
-    kwargs_tag = "_".join(str(v) for _, v in sorted(cache_kwargs.items()))
-    lock_tag = f"features_{kind}_{kwargs_tag}" if kwargs_tag else f"features_{kind}"
+    lock_tag = _kind_lock_tag(kind, cache_kwargs)
 
     manifest_updated = False
     with (
@@ -698,6 +716,304 @@ def _merge_manifests(on_disk: dict[str, Any], in_memory: dict[str, Any]) -> dict
             if unioned:
                 target["positions"] = unioned
     return merged
+
+
+class DeepFeatureBatcher:
+    """Accumulate per-cell crops across ``(pos_name, t)`` and flush in batches.
+
+    Owns a single side's :class:`_CacheContext`. The caller's outer position
+    scan decides which ``(pos_name, t)`` slots need work (via
+    :meth:`pending_kinds_per_t`) and feeds crops in (via :meth:`push`). When
+    the pending crop count for a backbone reaches *flush_threshold*, the
+    extractor runs over the accumulated crops, results are split by row
+    count, and per-``(pos, t)`` entries are written to the cache.
+
+    Parameters
+    ----------
+    ctx
+        The side's cache context. ``ctx.enabled`` must be ``True``.
+    extractors
+        Map from feature kind (``"dinov3" | "dynaclr" | "celldino"``) to a
+        configured extractor. Calls are routed through
+        :func:`dynacell.evaluation.metrics.features_from_crops`, which
+        accepts either a batch-capable or per-cell extractor.
+    flush_threshold
+        Pending crop count per backbone before a batched forward fires.
+    """
+
+    def __init__(
+        self,
+        ctx: _CacheContext,
+        extractors: dict[FeatureKind, Any],
+        flush_threshold: int = 256,
+    ) -> None:
+        if not ctx.enabled:
+            raise ValueError("DeepFeatureBatcher requires a cache-enabled context")
+        self.ctx = ctx
+        self.extractors = extractors
+        self.flush_threshold = flush_threshold
+        self._pending: dict[FeatureKind, list[tuple[str, int, np.ndarray]]] = {k: [] for k in extractors}
+        self._pending_counts: dict[FeatureKind, int] = {k: 0 for k in extractors}
+        # Snapshot force flags at construction. The scan reads from the
+        # snapshot, NEVER from ``ctx.force``. Mid-scan flushes that would
+        # otherwise clear ``ctx.force[...]`` cannot change the scan
+        # semantics for later positions.
+        self._force_snapshot: dict[FeatureKind, bool] = {k: ctx.force[f"{ctx.side}_{k}"] for k in extractors}
+        self._flushed_kinds: set[FeatureKind] = set()
+
+    def pending_kinds_per_t(self, pos_name: str, t_count: int) -> dict[FeatureKind, list[int]]:
+        """Lockless prefetch: return per-kind list of timepoints needing work."""
+        out: dict[FeatureKind, list[int]] = {}
+        for kind in self.extractors:
+            if self._force_snapshot[kind]:
+                out[kind] = list(range(t_count))
+                continue
+            cache_kwargs = _kind_cache_kwargs(self.ctx, kind)
+            with open_features_group(self.ctx.paths, kind, mode="r", **cache_kwargs) as group:
+                if group is None:
+                    out[kind] = list(range(t_count))
+                else:
+                    out[kind] = [t for t in range(t_count) if read_features_from_group(group, pos_name, t) is None]
+        return out
+
+    def push(
+        self,
+        pos_name: str,
+        t: int,
+        crops_stack: np.ndarray,
+        kinds: Iterable[FeatureKind],
+    ) -> None:
+        """Queue crops for the listed *kinds* at ``(pos_name, t)``.
+
+        Parameters
+        ----------
+        pos_name
+            FOV name (matches the ome-zarr position path).
+        t
+            Timepoint index.
+        crops_stack
+            Shape ``(n_cells, H, W)`` for non-empty slots or ``(0, 0, 0)``
+            sentinel for zero-cell slots.
+        kinds
+            Backbones to queue for; typically the filtered subset of
+            :meth:`pending_kinds_per_t` at this ``t``.
+        """
+        n = int(crops_stack.shape[0]) if crops_stack.size else 0
+        for kind in kinds:
+            self._pending[kind].append((pos_name, t, crops_stack))
+            self._pending_counts[kind] += n
+            if self._pending_counts[kind] >= self.flush_threshold:
+                _flush_kind(
+                    self.ctx,
+                    self.ctx.side,
+                    kind,
+                    self.extractors[kind],
+                    self._pending[kind],
+                )
+                self._flushed_kinds.add(kind)
+                self._pending[kind].clear()
+                self._pending_counts[kind] = 0
+
+    def drain(self) -> None:
+        """Flush all pending; clear force flags for kinds we populated.
+
+        The force clear is deferred to drain time so mid-scan flushes can't
+        flip scan semantics for later positions. Only kinds the batcher
+        actually flushed are cleared — kinds that had nothing to do (every
+        slot already cached) keep their force flag unchanged.
+        """
+        for kind, items in self._pending.items():
+            if items:
+                _flush_kind(
+                    self.ctx,
+                    self.ctx.side,
+                    kind,
+                    self.extractors[kind],
+                    items,
+                )
+                self._flushed_kinds.add(kind)
+                items.clear()
+                self._pending_counts[kind] = 0
+        for kind in self._flushed_kinds:
+            # Cache is now up-to-date for this kind; defang force_recompute
+            # so the downstream per-FOV path treats slots we just wrote as
+            # hits instead of re-extracting them.
+            self.ctx.force[f"{self.ctx.side}_{kind}"] = False
+
+
+def _flush_kind(
+    ctx: _CacheContext,
+    side: Literal["gt", "pred"],
+    kind: FeatureKind,
+    extractor,
+    items: list[tuple[str, int, np.ndarray]],
+) -> None:
+    """Run *extractor* on accumulated crops; split by row counts; write cache.
+
+    Calls through :func:`features_from_crops` so extractors without
+    ``extract_features_batch`` fall back to per-cell ``extract_features``.
+    Empty ``(pos, t)`` slots (zero cells) write ``np.empty((0, 0))`` to match
+    the per-FOV path's ``features_from_crops([])`` output.
+    """
+    del side  # carried for symmetry with the batcher; identity is in ctx.side
+    flat: list[np.ndarray] = []
+    counts: list[int] = []
+    for _, _, crops_stack in items:
+        n = int(crops_stack.shape[0]) if crops_stack.size else 0
+        counts.append(n)
+        if n:
+            flat.extend(crops_stack[i] for i in range(n))
+
+    feats = features_from_crops(flat, extractor)
+
+    cache_kwargs = _kind_cache_kwargs(ctx, kind)
+    lock_tag = _kind_lock_tag(kind, cache_kwargs)
+    _, _, _, manifest_keys, entry = _deep_feature_cache_metadata(ctx, kind)
+
+    by_pos: dict[str, list[tuple[int, np.ndarray]]] = {}
+    cursor = 0
+    for (pos_name, t, _), n in zip(items, counts):
+        if n:
+            chunk = feats[cursor : cursor + n]
+        else:
+            # Empty-cell slot writes (0, 0) — same as features_from_crops([]).
+            # NEVER write (0, feature_dim); that would diverge from the per-FOV
+            # path and break cache equivalence.
+            chunk = np.empty((0, 0), dtype=np.float32)
+        by_pos.setdefault(pos_name, []).append((t, chunk))
+        cursor += n
+
+    for pos_name, ts_chunks in by_pos.items():
+        with (
+            _pos_write_lock(ctx, lock_tag, pos_name),
+            open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group,
+        ):
+            for t, chunk in ts_chunks:
+                write_features_to_group(group, pos_name, t, chunk)
+        _update_manifest_entry(ctx.manifest, manifest_keys, entry)
+        _add_position(ctx.manifest, manifest_keys, pos_name)
+        ctx.mark_manifest_dirty()
+
+    # Persist manifest incrementally so an interrupted precompute leaves
+    # on-disk state consistent with the zarr writes above.
+    flush_manifest(ctx)
+
+
+def precompute_deep_features(
+    sides: dict[Literal["gt", "pred"], _CacheContext],
+    side_positions: dict[Literal["gt", "pred"], list[tuple[str, Any]]],
+    side_channel_names: dict[Literal["gt", "pred"], str],
+    seg_positions: list[tuple[str, Any]],
+    extractors: dict[FeatureKind, Any],
+    *,
+    flush_threshold: int = 256,
+) -> None:
+    """Batched precompute of deep features across all FOVs/timepoints.
+
+    Iterates positions in lockstep across the configured sides, loads
+    ``cell_seg`` once per position (shared across sides), loads each side's
+    image once, builds 2-D crops, and pushes to per-side
+    :class:`DeepFeatureBatcher` instances.
+
+    This function never raises on cold-cache misses — it IS the cache
+    builder. Whether to RUN precompute under ``ctx.require_complete`` is a
+    policy decision made by the caller.
+
+    Parameters
+    ----------
+    sides
+        Per-side ``_CacheContext`` map. Sides with ``not ctx.enabled`` are
+        skipped silently.
+    side_positions
+        Per-side ome-zarr position lists. Length must equal
+        ``len(seg_positions)`` and pos names must match across sides + seg.
+    side_channel_names
+        Per-side channel name used to index the image arrays.
+    seg_positions
+        Cell-segmentation ome-zarr position list.
+    extractors
+        Map from feature kind to a configured extractor.
+    flush_threshold
+        Crops accumulated per (side, backbone) before a batched forward fires.
+
+    Raises
+    ------
+    ValueError
+        If any side's positions are misaligned with ``seg_positions`` by
+        name or length, or if any ``pos_seg`` is ``None``.
+    """
+    active = {s: ctx for s, ctx in sides.items() if ctx.enabled}
+    if not active:
+        return
+
+    # Validate paired-position alignment upfront so we don't write crops to
+    # the wrong cache slot if names disagree.
+    for side, positions in side_positions.items():
+        if side not in active:
+            continue
+        if len(positions) != len(seg_positions):
+            raise ValueError(f"Position count mismatch: {side}={len(positions)} vs seg={len(seg_positions)}")
+        for (pos_name, _), (seg_name, _) in zip(positions, seg_positions):
+            if pos_name != seg_name:
+                raise ValueError(f"Position name mismatch: {side}={pos_name!r} vs seg={seg_name!r}")
+    if len(active) > 1:
+        names_by_side = {s: [n for n, _ in side_positions[s]] for s in active}
+        ref_side, ref_names = next(iter(names_by_side.items()))
+        for s, names in names_by_side.items():
+            if names != ref_names:
+                raise ValueError(f"Position name mismatch between sides: {ref_side}={ref_names!r} vs {s}={names!r}")
+
+    batchers = {s: DeepFeatureBatcher(ctx, extractors, flush_threshold=flush_threshold) for s, ctx in active.items()}
+
+    for pos_idx, (seg_name, pos_seg) in enumerate(seg_positions):
+        del seg_name
+        if pos_seg is None:
+            raise ValueError("cell_segmentation_path is required for deep feature precompute")
+
+        # Metadata-only T from the zarr array shape; no I/O.
+        t_count = int(pos_seg.data.shape[0])
+
+        # Walk every active side WITHOUT loading any arrays first. Only
+        # materialize cell_seg + image arrays once at least one side has
+        # missing slots — warm-cache runs skip the I/O entirely.
+        work_per_side: dict[str, dict] = {}
+        for side, ctx in active.items():
+            pos_name, pos = side_positions[side][pos_idx]
+            side_t = int(pos.data.shape[0])
+            if side_t != t_count:
+                raise ValueError(
+                    f"Timepoint count mismatch at {pos_name!r}: {side}.image T={side_t} vs cell_seg T={t_count}"
+                )
+            needs = batchers[side].pending_kinds_per_t(pos_name, t_count)
+            ts_needed = sorted({t for ts in needs.values() for t in ts})
+            if ts_needed:
+                work_per_side[side] = {
+                    "pos_name": pos_name,
+                    "pos": pos,
+                    "needs": needs,
+                    "ts_needed": ts_needed,
+                }
+
+        if not work_per_side:
+            continue
+
+        cell_seg = np.asarray(pos_seg.data[:, 0])
+        for side, work in work_per_side.items():
+            ctx = active[side]
+            pos = work["pos"]
+            pos_name = work["pos_name"]
+            needs = work["needs"]
+            ts_needed = work["ts_needed"]
+            channel_index = pos.get_channel_index(side_channel_names[side])
+            image = np.asarray(pos.data[:, channel_index])
+            for t in ts_needed:
+                crops = build_crops(image[t], cell_seg[t], ctx.patch_size)
+                crops_stack = np.stack(crops, axis=0) if crops else np.empty((0, 0, 0), dtype=np.float32)
+                kinds_for_t = [k for k in extractors if t in needs[k]]
+                batchers[side].push(pos_name, t, crops_stack, kinds_for_t)
+
+    for batcher in batchers.values():
+        batcher.drain()
 
 
 def resolve_dynaclr_encoder_cfg(config: DictConfig) -> dict[str, Any] | None:
