@@ -326,20 +326,14 @@ def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np
     return pred[valid], target[valid]
 
 
-def cp_target_regionprops(target, cell_segmentation, spacing):
-    """GT-side raw CP regionprops, shape ``(n_cells, n_props_raw)``.
+def cp_regionprops(image, cell_segmentation, spacing):
+    """Raw CP regionprops for one image and its cell segmentation.
 
-    Cacheable per ``(gt_path, cell_segmentation_path, spacing)`` since no
-    prediction data is involved.
+    Returns an array of shape ``(n_cells, n_props_raw)``. Same body for GT
+    and prediction sides — *image* is min/max normalized before extraction.
     """
     _require_cubic()
-    return _cp_raw_regionprops(_minmax_norm(target), cell_segmentation, spacing)
-
-
-def cp_pred_regionprops(prediction, cell_segmentation, spacing):
-    """Prediction-side raw CP regionprops, shape ``(n_cells, n_props_raw)``."""
-    _require_cubic()
-    return _cp_raw_regionprops(_minmax_norm(prediction), cell_segmentation, spacing)
+    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing)
 
 
 def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):
@@ -401,45 +395,24 @@ def features_from_crops(crops, feature_extractor):
     return np.stack(feats, axis=0)
 
 
-def build_pred_crops(prediction, cell_segmentation, patch_size):
-    """Compute the 2-D max-z projection + per-cell crops on the prediction side.
+def build_crops(image, cell_segmentation, patch_size):
+    """Compute the 2-D max-z projection + per-cell crops for one image.
 
     Shared by every deep-feature extractor in the eval pipeline so the
     max-projection, cell iteration, and crop construction run once per
     (FOV, timepoint) instead of once per backbone.
     """
-    if prediction.shape != cell_segmentation.shape:
-        raise ValueError(
-            f"Shape mismatch: prediction {prediction.shape} vs cell_segmentation {cell_segmentation.shape}"
-        )
-    prediction_2d = _minmax_norm(np.max(prediction, axis=0))
-    return _build_per_cell_crops_2d(prediction_2d, cell_segmentation, patch_size)
+    if image.shape != cell_segmentation.shape:
+        raise ValueError(f"Shape mismatch: image {image.shape} vs cell_segmentation {cell_segmentation.shape}")
+    image_2d = _minmax_norm(np.max(image, axis=0))
+    return _build_per_cell_crops_2d(image_2d, cell_segmentation, patch_size)
 
 
-def build_target_crops(target, cell_segmentation, patch_size):
-    """Compute the 2-D max-z projection + per-cell crops on the GT side."""
-    if target.shape != cell_segmentation.shape:
-        raise ValueError(f"Shape mismatch: target {target.shape} vs cell_segmentation {cell_segmentation.shape}")
-    target_2d = _minmax_norm(np.max(target, axis=0))
-    return _build_per_cell_crops_2d(target_2d, cell_segmentation, patch_size)
+def deep_features(image, cell_segmentation, feature_extractor, patch_size):
+    """Per-cell deep embeddings for one image, shape ``(n_cells, feature_dim)``.
 
-
-def deep_target_features(target, cell_segmentation, feature_extractor, patch_size):
-    """GT-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
-
-    Cacheable per ``(gt_path, cell_segmentation_path, patch_size, feature_extractor_identity)``.
-    Backward-compat wrapper: prefer :func:`build_target_crops` +
-    :func:`features_from_crops` when the same crops feed multiple extractors.
+    Prefer :func:`build_crops` + :func:`features_from_crops` when the same
+    crops feed multiple extractors.
     """
-    crops = build_target_crops(target, cell_segmentation, patch_size)
-    return features_from_crops(crops, feature_extractor)
-
-
-def deep_pred_features(prediction, cell_segmentation, feature_extractor, patch_size):
-    """Prediction-side per-cell deep embeddings, shape ``(n_cells, feature_dim)``.
-
-    Backward-compat wrapper: prefer :func:`build_pred_crops` +
-    :func:`features_from_crops` when the same crops feed multiple extractors.
-    """
-    crops = build_pred_crops(prediction, cell_segmentation, patch_size)
+    crops = build_crops(image, cell_segmentation, patch_size)
     return features_from_crops(crops, feature_extractor)

@@ -500,7 +500,7 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
 
 
 def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
-    """CP feature miss computes via cp_target_regionprops and writes per timepoint."""
+    """CP feature miss computes via cp_regionprops and writes per timepoint."""
 
     def fake_cp(target, cell_seg, spacing):
         del cell_seg, spacing
@@ -508,7 +508,7 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 
     # Patch the globals of fov_cp_features itself — robust against sys.modules
     # churn from other tests (e.g. test_lazy_init.py) that pop dynacell modules.
-    monkeypatch.setitem(fov_cp_features.__globals__, "cp_target_regionprops", fake_cp)
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
 
     cfg = _make_config(**{"io.gt_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="gt")
@@ -527,13 +527,13 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
-    """Prediction CP feature miss computes via cp_target_regionprops (side-agnostic) and writes per timepoint."""
+    """Prediction CP feature miss computes via cp_regionprops (side-agnostic) and writes per timepoint."""
 
     def fake_cp(prediction, cell_seg, spacing):
         del cell_seg, spacing
         return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
 
-    monkeypatch.setitem(fov_cp_features.__globals__, "cp_target_regionprops", fake_cp)
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
 
     cfg = _make_config(**{"io.pred_cache_dir": str(tmp_path)})
     ctx = init_cache_context(cfg, side="pred")

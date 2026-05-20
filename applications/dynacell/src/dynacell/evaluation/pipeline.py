@@ -25,10 +25,10 @@ from dynacell.evaluation.feature_select import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
-    build_pred_crops,
+    build_crops,
     calculate_microssim,
     compute_pixel_metrics,
-    cp_pred_regionprops,
+    cp_regionprops,
     drop_paired_nonfinite_rows,
     evaluate_segmentations,
     features_from_crops,
@@ -332,14 +332,12 @@ def evaluate_predictions(config: DictConfig):
                             pred_dynaclr = pred_dynaclr_per_t[t]
                             pred_celldino = pred_celldino_per_t[t] if pred_celldino_per_t is not None else None
                         else:
-                            pred_cp = cp_pred_regionprops(
-                                predict[t], cell_segmentation[t], config.pixel_metrics.spacing
-                            )
+                            pred_cp = cp_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
                             # Build the per-cell 2-D crops once per timepoint and
                             # reuse them across all 3-4 deep backbones (max-z
                             # projection + cell-iteration + crop construction
                             # are otherwise redundant per backbone).
-                            pred_crops_2d = build_pred_crops(
+                            pred_crops_2d = build_crops(
                                 predict[t], cell_segmentation[t], config.feature_metrics.patch_size
                             )
                             pred_dinov3 = features_from_crops(pred_crops_2d, dinov3_feature_extractor)

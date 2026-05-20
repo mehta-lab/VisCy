@@ -39,8 +39,8 @@ from dynacell.evaluation.cache import (
     write_mask,
 )
 from dynacell.evaluation.metrics import (
-    cp_target_regionprops,
-    deep_target_features,
+    cp_regionprops,
+    deep_features,
 )
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
@@ -510,7 +510,7 @@ def fov_cp_features(
         force_key=f"{ctx.side}_cp",
         artifact_label=f"{label_prefix}cp_features",
         cache_kwargs={},
-        compute_fn=lambda t: cp_target_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing),
+        compute_fn=lambda t: cp_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing),
     )
 
     if ctx.enabled and manifest_updated:
@@ -547,9 +547,7 @@ def fov_deep_features(
         pos_name=pos_name,
         image_arr=image_arr,
         kind=kind,
-        compute_fn=lambda t: deep_target_features(
-            image_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size
-        ),
+        compute_fn=lambda t: deep_features(image_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size),
     )
 
 
