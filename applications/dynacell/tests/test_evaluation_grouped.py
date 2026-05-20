@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from omegaconf import OmegaConf
 
 from ._eval_fixtures import (
     N_POSITIONS,
@@ -236,6 +237,57 @@ def test_grouped_mild_note_on_process_plus_cache_only(tmp_path: Path, capsys):
     assert "[grouped] note:" in out
     assert "no models actually load" in out
     assert "WARNING" not in out, f"unexpected loud warning under cache-only path: {out!r}"
+
+
+def test_grouped_rejects_require_complete_cache_override(tmp_path: Path):
+    """``io.require_complete_cache`` is a grouped invariant — overrides must raise.
+
+    The base config's ``io.require_complete_cache`` determines whether
+    ``load_eval_models`` instantiates a real ``SuperModel`` or returns
+    ``None``. Letting a condition flip this would mean the shared models
+    bundle disagrees with the condition's actual needs (None when
+    cache-miss expects a real segmenter, or loaded but never used). Guard
+    by treating it as a model-loading invariant.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["conditions"][1]["io"]["require_complete_cache"] = False
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="require_complete_cache"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
+def test_grouped_works_on_struct_mode_config(tmp_path: Path):
+    """Grouped driver must work on Hydra-composed (struct-mode) configs.
+
+    Real ``dynacell evaluate-grouped`` invocations go through
+    ``@hydra.main`` which always produces a struct-mode ``DictConfig``.
+    ``OmegaConf.merge`` propagates struct mode, so merging an overlay
+    carrying a ``name`` label (outside the schema) raises
+    ``ConfigKeyError``, and stripping ``conditions`` / ``name`` with
+    ``del`` raises ``ConfigTypeError``. The driver must escape struct
+    mode internally; this test guards against regression.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    OmegaConf.set_struct(grouped_cfg, True)
+
+    pipeline = live_pipeline_module()
+    results = pipeline.evaluate_predictions_grouped(grouped_cfg)
+    assert [name for name, _ in results] == ["cond_a", "cond_b"]
 
 
 def test_grouped_rejects_empty_conditions(tmp_path: Path):

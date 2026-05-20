@@ -1101,6 +1101,12 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
     "feature_extractor",
     "compute_feature_metrics",
     "use_gpu",
+    # require_complete_cache flips ``prepare_segmentation_model`` between
+    # "load real SuperModel" and "return None" — letting a condition
+    # override it would mean the shared seg_model bundle is wrong for that
+    # condition (None when cache-miss expects a real model, or loaded but
+    # never used). Treat as a grouped invariant.
+    "io.require_complete_cache",
 )
 
 
@@ -1115,13 +1121,16 @@ def _snapshot_field(cfg: DictConfig, cfg_field: str):
 def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
     """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
 
-    ``OmegaConf.merge`` already returns a config independent of its inputs,
-    so no upfront deep-copy is needed. The ``conditions`` field (the list
-    we're iterating over) and the per-overlay ``name`` label are stripped
-    from the result so each per-condition run sees a normal
-    single-condition config shape.
+    Hydra composition always returns struct-mode configs. ``OmegaConf.merge``
+    propagates struct mode from its first argument, so merging an overlay
+    that carries fields outside the base's schema (notably the per-condition
+    ``name`` label) raises ``ConfigKeyError``, and deleting the
+    ``conditions`` / ``name`` keys raises ``ConfigTypeError`` even when the
+    merge succeeds. The to_container round-trip below escapes struct mode
+    while still producing a config that's independent of ``base``.
     """
-    merged = OmegaConf.merge(base, OmegaConf.create(overrides))
+    base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
+    merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
     for key in ("conditions", "name"):
         if key in merged:
             del merged[key]
@@ -1219,8 +1228,10 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
 
     # Canonical baseline for invariant checks: the input config with the
     # ``conditions`` list dropped. Snapshot once; conditions are validated
-    # against this, including condition 0.
-    models_base = OmegaConf.merge(config, OmegaConf.create({}))
+    # against this, including condition 0. Round-trip through to_container
+    # to escape Hydra's struct-mode flag — ``del`` on a struct DictConfig
+    # raises ``ConfigTypeError``.
+    models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
     if "conditions" in models_base:
         del models_base["conditions"]
     base_snapshot = {field: _snapshot_field(models_base, field) for field in _MODEL_LOADING_FIELDS}
