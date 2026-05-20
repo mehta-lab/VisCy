@@ -964,11 +964,21 @@ def evaluate_predictions(config: DictConfig):
             else:
                 # executor == "process": spawn-context ProcessPoolExecutor.
                 # Workers lazy-load their own seg_model + extractors under the
-                # GPU lock; parent's copy stays loaded (used only here for
-                # checkpoint pre-warm side effect — discarded after this block).
+                # GPU lock; parent's copy was discarded after Phase-2 resolve.
+                #
+                # Streaming aggregation: futures arrive in completion order
+                # but we want deterministic per-FOV CSV / embedding NPZ row
+                # order, so the next-expected pos_name index advances
+                # opportunistically as results land. Only out-of-order
+                # FovResults stay buffered — once the expected position
+                # completes, we drain the buffer in order. Bounds peak
+                # parent-side memory to the number of out-of-order FOVs
+                # rather than the full N×seg_array (~N × 440 MB).
                 from concurrent.futures import as_completed
 
                 pos_names_in_order = [p[0] for p, _, _ in zip(pred_positions, gt_positions, seg_positions)]
+                next_idx = 0
+                buffer: dict[str, FovResult] = {}
                 with make_fov_executor(runtime) as pool:
                     if pool is None:
                         raise RuntimeError("make_fov_executor returned None for executor='process'")
@@ -978,15 +988,19 @@ def evaluate_predictions(config: DictConfig):
                         ): pos_name
                         for pos_name in pos_names_in_order
                     }
-                    results_by_pos: dict[str, FovResult] = {}
-                    for fut in tqdm(as_completed(futures), total=len(futures), desc="Processing positions"):
-                        pos_name = futures[fut]
-                        results_by_pos[pos_name] = fut.result()
-                # Aggregate in position order (independent of completion order)
-                # so per-FOV CSV / embedding NPZ row order is deterministic.
-                for fov_idx, pos_name in enumerate(pos_names_in_order):
-                    _aggregate(results_by_pos[pos_name])
-                    maybe_gc_collect(fov_idx, runtime.gc_collect_every_n_fovs)
+                    with tqdm(total=len(futures), desc="Processing positions") as pbar:
+                        for fut in as_completed(futures):
+                            pos_name = futures[fut]
+                            buffer[pos_name] = fut.result()
+                            # Drain in order while the next-expected position
+                            # is available, releasing seg_array refs as soon
+                            # as the aggregator's plate write completes.
+                            while next_idx < len(pos_names_in_order) and (pos_names_in_order[next_idx] in buffer):
+                                expected = pos_names_in_order[next_idx]
+                                _aggregate(buffer.pop(expected))
+                                maybe_gc_collect(next_idx, runtime.gc_collect_every_n_fovs)
+                                next_idx += 1
+                                pbar.update(1)
         finally:
             if seg_plate is not None:
                 seg_plate.close()
