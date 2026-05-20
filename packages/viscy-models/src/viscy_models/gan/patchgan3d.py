@@ -74,7 +74,6 @@ class PatchGAN3D(nn.Module):
         c3 = base_channels * 4
         c4 = base_channels * 8
 
-        # Layer 1: stride (1, 2, 2), no norm, LeakyReLU
         self.layer1 = nn.Sequential(
             _maybe_spectral_norm(
                 nn.Conv3d(in_channels, c1, kernel_size=4, stride=(1, 2, 2), padding=1),
@@ -83,7 +82,6 @@ class PatchGAN3D(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 2: stride (1, 2, 2), InstanceNorm + LeakyReLU
         self.layer2 = nn.Sequential(
             _maybe_spectral_norm(
                 nn.Conv3d(c1, c2, kernel_size=4, stride=(1, 2, 2), padding=1),
@@ -93,7 +91,6 @@ class PatchGAN3D(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 3: stride (2, 2, 2), InstanceNorm + LeakyReLU
         self.layer3 = nn.Sequential(
             _maybe_spectral_norm(
                 nn.Conv3d(c2, c3, kernel_size=4, stride=(2, 2, 2), padding=1),
@@ -103,7 +100,6 @@ class PatchGAN3D(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 4: stride (2, 2, 2), InstanceNorm + LeakyReLU
         self.layer4 = nn.Sequential(
             _maybe_spectral_norm(
                 nn.Conv3d(c3, c4, kernel_size=4, stride=(2, 2, 2), padding=1),
@@ -113,8 +109,7 @@ class PatchGAN3D(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 5: stride 1, kernel (1, 4, 4) so it stays valid when Z=1.
-        # Raw logits — no norm, no activation.
+        # Final kernel is (1, 4, 4) so it stays valid when Z=1; emits raw logits.
         self.layer5 = _maybe_spectral_norm(
             nn.Conv3d(c4, 1, kernel_size=(1, 4, 4), stride=1, padding=(0, 1, 1)),
             use_spectral_norm,

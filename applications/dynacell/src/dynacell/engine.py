@@ -14,10 +14,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
-from torch.optim import AdamW
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
 from viscy_data import Sample
@@ -64,6 +62,13 @@ def _aggregate_validation_losses(
     total_n = torch.stack(dl_totals).sum()
     weighted = torch.stack([m * n for m, n in zip(dl_means, dl_totals)]).sum()
     return weighted / total_n
+
+
+def _log_samples(module: LightningModule, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
+    """Log a list of detached image samples to the experiment logger at rank 0."""
+    if not imgs or not module.trainer.is_global_zero or module.logger is None:
+        return
+    log_image_grid(module.logger, key, imgs, module.current_epoch)
 
 
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
@@ -335,13 +340,13 @@ class DynacellUNet(LightningModule):
 
     def on_train_epoch_end(self):
         """Log training image samples."""
-        self._log_samples("train_samples", self.training_step_outputs)
+        _log_samples(self, "train_samples", self.training_step_outputs)
         self.training_step_outputs = []
 
     def on_validation_epoch_end(self):
         """Log validation samples and aggregate loss weighted by batch size."""
         super().on_validation_epoch_end()
-        self._log_samples("val_samples", self.validation_step_outputs)
+        _log_samples(self, "val_samples", self.validation_step_outputs)
         if self.validation_losses:
             self.log("loss/validate", _aggregate_validation_losses(self.validation_losses), sync_dist=True)
         self.validation_step_outputs.clear()
@@ -357,12 +362,6 @@ class DynacellUNet(LightningModule):
             warmup_steps=self.warmup_steps,
             warmup_multiplier=self.warmup_multiplier,
         )
-
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        """Log image grid to the active logger."""
-        if not imgs or not self.trainer.is_global_zero or self.logger is None:
-            return
-        log_image_grid(self.logger, key, imgs, self.current_epoch)
 
     def predict_sliding_window(self, source: Tensor, overlap_size: tuple[int, int, int] = (4, 256, 256)) -> Tensor:
         """Run sliding-window inference over a large input volume.
@@ -584,7 +583,7 @@ class DynacellFlowMatching(LightningModule):
 
     def on_train_epoch_end(self) -> None:
         """Log training image samples at end of epoch."""
-        self._log_samples("train_samples", self._training_step_outputs)
+        _log_samples(self, "train_samples", self._training_step_outputs)
         self._training_step_outputs = []
 
     def on_validation_epoch_end(self) -> None:
@@ -596,7 +595,7 @@ class DynacellFlowMatching(LightningModule):
                 n = min(self.log_samples_per_batch, phase_log.shape[0])
                 generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
                 gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
-                self._log_samples("val_generated_samples", gen_samples)
+                _log_samples(self, "val_generated_samples", gen_samples)
             self._val_log_batch = None
         if self._validation_losses:
             self.log("loss/validate", _aggregate_validation_losses(self._validation_losses), sync_dist=True)
@@ -677,12 +676,6 @@ class DynacellFlowMatching(LightningModule):
             warmup_steps=self.warmup_steps,
             warmup_multiplier=self.warmup_multiplier,
         )
-
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
-        """Log image grid to the active logger."""
-        if not imgs or not self.trainer.is_global_zero or self.logger is None:
-            return
-        log_image_grid(self.logger, key, imgs, self.current_epoch)
 
 
 class DynacellGAN(LightningModule):
@@ -806,8 +799,6 @@ class DynacellGAN(LightningModule):
             h, w = example_input_yx_shape
         self.example_input_array = torch.rand(1, in_channels, d, h, w)
 
-        # Mirror DynacellUNet's end-of-init weight load so Phase 4 predict
-        # leaves with ``model.init_args.ckpt_path`` actually load weights.
         if ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
@@ -877,10 +868,7 @@ class DynacellGAN(LightningModule):
         opt_d.zero_grad(set_to_none=True)
         self.manual_backward(d_loss)
         opt_d.step()
-        # Clear D grads after the D update so the G-step backward starts
-        # from a clean slate on D; this makes the "no D grads after G step"
-        # invariant verifiable in tests and avoids carrying D-step grads
-        # forward should anything else (a callback, etc.) inspect ``.grad``.
+        # Clear D grads so the no-D-grads-after-G-step invariant is verifiable.
         opt_d.zero_grad(set_to_none=True)
 
         # --- G step (G updates; D frozen, fwd-only) ---
@@ -900,7 +888,6 @@ class DynacellGAN(LightningModule):
         sch_g.step()
         sch_d.step()
 
-        # Accumulate samples for image grid logging — mirror DynacellUNet.
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
 
@@ -957,13 +944,13 @@ class DynacellGAN(LightningModule):
 
     def on_train_epoch_end(self) -> None:
         """Log accumulated training image samples and reset the buffer."""
-        self._log_samples("train_samples", self.training_step_outputs)
+        _log_samples(self, "train_samples", self.training_step_outputs)
         self.training_step_outputs = []
 
     def on_validation_epoch_end(self) -> None:
         """Log validation samples and the aggregated ``loss/validate`` alias."""
         super().on_validation_epoch_end()
-        self._log_samples("val_samples", self.validation_step_outputs)
+        _log_samples(self, "val_samples", self.validation_step_outputs)
         if self.validation_losses:
             self.log(
                 "loss/validate",
@@ -974,52 +961,24 @@ class DynacellGAN(LightningModule):
         self.validation_losses.clear()
 
     def configure_optimizers(self):
-        """Configure two AdamW optimizers and step-interval WarmupCosine schedulers.
-
-        ``configure_adamw_scheduler`` already builds a WarmupCosine
-        ``{"scheduler", "interval": "step"}`` dict, so we call it once per
-        optimizer and concatenate the resulting single-entry lists. This
-        keeps the two-optimizer return shape Lightning expects for manual
-        optimization without re-implementing the schedule construction.
-
-        Returns
-        -------
-        tuple[list, list]
-            ``([opt_g, opt_d], [sch_g_dict, sch_d_dict])``.
-
-        Raises
-        ------
-        ValueError
-            If ``schedule`` is not ``"WarmupCosine"``.
-        """
-        if self.schedule != "WarmupCosine":
-            raise ValueError(f"DynacellGAN only supports schedule='WarmupCosine', got {self.schedule!r}")
-        # Reuse the helper rather than rebuilding the scheduler in-place so
-        # any future change to the warmup contract stays in one location.
-        # The helper returns ``[opt], [{"scheduler", "interval"}]`` for
-        # WarmupCosine — we just concatenate two such pairs.
-        opt_g = AdamW(self.generator.parameters(), lr=self.lr_g)
-        opt_d = AdamW(self.discriminator.parameters(), lr=self.lr_d)
-        t_total = self.trainer.estimated_stepping_batches
-        sch_g = WarmupCosineSchedule(
-            opt_g,
+        """Build two AdamW optimizers + WarmupCosine schedulers via the shared helper."""
+        [opt_g], [sch_g] = configure_adamw_scheduler(
+            self,
+            self.generator,
+            self.lr_g,
+            self.schedule,
             warmup_steps=self.warmup_steps,
-            t_total=t_total,
             warmup_multiplier=self.warmup_multiplier,
         )
-        sch_d = WarmupCosineSchedule(
-            opt_d,
+        [opt_d], [sch_d] = configure_adamw_scheduler(
+            self,
+            self.discriminator,
+            self.lr_d,
+            self.schedule,
             warmup_steps=self.warmup_steps,
-            t_total=t_total,
             warmup_multiplier=self.warmup_multiplier,
         )
-        return (
-            [opt_g, opt_d],
-            [
-                {"scheduler": sch_g, "interval": "step"},
-                {"scheduler": sch_d, "interval": "step"},
-            ],
-        )
+        return [opt_g, opt_d], [sch_g, sch_d]
 
     def on_predict_start(self) -> None:
         """Build the divisible-pad transform matching the generator."""
@@ -1055,9 +1014,3 @@ class DynacellGAN(LightningModule):
         else:
             raise ValueError(f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image'.")
         return _center_crop_to_shape(prediction, original_shape)
-
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
-        """Log image grid to the active logger."""
-        if not imgs or not self.trainer.is_global_zero or self.logger is None:
-            return
-        log_image_grid(self.logger, key, imgs, self.current_epoch)

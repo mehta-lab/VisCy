@@ -547,7 +547,7 @@ def test_dynacell_gan_predict_step():
     assert prediction.shape == batch["source"].shape
 
 
-def test_dynacell_gan_validate_logs_alias():
+def test_dynacell_gan_validate_logs_alias(monkeypatch):
     """``on_validation_epoch_end`` logs the ``loss/validate`` weighted mean."""
     model = DynacellGAN(
         architecture="UNetViT3D",
@@ -563,7 +563,7 @@ def test_dynacell_gan_validate_logs_alias():
 
     model.log = _capture  # type: ignore[method-assign]
     # Skip the real Trainer-bound _log_samples — no logger attached here.
-    model._log_samples = lambda *args, **kwargs: None  # type: ignore[method-assign]
+    monkeypatch.setattr("dynacell.engine._log_samples", lambda *args, **kwargs: None)
 
     batch = _make_gan_batch()
     with torch.no_grad():
