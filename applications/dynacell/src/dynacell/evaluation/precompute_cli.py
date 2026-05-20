@@ -33,11 +33,25 @@ from dynacell.evaluation.pipeline_cache import (
 
 def precompute_gt_artifacts(config: DictConfig) -> None:
     """Build every GT-side artifact toggled on in ``config.build``."""
+    from dynacell.evaluation.runtime import apply_thread_budget, resolve_runtime
     from dynacell.evaluation.segmentation import prepare_segmentation_model
     from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
     if config.io.gt_cache_dir is None:
         raise ValueError("io.gt_cache_dir is required for dynacell precompute-gt")
+
+    # Precompute is single-process by design (DeepFeatureBatcher accumulates
+    # state across FOVs). Apply the thread cap but raise if the user requested
+    # FOV-level parallelism here — that belongs to evaluate_predictions only.
+    runtime = resolve_runtime(config)
+    if runtime.executor != "serial" or runtime.fov_workers != 1:
+        raise ValueError(
+            "dynacell precompute-gt does not support FOV-level parallelism. "
+            f"Got runtime.executor={runtime.executor!r}, "
+            f"runtime.fov_workers={runtime.fov_workers}. "
+            "Set runtime.executor='serial' and runtime.fov_workers=1 (or omit)."
+        )
+    apply_thread_budget(runtime.threads_per_worker)
 
     build = config.build
     build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino)

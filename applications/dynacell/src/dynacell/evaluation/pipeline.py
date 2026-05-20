@@ -155,8 +155,16 @@ def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]])
 
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
+    from dynacell.evaluation.runtime import apply_thread_budget, resolve_runtime
     from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
     from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
+
+    # Phase 1 runtime resolution: lock in executor + thread caps before any
+    # heavy work. fov_workers may be provisional when "auto"; re-resolved in
+    # Phase 2 once the position list is known (C4). threads_per_worker stays
+    # frozen across phases for parent/worker BLAS-cap consistency.
+    runtime = resolve_runtime(config)
+    apply_thread_budget(runtime.threads_per_worker)
 
     all_pixel_metrics = []
     all_mask_metrics = []

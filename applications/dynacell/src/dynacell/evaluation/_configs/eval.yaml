@@ -77,6 +77,27 @@ compute_microssim: true
 compute_feature_metrics: false
 limit_positions: null  # process first N positions; null means all
 
+# Eval runtime / parallelism. Default is bit-for-bit-current sequential behavior.
+# See applications/dynacell/CLAUDE.md "Eval runtime / parallelism" section.
+runtime:
+  # Outer FOV-level parallelism. 1 = current sequential behavior.
+  # "auto" + executor=process clamps to min(cpu_count//4, n_positions).
+  # "auto" + executor=serial resolves to 1.
+  fov_workers: 1  # int | "auto"
+
+  # BLAS/OMP/torch intra-op threads per worker process.
+  # "auto" → max(1, cpu_count // resolved_fov_workers).
+  threads_per_worker: "auto"  # int | "auto"
+
+  # FOV-loop executor. "serial" runs inline; "process" uses spawn-context
+  # ProcessPoolExecutor. Auto-demoted to "serial" if fov_workers resolves to 1.
+  executor: "serial"  # "serial" | "process"
+
+  # Per-T memory hygiene. Defaults set by C2 measurement (see commit log).
+  # Override at runtime with DYNACELL_FORCE_PER_T_HYGIENE=1 (operator escape hatch).
+  cuda_empty_cache_every_n_timepoints: 0   # 0 = off
+  gc_collect_every_n_fovs: 0               # 0 = off
+
 force_recompute:
   all: false
   gt_masks: false
