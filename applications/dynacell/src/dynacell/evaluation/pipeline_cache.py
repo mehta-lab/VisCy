@@ -45,6 +45,14 @@ from dynacell.evaluation.metrics import (
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
 
+_OTHER_SIDE: dict[Literal["gt", "pred"], Literal["gt", "pred"]] = {"gt": "pred", "pred": "gt"}
+
+# Per-side ``io.*`` field names: (cache_dir, plate_path, channel_name).
+_SIDE_IO_KEYS: dict[Literal["gt", "pred"], tuple[str, str, str]] = {
+    "gt": ("gt_cache_dir", "gt_path", "gt_channel_name"),
+    "pred": ("pred_cache_dir", "pred_path", "pred_channel_name"),
+}
+
 
 @dataclass
 class _CacheContext:
@@ -68,6 +76,16 @@ class _CacheContext:
     def enabled(self) -> bool:
         """Whether cache read/write is active for this run."""
         return self.paths is not None
+
+    @property
+    def label_prefix(self) -> str:
+        """Manifest artifact-label prefix for the pred side (empty for GT)."""
+        return "pred_" if self.side == "pred" else ""
+
+    @property
+    def source_tag(self) -> dict[str, str]:
+        """Manifest-entry tag distinguishing prediction artifacts; empty for GT."""
+        return {"source": "prediction"} if self.side == "pred" else {}
 
     def mark_manifest_dirty(self) -> None:
         """Record that the manifest has unsaved changes (next flush will persist them)."""
@@ -140,7 +158,7 @@ def init_cache_context(
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
     celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
 
-    cache_dir_key = "gt_cache_dir" if side == "gt" else "pred_cache_dir"
+    cache_dir_key, plate_key, channel_key = _SIDE_IO_KEYS[side]
     cache_dir = OmegaConf.select(config, f"io.{cache_dir_key}", default=None)
 
     base_kwargs: dict[str, Any] = dict(
@@ -169,7 +187,7 @@ def init_cache_context(
     paths = cache_paths(Path(cache_dir))
     manifest = load_manifest(paths)
 
-    other_side = "gt" if side == "pred" else "pred"
+    other_side = _OTHER_SIDE[side]
     if manifest.get(other_side) is not None:
         raise StaleCacheError(
             f"io.{cache_dir_key}={cache_dir!r} contains a {other_side.upper()} cache manifest; "
@@ -177,8 +195,8 @@ def init_cache_context(
         )
 
     cell_seg_path = str(io.cell_segmentation_path) if io.cell_segmentation_path is not None else None
-    plate_path = str(io.gt_path if side == "gt" else io.pred_path)
-    channel_name = str(io.gt_channel_name if side == "gt" else io.pred_channel_name)
+    plate_path = str(getattr(io, plate_key))
+    channel_name = str(getattr(io, channel_key))
     check_cache_identity(
         manifest,
         source=side,
@@ -208,26 +226,24 @@ def init_cache_context(
 def _validate_artifact_params(ctx: _CacheContext) -> None:
     """Raise if any existing per-artifact manifest entry disagrees with ctx params."""
     artifacts = ctx.manifest.get("artifacts", {})
-    source = {"source": "prediction"} if ctx.side == "pred" else {}
-    label_prefix = "pred_" if ctx.side == "pred" else ""
 
     masks_section = artifacts.get("organelle_masks", {})
     check_artifact_params(
         masks_section.get(ctx.target_name),
-        {"target_name": ctx.target_name, **source},
+        {"target_name": ctx.target_name, **ctx.source_tag},
         artifact_label=f"organelle_masks[{ctx.target_name}]",
     )
     check_artifact_params(
         artifacts.get("cp_features"),
-        {"spacing": ctx.spacing, **source},
-        artifact_label=f"{label_prefix}cp_features",
+        {"spacing": ctx.spacing, **ctx.source_tag},
+        artifact_label=f"{ctx.label_prefix}cp_features",
         numeric_keys=("spacing",),
     )
     if ctx.dinov3_model_name is not None:
         dinov3_section = artifacts.get("dinov3_features", {})
         check_artifact_params(
             dinov3_section.get(feature_slug(ctx.dinov3_model_name)),
-            {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **source},
+            {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
             artifact_label=f"dinov3_features[{ctx.dinov3_model_name}]",
         )
     if ctx.dynaclr_ckpt_sha12 is not None:
@@ -238,7 +254,7 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
                 "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
                 "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
                 "patch_size": ctx.patch_size,
-                **source,
+                **ctx.source_tag,
             },
             artifact_label=f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
         )
@@ -249,7 +265,7 @@ def _validate_artifact_params(ctx: _CacheContext) -> None:
             {
                 "weights_sha256_12": ctx.celldino_weights_sha12,
                 "patch_size": ctx.patch_size,
-                **source,
+                **ctx.source_tag,
             },
             artifact_label=f"celldino_features[{ctx.celldino_weights_sha12}]",
         )
@@ -333,21 +349,19 @@ def fov_masks(
     from it. When caching is disabled (``ctx.enabled == False``), the masks
     are computed fresh from *image_arr* without any cache interaction.
     """
-    label_prefix = "pred_" if ctx.side == "pred" else ""
     manifest_entry: dict[str, Any] = {
         "path": f"organelle_masks/{ctx.target_name}.zarr",
         "target_name": ctx.target_name,
         "built_at": built_at_now(),
+        **ctx.source_tag,
     }
-    if ctx.side == "pred":
-        manifest_entry["source"] = "prediction"
     return _fov_masks(
         ctx,
         pos_name=pos_name,
         image_arr=image_arr,
         seg_model=seg_model,
         force_key=f"{ctx.side}_masks",
-        artifact_label=f"{label_prefix}organelle_masks[{ctx.target_name}]",
+        artifact_label=f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
         manifest_entry=manifest_entry,
     )
 
@@ -501,14 +515,13 @@ def fov_cp_features(
     The cache side is taken from ``ctx.side``. Result is a list of ``T``
     arrays, each shape ``(n_cells_t, n_props_raw)``.
     """
-    label_prefix = "pred_" if ctx.side == "pred" else ""
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
         kind="cp",
         pos_name=pos_name,
         t_count=image_arr.shape[0],
         force_key=f"{ctx.side}_cp",
-        artifact_label=f"{label_prefix}cp_features",
+        artifact_label=f"{ctx.label_prefix}cp_features",
         cache_kwargs={},
         compute_fn=lambda t: cp_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing),
     )
@@ -518,9 +531,8 @@ def fov_cp_features(
             "path": "features/cp.zarr",
             "spacing": ctx.spacing,
             "built_at": built_at_now(),
+            **ctx.source_tag,
         }
-        if ctx.side == "pred":
-            entry["source"] = "prediction"
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
         _add_position(ctx.manifest, ["cp_features"], pos_name)
         ctx.mark_manifest_dirty()
@@ -556,13 +568,11 @@ def _deep_feature_cache_metadata(
     kind: FeatureKind,
 ) -> tuple[str, str, dict[str, Any], list[str], dict[str, Any]]:
     """Return force key, artifact label, cache kwargs, manifest path, and manifest entry."""
-    source = {"source": "prediction"} if ctx.side == "pred" else {}
-    label_prefix = "pred_" if ctx.side == "pred" else ""
     if kind == "dinov3":
         if ctx.dinov3_model_name is None:
             raise ValueError("dinov3_model_name is required for DINOv3 feature caching")
         force_key = f"{ctx.side}_dinov3"
-        artifact_label = f"{label_prefix}dinov3_features[{ctx.dinov3_model_name}]"
+        artifact_label = f"{ctx.label_prefix}dinov3_features[{ctx.dinov3_model_name}]"
         cache_kwargs = {"model_name": ctx.dinov3_model_name}
         slug = feature_slug(ctx.dinov3_model_name)
         manifest_keys = ["dinov3_features", slug]
@@ -570,14 +580,14 @@ def _deep_feature_cache_metadata(
             "path": f"features/dinov3/{slug}.zarr",
             "model_name": ctx.dinov3_model_name,
             "patch_size": ctx.patch_size,
-            **source,
+            **ctx.source_tag,
             "built_at": built_at_now(),
         }
     elif kind == "dynaclr":
         if ctx.dynaclr_ckpt_sha12 is None:
             raise ValueError("dynaclr_ckpt_sha12 is required for DynaCLR feature caching")
         force_key = f"{ctx.side}_dynaclr"
-        artifact_label = f"{label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]"
+        artifact_label = f"{ctx.label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]"
         cache_kwargs = {"ckpt_sha12": ctx.dynaclr_ckpt_sha12}
         manifest_keys = ["dynaclr_features", ctx.dynaclr_ckpt_sha12]
         entry = {
@@ -585,21 +595,21 @@ def _deep_feature_cache_metadata(
             "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
             "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
             "patch_size": ctx.patch_size,
-            **source,
+            **ctx.source_tag,
             "built_at": built_at_now(),
         }
     elif kind == "celldino":
         if ctx.celldino_weights_sha12 is None:
             raise ValueError("celldino_weights_sha12 is required for CELL-DINO feature caching")
         force_key = f"{ctx.side}_celldino"
-        artifact_label = f"{label_prefix}celldino_features[{ctx.celldino_weights_sha12}]"
+        artifact_label = f"{ctx.label_prefix}celldino_features[{ctx.celldino_weights_sha12}]"
         cache_kwargs = {"weights_sha12": ctx.celldino_weights_sha12}
         manifest_keys = ["celldino_features", ctx.celldino_weights_sha12]
         entry = {
             "path": f"features/celldino/{ctx.celldino_weights_sha12}.zarr",
             "weights_sha256_12": ctx.celldino_weights_sha12,
             "patch_size": ctx.patch_size,
-            **source,
+            **ctx.source_tag,
             "built_at": built_at_now(),
         }
     else:
