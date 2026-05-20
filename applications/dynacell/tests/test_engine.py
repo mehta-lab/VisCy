@@ -402,7 +402,6 @@ GAN_GEN_TEST_CONFIG = {
 GAN_DISC_TEST_CONFIG = {
     "in_channels": 2,
     "base_channels": 8,
-    "num_layers": 5,
     "num_scales": 2,
 }
 

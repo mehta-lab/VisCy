@@ -43,10 +43,6 @@ class PatchGAN3D(nn.Module):
         Channel count of the first conv. Subsequent convs double the channels
         up to ``base_channels * 8`` before projecting to a single logit
         channel. Default is 64.
-    num_layers : int, optional
-        Number of conv layers. Only ``num_layers=5`` is supported in v1; the
-        argument exists so future ablations can extend the network without an
-        API break.
     use_spectral_norm : bool, optional
         If True, apply ``spectral_norm`` to every conv. Default is True.
 
@@ -62,13 +58,9 @@ class PatchGAN3D(nn.Module):
         self,
         in_channels: int = 2,
         base_channels: int = 64,
-        num_layers: int = 5,
         use_spectral_norm: bool = True,
     ) -> None:
         super().__init__()
-        if num_layers != 5:
-            raise ValueError(f"PatchGAN3D only supports num_layers=5 in v1, got {num_layers}.")
-
         c1 = base_channels
         c2 = base_channels * 2
         c3 = base_channels * 4
@@ -154,8 +146,6 @@ class MultiScalePatchGAN3D(nn.Module):
         target / pred).
     base_channels : int, optional
         First-conv channel count for each ``PatchGAN3D``. Default is 64.
-    num_layers : int, optional
-        Number of conv layers per ``PatchGAN3D``. Default is 5.
     num_scales : int, optional
         Number of independent discriminators. ``num_scales=2`` is the v1
         default; ``num_scales=1`` is supported as a single-scale ablation.
@@ -174,7 +164,6 @@ class MultiScalePatchGAN3D(nn.Module):
         self,
         in_channels: int = 2,
         base_channels: int = 64,
-        num_layers: int = 5,
         num_scales: int = 2,
         use_spectral_norm: bool = True,
     ) -> None:
@@ -187,7 +176,6 @@ class MultiScalePatchGAN3D(nn.Module):
                 PatchGAN3D(
                     in_channels=in_channels,
                     base_channels=base_channels,
-                    num_layers=num_layers,
                     use_spectral_norm=use_spectral_norm,
                 )
                 for _ in range(num_scales)
