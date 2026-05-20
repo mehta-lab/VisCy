@@ -67,7 +67,7 @@ Under `executor=process`, workers return their slice of the timing log inside `F
 
 ### Reality check for process mode
 
-- The parent still loads the seg model once at `pipeline.py:171` (used for checkpoint pre-warm side-effect under `process` mode + the seg model itself under `serial` mode).
+- The parent still loads the seg model once via `load_eval_models(config)` at the start of `evaluate_predictions` in `pipeline.py` (used for checkpoint pre-warm side-effect under `process` mode + the seg model itself under `serial` mode).
 - `precompute_deep_features` (the upfront batched feature pre-fill) stays in the parent — single-pass over positions with the `DeepFeatureBatcher` cross-FOV amortization. Parallelizing precompute is a separate plan.
 - Workers cannot share open iohub plate handles or torch modules across the pickle boundary; each worker re-opens plates on first FOV.
 - `ProcessPoolExecutor.shutdown(wait=False, cancel_futures=True)` cancels queued futures only — in-flight workers continue to completion (~minutes if mid-cellpose). Ctrl-C may need `scancel` to fully release GPU memory.
@@ -110,7 +110,7 @@ uv run dynacell evaluate-grouped -c eval_grouped_a549_mantis_er
 Constraints (enforced at runtime by `_check_grouped_field_invariants`):
 - Per-condition overlays may freely override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, and carry a `name` label.
 - Overlays MUST NOT change `target_name`, `feature_extractor.*`, `compute_feature_metrics`, or `use_gpu` — those gate model loading and must be identical across conditions. Run such variants separately.
-- Each condition independently honors `_final_metrics_cache_valid` — if a condition's CSV/NPY already exist with `force_recompute.final_metrics=false`, the driver skips it and loads the cached outputs.
+- Each condition independently honors `_final_metrics_cache_valid` — if a condition's CSV/NPY already exist AND both `force_recompute.all=false` and `force_recompute.final_metrics=false`, the driver skips it and loads the cached outputs. Either flag set to `true` bypasses the cache.
 
 Process-mode caveat: under `runtime.executor=process`, the parent's shared `EvalModels` is passed to `evaluate_predictions(..., models=...)` so the parent-side pre-warm is amortized, but each condition still spawns a fresh `ProcessPoolExecutor` whose workers re-load their own model copies. Use `executor=serial` to maximize the amortization benefit. The driver tiers its message based on the cache mode:
 
