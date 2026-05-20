@@ -399,6 +399,16 @@ def _worker_initializer(threads: int, gpu_lock_path: str | None) -> None:
     _GPU_LOCK_PATH = gpu_lock_path
 
 
+def is_worker() -> bool:
+    """Return True if called from a spawn worker (post-``_worker_initializer``).
+
+    Used to suppress inner per-T tqdm bars in workers — under
+    ``fov_workers>1`` the N concurrent inner bars interleave on the parent's
+    stderr unreadably. The outer per-FOV tqdm (in the parent) stays visible.
+    """
+    return _GPU_LOCK_PATH is not None
+
+
 @contextmanager
 def gpu_serialization_lock() -> Iterator[None]:
     """Serialize GPU operations across workers via an ``fcntl.flock``.

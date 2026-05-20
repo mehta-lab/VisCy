@@ -226,12 +226,16 @@ def _process_one_fov(
     from dynacell.evaluation.runtime import (
         get_timings,
         gpu_serialization_lock,
+        is_worker,
         maybe_empty_cuda_cache,
         region_timer,
     )
     from dynacell.evaluation.segmentation import segment
 
     timings_start = len(get_timings())
+    # Inner per-T tqdm is noise when N workers each emit it to the shared
+    # parent stderr — outer per-FOV tqdm in the parent stays visible either way.
+    suppress_inner_tqdm = is_worker()
 
     pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
     gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
@@ -299,7 +303,7 @@ def _process_one_fov(
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
 
-    for t in tqdm(range(T), desc="Processing timepoints", leave=False):
+    for t in tqdm(range(T), desc="Processing timepoints", leave=False, disable=suppress_inner_tqdm):
         data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
         with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock():
