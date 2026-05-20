@@ -137,8 +137,18 @@ jobs:
         run: uv sync --frozen --group test
         working-directory: applications/dynacell
 
-      - name: Run benchmark-schema + submit-tool tests
-        run: uv run --frozen pytest tests/test_benchmark_config_composition.py tests/test_submit_benchmark_job.py -v
+      - name: Run benchmark-schema + submit-tool + eval-runtime tests
+        # tests/test_runtime.py and tests/test_evaluation_pipeline_parallel.py
+        # cover the dynacell.evaluation.runtime module + FovResult pickle
+        # contract that gate the FOV-level parallelism wiring. They don't
+        # need the eval extras (no iohub fixture or model loads).
+        run: |
+          uv run --frozen pytest \
+            tests/test_benchmark_config_composition.py \
+            tests/test_submit_benchmark_job.py \
+            tests/test_runtime.py \
+            tests/test_evaluation_pipeline_parallel.py \
+            -v
         working-directory: applications/dynacell
 
   check:
