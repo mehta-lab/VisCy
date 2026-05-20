@@ -215,16 +215,17 @@ def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
 
 
 def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral_pcc_kwargs=None, use_gpu=True):
-    """Compute pixel-level image quality metrics between prediction and target."""
-    _require_cubic()
+    """Compute pixel-level image quality metrics between prediction and target.
+
+    Stays device-resident: torch metrics (PCC / SSIM / NRMSE / PSNR) run on
+    CUDA when available, then the same tensors are handed to cubic's
+    spectral PCC and FSC implementations via :func:`cubic.cuda.ascupy` /
+    :func:`cubic.cuda.asnumpy`. The torch→cupy hop on CUDA is zero-copy
+    through the CUDA Array Interface — no host bounce per timepoint.
+    """
     prediction = torch.as_tensor(prediction)
     target = torch.as_tensor(target)
-
-    if use_gpu and torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-
+    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
     prediction = prediction.to(device)
     target = target.to(device)
 
@@ -234,14 +235,24 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
         "NRMSE": nrmse(target, prediction).item(),
         "PSNR": psnr(target, prediction).item(),
     }
-    target, prediction = target.cpu().numpy(), prediction.cpu().numpy()
+
+    if spectral_pcc_kwargs is None and fsc_kwargs is None:
+        return metrics
+
+    _require_cubic()
+    if device.type == "cuda":
+        prediction_xp = ascupy(prediction)
+        target_xp = ascupy(target)
+    else:
+        prediction_xp = asnumpy(prediction)
+        target_xp = asnumpy(target)
 
     if spectral_pcc_kwargs is not None:
-        metrics["Spectral_PCC"] = spectral_pcc(prediction, target, spacing=spacing, **spectral_pcc_kwargs)
+        metrics["Spectral_PCC"] = spectral_pcc(prediction_xp, target_xp, spacing=spacing, **spectral_pcc_kwargs)
     if fsc_kwargs is not None:
         resolutions = fsc_resolution(
-            target - target.mean(),
-            prediction - prediction.mean(),
+            target_xp - target_xp.mean(),
+            prediction_xp - prediction_xp.mean(),
             spacing=spacing,
             **fsc_kwargs,
         )
