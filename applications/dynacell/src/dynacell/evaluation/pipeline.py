@@ -8,7 +8,7 @@ import hydra
 import numpy as np
 import pandas as pd
 from iohub.ngff import open_ome_zarr
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
@@ -39,6 +39,7 @@ from dynacell.evaluation.pipeline_cache import (
     fov_deep_features,
     fov_masks,
     init_cache_context,
+    precompute_deep_features,
     resolve_dynaclr_encoder_cfg,
 )
 from dynacell.evaluation.utils import plot_metrics
@@ -274,6 +275,49 @@ def evaluate_predictions(config: DictConfig):
             gt_positions = gt_positions[:limit]
             seg_positions = seg_positions[:limit]
         try:
+            # Hoist paired-name validation so precompute (which runs before
+            # the per-FOV loop) cannot write to mismatched cache slots.
+            for (pos_name_pred, _), (pos_name_gt, _), (pos_name_seg, _) in zip(
+                pred_positions, gt_positions, seg_positions
+            ):
+                if pos_name_pred != pos_name_gt:
+                    raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, gt={pos_name_gt!r}")
+                if seg_plate is not None and pos_name_seg != pos_name_pred:
+                    raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
+
+            if config.compute_feature_metrics:
+                deep_extractors = {
+                    "dinov3": dinov3_feature_extractor,
+                    "dynaclr": dynaclr_feature_extractor,
+                }
+                if celldino_feature_extractor is not None:
+                    deep_extractors["celldino"] = celldino_feature_extractor
+                flush_threshold = int(
+                    OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256)
+                )
+                # Skip precompute on any side under require_complete_cache;
+                # the per-FOV path will fail-loud on misses for that side.
+                sides_for_precompute: dict = {}
+                side_positions: dict = {}
+                side_channels: dict = {}
+                if cache_ctx.enabled and not cache_ctx.require_complete:
+                    sides_for_precompute["gt"] = cache_ctx
+                    side_positions["gt"] = gt_positions
+                    side_channels["gt"] = io_config.gt_channel_name
+                if pred_cache_ctx.enabled and not pred_cache_ctx.require_complete:
+                    sides_for_precompute["pred"] = pred_cache_ctx
+                    side_positions["pred"] = pred_positions
+                    side_channels["pred"] = io_config.pred_channel_name
+                if sides_for_precompute:
+                    precompute_deep_features(
+                        sides_for_precompute,
+                        side_positions,
+                        side_channels,
+                        seg_positions,
+                        deep_extractors,
+                        flush_threshold=flush_threshold,
+                    )
+
             for p1, p2, p3 in tqdm(
                 zip(pred_positions, gt_positions, seg_positions),
                 total=len(pred_positions),
