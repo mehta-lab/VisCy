@@ -155,7 +155,15 @@ def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]])
 
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
-    from dynacell.evaluation.runtime import apply_thread_budget, resolve_runtime
+    from dynacell.evaluation.runtime import (
+        apply_thread_budget,
+        dump_timings_csv,
+        maybe_empty_cuda_cache,
+        maybe_gc_collect,
+        region_timer,
+        reset_timings,
+        resolve_runtime,
+    )
     from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
     from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
@@ -165,6 +173,7 @@ def evaluate_predictions(config: DictConfig):
     # frozen across phases for parent/worker BLAS-cap consistency.
     runtime = resolve_runtime(config)
     apply_thread_budget(runtime.threads_per_worker)
+    reset_timings()
 
     all_pixel_metrics = []
     all_mask_metrics = []
@@ -328,10 +337,12 @@ def evaluate_predictions(config: DictConfig):
                     for ctx in sides_for_precompute.values():
                         flush_manifest(ctx)
 
-            for p1, p2, p3 in tqdm(
-                zip(pred_positions, gt_positions, seg_positions),
-                total=len(pred_positions),
-                desc="Processing positions",
+            for fov_idx, (p1, p2, p3) in enumerate(
+                tqdm(
+                    zip(pred_positions, gt_positions, seg_positions),
+                    total=len(pred_positions),
+                    desc="Processing positions",
+                )
             ):
                 pos_name_pred, pos_pred = p1
                 _, pos_gt = p2
@@ -346,37 +357,49 @@ def evaluate_predictions(config: DictConfig):
 
                 T = predict.shape[0]
 
-                gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
-                pred_mask_stack = (
-                    fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model) if pred_cache_ctx.enabled else None
-                )
+                with region_timer("mask_gt", pos_name_pred):
+                    gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
+                if pred_cache_ctx.enabled:
+                    with region_timer("mask_pred", pos_name_pred):
+                        pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+                else:
+                    pred_mask_stack = None
 
                 if config.compute_feature_metrics:
-                    gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
-                    gt_dinov3_per_t = fov_deep_features(
-                        cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
-                    )
-                    gt_dynaclr_per_t = fov_deep_features(
-                        cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
-                    )
-                    gt_celldino_per_t = (
-                        fov_deep_features(
-                            cache_ctx, pos_name_pred, target, cell_segmentation, celldino_feature_extractor, "celldino"
+                    with region_timer("cp_gt", pos_name_pred):
+                        gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
+                    with region_timer("deep_gt_dinov3", pos_name_pred):
+                        gt_dinov3_per_t = fov_deep_features(
+                            cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
                         )
-                        if celldino_feature_extractor is not None
-                        else None
-                    )
-                    pred_per_t = _fov_pred_features_per_t(
-                        pred_cache_ctx,
-                        pos_name_pred,
-                        predict,
-                        cell_segmentation,
-                        dinov3_feature_extractor,
-                        dynaclr_feature_extractor,
-                        celldino_feature_extractor,
-                        config.feature_metrics.patch_size,
-                        config.pixel_metrics.spacing,
-                    )
+                    with region_timer("deep_gt_dynaclr", pos_name_pred):
+                        gt_dynaclr_per_t = fov_deep_features(
+                            cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+                        )
+                    if celldino_feature_extractor is not None:
+                        with region_timer("deep_gt_celldino", pos_name_pred):
+                            gt_celldino_per_t = fov_deep_features(
+                                cache_ctx,
+                                pos_name_pred,
+                                target,
+                                cell_segmentation,
+                                celldino_feature_extractor,
+                                "celldino",
+                            )
+                    else:
+                        gt_celldino_per_t = None
+                    with region_timer("features_pred_per_t", pos_name_pred):
+                        pred_per_t = _fov_pred_features_per_t(
+                            pred_cache_ctx,
+                            pos_name_pred,
+                            predict,
+                            cell_segmentation,
+                            dinov3_feature_extractor,
+                            dynaclr_feature_extractor,
+                            celldino_feature_extractor,
+                            config.feature_metrics.patch_size,
+                            config.pixel_metrics.spacing,
+                        )
 
                 microssim_data = []
                 fov_pixel_metrics = []
@@ -385,51 +408,54 @@ def evaluate_predictions(config: DictConfig):
                 for t in tqdm(range(T), desc="Processing timepoints"):
                     data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
-                    pixel_metrics = compute_pixel_metrics(
-                        predict[t],
-                        target[t],
-                        spacing=config.pixel_metrics.spacing,
-                        fsc_kwargs=config.pixel_metrics.fsc,
-                        spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
-                        use_gpu=config.use_gpu,
-                    )
+                    with region_timer("pixel_metrics", pos_name_pred, t):
+                        pixel_metrics = compute_pixel_metrics(
+                            predict[t],
+                            target[t],
+                            spacing=config.pixel_metrics.spacing,
+                            fsc_kwargs=config.pixel_metrics.fsc,
+                            spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
+                            use_gpu=config.use_gpu,
+                        )
                     if config.compute_microssim:
                         microssim_data.append({"target": target[t], "predict": predict[t]})
                     fov_pixel_metrics.append({**data_info, **pixel_metrics})
 
-                    segmented_target = gt_mask_stack[t]
-                    segmented_predict = (
-                        pred_mask_stack[t]
-                        if pred_mask_stack is not None
-                        else np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(bool)
-                    )
-                    all_mask_metrics.append(
-                        {**data_info, **evaluate_segmentations(segmented_predict, segmented_target)}
-                    )
-                    segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
+                    with region_timer("mask_metrics", pos_name_pred, t):
+                        segmented_target = gt_mask_stack[t]
+                        segmented_predict = (
+                            pred_mask_stack[t]
+                            if pred_mask_stack is not None
+                            else np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(bool)
+                        )
+                        all_mask_metrics.append(
+                            {**data_info, **evaluate_segmentations(segmented_predict, segmented_target)}
+                        )
+                        segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
                     if config.compute_feature_metrics:
-                        pred_cp = pred_per_t["cp"][t]
-                        pred_dinov3 = pred_per_t["dinov3"][t]
-                        pred_dynaclr = pred_per_t["dynaclr"][t]
-                        pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
-                        pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
-                        # Per-timepoint CP: drop target-zero columns + per-side z-score.
-                        # Deep features stay untouched.
-                        if pred_cp.size and gt_cp_t.size:
-                            pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
-                        else:
-                            pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
-                        pairwise_metrics = {
-                            **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
-                            **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
-                            **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
-                        }
-                        if pred_celldino is not None:
-                            pairwise_metrics.update(
-                                compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
-                            )
-                        all_feature_metrics.append({**data_info, **pairwise_metrics})
+                        with region_timer("feature_pairwise", pos_name_pred, t):
+                            pred_cp = pred_per_t["cp"][t]
+                            pred_dinov3 = pred_per_t["dinov3"][t]
+                            pred_dynaclr = pred_per_t["dynaclr"][t]
+                            pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
+                            pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
+                            # Per-timepoint CP: drop target-zero columns + per-side z-score.
+                            # Deep features stay untouched.
+                            if pred_cp.size and gt_cp_t.size:
+                                pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
+                            else:
+                                pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
+                            pairwise_metrics = {
+                                **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
+                                **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
+                                **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
+                            }
+                            if pred_celldino is not None:
+                                pairwise_metrics.update(
+                                    compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
+                                )
+                            all_feature_metrics.append({**data_info, **pairwise_metrics})
                         # pred/gt fov+timepoint arrays are byte-identical per
                         # backbone; share one reference each (consumers only
                         # concatenate, never mutate in place).
@@ -470,21 +496,27 @@ def evaluate_predictions(config: DictConfig):
                             pred_celldino_ts.append(t_arr)
                             gt_celldino_ts.append(t_arr)
 
-                seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
-                row, col, fov = pos_name_pred.split("/")
-                seg_pos = segmentation_results.create_position(row, col, fov)
-                seg_pos.create_image("0", seg.astype(bool))
+                    maybe_empty_cuda_cache(t, runtime.cuda_empty_cache_every_n_timepoints)
+
+                with region_timer("seg_write", pos_name_pred):
+                    seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
+                    row, col, fov = pos_name_pred.split("/")
+                    seg_pos = segmentation_results.create_position(row, col, fov)
+                    seg_pos.create_image("0", seg.astype(bool))
 
                 if config.compute_microssim:
-                    microssim_scores = calculate_microssim(microssim_data)
-                    for i in range(T):
-                        fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
+                    with region_timer("microssim", pos_name_pred):
+                        microssim_scores = calculate_microssim(microssim_data)
+                        for i in range(T):
+                            fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
                 all_pixel_metrics.extend(fov_pixel_metrics)
 
                 # Flush manifest after each position so interrupted runs preserve progress.
                 flush_manifest(cache_ctx)
                 flush_manifest(pred_cache_ctx)
+
+                maybe_gc_collect(fov_idx, runtime.gc_collect_every_n_fovs)
         finally:
             if seg_plate is not None:
                 seg_plate.close()
@@ -601,6 +633,8 @@ def evaluate_predictions(config: DictConfig):
             embedding_groups["pred_celldino"] = (pred_celldino_feats, pred_celldino_fovs, pred_celldino_ts)
             embedding_groups["gt_celldino"] = (gt_celldino_feats, gt_celldino_fovs, gt_celldino_ts)
         _save_embeddings(save_dir, embedding_groups)
+
+    dump_timings_csv(save_dir)
 
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 

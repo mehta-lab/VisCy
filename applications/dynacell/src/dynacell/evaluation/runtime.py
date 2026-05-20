@@ -17,10 +17,15 @@ lazily inside function bodies so spawn-context workers can set
 
 from __future__ import annotations
 
+import csv
+import gc
 import logging
 import os
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal
+from pathlib import Path
+from typing import Any, Iterator, Literal
 
 from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
@@ -277,3 +282,93 @@ def resolve_runtime(
         cuda_empty_cache_every_n_timepoints=cuda_empty_n,
         gc_collect_every_n_fovs=gc_collect_n,
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-T memory hygiene + region timing instrumentation.
+# ---------------------------------------------------------------------------
+
+# Per-process timing collector. Each entry is (pos_name, t_or_None, region,
+# seconds). Under executor=process (C3+), workers return their slice in
+# FovResult.timings; the parent's aggregator concatenates.
+_TIMINGS: list[tuple[str, int | None, str, float]] = []
+
+
+def reset_timings() -> None:
+    """Clear the per-process timing collector."""
+    _TIMINGS.clear()
+
+
+def get_timings() -> list[tuple[str, int | None, str, float]]:
+    """Return a copy of the per-process timing collector."""
+    return list(_TIMINGS)
+
+
+def extend_timings(rows: list[tuple[str, int | None, str, float]]) -> None:
+    """Append a batch of timing rows (used by parent aggregator under process mode)."""
+    _TIMINGS.extend(rows)
+
+
+@contextmanager
+def region_timer(region: str, pos_name: str, t: int | None = None) -> Iterator[None]:
+    """Record wall time of the wrapped block to the per-process timing collector.
+
+    Parameters
+    ----------
+    region : str
+        Region tag (e.g. "pixel_metrics", "mask_gt", "features_pred_per_t").
+    pos_name : str
+        FOV identifier (typically "<row>/<col>/<fov>").
+    t : int or None
+        Timepoint index when the region is per-T; ``None`` for FOV-level regions.
+    """
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        _TIMINGS.append((pos_name, t, region, time.perf_counter() - start))
+
+
+def dump_timings_csv(save_dir: Path) -> Path | None:
+    """Write the collected timings to ``<save_dir>/eval_timing.csv`` and return the path.
+
+    Returns ``None`` if no timings were recorded.
+    """
+    if not _TIMINGS:
+        return None
+    save_dir.mkdir(parents=True, exist_ok=True)
+    out_path = save_dir / "eval_timing.csv"
+    with out_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["pos_name", "t", "region", "seconds"])
+        for pos_name, t, region, seconds in _TIMINGS:
+            writer.writerow([pos_name, "" if t is None else t, region, f"{seconds:.6f}"])
+    return out_path
+
+
+def maybe_empty_cuda_cache(t: int, every_n: int) -> None:
+    """Call ``torch.cuda.empty_cache()`` every ``every_n`` timepoints.
+
+    No-op when ``every_n <= 0`` or CUDA is unavailable.
+    """
+    if every_n <= 0:
+        return
+    if (t + 1) % every_n != 0:
+        return
+    import torch
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def maybe_gc_collect(fov_idx: int, every_n: int) -> None:
+    """Call ``gc.collect()`` every ``every_n`` FOVs.
+
+    ``fov_idx`` is 0-based; collects when ``(fov_idx + 1) % every_n == 0``.
+    No-op when ``every_n <= 0``.
+    """
+    if every_n <= 0:
+        return
+    if (fov_idx + 1) % every_n != 0:
+        return
+    gc.collect()
