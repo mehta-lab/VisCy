@@ -501,19 +501,25 @@ def _aggregate_fov_result(
 
 
 # Worker-side state for ``executor=process``. A spawn-context child Python
-# interpreter calls ``_worker_run_fov`` once per submitted FOV; the first call
-# triggers ``_worker_setup`` which lazy-loads seg model + extractors + plate
-# handles under the GPU serialization lock and caches them here. Subsequent
-# FOVs in the same worker reuse the cached state.
+# interpreter calls ``_worker_run_fov`` once per submitted FOV; the first
+# call triggers ``_worker_setup`` which lazy-loads seg model + extractors +
+# cache contexts under the GPU serialization lock and caches them here.
+# Subsequent FOVs in the same worker reuse the cached state.
+#
+# Plate handles are intentionally *not* cached here — they're context-managed
+# per-FOV inside ``_worker_run_fov`` so iohub file descriptors close when the
+# worker is between FOVs, and so the worker has nothing to clean up on
+# ProcessPoolExecutor shutdown.
 _WORKER_STATE: dict[str, Any] = {}
 
 
 def _worker_setup(config: DictConfig) -> None:
-    """First-FOV-per-worker initialization: load models, open plates, init caches.
+    """First-FOV-per-worker initialization: load models + init cache contexts.
 
-    Wraps all GPU touch sites in ``gpu_serialization_lock()`` so N workers
-    don't initialize CUDA contexts + load weights concurrently. Cache contexts
-    and iohub plates are opened outside the lock (no GPU touch).
+    GPU touch sites (model + extractor loads) run under
+    ``gpu_serialization_lock()`` so N workers don't initialize CUDA + load
+    weights concurrently. Cache contexts (no GPU touch) are built outside
+    the lock. Plate handles are opened lazily per-FOV in ``_worker_run_fov``.
     """
     if _WORKER_STATE.get("initialized"):
         return
@@ -571,12 +577,6 @@ def _worker_setup(config: DictConfig) -> None:
         celldino_weights_path=celldino_weights_path,
     )
 
-    pred_plate = open_ome_zarr(Path(config.io.pred_path), mode="r")
-    gt_plate = open_ome_zarr(Path(config.io.gt_path), mode="r")
-    seg_plate = None
-    if config.io.cell_segmentation_path is not None:
-        seg_plate = open_ome_zarr(Path(config.io.cell_segmentation_path), mode="r")
-
     _WORKER_STATE.update(
         {
             "initialized": True,
@@ -586,46 +586,78 @@ def _worker_setup(config: DictConfig) -> None:
             "celldino": celldino_feature_extractor,
             "cache_ctx": cache_ctx,
             "pred_cache_ctx": pred_cache_ctx,
-            "pred_plate": pred_plate,
-            "gt_plate": gt_plate,
-            "seg_plate": seg_plate,
-            "pred_positions": dict(pred_plate.positions()),
-            "gt_positions": dict(gt_plate.positions()),
-            "seg_positions": dict(seg_plate.positions()) if seg_plate is not None else None,
         }
     )
+
+
+def _find_position(plate, pos_name: str):
+    """Return the iohub Position with name ``pos_name`` from ``plate``.
+
+    Scans ``plate.positions()`` since iohub doesn't index by name. Cheap
+    for the ≤ tens of positions per eval.
+    """
+    for name, pos in plate.positions():
+        if name == pos_name:
+            return pos
+    raise KeyError(f"position {pos_name!r} not found in plate")
 
 
 def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) -> FovResult:
     """Worker entry point: process one FOV by name and return FovResult.
 
-    Submitted via ``pool.submit`` in ``executor=process`` mode. Returns a
-    pickle-friendly ``FovResult`` (no plate handles or torch modules
-    cross the process boundary).
+    Submitted via ``pool.submit`` in ``executor=process`` mode. Plates
+    are opened with a context manager scoped to this single call — iohub
+    file descriptors close before the worker accepts its next FOV. Models
+    + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
     """
     from dynacell.evaluation.pipeline_cache import flush_manifest
 
     _worker_setup(config)
     state = _WORKER_STATE
-    pos_pred = state["pred_positions"][pos_name]
-    pos_gt = state["gt_positions"][pos_name]
-    pos_seg = state["seg_positions"][pos_name] if state["seg_positions"] is not None else None
 
-    result = _process_one_fov(
-        config,
-        cuda_empty_every_n,
-        pos_name,
-        pos_pred,
-        pos_gt,
-        pos_seg,
-        config.io,
-        state["cache_ctx"],
-        state["pred_cache_ctx"],
-        state["seg_model"],
-        state["dinov3"],
-        state["dynaclr"],
-        state["celldino"],
-    )
+    seg_path = config.io.cell_segmentation_path
+    with (
+        open_ome_zarr(Path(config.io.pred_path), mode="r") as pred_plate,
+        open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate,
+    ):
+        pos_pred = _find_position(pred_plate, pos_name)
+        pos_gt = _find_position(gt_plate, pos_name)
+
+        if seg_path is not None:
+            with open_ome_zarr(Path(seg_path), mode="r") as seg_plate:
+                pos_seg = _find_position(seg_plate, pos_name)
+                result = _process_one_fov(
+                    config,
+                    cuda_empty_every_n,
+                    pos_name,
+                    pos_pred,
+                    pos_gt,
+                    pos_seg,
+                    config.io,
+                    state["cache_ctx"],
+                    state["pred_cache_ctx"],
+                    state["seg_model"],
+                    state["dinov3"],
+                    state["dynaclr"],
+                    state["celldino"],
+                )
+        else:
+            result = _process_one_fov(
+                config,
+                cuda_empty_every_n,
+                pos_name,
+                pos_pred,
+                pos_gt,
+                None,
+                config.io,
+                state["cache_ctx"],
+                state["pred_cache_ctx"],
+                state["seg_model"],
+                state["dinov3"],
+                state["dynaclr"],
+                state["celldino"],
+            )
+
     # Worker-side manifest flush so interrupted runs preserve progress even
     # when the parent dies. The global manifest lock at
     # _pos_write_lock(ctx, "manifest", "global") serializes flushes across
