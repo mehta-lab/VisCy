@@ -5,6 +5,10 @@
 #
 # Differs from unetvit3d_fit.yml by splitting the LR into lr_g/lr_d
 # (DynacellGAN has no `lr` param — it would raise UnexpectedKeyword).
+#
+# TTUR: lr_d = lr_g / 10. The 1:1 schedule collapsed to D-dominance
+# (loss/d_train -> 1e-4 by epoch ~5; loss/g_adv pinned at 1.0, no
+# adversarial gradient). Slowing D 10x is the canonical pix2pix fix.
 base:
   - ../../../../../../recipes/models/pix2pix3d_unetvit.yml
   - ../../../../../../recipes/trainer/fit.yml
@@ -12,7 +16,7 @@ base:
 model:
   init_args:
     lr_g: 0.0003
-    lr_d: 0.0003
+    lr_d: 3.0e-5
     schedule: WarmupCosine
     warmup_steps: 8500
     warmup_multiplier: 1e-3
