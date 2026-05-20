@@ -1,0 +1,13 @@
+# @package _global_
+# Benchmark eval leaf: nucleus (Nuclei) predicted by pix2pix3d_unetvit on iPSC confocal.
+defaults:
+  - override /target: nucleus
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_pix2pix3d_unetvit.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_nucl_pix2pix3d_unetvit

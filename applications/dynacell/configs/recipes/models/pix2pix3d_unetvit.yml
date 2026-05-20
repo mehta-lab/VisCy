@@ -1,0 +1,23 @@
+# Model recipe: pix2pix3d_unetvit — UNetViT3D generator + 3D PatchGAN
+# discriminator trained with LSGAN + L1.
+model:
+  class_path: dynacell.engine.DynacellGAN
+  init_args:
+    architecture: UNetViT3D
+    generator_config:
+      input_spatial_size: [8, 512, 512]
+      in_channels: 1
+      out_channels: 1
+      dims: [64, 128, 256, 256]
+      num_res_block: [2, 2, 2]
+      hidden_size: 512
+      num_heads: 8
+      dim_head: 64
+      num_hidden_layers: 8
+      patch_size: 4
+    discriminator_config:
+      in_channels: 2
+      base_channels: 64
+      num_scales: 2          # multi-scale D (pix2pixHD-style); set 1 to ablate
+      use_spectral_norm: true
+    lambda_l1: 100.0

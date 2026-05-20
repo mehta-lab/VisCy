@@ -1,7 +1,8 @@
 """Dynacell LightningModules for virtual staining benchmarks.
 
-Provides :class:`DynacellUNet` for supervised regression and
-:class:`DynacellFlowMatching` for flow-matching generative staining.
+Provides :class:`DynacellUNet` for supervised regression,
+:class:`DynacellFlowMatching` for flow-matching generative staining, and
+:class:`DynacellGAN` for adversarial (LSGAN + L1) virtual staining.
 """
 
 import inspect
@@ -20,6 +21,7 @@ from dynacell.celldiff_wrapper import CELLDiff3DVS
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
+from viscy_models.gan import MultiScalePatchGAN3D, lsgan_d_loss, lsgan_g_loss
 from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
 from viscy_utils.optimizers import configure_adamw_scheduler
@@ -60,6 +62,13 @@ def _aggregate_validation_losses(
     total_n = torch.stack(dl_totals).sum()
     weighted = torch.stack([m * n for m, n in zip(dl_means, dl_totals)]).sum()
     return weighted / total_n
+
+
+def _log_samples(module: LightningModule, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
+    """Log a list of detached image samples to the experiment logger at rank 0."""
+    if not imgs or not module.trainer.is_global_zero or module.logger is None:
+        return
+    log_image_grid(module.logger, key, imgs, module.current_epoch)
 
 
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
@@ -331,13 +340,13 @@ class DynacellUNet(LightningModule):
 
     def on_train_epoch_end(self):
         """Log training image samples."""
-        self._log_samples("train_samples", self.training_step_outputs)
+        _log_samples(self, "train_samples", self.training_step_outputs)
         self.training_step_outputs = []
 
     def on_validation_epoch_end(self):
         """Log validation samples and aggregate loss weighted by batch size."""
         super().on_validation_epoch_end()
-        self._log_samples("val_samples", self.validation_step_outputs)
+        _log_samples(self, "val_samples", self.validation_step_outputs)
         if self.validation_losses:
             self.log("loss/validate", _aggregate_validation_losses(self.validation_losses), sync_dist=True)
         self.validation_step_outputs.clear()
@@ -353,12 +362,6 @@ class DynacellUNet(LightningModule):
             warmup_steps=self.warmup_steps,
             warmup_multiplier=self.warmup_multiplier,
         )
-
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        """Log image grid to the active logger."""
-        if not imgs or not self.trainer.is_global_zero or self.logger is None:
-            return
-        log_image_grid(self.logger, key, imgs, self.current_epoch)
 
     def predict_sliding_window(self, source: Tensor, overlap_size: tuple[int, int, int] = (4, 256, 256)) -> Tensor:
         """Run sliding-window inference over a large input volume.
@@ -580,7 +583,7 @@ class DynacellFlowMatching(LightningModule):
 
     def on_train_epoch_end(self) -> None:
         """Log training image samples at end of epoch."""
-        self._log_samples("train_samples", self._training_step_outputs)
+        _log_samples(self, "train_samples", self._training_step_outputs)
         self._training_step_outputs = []
 
     def on_validation_epoch_end(self) -> None:
@@ -592,7 +595,7 @@ class DynacellFlowMatching(LightningModule):
                 n = min(self.log_samples_per_batch, phase_log.shape[0])
                 generated = self.model.generate(phase_log[:n], num_steps=self.num_log_steps)
                 gen_samples = detach_sample((phase_log[:n], target_log[:n], generated), n)
-                self._log_samples("val_generated_samples", gen_samples)
+                _log_samples(self, "val_generated_samples", gen_samples)
             self._val_log_batch = None
         if self._validation_losses:
             self.log("loss/validate", _aggregate_validation_losses(self._validation_losses), sync_dist=True)
@@ -674,8 +677,340 @@ class DynacellFlowMatching(LightningModule):
             warmup_multiplier=self.warmup_multiplier,
         )
 
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
-        """Log image grid to the active logger."""
-        if not imgs or not self.trainer.is_global_zero or self.logger is None:
-            return
-        log_image_grid(self.logger, key, imgs, self.current_epoch)
+
+class DynacellGAN(LightningModule):
+    """Adversarial virtual-staining LightningModule (LSGAN + L1).
+
+    Pairs a regression-style generator (default ``UNetViT3D``) with a
+    multi-scale 3D PatchGAN discriminator. The training step alternates a
+    discriminator update and a generator update per batch using Lightning's
+    manual-optimization API, so the module sets
+    ``automatic_optimization = False``.
+
+    The discriminator is conditional: it consumes the concatenation of
+    ``source`` and either the real target or the generator output along the
+    channel dimension. The generator loss combines an LSGAN adversarial term
+    (MSE-to-real for the fake pair) with an L1 reconstruction term scaled by
+    ``lambda_l1``.
+
+    The ``requires_grad`` flags on the generator and discriminator are
+    toggled at each phase of the training step so each backward pass only
+    populates ``.grad`` on the parameters being optimized. After the
+    discriminator update we additionally call ``opt_d.zero_grad`` so that
+    after a full ``training_step`` no discriminator parameter retains a
+    non-zero accumulated gradient — this invariant is verified by unit
+    tests.
+
+    Parameters
+    ----------
+    architecture : {"UNetViT3D"}
+        Generator architecture key. Looked up in the shared
+        :data:`_ARCHITECTURE` registry.
+    generator_config : dict or None
+        Keyword arguments forwarded to the generator constructor.
+    discriminator_config : dict or None
+        Keyword arguments forwarded to :class:`MultiScalePatchGAN3D`.
+    lambda_l1 : float
+        Weight of the L1 reconstruction loss in the generator objective.
+    lr_g : float
+        Learning rate for the generator optimizer.
+    lr_d : float
+        Learning rate for the discriminator optimizer.
+    schedule : {"WarmupCosine"}
+        Learning rate schedule. Only ``"WarmupCosine"`` is supported because
+        manual optimization expects a step-interval scheduler.
+    warmup_steps : int
+        Number of warmup steps for the WarmupCosine schedule.
+    warmup_multiplier : float
+        Initial LR multiplier at step 0 of the WarmupCosine schedule.
+    log_batches_per_epoch : int
+        Maximum number of batches per epoch to accumulate for image logging.
+    log_samples_per_batch : int
+        Number of samples per batch to log.
+    example_input_yx_shape : Sequence of int
+        YX shape used to build ``example_input_array`` for graph logging
+        when the generator does not advertise an ``input_spatial_size``.
+    predict_method : {"full_image"}
+        Prediction method. Only ``"full_image"`` is supported (the
+        discriminator is not exposed at inference time and the generator is
+        a fixed-input-size ViT-bottleneck UNet).
+    predict_overlap : tuple of int
+        Reserved for future tiled inference; currently unused at predict.
+    ckpt_path : str or None
+        Optional path to a Lightning checkpoint to load **weights only** at
+        construction time. Intended for inference (predict/test), not
+        training resumption — optimizer state, epoch counters, and
+        scheduler state are not restored.
+    """
+
+    def __init__(
+        self,
+        architecture: Literal["UNetViT3D"] = "UNetViT3D",
+        generator_config: dict | None = None,
+        discriminator_config: dict | None = None,
+        lambda_l1: float = 100.0,
+        lr_g: float = 3e-4,
+        lr_d: float = 3e-4,
+        schedule: Literal["WarmupCosine"] = "WarmupCosine",
+        warmup_steps: int = 8500,
+        warmup_multiplier: float = 1e-3,
+        log_batches_per_epoch: int = 8,
+        log_samples_per_batch: int = 1,
+        example_input_yx_shape: Sequence[int] = (512, 512),
+        predict_method: Literal["full_image"] = "full_image",
+        predict_overlap: tuple[int, int, int] = (4, 256, 256),
+        ckpt_path: str | None = None,
+    ) -> None:
+        super().__init__()
+        # Lightning's manual-optimization API: required because the GAN
+        # alternates two optimizers per training_step.
+        self.automatic_optimization = False
+        self.save_hyperparameters(ignore=["ckpt_path"])
+
+        net_class = _ARCHITECTURE.get(architecture)
+        if net_class is None:
+            raise ValueError(f"Architecture {architecture!r} not in {set(_ARCHITECTURE)}")
+        self.generator = net_class(**(generator_config or {}))
+        self.discriminator = MultiScalePatchGAN3D(**(discriminator_config or {}))
+
+        self.lambda_l1 = lambda_l1
+        self.lr_g = lr_g
+        self.lr_d = lr_d
+        self.schedule = schedule
+        self.warmup_steps = warmup_steps
+        self.warmup_multiplier = warmup_multiplier
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+        self.predict_method = predict_method
+        self.predict_overlap = predict_overlap
+
+        self.training_step_outputs: list = []
+        # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
+        self.validation_losses: list[list[tuple[Tensor, int]]] = []
+        self.validation_step_outputs: list = []
+
+        # Build example_input_array for graph logging (TensorBoard/W&B).
+        gen_cfg = generator_config or {}
+        in_channels = gen_cfg.get("in_channels") or 1
+        if hasattr(self.generator, "input_spatial_size"):
+            d, h, w = self.generator.input_spatial_size
+        else:
+            d = gen_cfg.get("in_stack_depth") or 5
+            h, w = example_input_yx_shape
+        self.example_input_array = torch.rand(1, in_channels, d, h, w)
+
+        if ckpt_path is not None:
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+
+    @staticmethod
+    def _set_requires_grad(module: nn.Module, value: bool) -> None:
+        """Toggle ``requires_grad`` on every parameter of ``module``.
+
+        Parameters
+        ----------
+        module : nn.Module
+            Module whose parameters should have ``requires_grad`` set.
+        value : bool
+            New value for ``requires_grad``.
+        """
+        for p in module.parameters():
+            p.requires_grad = value
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Run a generator-only forward pass (inference contract).
+
+        The discriminator is not exposed at inference time; ``forward``
+        always returns the generator output.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor of shape ``(B, C, D, H, W)``.
+
+        Returns
+        -------
+        Tensor
+            Generator output.
+        """
+        return self.generator(x)
+
+    def training_step(self, batch: Sample, batch_idx: int) -> None:
+        """Run one alternating D/G optimization step.
+
+        The discriminator is updated first using a detached generator
+        forward (so D's loss has no gradient path into G), then the
+        generator is updated using the LSGAN adversarial term + L1.
+        ``requires_grad`` is toggled per phase so each backward populates
+        ``.grad`` only on the side being trained, and the discriminator's
+        gradients are explicitly cleared after its update so the G step
+        starts with no residual D gradients.
+
+        Parameters
+        ----------
+        batch : Sample
+            Batch dict with ``"source"`` and ``"target"`` tensors.
+        batch_idx : int
+            Batch index within the epoch.
+        """
+        source = batch["source"]
+        target = batch["target"]
+        opt_g, opt_d = self.optimizers()
+        sch_g, sch_d = self.lr_schedulers()
+
+        # --- D step (D updates; G frozen, no-grad forward) ---
+        self._set_requires_grad(self.generator, False)
+        self._set_requires_grad(self.discriminator, True)
+        with torch.no_grad():
+            pred = self.generator(source)
+        d_real = self.discriminator(torch.cat([source, target], dim=1))
+        d_fake = self.discriminator(torch.cat([source, pred], dim=1))
+        d_loss = lsgan_d_loss(d_real, d_fake)
+        opt_d.zero_grad(set_to_none=True)
+        self.manual_backward(d_loss)
+        opt_d.step()
+        # Clear D grads so the no-D-grads-after-G-step invariant is verifiable.
+        opt_d.zero_grad(set_to_none=True)
+
+        # --- G step (G updates; D frozen, fwd-only) ---
+        self._set_requires_grad(self.generator, True)
+        self._set_requires_grad(self.discriminator, False)
+        pred = self.generator(source)
+        d_fake_for_g = self.discriminator(torch.cat([source, pred], dim=1))
+        adv_loss = lsgan_g_loss(d_fake_for_g)
+        l1_loss = F.l1_loss(pred, target)
+        g_loss = adv_loss + self.lambda_l1 * l1_loss
+        opt_g.zero_grad(set_to_none=True)
+        self.manual_backward(g_loss)
+        opt_g.step()
+
+        # WarmupCosine is step-based and ignored by Lightning's automatic
+        # scheduler machinery when ``automatic_optimization = False``.
+        sch_g.step()
+        sch_d.step()
+
+        if batch_idx < self.log_batches_per_epoch:
+            self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
+
+        self.log_dict(
+            {
+                "loss/d_train": d_loss,
+                "loss/g_train": g_loss,
+                "loss/g_adv_train": adv_loss,
+                "loss/g_l1_train": l1_loss,
+            },
+            on_step=True,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=source.size(0),
+        )
+
+    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
+        """Compute generator-only L1 validation loss and capture samples.
+
+        Mirrors :class:`DynacellUNet`'s aggregation pattern so
+        ``loss/validate`` is an epoch-aggregated weighted mean — the value
+        ``ModelCheckpoint(monitor="loss/validate")`` keys off.
+
+        Parameters
+        ----------
+        batch : Sample
+            Batch dict with ``"source"`` and ``"target"`` tensors.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int
+            Index of the validation dataloader.
+
+        Returns
+        -------
+        Tensor
+            Scalar L1 loss on this batch.
+        """
+        source: Tensor = batch["source"]
+        target: Tensor = batch["target"]
+        pred = self.generator(source)
+        l1 = F.l1_loss(pred, target)
+        if dataloader_idx + 1 > len(self.validation_losses):
+            self.validation_losses.append([])
+        self.validation_losses[dataloader_idx].append((l1.detach(), source.shape[0]))
+        self.log(
+            f"loss/val/{dataloader_idx}",
+            l1,
+            sync_dist=True,
+            batch_size=source.shape[0],
+        )
+        if batch_idx < self.log_batches_per_epoch:
+            self.validation_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
+        return l1
+
+    def on_train_epoch_end(self) -> None:
+        """Log accumulated training image samples and reset the buffer."""
+        _log_samples(self, "train_samples", self.training_step_outputs)
+        self.training_step_outputs = []
+
+    def on_validation_epoch_end(self) -> None:
+        """Log validation samples and the aggregated ``loss/validate`` alias."""
+        super().on_validation_epoch_end()
+        _log_samples(self, "val_samples", self.validation_step_outputs)
+        if self.validation_losses:
+            self.log(
+                "loss/validate",
+                _aggregate_validation_losses(self.validation_losses),
+                sync_dist=True,
+            )
+        self.validation_step_outputs.clear()
+        self.validation_losses.clear()
+
+    def configure_optimizers(self):
+        """Build two AdamW optimizers + WarmupCosine schedulers via the shared helper."""
+        [opt_g], [sch_g] = configure_adamw_scheduler(
+            self,
+            self.generator,
+            self.lr_g,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
+        [opt_d], [sch_d] = configure_adamw_scheduler(
+            self,
+            self.discriminator,
+            self.lr_d,
+            self.schedule,
+            warmup_steps=self.warmup_steps,
+            warmup_multiplier=self.warmup_multiplier,
+        )
+        return [opt_g, opt_d], [sch_g, sch_d]
+
+    def on_predict_start(self) -> None:
+        """Build the divisible-pad transform matching the generator."""
+        self._predict_pad = _make_divisible_pad(self.generator)
+
+    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
+        """Run a generator-only prediction step with divisible padding.
+
+        Pads the input tile to the nearest multiple of the generator's
+        downsampling factor, runs the generator forward pass, then crops
+        back to the original spatial shape. The discriminator is not
+        exposed at inference.
+
+        Parameters
+        ----------
+        batch : Sample
+            Batch dict. Only ``"source"`` is used.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int
+            Dataloader index.
+
+        Returns
+        -------
+        Tensor
+            Generator prediction cropped to the input spatial shape.
+        """
+        source = batch["source"]
+        original_shape = source.shape[2:]
+        source = self._predict_pad(source)
+        if self.predict_method == "full_image":
+            prediction = self.generator(source)
+        else:
+            raise ValueError(f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image'.")
+        return _center_crop_to_shape(prediction, original_shape)

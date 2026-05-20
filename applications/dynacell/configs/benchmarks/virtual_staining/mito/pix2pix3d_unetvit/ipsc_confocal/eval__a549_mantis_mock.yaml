@@ -1,0 +1,11 @@
+# @package _global_
+# Benchmark eval leaf: mito (TOMM20) predicted by pix2pix3d_unetvit on a549-mantis-tomm20-mock.
+defaults:
+  - override /target: mito_tomm20
+  - override /predict_set: a549_mantis_tomm20_mock
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_pix2pix3d_unetvit__tomm20_mock.zarr
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_tomm20_pix2pix3d_unetvit__tomm20_mock

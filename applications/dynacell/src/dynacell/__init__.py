@@ -1,6 +1,6 @@
 """Dynacell: benchmark virtual staining application."""
 
-__all__ = ["DynacellFlowMatching", "DynacellUNet"]
+__all__ = ["DynacellFlowMatching", "DynacellGAN", "DynacellUNet"]
 
 
 def __getattr__(name: str):
@@ -9,6 +9,10 @@ def __getattr__(name: str):
         from dynacell.engine import DynacellFlowMatching
 
         return DynacellFlowMatching
+    if name == "DynacellGAN":
+        from dynacell.engine import DynacellGAN
+
+        return DynacellGAN
     if name == "DynacellUNet":
         from dynacell.engine import DynacellUNet
 

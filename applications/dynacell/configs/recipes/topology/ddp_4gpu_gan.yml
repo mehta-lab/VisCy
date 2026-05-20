@@ -1,0 +1,25 @@
+# Topology recipe: 4-GPU DDP for GAN training (manual optimization, two opts).
+#
+# GAN engines (e.g. DynacellGAN / pix2pix3d_unetvit) use manual optimization
+# with two optimizers (G and D) trained on alternating sub-steps. Each
+# `training_step` toggles `requires_grad` on the inactive side, so the
+# parameters of whichever side is *not* updating in that sub-step look
+# "unused" from DDP's reducer perspective on each backward pass.
+#
+# DDP's reducer is set up at module-wrap time over the FULL parameter set;
+# with the default `find_unused_parameters=False`, hitting an unused param
+# raises:
+#   "Expected to mark a variable ready only once. ... Parameter ... did not
+#    receive gradient ..."
+# at first backward and kills the job. The Lightning string shortcut
+# `ddp_find_unused_parameters_true` instantiates a `DDPStrategy` with
+# `find_unused_parameters=True`, which makes the reducer tolerate the
+# alternating-grad pattern (small per-step overhead, acceptable here).
+#
+# Do not use this topology for non-GAN models — plain `ddp_4gpu.yml` skips
+# the unused-param scan and is strictly faster for fully-active graphs.
+trainer:
+  accelerator: gpu
+  strategy: ddp_find_unused_parameters_true
+  devices: 4
+  num_nodes: 1

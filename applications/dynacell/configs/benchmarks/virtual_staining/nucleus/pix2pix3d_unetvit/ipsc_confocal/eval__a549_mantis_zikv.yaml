@@ -1,0 +1,11 @@
+# @package _global_
+# Benchmark eval leaf: nucleus (Nuclei) predicted by pix2pix3d_unetvit on a549-mantis-h2b-zikv.
+defaults:
+  - override /target: nucleus
+  - override /predict_set: a549_mantis_h2b_zikv
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_pix2pix3d_unetvit__h2b_zikv.zarr
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_nucl_pix2pix3d_unetvit__h2b_zikv
