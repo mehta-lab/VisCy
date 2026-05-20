@@ -16,14 +16,15 @@ from pathlib import Path
 import hydra
 import numpy as np
 from iohub.ngff import open_ome_zarr
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.metrics import build_crops
 from dynacell.evaluation.pipeline_cache import (
+    DeepFeatureBatcher,
     flush_manifest,
     fov_cp_features,
-    fov_deep_features,
     fov_masks,
     init_cache_context,
     resolve_dynaclr_encoder_cfg,
@@ -107,6 +108,21 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 gt_positions = gt_positions[:limit]
                 seg_positions = seg_positions[:limit]
 
+            deep_extractors = {}
+            if build.dinov3:
+                deep_extractors["dinov3"] = dinov3_feature_extractor
+            if build.dynaclr:
+                deep_extractors["dynaclr"] = dynaclr_feature_extractor
+            if build.celldino:
+                deep_extractors["celldino"] = celldino_feature_extractor
+
+            flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
+            batcher = (
+                DeepFeatureBatcher(cache_ctx, deep_extractors, flush_threshold=flush_threshold)
+                if deep_extractors and cache_ctx.enabled
+                else None
+            )
+
             for (pos_name_gt, pos_gt), (pos_name_seg, pos_seg) in tqdm(
                 zip(gt_positions, seg_positions),
                 total=len(gt_positions),
@@ -123,20 +139,25 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                     fov_masks(cache_ctx, pos_name_gt, target, seg_model)
                 if build.cp:
                     fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
-                if build.dinov3:
-                    fov_deep_features(
-                        cache_ctx, pos_name_gt, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
-                    )
-                if build.dynaclr:
-                    fov_deep_features(
-                        cache_ctx, pos_name_gt, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
-                    )
-                if build.celldino:
-                    fov_deep_features(
-                        cache_ctx, pos_name_gt, target, cell_segmentation, celldino_feature_extractor, "celldino"
-                    )
+
+                # Deep features stream in-loop via the batcher — no second
+                # plate read. The batcher's pending_kinds_per_t reflects
+                # already-cached slots so warm-cache positions skip work.
+                if batcher is not None and cell_segmentation is not None:
+                    t_count = target.shape[0]
+                    needs = batcher.pending_kinds_per_t(pos_name_gt, t_count)
+                    for t in range(t_count):
+                        kinds_for_t = [k for k in deep_extractors if t in needs[k]]
+                        if not kinds_for_t:
+                            continue
+                        crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size)
+                        crops_stack = np.stack(crops, axis=0) if crops else np.empty((0, 0, 0), dtype=np.float32)
+                        batcher.push(pos_name_gt, t, crops_stack, kinds_for_t)
 
                 flush_manifest(cache_ctx)
+
+            if batcher is not None:
+                batcher.drain()
         finally:
             if seg_plate is not None:
                 seg_plate.close()
