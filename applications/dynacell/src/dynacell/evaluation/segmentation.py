@@ -91,7 +91,14 @@ def prepare_segmentation_model(config):
 
     Returns ``None`` for organelles that use classical (non-DL) workflows.
     Respects ``config.use_gpu`` when deciding whether to move models to GPU.
+
+    Returns ``None`` unconditionally when ``io.require_complete_cache=true``:
+    in that mode the caller asserts that all needed masks live in the cache,
+    so loading SuperModel (which hits a quilt download for nucleus/membrane
+    on a cold node) would be wasted work. If a mask cache-miss happens, the
+    cache layer raises ``StaleCacheError`` before any ``segment()`` call.
     """
+    require_complete = bool(getattr(config.io, "require_complete_cache", False))
     if config.target_name not in [
         "nucleus",
         "membrane",
@@ -101,6 +108,8 @@ def prepare_segmentation_model(config):
         "mitochondria",
     ]:
         raise ValueError(f"Invalid target_name in config: {config.target_name!r}")
+    if require_complete:
+        return None
     if config.target_name in ["nucleus", "membrane"]:
         _require_segmenter_model_zoo()
         if config.target_name == "nucleus":
