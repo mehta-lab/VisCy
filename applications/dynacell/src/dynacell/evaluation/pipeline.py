@@ -83,6 +83,53 @@ def _real_vs_pred_probe(
     }
 
 
+def _fov_pred_features_per_t(
+    pred_cache_ctx,
+    pos_name: str,
+    predict: np.ndarray,
+    cell_segmentation: np.ndarray | None,
+    dinov3_feature_extractor,
+    dynaclr_feature_extractor,
+    celldino_feature_extractor,
+    patch_size: int,
+    spacing,
+) -> dict[str, list[np.ndarray] | None]:
+    """Return per-backbone per-t prediction features.
+
+    Uses the pred cache when configured; otherwise computes fresh
+    per-timepoint, sharing one set of 2-D crops across all deep backbones
+    to avoid redundant max-projection + crop construction per backbone.
+    """
+    if pred_cache_ctx.enabled:
+        return {
+            "cp": fov_cp_features(pred_cache_ctx, pos_name, predict, cell_segmentation),
+            "dinov3": fov_deep_features(
+                pred_cache_ctx, pos_name, predict, cell_segmentation, dinov3_feature_extractor, "dinov3"
+            ),
+            "dynaclr": fov_deep_features(
+                pred_cache_ctx, pos_name, predict, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+            ),
+            "celldino": (
+                fov_deep_features(
+                    pred_cache_ctx, pos_name, predict, cell_segmentation, celldino_feature_extractor, "celldino"
+                )
+                if celldino_feature_extractor is not None
+                else None
+            ),
+        }
+    t_count = predict.shape[0]
+    cp = [cp_regionprops(predict[t], cell_segmentation[t], spacing) for t in range(t_count)]
+    crops = [build_crops(predict[t], cell_segmentation[t], patch_size) for t in range(t_count)]
+    dinov3 = [features_from_crops(crops[t], dinov3_feature_extractor) for t in range(t_count)]
+    dynaclr = [features_from_crops(crops[t], dynaclr_feature_extractor) for t in range(t_count)]
+    celldino = (
+        [features_from_crops(crops[t], celldino_feature_extractor) for t in range(t_count)]
+        if celldino_feature_extractor is not None
+        else None
+    )
+    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino}
+
+
 def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]]) -> None:
     """Save concatenated single-cell embeddings with FOV and Timepoint metadata."""
     embed_dir = save_dir / "embeddings"
@@ -264,36 +311,17 @@ def evaluate_predictions(config: DictConfig):
                         if celldino_feature_extractor is not None
                         else None
                     )
-                    if pred_cache_ctx.enabled:
-                        pred_cp_per_t = fov_cp_features(pred_cache_ctx, pos_name_pred, predict, cell_segmentation)
-                        pred_dinov3_per_t = fov_deep_features(
-                            pred_cache_ctx,
-                            pos_name_pred,
-                            predict,
-                            cell_segmentation,
-                            dinov3_feature_extractor,
-                            "dinov3",
-                        )
-                        pred_dynaclr_per_t = fov_deep_features(
-                            pred_cache_ctx,
-                            pos_name_pred,
-                            predict,
-                            cell_segmentation,
-                            dynaclr_feature_extractor,
-                            "dynaclr",
-                        )
-                        pred_celldino_per_t = (
-                            fov_deep_features(
-                                pred_cache_ctx,
-                                pos_name_pred,
-                                predict,
-                                cell_segmentation,
-                                celldino_feature_extractor,
-                                "celldino",
-                            )
-                            if celldino_feature_extractor is not None
-                            else None
-                        )
+                    pred_per_t = _fov_pred_features_per_t(
+                        pred_cache_ctx,
+                        pos_name_pred,
+                        predict,
+                        cell_segmentation,
+                        dinov3_feature_extractor,
+                        dynaclr_feature_extractor,
+                        celldino_feature_extractor,
+                        config.feature_metrics.patch_size,
+                        config.pixel_metrics.spacing,
+                    )
 
                 microssim_data = []
                 fov_pixel_metrics = []
@@ -326,27 +354,10 @@ def evaluate_predictions(config: DictConfig):
                     segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
                     if config.compute_feature_metrics:
-                        if pred_cache_ctx.enabled:
-                            pred_cp = pred_cp_per_t[t]
-                            pred_dinov3 = pred_dinov3_per_t[t]
-                            pred_dynaclr = pred_dynaclr_per_t[t]
-                            pred_celldino = pred_celldino_per_t[t] if pred_celldino_per_t is not None else None
-                        else:
-                            pred_cp = cp_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
-                            # Build the per-cell 2-D crops once per timepoint and
-                            # reuse them across all 3-4 deep backbones (max-z
-                            # projection + cell-iteration + crop construction
-                            # are otherwise redundant per backbone).
-                            pred_crops_2d = build_crops(
-                                predict[t], cell_segmentation[t], config.feature_metrics.patch_size
-                            )
-                            pred_dinov3 = features_from_crops(pred_crops_2d, dinov3_feature_extractor)
-                            pred_dynaclr = features_from_crops(pred_crops_2d, dynaclr_feature_extractor)
-                            pred_celldino = (
-                                features_from_crops(pred_crops_2d, celldino_feature_extractor)
-                                if celldino_feature_extractor is not None
-                                else None
-                            )
+                        pred_cp = pred_per_t["cp"][t]
+                        pred_dinov3 = pred_per_t["dinov3"][t]
+                        pred_dynaclr = pred_per_t["dynaclr"][t]
+                        pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
                         pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                         # Per-timepoint CP: drop target-zero columns + per-side z-score.
                         # Deep features stay untouched.
