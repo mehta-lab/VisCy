@@ -372,3 +372,96 @@ def maybe_gc_collect(fov_idx: int, every_n: int) -> None:
     if (fov_idx + 1) % every_n != 0:
         return
     gc.collect()
+
+
+# ---------------------------------------------------------------------------
+# Process-pool primitives for FOV-level parallelism (C4).
+# Spawn context so each worker gets its own CUDA context and BLAS load.
+# ---------------------------------------------------------------------------
+
+# Worker-global GPU lock path, set by _worker_initializer. ``None`` in the
+# parent / serial mode -> gpu_serialization_lock is a no-op.
+_GPU_LOCK_PATH: str | None = None
+
+
+def _worker_initializer(threads: int, gpu_lock_path: str | None) -> None:
+    """Initialize a freshly-spawned worker process.
+
+    Order matters: env caps are set BEFORE ``apply_thread_budget`` is called,
+    which lazy-imports torch. If torch were imported first, ``CUDA_VISIBLE_DEVICES``
+    overrides (if any) would come too late.
+    """
+    global _GPU_LOCK_PATH
+    # Env caps first so BLAS C-extensions load with the right thread count.
+    for var in _THREAD_ENV_VARS:
+        os.environ.setdefault(var, str(threads))
+    apply_thread_budget(threads)
+    _GPU_LOCK_PATH = gpu_lock_path
+
+
+@contextmanager
+def gpu_serialization_lock() -> Iterator[None]:
+    """Serialize GPU operations across workers via an ``fcntl.flock``.
+
+    No-op when ``_GPU_LOCK_PATH`` is unset (parent / serial mode).
+    Used to wrap model loads and per-FOV GPU operations under
+    ``executor=process``.
+    """
+    if _GPU_LOCK_PATH is None:
+        yield
+        return
+    import fcntl
+
+    with open(_GPU_LOCK_PATH, "w") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def gpu_lock_path_for_job() -> str:
+    """Return a node-local lock path tagged by SLURM_JOB_ID (or PID as fallback).
+
+    Stays on local /tmp so fcntl serialization is fast and doesn't go through
+    NFS lockd. One lock per job, shared across all workers in that job.
+    """
+    import tempfile
+
+    tag = os.environ.get("SLURM_JOB_ID", str(os.getpid()))
+    return str(Path(tempfile.gettempdir()) / f"dynacell_gpu_{tag}.lock")
+
+
+@contextmanager
+def make_fov_executor(runtime: ResolvedRuntime) -> Iterator[Any]:
+    """Yield a ``ProcessPoolExecutor`` for ``executor=process`` or ``None`` for serial.
+
+    Callers branch on the yielded value: ``None`` means run inline; an
+    ``Executor`` means submit ``_process_one_fov`` invocations to workers.
+
+    Cleanup: on exit (normal or exception), the pool is shut down with
+    ``cancel_futures=True``. In-flight workers continue to completion
+    (Python's ``ProcessPoolExecutor`` does not signal them); user may need
+    ``scancel`` to fully release GPU memory on Ctrl-C.
+    """
+    if runtime.executor == "serial":
+        yield None
+        return
+
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    lock_path = gpu_lock_path_for_job()
+    # Touch the lock file so workers can flock-open it before any FOV runs.
+    Path(lock_path).touch()
+    ctx = mp.get_context("spawn")
+    pool = ProcessPoolExecutor(
+        max_workers=runtime.fov_workers,
+        mp_context=ctx,
+        initializer=_worker_initializer,
+        initargs=(runtime.threads_per_worker, lock_path),
+    )
+    try:
+        yield pool
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)

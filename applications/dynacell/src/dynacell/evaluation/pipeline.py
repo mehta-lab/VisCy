@@ -4,6 +4,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import hydra
 import numpy as np
@@ -224,6 +225,7 @@ def _process_one_fov(
     """
     from dynacell.evaluation.runtime import (
         get_timings,
+        gpu_serialization_lock,
         maybe_empty_cuda_cache,
         region_timer,
     )
@@ -240,10 +242,10 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
-    with region_timer("mask_gt", pos_name_pred):
+    with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock():
         gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
     if pred_cache_ctx.enabled:
-        with region_timer("mask_pred", pos_name_pred):
+        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock():
             pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
     else:
         pred_mask_stack = None
@@ -254,18 +256,18 @@ def _process_one_fov(
     gt_celldino_per_t = None
     pred_per_t = None
     if config.compute_feature_metrics:
-        with region_timer("cp_gt", pos_name_pred):
+        with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock():
             gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
-        with region_timer("deep_gt_dinov3", pos_name_pred):
+        with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock():
             gt_dinov3_per_t = fov_deep_features(
                 cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
             )
-        with region_timer("deep_gt_dynaclr", pos_name_pred):
+        with region_timer("deep_gt_dynaclr", pos_name_pred), gpu_serialization_lock():
             gt_dynaclr_per_t = fov_deep_features(
                 cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
             )
         if celldino_feature_extractor is not None:
-            with region_timer("deep_gt_celldino", pos_name_pred):
+            with region_timer("deep_gt_celldino", pos_name_pred), gpu_serialization_lock():
                 gt_celldino_per_t = fov_deep_features(
                     cache_ctx,
                     pos_name_pred,
@@ -274,7 +276,7 @@ def _process_one_fov(
                     celldino_feature_extractor,
                     "celldino",
                 )
-        with region_timer("features_pred_per_t", pos_name_pred):
+        with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock():
             pred_per_t = _fov_pred_features_per_t(
                 pred_cache_ctx,
                 pos_name_pred,
@@ -300,7 +302,7 @@ def _process_one_fov(
     for t in tqdm(range(T), desc="Processing timepoints", leave=False):
         data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
-        with region_timer("pixel_metrics", pos_name_pred, t):
+        with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock():
             pixel_metrics = compute_pixel_metrics(
                 predict[t],
                 target[t],
@@ -315,11 +317,13 @@ def _process_one_fov(
 
         with region_timer("mask_metrics", pos_name_pred, t):
             segmented_target = gt_mask_stack[t]
-            segmented_predict = (
-                pred_mask_stack[t]
-                if pred_mask_stack is not None
-                else np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(bool)
-            )
+            if pred_mask_stack is not None:
+                segmented_predict = pred_mask_stack[t]
+            else:
+                with gpu_serialization_lock():
+                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
+                        bool
+                    )
             fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
             segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
@@ -483,11 +487,147 @@ def _aggregate_fov_result(
     gt_celldino_ts.extend(result.celldino.gt_ts)
 
 
+# Worker-side state for ``executor=process``. A spawn-context child Python
+# interpreter calls ``_worker_run_fov`` once per submitted FOV; the first call
+# triggers ``_worker_setup`` which lazy-loads seg model + extractors + plate
+# handles under the GPU serialization lock and caches them here. Subsequent
+# FOVs in the same worker reuse the cached state.
+_WORKER_STATE: dict[str, Any] = {}
+
+
+def _worker_setup(config: DictConfig) -> None:
+    """First-FOV-per-worker initialization: load models, open plates, init caches.
+
+    Wraps all GPU touch sites in ``gpu_serialization_lock()`` so N workers
+    don't initialize CUDA contexts + load weights concurrently. Cache contexts
+    and iohub plates are opened outside the lock (no GPU touch).
+    """
+    if _WORKER_STATE.get("initialized"):
+        return
+    from dynacell.evaluation.pipeline_cache import init_cache_context, resolve_dynaclr_encoder_cfg
+    from dynacell.evaluation.runtime import gpu_serialization_lock
+    from dynacell.evaluation.segmentation import prepare_segmentation_model
+    from dynacell.evaluation.utils import (
+        CellDinoFeatureExtractor,
+        DinoV3FeatureExtractor,
+        DynaCLRFeatureExtractor,
+    )
+
+    with gpu_serialization_lock():
+        seg_model = prepare_segmentation_model(config)
+        dinov3_feature_extractor = None
+        dynaclr_feature_extractor = None
+        celldino_feature_extractor = None
+        dinov3_model_name = None
+        dynaclr_ckpt_path = None
+        dynaclr_encoder_cfg = None
+        celldino_weights_path = None
+        if config.compute_feature_metrics:
+            dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
+            dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
+            dynaclr_config = config.feature_extractor.dynaclr
+            dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
+            dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
+            dynaclr_feature_extractor = DynaCLRFeatureExtractor(
+                checkpoint=dynaclr_config.checkpoint,
+                encoder_config=dynaclr_encoder_cfg,
+            )
+            celldino_cfg = config.feature_extractor.celldino
+            if celldino_cfg.weights_path is not None:
+                celldino_weights_path = str(celldino_cfg.weights_path)
+                celldino_feature_extractor = CellDinoFeatureExtractor(
+                    weights_path=celldino_weights_path,
+                    img_size=int(celldino_cfg.img_size),
+                    patch_size=int(celldino_cfg.patch_size),
+                )
+
+    cache_ctx = init_cache_context(
+        config,
+        side="gt",
+        dinov3_model_name=dinov3_model_name,
+        dynaclr_ckpt_path=dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+        celldino_weights_path=celldino_weights_path,
+    )
+    pred_cache_ctx = init_cache_context(
+        config,
+        side="pred",
+        dinov3_model_name=dinov3_model_name,
+        dynaclr_ckpt_path=dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+        celldino_weights_path=celldino_weights_path,
+    )
+
+    pred_plate = open_ome_zarr(Path(config.io.pred_path), mode="r")
+    gt_plate = open_ome_zarr(Path(config.io.gt_path), mode="r")
+    seg_plate = None
+    if config.io.cell_segmentation_path is not None:
+        seg_plate = open_ome_zarr(Path(config.io.cell_segmentation_path), mode="r")
+
+    _WORKER_STATE.update(
+        {
+            "initialized": True,
+            "seg_model": seg_model,
+            "dinov3": dinov3_feature_extractor,
+            "dynaclr": dynaclr_feature_extractor,
+            "celldino": celldino_feature_extractor,
+            "cache_ctx": cache_ctx,
+            "pred_cache_ctx": pred_cache_ctx,
+            "pred_plate": pred_plate,
+            "gt_plate": gt_plate,
+            "seg_plate": seg_plate,
+            "pred_positions": dict(pred_plate.positions()),
+            "gt_positions": dict(gt_plate.positions()),
+            "seg_positions": dict(seg_plate.positions()) if seg_plate is not None else None,
+        }
+    )
+
+
+def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) -> FovResult:
+    """Worker entry point: process one FOV by name and return FovResult.
+
+    Submitted via ``pool.submit`` in ``executor=process`` mode. Returns a
+    pickle-friendly ``FovResult`` (no plate handles or torch modules
+    cross the process boundary).
+    """
+    from dynacell.evaluation.pipeline_cache import flush_manifest
+
+    _worker_setup(config)
+    state = _WORKER_STATE
+    pos_pred = state["pred_positions"][pos_name]
+    pos_gt = state["gt_positions"][pos_name]
+    pos_seg = state["seg_positions"][pos_name] if state["seg_positions"] is not None else None
+
+    result = _process_one_fov(
+        config,
+        cuda_empty_every_n,
+        pos_name,
+        pos_pred,
+        pos_gt,
+        pos_seg,
+        config.io,
+        state["cache_ctx"],
+        state["pred_cache_ctx"],
+        state["seg_model"],
+        state["dinov3"],
+        state["dynaclr"],
+        state["celldino"],
+    )
+    # Worker-side manifest flush so interrupted runs preserve progress even
+    # when the parent dies. The global manifest lock at
+    # _pos_write_lock(ctx, "manifest", "global") serializes flushes across
+    # workers.
+    flush_manifest(state["cache_ctx"])
+    flush_manifest(state["pred_cache_ctx"])
+    return result
+
+
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
     from dynacell.evaluation.runtime import (
         apply_thread_budget,
         dump_timings_csv,
+        make_fov_executor,
         maybe_gc_collect,
         reset_timings,
         resolve_runtime,
@@ -665,32 +805,16 @@ def evaluate_predictions(config: DictConfig):
                     for ctx in sides_for_precompute.values():
                         flush_manifest(ctx)
 
-            for fov_idx, (p1, p2, p3) in enumerate(
-                tqdm(
-                    zip(pred_positions, gt_positions, seg_positions),
-                    total=len(pred_positions),
-                    desc="Processing positions",
-                )
-            ):
-                pos_name_pred, pos_pred = p1
-                _, pos_gt = p2
-                _, pos_seg = p3
+            # Phase 2 runtime resolution: clamp fov_workers to n_positions
+            # now that we know it. threads_per_worker is frozen at Phase 1
+            # so the parent's BLAS cap matches what workers see.
+            runtime = resolve_runtime(
+                config,
+                n_positions=len(pred_positions),
+                freeze_threads_per_worker=runtime.threads_per_worker,
+            )
 
-                result = _process_one_fov(
-                    config,
-                    runtime.cuda_empty_cache_every_n_timepoints,
-                    pos_name_pred,
-                    pos_pred,
-                    pos_gt,
-                    pos_seg,
-                    io_config,
-                    cache_ctx,
-                    pred_cache_ctx,
-                    seg_model,
-                    dinov3_feature_extractor,
-                    dynaclr_feature_extractor,
-                    celldino_feature_extractor,
-                )
+            def _aggregate(result: FovResult) -> None:
                 _aggregate_fov_result(
                     result,
                     segmentation_results,
@@ -723,11 +847,66 @@ def evaluate_predictions(config: DictConfig):
                     gt_celldino_ts,
                 )
 
-                # Flush manifest after each position so interrupted runs preserve progress.
-                flush_manifest(cache_ctx)
-                flush_manifest(pred_cache_ctx)
+            if runtime.executor == "serial":
+                for fov_idx, (p1, p2, p3) in enumerate(
+                    tqdm(
+                        zip(pred_positions, gt_positions, seg_positions),
+                        total=len(pred_positions),
+                        desc="Processing positions",
+                    )
+                ):
+                    pos_name_pred, pos_pred = p1
+                    _, pos_gt = p2
+                    _, pos_seg = p3
 
-                maybe_gc_collect(fov_idx, runtime.gc_collect_every_n_fovs)
+                    result = _process_one_fov(
+                        config,
+                        runtime.cuda_empty_cache_every_n_timepoints,
+                        pos_name_pred,
+                        pos_pred,
+                        pos_gt,
+                        pos_seg,
+                        io_config,
+                        cache_ctx,
+                        pred_cache_ctx,
+                        seg_model,
+                        dinov3_feature_extractor,
+                        dynaclr_feature_extractor,
+                        celldino_feature_extractor,
+                    )
+                    _aggregate(result)
+
+                    # Flush manifest after each position so interrupted runs preserve progress.
+                    flush_manifest(cache_ctx)
+                    flush_manifest(pred_cache_ctx)
+
+                    maybe_gc_collect(fov_idx, runtime.gc_collect_every_n_fovs)
+            else:
+                # executor == "process": spawn-context ProcessPoolExecutor.
+                # Workers lazy-load their own seg_model + extractors under the
+                # GPU lock; parent's copy stays loaded (used only here for
+                # checkpoint pre-warm side effect — discarded after this block).
+                from concurrent.futures import as_completed
+
+                pos_names_in_order = [p[0] for p, _, _ in zip(pred_positions, gt_positions, seg_positions)]
+                with make_fov_executor(runtime) as pool:
+                    if pool is None:
+                        raise RuntimeError("make_fov_executor returned None for executor='process'")
+                    futures = {
+                        pool.submit(
+                            _worker_run_fov, config, pos_name, runtime.cuda_empty_cache_every_n_timepoints
+                        ): pos_name
+                        for pos_name in pos_names_in_order
+                    }
+                    results_by_pos: dict[str, FovResult] = {}
+                    for fut in tqdm(as_completed(futures), total=len(futures), desc="Processing positions"):
+                        pos_name = futures[fut]
+                        results_by_pos[pos_name] = fut.result()
+                # Aggregate in position order (independent of completion order)
+                # so per-FOV CSV / embedding NPZ row order is deterministic.
+                for fov_idx, pos_name in enumerate(pos_names_in_order):
+                    _aggregate(results_by_pos[pos_name])
+                    maybe_gc_collect(fov_idx, runtime.gc_collect_every_n_fovs)
         finally:
             if seg_plate is not None:
                 seg_plate.close()
