@@ -35,6 +35,7 @@ from dynacell.evaluation.metrics import (
     evaluate_segmentations,
     features_from_crops,
 )
+from dynacell.evaluation.model_loader import EvalModels, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
     fov_cp_features,
@@ -42,7 +43,6 @@ from dynacell.evaluation.pipeline_cache import (
     fov_masks,
     init_cache_context,
     precompute_deep_features,
-    resolve_dynaclr_encoder_cfg,
 )
 from dynacell.evaluation.utils import plot_metrics
 
@@ -528,68 +528,36 @@ def _worker_setup(config: DictConfig) -> None:
     """
     if _WORKER_STATE.get("initialized"):
         return
-    from dynacell.evaluation.pipeline_cache import init_cache_context, resolve_dynaclr_encoder_cfg
     from dynacell.evaluation.runtime import gpu_serialization_lock
-    from dynacell.evaluation.segmentation import prepare_segmentation_model
-    from dynacell.evaluation.utils import (
-        CellDinoFeatureExtractor,
-        DinoV3FeatureExtractor,
-        DynaCLRFeatureExtractor,
-    )
 
     use_gpu = bool(getattr(config, "use_gpu", True))
     with gpu_serialization_lock(gate=use_gpu):
-        seg_model = prepare_segmentation_model(config)
-        dinov3_feature_extractor = None
-        dynaclr_feature_extractor = None
-        celldino_feature_extractor = None
-        dinov3_model_name = None
-        dynaclr_ckpt_path = None
-        dynaclr_encoder_cfg = None
-        celldino_weights_path = None
-        if config.compute_feature_metrics:
-            dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
-            dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
-            dynaclr_config = config.feature_extractor.dynaclr
-            dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
-            dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
-            dynaclr_feature_extractor = DynaCLRFeatureExtractor(
-                checkpoint=dynaclr_config.checkpoint,
-                encoder_config=dynaclr_encoder_cfg,
-            )
-            celldino_cfg = config.feature_extractor.celldino
-            if celldino_cfg.weights_path is not None:
-                celldino_weights_path = str(celldino_cfg.weights_path)
-                celldino_feature_extractor = CellDinoFeatureExtractor(
-                    weights_path=celldino_weights_path,
-                    img_size=int(celldino_cfg.img_size),
-                    patch_size=int(celldino_cfg.patch_size),
-                )
+        models = load_eval_models(config)
 
     cache_ctx = init_cache_context(
         config,
         side="gt",
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
-        celldino_weights_path=celldino_weights_path,
+        dinov3_model_name=models.dinov3_model_name,
+        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
+        celldino_weights_path=models.celldino_weights_path,
     )
     pred_cache_ctx = init_cache_context(
         config,
         side="pred",
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
-        celldino_weights_path=celldino_weights_path,
+        dinov3_model_name=models.dinov3_model_name,
+        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
+        celldino_weights_path=models.celldino_weights_path,
     )
 
     _WORKER_STATE.update(
         {
             "initialized": True,
-            "seg_model": seg_model,
-            "dinov3": dinov3_feature_extractor,
-            "dynaclr": dynaclr_feature_extractor,
-            "celldino": celldino_feature_extractor,
+            "seg_model": models.seg_model,
+            "dinov3": models.dinov3,
+            "dynaclr": models.dynaclr,
+            "celldino": models.celldino,
             "cache_ctx": cache_ctx,
             "pred_cache_ctx": pred_cache_ctx,
         }
@@ -673,8 +641,22 @@ def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) 
     return result
 
 
-def evaluate_predictions(config: DictConfig):
-    """Evaluate predictions on all test images."""
+def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None):
+    """Evaluate predictions on all test images.
+
+    Parameters
+    ----------
+    config : DictConfig
+        Resolved eval config.
+    models : EvalModels | None, optional
+        Pre-loaded segmenter + feature extractors. When provided, the
+        inline ``load_eval_models(config)`` call is skipped — used by the
+        grouped multi-condition driver to amortize model loads across
+        conditions sharing the same target/extractors. Default ``None``
+        preserves the historical single-condition behavior. Note: under
+        ``runtime.executor=process``, workers still load their own model
+        copies; this kwarg saves only the parent-side load.
+    """
     from dynacell.evaluation.runtime import (
         apply_thread_budget,
         dump_timings_csv,
@@ -683,8 +665,6 @@ def evaluate_predictions(config: DictConfig):
         reset_timings,
         resolve_runtime,
     )
-    from dynacell.evaluation.segmentation import prepare_segmentation_model
-    from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
@@ -709,52 +689,31 @@ def evaluate_predictions(config: DictConfig):
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    seg_model = prepare_segmentation_model(config)
+    if config.compute_feature_metrics and io_config.cell_segmentation_path is None:
+        raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
 
-    dinov3_model_name = None
-    dynaclr_ckpt_path = None
-    dynaclr_encoder_cfg = None
-    celldino_weights_path = None
-    dinov3_feature_extractor = None
-    dynaclr_feature_extractor = None
-    celldino_feature_extractor = None
-
-    if config.compute_feature_metrics:
-        if io_config.cell_segmentation_path is None:
-            raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
-        dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
-        dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
-        dynaclr_config = config.feature_extractor.dynaclr
-        dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
-        dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
-        dynaclr_feature_extractor = DynaCLRFeatureExtractor(
-            checkpoint=dynaclr_config.checkpoint,
-            encoder_config=dynaclr_encoder_cfg,
-        )
-        celldino_cfg = config.feature_extractor.celldino
-        if celldino_cfg.weights_path is not None:
-            celldino_weights_path = str(celldino_cfg.weights_path)
-            celldino_feature_extractor = CellDinoFeatureExtractor(
-                weights_path=celldino_weights_path,
-                img_size=int(celldino_cfg.img_size),
-                patch_size=int(celldino_cfg.patch_size),
-            )
+    if models is None:
+        models = load_eval_models(config)
+    seg_model = models.seg_model
+    dinov3_feature_extractor = models.dinov3
+    dynaclr_feature_extractor = models.dynaclr
+    celldino_feature_extractor = models.celldino
 
     cache_ctx = init_cache_context(
         config,
         side="gt",
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
-        celldino_weights_path=celldino_weights_path,
+        dinov3_model_name=models.dinov3_model_name,
+        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
+        celldino_weights_path=models.celldino_weights_path,
     )
     pred_cache_ctx = init_cache_context(
         config,
         side="pred",
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
-        celldino_weights_path=celldino_weights_path,
+        dinov3_model_name=models.dinov3_model_name,
+        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
+        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
+        celldino_weights_path=models.celldino_weights_path,
     )
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
@@ -1156,6 +1115,136 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     return pixel_ok and mask_ok and feature_ok
 
 
+_MODEL_LOADING_FIELDS: tuple[str, ...] = (
+    "target_name",
+    "feature_extractor",
+    "compute_feature_metrics",
+    "use_gpu",
+)
+
+
+def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
+    """Return a deep copy of ``base`` with ``overrides`` deep-merged in.
+
+    The returned config is fully independent (mutations don't leak into
+    ``base``). The ``conditions`` field is stripped from the copy so each
+    per-condition run sees a normal single-condition shape.
+    """
+    base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
+    if "conditions" in base_copy:
+        del base_copy["conditions"]
+    merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
+    if "name" in merged:
+        del merged["name"]
+    return merged  # type: ignore[return-value]
+
+
+def _check_grouped_field_invariants(base: DictConfig, merged: DictConfig, condition_name: str) -> None:
+    """Raise if any model-loading field differs between base and merged.
+
+    Per-condition overrides may freely change ``io.*``, ``save.*``,
+    ``runtime.*``, ``limit_positions``, and ``force_recompute.*``, but
+    must NOT touch the fields that determine which models get loaded —
+    that would defeat the whole point of sharing models across conditions.
+    """
+
+    def _snapshot(cfg: DictConfig, field: str):
+        node = OmegaConf.select(cfg, field, default=None)
+        if isinstance(node, (DictConfig, type(OmegaConf.create([])))):
+            return OmegaConf.to_container(node, resolve=False)
+        return node
+
+    for cfg_field in _MODEL_LOADING_FIELDS:
+        base_val = _snapshot(base, cfg_field)
+        merged_val = _snapshot(merged, cfg_field)
+        if base_val != merged_val:
+            raise ValueError(
+                f"Condition {condition_name!r}: overrides changed model-loading field "
+                f"{cfg_field!r}. Move it to the base config or run this condition separately."
+            )
+
+
+def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
+    """Run ``evaluate_predictions`` over a list of conditions sharing one model load.
+
+    Reads ``config.conditions`` (list of per-condition overrides). For each
+    condition, merges its overrides into a copy of the base config and
+    calls :func:`evaluate_predictions` with the shared ``EvalModels``.
+
+    Conditions may freely override ``io.*``, ``save.*``, ``runtime.*``,
+    ``limit_positions``, and ``force_recompute.*``. They must NOT change
+    ``target_name``, ``feature_extractor.*``, ``compute_feature_metrics``,
+    or ``use_gpu`` — those gate which models get loaded.
+
+    Parameters
+    ----------
+    config : DictConfig
+        Eval config with an extra top-level ``conditions: [...]`` list.
+        Each entry is a dict-like overlay applied to the base.
+
+    Returns
+    -------
+    list[tuple[str, tuple]]
+        ``[(condition_name, (pixel_rows, mask_rows, feature_rows)), ...]``
+        in input order. ``condition_name`` is taken from the entry's
+        ``name`` field, falling back to its index as a string.
+
+    Notes
+    -----
+    Under ``runtime.executor=process``, workers still load their own
+    model copies per condition (the pool is rebuilt inside each
+    ``evaluate_predictions`` call). Only the parent-side load is shared.
+    Use ``executor=serial`` to maximize the amortization benefit.
+    """
+    conditions = OmegaConf.select(config, "conditions", default=None)
+    if not conditions:
+        raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
+
+    executor = OmegaConf.select(config, "runtime.executor", default="serial")
+    if executor == "process":
+        print(
+            "[grouped] note: runtime.executor=process — workers re-load models per "
+            "condition; only the parent-side load is amortized. Use executor=serial "
+            "to share extractors across all conditions."
+        )
+
+    base_for_models = _merge_condition(config, conditions[0])
+    apply_dataset_ref(base_for_models)
+    print(f"[grouped] loading shared models from condition 0 of {len(conditions)} ...")
+    models = load_eval_models(base_for_models)
+
+    results: list[tuple[str, tuple]] = []
+    for idx, cond in enumerate(conditions):
+        name = (
+            cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
+        )
+        merged = _merge_condition(config, cond)
+        apply_dataset_ref(merged)
+        _check_grouped_field_invariants(base_for_models, merged, name)
+        print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
+
+        if _final_metrics_cache_valid(merged):
+            print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
+            save_dir = Path(merged.save.save_dir)
+            pixel_metrics = np.load(save_dir / merged.save.pixel_metrics_filename, allow_pickle=True).tolist()
+            mask_metrics = np.load(save_dir / merged.save.mask_metrics_filename, allow_pickle=True).tolist()
+            if merged.compute_feature_metrics:
+                feature_metrics = np.load(save_dir / merged.save.feature_metrics_filename, allow_pickle=True).tolist()
+            else:
+                feature_metrics = []
+        else:
+            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(merged, models=models)
+            save_metrics(
+                merged,
+                pixel_metrics=pixel_metrics,
+                mask_metrics=mask_metrics,
+                feature_metrics=feature_metrics,
+            )
+        results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
+
+    return results
+
+
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
@@ -1181,6 +1270,12 @@ def evaluate_model(config: DictConfig):
             feature_metrics=feature_metrics,
         )
     return pixel_metrics, mask_metrics, feature_metrics
+
+
+@hydra.main(version_base="1.2", config_path="_configs", config_name="eval_grouped")
+def evaluate_model_grouped(config: DictConfig):
+    """Run grouped multi-condition eval, amortizing model loads across conditions."""
+    return evaluate_predictions_grouped(config)
 
 
 if __name__ == "__main__":
