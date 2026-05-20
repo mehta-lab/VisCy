@@ -28,6 +28,7 @@ from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     fov_deep_features,
     fov_masks,
     init_cache_context,
+    precompute_deep_features,
 )
 
 
@@ -551,3 +552,224 @@ def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> Non
         )
     manifest = load_manifest(paths)
     assert manifest["artifacts"]["cp_features"]["source"] == "prediction"
+
+
+def _write_tiny_hcs_plate(
+    path: Path,
+    positions: list[tuple[str, str, str]],
+    *,
+    n_t: int = 3,
+    channel: str = "target",
+) -> None:
+    """Write a tiny ``(T, 1, 2, 8, 8)`` plate for batched precompute tests.
+
+    Image content is constant 0.5 — the deep-feature stub doesn't care
+    about pixel values, only the per-(pos, t) cell counts.
+    """
+    from iohub.ngff import open_ome_zarr
+
+    data = np.full((n_t, 1, 2, 8, 8), 0.5, dtype=np.float32)
+    with open_ome_zarr(path, mode="w", layout="hcs", channel_names=[channel], version="0.5") as plate:
+        for row, col, fov in positions:
+            pos = plate.create_position(row, col, fov)
+            pos.create_image("0", data)
+
+
+def _write_tiny_seg_plate(
+    path: Path,
+    positions: list[tuple[str, str, str]],
+    *,
+    n_t: int = 3,
+    n_cells: int = 2,
+) -> None:
+    """Write a tiny ``(T, 1, 2, 8, 8)`` cell-segmentation plate with N labeled cells."""
+    from iohub.ngff import open_ome_zarr
+
+    seg = np.zeros((n_t, 1, 2, 8, 8), dtype=np.int32)
+    if n_cells >= 1:
+        seg[:, 0, :, 0:3, 0:3] = 1
+    if n_cells >= 2:
+        seg[:, 0, :, 5:8, 5:8] = 2
+    if n_cells >= 3:
+        seg[:, 0, :, 0:3, 5:8] = 3
+    if n_cells >= 4:
+        seg[:, 0, :, 5:8, 0:3] = 4
+    with open_ome_zarr(path, mode="w", layout="hcs", channel_names=["cell_segmentation"], version="0.5") as plate:
+        for row, col, fov in positions:
+            pos = plate.create_position(row, col, fov)
+            pos.create_image("0", seg)
+
+
+class _BatchedConstantExtractor:
+    """Stub extractor that honors the ``extract_features_batch`` contract.
+
+    Returns ones of shape ``(len(images), feature_dim)`` so equality
+    checks across paths are bit-exact. Counts batch calls and records
+    every batch size so tests can assert skipped slots.
+    """
+
+    def __init__(self, feature_dim: int = 16) -> None:
+        self.feature_dim = feature_dim
+        self.batch_call_count = 0
+        self.batch_sizes: list[int] = []
+
+    def extract_features_batch(self, images):
+        import torch
+
+        self.batch_call_count += 1
+        self.batch_sizes.append(len(images))
+        return torch.from_numpy(np.ones((len(images), self.feature_dim), dtype=np.float32))
+
+    def extract_features(self, img):
+        import torch
+
+        return torch.from_numpy(np.ones((self.feature_dim,), dtype=np.float32))
+
+
+def _open_precompute_inputs(tmp_path: Path, *, n_t: int = 3, n_cells: int = 2):
+    """Open tiny GT + seg plates and return the test fixtures the precompute helper consumes."""
+    from iohub.ngff import open_ome_zarr
+
+    gt_path = tmp_path / "gt.zarr"
+    seg_path = tmp_path / "seg.zarr"
+    pos_keys = [("A", "1", "0"), ("A", "1", "1")]
+    _write_tiny_hcs_plate(gt_path, pos_keys, n_t=n_t)
+    _write_tiny_seg_plate(seg_path, pos_keys, n_t=n_t, n_cells=n_cells)
+    gt_plate = open_ome_zarr(gt_path, mode="r")
+    seg_plate = open_ome_zarr(seg_path, mode="r")
+    return gt_plate, seg_plate, gt_path, seg_path
+
+
+def test_precompute_deep_features_writes_all_slots(tmp_path: Path) -> None:
+    """precompute_deep_features writes every (pos, t) slot to the deep-feature cache."""
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path)
+    cache_dir = tmp_path / "cache"
+    try:
+        cfg = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_dir),
+            }
+        )
+        ctx = init_cache_context(cfg, side="gt", dinov3_model_name="facebook/test-dinov3")
+
+        extractor = _BatchedConstantExtractor(feature_dim=16)
+        precompute_deep_features(
+            sides={"gt": ctx},
+            side_positions={"gt": list(gt_plate.positions())},
+            side_channel_names={"gt": "target"},
+            seg_positions=list(seg_plate.positions()),
+            extractors={"dinov3": extractor},
+        )
+
+        paths = cache_paths(cache_dir)
+        for pos_name in ("A/1/0", "A/1/1"):
+            for t in range(3):
+                feats = read_features(paths, "dinov3", pos_name, t, model_name="facebook/test-dinov3")
+                assert feats is not None, f"missing slot {pos_name}/t{t}"
+                assert feats.shape == (2, 16), f"unexpected shape at {pos_name}/t{t}: {feats.shape}"
+        # 2 positions × 3 timepoints × 2 cells = 12 crops, plus a single
+        # batched call (well below threshold=256).
+        assert sum(extractor.batch_sizes) == 12
+    finally:
+        gt_plate.close()
+        seg_plate.close()
+
+
+def test_precompute_deep_features_matches_per_fov(tmp_path: Path) -> None:
+    """Cache produced by precompute_deep_features matches per-FOV fov_deep_features."""
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path)
+    cache_a = tmp_path / "cache_a"
+    cache_b = tmp_path / "cache_b"
+    try:
+        cfg_a = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_a),
+            }
+        )
+        cfg_b = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_b),
+            }
+        )
+        ctx_a = init_cache_context(cfg_a, side="gt", dinov3_model_name="facebook/test-dinov3")
+        ctx_b = init_cache_context(cfg_b, side="gt", dinov3_model_name="facebook/test-dinov3")
+
+        precompute_deep_features(
+            sides={"gt": ctx_a},
+            side_positions={"gt": list(gt_plate.positions())},
+            side_channel_names={"gt": "target"},
+            seg_positions=list(seg_plate.positions()),
+            extractors={"dinov3": _BatchedConstantExtractor(feature_dim=16)},
+        )
+
+        # Per-FOV path into cache B for the same data + a fresh stub instance.
+        per_fov_extractor = _BatchedConstantExtractor(feature_dim=16)
+        for (pos_name_gt, pos_gt), (_, pos_seg) in zip(list(gt_plate.positions()), list(seg_plate.positions())):
+            target = np.asarray(pos_gt.data[:, pos_gt.get_channel_index("target")])
+            cell_seg = np.asarray(pos_seg.data[:, 0])
+            fov_deep_features(ctx_b, pos_name_gt, target, cell_seg, per_fov_extractor, "dinov3")
+            flush_manifest(ctx_b)
+
+        paths_a = cache_paths(cache_a)
+        paths_b = cache_paths(cache_b)
+        for pos_name in ("A/1/0", "A/1/1"):
+            for t in range(3):
+                feats_a = read_features(paths_a, "dinov3", pos_name, t, model_name="facebook/test-dinov3")
+                feats_b = read_features(paths_b, "dinov3", pos_name, t, model_name="facebook/test-dinov3")
+                np.testing.assert_array_equal(feats_a, feats_b)
+    finally:
+        gt_plate.close()
+        seg_plate.close()
+
+
+def test_precompute_deep_features_skips_cached_slots(tmp_path: Path) -> None:
+    """Pre-seeded (pos, t) slots are skipped — extractor only sees remaining cells."""
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path)
+    cache_dir = tmp_path / "cache"
+    try:
+        cfg = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_dir),
+            }
+        )
+        ctx = init_cache_context(cfg, side="gt", dinov3_model_name="facebook/test-dinov3")
+
+        # Pre-seed (A/1/0, t=1) with the same shape (2 cells, 16 dims).
+        paths = cache_paths(cache_dir)
+        write_features(
+            paths,
+            "dinov3",
+            "A/1/0",
+            1,
+            np.full((2, 16), 7.0, dtype=np.float32),
+            model_name="facebook/test-dinov3",
+        )
+
+        extractor = _BatchedConstantExtractor(feature_dim=16)
+        precompute_deep_features(
+            sides={"gt": ctx},
+            side_positions={"gt": list(gt_plate.positions())},
+            side_channel_names={"gt": "target"},
+            seg_positions=list(seg_plate.positions()),
+            extractors={"dinov3": extractor},
+        )
+
+        # Total cells across 2 pos × 3 t × 2 cells = 12; pre-seeded slot
+        # carried 2 cells, so extractor must have seen exactly 10.
+        assert sum(extractor.batch_sizes) == 10
+        # Pre-seeded slot stays untouched (constant 7.0).
+        np.testing.assert_array_equal(
+            read_features(paths, "dinov3", "A/1/0", 1, model_name="facebook/test-dinov3"),
+            np.full((2, 16), 7.0, dtype=np.float32),
+        )
+    finally:
+        gt_plate.close()
+        seg_plate.close()
