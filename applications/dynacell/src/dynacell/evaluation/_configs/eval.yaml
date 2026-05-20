@@ -40,6 +40,7 @@ pixel_metrics:
 
 feature_metrics:
   patch_size: 256
+  deep_feature_batch_threshold: 256
 
 # Feature extractor configuration — required only when compute_feature_metrics=true
 # (or when the corresponding precompute-gt build.* flag is set). Fields stay ???
