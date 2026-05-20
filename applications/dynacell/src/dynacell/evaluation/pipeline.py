@@ -236,6 +236,11 @@ def _process_one_fov(
     # Inner per-T tqdm is noise when N workers each emit it to the shared
     # parent stderr — outer per-FOV tqdm in the parent stays visible either way.
     suppress_inner_tqdm = is_worker()
+    # GPU serialization lock is a no-op when use_gpu=false: under that
+    # setting compute_pixel_metrics, cellpose, and feature extractors all
+    # run CPU-only, so cross-worker fcntl serialization would just add
+    # latency for nothing.
+    use_gpu = bool(getattr(config, "use_gpu", True))
 
     pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
     gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
@@ -246,10 +251,10 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
-    with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock():
+    with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
         gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
     if pred_cache_ctx.enabled:
-        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock():
+        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
     else:
         pred_mask_stack = None
@@ -260,18 +265,18 @@ def _process_one_fov(
     gt_celldino_per_t = None
     pred_per_t = None
     if config.compute_feature_metrics:
-        with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock():
+        with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
-        with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock():
+        with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_dinov3_per_t = fov_deep_features(
                 cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
             )
-        with region_timer("deep_gt_dynaclr", pos_name_pred), gpu_serialization_lock():
+        with region_timer("deep_gt_dynaclr", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_dynaclr_per_t = fov_deep_features(
                 cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
             )
         if celldino_feature_extractor is not None:
-            with region_timer("deep_gt_celldino", pos_name_pred), gpu_serialization_lock():
+            with region_timer("deep_gt_celldino", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 gt_celldino_per_t = fov_deep_features(
                     cache_ctx,
                     pos_name_pred,
@@ -280,7 +285,7 @@ def _process_one_fov(
                     celldino_feature_extractor,
                     "celldino",
                 )
-        with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock():
+        with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             pred_per_t = _fov_pred_features_per_t(
                 pred_cache_ctx,
                 pos_name_pred,
@@ -306,7 +311,7 @@ def _process_one_fov(
     for t in tqdm(range(T), desc="Processing timepoints", leave=False, disable=suppress_inner_tqdm):
         data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
-        with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock():
+        with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
             pixel_metrics = compute_pixel_metrics(
                 predict[t],
                 target[t],
@@ -324,7 +329,7 @@ def _process_one_fov(
             if pred_mask_stack is not None:
                 segmented_predict = pred_mask_stack[t]
             else:
-                with gpu_serialization_lock():
+                with gpu_serialization_lock(gate=use_gpu):
                     segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
                         bool
                     )
@@ -517,7 +522,7 @@ def _worker_setup(config: DictConfig) -> None:
     """First-FOV-per-worker initialization: load models + init cache contexts.
 
     GPU touch sites (model + extractor loads) run under
-    ``gpu_serialization_lock()`` so N workers don't initialize CUDA + load
+    ``gpu_serialization_lock(gate=use_gpu)`` so under ``use_gpu=true`` N workers don't initialize CUDA + load
     weights concurrently. Cache contexts (no GPU touch) are built outside
     the lock. Plate handles are opened lazily per-FOV in ``_worker_run_fov``.
     """
@@ -532,7 +537,8 @@ def _worker_setup(config: DictConfig) -> None:
         DynaCLRFeatureExtractor,
     )
 
-    with gpu_serialization_lock():
+    use_gpu = bool(getattr(config, "use_gpu", True))
+    with gpu_serialization_lock(gate=use_gpu):
         seg_model = prepare_segmentation_model(config)
         dinov3_feature_extractor = None
         dynaclr_feature_extractor = None

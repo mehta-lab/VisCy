@@ -56,6 +56,21 @@ _THREAD_ENV_VARS: tuple[str, ...] = (
 _FORCE_PER_T_HYGIENE_ENV: str = "DYNACELL_FORCE_PER_T_HYGIENE"
 
 
+def _cpu_count() -> int:
+    """Return the number of CPUs visible to this process.
+
+    Prefers ``os.sched_getaffinity(0)`` when available (Linux): it respects
+    SLURM cgroups + cpuset limits, so we don't oversize ``fov_workers`` or
+    ``threads_per_worker`` past the cgroup-visible budget. Falls back to
+    ``os.cpu_count()`` (which reports the host's logical CPU count, ignoring
+    cgroups) on platforms without ``sched_getaffinity``.
+    """
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except AttributeError:
+        return max(1, os.cpu_count() or 1)
+
+
 @dataclass(frozen=True)
 class ResolvedRuntime:
     """Materialized runtime config with all ``"auto"`` values resolved.
@@ -147,14 +162,13 @@ def apply_thread_budget(threads: int) -> None:
         logger.info("torch.set_num_interop_threads: %s; continuing with current value", e)
 
     # 4. Activate threadpool_limits for the rest of the process.
-    if _ACTIVE_THREADPOOL_HANDLE is None:
-        _ACTIVE_THREADPOOL_HANDLE = threadpool_limits(limits=threads, user_api="blas")
-    else:
-        # Re-arming: enter a fresh context with the new limit. The old handle
-        # stays alive (its __exit__ is never called); threadpoolctl honors
-        # the innermost active limit. Acceptable for re-call from a worker
-        # initializer that inherited a parent's handle.
-        _ACTIVE_THREADPOOL_HANDLE = threadpool_limits(limits=threads, user_api="blas")
+    # On re-arm, the old handle becomes unreachable and is GC'd. We don't
+    # call its __exit__ because that would *restore* the prior thread cap
+    # — but we want the new cap to be the active one. threadpoolctl's
+    # native thread-limit state is set when the new limiter is entered
+    # (via __enter__ inside threadpool_limits.__init__), so the new limit
+    # is active immediately; dropping the old handle is intentional.
+    _ACTIVE_THREADPOOL_HANDLE = threadpool_limits(limits=threads, user_api="blas")
 
 
 def _get_int(config: DictConfig, key: str, default: int) -> int:
@@ -212,7 +226,7 @@ def resolve_runtime(
         # matching today's behavior.
         return ResolvedRuntime(
             fov_workers=1,
-            threads_per_worker=max(1, os.cpu_count() or 1),
+            threads_per_worker=_cpu_count(),
             executor="serial",
             cuda_empty_cache_every_n_timepoints=0,
             gc_collect_every_n_fovs=0,
@@ -222,13 +236,15 @@ def resolve_runtime(
     if executor not in ("serial", "process"):
         raise ValueError(f"runtime.executor must be 'serial' or 'process', got {executor!r}")
 
-    cpu_count = max(1, os.cpu_count() or 1)
+    cpu_count = _cpu_count()
     raw_fov_workers = OmegaConf.select(runtime, "fov_workers", default=1)
     raw_threads = OmegaConf.select(runtime, "threads_per_worker", default="auto")
 
     # Resolve fov_workers.
     if isinstance(raw_fov_workers, int):
         resolved_fov_workers = int(raw_fov_workers)
+        if resolved_fov_workers < 1:
+            raise ValueError(f"runtime.fov_workers must be >= 1, got {resolved_fov_workers}")
         if resolved_fov_workers > 1 and executor == "serial":
             raise ValueError(
                 f"runtime.fov_workers={resolved_fov_workers} requires runtime.executor='process' (got 'serial')"
@@ -255,6 +271,8 @@ def resolve_runtime(
         resolved_threads = int(freeze_threads_per_worker)
     elif isinstance(raw_threads, int):
         resolved_threads = int(raw_threads)
+        if resolved_threads < 1:
+            raise ValueError(f"runtime.threads_per_worker must be >= 1, got {resolved_threads}")
     elif raw_threads == "auto":
         resolved_threads = max(1, cpu_count // resolved_fov_workers)
     else:
@@ -410,14 +428,23 @@ def is_worker() -> bool:
 
 
 @contextmanager
-def gpu_serialization_lock() -> Iterator[None]:
+def gpu_serialization_lock(gate: bool = True) -> Iterator[None]:
     """Serialize GPU operations across workers via an ``fcntl.flock``.
 
-    No-op when ``_GPU_LOCK_PATH`` is unset (parent / serial mode).
-    Used to wrap model loads and per-FOV GPU operations under
-    ``executor=process``.
+    Parameters
+    ----------
+    gate : bool
+        When False (e.g., the protected region runs CPU-only under
+        ``use_gpu=false``), this is a no-op even in process mode.
+        Callers pass ``gate=config.use_gpu`` for regions whose GPU
+        usage tracks the ``use_gpu`` flag, so CPU-only runs don't
+        serialize across workers needlessly.
+
+    Other no-op conditions: ``_GPU_LOCK_PATH`` unset (parent / serial
+    mode) or no CUDA available in the worker. Used to wrap model loads
+    and per-FOV GPU operations under ``executor=process``.
     """
-    if _GPU_LOCK_PATH is None:
+    if not gate or _GPU_LOCK_PATH is None:
         yield
         return
     import fcntl
