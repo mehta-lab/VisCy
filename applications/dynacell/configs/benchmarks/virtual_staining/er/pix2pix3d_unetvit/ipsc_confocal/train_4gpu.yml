@@ -1,0 +1,51 @@
+# pix2pix3d_unetvit fit on ER (SEC61B) — 4-GPU DDP production leaf.
+#
+# Sibling of train.yml that swaps the model overlay + hardware profile to
+# the 4-GPU GAN DDP topology (find_unused_parameters=True). The DDP run is
+# the canonical production run going forward; we keep `experiment_id` and
+# `launcher.run_root` / `ModelCheckpoint.dirpath` IDENTICAL to train.yml
+# so checkpoints land in the same canonical subtree (Phase 4 predict leaves
+# reference that path). W&B run name and slurm job name are suffixed
+# `_4gpu` to disambiguate from the in-flight single-GPU run sharing the
+# same experiment_id.
+#
+# Per-GPU batch_size stays at 4 (inherited from data_overlays/unetvit3d_fit
+# via single-GPU recipe). Effective batch = 16 across 4 ranks. lr_g/lr_d
+# are NOT scaled by GPU count — we want to evaluate DDP at the same
+# per-rank optimization settings as the single-GPU run first.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: er__ipsc_confocal__pix2pix3d_unetvit
+
+trainer:
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_SEC61B_4gpu
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_SEC61B_4gpu
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit

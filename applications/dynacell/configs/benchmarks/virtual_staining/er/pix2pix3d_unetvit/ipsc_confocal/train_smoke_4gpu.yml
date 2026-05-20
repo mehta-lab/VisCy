@@ -1,0 +1,64 @@
+# 4-GPU DDP smoke for pix2pix3d_unetvit on the iPSC SEC61B test48 store.
+#
+# Purpose: validate the GAN-aware DDP topology (find_unused_parameters=True)
+# + HCSDataModule single-set DistributedSampler integration end-to-end on a
+# 48-FOV debug zarr. The single-GPU `train_smoke.yml` already proved
+# compose/instantiate/training-loop; this leaf isolates DDP behavior on
+# the alternating two-optimizer training_step under 4 ranks.
+#
+# Mirrors train_smoke.yml's two compose constraints:
+# (1) `targets/er_sec61b.yml` sets `benchmark.dataset_ref`; we null it so
+#     the resolver no-ops and the inline data_path/channels take effect.
+# (2) `augmentations[0].init_args.num_samples: 2` and
+#     HCSDataModule._train_transform enforces batch_size % num_samples == 0,
+#     so we set `batch_size: 2`.
+#
+# Per-GPU batch_size stays at 2 (matches single-GPU smoke); effective batch
+# under 4 GPUs is 8.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/wall_smoke.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: er__ipsc_confocal__pix2pix3d_unetvit__smoke_4gpu
+  # Null disables the compose-hook resolver so the inline data_path /
+  # source_channel / target_channel below take effect without colliding.
+  dataset_ref: null
+
+data:
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B_test48.zarr
+    source_channel: [Phase3D]
+    target_channel: [Structure]
+    batch_size: 2
+
+trainer:
+  # Smoke runs don't need a logger. `false` disables the recipe's WandbLogger
+  # so consumers don't have to remember --override trainer.logger=false.
+  # LearningRateMonitor (recipe default) raises without a logger AND
+  # manual schedulers don't play well with it under DynacellGAN — so the
+  # callbacks list is replaced with only ModelCheckpoint (lists replace
+  # wholesale under deep_merge).
+  logger: false
+  max_steps: 20
+  max_epochs: 1
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_last: true
+        every_n_train_steps: 10
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit/smoke_4gpu/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_SEC61B_SMOKE_4GPU
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit/smoke_4gpu
