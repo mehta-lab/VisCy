@@ -217,11 +217,14 @@ def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
 def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral_pcc_kwargs=None, use_gpu=True):
     """Compute pixel-level image quality metrics between prediction and target.
 
-    Stays device-resident: torch metrics (PCC / SSIM / NRMSE / PSNR) run on
-    CUDA when available, then the same tensors are handed to cubic's
-    spectral PCC and FSC implementations via :func:`cubic.cuda.ascupy` /
-    :func:`cubic.cuda.asnumpy`. The torch→cupy hop on CUDA is zero-copy
-    through the CUDA Array Interface — no host bounce per timepoint.
+    Notes
+    -----
+    Pre-refactor the function pulled both tensors back to host
+    (``.cpu().numpy()``) before calling cubic's spectral PCC and FSC,
+    which dominated wall time on long timelapses. cubic's metrics are
+    array-module-agnostic, so we keep the tensors on the chosen device
+    and hand them off via ``cubic.cuda.ascupy``/``asnumpy`` — zero-copy
+    on CUDA through the CUDA Array Interface.
     """
     prediction = torch.as_tensor(prediction)
     target = torch.as_tensor(target)
@@ -240,22 +243,15 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
         return metrics
 
     _require_cubic()
-    if device.type == "cuda":
-        prediction_xp = ascupy(prediction)
-        target_xp = ascupy(target)
-    else:
-        prediction_xp = asnumpy(prediction)
-        target_xp = asnumpy(target)
+    to_xp = ascupy if device.type == "cuda" else asnumpy
+    prediction, target = to_xp(prediction), to_xp(target)
 
     if spectral_pcc_kwargs is not None:
-        metrics["Spectral_PCC"] = spectral_pcc(prediction_xp, target_xp, spacing=spacing, **spectral_pcc_kwargs)
+        metrics["Spectral_PCC"] = spectral_pcc(prediction, target, spacing=spacing, **spectral_pcc_kwargs)
     if fsc_kwargs is not None:
-        resolutions = fsc_resolution(
-            target_xp - target_xp.mean(),
-            prediction_xp - prediction_xp.mean(),
-            spacing=spacing,
-            **fsc_kwargs,
-        )
+        # cubic.fsc_resolution mean-centers internally before every FFT,
+        # so we pass the raw arrays.
+        resolutions = fsc_resolution(target, prediction, spacing=spacing, **fsc_kwargs)
         metrics.update({f"{k.upper()}_FSC_Resolution": float(v) for k, v in resolutions.items()})
 
     return metrics
