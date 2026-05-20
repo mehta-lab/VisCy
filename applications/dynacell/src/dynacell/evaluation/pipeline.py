@@ -35,13 +35,12 @@ from dynacell.evaluation.metrics import (
     evaluate_segmentations,
     features_from_crops,
 )
-from dynacell.evaluation.model_loader import EvalModels, load_eval_models
+from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
     fov_cp_features,
     fov_deep_features,
     fov_masks,
-    init_cache_context,
     precompute_deep_features,
 )
 from dynacell.evaluation.utils import plot_metrics
@@ -534,22 +533,7 @@ def _worker_setup(config: DictConfig) -> None:
     with gpu_serialization_lock(gate=use_gpu):
         models = load_eval_models(config)
 
-    cache_ctx = init_cache_context(
-        config,
-        side="gt",
-        dinov3_model_name=models.dinov3_model_name,
-        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
-        celldino_weights_path=models.celldino_weights_path,
-    )
-    pred_cache_ctx = init_cache_context(
-        config,
-        side="pred",
-        dinov3_model_name=models.dinov3_model_name,
-        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
-        celldino_weights_path=models.celldino_weights_path,
-    )
+    cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
 
     _WORKER_STATE.update(
         {
@@ -699,22 +683,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     dynaclr_feature_extractor = models.dynaclr
     celldino_feature_extractor = models.celldino
 
-    cache_ctx = init_cache_context(
-        config,
-        side="gt",
-        dinov3_model_name=models.dinov3_model_name,
-        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
-        celldino_weights_path=models.celldino_weights_path,
-    )
-    pred_cache_ctx = init_cache_context(
-        config,
-        side="pred",
-        dinov3_model_name=models.dinov3_model_name,
-        dynaclr_ckpt_path=models.dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=models.dynaclr_encoder_cfg,
-        celldino_weights_path=models.celldino_weights_path,
-    )
+    cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
@@ -1115,6 +1084,18 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     return pixel_ok and mask_ok and feature_ok
 
 
+def _load_cached_final_metrics(config: DictConfig) -> tuple[list, list, list]:
+    """Reload the (pixel, mask, feature) NPY caches saved by ``save_metrics``."""
+    save_dir = Path(config.save.save_dir)
+    pixel = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
+    mask = np.load(save_dir / config.save.mask_metrics_filename, allow_pickle=True).tolist()
+    if config.compute_feature_metrics:
+        feature = np.load(save_dir / config.save.feature_metrics_filename, allow_pickle=True).tolist()
+    else:
+        feature = []
+    return pixel, mask, feature
+
+
 _MODEL_LOADING_FIELDS: tuple[str, ...] = (
     "target_name",
     "feature_extractor",
@@ -1123,41 +1104,42 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
 )
 
 
-def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
-    """Return a deep copy of ``base`` with ``overrides`` deep-merged in.
+def _snapshot_field(cfg: DictConfig, cfg_field: str):
+    """Resolve a model-loading field to a comparable plain Python value."""
+    node = OmegaConf.select(cfg, cfg_field, default=None)
+    if OmegaConf.is_config(node):
+        return OmegaConf.to_container(node, resolve=False)
+    return node
 
-    The returned config is fully independent (mutations don't leak into
-    ``base``). The ``conditions`` field is stripped from the copy so each
-    per-condition run sees a normal single-condition shape.
+
+def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
+    """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
+
+    ``OmegaConf.merge`` already returns a config independent of its inputs,
+    so no upfront deep-copy is needed. The ``conditions`` field (the list
+    we're iterating over) and the per-overlay ``name`` label are stripped
+    from the result so each per-condition run sees a normal
+    single-condition config shape.
     """
-    base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
-    if "conditions" in base_copy:
-        del base_copy["conditions"]
-    merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
-    if "name" in merged:
-        del merged["name"]
+    merged = OmegaConf.merge(base, OmegaConf.create(overrides))
+    for key in ("conditions", "name"):
+        if key in merged:
+            del merged[key]
     return merged  # type: ignore[return-value]
 
 
-def _check_grouped_field_invariants(base: DictConfig, merged: DictConfig, condition_name: str) -> None:
-    """Raise if any model-loading field differs between base and merged.
+def _check_grouped_field_invariants(base_snapshot: dict[str, object], merged: DictConfig, condition_name: str) -> None:
+    """Raise if a per-condition merged config disagrees with the baseline on model-loading fields.
 
-    Per-condition overrides may freely change ``io.*``, ``save.*``,
-    ``runtime.*``, ``limit_positions``, and ``force_recompute.*``, but
-    must NOT touch the fields that determine which models get loaded —
-    that would defeat the whole point of sharing models across conditions.
+    ``base_snapshot`` is computed once per grouped run from the
+    conditions-stripped base, so condition 0 is validated symmetrically
+    with all later conditions (a condition 0 overlay that sneaks in e.g.
+    ``target_name`` would be rejected, not silently adopted as the new
+    "base").
     """
-
-    def _snapshot(cfg: DictConfig, field: str):
-        node = OmegaConf.select(cfg, field, default=None)
-        if isinstance(node, (DictConfig, type(OmegaConf.create([])))):
-            return OmegaConf.to_container(node, resolve=False)
-        return node
-
     for cfg_field in _MODEL_LOADING_FIELDS:
-        base_val = _snapshot(base, cfg_field)
-        merged_val = _snapshot(merged, cfg_field)
-        if base_val != merged_val:
+        merged_val = _snapshot_field(merged, cfg_field)
+        if base_snapshot[cfg_field] != merged_val:
             raise ValueError(
                 f"Condition {condition_name!r}: overrides changed model-loading field "
                 f"{cfg_field!r}. Move it to the base config or run this condition separately."
@@ -1170,6 +1152,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     Reads ``config.conditions`` (list of per-condition overrides). For each
     condition, merges its overrides into a copy of the base config and
     calls :func:`evaluate_predictions` with the shared ``EvalModels``.
+    Models are loaded lazily on the first condition that misses its
+    ``_final_metrics_cache_valid`` short-circuit, so restarts where every
+    condition is cache-hit pay no cold-start.
 
     Conditions may freely override ``io.*``, ``save.*``, ``runtime.*``,
     ``limit_positions``, and ``force_recompute.*``. They must NOT change
@@ -1208,10 +1193,22 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
             "to share extractors across all conditions."
         )
 
-    base_for_models = _merge_condition(config, conditions[0])
-    apply_dataset_ref(base_for_models)
-    print(f"[grouped] loading shared models from condition 0 of {len(conditions)} ...")
-    models = load_eval_models(base_for_models)
+    # Canonical baseline for invariant checks: the input config with the
+    # ``conditions`` list dropped. Snapshot once; conditions are validated
+    # against this, including condition 0.
+    models_base = OmegaConf.merge(config, OmegaConf.create({}))
+    if "conditions" in models_base:
+        del models_base["conditions"]
+    base_snapshot = {field: _snapshot_field(models_base, field) for field in _MODEL_LOADING_FIELDS}
+
+    models: EvalModels | None = None
+
+    def get_models() -> EvalModels:
+        nonlocal models
+        if models is None:
+            print(f"[grouped] loading shared models for {len(conditions)} conditions ...")
+            models = load_eval_models(models_base)
+        return models
 
     results: list[tuple[str, tuple]] = []
     for idx, cond in enumerate(conditions):
@@ -1220,20 +1217,14 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         )
         merged = _merge_condition(config, cond)
         apply_dataset_ref(merged)
-        _check_grouped_field_invariants(base_for_models, merged, name)
+        _check_grouped_field_invariants(base_snapshot, merged, name)
         print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
 
         if _final_metrics_cache_valid(merged):
             print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
-            save_dir = Path(merged.save.save_dir)
-            pixel_metrics = np.load(save_dir / merged.save.pixel_metrics_filename, allow_pickle=True).tolist()
-            mask_metrics = np.load(save_dir / merged.save.mask_metrics_filename, allow_pickle=True).tolist()
-            if merged.compute_feature_metrics:
-                feature_metrics = np.load(save_dir / merged.save.feature_metrics_filename, allow_pickle=True).tolist()
-            else:
-                feature_metrics = []
+            pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
-            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(merged, models=models)
+            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(merged, models=get_models())
             save_metrics(
                 merged,
                 pixel_metrics=pixel_metrics,
@@ -1249,18 +1240,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
     apply_dataset_ref(config)
-    save_dir = Path(config.save.save_dir)
-    pixel_metrics_path = save_dir / config.save.pixel_metrics_filename
-    mask_metrics_path = save_dir / config.save.mask_metrics_filename
-    feature_metrics_path = save_dir / config.save.feature_metrics_filename
     if _final_metrics_cache_valid(config):
         print("Found existing metrics.")
-        pixel_metrics = np.load(pixel_metrics_path, allow_pickle=True).tolist()
-        mask_metrics = np.load(mask_metrics_path, allow_pickle=True).tolist()
-        if config.compute_feature_metrics:
-            feature_metrics = np.load(feature_metrics_path, allow_pickle=True).tolist()
-        else:
-            feature_metrics = []
+        pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(config)
     else:
         pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config)
         save_metrics(

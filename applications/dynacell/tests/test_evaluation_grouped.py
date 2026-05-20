@@ -11,54 +11,38 @@ Cache-only design (same shape as
 means no segmenter / extractors / cubic are loaded — the test
 validates the **loop structure** of the grouped driver, not the
 model-sharing speedup (which is hermetic-untestable).
+
+Fixture-building helpers live in ``_eval_fixtures.py``.
 """
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-from iohub.ngff import open_ome_zarr
-from omegaconf import OmegaConf
 
-# Reuse the fixture builders from the parallel-CPU integration test —
-# they already produce a deterministic, cache-complete fixture for the
-# cache-only fast path.
-sys.path.insert(0, str(Path(__file__).parent))
-from test_evaluation_pipeline_parallel_cpu import (  # noqa: E402
+from ._eval_fixtures import (
     N_POSITIONS,
     T,
-    _build_eval_config,
-    _build_fixture,
-    _live_pipeline_module,
+    build_eval_config,
+    build_fixture,
+    live_pipeline_module,
+    read_position_arrays,
 )
-
-
-def _read_position_arrays(plate_path: Path) -> dict[str, np.ndarray]:
-    out: dict[str, np.ndarray] = {}
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        for name, pos in plate.positions():
-            out[name] = np.asarray(pos.data[:])
-    return out
 
 
 def _build_grouped_config(
     cond_a_root: Path,
     cond_b_root: Path,
     save_root: Path,
-) -> OmegaConf:
-    """Construct the grouped config with two condition overlays.
+):
+    """Construct the grouped config with two condition overlays."""
+    pred_a, gt_a, gt_cache_a, pred_cache_a = build_fixture(cond_a_root)
+    pred_b, gt_b, gt_cache_b, pred_cache_b = build_fixture(cond_b_root)
 
-    The base mirrors ``_build_eval_config`` (cache-only flags) and the
-    conditions overlay only the per-condition io + save paths.
-    """
-    pred_a, gt_a, gt_cache_a, pred_cache_a = _build_fixture(cond_a_root)
-    pred_b, gt_b, gt_cache_b, pred_cache_b = _build_fixture(cond_b_root)
-
-    base = _build_eval_config(
-        pred_a,  # placeholder; overridden per condition
+    base = build_eval_config(
+        pred_a,
         gt_a,
         gt_cache_a,
         pred_cache_a,
@@ -99,12 +83,7 @@ def _build_grouped_config(
 
 
 def test_grouped_matches_sequential_per_condition(tmp_path: Path):
-    """Grouped eval produces byte-equal outputs to sequential per-condition runs.
-
-    Validates the loop structure of ``evaluate_predictions_grouped``:
-    per-condition merge, config independence (no cross-contamination),
-    seg plate write paths, CSV output paths.
-    """
+    """Grouped eval produces byte-equal outputs to sequential per-condition runs."""
     cond_a_root = tmp_path / "fixture_a"
     cond_b_root = tmp_path / "fixture_b"
     cond_a_root.mkdir()
@@ -112,24 +91,21 @@ def test_grouped_matches_sequential_per_condition(tmp_path: Path):
     save_root = tmp_path / "saves"
     save_root.mkdir()
 
-    # Sequential per-condition baseline.
-    pred_a, gt_a, gt_cache_a, pred_cache_a = _build_fixture(cond_a_root)
-    pred_b, gt_b, gt_cache_b, pred_cache_b = _build_fixture(cond_b_root)
+    pred_a, gt_a, gt_cache_a, pred_cache_a = build_fixture(cond_a_root)
+    pred_b, gt_b, gt_cache_b, pred_cache_b = build_fixture(cond_b_root)
     save_a_seq = save_root / "cond_a_seq"
     save_b_seq = save_root / "cond_b_seq"
     save_a_seq.mkdir()
     save_b_seq.mkdir()
 
-    pipeline = _live_pipeline_module()
-    cfg_a_seq = _build_eval_config(pred_a, gt_a, gt_cache_a, pred_cache_a, save_a_seq, executor="serial", fov_workers=1)
-    cfg_b_seq = _build_eval_config(pred_b, gt_b, gt_cache_b, pred_cache_b, save_b_seq, executor="serial", fov_workers=1)
+    pipeline = live_pipeline_module()
+    cfg_a_seq = build_eval_config(pred_a, gt_a, gt_cache_a, pred_cache_a, save_a_seq, executor="serial", fov_workers=1)
+    cfg_b_seq = build_eval_config(pred_b, gt_b, gt_cache_b, pred_cache_b, save_b_seq, executor="serial", fov_workers=1)
     pixel_a_seq, mask_a_seq, _ = pipeline.evaluate_predictions(cfg_a_seq)
     pixel_b_seq, mask_b_seq, _ = pipeline.evaluate_predictions(cfg_b_seq)
 
-    # Grouped run reuses the same fixture roots (deterministic) but uses
-    # its own save dirs so we can compare side by side.
     grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
-    pipeline = _live_pipeline_module()
+    pipeline = live_pipeline_module()
     results = pipeline.evaluate_predictions_grouped(grouped_cfg)
 
     assert [name for name, _ in results] == ["cond_a", "cond_b"]
@@ -147,8 +123,8 @@ def test_grouped_matches_sequential_per_condition(tmp_path: Path):
         ("cond_a", save_a_seq, save_root / "cond_a_grouped"),
         ("cond_b", save_b_seq, save_root / "cond_b_grouped"),
     ]:
-        arrs_seq = _read_position_arrays(save_seq / "segmentation_results.zarr")
-        arrs_grp = _read_position_arrays(save_grp / "segmentation_results.zarr")
+        arrs_seq = read_position_arrays(save_seq / "segmentation_results.zarr")
+        arrs_grp = read_position_arrays(save_grp / "segmentation_results.zarr")
         assert set(arrs_seq.keys()) == set(arrs_grp.keys()), f"{cond_name} position set mismatch"
         for pos_name, arr_seq in arrs_seq.items():
             np.testing.assert_array_equal(arr_seq, arrs_grp[pos_name], err_msg=f"{cond_name}/{pos_name}")
@@ -158,7 +134,7 @@ def test_grouped_matches_sequential_per_condition(tmp_path: Path):
 
 
 def test_grouped_rejects_model_loading_field_overrides(tmp_path: Path):
-    """Per-condition overrides on model-loading fields must raise."""
+    """Per-condition overrides on model-loading fields must raise — including condition 0."""
     cond_a_root = tmp_path / "fixture_a"
     cond_b_root = tmp_path / "fixture_b"
     cond_a_root.mkdir()
@@ -167,10 +143,33 @@ def test_grouped_rejects_model_loading_field_overrides(tmp_path: Path):
     save_root.mkdir()
 
     grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
-    # Sabotage: condition B tries to override target_name.
+    # Sabotage condition B's target_name.
     grouped_cfg["conditions"][1]["target_name"] = "membrane"
 
-    pipeline = _live_pipeline_module()
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="model-loading field"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
+def test_grouped_rejects_condition0_model_field_override(tmp_path: Path):
+    """A model-loading override smuggled into condition 0 must raise, not silently re-baseline.
+
+    Earlier wiring used ``conditions[0]``-merged config as the invariant
+    baseline, which would have made condition 0 implicitly trusted to
+    redefine ``target_name`` / ``feature_extractor.*`` etc. Guards
+    against regression of that asymmetry.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["conditions"][0]["target_name"] = "membrane"
+
+    pipeline = live_pipeline_module()
     with pytest.raises(ValueError, match="model-loading field"):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
 
@@ -186,6 +185,6 @@ def test_grouped_rejects_empty_conditions(tmp_path: Path):
     grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
     grouped_cfg["conditions"] = []
 
-    pipeline = _live_pipeline_module()
+    pipeline = live_pipeline_module()
     with pytest.raises(ValueError, match="non-empty"):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
