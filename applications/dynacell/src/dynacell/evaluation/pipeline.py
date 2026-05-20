@@ -2,6 +2,7 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import hydra
@@ -153,18 +154,345 @@ def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]])
         print(f"Saved embeddings → {out_path}")
 
 
+@dataclass
+class _BackboneLists:
+    """Per-FOV per-backbone single-cell feature lists.
+
+    Each list holds one entry per timepoint with non-empty cell features.
+    ``pred_*`` and ``gt_*`` indices align: ``pred_feats[i]`` and
+    ``gt_feats[i]`` come from the same (pos_name, t) pair, with
+    ``pred_fovs[i] == gt_fovs[i]`` and ``pred_ts[i] == gt_ts[i]``.
+    """
+
+    pred_feats: list[np.ndarray] = field(default_factory=list)
+    gt_feats: list[np.ndarray] = field(default_factory=list)
+    pred_fovs: list[np.ndarray] = field(default_factory=list)
+    gt_fovs: list[np.ndarray] = field(default_factory=list)
+    pred_ts: list[np.ndarray] = field(default_factory=list)
+    gt_ts: list[np.ndarray] = field(default_factory=list)
+
+
+@dataclass
+class FovResult:
+    """Output of ``_process_one_fov``: everything one FOV contributes to the run.
+
+    Designed for cross-process transport via pickle: all fields are picklable
+    types (str, list[dict], list[np.ndarray], np.ndarray) — no iohub handles,
+    no torch modules.
+
+    Microssim scores are merged into ``per_t_pixel_rows`` before return
+    (matching the existing serial path at ``pipeline.py:478-481``); no
+    separate microssim field.
+    """
+
+    pos_name: str
+    row: str
+    col: str
+    fov: str
+    per_t_pixel_rows: list[dict]
+    per_t_mask_rows: list[dict]
+    per_t_feature_rows: list[dict]
+    seg_array: np.ndarray  # (T, 2, D, H, W) bool: channel 0 = pred, channel 1 = GT
+    cp: _BackboneLists = field(default_factory=_BackboneLists)
+    dinov3: _BackboneLists = field(default_factory=_BackboneLists)
+    dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
+    celldino: _BackboneLists = field(default_factory=_BackboneLists)
+    timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
+
+
+def _process_one_fov(
+    config: DictConfig,
+    cuda_empty_cache_every_n_timepoints: int,
+    pos_name_pred: str,
+    pos_pred,
+    pos_gt,
+    pos_seg,
+    io_config,
+    cache_ctx,
+    pred_cache_ctx,
+    seg_model,
+    dinov3_feature_extractor,
+    dynaclr_feature_extractor,
+    celldino_feature_extractor,
+) -> FovResult:
+    """Compute everything one FOV contributes to the eval and return a FovResult.
+
+    No side effects on shared parent state (no segmentation_results plate
+    writes, no manifest flush). The parent aggregator handles those — see
+    ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
+    paths in ``evaluate_predictions``.
+    """
+    from dynacell.evaluation.runtime import (
+        get_timings,
+        maybe_empty_cuda_cache,
+        region_timer,
+    )
+    from dynacell.evaluation.segmentation import segment
+
+    timings_start = len(get_timings())
+
+    pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
+    gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
+
+    predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
+    target = np.asarray(pos_gt.data[:, gt_channel_index])
+    cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
+
+    T = predict.shape[0]
+
+    with region_timer("mask_gt", pos_name_pred):
+        gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
+    if pred_cache_ctx.enabled:
+        with region_timer("mask_pred", pos_name_pred):
+            pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+    else:
+        pred_mask_stack = None
+
+    gt_cp_per_t = None
+    gt_dinov3_per_t = None
+    gt_dynaclr_per_t = None
+    gt_celldino_per_t = None
+    pred_per_t = None
+    if config.compute_feature_metrics:
+        with region_timer("cp_gt", pos_name_pred):
+            gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
+        with region_timer("deep_gt_dinov3", pos_name_pred):
+            gt_dinov3_per_t = fov_deep_features(
+                cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
+            )
+        with region_timer("deep_gt_dynaclr", pos_name_pred):
+            gt_dynaclr_per_t = fov_deep_features(
+                cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+            )
+        if celldino_feature_extractor is not None:
+            with region_timer("deep_gt_celldino", pos_name_pred):
+                gt_celldino_per_t = fov_deep_features(
+                    cache_ctx,
+                    pos_name_pred,
+                    target,
+                    cell_segmentation,
+                    celldino_feature_extractor,
+                    "celldino",
+                )
+        with region_timer("features_pred_per_t", pos_name_pred):
+            pred_per_t = _fov_pred_features_per_t(
+                pred_cache_ctx,
+                pos_name_pred,
+                predict,
+                cell_segmentation,
+                dinov3_feature_extractor,
+                dynaclr_feature_extractor,
+                celldino_feature_extractor,
+                config.feature_metrics.patch_size,
+                config.pixel_metrics.spacing,
+            )
+
+    microssim_data: list[dict] = []
+    fov_pixel_metrics: list[dict] = []
+    fov_mask_metrics: list[dict] = []
+    fov_feature_metrics: list[dict] = []
+    segmentations: list[np.ndarray] = []
+    cp = _BackboneLists()
+    dinov3 = _BackboneLists()
+    dynaclr = _BackboneLists()
+    celldino = _BackboneLists()
+
+    for t in tqdm(range(T), desc="Processing timepoints", leave=False):
+        data_info = {"FOV": pos_name_pred, "Timepoint": t}
+
+        with region_timer("pixel_metrics", pos_name_pred, t):
+            pixel_metrics = compute_pixel_metrics(
+                predict[t],
+                target[t],
+                spacing=config.pixel_metrics.spacing,
+                fsc_kwargs=config.pixel_metrics.fsc,
+                spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
+                use_gpu=config.use_gpu,
+            )
+        if config.compute_microssim:
+            microssim_data.append({"target": target[t], "predict": predict[t]})
+        fov_pixel_metrics.append({**data_info, **pixel_metrics})
+
+        with region_timer("mask_metrics", pos_name_pred, t):
+            segmented_target = gt_mask_stack[t]
+            segmented_predict = (
+                pred_mask_stack[t]
+                if pred_mask_stack is not None
+                else np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(bool)
+            )
+            fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
+            segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
+
+        if config.compute_feature_metrics:
+            with region_timer("feature_pairwise", pos_name_pred, t):
+                pred_cp = pred_per_t["cp"][t]
+                pred_dinov3 = pred_per_t["dinov3"][t]
+                pred_dynaclr = pred_per_t["dynaclr"][t]
+                pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
+                pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
+                if pred_cp.size and gt_cp_t.size:
+                    pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
+                else:
+                    pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
+                pairwise_metrics = {
+                    **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
+                    **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
+                    **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
+                }
+                if pred_celldino is not None:
+                    pairwise_metrics.update(
+                        compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
+                    )
+                fov_feature_metrics.append({**data_info, **pairwise_metrics})
+                if pred_cp.size > 0:
+                    cp.pred_feats.append(pred_cp)
+                    cp.gt_feats.append(gt_cp_t)
+                    fov_arr = np.full(len(pred_cp), pos_name_pred)
+                    t_arr = np.full(len(pred_cp), t, dtype=np.int32)
+                    cp.pred_fovs.append(fov_arr)
+                    cp.gt_fovs.append(fov_arr)
+                    cp.pred_ts.append(t_arr)
+                    cp.gt_ts.append(t_arr)
+                if pred_dinov3.size > 0:
+                    dinov3.pred_feats.append(pred_dinov3)
+                    dinov3.gt_feats.append(gt_dinov3_per_t[t])
+                    fov_arr = np.full(len(pred_dinov3), pos_name_pred)
+                    t_arr = np.full(len(pred_dinov3), t, dtype=np.int32)
+                    dinov3.pred_fovs.append(fov_arr)
+                    dinov3.gt_fovs.append(fov_arr)
+                    dinov3.pred_ts.append(t_arr)
+                    dinov3.gt_ts.append(t_arr)
+                if pred_dynaclr.size > 0:
+                    dynaclr.pred_feats.append(pred_dynaclr)
+                    dynaclr.gt_feats.append(gt_dynaclr_per_t[t])
+                    fov_arr = np.full(len(pred_dynaclr), pos_name_pred)
+                    t_arr = np.full(len(pred_dynaclr), t, dtype=np.int32)
+                    dynaclr.pred_fovs.append(fov_arr)
+                    dynaclr.gt_fovs.append(fov_arr)
+                    dynaclr.pred_ts.append(t_arr)
+                    dynaclr.gt_ts.append(t_arr)
+                if pred_celldino is not None and pred_celldino.size > 0:
+                    celldino.pred_feats.append(pred_celldino)
+                    celldino.gt_feats.append(gt_celldino_per_t[t])
+                    fov_arr = np.full(len(pred_celldino), pos_name_pred)
+                    t_arr = np.full(len(pred_celldino), t, dtype=np.int32)
+                    celldino.pred_fovs.append(fov_arr)
+                    celldino.gt_fovs.append(fov_arr)
+                    celldino.pred_ts.append(t_arr)
+                    celldino.gt_ts.append(t_arr)
+
+        maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
+
+    seg_array = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
+
+    if config.compute_microssim:
+        with region_timer("microssim", pos_name_pred):
+            microssim_scores = calculate_microssim(microssim_data)
+            for i in range(T):
+                fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
+
+    row, col, fov = pos_name_pred.split("/")
+    return FovResult(
+        pos_name=pos_name_pred,
+        row=row,
+        col=col,
+        fov=fov,
+        per_t_pixel_rows=fov_pixel_metrics,
+        per_t_mask_rows=fov_mask_metrics,
+        per_t_feature_rows=fov_feature_metrics,
+        seg_array=seg_array.astype(bool),
+        cp=cp,
+        dinov3=dinov3,
+        dynaclr=dynaclr,
+        celldino=celldino,
+        timings=get_timings()[timings_start:],
+    )
+
+
+def _aggregate_fov_result(
+    result: FovResult,
+    segmentation_results,
+    all_pixel_metrics: list[dict],
+    all_mask_metrics: list[dict],
+    all_feature_metrics: list[dict],
+    pred_cp_feats: list[np.ndarray],
+    pred_cp_fovs: list[np.ndarray],
+    pred_cp_ts: list[np.ndarray],
+    gt_cp_feats: list[np.ndarray],
+    gt_cp_fovs: list[np.ndarray],
+    gt_cp_ts: list[np.ndarray],
+    pred_dinov3_feats: list[np.ndarray],
+    pred_dinov3_fovs: list[np.ndarray],
+    pred_dinov3_ts: list[np.ndarray],
+    gt_dinov3_feats: list[np.ndarray],
+    gt_dinov3_fovs: list[np.ndarray],
+    gt_dinov3_ts: list[np.ndarray],
+    pred_dynaclr_feats: list[np.ndarray],
+    pred_dynaclr_fovs: list[np.ndarray],
+    pred_dynaclr_ts: list[np.ndarray],
+    gt_dynaclr_feats: list[np.ndarray],
+    gt_dynaclr_fovs: list[np.ndarray],
+    gt_dynaclr_ts: list[np.ndarray],
+    pred_celldino_feats: list[np.ndarray],
+    pred_celldino_fovs: list[np.ndarray],
+    pred_celldino_ts: list[np.ndarray],
+    gt_celldino_feats: list[np.ndarray],
+    gt_celldino_fovs: list[np.ndarray],
+    gt_celldino_ts: list[np.ndarray],
+) -> None:
+    """Apply one FOV's contributions to the parent-side run state.
+
+    Writes the segmentation array to the HCS plate, extends the per-T row
+    lists, and extends the 24 dataset-level accumulator lists.
+    """
+    from dynacell.evaluation.runtime import extend_timings, region_timer
+
+    extend_timings(result.timings)
+
+    with region_timer("seg_write", result.pos_name):
+        seg_pos = segmentation_results.create_position(result.row, result.col, result.fov)
+        seg_pos.create_image("0", result.seg_array)
+
+    all_pixel_metrics.extend(result.per_t_pixel_rows)
+    all_mask_metrics.extend(result.per_t_mask_rows)
+    all_feature_metrics.extend(result.per_t_feature_rows)
+
+    pred_cp_feats.extend(result.cp.pred_feats)
+    pred_cp_fovs.extend(result.cp.pred_fovs)
+    pred_cp_ts.extend(result.cp.pred_ts)
+    gt_cp_feats.extend(result.cp.gt_feats)
+    gt_cp_fovs.extend(result.cp.gt_fovs)
+    gt_cp_ts.extend(result.cp.gt_ts)
+    pred_dinov3_feats.extend(result.dinov3.pred_feats)
+    pred_dinov3_fovs.extend(result.dinov3.pred_fovs)
+    pred_dinov3_ts.extend(result.dinov3.pred_ts)
+    gt_dinov3_feats.extend(result.dinov3.gt_feats)
+    gt_dinov3_fovs.extend(result.dinov3.gt_fovs)
+    gt_dinov3_ts.extend(result.dinov3.gt_ts)
+    pred_dynaclr_feats.extend(result.dynaclr.pred_feats)
+    pred_dynaclr_fovs.extend(result.dynaclr.pred_fovs)
+    pred_dynaclr_ts.extend(result.dynaclr.pred_ts)
+    gt_dynaclr_feats.extend(result.dynaclr.gt_feats)
+    gt_dynaclr_fovs.extend(result.dynaclr.gt_fovs)
+    gt_dynaclr_ts.extend(result.dynaclr.gt_ts)
+    pred_celldino_feats.extend(result.celldino.pred_feats)
+    pred_celldino_fovs.extend(result.celldino.pred_fovs)
+    pred_celldino_ts.extend(result.celldino.pred_ts)
+    gt_celldino_feats.extend(result.celldino.gt_feats)
+    gt_celldino_fovs.extend(result.celldino.gt_fovs)
+    gt_celldino_ts.extend(result.celldino.gt_ts)
+
+
 def evaluate_predictions(config: DictConfig):
     """Evaluate predictions on all test images."""
     from dynacell.evaluation.runtime import (
         apply_thread_budget,
         dump_timings_csv,
-        maybe_empty_cuda_cache,
         maybe_gc_collect,
-        region_timer,
         reset_timings,
         resolve_runtime,
     )
-    from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
+    from dynacell.evaluation.segmentation import prepare_segmentation_model
     from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
 
     # Phase 1 runtime resolution: lock in executor + thread caps before any
@@ -348,169 +676,52 @@ def evaluate_predictions(config: DictConfig):
                 _, pos_gt = p2
                 _, pos_seg = p3
 
-                pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
-                gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
-
-                predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
-                target = np.asarray(pos_gt.data[:, gt_channel_index])  # shape: (T, D, H, W)
-                cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
-
-                T = predict.shape[0]
-
-                with region_timer("mask_gt", pos_name_pred):
-                    gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
-                if pred_cache_ctx.enabled:
-                    with region_timer("mask_pred", pos_name_pred):
-                        pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
-                else:
-                    pred_mask_stack = None
-
-                if config.compute_feature_metrics:
-                    with region_timer("cp_gt", pos_name_pred):
-                        gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
-                    with region_timer("deep_gt_dinov3", pos_name_pred):
-                        gt_dinov3_per_t = fov_deep_features(
-                            cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
-                        )
-                    with region_timer("deep_gt_dynaclr", pos_name_pred):
-                        gt_dynaclr_per_t = fov_deep_features(
-                            cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
-                        )
-                    if celldino_feature_extractor is not None:
-                        with region_timer("deep_gt_celldino", pos_name_pred):
-                            gt_celldino_per_t = fov_deep_features(
-                                cache_ctx,
-                                pos_name_pred,
-                                target,
-                                cell_segmentation,
-                                celldino_feature_extractor,
-                                "celldino",
-                            )
-                    else:
-                        gt_celldino_per_t = None
-                    with region_timer("features_pred_per_t", pos_name_pred):
-                        pred_per_t = _fov_pred_features_per_t(
-                            pred_cache_ctx,
-                            pos_name_pred,
-                            predict,
-                            cell_segmentation,
-                            dinov3_feature_extractor,
-                            dynaclr_feature_extractor,
-                            celldino_feature_extractor,
-                            config.feature_metrics.patch_size,
-                            config.pixel_metrics.spacing,
-                        )
-
-                microssim_data = []
-                fov_pixel_metrics = []
-                segmentations = []
-
-                for t in tqdm(range(T), desc="Processing timepoints"):
-                    data_info = {"FOV": pos_name_pred, "Timepoint": t}
-
-                    with region_timer("pixel_metrics", pos_name_pred, t):
-                        pixel_metrics = compute_pixel_metrics(
-                            predict[t],
-                            target[t],
-                            spacing=config.pixel_metrics.spacing,
-                            fsc_kwargs=config.pixel_metrics.fsc,
-                            spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
-                            use_gpu=config.use_gpu,
-                        )
-                    if config.compute_microssim:
-                        microssim_data.append({"target": target[t], "predict": predict[t]})
-                    fov_pixel_metrics.append({**data_info, **pixel_metrics})
-
-                    with region_timer("mask_metrics", pos_name_pred, t):
-                        segmented_target = gt_mask_stack[t]
-                        segmented_predict = (
-                            pred_mask_stack[t]
-                            if pred_mask_stack is not None
-                            else np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(bool)
-                        )
-                        all_mask_metrics.append(
-                            {**data_info, **evaluate_segmentations(segmented_predict, segmented_target)}
-                        )
-                        segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
-
-                    if config.compute_feature_metrics:
-                        with region_timer("feature_pairwise", pos_name_pred, t):
-                            pred_cp = pred_per_t["cp"][t]
-                            pred_dinov3 = pred_per_t["dinov3"][t]
-                            pred_dynaclr = pred_per_t["dynaclr"][t]
-                            pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
-                            pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
-                            # Per-timepoint CP: drop target-zero columns + per-side z-score.
-                            # Deep features stay untouched.
-                            if pred_cp.size and gt_cp_t.size:
-                                pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
-                            else:
-                                pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
-                            pairwise_metrics = {
-                                **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
-                                **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
-                                **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
-                            }
-                            if pred_celldino is not None:
-                                pairwise_metrics.update(
-                                    compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
-                                )
-                            all_feature_metrics.append({**data_info, **pairwise_metrics})
-                        # pred/gt fov+timepoint arrays are byte-identical per
-                        # backbone; share one reference each (consumers only
-                        # concatenate, never mutate in place).
-                        if pred_cp.size > 0:
-                            pred_cp_feats.append(pred_cp)
-                            gt_cp_feats.append(gt_cp_t)
-                            fov_arr = np.full(len(pred_cp), pos_name_pred)
-                            t_arr = np.full(len(pred_cp), t, dtype=np.int32)
-                            pred_cp_fovs.append(fov_arr)
-                            gt_cp_fovs.append(fov_arr)
-                            pred_cp_ts.append(t_arr)
-                            gt_cp_ts.append(t_arr)
-                        if pred_dinov3.size > 0:
-                            pred_dinov3_feats.append(pred_dinov3)
-                            gt_dinov3_feats.append(gt_dinov3_per_t[t])
-                            fov_arr = np.full(len(pred_dinov3), pos_name_pred)
-                            t_arr = np.full(len(pred_dinov3), t, dtype=np.int32)
-                            pred_dinov3_fovs.append(fov_arr)
-                            gt_dinov3_fovs.append(fov_arr)
-                            pred_dinov3_ts.append(t_arr)
-                            gt_dinov3_ts.append(t_arr)
-                        if pred_dynaclr.size > 0:
-                            pred_dynaclr_feats.append(pred_dynaclr)
-                            gt_dynaclr_feats.append(gt_dynaclr_per_t[t])
-                            fov_arr = np.full(len(pred_dynaclr), pos_name_pred)
-                            t_arr = np.full(len(pred_dynaclr), t, dtype=np.int32)
-                            pred_dynaclr_fovs.append(fov_arr)
-                            gt_dynaclr_fovs.append(fov_arr)
-                            pred_dynaclr_ts.append(t_arr)
-                            gt_dynaclr_ts.append(t_arr)
-                        if pred_celldino is not None and pred_celldino.size > 0:
-                            pred_celldino_feats.append(pred_celldino)
-                            gt_celldino_feats.append(gt_celldino_per_t[t])
-                            fov_arr = np.full(len(pred_celldino), pos_name_pred)
-                            t_arr = np.full(len(pred_celldino), t, dtype=np.int32)
-                            pred_celldino_fovs.append(fov_arr)
-                            gt_celldino_fovs.append(fov_arr)
-                            pred_celldino_ts.append(t_arr)
-                            gt_celldino_ts.append(t_arr)
-
-                    maybe_empty_cuda_cache(t, runtime.cuda_empty_cache_every_n_timepoints)
-
-                with region_timer("seg_write", pos_name_pred):
-                    seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
-                    row, col, fov = pos_name_pred.split("/")
-                    seg_pos = segmentation_results.create_position(row, col, fov)
-                    seg_pos.create_image("0", seg.astype(bool))
-
-                if config.compute_microssim:
-                    with region_timer("microssim", pos_name_pred):
-                        microssim_scores = calculate_microssim(microssim_data)
-                        for i in range(T):
-                            fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
-
-                all_pixel_metrics.extend(fov_pixel_metrics)
+                result = _process_one_fov(
+                    config,
+                    runtime.cuda_empty_cache_every_n_timepoints,
+                    pos_name_pred,
+                    pos_pred,
+                    pos_gt,
+                    pos_seg,
+                    io_config,
+                    cache_ctx,
+                    pred_cache_ctx,
+                    seg_model,
+                    dinov3_feature_extractor,
+                    dynaclr_feature_extractor,
+                    celldino_feature_extractor,
+                )
+                _aggregate_fov_result(
+                    result,
+                    segmentation_results,
+                    all_pixel_metrics,
+                    all_mask_metrics,
+                    all_feature_metrics,
+                    pred_cp_feats,
+                    pred_cp_fovs,
+                    pred_cp_ts,
+                    gt_cp_feats,
+                    gt_cp_fovs,
+                    gt_cp_ts,
+                    pred_dinov3_feats,
+                    pred_dinov3_fovs,
+                    pred_dinov3_ts,
+                    gt_dinov3_feats,
+                    gt_dinov3_fovs,
+                    gt_dinov3_ts,
+                    pred_dynaclr_feats,
+                    pred_dynaclr_fovs,
+                    pred_dynaclr_ts,
+                    gt_dynaclr_feats,
+                    gt_dynaclr_fovs,
+                    gt_dynaclr_ts,
+                    pred_celldino_feats,
+                    pred_celldino_fovs,
+                    pred_celldino_ts,
+                    gt_celldino_feats,
+                    gt_celldino_fovs,
+                    gt_celldino_ts,
+                )
 
                 # Flush manifest after each position so interrupted runs preserve progress.
                 flush_manifest(cache_ctx)
