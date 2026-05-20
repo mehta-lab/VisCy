@@ -447,15 +447,24 @@ def _aggregate_fov_result(
     gt_celldino_feats: list[np.ndarray],
     gt_celldino_fovs: list[np.ndarray],
     gt_celldino_ts: list[np.ndarray],
+    *,
+    extend_worker_timings: bool,
 ) -> None:
     """Apply one FOV's contributions to the parent-side run state.
 
     Writes the segmentation array to the HCS plate, extends the per-T row
     lists, and extends the 24 dataset-level accumulator lists.
+
+    ``extend_worker_timings`` toggles whether to append ``result.timings``
+    to the parent's global ``_TIMINGS`` collector. Set ``False`` in serial
+    mode (workers and parent share one collector, so the timings are
+    already there); set ``True`` in process mode (workers have separate
+    per-process collectors, so the parent must aggregate).
     """
     from dynacell.evaluation.runtime import extend_timings, region_timer
 
-    extend_timings(result.timings)
+    if extend_worker_timings:
+        extend_timings(result.timings)
 
     with region_timer("seg_write", result.pos_name):
         seg_pos = segmentation_results.create_position(result.row, result.col, result.fov)
@@ -839,6 +848,13 @@ def evaluate_predictions(config: DictConfig):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
+            # Whether to fold result.timings into the parent's _TIMINGS:
+            # only when results come from spawn workers (separate per-process
+            # collector). In serial mode, _process_one_fov already wrote to
+            # the parent's collector via region_timer; re-extending here
+            # would double-count every row.
+            extend_worker_timings = runtime.executor == "process"
+
             def _aggregate(result: FovResult) -> None:
                 _aggregate_fov_result(
                     result,
@@ -870,6 +886,7 @@ def evaluate_predictions(config: DictConfig):
                     gt_celldino_feats,
                     gt_celldino_fovs,
                     gt_celldino_ts,
+                    extend_worker_timings=extend_worker_timings,
                 )
 
             if runtime.executor == "serial":

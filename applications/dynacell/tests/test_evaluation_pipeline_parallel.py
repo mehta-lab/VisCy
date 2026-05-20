@@ -211,6 +211,7 @@ def test_aggregate_fov_result_extends_24_accumulators():
         gt_celldino_feats,
         gt_celldino_fovs,
         gt_celldino_ts,
+        extend_worker_timings=True,
     )
 
     assert len(all_pix) == 2
