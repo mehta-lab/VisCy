@@ -814,6 +814,22 @@ def evaluate_predictions(config: DictConfig):
                 freeze_threads_per_worker=runtime.threads_per_worker,
             )
 
+            # Under executor=process, workers lazy-load their own seg_model
+            # copies (under the GPU lock). The parent's copy is held only for
+            # the checkpoint-cache-warm side effect (segmenter_model_zoo's
+            # validate_model has no file lock around its quilt download, so
+            # pre-warming in the parent prevents N workers from racing on a
+            # cold cache). After Phase 2 we know the final executor — if it's
+            # process, drop the parent copy so we don't keep two seg model
+            # copies resident on the GPU.
+            if runtime.executor == "process" and seg_model is not None:
+                del seg_model
+                seg_model = None
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
             def _aggregate(result: FovResult) -> None:
                 _aggregate_fov_result(
                     result,
