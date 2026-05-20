@@ -157,6 +157,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
 
             if batcher is not None:
                 batcher.drain()
+                flush_manifest(cache_ctx)
         finally:
             if seg_plate is not None:
                 seg_plate.close()

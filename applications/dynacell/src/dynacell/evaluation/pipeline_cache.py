@@ -875,10 +875,9 @@ def _flush_kind(
         _update_manifest_entry(ctx.manifest, manifest_keys, entry)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
-
-    # Persist manifest incrementally so an interrupted precompute leaves
-    # on-disk state consistent with the zarr writes above.
-    flush_manifest(ctx)
+    # Manifest persistence is deferred to the caller (after batcher.drain()).
+    # Zarr slot writes above are durable per-slot; on resume the lockless
+    # prefetch finds them whether or not the manifest is up to date.
 
 
 def precompute_deep_features(

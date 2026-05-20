@@ -317,6 +317,8 @@ def evaluate_predictions(config: DictConfig):
                         deep_extractors,
                         flush_threshold=flush_threshold,
                     )
+                    for ctx in sides_for_precompute.values():
+                        flush_manifest(ctx)
 
             for p1, p2, p3 in tqdm(
                 zip(pred_positions, gt_positions, seg_positions),
