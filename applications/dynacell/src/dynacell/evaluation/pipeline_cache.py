@@ -166,14 +166,16 @@ def init_cache_context(
     cell_seg_path = str(io.cell_segmentation_path) if io.cell_segmentation_path is not None else None
     check_cache_identity(
         manifest,
-        gt_plate_path=str(io.gt_path),
-        gt_channel_name=str(io.gt_channel_name),
+        source="gt",
+        plate_path=str(io.gt_path),
+        channel_name=str(io.gt_channel_name),
         cell_segmentation_path=cell_seg_path,
     )
     seed_cache_identity(
         manifest,
-        gt_plate_path=str(io.gt_path),
-        gt_channel_name=str(io.gt_channel_name),
+        source="gt",
+        plate_path=str(io.gt_path),
+        channel_name=str(io.gt_channel_name),
         cell_segmentation_path=cell_seg_path,
     )
 
@@ -253,14 +255,16 @@ def init_pred_cache_context(
     cell_seg_path = str(io.cell_segmentation_path) if io.cell_segmentation_path is not None else None
     check_cache_identity(
         manifest,
-        pred_plate_path=str(io.pred_path),
-        pred_channel_name=str(io.pred_channel_name),
+        source="pred",
+        plate_path=str(io.pred_path),
+        channel_name=str(io.pred_channel_name),
         cell_segmentation_path=cell_seg_path,
     )
     seed_cache_identity(
         manifest,
-        pred_plate_path=str(io.pred_path),
-        pred_channel_name=str(io.pred_channel_name),
+        source="pred",
+        plate_path=str(io.pred_path),
+        channel_name=str(io.pred_channel_name),
         cell_segmentation_path=cell_seg_path,
     )
 

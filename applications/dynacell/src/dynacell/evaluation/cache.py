@@ -107,11 +107,10 @@ def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
 def check_cache_identity(
     manifest: dict[str, Any],
     *,
-    gt_plate_path: str | None = None,
-    gt_channel_name: str | None = None,
+    source: Literal["gt", "pred"] | None = None,
+    plate_path: str | None = None,
+    channel_name: str | None = None,
     cell_segmentation_path: str | None = None,
-    pred_plate_path: str | None = None,
-    pred_channel_name: str | None = None,
 ) -> None:
     """Raise if the manifest's cache identity disagrees with the current config.
 
@@ -119,16 +118,17 @@ def check_cache_identity(
     ----------
     manifest
         Loaded manifest dict (may be the empty skeleton from :func:`load_manifest`).
-    gt_plate_path
-        Current ``io.gt_path``. ``None`` skips the GT check.
-    gt_channel_name
-        Current ``io.gt_channel_name``. ``None`` skips the GT check.
+    source
+        Which side to check (``"gt"`` or ``"pred"``); ``None`` skips per-side
+        identity and only validates ``cell_segmentation_path``.
+    plate_path
+        Current ``io.gt_path`` (when ``source="gt"``) or ``io.pred_path``
+        (when ``source="pred"``).
+    channel_name
+        Current ``io.gt_channel_name`` or ``io.pred_channel_name``, matching
+        *source*.
     cell_segmentation_path
         Current ``io.cell_segmentation_path``. ``None`` skips the check.
-    pred_plate_path
-        Current ``io.pred_path``. ``None`` skips the prediction check.
-    pred_channel_name
-        Current ``io.pred_channel_name``. ``None`` skips the prediction check.
     """
     version = manifest.get("cache_schema_version")
     if version is not None and version != CACHE_SCHEMA_VERSION:
@@ -136,27 +136,15 @@ def check_cache_identity(
             f"Cache schema version mismatch: manifest has {version}, current is {CACHE_SCHEMA_VERSION}. "
             "Delete the cache directory or bump cache_schema_version."
         )
-    gt_entry = manifest.get("gt")
-    if gt_entry is not None and gt_plate_path is not None:
-        if gt_entry.get("plate_path") != gt_plate_path:
+    if source is not None:
+        entry = manifest.get(source)
+        if entry is not None and plate_path is not None and entry.get("plate_path") != plate_path:
             raise StaleCacheError(
-                f"gt.plate_path mismatch: manifest={gt_entry.get('plate_path')!r}, config={gt_plate_path!r}"
+                f"{source}.plate_path mismatch: manifest={entry.get('plate_path')!r}, config={plate_path!r}"
             )
-    if gt_entry is not None and gt_channel_name is not None:
-        if gt_entry.get("channel_name") != gt_channel_name:
+        if entry is not None and channel_name is not None and entry.get("channel_name") != channel_name:
             raise StaleCacheError(
-                f"gt.channel_name mismatch: manifest={gt_entry.get('channel_name')!r}, config={gt_channel_name!r}"
-            )
-    pred_entry = manifest.get("pred")
-    if pred_entry is not None and pred_plate_path is not None:
-        if pred_entry.get("plate_path") != pred_plate_path:
-            raise StaleCacheError(
-                f"pred.plate_path mismatch: manifest={pred_entry.get('plate_path')!r}, config={pred_plate_path!r}"
-            )
-    if pred_entry is not None and pred_channel_name is not None:
-        if pred_entry.get("channel_name") != pred_channel_name:
-            raise StaleCacheError(
-                f"pred.channel_name mismatch: manifest={pred_entry.get('channel_name')!r}, config={pred_channel_name!r}"
+                f"{source}.channel_name mismatch: manifest={entry.get('channel_name')!r}, config={channel_name!r}"
             )
     seg_entry = manifest.get("cell_segmentation")
     if seg_entry is not None and cell_segmentation_path is not None:
@@ -170,27 +158,24 @@ def check_cache_identity(
 def seed_cache_identity(
     manifest: dict[str, Any],
     *,
-    gt_plate_path: str | None = None,
-    gt_channel_name: str | None = None,
+    source: Literal["gt", "pred"] | None = None,
+    plate_path: str | None = None,
+    channel_name: str | None = None,
     cell_segmentation_path: str | None = None,
-    pred_plate_path: str | None = None,
-    pred_channel_name: str | None = None,
 ) -> None:
     """Populate source identity manifest entries if absent.
 
     Called before the first artifact is written. Safe to call repeatedly;
     later calls with conflicting values should be preceded by
-    :func:`check_cache_identity`.
+    :func:`check_cache_identity`. Pass *source* once per side — seeding both
+    sides in a single call is no longer supported.
     """
     manifest["cache_schema_version"] = CACHE_SCHEMA_VERSION
-    if (gt_plate_path is None) != (gt_channel_name is None):
-        raise ValueError("gt_plate_path and gt_channel_name must be provided together")
-    if (pred_plate_path is None) != (pred_channel_name is None):
-        raise ValueError("pred_plate_path and pred_channel_name must be provided together")
-    if gt_plate_path is not None and gt_channel_name is not None and manifest.get("gt") is None:
-        manifest["gt"] = {"plate_path": gt_plate_path, "channel_name": gt_channel_name}
-    if pred_plate_path is not None and pred_channel_name is not None and manifest.get("pred") is None:
-        manifest["pred"] = {"plate_path": pred_plate_path, "channel_name": pred_channel_name}
+    if source is not None:
+        if (plate_path is None) != (channel_name is None):
+            raise ValueError(f"plate_path and channel_name must be provided together for source={source!r}")
+        if plate_path is not None and channel_name is not None and manifest.get(source) is None:
+            manifest[source] = {"plate_path": plate_path, "channel_name": channel_name}
     if cell_segmentation_path is not None and manifest.get("cell_segmentation") is None:
         manifest["cell_segmentation"] = {"plate_path": cell_segmentation_path}
 
