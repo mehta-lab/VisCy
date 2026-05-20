@@ -174,6 +174,70 @@ def test_grouped_rejects_condition0_model_field_override(tmp_path: Path):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
 
 
+def test_grouped_warns_loudly_on_process_plus_cache_miss(tmp_path: Path, capsys):
+    """``executor=process`` + multiple conditions + cache-miss prints a loud WARNING.
+
+    This combination is the worst case for amortization: each
+    condition's worker pool independently re-loads SuperModel + the
+    three deep extractors, so cold-start cost multiplies by
+    ``N_workers × N_conditions``. The driver should warn the user
+    upfront and recommend ``executor=serial``.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["runtime"]["executor"] = "process"
+    grouped_cfg["runtime"]["fov_workers"] = 2
+    grouped_cfg["io"]["require_complete_cache"] = False
+
+    # The grouped driver prints the warning before iterating conditions.
+    # The eval will then fail/succeed depending on cache state; we don't
+    # care — we just want the warning text in stdout.
+    pipeline = live_pipeline_module()
+    try:
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+    except Exception:
+        pass
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out, f"expected loud warning, got: {out!r}"
+    assert "executor=process" in out
+    assert "require_complete_cache=false" in out
+    assert "executor=serial" in out
+
+
+def test_grouped_mild_note_on_process_plus_cache_only(tmp_path: Path, capsys):
+    """``executor=process`` + ``require_complete_cache=true`` gets a mild note, not the loud WARNING.
+
+    Under the cache-only path, workers skip ``prepare_segmentation_model``
+    and don't instantiate extractors — pool re-spawn is the only
+    overhead, which is small. The driver should inform but not alarm.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["runtime"]["executor"] = "process"
+    grouped_cfg["runtime"]["fov_workers"] = 2
+    # require_complete_cache stays True from the cache-only fixture.
+
+    pipeline = live_pipeline_module()
+    pipeline.evaluate_predictions_grouped(grouped_cfg)
+    out = capsys.readouterr().out
+    assert "[grouped] note:" in out
+    assert "no models actually load" in out
+    assert "WARNING" not in out, f"unexpected loud warning under cache-only path: {out!r}"
+
+
 def test_grouped_rejects_empty_conditions(tmp_path: Path):
     """Missing or empty 'conditions' list must raise an informative error."""
     cond_a_root = tmp_path / "fixture_a"

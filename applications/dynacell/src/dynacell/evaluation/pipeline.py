@@ -1186,12 +1186,36 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
 
     executor = OmegaConf.select(config, "runtime.executor", default="serial")
-    if executor == "process":
-        print(
-            "[grouped] note: runtime.executor=process — workers re-load models per "
-            "condition; only the parent-side load is amortized. Use executor=serial "
-            "to share extractors across all conditions."
-        )
+    require_complete = bool(OmegaConf.select(config, "io.require_complete_cache", default=False))
+    n_conditions = len(conditions)
+    if executor == "process" and n_conditions > 1:
+        if require_complete:
+            # Cache-only path: workers skip prepare_segmentation_model (returns
+            # None) and don't instantiate extractors. Pool re-spawn is the only
+            # overhead — mild informational note, not a warning.
+            print(
+                "[grouped] note: runtime.executor=process with require_complete_cache=true — "
+                f"workers re-init per condition but no models actually load. "
+                f"{n_conditions} pool spawns total; consider executor=serial to skip "
+                "spawn overhead entirely."
+            )
+        else:
+            # Worst-case: each condition's worker pool independently loads
+            # SuperModel + DINOv3 + DynaCLR + CELL-DINO. Total wasted
+            # cold-start ≈ load_time × N_workers × N_conditions.
+            print(
+                "\n"
+                "[grouped] !!! WARNING: runtime.executor=process + "
+                f"{n_conditions} conditions + require_complete_cache=false !!!\n"
+                "  Each condition's worker pool independently loads SuperModel + "
+                "DINOv3 + DynaCLR + CELL-DINO.\n"
+                "  Expected waste: ~30-90 s × N_workers × "
+                f"{n_conditions} conditions of redundant cold-start.\n"
+                "  Fix: set runtime.executor=serial to share the parent's pre-loaded "
+                "models across conditions.\n"
+                "  Use process mode only when you need per-FOV parallelism within a "
+                "single condition.\n"
+            )
 
     # Canonical baseline for invariant checks: the input config with the
     # ``conditions`` list dropped. Snapshot once; conditions are validated

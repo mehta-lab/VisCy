@@ -112,6 +112,11 @@ Constraints (enforced at runtime by `_check_grouped_field_invariants`):
 - Overlays MUST NOT change `target_name`, `feature_extractor.*`, `compute_feature_metrics`, or `use_gpu` — those gate model loading and must be identical across conditions. Run such variants separately.
 - Each condition independently honors `_final_metrics_cache_valid` — if a condition's CSV/NPY already exist with `force_recompute.final_metrics=false`, the driver skips it and loads the cached outputs.
 
-Process-mode caveat: under `runtime.executor=process`, the parent's shared `EvalModels` is passed to `evaluate_predictions(..., models=...)` so the parent-side pre-warm is amortized, but each condition still spawns a fresh `ProcessPoolExecutor` whose workers re-load their own model copies. Use `executor=serial` to maximize the amortization benefit; the driver prints a heads-up when it detects `process` mode. For an A40 / single-GPU interactive node where you'd run serial anyway, this is the default win.
+Process-mode caveat: under `runtime.executor=process`, the parent's shared `EvalModels` is passed to `evaluate_predictions(..., models=...)` so the parent-side pre-warm is amortized, but each condition still spawns a fresh `ProcessPoolExecutor` whose workers re-load their own model copies. Use `executor=serial` to maximize the amortization benefit. The driver tiers its message based on the cache mode:
+
+- `executor=process` + `require_complete_cache=true` + `n_conditions > 1` → mild **note**: workers re-init per condition but skip `prepare_segmentation_model` (returns None) and don't instantiate extractors, so the cost is just N pool spawns.
+- `executor=process` + `require_complete_cache=false` + `n_conditions > 1` → loud **WARNING**: each condition's worker pool independently loads SuperModel + DINOv3 + DynaCLR + CELL-DINO. Total waste is ~30-90 s × `runtime.fov_workers` × `n_conditions`. Fix: switch to `executor=serial` so the parent's pre-loaded models are reused across conditions; reserve `process` for per-FOV parallelism within a *single* condition.
+
+For an A40 / single-GPU interactive node where you'd run serial anyway, this is the default win.
 
 Tests: `applications/dynacell/tests/test_evaluation_grouped.py` validates byte-equal parity against sequential per-condition runs on the same cache-only fixture used by `test_evaluation_pipeline_parallel_cpu.py`, plus rejection cases for empty `conditions` and forbidden model-loading-field overrides.
