@@ -1,0 +1,34 @@
+defaults:
+  - eval
+  - _self_
+
+# Per-condition overlays for grouped multi-condition eval. Each entry is a
+# deep merge applied to the base config above. Use this to run e.g. all three
+# A549 treatment conditions (mock / denv / zikv) in one process, amortizing
+# the segmenter + DINOv3 + DynaCLR + CELL-DINO load.
+#
+# Each overlay may freely change ``io.*``, ``save.*``, ``runtime.*``,
+# ``limit_positions``, ``force_recompute.*``, and optionally carry a ``name``
+# label used in logs + the returned result tuple. Overlays MUST NOT touch
+# ``target_name``, ``feature_extractor.*``, ``compute_feature_metrics``, or
+# ``use_gpu`` — those gate model loading, which is shared. See
+# applications/dynacell/CLAUDE.md "Grouped multi-condition eval".
+#
+# Example:
+# conditions:
+#   - name: a549_mock
+#     io:
+#       pred_path: /path/to/mock_pred.zarr
+#       gt_path:   /path/to/mock_gt.zarr
+#       cell_segmentation_path: /path/to/mock_seg.zarr
+#       gt_cache_dir:   /path/to/mock_gt_cache
+#       pred_cache_dir: /path/to/mock_pred_cache
+#     save:
+#       save_dir: /path/to/eval_out/a549_mock
+#   - name: a549_denv
+#     io: { ... }
+#     save: { save_dir: /path/to/eval_out/a549_denv }
+#   - name: a549_zikv
+#     io: { ... }
+#     save: { save_dir: /path/to/eval_out/a549_zikv }
+conditions: []

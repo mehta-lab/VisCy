@@ -19,6 +19,7 @@ from pathlib import Path
 
 _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
     "evaluate": ("dynacell.evaluation.pipeline", "evaluate_model", "eval"),
+    "evaluate-grouped": ("dynacell.evaluation.pipeline", "evaluate_model_grouped", "eval"),
     "precompute-gt": ("dynacell.evaluation.precompute_cli", "precompute_gt", "eval"),
     "report": ("dynacell.reporting.cli", "generate_report", "report"),
 }
