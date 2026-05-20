@@ -151,8 +151,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                         if not kinds_for_t:
                             continue
                         crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size)
-                        crops_stack = np.stack(crops, axis=0) if crops else np.empty((0, 0, 0), dtype=np.float32)
-                        batcher.push(pos_name_gt, t, crops_stack, kinds_for_t)
+                        batcher.push(pos_name_gt, t, crops, kinds_for_t)
 
                 flush_manifest(cache_ctx)
 

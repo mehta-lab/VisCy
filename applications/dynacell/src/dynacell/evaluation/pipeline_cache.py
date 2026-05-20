@@ -752,7 +752,7 @@ class DeepFeatureBatcher:
         self.ctx = ctx
         self.extractors = extractors
         self.flush_threshold = flush_threshold
-        self._pending: dict[FeatureKind, list[tuple[str, int, np.ndarray]]] = {k: [] for k in extractors}
+        self._pending: dict[FeatureKind, list[tuple[str, int, list[np.ndarray]]]] = {k: [] for k in extractors}
         self._pending_counts: dict[FeatureKind, int] = {k: 0 for k in extractors}
         # Snapshot force flags at construction. The scan reads from the
         # snapshot, NEVER from ``ctx.force``. Mid-scan flushes that would
@@ -780,10 +780,10 @@ class DeepFeatureBatcher:
         self,
         pos_name: str,
         t: int,
-        crops_stack: np.ndarray,
+        crops: list[np.ndarray],
         kinds: Iterable[FeatureKind],
     ) -> None:
-        """Queue crops for the listed *kinds* at ``(pos_name, t)``.
+        """Queue *crops* for the listed *kinds* at ``(pos_name, t)``.
 
         Parameters
         ----------
@@ -791,16 +791,17 @@ class DeepFeatureBatcher:
             FOV name (matches the ome-zarr position path).
         t
             Timepoint index.
-        crops_stack
-            Shape ``(n_cells, H, W)`` for non-empty slots or ``(0, 0, 0)``
-            sentinel for zero-cell slots.
+        crops
+            Per-cell 2-D crops from :func:`build_crops`. Empty list is a
+            valid zero-cell slot and will write the same ``(0, 0)``
+            sentinel as ``features_from_crops([])``.
         kinds
             Backbones to queue for; typically the filtered subset of
             :meth:`pending_kinds_per_t` at this ``t``.
         """
-        n = int(crops_stack.shape[0]) if crops_stack.size else 0
+        n = len(crops)
         for kind in kinds:
-            self._pending[kind].append((pos_name, t, crops_stack))
+            self._pending[kind].append((pos_name, t, crops))
             self._pending_counts[kind] += n
             if self._pending_counts[kind] >= self.flush_threshold:
                 _flush_kind(self.ctx, kind, self.extractors[kind], self._pending[kind])
@@ -833,7 +834,7 @@ def _flush_kind(
     ctx: _CacheContext,
     kind: FeatureKind,
     extractor,
-    items: list[tuple[str, int, np.ndarray]],
+    items: list[tuple[str, int, list[np.ndarray]]],
 ) -> None:
     """Run *extractor* on accumulated crops; split by row counts; write cache.
 
@@ -842,13 +843,8 @@ def _flush_kind(
     Empty ``(pos, t)`` slots (zero cells) write ``np.empty((0, 0))`` to match
     the per-FOV path's ``features_from_crops([])`` output.
     """
-    flat: list[np.ndarray] = []
-    counts: list[int] = []
-    for _, _, crops_stack in items:
-        n = int(crops_stack.shape[0]) if crops_stack.size else 0
-        counts.append(n)
-        if n:
-            flat.extend(crops_stack[i] for i in range(n))
+    flat: list[np.ndarray] = [c for _, _, crops in items for c in crops]
+    counts = [len(crops) for _, _, crops in items]
 
     feats = features_from_crops(flat, extractor)
 
@@ -994,9 +990,8 @@ def precompute_deep_features(
             image = np.asarray(pos.data[:, channel_index])
             for t in ts_needed:
                 crops = build_crops(image[t], cell_seg[t], ctx.patch_size)
-                crops_stack = np.stack(crops, axis=0) if crops else np.empty((0, 0, 0), dtype=np.float32)
                 kinds_for_t = [k for k in extractors if t in needs[k]]
-                batchers[side].push(pos_name, t, crops_stack, kinds_for_t)
+                batchers[side].push(pos_name, t, crops, kinds_for_t)
 
     for batcher in batchers.values():
         batcher.drain()
