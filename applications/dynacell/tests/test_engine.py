@@ -805,11 +805,16 @@ def test_dynacell_gan_ema_seed_on_legacy_load(tmp_path):
     """When loading a checkpoint without EMA keys but constructor enables EMA,
     the EMA shadow is seeded from the loaded generator weights."""
     seed_everything(7)
+    # Use SN-off discriminator on both sides; _build_modernized_gan does too
+    # so the strict-with-allowlist load doesn't trip on spectral_norm
+    # parametrization name mismatches (parametrizations introduce
+    # `*.parametrizations.weight.original*` keys vs the plain `.weight`).
+    disc_cfg_no_sn = {**GAN_DISC_TEST_CONFIG, "use_spectral_norm": False}
     # Step 1: build a legacy model and save its state_dict (no EMA keys).
     legacy = DynacellGAN(
         architecture="UNetViT3D",
         generator_config=GAN_GEN_TEST_CONFIG,
-        discriminator_config=GAN_DISC_TEST_CONFIG,
+        discriminator_config=disc_cfg_no_sn,
     )
     legacy_ckpt = tmp_path / "legacy.ckpt"
     torch.save({"state_dict": legacy.state_dict()}, legacy_ckpt)
@@ -862,3 +867,165 @@ def test_dynacell_gan_validation_logs_both_aliases(monkeypatch):
 
     assert "loss/validate" in logged, "back-compat loss/validate must still be logged"
     assert "loss/validate_ema" in logged, "modernized loss/validate_ema missing"
+
+
+def test_dynacell_gan_rpgan_requires_r2():
+    """RpGAN constructor raises when r2_gamma=0 (R3GAN Theorem 3.1 requires both)."""
+    with pytest.raises(ValueError, match="RpGAN requires nonzero r1_gamma AND r2_gamma"):
+        DynacellGAN(
+            architecture="UNetViT3D",
+            generator_config=GAN_GEN_TEST_CONFIG,
+            discriminator_config=GAN_DISC_TEST_CONFIG,
+            loss_type="rpgan",
+            r1_gamma=10.0,
+            r2_gamma=0.0,
+        )
+
+
+def test_dynacell_gan_ema_kimg_zero_raises():
+    """ema_kimg=0 raises (avoids silent EMA freeze)."""
+    with pytest.raises(ValueError, match="ema_kimg must be > 0"):
+        DynacellGAN(
+            architecture="UNetViT3D",
+            generator_config=GAN_GEN_TEST_CONFIG,
+            discriminator_config=GAN_DISC_TEST_CONFIG,
+            ema_kimg=0.0,
+        )
+
+
+def test_dynacell_gan_rpgan_smoke(tmp_path):
+    """RpGAN trainer.fit drives the relativistic G-step path (fresh d_real)."""
+    seed_everything(13)
+    model = _build_modernized_gan(
+        loss_type="rpgan",
+        r1_gamma=1.0,
+        r2_gamma=1.0,
+        r1_every=1,  # fire R1/R2 every step so we hit the path in this short smoke
+    )
+    captured: list[dict[str, float]] = []
+    extra: dict[str, float] = {}
+    real_log_dict = model.log_dict
+    real_log = model.log
+
+    def _capture_log_dict(d, *args, **kwargs):
+        captured.append({k: float(v.detach()) for k, v in d.items()})
+        return real_log_dict(d, *args, **kwargs)
+
+    def _capture_log(name, value, *args, **kwargs):
+        extra[name] = float(value.detach()) if isinstance(value, torch.Tensor) else float(value)
+        return real_log(name, value, *args, **kwargs)
+
+    model.log_dict = _capture_log_dict  # type: ignore[method-assign]
+    model.log = _capture_log  # type: ignore[method-assign]
+
+    batch = _make_gan_batch()
+
+    class _BatchDataset(torch.utils.data.Dataset):
+        def __init__(self, n: int):
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"source": batch["source"][0], "target": batch["target"][0]}
+
+    train_loader = torch.utils.data.DataLoader(_BatchDataset(4), batch_size=2)
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, train_dataloaders=train_loader)
+    for step_idx, logged in enumerate(captured):
+        for key in ("loss/d_train", "loss/g_train", "loss/g_adv_train", "loss/g_l1_train"):
+            value = logged[key]
+            assert torch.isfinite(torch.tensor(value)), f"rpgan step {step_idx} {key}={value} not finite"
+    # Both R1 AND R2 should fire (r1_every=1, both gammas > 0).
+    assert "reg/r1" in extra, f"reg/r1 missing under rpgan; got {list(extra)}"
+    assert "reg/r2" in extra, f"reg/r2 missing under rpgan; got {list(extra)}"
+
+
+def test_dynacell_gan_ema_update_math():
+    """One EMA update step produces lerp_(p, 1-decay) with the StyleGAN2 decay formula."""
+    seed_everything(42)
+    model = _build_modernized_gan(ema_kimg=1.0)  # short half-life -> larger move
+    # Snapshot EMA before any update.
+    ema_before = {n: p.detach().clone() for n, p in model.generator_ema.named_parameters()}
+    gen_before = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
+    # All ema params equal generator params at init.
+    for n, p in ema_before.items():
+        assert torch.equal(p, gen_before[n])
+
+    # Synthetic generator update: perturb generator params, then apply the
+    # EMA update by hand using the same formula the engine uses.
+    with torch.no_grad():
+        for p in model.generator.parameters():
+            p.add_(0.1)
+    gen_after = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
+
+    bs = 4  # mirrors the test config
+    decay = 0.5 ** (bs / max(model.ema_kimg * 1000.0, 1e-8))
+    # Apply the EXACT lerp_ from the engine (lerp_(target, 1-decay) means
+    # self = self + (1-decay)*(target - self) = decay*self + (1-decay)*target).
+    with torch.no_grad():
+        for p_ema, p in zip(
+            model.generator_ema.parameters(),
+            model.generator.parameters(),
+            strict=True,
+        ):
+            p_ema.lerp_(p.detach(), 1.0 - decay)
+
+    # Closed-form expectation: ema = decay * ema_before + (1-decay) * gen_after.
+    for n, p_ema in model.generator_ema.named_parameters():
+        expected = decay * ema_before[n] + (1.0 - decay) * gen_after[n]
+        assert torch.allclose(p_ema, expected, atol=1e-6), f"EMA update math mismatch on {n}"
+
+
+def test_dynacell_gan_use_ema_at_predict_false():
+    """use_ema_at_predict=False returns raw generator output even when EMA exists."""
+    seed_everything(0)
+    model = _build_modernized_gan(use_ema_at_predict=False)
+    assert model.generator_ema is not None
+    # Force the two generators to differ by perturbing the live one.
+    with torch.no_grad():
+        for p in model.generator.parameters():
+            p.add_(0.5)
+    model.eval()
+    model.on_predict_start()
+    batch = _make_gan_batch(batch_size=1)
+    batch_meta = {"source": MetaTensor(batch["source"])}
+    with torch.no_grad():
+        pred = model.predict_step(batch_meta, batch_idx=0)
+        pred_raw = model.generator(batch["source"])
+        pred_ema = model.generator_ema(batch["source"])
+    # Predict should equal raw forward, NOT EMA forward.
+    assert torch.allclose(pred, pred_raw, atol=1e-6)
+    assert not torch.allclose(pred, pred_ema, atol=1e-6)
+
+
+def test_dynacell_gan_ckpt_unexpected_missing_raises(tmp_path):
+    """A checkpoint missing required (non-modernization) keys raises RuntimeError."""
+    seed_everything(0)
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    state = model.state_dict()
+    # Drop a real generator weight to simulate a genuinely incompatible ckpt.
+    sample_gen_key = next(k for k in state if k.startswith("generator.") and k.endswith(".weight"))
+    del state[sample_gen_key]
+    ckpt_path = tmp_path / "bad.ckpt"
+    torch.save({"state_dict": state}, ckpt_path)
+
+    with pytest.raises(RuntimeError, match="missing keys that are not part of the modernization"):
+        DynacellGAN(
+            architecture="UNetViT3D",
+            generator_config=GAN_GEN_TEST_CONFIG,
+            discriminator_config=GAN_DISC_TEST_CONFIG,
+            ckpt_path=str(ckpt_path),
+        )

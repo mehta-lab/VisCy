@@ -9,7 +9,6 @@ import copy
 import inspect
 import itertools
 import logging
-import warnings
 from typing import Literal, Sequence
 
 import numpy as np
@@ -828,10 +827,16 @@ class DynacellGAN(LightningModule):
             raise ValueError(f"Architecture {architecture!r} not in {set(_ARCHITECTURE)}")
         if loss_type not in ("lsgan", "nonsat", "rpgan"):
             raise ValueError(f"Unknown loss_type {loss_type!r}; expected lsgan|nonsat|rpgan.")
-        if loss_type == "rpgan" and r1_gamma <= 0.0:
+        if loss_type == "rpgan" and (r1_gamma <= 0.0 or r2_gamma <= 0.0):
             raise ValueError(
-                "RpGAN requires nonzero r1_gamma for convergence on sharp distributions; "
-                "R3GAN Theorem 3.1. Set r1_gamma > 0 (and ideally r2_gamma > 0) when using rpgan."
+                "RpGAN requires nonzero r1_gamma AND r2_gamma for convergence on sharp "
+                "distributions (R3GAN Theorem 3.1). "
+                f"Got r1_gamma={r1_gamma}, r2_gamma={r2_gamma}."
+            )
+        if ema_kimg is not None and ema_kimg <= 0.0:
+            raise ValueError(
+                f"ema_kimg must be > 0 (or None to disable EMA); got {ema_kimg}. "
+                "ema_kimg=0 would freeze EMA at init weights with no signal."
             )
         self.generator = net_class(**(generator_config or {}))
         self.discriminator = MultiScalePatchGAN3D(**(discriminator_config or {}))
@@ -897,26 +902,48 @@ class DynacellGAN(LightningModule):
             state = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
             # strict=False: pre-modernization checkpoints don't carry
             # generator_ema.* / _d_step_count / _lecam_ema_* keys. Filter
-            # the warning to expected-missing prefixes so genuine
-            # mismatches still surface.
+            # missing-key warnings to expected-missing prefixes; anything else
+            # is a genuine state-dict mismatch (renamed layer, dropped module,
+            # wrong checkpoint kind). RAISE rather than warn — silent
+            # half-loaded models burn hours of training before users notice.
             incompat = self.load_state_dict(state, strict=False)
             expected_missing = ("generator_ema.", "_d_step_count", "_lecam_ema_")
             unexpected_missing = [k for k in incompat.missing_keys if not k.startswith(expected_missing)]
             if unexpected_missing:
-                warnings.warn(
-                    f"Unexpected missing keys loading {ckpt_path}: {unexpected_missing}",
-                    stacklevel=2,
+                raise RuntimeError(
+                    f"Checkpoint {ckpt_path!r} is missing keys that are not part of the "
+                    f"modernization additions: {unexpected_missing}. The model would load "
+                    "with partially random weights. If this is intentional, drop those "
+                    "submodules from the model config or use an explicit migration step."
                 )
             if incompat.unexpected_keys:
-                warnings.warn(
-                    f"Unexpected keys in {ckpt_path}: {incompat.unexpected_keys}",
-                    stacklevel=2,
+                _logger.warning(
+                    "Checkpoint %s has unexpected keys ignored by strict=False load: %s",
+                    ckpt_path,
+                    incompat.unexpected_keys,
                 )
             # Seed EMA from loaded generator when ckpt has no EMA section,
             # so inference paths return the loaded weights (not the
-            # random-init deepcopy from __init__).
-            if self.generator_ema is not None and not any(k.startswith("generator_ema.") for k in state):
-                self.generator_ema.load_state_dict(self.generator.state_dict())
+            # random-init deepcopy from __init__). RAISE on partial-EMA ckpt
+            # to catch a corrupted save (e.g., crash mid-checkpoint, or a
+            # future buffer added to generator_ema that an old ckpt lacks) —
+            # silently half-seeding would produce nonsense at the partial layers.
+            if self.generator_ema is not None:
+                ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
+                ema_keys_expected = len(self.generator_ema.state_dict())
+                if ema_keys_in_ckpt == 0:
+                    self.generator_ema.load_state_dict(self.generator.state_dict())
+                    _logger.info(
+                        "Checkpoint %s has no generator_ema.* keys; seeded EMA shadow from loaded generator weights.",
+                        ckpt_path,
+                    )
+                elif ema_keys_in_ckpt != ema_keys_expected:
+                    raise RuntimeError(
+                        f"Checkpoint {ckpt_path!r} has {ema_keys_in_ckpt} generator_ema.* "
+                        f"keys but the EMA submodule expects {ema_keys_expected}. "
+                        "Partial EMA loads would leave random-init values in the missing "
+                        "EMA layers and silently produce wrong inference outputs."
+                    )
 
     @staticmethod
     def _set_requires_grad(module: nn.Module, value: bool) -> None:
@@ -1254,8 +1281,22 @@ class DynacellGAN(LightningModule):
         return [opt_g, opt_d], [sch_g, sch_d]
 
     def on_predict_start(self) -> None:
-        """Build the divisible-pad transform matching the generator."""
+        """Build the divisible-pad transform matching the generator.
+
+        Also logs which generator (raw vs EMA) will be used at inference, so
+        users notice a silent fallback when EMA is unexpectedly disabled
+        (e.g., a predict overlay that forgot to set ``ema_kimg`` on a
+        modernized checkpoint, or ``use_ema_at_predict=False``).
+        """
         self._predict_pad = _make_divisible_pad(self.generator)
+        which = "EMA" if (self.generator_ema is not None and self.use_ema_at_predict) else "raw"
+        _logger.info(
+            "DynacellGAN predict: using %s generator (ema_kimg=%s, use_ema_at_predict=%s, generator_ema=%s)",
+            which,
+            self.ema_kimg,
+            self.use_ema_at_predict,
+            "present" if self.generator_ema is not None else "absent",
+        )
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Run a generator-only prediction step with divisible padding.
