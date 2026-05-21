@@ -174,9 +174,9 @@ def test_aggregate_fov_result_extends_backbone_lists():
     assert len(all_feat) == 2
     assert (row_, col_, fov_) == ("A", "1", "0")
     assert written[("A", "1", "0", "0")].shape == result.seg_array.shape
-    # Stronger than the old test: assert every backbone's six lists landed
-    # lockstep. Catches a future regression where _extend_backbone drifts
-    # (e.g. someone adds a field to _BackboneLists and forgets a list).
+    # All six lists per backbone must land lockstep — catches a regression
+    # where _extend_backbone drifts (e.g. a new field added to _BackboneLists
+    # but the helper forgets to append to it).
     for name in pipeline._BACKBONE_KEYS:
         bb = parent_lists[name]
         assert len(bb.pred_feats) == 2

@@ -4,7 +4,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import hydra
 import numpy as np
@@ -15,6 +15,7 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.cache import FeatureKind
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
@@ -186,12 +187,11 @@ class _BackboneLists:
     gt_ts: list[np.ndarray] = field(default_factory=list)
 
 
-# Order matters: every code path that iterates backbones (helper guard,
-# aggregator loop, parent-side allocation, post-loop CP+deep blocks,
-# embedding_groups) reads this tuple. CP is first because the post-loop
-# block treats it specially (variance/correlation pruning + z-score)
-# before the generic deep-track loop.
-_BACKBONE_KEYS: tuple[str, ...] = ("cp", "dinov3", "dynaclr", "celldino")
+# Single source of truth for backbone names is cache.FeatureKind.
+# Ordering matters: the post-loop CP block runs before the generic
+# deep-track loop, so "cp" must be first in FeatureKind.
+_BACKBONE_KEYS: tuple[FeatureKind, ...] = get_args(FeatureKind)
+_BB_FIELDS = fields(_BackboneLists)
 
 
 def _extend_backbone(
@@ -479,12 +479,12 @@ def _aggregate_fov_result(
     all_mask_metrics.extend(result.per_t_mask_rows)
     all_feature_metrics.extend(result.per_t_feature_rows)
 
-    # Iterate _BackboneLists's six fields in declaration order. If a future
-    # maintainer adds a non-list field, the .extend(...) below is the canary.
+    # Canary: if a non-list field is added to _BackboneLists, the .extend(...)
+    # below will raise AttributeError on the new field.
     for name in _BACKBONE_KEYS:
         worker_bb = getattr(result, name)
         parent_bb = parent_lists[name]
-        for bb_field in fields(_BackboneLists):
+        for bb_field in _BB_FIELDS:
             getattr(parent_bb, bb_field.name).extend(getattr(worker_bb, bb_field.name))
 
 
