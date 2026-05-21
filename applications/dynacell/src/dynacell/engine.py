@@ -782,11 +782,13 @@ class DynacellGAN(LightningModule):
     ckpt_path : str or None
         Optional path to a Lightning checkpoint to load weights from at
         construction time. Loaded with ``strict=False`` so pre-modernization
-        checkpoints (which lack ``generator_ema.*`` / ``_d_step_count`` /
-        ``_lecam_ema_*``) load cleanly. When the checkpoint has no
-        ``generator_ema.*`` keys but EMA is enabled, the EMA submodule is
-        seeded from the loaded generator weights (so inference matches the
-        non-EMA inference path on legacy checkpoints).
+        checkpoints (which lack ``generator_ema.*`` / ``_lecam_ema_*``) load
+        cleanly. The lazy-reg counter ``_d_step_count`` lives outside
+        ``state_dict`` and is restored via ``on_load_checkpoint`` (defaults
+        to ``0`` when absent). When the checkpoint has no ``generator_ema.*``
+        keys but EMA is enabled, the EMA submodule is seeded from the loaded
+        generator weights (so inference matches the non-EMA inference path
+        on legacy checkpoints).
     """
 
     def __init__(
@@ -867,9 +869,11 @@ class DynacellGAN(LightningModule):
 
         # D-step counter for lazy R1 schedule. self.global_step would
         # advance by 2 per training_step (D opt + G opt) so it can't be used
-        # directly. Buffer => DDP broadcasts at init and it persists in
-        # checkpoints.
-        self.register_buffer("_d_step_count", torch.tensor(0, dtype=torch.long))
+        # directly. Stored as a Python int — not a buffer — so the lazy-reg
+        # modulo gate avoids a CUDA→CPU sync each step. Persistence is via
+        # on_save_checkpoint / on_load_checkpoint below; all DDP ranks start
+        # at 0 and advance deterministically in lockstep.
+        self._d_step_count: int = 0
 
         # Generator EMA shadow. Custom deepcopy (not timm) so we control
         # device/dtype precisely. requires_grad_(False) keeps EMA params out
@@ -905,13 +909,15 @@ class DynacellGAN(LightningModule):
         if ckpt_path is not None:
             state = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
             # strict=False: pre-modernization checkpoints don't carry
-            # generator_ema.* / _d_step_count / _lecam_ema_* keys. Filter
-            # missing-key warnings to expected-missing prefixes; anything else
-            # is a genuine state-dict mismatch (renamed layer, dropped module,
-            # wrong checkpoint kind). RAISE rather than warn — silent
-            # half-loaded models burn hours of training before users notice.
+            # generator_ema.* / _lecam_ema_* keys. Filter missing-key warnings
+            # to expected-missing prefixes; anything else is a genuine
+            # state-dict mismatch (renamed layer, dropped module, wrong
+            # checkpoint kind). RAISE rather than warn — silent half-loaded
+            # models burn hours of training before users notice. (The lazy-reg
+            # counter `_d_step_count` lives outside state_dict and is restored
+            # via on_load_checkpoint, so it never appears in missing_keys.)
             incompat = self.load_state_dict(state, strict=False)
-            expected_missing = ("generator_ema.", "_d_step_count", "_lecam_ema_")
+            expected_missing = ("generator_ema.", "_lecam_ema_")
             unexpected_missing = [k for k in incompat.missing_keys if not k.startswith(expected_missing)]
             if unexpected_missing:
                 raise RuntimeError(
@@ -973,6 +979,23 @@ class DynacellGAN(LightningModule):
         if self.generator_ema is not None and self.use_ema_at_predict:
             return self.generator_ema
         return self.generator
+
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        """Persist the lazy-reg D-step counter alongside ``state_dict``.
+
+        ``_d_step_count`` is a plain Python int (not a buffer) to keep the
+        lazy-reg modulo gate sync-free, so Lightning's automatic state_dict
+        round-trip does not capture it.
+        """
+        checkpoint["_d_step_count"] = self._d_step_count
+
+    def on_load_checkpoint(self, checkpoint: dict) -> None:
+        """Restore the lazy-reg D-step counter from the checkpoint.
+
+        Falls back to ``0`` on pre-modernization checkpoints that pre-date the
+        counter.
+        """
+        self._d_step_count = int(checkpoint.get("_d_step_count", 0))
 
     def forward(self, x: Tensor) -> Tensor:
         """Run a generator-only forward pass (inference contract).
@@ -1060,7 +1083,7 @@ class DynacellGAN(LightningModule):
         self._d_step_count += 1
         r1_value: Tensor | None = None
         r2_value: Tensor | None = None
-        do_lazy_reg = (self.r1_gamma > 0.0 or self.r2_gamma > 0.0) and int(self._d_step_count) % self.r1_every == 0
+        do_lazy_reg = (self.r1_gamma > 0.0 or self.r2_gamma > 0.0) and self._d_step_count % self.r1_every == 0
         if do_lazy_reg:
             # Mescheder R1 grad-of-grad needs fp32; under Lightning bf16-mixed,
             # autocast() injects bf16 into D forwards which is numerically fragile

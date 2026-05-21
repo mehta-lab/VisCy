@@ -620,7 +620,7 @@ def test_dynacell_gan_legacy_defaults_safe():
     assert model.generator_ema is None
     assert model.lecam_gamma == 0.0
     assert not hasattr(model, "_lecam_ema_real")
-    assert model._d_step_count.item() == 0
+    assert model._d_step_count == 0
 
 
 def test_dynacell_gan_rpgan_requires_r1():
@@ -737,14 +737,14 @@ def test_dynacell_gan_lazy_r1_step_counter():
     """`_d_step_count` increments per D step, gates R1 correctly."""
     model = _build_modernized_gan(r1_every=4)
     # Counter starts at 0.
-    assert int(model._d_step_count) == 0
+    assert model._d_step_count == 0
     # Simulate four D steps by directly incrementing (the actual training
     # path increments inside training_step; here we verify the gating math).
     for _ in range(4):
         model._d_step_count += 1
-    assert int(model._d_step_count) == 4
+    assert model._d_step_count == 4
     # 4 % 4 == 0, so reg fires on this step.
-    assert int(model._d_step_count) % model.r1_every == 0
+    assert model._d_step_count % model.r1_every == 0
 
 
 def test_dynacell_gan_lsgan_gamma_zero_skips_r1(tmp_path):
@@ -847,6 +847,28 @@ def test_dynacell_gan_ema_seed_on_legacy_load(tmp_path):
         strict=True,
     ):
         assert torch.equal(p_ema, p_loaded)
+
+
+def test_dynacell_gan_d_step_count_checkpoint_roundtrip():
+    """_d_step_count survives an on_save/on_load_checkpoint round-trip."""
+    model = _build_modernized_gan()
+    model._d_step_count = 137
+    checkpoint: dict = {}
+    model.on_save_checkpoint(checkpoint)
+    assert checkpoint["_d_step_count"] == 137
+
+    restored = _build_modernized_gan()
+    assert restored._d_step_count == 0  # fresh model starts at zero
+    restored.on_load_checkpoint(checkpoint)
+    assert restored._d_step_count == 137
+
+
+def test_dynacell_gan_d_step_count_load_legacy_defaults_zero():
+    """Legacy checkpoints (no `_d_step_count` key) restore to 0."""
+    model = _build_modernized_gan()
+    model._d_step_count = 50
+    model.on_load_checkpoint({})  # legacy: key absent
+    assert model._d_step_count == 0
 
 
 def test_dynacell_gan_lecam_buffers_registered():
