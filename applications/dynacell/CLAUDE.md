@@ -102,10 +102,16 @@ conditions:
     save: { save_dir: /path/to/out/a549_zikv }
 ```
 
-Invoke:
+Invoke (leaves live under
+`applications/dynacell/configs/benchmarks/virtual_staining/_internal/leaf/grouped/`
+and are discovered via `_EXTERNAL_SEARCHPATHS` in `__main__.py`):
 ```sh
-uv run dynacell evaluate-grouped -c eval_grouped_a549_mantis_er
+uv run dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 ```
+
+`-c` is Hydra's `--cfg` flag (accepts `job`, `hydra`, or `all` for config
+display only); it cannot select the leaf. Use the `leaf=` group override
+instead — that's how single-condition leaves discover their YAML too.
 
 Constraints (enforced at runtime by `_check_grouped_field_invariants`):
 - Per-condition overlays may freely override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, and carry a `name` label.
