@@ -10,7 +10,7 @@ import click
 from anndata import read_zarr
 from pydantic import ValidationError
 
-from viscy_utils.cli_utils import format_markdown_table, load_config
+from viscy_utils.cli_utils import format_markdown_table, load_config_section
 from viscy_utils.evaluation.linear_classifier import (
     load_pipeline_from_wandb,
     predict_with_classifier,
@@ -92,7 +92,7 @@ def main(config: Path):
     click.echo("=" * 60)
 
     try:
-        config_dict = load_config(config)
+        config_dict = load_config_section(config, None, default_section="apply_linear_classifier")
         inference_config = LinearClassifierInferenceConfig(**config_dict)
     except ValidationError as e:
         click.echo(f"\n Configuration validation failed:\n{e}", err=True)

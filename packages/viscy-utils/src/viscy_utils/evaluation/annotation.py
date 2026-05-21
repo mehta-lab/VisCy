@@ -106,7 +106,13 @@ def convert(
         return adata
 
 
-def load_annotation_anndata(adata: ad.AnnData, path: str, name: str, categories: dict | None = None):
+def load_annotation_anndata(
+    adata: ad.AnnData,
+    path: str,
+    name: str,
+    categories: dict | None = None,
+    spatial_tolerance: float = 4.0,
+):
     """
     Load annotations from a CSV file and map them to the AnnData object.
 
@@ -120,6 +126,15 @@ def load_annotation_anndata(adata: ad.AnnData, path: str, name: str, categories:
         The column name in the CSV file to be used as annotations.
     categories : dict, optional
         A dictionary to rename categories in the annotation column. Default is None.
+    spatial_tolerance : float, optional
+        Pixel tolerance (Chebyshev / box kernel half-width) used to disambiguate
+        duplicate annotation rows at division frames. At a mitosis split the
+        segmenter typically produces two daughter cells that briefly share the
+        parent's ``track_id`` for one frame, yielding two annotation rows with
+        the same ``(fov_name, t, track_id)`` but distinct ``(y, x)``. We resolve
+        the duplicate by picking the annotation row whose ``(y, x)`` falls
+        within ``spatial_tolerance`` pixels of the embedding's centroid; if no
+        candidate is within range the label stays NaN. Default 4 pixels.
 
     Returns
     -------
@@ -129,13 +144,53 @@ def load_annotation_anndata(adata: ad.AnnData, path: str, name: str, categories:
     annotation = pd.read_csv(path)
     annotation["fov_name"] = annotation["fov_name"].str.strip("/")
 
-    annotation = annotation.set_index(["fov_name", "id"])
+    # Normalize obs fov_name: strip leading/trailing slashes so both sides match.
+    obs_fov = adata.obs["fov_name"].astype(object).str.strip("/")
 
-    mi = pd.MultiIndex.from_arrays([adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"])
+    if "id" in adata.obs.columns and "id" in annotation.columns:
+        key_cols = ["fov_name", "id"]
+        mi = pd.MultiIndex.from_arrays([obs_fov, adata.obs["id"]], names=key_cols)
+    elif all(c in adata.obs.columns for c in ("fov_name", "t", "track_id")) and all(
+        c in annotation.columns for c in ("fov_name", "t", "track_id")
+    ):
+        key_cols = ["fov_name", "t", "track_id"]
+        mi = pd.MultiIndex.from_arrays(
+            [obs_fov, adata.obs["t"], adata.obs["track_id"]],
+            names=key_cols,
+        )
+    else:
+        raise KeyError(
+            "Cannot join annotations: embeddings have neither (fov_name, id) nor (fov_name, t, track_id) columns."
+        )
 
-    # Use reindex to handle missing annotations gracefully
-    # This will return NaN for observations that don't have annotations
-    selected = annotation.reindex(mi)[name]
+    annotation_indexed = annotation.set_index(key_cols)
+
+    if annotation_indexed.index.is_unique:
+        # Fast path: unique annotation index, plain reindex.
+        selected = annotation_indexed.reindex(mi)[name]
+    else:
+        # Slow path: annotation has duplicate keys (typically mitotic daughters
+        # briefly sharing a parent track_id at the division frame). Resolve by
+        # picking the duplicate whose (y, x) is closest to the embedding's
+        # (y, x), provided it falls within ``spatial_tolerance`` pixels.
+        spatial_cols = ("y", "x")
+        if not all(c in annotation.columns for c in spatial_cols) or not all(
+            c in adata.obs.columns for c in spatial_cols
+        ):
+            raise ValueError(
+                f"Annotation index {key_cols} has duplicate keys (typical of mitosis "
+                f"split frames) but cannot disambiguate: both annotation and embedding "
+                f"obs must carry (y, x) columns for spatial nearest-neighbor matching."
+            )
+
+        selected = _spatial_nearest_select(
+            annotation_indexed,
+            mi=mi,
+            embedding_y=np.asarray(adata.obs["y"], dtype=float),
+            embedding_x=np.asarray(adata.obs["x"], dtype=float),
+            value_col=name,
+            tolerance=spatial_tolerance,
+        )
 
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
@@ -144,3 +199,53 @@ def load_annotation_anndata(adata: ad.AnnData, path: str, name: str, categories:
     adata.obs[name] = selected
 
     return adata
+
+
+def _spatial_nearest_select(
+    annotation_indexed: pd.DataFrame,
+    *,
+    mi: pd.MultiIndex,
+    embedding_y: np.ndarray,
+    embedding_x: np.ndarray,
+    value_col: str,
+    tolerance: float,
+) -> pd.Series:
+    """Resolve duplicate annotation keys via spatial nearest-neighbor.
+
+    For each row in ``mi`` (one per embedding observation), find rows in
+    ``annotation_indexed`` whose key matches, and among them pick the one
+    whose ``(y, x)`` is closest to the embedding's ``(y, x)`` — but only if
+    the Chebyshev (box) distance is within ``tolerance`` pixels. Returns the
+    ``value_col`` of the chosen row, or NaN if no match passes the threshold.
+
+    The Chebyshev metric (``max(|dy|, |dx|)``) matches a square kernel; use
+    Euclidean if a circular kernel is preferred.
+    """
+    # Strategy: pair each annotation row with every embedding row that shares
+    # the same key (via pandas merge), compute Chebyshev distance, and keep
+    # the closest annotation per embedding row whose distance ≤ tolerance.
+    n = len(mi)
+
+    emb_df = pd.DataFrame(
+        {"_emb_idx": np.arange(n), "_emb_y": embedding_y, "_emb_x": embedding_x},
+        index=mi,
+    ).reset_index()
+
+    ann_df = annotation_indexed[["y", "x", value_col]].reset_index()
+    ann_df = ann_df.rename(columns={"y": "_ann_y", "x": "_ann_x"})
+
+    key_cols = list(mi.names)
+    paired = emb_df.merge(ann_df, on=key_cols, how="left")
+
+    dy = (paired["_ann_y"] - paired["_emb_y"]).abs()
+    dx = (paired["_ann_x"] - paired["_emb_x"]).abs()
+    paired["_dist"] = np.maximum(dy, dx)
+    paired.loc[paired["_dist"] > tolerance, "_dist"] = np.nan
+
+    # Pick the row with minimum distance per embedding row; idxmin skips NaN,
+    # so embedding rows with no candidate within tolerance silently drop out.
+    best = paired.dropna(subset=["_dist"]).loc[lambda d: d.groupby("_emb_idx")["_dist"].idxmin()]
+
+    out = pd.Series(pd.NA, index=np.arange(n), name=value_col, dtype="object")
+    out.loc[best["_emb_idx"].to_numpy()] = best[value_col].to_numpy()
+    return out

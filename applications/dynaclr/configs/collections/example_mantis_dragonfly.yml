@@ -1,0 +1,54 @@
+name: example_mantis_dragonfly
+description: "Example collection combining mantis (lightsheet) and dragonfly (confocal) datasets. SEC61B from 2025_07_24 ZIKV experiment and pAL10 viral sensor from 2024_08_14 ZIKV experiment."
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "OR(SEARCH(\"2025_07_24\", {dataset}), SEARCH(\"2024_08_14\", {dataset}))"
+  record_ids: []
+  created_at: "2026-04-01T00:00:00"
+  created_by: "eduardo.hirata"
+
+experiments:
+  - name: 2025_07_24_A549_SEC61_ZIKV
+    data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: GFP EX488 EM525-45
+        marker: SEC61B
+      - name: mCherry EX561 EM600-37
+        marker: mCherry
+    perturbation_wells:
+      ZIKV:
+        - A/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: SEC61B
+    organelle: endoplasmic_reticulum
+    microscope: mantis
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+    moi: 5.0
+
+  - name: 2024_08_14_ZIKV_pal17_48h
+    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h_sharded.zarr
+    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h_timeaware_tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: MultiCam_GFP_BF
+        marker: pAL10
+    perturbation_wells:
+      uninfected:
+        - "0/3"
+      ZIKV:
+        - "0/4"
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    marker: pAL10
+    organelle: viral_sensor
+    microscope: dragonfly
+    pixel_size_xy_um: 0.206
+    pixel_size_z_um: 0.2878069639205931
+    moi: 5.0

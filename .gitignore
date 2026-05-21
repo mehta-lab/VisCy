@@ -70,3 +70,6 @@ lightning_logs/
 checkpoints/
 
 plot_related/
+
+# Local-only planning docs (not for upstream)
+applications/dynaclr/docs/DAGs/evaluation_matrix.md

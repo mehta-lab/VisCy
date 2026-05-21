@@ -1,0 +1,25 @@
+# Dataset recipe: infectomics-annotated-tomm20
+# =============================================================================
+# TOMM20-only embedding pipeline. No annotations, no linear classifiers --
+# just produce per-experiment embedding zarrs (predict -> split ->
+# reduce_dimensionality -> smoothness) for downstream analysis.
+#
+# Composition:
+#   - cell_index_path           -- TOMM20-only parquet (3 experiments)
+#   - steps                     -- predict / split / reduce_dimensionality /
+#                                  reduce_combined / smoothness only
+#
+# Leaves merge this via:
+#   base:
+#     - recipes/predict.yml
+#     - recipes/reduce.yml
+#     - recipes/infectomics-annotated-tomm20.yml
+
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-BoC-tomm20-eval-v1.parquet
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - smoothness

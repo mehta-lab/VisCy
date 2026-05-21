@@ -164,6 +164,10 @@ class TestDatasetRecordFromAirtable:
         assert rec.channel_1_marker == "Endoplasmic Reticulum"
         assert rec.data_path == "/hpc/datasets/alpha.zarr"
         assert rec.fluorescence_modality == "widefield"
+        assert rec.microscope == "mantis"
+        assert rec.labelfree_modality == "widefield"
+        assert rec.treatment == "DMSO"
+        assert rec.hours_post_treatment == 2.0
         assert rec.t_shape == 50
         assert rec.c_shape == 2
         assert rec.z_shape == 30
@@ -181,6 +185,10 @@ class TestDatasetRecordFromAirtable:
         assert rec.perturbation == "ZIKV"
         assert rec.moi == 0.5
         assert rec.cell_line is None
+        assert rec.microscope == "dragonfly"
+        assert rec.labelfree_modality == "oblique"
+        assert rec.treatment is None
+        assert rec.hours_post_treatment is None
 
     def test_minimal_record(self):
         """Record with only required fields."""

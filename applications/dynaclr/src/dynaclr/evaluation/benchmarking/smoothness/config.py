@@ -34,6 +34,10 @@ class SmoothnessEvalConfig(BaseModel):
         Whether to use memory-optimized computation.
     verbose : bool
         Print verbose progress messages.
+    group_by : str or None
+        obs column to group by before computing smoothness (e.g. "marker").
+        Smoothness is computed per group; the reported aggregate stats are
+        mean ± std across groups. Set to null to compute on the whole embedding.
     """
 
     models: list[ModelEntry] = Field(..., min_length=1)
@@ -44,6 +48,7 @@ class SmoothnessEvalConfig(BaseModel):
     save_distributions: bool = False
     use_optimized: bool = True
     verbose: bool = False
+    group_by: Optional[str] = "marker"
 
     @model_validator(mode="after")
     def validate_paths(self):

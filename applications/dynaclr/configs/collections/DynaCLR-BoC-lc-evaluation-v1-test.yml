@@ -1,0 +1,174 @@
+name: DynaCLR-BoC-lc-evaluation-v1-test
+description: "Minimal subset of DynaCLR-BoC-lc-evaluation-v1 for fast end-to-end
+  testing of MMD and linear classifier evaluation. Three markers (G3BP1, Phase3D,
+  viral_sensor) across two dates (2025_07_22 and 2025_07_24) + one G3BP1-only
+  experiment (2025_01_28). Enables cross-experiment MMD for all three markers."
+datasets_root: /hpc/projects/organelle_phenotyping
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "OR(SEARCH(\"2025_01_28_A549_G3BP1_ZIKV_DENV\", {dataset}), SEARCH(\"2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV\", {dataset}), SEARCH(\"2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV\", {dataset}))"
+  record_ids: []
+  created_at: "2026-04-09T00:00:00"
+  created_by: "eduardo.hirata"
+
+experiments:
+  # ── 2025_01_28: G3BP1, ZIKV + DENV — 1 uninfected + 1 infected well ──
+  - name: 2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_01_28: Phase3D, ZIKV + DENV — 1 uninfected + 1 infected well ──
+  - name: 2025_01_28_A549_Phase3D_ZIKV_DENV
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_24: G3BP1, ZIKV — 1 uninfected + 1 infected well ──
+  - name: 2025_07_24_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_24: Phase3D, ZIKV — 1 uninfected + 1 infected well ──
+  - name: 2025_07_24_A549_Phase3D_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_22: G3BP1, ZIKV — 1 uninfected (C/1) + 1 infected (C/2) ──
+  - name: 2025_07_22_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_22: Phase3D, ZIKV — 1 uninfected (C/1) + 1 infected (C/2) ──
+  - name: 2025_07_22_A549_Phase3D_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: Phase3D
+    organelle: Phase3D
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_22: viral_sensor, ZIKV — 1 uninfected (C/1) + 1 infected (C/2) ──
+  - name: 2025_07_22_A549_viral_sensor_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  # ── 2025_07_24: viral_sensor, ZIKV — 1 uninfected + 1 infected well ──
+  - name: 2025_07_24_A549_viral_sensor_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - C/1
+      infected:
+        - C/2
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174

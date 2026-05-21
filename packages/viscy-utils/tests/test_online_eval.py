@@ -1,8 +1,15 @@
 """Tests for OnlineEvalCallback metrics."""
 
-import numpy as np
+from types import SimpleNamespace
 
-from viscy_utils.callbacks.online_eval import effective_rank, temporal_smoothness
+import numpy as np
+import torch
+
+from viscy_utils.callbacks.online_eval import (
+    OnlineEvalCallback,
+    effective_rank,
+    temporal_smoothness,
+)
 
 
 class TestEffectiveRank:
@@ -85,3 +92,42 @@ class TestTemporalSmoothness:
 
         rho = temporal_smoothness(features, track_ids, timepoints)
         assert np.isnan(rho)
+
+
+class TestGatherAcrossRanks:
+    """_gather_across_ranks must produce full-set arrays under DDP.
+
+    The world_size=1 path is exercised by the integration test; this
+    class covers the multi-rank gather + missing-key passthrough that
+    are otherwise unreachable without a real distributed backend.
+    """
+
+    def test_world_size_two_concatenates_features_and_handles_missing(self):
+        """world_size=2 with identical per-rank inputs stacks features and labels;
+        a globally-missing optional array returns None instead of stalling."""
+
+        class _FakeModule:
+            def __init__(self, world_size: int):
+                self.trainer = SimpleNamespace(world_size=world_size)
+                self.device = torch.device("cpu")
+                self._w = world_size
+
+            def all_gather(self, tensor: torch.Tensor) -> torch.Tensor:
+                return torch.stack([tensor] * self._w, dim=0)
+
+        callback = OnlineEvalCallback()
+        module = _FakeModule(world_size=2)
+        features_local = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+        labels_local = np.array([7, 8, 9])
+
+        # labels present, track_ids/timepoints missing (None on every rank).
+        features_np, labels, track_ids, timepoints = callback._gather_across_ranks(
+            module, features_local, labels_local, None, None
+        )
+
+        assert features_np.shape == (6, 4)
+        np.testing.assert_array_equal(features_np[:3], features_local.numpy())
+        np.testing.assert_array_equal(features_np[3:], features_local.numpy())
+        np.testing.assert_array_equal(labels, np.array([7, 8, 9, 7, 8, 9]))
+        assert track_ids is None
+        assert timepoints is None

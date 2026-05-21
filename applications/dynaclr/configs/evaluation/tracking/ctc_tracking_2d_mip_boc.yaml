@@ -1,0 +1,20 @@
+models:
+  - path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/onnx/last.onnx
+    label: DynaCLR-2D-MIP
+    pixel_size_um: 0.149  # training pixel size (ALFI dragonfly)
+  - path: null
+    label: baseline-iou
+
+datasets:
+  - path: /hpc/reference/group.royer/CTC/training/DIC-C2DH-HeLa
+    sequences: ["01", "02"]
+    pixel_size_um: 0.190  # DIC-C2DH-HeLa from TIFF XResolution metadata
+
+ctc_metadata_path: /hpc/reference/group.royer/CTC/metadata.yaml
+model_input_shape: [160, 160]
+distance_threshold: 325.0
+n_neighbors: 10
+delta_t: 5
+batch_size: 128
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/ctc_tracking/
+show_napari: false

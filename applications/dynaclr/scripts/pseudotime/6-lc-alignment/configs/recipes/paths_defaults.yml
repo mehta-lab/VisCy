@@ -1,0 +1,34 @@
+# Stage C defaults — pairings between Stage B Δt estimators within each cell.
+
+pairings:
+  - label: cell_own_tau50_vs_human_LC
+    a_col: path1_cell_own_tau050_delta_t_minutes
+    a_det: path1_cell_own_tau050_detected
+    a_frame_col: path1_cell_own_tau050_delta_t_frames
+    b_col: path2_organelle_state_delta_t_minutes
+    b_det: path2_organelle_state_detected
+    b_frame_col: path2_organelle_state_delta_t_frames
+
+  - label: uninfected_pop_tau50_vs_human_LC
+    a_col: path1_uninfected_pop_tau050_delta_t_minutes
+    a_det: path1_uninfected_pop_tau050_detected
+    a_frame_col: path1_uninfected_pop_tau050_delta_t_frames
+    b_col: path2_organelle_state_delta_t_minutes
+    b_det: path2_organelle_state_detected
+    b_frame_col: path2_organelle_state_delta_t_frames
+
+  - label: human_LC_vs_predicted_LC
+    a_col: path2_organelle_state_delta_t_minutes
+    a_det: path2_organelle_state_detected
+    a_frame_col: path2_organelle_state_delta_t_frames
+    b_col: path2_predicted_organelle_state_delta_t_minutes
+    b_det: path2_predicted_organelle_state_detected
+    b_frame_col: path2_predicted_organelle_state_delta_t_frames
+
+  - label: cell_own_tau50_vs_predicted_LC
+    a_col: path1_cell_own_tau050_delta_t_minutes
+    a_det: path1_cell_own_tau050_detected
+    a_frame_col: path1_cell_own_tau050_delta_t_frames
+    b_col: path2_predicted_organelle_state_delta_t_minutes
+    b_det: path2_predicted_organelle_state_detected
+    b_frame_col: path2_predicted_organelle_state_delta_t_frames

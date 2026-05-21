@@ -1,0 +1,34 @@
+# Local reproducer for the post-LOCAL_RANK hang on OPS tiny (346k rows).
+# Same as OPS-1000genes-allmarkers-tiny.yml but DROPS fast_dev_run — because
+# every passing run used fast_dev_run and every hanging run did not.
+# Single GPU to rule out DDP as the variable.
+#
+# Run:
+#   uv run viscy fit \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers.yml \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers-tiny-full.yml
+
+trainer:
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  max_epochs: 1
+  limit_train_batches: 10
+  limit_val_batches: 5
+  val_check_interval: 0.5
+  num_sanity_val_steps: 0
+  logger: null
+  callbacks: []
+
+data:
+  init_args:
+    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/tmp/ops_tiny.parquet
+    batch_size: 8
+    num_workers: 0
+    prefetch_factor: null
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null

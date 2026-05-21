@@ -1,0 +1,77 @@
+# Minimal test config for MMD + linear classifier evaluation.
+# Collection: DynaCLR-BoC-lc-evaluation-v1-test (7 experiments, 3 markers x 2 dates)
+#   2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1:  B/4 (uninfected), C/4 (infected) — G3BP1
+#   2025_07_22_A549_G3BP1_ZIKV:             C/2 (infected) — G3BP1
+#   2025_07_22_A549_Phase3D_ZIKV:           C/2 (infected) — Phase3D
+#   2025_07_22_A549_viral_sensor_ZIKV:      C/2 (infected) — viral_sensor
+#   2025_07_24_A549_G3BP1_ZIKV:             C/1 (uninfected), C/2 (infected) — G3BP1
+#   2025_07_24_A549_Phase3D_ZIKV:           C/1 (uninfected), C/2 (infected) — Phase3D
+#   2025_07_24_A549_viral_sensor_ZIKV:      C/1 (uninfected), C/2 (infected) — viral_sensor
+#
+# nextflow run applications/dynaclr/nextflow/main.nf \
+#   --eval_config applications/dynaclr/configs/evaluation/test_evaluation.yaml \
+#   --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+#   -resume -profile local
+
+base:
+  - recipes/predict.yml
+  - recipes/reduce.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-BoC-lc-evaluation-v1-test.parquet
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluation_test_lc_2
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - linear_classifiers
+  - smoothness
+
+# Override n_jobs for smaller test run
+reduce_combined:
+  phate:
+    n_jobs: 12
+
+mmd:
+  - name: perturbation
+    group_by: perturbation
+    comparisons:
+      - cond_a: uninfected
+        cond_b: infected
+        label: "uninfected vs infected"
+    temporal_bin_size: 4.0
+    combined_temporal_bin_size: null
+    combined_mode: true
+
+linear_classifiers:
+  annotations:
+    - experiment: "2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv
+    - experiment: "2025_01_28_A549_Phase3D_ZIKV_DENV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_G3BP1_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_Phase3D_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_24_A549_viral_sensor_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_22_A549_G3BP1_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_22_A549_Phase3D_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    - experiment: "2025_07_22_A549_viral_sensor_ZIKV"
+      path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+  tasks:
+    - task: infection_state
+    - task: cell_division_state
+    - task: organelle_state
+      marker_filters:
+        - G3BP1
+    - task: cell_death_state
+  use_scaling: true
+  use_pca: false
+  split_train_data: 0.8
+  random_seed: 42

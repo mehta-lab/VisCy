@@ -1,0 +1,18 @@
+# Stage D leaf — SEC61B vs G3BP1 ordering on 07_24_ZIKV.
+
+base:
+  - ../recipes/sequence_defaults.yml
+  - ../recipes/pairings_zikv_sec61_vs_g3bp1.yml
+
+# Inject timing_dir into each pairing entry. The recipe lists filenames only;
+# the leaf supplies the absolute paths for this model's Stage B outputs.
+pairings:
+  - dataset: 07_24_ZIKV
+    organelle_a:
+      label: SEC61B
+      timing_dir: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/pseudotime/6-lc-alignment/out/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/zikv_timing_sec61
+      timing_filename: 07_24_ZIKV_event_timing.parquet
+    organelle_b:
+      label: G3BP1
+      timing_dir: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/pseudotime/6-lc-alignment/out/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/zikv_timing_g3bp1
+      timing_filename: 07_24_ZIKV_event_timing.parquet

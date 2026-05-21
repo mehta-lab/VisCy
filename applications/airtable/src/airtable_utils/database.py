@@ -143,3 +143,18 @@ class AirtableDatasets:
             Created records as returned by the Airtable API.
         """
         return self._table.batch_create([r["fields"] for r in records])
+
+    def batch_delete(self, record_ids: list[str]) -> list[dict]:
+        """Batch-delete records by ID.
+
+        Parameters
+        ----------
+        record_ids : list[str]
+            Airtable record IDs to delete.
+
+        Returns
+        -------
+        list[dict]
+            Deletion confirmations from the Airtable API.
+        """
+        return self._table.batch_delete(record_ids)

@@ -1,0 +1,7 @@
+# Stage C leaf — cross-validate G3BP1 Δt estimators.
+
+base:
+  - ../recipes/paths_defaults.yml
+  - ../recipes/paths_entries_zikv_g3bp1.yml
+
+timing_dir: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/pseudotime/6-lc-alignment/out/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/zikv_timing_g3bp1

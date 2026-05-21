@@ -1,0 +1,44 @@
+# Dataset recipe: microglia (dynamorph)
+# =============================================================================
+# Embed-only dataset: no annotations exist for microglia, and its markers
+# don't overlap with any LC registry, so linear_classifiers and
+# append_predictions are intentionally omitted. We only compute embeddings,
+# dimensionality reductions, and smoothness for cross-model comparison plots.
+#
+# Data: 20191107_1209_1_GW23_dynamorph, **Phase3D channel only** (filtered
+# 2026-05-07 — the original microglia-eval.parquet covers Brightfield +
+# Phase3D + Retardance ≈ 2.58M cells, but we only embed Phase3D for
+# comparability with infectomics' Phase3D and to keep eval cost manageable).
+# Perturbations: untreated, IL17, IFN-beta, Rubella, Glioblastoma_supernatant.
+#
+# Leaves merge this via:
+#   base:
+#     - recipes/predict.yml
+#     - recipes/reduce.yml
+#     - recipes/microglia.yml
+
+cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/microglia-eval-phase3d.parquet
+
+steps:
+  - predict
+  - split
+  - reduce_dimensionality
+  - reduce_combined
+  - smoothness
+  - plot
+
+plot:
+  embedding_keys:
+    - X_pca
+  combined_embedding_keys:
+    - X_pca_combined
+    - X_phate_combined
+  # Dropped `experiment` and `marker` from color_by — both are constant
+  # after the Phase3D-only filter (single experiment, single marker), so
+  # coloring by them produces a single-color scatter.
+  color_by:
+    - perturbation
+    - hours_post_perturbation
+  point_size: 1.0
+  components: [0, 1]
+  format: pdf
