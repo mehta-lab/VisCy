@@ -31,7 +31,7 @@ trainer:
   logger:
     init_args:
       name: pix2pix3d_unetvit_JOINT_TOMM20
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -42,7 +42,7 @@ trainer:
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit/checkpoints
 
 # Child HCSDataModule init_args shared across both datasets (only data_path
 # differs). `_`-prefixed top-level keys are stripped by load_composed_config
@@ -140,7 +140,7 @@ data:
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_TOMM20
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit
   # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; default 256G
   # is too tight for the iPSC marker store + A549 pool + worker overhead.
   sbatch:

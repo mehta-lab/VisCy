@@ -57,8 +57,8 @@ trainer:
       init_args:
         save_last: true
         every_n_train_steps: 10
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit/smoke_4gpu/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/pix2pix3d_unetvit/smoke_4gpu/checkpoints
 
 launcher:
   job_name: pix2pix3d_unetvit_SEC61B_SMOKE_4GPU
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit/smoke_4gpu
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/pix2pix3d_unetvit/smoke_4gpu

@@ -19,7 +19,7 @@ trainer:
   logger:
     init_args:
       name: pix2pix3d_unetvit_iPSC_TOMM20
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/pix2pix3d_unetvit
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/pix2pix3d_unetvit
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -30,8 +30,8 @@ trainer:
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/pix2pix3d_unetvit/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/pix2pix3d_unetvit/checkpoints
 
 launcher:
   job_name: pix2pix3d_unetvit_TOMM20
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/tomm20/pix2pix3d_unetvit
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/tomm20/pix2pix3d_unetvit
