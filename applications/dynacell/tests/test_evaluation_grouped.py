@@ -215,9 +215,10 @@ def test_grouped_warns_loudly_on_process_plus_cache_miss(tmp_path: Path, capsys)
 def test_grouped_mild_note_on_process_plus_cache_only(tmp_path: Path, capsys):
     """``executor=process`` + ``require_complete_cache=true`` gets a mild note, not the loud WARNING.
 
-    Under the cache-only path, workers skip ``prepare_segmentation_model``
-    and don't instantiate extractors — pool re-spawn is the only
-    overhead, which is small. The driver should inform but not alarm.
+    Under the cache-only path the segmenter is usually skipped (the
+    deep extractors still load when ``compute_feature_metrics=true``,
+    so the cost isn't strictly zero — but it's bounded). The driver
+    should inform but not alarm.
     """
     cond_a_root = tmp_path / "fixture_a"
     cond_b_root = tmp_path / "fixture_b"
@@ -235,7 +236,7 @@ def test_grouped_mild_note_on_process_plus_cache_only(tmp_path: Path, capsys):
     pipeline.evaluate_predictions_grouped(grouped_cfg)
     out = capsys.readouterr().out
     assert "[grouped] note:" in out
-    assert "no models actually load" in out
+    assert "segmenter usually skipped" in out
     assert "WARNING" not in out, f"unexpected loud warning under cache-only path: {out!r}"
 
 
@@ -261,6 +262,39 @@ def test_grouped_rejects_require_complete_cache_override(tmp_path: Path):
 
     pipeline = live_pipeline_module()
     with pytest.raises(ValueError, match="require_complete_cache"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
+def test_grouped_rejects_pred_cache_dir_flip_for_nucleus(tmp_path: Path):
+    """A per-condition ``io.pred_cache_dir=None`` flip must raise for nucleus/membrane.
+
+    Under ``target_name ∈ {nucleus, membrane}`` + ``require_complete_cache=true``,
+    ``prepare_segmentation_model`` returns ``None`` when ``io.pred_cache_dir``
+    is set (pred masks served from cache) but loads ``SuperModel`` when
+    ``io.pred_cache_dir is None`` (per-T loop falls back to
+    ``segment(predict[t], seg_model=...)``). If the base config has
+    ``pred_cache_dir`` set so the shared bundle skips SuperModel, but a
+    condition overrides ``pred_cache_dir=None``, the per-T loop in that
+    condition would call ``segment(...)`` with ``seg_model=None`` and crash.
+    The grouped driver must catch this dangerous-direction flip pre-eval.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["target_name"] = "nucleus"
+    # Force the dangerous direction: base has pred_cache_dir set (so the
+    # baseline doesn't load SuperModel), then cond_a flips it to None
+    # (which would crash at runtime as ``segment(predict[t], seg_model=None)``).
+    grouped_cfg["io"]["pred_cache_dir"] = str(cond_a_root / "_unused_base_pred_cache")
+    grouped_cfg["conditions"][0]["io"]["pred_cache_dir"] = None
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="pred_cache_dir"):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
 
 

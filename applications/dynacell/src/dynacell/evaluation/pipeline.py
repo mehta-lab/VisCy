@@ -43,6 +43,20 @@ from dynacell.evaluation.pipeline_cache import (
     fov_masks,
     precompute_deep_features,
 )
+from dynacell.evaluation.runtime import (
+    apply_thread_budget,
+    dump_timings_csv,
+    extend_timings,
+    get_timings,
+    gpu_serialization_lock,
+    is_worker,
+    make_fov_executor,
+    maybe_empty_cuda_cache,
+    maybe_gc_collect,
+    region_timer,
+    reset_timings,
+    resolve_runtime,
+)
 from dynacell.evaluation.utils import plot_metrics
 
 
@@ -222,13 +236,6 @@ def _process_one_fov(
     ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
     paths in ``evaluate_predictions``.
     """
-    from dynacell.evaluation.runtime import (
-        get_timings,
-        gpu_serialization_lock,
-        is_worker,
-        maybe_empty_cuda_cache,
-        region_timer,
-    )
     from dynacell.evaluation.segmentation import segment
 
     timings_start = len(get_timings())
@@ -465,8 +472,6 @@ def _aggregate_fov_result(
     already there); set ``True`` in process mode (workers have separate
     per-process collectors, so the parent must aggregate).
     """
-    from dynacell.evaluation.runtime import extend_timings, region_timer
-
     if extend_worker_timings:
         extend_timings(result.timings)
 
@@ -527,7 +532,6 @@ def _worker_setup(config: DictConfig) -> None:
     """
     if _WORKER_STATE.get("initialized"):
         return
-    from dynacell.evaluation.runtime import gpu_serialization_lock
 
     use_gpu = bool(getattr(config, "use_gpu", True))
     with gpu_serialization_lock(gate=use_gpu):
@@ -568,8 +572,6 @@ def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) 
     file descriptors close before the worker accepts its next FOV. Models
     + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
     """
-    from dynacell.evaluation.pipeline_cache import flush_manifest
-
     _worker_setup(config)
     state = _WORKER_STATE
 
@@ -641,15 +643,6 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         ``runtime.executor=process``, workers still load their own model
         copies; this kwarg saves only the parent-side load.
     """
-    from dynacell.evaluation.runtime import (
-        apply_thread_budget,
-        dump_timings_csv,
-        make_fov_executor,
-        maybe_gc_collect,
-        reset_timings,
-        resolve_runtime,
-    )
-
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
     # Phase 2 once the position list is known (C4). threads_per_worker stays
@@ -920,15 +913,18 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         for fut in as_completed(futures):
                             pos_name = futures[fut]
                             buffer[pos_name] = fut.result()
-                            # Drain in order while the next-expected position
-                            # is available, releasing seg_array refs as soon
-                            # as the aggregator's plate write completes.
+                            # Advance the bar on every worker completion so the
+                            # operator sees real progress even when FOVs arrive
+                            # out of order. The in-order drain below releases
+                            # seg_array refs as soon as the aggregator's plate
+                            # write completes; that's an internal step, not a
+                            # user-visible unit of work.
+                            pbar.update(1)
                             while next_idx < len(pos_names_in_order) and (pos_names_in_order[next_idx] in buffer):
                                 expected = pos_names_in_order[next_idx]
                                 _aggregate(buffer.pop(expected))
                                 maybe_gc_collect(next_idx, runtime.gc_collect_every_n_fovs)
                                 next_idx += 1
-                                pbar.update(1)
         finally:
             if seg_plate is not None:
                 seg_plate.close()
@@ -1118,6 +1114,38 @@ def _snapshot_field(cfg: DictConfig, cfg_field: str):
     return node
 
 
+def _seg_model_required(cfg: DictConfig) -> bool:
+    """Mirror ``prepare_segmentation_model``'s load decision without instantiating.
+
+    Returns ``True`` iff a real ``SuperModel`` would be loaded for *cfg*.
+    Used as a derived grouped-eval invariant so a per-condition override of
+    ``io.pred_cache_dir`` cannot silently flip whether the shared seg_model
+    is needed (per-condition pred caches are otherwise free to differ).
+
+    Mirrors ``segmentation.prepare_segmentation_model``:
+
+    - Organelle targets (``er``, ``mitochondria``, ``nucleoli``,
+      ``lysosomes``) use ``aicssegmentation`` workflows that don't take a
+      ``seg_model`` arg → ``False``.
+    - Nucleus/membrane with ``require_complete_cache=false`` → ``True``
+      (cellpose loads to compute fresh masks on cache miss).
+    - Nucleus/membrane with ``require_complete_cache=true`` AND
+      ``io.pred_cache_dir`` set → ``False`` (pred masks served from cache;
+      per-T loop never falls back to ``segment(predict[t], seg_model=...)``).
+    - Nucleus/membrane with ``require_complete_cache=true`` AND
+      ``io.pred_cache_dir is None`` → ``True`` (per-T loop falls back to
+      ``segment(predict[t], seg_model=...)``; the seg_model is required).
+    """
+    target_name = OmegaConf.select(cfg, "target_name", default=None)
+    if target_name not in ("nucleus", "membrane"):
+        return False
+    require_complete = bool(OmegaConf.select(cfg, "io.require_complete_cache", default=False))
+    if not require_complete:
+        return True
+    pred_cache_dir = OmegaConf.select(cfg, "io.pred_cache_dir", default=None)
+    return pred_cache_dir is None
+
+
 def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
     """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
 
@@ -1137,7 +1165,12 @@ def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConf
     return merged  # type: ignore[return-value]
 
 
-def _check_grouped_field_invariants(base_snapshot: dict[str, object], merged: DictConfig, condition_name: str) -> None:
+def _check_grouped_field_invariants(
+    base_snapshot: dict[str, object],
+    base_seg_required: bool,
+    merged: DictConfig,
+    condition_name: str,
+) -> None:
     """Raise if a per-condition merged config disagrees with the baseline on model-loading fields.
 
     ``base_snapshot`` is computed once per grouped run from the
@@ -1145,6 +1178,13 @@ def _check_grouped_field_invariants(base_snapshot: dict[str, object], merged: Di
     with all later conditions (a condition 0 overlay that sneaks in e.g.
     ``target_name`` would be rejected, not silently adopted as the new
     "base").
+
+    ``base_seg_required`` is the baseline value of :func:`_seg_model_required`.
+    ``io.pred_cache_dir`` is intentionally NOT in :data:`_MODEL_LOADING_FIELDS`
+    (per-condition pred caches are the canonical grouped-run use case), but a
+    pred_cache_dir flip *can* indirectly change whether SuperModel is needed
+    for nucleus/membrane targets under ``require_complete_cache=true``. Catch
+    that specific case here so the shared seg_model bundle is never wrong.
     """
     for cfg_field in _MODEL_LOADING_FIELDS:
         merged_val = _snapshot_field(merged, cfg_field)
@@ -1153,6 +1193,18 @@ def _check_grouped_field_invariants(base_snapshot: dict[str, object], merged: Di
                 f"Condition {condition_name!r}: overrides changed model-loading field "
                 f"{cfg_field!r}. Move it to the base config or run this condition separately."
             )
+    if _seg_model_required(merged) and not base_seg_required:
+        raise ValueError(
+            f"Condition {condition_name!r}: io.pred_cache_dir override flips "
+            f"prepare_segmentation_model's load decision in the dangerous direction. "
+            f"The base config does NOT load SuperModel "
+            f"(target_name={base_snapshot['target_name']!r}, "
+            f"require_complete_cache={base_snapshot['io.require_complete_cache']!r}, "
+            f"base io.pred_cache_dir is set), but this condition sets "
+            f"io.pred_cache_dir=None which makes the per-T loop fall back to "
+            f"segment(predict[t], seg_model=...) — that call would receive None "
+            f"and raise. Set io.pred_cache_dir on this condition, or run it separately."
+        )
 
 
 def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
@@ -1199,14 +1251,16 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     n_conditions = len(conditions)
     if executor == "process" and n_conditions > 1:
         if require_complete:
-            # Cache-only path: workers skip prepare_segmentation_model (returns
-            # None) and don't instantiate extractors. Pool re-spawn is the only
-            # overhead — mild informational note, not a warning.
+            # Cache-only path: workers still re-init per condition (pool spawn +
+            # thread budget + ``load_eval_models`` call). Under
+            # ``require_complete_cache=true`` the segmenter usually short-circuits
+            # to ``None``, but deep extractors still load when
+            # ``compute_feature_metrics=true``. Mild informational note.
             print(
                 "[grouped] note: runtime.executor=process with require_complete_cache=true — "
-                f"workers re-init per condition but no models actually load. "
-                f"{n_conditions} pool spawns total; consider executor=serial to skip "
-                "spawn overhead entirely."
+                f"workers re-init per condition (segmenter usually skipped; deep extractors "
+                f"still load when compute_feature_metrics=true). {n_conditions} pool spawns "
+                f"total; use executor=serial to amortize the per-condition load."
             )
         else:
             # Worst-case: each condition's worker pool independently loads
@@ -1235,6 +1289,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     if "conditions" in models_base:
         del models_base["conditions"]
     base_snapshot = {field: _snapshot_field(models_base, field) for field in _MODEL_LOADING_FIELDS}
+    base_seg_required = _seg_model_required(models_base)
 
     models: EvalModels | None = None
 
@@ -1252,7 +1307,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         )
         merged = _merge_condition(config, cond)
         apply_dataset_ref(merged)
-        _check_grouped_field_invariants(base_snapshot, merged, name)
+        _check_grouped_field_invariants(base_snapshot, base_seg_required, merged, name)
         print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
 
         if _final_metrics_cache_valid(merged):
