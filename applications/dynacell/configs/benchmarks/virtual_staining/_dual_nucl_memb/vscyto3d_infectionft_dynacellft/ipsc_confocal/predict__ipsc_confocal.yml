@@ -1,0 +1,43 @@
+# vscyto3d_infectionft_dynacellft (InfectionFTDynacell-init + dynacell FT on iPSC) predict:
+# dual nucleus+membrane on iPSC test set. ckpt_path is filled in post-training
+# from the best-val checkpoint of the matching train.yml run.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal_dual.yml
+  - ../../../_internal/shared/model/targets/dual_nucl_memb.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_2chan_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: dual_nucl_memb
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal_dual
+  model_name: vscyto3d_infectionft_dynacellft
+  experiment_id: dual_nucl_memb__ipsc_confocal__vscyto3d_infectionft_dynacellft__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft.zarr
+
+launcher:
+  job_name: VSCyto3D_InfectionFTDynacell_iPSC_PRED_DUAL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
