@@ -1,0 +1,59 @@
+# Gate 12 smoke leaf: same as train.yml but trainer.fast_dev_run=true on
+# single GPU. NOT FOR PRODUCTION — delete after Phase 1 gate verification.
+# Purpose: verify full-weight cytoland ckpt load into fcmae_vscyto3d_2chan_fit
+# arch succeeds, one fwd/bwd pass completes, no shape errors.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_dual.yml
+  - ../../../_internal/shared/model/targets/dual_nucl_memb.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_2chan_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: dual_nucl_memb
+  train_set: ipsc_confocal
+  model_name: vscyto3d_cytolandft
+  experiment_id: dual_nucl_memb__ipsc_confocal__vscyto3d_cytolandft__smoke
+
+data:
+  init_args:
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei, Membrane]
+          w_key: Nuclei
+          spatial_size: [15, 600, 600]
+          num_samples: 4
+    # Cut workers + skip mmap_preload to keep startup overhead small for a
+    # 1-batch run — preloading 500 iPSC FOVs into /dev/shm peaks at ~185G,
+    # which OOMs at the smoke mem budget below.
+    num_workers: 0
+    persistent_workers: false
+    mmap_preload: false
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSCyto3D/epoch=83-step=14532-loss=0.492.ckpt
+
+trainer:
+  # Override topology to single-GPU + 1-batch fast_dev_run.
+  fast_dev_run: true
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  logger: false
+  callbacks: []
+
+launcher:
+  job_name: SMOKE_GATE12_Cytoland_FT_iPSC_Dual
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/dual_nucl_memb/vscyto3d_cytolandft/_smoke
+  sbatch:
+    ntasks_per_node: 1
+    cpus_per_task: 8
+    gpus: 1
+    mem: "128G"
+    constraint: "h100|h200"
+    time: "00:30:00"
