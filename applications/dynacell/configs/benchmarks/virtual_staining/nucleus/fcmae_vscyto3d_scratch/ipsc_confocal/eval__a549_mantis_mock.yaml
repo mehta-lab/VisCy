@@ -13,5 +13,7 @@ benchmark:
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_scratch_mock.zarr
 
+compute_feature_metrics: true
+
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_nucl_fcmae_vscyto3d_scratch_mock

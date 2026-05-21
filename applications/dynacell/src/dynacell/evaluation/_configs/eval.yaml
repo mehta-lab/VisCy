@@ -74,7 +74,7 @@ feature_extractor:
 
 use_gpu: true
 compute_microssim: true
-compute_feature_metrics: false
+compute_feature_metrics: true
 limit_positions: null  # process first N positions; null means all
 
 # Eval runtime / parallelism. Default is bit-for-bit-current sequential behavior.

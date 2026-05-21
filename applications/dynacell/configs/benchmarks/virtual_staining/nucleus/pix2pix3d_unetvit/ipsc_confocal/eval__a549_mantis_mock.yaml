@@ -7,5 +7,7 @@ defaults:
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_pix2pix3d_unetvit__h2b_mock.zarr
 
+compute_feature_metrics: true
+
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_nucl_pix2pix3d_unetvit__h2b_mock
