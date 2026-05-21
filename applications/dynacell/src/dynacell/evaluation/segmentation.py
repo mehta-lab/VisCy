@@ -91,7 +91,19 @@ def prepare_segmentation_model(config):
 
     Returns ``None`` for organelles that use classical (non-DL) workflows.
     Respects ``config.use_gpu`` when deciding whether to move models to GPU.
+
+    Returns ``None`` when ``io.require_complete_cache=true`` AND no per-FOV
+    call path can invoke ``segment()`` without a cached mask. Concretely:
+    organelle targets (``er``/``nucleoli``/``lysosomes``/``mitochondria``)
+    delegate to aicssegmentation workflows that don't take ``seg_model``,
+    so skipping the SuperModel load is safe. For ``nucleus``/``membrane``,
+    the per-T loop in ``pipeline._process_one_fov`` falls back to
+    ``segment(predict[t], seg_model=seg_model)`` whenever the pred-side
+    mask cache is disabled (``io.pred_cache_dir=None``); in that case we
+    must still load SuperModel even under ``require_complete_cache=true``
+    or the fallback raises ``ValueError`` mid-loop.
     """
+    require_complete = bool(getattr(config.io, "require_complete_cache", False))
     if config.target_name not in [
         "nucleus",
         "membrane",
@@ -101,6 +113,10 @@ def prepare_segmentation_model(config):
         "mitochondria",
     ]:
         raise ValueError(f"Invalid target_name in config: {config.target_name!r}")
+    if require_complete:
+        pred_cache_dir = getattr(config.io, "pred_cache_dir", None)
+        if config.target_name not in ("nucleus", "membrane") or pred_cache_dir is not None:
+            return None
     if config.target_name in ["nucleus", "membrane"]:
         _require_segmenter_model_zoo()
         if config.target_name == "nucleus":

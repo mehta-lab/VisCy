@@ -19,6 +19,7 @@ from pathlib import Path
 
 _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
     "evaluate": ("dynacell.evaluation.pipeline", "evaluate_model", "eval"),
+    "evaluate-grouped": ("dynacell.evaluation.pipeline", "evaluate_model_grouped", "eval"),
     "precompute-gt": ("dynacell.evaluation.precompute_cli", "precompute_gt", "eval"),
     "report": ("dynacell.reporting.cli", "generate_report", "report"),
 }
@@ -106,6 +107,14 @@ def _inject_external_configs(argv: list[str]) -> list[str]:
 
 def main_cli():
     """Console script entry point for ``dynacell`` command."""
+    # Apply BLAS/OMP env caps BEFORE any torch/numpy import. The import below
+    # is stdlib + threadpoolctl only — no torch — so the env vars set here
+    # bite at first BLAS C-extension load, which happens transitively when
+    # we import the Hydra command module or viscy_utils.cli below.
+    from dynacell.evaluation.runtime import early_apply_env_caps
+
+    early_apply_env_caps()
+
     if len(sys.argv) >= 2 and sys.argv[1] in _HYDRA_COMMANDS:
         command = sys.argv[1]
         module_path, func_name, extra = _HYDRA_COMMANDS[command]

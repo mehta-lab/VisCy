@@ -21,23 +21,34 @@ from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.metrics import build_crops
+from dynacell.evaluation.model_loader import LoadFlags, init_gt_cache_context, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
     DeepFeatureBatcher,
     flush_manifest,
     fov_cp_features,
     fov_masks,
-    init_cache_context,
-    resolve_dynaclr_encoder_cfg,
 )
 
 
 def precompute_gt_artifacts(config: DictConfig) -> None:
     """Build every GT-side artifact toggled on in ``config.build``."""
-    from dynacell.evaluation.segmentation import prepare_segmentation_model
-    from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
+    from dynacell.evaluation.runtime import apply_thread_budget, resolve_runtime
 
     if config.io.gt_cache_dir is None:
         raise ValueError("io.gt_cache_dir is required for dynacell precompute-gt")
+
+    # Precompute is single-process by design (DeepFeatureBatcher accumulates
+    # state across FOVs). Apply the thread cap but raise if the user requested
+    # FOV-level parallelism here — that belongs to evaluate_predictions only.
+    runtime = resolve_runtime(config)
+    if runtime.executor != "serial" or runtime.fov_workers != 1:
+        raise ValueError(
+            "dynacell precompute-gt does not support FOV-level parallelism. "
+            f"Got runtime.executor={runtime.executor!r}, "
+            f"runtime.fov_workers={runtime.fov_workers}. "
+            "Set runtime.executor='serial' and runtime.fov_workers=1 (or omit)."
+        )
+    apply_thread_budget(runtime.threads_per_worker)
 
     build = config.build
     build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino)
@@ -48,46 +59,28 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
             "build.cp / build.dinov3 / build.dynaclr / build.celldino is true"
         )
 
-    seg_model = prepare_segmentation_model(config) if build.masks else None
+    # Stricter celldino gate than evaluate_predictions: precompute-gt
+    # requires an explicit weights path when build.celldino=true (the
+    # eval path soft-skips a null weights_path; here it would silently
+    # produce no cache, so we surface it as an error).
+    if build.celldino and config.feature_extractor.celldino.weights_path is None:
+        raise ValueError("feature_extractor.celldino.weights_path is required when build.celldino=true")
 
-    dinov3_model_name = None
-    dynaclr_ckpt_path = None
-    dynaclr_encoder_cfg = None
-    celldino_weights_path = None
-    dinov3_feature_extractor = None
-    dynaclr_feature_extractor = None
-    celldino_feature_extractor = None
-
-    if build.dinov3:
-        dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
-        dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
-    if build.dynaclr:
-        dynaclr_config = config.feature_extractor.dynaclr
-        dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
-        dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
-        dynaclr_feature_extractor = DynaCLRFeatureExtractor(
-            checkpoint=dynaclr_config.checkpoint,
-            encoder_config=dynaclr_encoder_cfg,
-        )
-    if build.celldino:
-        celldino_cfg = config.feature_extractor.celldino
-        if celldino_cfg.weights_path is None:
-            raise ValueError("feature_extractor.celldino.weights_path is required when build.celldino=true")
-        celldino_weights_path = str(celldino_cfg.weights_path)
-        celldino_feature_extractor = CellDinoFeatureExtractor(
-            weights_path=celldino_weights_path,
-            img_size=int(celldino_cfg.img_size),
-            patch_size=int(celldino_cfg.patch_size),
-        )
-
-    cache_ctx = init_cache_context(
+    models = load_eval_models(
         config,
-        side="gt",
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
-        celldino_weights_path=celldino_weights_path,
+        flags=LoadFlags(
+            masks=bool(build.masks),
+            dinov3=bool(build.dinov3),
+            dynaclr=bool(build.dynaclr),
+            celldino=bool(build.celldino),
+        ),
     )
+    seg_model = models.seg_model
+    dinov3_feature_extractor = models.dinov3
+    dynaclr_feature_extractor = models.dynaclr
+    celldino_feature_extractor = models.celldino
+
+    cache_ctx = init_gt_cache_context(config, models)
 
     gt_path = Path(config.io.gt_path)
     seg_path = Path(config.io.cell_segmentation_path) if config.io.cell_segmentation_path is not None else None
