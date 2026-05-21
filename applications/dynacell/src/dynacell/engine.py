@@ -838,6 +838,10 @@ class DynacellGAN(LightningModule):
                 f"ema_kimg must be > 0 (or None to disable EMA); got {ema_kimg}. "
                 "ema_kimg=0 would freeze EMA at init weights with no signal."
             )
+        if r1_every < 1:
+            raise ValueError(
+                f"r1_every must be >= 1 (it is the modulo period for the lazy R1/R2 schedule); got {r1_every}."
+            )
         self.generator = net_class(**(generator_config or {}))
         self.discriminator = MultiScalePatchGAN3D(**(discriminator_config or {}))
 

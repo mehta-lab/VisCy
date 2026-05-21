@@ -644,6 +644,18 @@ def test_dynacell_gan_unknown_loss_type():
         )
 
 
+@pytest.mark.parametrize("bad_r1_every", [0, -1])
+def test_dynacell_gan_invalid_r1_every_raises(bad_r1_every):
+    """r1_every < 1 is rejected at __init__ (would zero-divide / break gate)."""
+    with pytest.raises(ValueError, match="r1_every must be >= 1"):
+        DynacellGAN(
+            architecture="UNetViT3D",
+            generator_config=GAN_GEN_TEST_CONFIG,
+            discriminator_config=GAN_DISC_TEST_CONFIG,
+            r1_every=bad_r1_every,
+        )
+
+
 def test_dynacell_gan_ema_seeded_on_init():
     """Enabling EMA constructs a shadow that matches the live generator."""
     model = _build_modernized_gan()
