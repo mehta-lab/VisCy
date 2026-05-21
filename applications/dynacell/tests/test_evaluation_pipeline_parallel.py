@@ -5,10 +5,10 @@ These tests cover the cross-process boundary in two pieces:
 1. ``FovResult`` survives ``pickle`` round-trip with realistic
    shapes (the ``concurrent.futures.ProcessPoolExecutor`` future-result
    transport uses pickle).
-2. ``_aggregate_fov_result`` correctly extends the parent's 24
-   dataset-level accumulator lists from a synthetic FovResult, preserving
-   the existing ``if size > 0: append`` semantics that the worker
-   internally maintains.
+2. ``_aggregate_fov_result`` correctly extends each backbone's six lists
+   in the parent-side ``parent_lists: dict[str, _BackboneLists]`` from a
+   synthetic FovResult, preserving the existing ``if size > 0: append``
+   semantics that the worker internally maintains.
 
 End-to-end serial/process parity on a real eval (with iohub fixtures and
 prebuilt mask caches) is a follow-up CPU integration test — see the plan
@@ -132,10 +132,11 @@ def test_fov_result_pickle_handles_empty_backbones():
     assert restored.celldino.gt_feats == []
 
 
-def test_aggregate_fov_result_extends_24_accumulators():
-    """Aggregator must extend each backbone's 6 lists with worker contributions."""
+def test_aggregate_fov_result_extends_backbone_lists():
+    """Aggregator must extend each backbone's six lists with worker contributions."""
     pipeline = _live_pipeline_module()
     _aggregate_fov_result = pipeline._aggregate_fov_result
+    _BackboneLists = pipeline._BackboneLists
     # Mock segmentation_results plate handle (only create_position is exercised).
     written = {}
 
@@ -156,30 +157,7 @@ def test_aggregate_fov_result_extends_24_accumulators():
     all_pix: list[dict] = []
     all_mask: list[dict] = []
     all_feat: list[dict] = []
-    pred_cp_feats: list = []
-    pred_cp_fovs: list = []
-    pred_cp_ts: list = []
-    gt_cp_feats: list = []
-    gt_cp_fovs: list = []
-    gt_cp_ts: list = []
-    pred_dinov3_feats: list = []
-    pred_dinov3_fovs: list = []
-    pred_dinov3_ts: list = []
-    gt_dinov3_feats: list = []
-    gt_dinov3_fovs: list = []
-    gt_dinov3_ts: list = []
-    pred_dynaclr_feats: list = []
-    pred_dynaclr_fovs: list = []
-    pred_dynaclr_ts: list = []
-    gt_dynaclr_feats: list = []
-    gt_dynaclr_fovs: list = []
-    gt_dynaclr_ts: list = []
-    pred_celldino_feats: list = []
-    pred_celldino_fovs: list = []
-    pred_celldino_ts: list = []
-    gt_celldino_feats: list = []
-    gt_celldino_fovs: list = []
-    gt_celldino_ts: list = []
+    parent_lists = {name: _BackboneLists() for name in pipeline._BACKBONE_KEYS}
 
     _aggregate_fov_result(
         result,
@@ -187,30 +165,7 @@ def test_aggregate_fov_result_extends_24_accumulators():
         all_pix,
         all_mask,
         all_feat,
-        pred_cp_feats,
-        pred_cp_fovs,
-        pred_cp_ts,
-        gt_cp_feats,
-        gt_cp_fovs,
-        gt_cp_ts,
-        pred_dinov3_feats,
-        pred_dinov3_fovs,
-        pred_dinov3_ts,
-        gt_dinov3_feats,
-        gt_dinov3_fovs,
-        gt_dinov3_ts,
-        pred_dynaclr_feats,
-        pred_dynaclr_fovs,
-        pred_dynaclr_ts,
-        gt_dynaclr_feats,
-        gt_dynaclr_fovs,
-        gt_dynaclr_ts,
-        pred_celldino_feats,
-        pred_celldino_fovs,
-        pred_celldino_ts,
-        gt_celldino_feats,
-        gt_celldino_fovs,
-        gt_celldino_ts,
+        parent_lists,
         extend_worker_timings=True,
     )
 
@@ -219,11 +174,14 @@ def test_aggregate_fov_result_extends_24_accumulators():
     assert len(all_feat) == 2
     assert (row_, col_, fov_) == ("A", "1", "0")
     assert written[("A", "1", "0", "0")].shape == result.seg_array.shape
-    # Each backbone contributes 2 entries (one per timepoint).
-    for lst in (
-        pred_cp_feats,
-        pred_dinov3_feats,
-        pred_dynaclr_feats,
-        pred_celldino_feats,
-    ):
-        assert len(lst) == 2
+    # Stronger than the old test: assert every backbone's six lists landed
+    # lockstep. Catches a future regression where _extend_backbone drifts
+    # (e.g. someone adds a field to _BackboneLists and forgets a list).
+    for name in pipeline._BACKBONE_KEYS:
+        bb = parent_lists[name]
+        assert len(bb.pred_feats) == 2
+        assert len(bb.gt_feats) == 2
+        assert len(bb.pred_fovs) == 2
+        assert len(bb.gt_fovs) == 2
+        assert len(bb.pred_ts) == 2
+        assert len(bb.gt_ts) == 2
