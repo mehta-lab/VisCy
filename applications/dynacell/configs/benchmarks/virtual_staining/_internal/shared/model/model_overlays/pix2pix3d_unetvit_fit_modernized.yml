@@ -1,7 +1,7 @@
 # pix2pix3d_unetvit fit overlay — STYLEGAN2/R3GAN-STYLE MODERNIZED RECIPE.
 #
-# Opt-in modernization of the LSGAN baseline. See plan
-# /home/alex.kalinin/.claude/plans/pix2pix3d-gan-modernization.md.
+# Opt-in modernization of the LSGAN baseline. See PR
+# https://github.com/mehta-lab/VisCy/pull/428 for the recipe and rationale.
 #
 # Differences from pix2pix3d_unetvit_fit.yml:
 #   - loss_type:   lsgan         -> nonsat (StyleGAN2 default; softplus-based)
