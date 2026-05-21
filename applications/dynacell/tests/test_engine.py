@@ -3,10 +3,12 @@
 import copy
 import warnings
 
+import numpy as np
 import pytest
 import torch
 from lightning.pytorch import Trainer, seed_everything
 from monai.data import MetaTensor
+from torch import nn
 
 from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
 
@@ -1017,6 +1019,35 @@ def test_dynacell_gan_use_ema_at_predict_false():
     # Predict should equal raw forward, NOT EMA forward.
     assert torch.allclose(pred, pred_raw, atol=1e-6)
     assert not torch.allclose(pred, pred_ema, atol=1e-6)
+
+
+@pytest.mark.parametrize("use_ema_at_predict", [True, False])
+def test_dynacell_gan_val_samples_match_inference_path(use_ema_at_predict):
+    """Logged val samples follow the inference generator (EMA flag respected).
+
+    Swaps both generators for trivial modules with distinguishable outputs
+    so we can read off which one fed the dashboard.
+    """
+
+    class _Constant(nn.Module):
+        def __init__(self, value: float) -> None:
+            super().__init__()
+            self.value = value
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return torch.full_like(x, self.value)
+
+    model = _build_modernized_gan(use_ema_at_predict=use_ema_at_predict, log_batches_per_epoch=1)
+    model.generator = _Constant(0.0)
+    model.generator_ema = _Constant(1.0)
+    batch = _make_gan_batch(batch_size=1)
+    model.validation_step(batch, batch_idx=0, dataloader_idx=0)
+    # validation_step_outputs is a list of rows; each row is
+    # [source_midz, target_midz, pred_midz] as 2-D numpy slices.
+    assert model.validation_step_outputs, "expected at least one logged sample"
+    pred_midz = model.validation_step_outputs[0][2]
+    expected_value = 1.0 if use_ema_at_predict else 0.0
+    assert np.allclose(pred_midz, expected_value)
 
 
 def test_dynacell_gan_ckpt_unexpected_missing_raises(tmp_path):

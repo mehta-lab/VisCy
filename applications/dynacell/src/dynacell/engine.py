@@ -1228,7 +1228,12 @@ class DynacellGAN(LightningModule):
                 sync_dist=True,
                 batch_size=source.shape[0],
             )
-            pred_for_samples = pred_ema
+            # Sample logging follows the inference path so the dashboard
+            # tracks what `predict_step` (via `_inference_generator`) actually
+            # emits. If EMA exists but use_ema_at_predict=False, predict_step
+            # uses the raw generator, so logged samples must match.
+            if self.use_ema_at_predict:
+                pred_for_samples = pred_ema
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 detach_sample((source, target, pred_for_samples), self.log_samples_per_batch)
