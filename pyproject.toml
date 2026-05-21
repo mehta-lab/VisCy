@@ -62,7 +62,6 @@ waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
 aicsmlsegment = { git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git", branch = "main" }
-iohub = { git = "https://github.com/czbiohub-sf/iohub.git", rev = "afe11f6a0f7d06b2105fac40c1ef4bb053417100" }
 
 [tool.ruff]
 target-version = "py312"

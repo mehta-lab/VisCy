@@ -30,7 +30,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "iohub>=0.3.3",
+  "iohub>=0.3.5",
   "jsonargparse[signatures]>=4.26",
   "lightning>=2.3",
   "matplotlib>=3.10",
