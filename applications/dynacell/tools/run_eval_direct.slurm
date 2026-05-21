@@ -42,10 +42,19 @@ EXTRA_OVERRIDES=("$@")
 # applications/dynacell/CLAUDE.md "Eval runtime / parallelism".
 export DYNACELL_THREADS_PER_WORKER="${SLURM_CPUS_PER_TASK:-16}"
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+# SLURM stages this script in a spool dir, so ``BASH_SOURCE[0]`` does not
+# point at the source tree. ``SLURM_SUBMIT_DIR`` is the directory where
+# ``sbatch`` was invoked — by convention that's the worktree root. Fall
+# back to BASH_SOURCE[0] for direct ``bash run_eval_direct.slurm`` use
+# outside SLURM (testing).
+if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+  REPO="${SLURM_SUBMIT_DIR}"
+else
+  REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+fi
 cd "${REPO}"
 
-ml uv 2>/dev/null || true
+ml uv
 
 # Decide single vs grouped from leaf basename.
 LEAF_BASENAME=$(basename "${LEAF}")
