@@ -13,6 +13,21 @@ Code names (used in YAML config keys, prediction zarr filenames, eval pipeline k
 | `unetvit3d` | UNetViT3D |
 | `fnet3d_paper` | FNet3D |
 | `celldiff` | CELL-Diff (variants: `iterative`, `sliding_window`, `denoise`/Mean Predictor) |
+| `fcmae_vscyto3d_pretrained_randinit` | **VSCyto3D-RandInit** (untrained ablation; one frozen ckpt per organelle persisted by `save_random_init_vscyto3d_ckpts.py`) |
+| `fcmae_vscyto3d_pretrained_cytoland` | **VSCyto3D-Cytoland** (cytoland public ckpt evaluated without dynacell FT) |
+| `fcmae_vscyto3d_pretrained_infectionft` | **VSCyto3D-InfectionFT** (cytoland → A549-infection-FT ckpt evaluated without further FT) |
+| `vscyto3d_cytolandft` | **VSCyto3D-CytolandFT** (cytoland ckpt + dynacell FT; dual nucleus+membrane, 2-channel) |
+| `vscyto3d_infectionft_dynacellft` | **VSCyto3D-InfectionFT-DynacellFT** (cytoland → A549-infection-FT → dynacell FT; dual nucleus+membrane) |
+
+**Training-set infixes for the no-FT ablations** (Track A/B in `vscyto3d-ablations`):
+
+| Infix in zarr filename | Meaning |
+| --- | --- |
+| `_randinit` | random init, no training (Track A) |
+| `_cytoland` | cytoland public ckpt, no FT (Track B1) |
+| `_infectionft` | VSCyto3D-A549-infection-finetune ckpt, no FT (Track B2) |
+| `_cytolandft` | cytoland init + dynacell FT (Track C1) — combines with `_a549trained` for A549-trained variants |
+| `_infectionft_dynacellft` | infection-FT init + dynacell FT (Track C2) — combines with `_a549trained` similarly |
 
 Eval-pipeline directory naming (`/hpc/projects/virtual_staining/training/dynacell/{ipsc,a549}/evaluations/eval_<model>_<organelle>[_<plate>]`) uses the **paper key** (`unext2`, `vscyto3d`, `fnet3d`, `unetvit3d`, `celldiff_*`), not the config key. So `eval_unext2_membrane` maps to the `fcmae_vscyto3d_scratch` predictions, `eval_vscyto3d_membrane` maps to `fcmae_vscyto3d_pretrained`.
 
