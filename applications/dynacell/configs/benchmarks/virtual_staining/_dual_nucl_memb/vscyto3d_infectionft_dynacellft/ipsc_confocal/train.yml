@@ -1,0 +1,58 @@
+# VSCyto3D dual nucleus+membrane FT: cytoland -> A549-infection-FT -> dynacell FT (3-stage) on iPSC.
+# Full-weight load (no encoder_only) — source ckpt is 2-channel and matches
+# the fcmae_vscyto3d_2chan_fit arch exactly. Sampling bias is Nuclei-foreground
+# weighted (w_key=Nuclei in targets/dual_nucl_memb.yml + bumped num_samples
+# here); revisit if validation loss for Membrane channel diverges from the
+# fcmae_vscyto3d_pretrained membrane baseline.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_dual.yml
+  - ../../../_internal/shared/model/targets/dual_nucl_memb.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_2chan_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: dual_nucl_memb
+  train_set: ipsc_confocal
+  model_name: vscyto3d_infectionft_dynacellft
+  experiment_id: dual_nucl_memb__ipsc_confocal__vscyto3d_infectionft_dynacellft
+
+# Bump num_samples from the dual_nucl_memb default (2) to 4 to match the
+# single-organelle FCMAE recipe at the same crop size.
+data:
+  init_args:
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei, Membrane]
+          w_key: Nuclei
+          spatial_size: [15, 600, 600]
+          num_samples: 4
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/organelle_phenotyping/models/VSCyto3D-A549-infection-finetune/4gpu_bf16_bs16_to_ep7/checkpoints/epoch=7-step=832.ckpt
+
+trainer:
+  logger:
+    init_args:
+      name: VSCyto3D_InfectionFTDynacell_iPSC_Dual
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/dual_nucl_memb/vscyto3d_infectionft_dynacellft
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/dual_nucl_memb/vscyto3d_infectionft_dynacellft/checkpoints
+
+launcher:
+  job_name: VSCyto3D_InfectionFTDynacell_iPSC_Dual
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/dual_nucl_memb/vscyto3d_infectionft_dynacellft
