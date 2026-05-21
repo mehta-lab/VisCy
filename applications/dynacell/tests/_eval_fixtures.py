@@ -46,16 +46,18 @@ def live_pipeline_module():
     return importlib.import_module("dynacell.evaluation.pipeline")
 
 
-def make_hcs_plate(path: Path, channel_name: str, seed: int) -> None:
-    """Create a tiny HCS plate with ``N_POSITIONS`` positions of shape ``(T, 1, D, H, W)``.
+def make_hcs_plate(path: Path, channel_name: str, seed: int, n_positions: int = N_POSITIONS) -> None:
+    """Create a tiny HCS plate with ``n_positions`` positions of shape ``(T, 1, D, H, W)``.
 
-    Positions are named ``A/1/{i}`` for ``i in range(N_POSITIONS)``. Pixel
+    Positions are named ``A/1/{i}`` for ``i in range(n_positions)``. Pixel
     values are deterministic from ``seed`` so pred and GT differ
-    predictably.
+    predictably. ``n_positions`` defaults to ``N_POSITIONS`` (the matched
+    pred/gt case); pass a smaller value to simulate a ``--fast_dev_run``
+    pred zarr that only wrote the first N FOVs.
     """
     rng = np.random.default_rng(seed)
     with open_ome_zarr(path, mode="w", layout="hcs", channel_names=[channel_name], version="0.5") as plate:
-        for i in range(N_POSITIONS):
+        for i in range(n_positions):
             pos = plate.create_position("A", "1", str(i))
             data = rng.uniform(0.0, 1.0, size=(T, 1, D, H, W)).astype(np.float32)
             pos.create_image("0", data)
@@ -67,6 +69,7 @@ def make_mask_cache(
     channel_name: str,
     side: str,
     target_name: str = "er",
+    n_positions: int = N_POSITIONS,
 ) -> None:
     """Prebuild a mask cache (zarr + manifest) for ``N_POSITIONS`` positions.
 
@@ -85,7 +88,7 @@ def make_mask_cache(
     paths = cache_paths(cache_dir)
     mask_channel = "target_seg" if side == "gt" else "prediction_seg"
 
-    pos_names = [f"A/1/{i}" for i in range(N_POSITIONS)]
+    pos_names = [f"A/1/{i}" for i in range(n_positions)]
     for pos_name in pos_names:
         masks = np.zeros((T, D, H, W), dtype=bool)
         if side == "gt":
