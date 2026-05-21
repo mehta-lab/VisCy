@@ -1,0 +1,51 @@
+# pix2pix3d_unetvit fit overlay — STYLEGAN2/R3GAN-STYLE MODERNIZED RECIPE.
+#
+# Opt-in modernization of the LSGAN baseline. See plan
+# /home/alex.kalinin/.claude/plans/pix2pix3d-gan-modernization.md.
+#
+# Differences from pix2pix3d_unetvit_fit.yml:
+#   - loss_type:   lsgan         -> nonsat (StyleGAN2 default; softplus-based)
+#   - lr_g/lr_d:   3e-4 / 3e-5   -> 2e-4 / 2e-4 (equal LR; matches StyleGAN2-ADA /
+#                                  StyleGAN3 / StyleGAN-XL / R3GAN; the 10x
+#                                  D-slower TTUR was a pre-R1-era hack)
+#   - r1_gamma:    0             -> 10.0  (Mescheder zero-centered grad penalty,
+#                                  StyleGAN2 256² default; ablate {1,5,10,20})
+#   - r1_every:    n/a           -> 16    (StyleGAN2 D_reg_interval; lazy reg
+#                                  with `* r1_every` unbiased rescaling)
+#   - ema_kimg:    null          -> 10.0  (G EMA half-life 10k images;
+#                                  StyleGAN2 256² default. Decay derived
+#                                  per-step from global batch size.)
+#   - lambda_adv:  implicit 1.0  -> 1.0   (now an explicit knob)
+#
+# Unchanged from the LSGAN baseline:
+#   - generator backbone (UNetViT3D)
+#   - discriminator backbone (MultiScalePatchGAN3D, num_scales=2, SN on)
+#   - lambda_l1 (=100.0 from recipes/models/pix2pix3d_unetvit.yml)
+#   - warmup_steps, warmup_multiplier, schedule, precision, max_epochs
+#
+# Architectural fairness with CellDiff / FNet3D / etc. is preserved: only
+# the training RECIPE differs from LSGAN; the model under test is still
+# pix2pix3d_unetvit.
+base:
+  - ../../../../../../recipes/models/pix2pix3d_unetvit.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    loss_type: nonsat
+    lambda_adv: 1.0
+    r1_gamma: 10.0
+    r2_gamma: 0.0
+    r1_every: 16
+    ema_kimg: 10.0
+    lecam_gamma: 0.0
+    lecam_decay: 0.9
+    use_ema_at_predict: true
+    lr_g: 2.0e-4
+    lr_d: 2.0e-4
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+trainer:
+  precision: bf16-mixed
+  max_epochs: 20

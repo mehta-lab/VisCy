@@ -1,0 +1,51 @@
+# pix2pix3d_unetvit MODERNIZED fit on ER (SEC61B) — 4-GPU DDP production leaf.
+#
+# Run A of the modernization plan (see
+# /home/alex.kalinin/.claude/plans/pix2pix3d-gan-modernization.md).
+#
+# Sibling of train_4gpu.yml. Same experiment_id and W&B/save-dir structure,
+# but composes the MODERNIZED model overlay (nonsat + R1 + EMA + equal LR)
+# instead of the LSGAN baseline overlay. Checkpoints land in a distinct
+# subtree so they cannot collide with the in-flight LSGAN run.
+#
+# W&B run name and slurm job name carry `_modernized` to make the recipe
+# obvious in the dashboard.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: er__ipsc_confocal__pix2pix3d_unetvit_modernized
+
+trainer:
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_SEC61B_4gpu_modernized
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        # Modernized recipe monitors the EMA generator's val loss — that's
+        # the inference path (predict_step uses _inference_generator which
+        # prefers EMA when available).
+        monitor: loss/validate_ema
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_SEC61B_4gpu_modernized
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized
