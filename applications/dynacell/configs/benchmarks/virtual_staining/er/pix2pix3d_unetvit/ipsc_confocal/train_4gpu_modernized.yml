@@ -1,7 +1,7 @@
 # pix2pix3d_unetvit MODERNIZED fit on ER (SEC61B) — 4-GPU DDP production leaf.
 #
-# Run A of the modernization plan (see
-# /home/alex.kalinin/.claude/plans/pix2pix3d-gan-modernization.md).
+# Run A of the modernization recipe (see PR
+# https://github.com/mehta-lab/VisCy/pull/428).
 #
 # Sibling of train_4gpu.yml. Same experiment_id and W&B/save-dir structure,
 # but composes the MODERNIZED model overlay (nonsat + R1 + EMA + equal LR)
