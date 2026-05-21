@@ -1,0 +1,22 @@
+# Train set: A549 mantis, dual Nuclei+Membrane targets in one zarr.
+# Points at the fused 2-channel store produced by Phase 0
+# (applications/dynacell/tools/fuse_a549_dual_channel_zarr.py); the two
+# pooled-per-marker train stores (CAAX_all.zarr, H2B_all.zarr) are channel-
+# extracted views of the same source plate (verified via source_position
+# join; Phase 0 also gates on Phase3D byte-equality between the two views).
+#
+# Used by Track C1 (vscyto3d_cytolandft/a549_mantis) and Track C2
+# (vscyto3d_infectionft_dynacellft/a549_mantis) train leaves.
+benchmark:
+  train_set: a549_mantis
+  dataset_group: a549-mantis
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/comp.micro/virtual_staining/datasets/dynacell/a549_mantis_dual_nucl_memb_all.zarr
+    source_channel: [Phase3D]
+    target_channel: [Nuclei, Membrane]
+    split_ratio: 0.8
+    mmap_preload: true
+    scratch_dir: /dev/shm
+    persistent_workers: true

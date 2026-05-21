@@ -1,0 +1,13 @@
+# Predict set: AICS iPSC confocal, dual Nuclei+Membrane prediction.
+# No dataset_ref: dual target_channel cannot be resolved via the
+# single-target manifest schema (see targets/dual_nucl_memb.yml).
+# data_path / source_channel / target_channel are spliced inline so
+# leaves don't need to override the resolver.
+benchmark:
+  predict_set: ipsc_confocal_dual
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+    source_channel: [Phase3D]
+    target_channel: [Nuclei, Membrane]

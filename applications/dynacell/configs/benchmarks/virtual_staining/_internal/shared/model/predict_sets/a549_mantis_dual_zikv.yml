@@ -1,0 +1,12 @@
+# Predict set: A549 mantis dual Nuclei+Membrane prediction on ZIKV plate.
+# No dataset_ref: see predict_sets/ipsc_confocal_dual.yml for rationale.
+# Phase3D is byte-equal between CAAX_ZIKV.ozx and H2B_ZIKV.ozx (verified at
+# Phase 0); CAAX is the canonical pick for input source.
+benchmark:
+  predict_set: a549_mantis_dual_zikv
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/CAAX_ZIKV.ozx
+    source_channel: [Phase3D]
+    target_channel: [Nuclei, Membrane]
