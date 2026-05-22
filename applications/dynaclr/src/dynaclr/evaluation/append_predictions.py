@@ -143,6 +143,16 @@ def append_predictions(
                     continue
 
                 pipeline = joblib.load(pipeline_path)
+                # Class-space contract: every marker pipeline within a task must
+                # share the first pipeline's class labels and order, otherwise
+                # `all_proba[marker_mask] = probas` silently misaligns columns.
+                entry_classes = pipeline.classifier.classes_.tolist()
+                if entry_classes != classes:
+                    raise ValueError(
+                        f"{task}/{marker_filter}: classifier.classes_ {entry_classes!r} "
+                        f"does not match the first pipeline's classes_ {classes!r}; "
+                        "per-marker probability columns would be misaligned."
+                    )
                 adata_subset = adata[marker_mask]
 
                 X_subset = adata_subset.X if isinstance(adata_subset.X, np.ndarray) else adata_subset.X.toarray()
