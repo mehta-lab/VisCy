@@ -1,4 +1,4 @@
-"""Metric computation for evaluation: pixel metrics, mask metrics, MicroSSIM."""
+"""Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
 import numpy as np
 import torch
