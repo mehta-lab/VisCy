@@ -64,6 +64,17 @@ def _require_cell_dino():
 class DynaCLRFeatureExtractor:
     """DynaCLR-based contrastive feature extractor for cell images."""
 
+    PREPROCESS_VERSION = "v1"
+    """Version tag for the input-side preprocessing recipe.
+
+    Stored alongside cached features in the per-cache-dir manifest under
+    ``artifacts.dynaclr_features.<sha12>.preprocess_version``. Bump when
+    anything about how raw dataloader tensors are converted into model
+    input changes (normalization, channel handling, resize, etc.). The
+    cache layer compares cached vs current version on context init and
+    auto-invalidates the cached features for this extractor on mismatch.
+    """
+
     def __init__(self, checkpoint: str, encoder_config: dict):
         """Load DynaCLR model from checkpoint.
 
@@ -118,6 +129,16 @@ class DynaCLRFeatureExtractor:
 
 class DinoV3FeatureExtractor:
     """DINOv3-based feature extractor for cell images."""
+
+    PREPROCESS_VERSION = "imagenet_normalize_v1"
+    """Version tag for the input-side preprocessing recipe.
+
+    Stored under ``artifacts.dinov3_features.<slug>.preprocess_version``
+    in the cache manifest. Current recipe is per-image min/max scale to
+    ``[0, 1]`` followed by ImageNet ``(mean, std)`` normalization, applied
+    in :meth:`viscy_models.foundation.DINOv3Model.preprocess_2d`. Bump on
+    any change to that recipe so cached features auto-invalidate.
+    """
 
     def __init__(self, pretrained_model_name: str):
         """Load DINOv3 model from HuggingFace Hub.
@@ -181,6 +202,19 @@ class CellDinoFeatureExtractor:
     (the ``self_normalize`` recipe used during CELL-DINO pretraining), so
     the caller can feed the same masked 2-D cell crop used for the other
     backbones.
+    """
+
+    PREPROCESS_VERSION = "self_normalize_v1"
+    """Version tag for the input-side preprocessing recipe.
+
+    Stored under ``artifacts.celldino_features.<sha12>.preprocess_version``
+    in the cache manifest. Current recipe is per-image per-channel
+    spatial z-score (the official ``self_normalize`` recipe used during
+    CELL-DINO pretraining), applied in
+    :meth:`viscy_models.foundation.CellDinoModel.preprocess_2d`. Bump on
+    any future change so cached features auto-invalidate. The bump from
+    the previous min/max-to-[0,1] recipe (which had no version tag) is
+    one such transition — see commit e648c4ce.
     """
 
     def __init__(self, weights_path: str, img_size: int = 224, patch_size: int = 16):

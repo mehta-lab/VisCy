@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,6 +74,9 @@ class _CacheContext:
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
     celldino_weights_sha12: str | None = None
+    dinov3_preprocess_version: str | None = None
+    dynaclr_preprocess_version: str | None = None
+    celldino_preprocess_version: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -128,6 +132,9 @@ def init_cache_context(
     dynaclr_ckpt_path: str | None = None,
     dynaclr_encoder_cfg: dict[str, Any] | None = None,
     celldino_weights_path: str | None = None,
+    dinov3_preprocess_version: str | None = None,
+    dynaclr_preprocess_version: str | None = None,
+    celldino_preprocess_version: str | None = None,
 ) -> _CacheContext:
     """Open and validate the *side*-specific artifact cache for the run.
 
@@ -150,6 +157,15 @@ def init_cache_context(
     celldino_weights_path
         CELL-DINO ``.pth`` state_dict path; ``None`` when the CELL-DINO
         backbone is not configured.
+    dinov3_preprocess_version, dynaclr_preprocess_version,
+    celldino_preprocess_version
+        Per-extractor preprocess-recipe version tags (e.g.
+        ``"self_normalize_v1"``). On a known mismatch against the cached
+        manifest entry, the corresponding ``force_recompute.<side>_<kind>``
+        flag is set so the per-FOV cache is bypassed and features get
+        recomputed with the current preprocessing. Missing values (e.g.
+        the kind isn't loaded, or the cached manifest pre-dates version
+        tracking) are treated as "no constraint" — no auto-invalidation.
     """
     io = config.io
     force = _resolve_force(config.force_recompute)
@@ -173,6 +189,9 @@ def init_cache_context(
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
         celldino_weights_sha12=celldino_weights_sha12,
+        dinov3_preprocess_version=dinov3_preprocess_version,
+        dynaclr_preprocess_version=dynaclr_preprocess_version,
+        celldino_preprocess_version=celldino_preprocess_version,
     )
 
     if cache_dir is None:
@@ -223,7 +242,54 @@ def init_cache_context(
         **base_kwargs,
     )
     _validate_artifact_params(ctx)
+    _auto_invalidate_on_preprocess_version_mismatch(ctx)
     return ctx
+
+
+def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
+    """Soft-invalidate per-extractor cache when ``preprocess_version`` changes.
+
+    The cache manifest records a per-extractor ``preprocess_version`` tag
+    starting with this commit. When the version on disk differs from the
+    extractor's current ``PREPROCESS_VERSION``, the corresponding
+    ``ctx.force[<side>_<kind>]`` flag is set so the per-FOV cache read is
+    bypassed and features are recomputed with the current preprocessing.
+
+    Missing tags (cached manifest pre-dates version tracking, or the kind
+    isn't loaded for this run) are treated as "no constraint" — they do
+    NOT trigger invalidation. Operators handle that bootstrap transition
+    explicitly via ``force_recompute.<side>_<kind>``.
+    """
+    if not ctx.enabled:
+        return
+    artifacts = ctx.manifest.get("artifacts", {})
+    checks: list[tuple[str, str, str | None, str | None]] = [
+        (
+            "dinov3",
+            "dinov3_features",
+            ctx.dinov3_preprocess_version,
+            feature_slug(ctx.dinov3_model_name) if ctx.dinov3_model_name is not None else None,
+        ),
+        ("dynaclr", "dynaclr_features", ctx.dynaclr_preprocess_version, ctx.dynaclr_ckpt_sha12),
+        ("celldino", "celldino_features", ctx.celldino_preprocess_version, ctx.celldino_weights_sha12),
+    ]
+    for kind, section_key, current_version, sub_key in checks:
+        if current_version is None or sub_key is None:
+            continue
+        entry = artifacts.get(section_key, {}).get(sub_key)
+        if entry is None:
+            continue
+        cached_version = entry.get("preprocess_version")
+        if cached_version is None or cached_version == current_version:
+            continue
+        force_key = f"{ctx.side}_{kind}"
+        ctx.force[force_key] = True
+        warnings.warn(
+            f"{section_key}[{sub_key}]: preprocess_version mismatch "
+            f"(cached={cached_version!r}, current={current_version!r}); "
+            f"auto-invalidating {force_key} cache for this run.",
+            stacklevel=2,
+        )
 
 
 def _validate_artifact_params(ctx: _CacheContext) -> None:
@@ -601,6 +667,8 @@ def _deep_feature_cache_metadata(
             **ctx.source_tag,
             "built_at": built_at_now(),
         }
+        if ctx.dinov3_preprocess_version is not None:
+            entry["preprocess_version"] = ctx.dinov3_preprocess_version
     elif kind == "dynaclr":
         if ctx.dynaclr_ckpt_sha12 is None:
             raise ValueError("dynaclr_ckpt_sha12 is required for DynaCLR feature caching")
@@ -616,6 +684,8 @@ def _deep_feature_cache_metadata(
             **ctx.source_tag,
             "built_at": built_at_now(),
         }
+        if ctx.dynaclr_preprocess_version is not None:
+            entry["preprocess_version"] = ctx.dynaclr_preprocess_version
     elif kind == "celldino":
         if ctx.celldino_weights_sha12 is None:
             raise ValueError("celldino_weights_sha12 is required for CELL-DINO feature caching")
@@ -630,6 +700,8 @@ def _deep_feature_cache_metadata(
             **ctx.source_tag,
             "built_at": built_at_now(),
         }
+        if ctx.celldino_preprocess_version is not None:
+            entry["preprocess_version"] = ctx.celldino_preprocess_version
     else:
         raise ValueError(f"Unknown deep-feature kind: {kind!r}")
     return force_key, artifact_label, cache_kwargs, manifest_keys, entry
