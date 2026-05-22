@@ -255,8 +255,8 @@ def calculate_microssim(microssim_data):
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
 
     def microssim_with_condition(condition):
-        masked_targets = asnumpy(np.where(condition, targets, 0))
-        masked_predictions = asnumpy(np.where(condition, predictions, 0))
+        masked_targets = np.where(condition, targets, 0)
+        masked_predictions = np.where(condition, predictions, 0)
 
         sim = MicroMS3IM()
         sim.fit(masked_targets, masked_predictions)
