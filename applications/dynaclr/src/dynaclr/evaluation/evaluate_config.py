@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -57,9 +57,9 @@ class ReduceCombinedStepConfig(BaseModel):
     """
 
     overwrite_keys: bool = True
-    pca: Optional[PCAConfig] = PCAConfig(n_components=32, normalize_features=True)
-    umap: Optional[UMAPConfig] = None
-    phate: Optional[PHATEConfig] = PHATEConfig(n_components=2, knn=5, decay=40, scale_embeddings=False)
+    pca: PCAConfig | None = PCAConfig(n_components=32, normalize_features=True)
+    umap: UMAPConfig | None = None
+    phate: PHATEConfig | None = PHATEConfig(n_components=2, knn=5, decay=40, scale_embeddings=False)
 
 
 class ReduceStepConfig(BaseModel):
@@ -78,9 +78,9 @@ class ReduceStepConfig(BaseModel):
     """
 
     overwrite_keys: bool = True
-    pca: Optional[PCAConfig] = PCAConfig(n_components=32, normalize_features=True)
-    umap: Optional[UMAPConfig] = None
-    phate: Optional[PHATEConfig] = None  # PHATE runs jointly in reduce_combined, not per-experiment
+    pca: PCAConfig | None = PCAConfig(n_components=32, normalize_features=True)
+    umap: UMAPConfig | None = None
+    phate: PHATEConfig | None = None  # PHATE runs jointly in reduce_combined, not per-experiment
 
 
 class SmoothnessStepConfig(BaseModel):
@@ -169,7 +169,7 @@ class TaskSpec(BaseModel):
     """
 
     task: str
-    marker_filters: Optional[list[str]] = None
+    marker_filters: list[str] | None = None
 
 
 class MMDStepConfig(BaseModel):
@@ -215,15 +215,15 @@ class MMDStepConfig(BaseModel):
 
     comparisons: list[ComparisonSpec]
     group_by: str = "perturbation"
-    obs_filter: Optional[dict[str, str]] = None
-    embedding_key: Optional[str] = None
+    obs_filter: dict[str, str] | None = None
+    embedding_key: str | None = None
     mmd: MMDSettings = MMDSettings()
     map_settings: MAPSettings = MAPSettings()
-    temporal_bin_size: Optional[float] = None
-    combined_temporal_bin_size: Optional[float] = None
+    temporal_bin_size: float | None = None
+    combined_temporal_bin_size: float | None = None
     save_plots: bool = True
     combined_mode: bool = False
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class LinearClassifiersStepConfig(BaseModel):
@@ -271,16 +271,16 @@ class LinearClassifiersStepConfig(BaseModel):
 
     annotations: list[AnnotationSource]
     tasks: list[TaskSpec]
-    publish_dir: Optional[str] = None
+    publish_dir: str | None = None
     use_scaling: bool = True
     use_pca: bool = False
-    n_pca_components: Optional[int] = None
+    n_pca_components: int | None = None
     max_iter: int = 1000
-    class_weight: Optional[str] = "balanced"
+    class_weight: str | None = "balanced"
     solver: str = "liblinear"
     split_train_data: float = 0.8
     random_seed: int = 42
-    split_groups_by: Optional[list[str]] = None
+    split_groups_by: list[str] | None = None
 
 
 class AppendPredictionsStepConfig(BaseModel):
@@ -297,7 +297,7 @@ class AppendPredictionsStepConfig(BaseModel):
         pipelines trained by a separate Wave-1 run.
     """
 
-    pipelines_dir: Optional[str] = None
+    pipelines_dir: str | None = None
 
 
 class AppendAnnotationsStepConfig(BaseModel):
@@ -366,8 +366,8 @@ class EvaluationConfig(BaseModel):
     # ckpt_path is None for foundation-model baselines (e.g. DINOv3-frozen) where
     # weights are loaded from HuggingFace inside the model __init__ and there is
     # no Lightning checkpoint to restore from.
-    ckpt_path: Optional[str] = None
-    cell_index_path: Optional[str] = None
+    ckpt_path: str | None = None
+    cell_index_path: str | None = None
     output_dir: str
     steps: list[str] = ["predict", "split", "reduce_dimensionality", "reduce_combined", "plot", "smoothness"]
     predict: PredictStepConfig = PredictStepConfig()
@@ -375,9 +375,9 @@ class EvaluationConfig(BaseModel):
     reduce_combined: ReduceCombinedStepConfig = ReduceCombinedStepConfig()
     smoothness: SmoothnessStepConfig = SmoothnessStepConfig()
     plot: PlotStepConfig = PlotStepConfig()
-    linear_classifiers: Optional[LinearClassifiersStepConfig] = None
-    append_annotations: Optional[AppendAnnotationsStepConfig] = None
-    append_predictions: Optional[AppendPredictionsStepConfig] = None
+    linear_classifiers: LinearClassifiersStepConfig | None = None
+    append_annotations: AppendAnnotationsStepConfig | None = None
+    append_predictions: AppendPredictionsStepConfig | None = None
     mmd: list[MMDStepConfig] = []
 
     @property
