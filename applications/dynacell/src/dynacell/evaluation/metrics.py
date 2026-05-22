@@ -122,39 +122,41 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     Notes
     -----
-    PCC/SSIM/NRMSE/PSNR are computed on CPU tensors (cubic converts internally).
-    Spectral metrics (spectral_pcc, fsc_resolution) benefit from cupy zero-copy
-    via the CUDA Array Interface, so tensors are moved to GPU only when those
-    kwargs are present.
+    Tensors are moved to the chosen device (GPU when ``use_gpu=True`` and
+    CUDA is available, CPU otherwise) and converted to cupy/numpy via
+    ``cubic.cuda.ascupy``/``asnumpy`` before all metric calls. cupy arrays
+    pass through cubic's ``@scale_invariant`` unchanged, enabling GPU-backed
+    computation (via cucim/cupy) for all metrics when CUDA is available.
+    Spectral metrics additionally benefit from zero-copy CUDA Array Interface
+    transfer.
     """
     if pcc is None:
         raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
+    _require_cubic()
     prediction = torch.as_tensor(prediction)
     target = torch.as_tensor(target)
+    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
+    prediction = prediction.to(device)
+    target = target.to(device)
+    to_xp = ascupy if device.type == "cuda" else asnumpy
+    pred_xp, target_xp = to_xp(prediction), to_xp(target)
 
     metrics = {
-        "PCC": pcc(target, prediction),
+        "PCC": pcc(target_xp, pred_xp),
         "SSIM": ssim(target, prediction),
-        "NRMSE": nrmse(target, prediction, normalize="min_max"),
-        "PSNR": psnr(target, prediction, normalize="min_max"),
+        "NRMSE": nrmse(target_xp, pred_xp, normalize="min_max"),
+        "PSNR": psnr(target_xp, pred_xp, normalize="min_max"),
     }
 
     if spectral_pcc_kwargs is None and fsc_kwargs is None:
         return metrics
 
-    _require_cubic()
-    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    prediction = prediction.to(device)
-    target = target.to(device)
-    to_xp = ascupy if device.type == "cuda" else asnumpy
-    prediction, target = to_xp(prediction), to_xp(target)
-
     if spectral_pcc_kwargs is not None:
-        metrics["Spectral_PCC"] = spectral_pcc(prediction, target, spacing=spacing, **spectral_pcc_kwargs)
+        metrics["Spectral_PCC"] = spectral_pcc(pred_xp, target_xp, spacing=spacing, **spectral_pcc_kwargs)
     if fsc_kwargs is not None:
         # cubic.fsc_resolution mean-centers internally before every FFT,
         # so we pass the raw arrays.
-        resolutions = fsc_resolution(target, prediction, spacing=spacing, **fsc_kwargs)
+        resolutions = fsc_resolution(target_xp, pred_xp, spacing=spacing, **fsc_kwargs)
         metrics.update({f"{k.upper()}_FSC_Resolution": float(v) for k, v in resolutions.items()})
 
     return metrics
