@@ -204,9 +204,8 @@ def _extend_backbone(
     """Append one (pred, gt) feature pair for ``(pos_name, t)`` into ``bb``.
 
     No-op when ``pred`` is None (CellDINO disabled) or zero rows (no cells).
-    The four ``bb.*_fovs`` / ``bb.*_ts`` lists are appended with arrays
-    derived from ``len(pred)`` so all six lists in ``_BackboneLists`` stay
-    lockstep.
+    All six lists in ``_BackboneLists`` (feats, fovs, ts for pred and gt) are
+    extended with arrays of length ``len(pred)`` to stay lockstep.
 
     Raises
     ------
