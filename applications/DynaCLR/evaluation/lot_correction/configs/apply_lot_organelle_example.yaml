@@ -1,0 +1,8 @@
+# Example: apply fitted LOT pipeline to the light-sheet organelle zarr
+# Output zarr will have corrected embeddings in target (confocal) PCA space
+# Shape: (n_cells, n_pca=50) — all obs metadata preserved
+
+input_zarr: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_organelle_160patch_104ckpt.zarr
+pipeline: /tmp/lot_test/lot_organelle_pipeline.pkl
+output_zarr: /tmp/lot_test/lot_corrected_organelle.zarr
+overwrite: false

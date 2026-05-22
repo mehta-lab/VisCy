@@ -1,0 +1,24 @@
+# Example: fit LOT correction pipeline on G3BP1 organelle channel
+# Source = light-sheet (LS1 + LS2 combined), Target = confocal 223-patch
+#
+# LS G3BP1 uninfected wells: C/1/
+# Confocal G3BP1 uninfected: fov_name starts with "G3BP1/uninfected"
+
+source_zarr: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_organelle_160patch_104ckpt.zarr
+target_zarr: /hpc/projects/intracellular_dashboard/organelle_box/2026_03_10_A549_strong_organelles_DENV_ZIKV_time_course/5-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/organelle_223patch_104ckpt.zarr
+
+source_uninf_filter:
+  column: fov_name
+  startswith:
+    - "C/1/"
+
+target_uninf_filter:
+  column: fov_name
+  startswith:
+    - "G3BP1/uninfected"
+
+n_pca: 50
+ns_lot: 3000
+random_seed: 42
+
+output_pipeline: /tmp/lot_test/lot_organelle_pipeline.pkl

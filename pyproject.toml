@@ -76,6 +76,7 @@ optional-dependencies.visual = [
 ]
 scripts.viscy = "viscy.cli:main"
 scripts."viscy-dynaclr" = "viscy.cli_dynaclr:main"
+scripts.dynaclr = "viscy.cli_dynaclr:main"
 
 [tool.setuptools.packages.find]
 include = [ "viscy", "applications*" ]
