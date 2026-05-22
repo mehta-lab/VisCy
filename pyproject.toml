@@ -58,6 +58,9 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
 dynacell = { workspace = true }
+# Temporary: torch CUDA tensor fix (post-0.7.0a5) not yet released to PyPI.
+# Pin to cubic main until next alpha ships.
+cubic = { git = "https://github.com/alxndrkalinin/cubic.git", rev = "70a43fe576c3bc538292fe8db13120cd585473e1" }
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
