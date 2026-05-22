@@ -127,6 +127,8 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     via the CUDA Array Interface, so tensors are moved to GPU only when those
     kwargs are present.
     """
+    if pcc is None:
+        raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
     prediction = torch.as_tensor(prediction)
     target = torch.as_tensor(target)
 
