@@ -296,3 +296,144 @@ class BatchedRandAffined(MapTransform):
                 d[key] = self.random_affine(data)
             assert d[key].device == data.device
         return d
+
+
+class BatchedRandRotate90(RandomizableTransform):
+    """Randomly rotate a batch of images by 90 degrees along specified spatial axes.
+
+    Parameters
+    ----------
+    spatial_axes : tuple[int, int] | None
+        Spatial axes (0-indexed relative to spatial dimensions) to apply the rotation to.
+        For 5D tensor [B, C, D, H, W], spatial dims are D(0), H(1), W(2).
+        For 4D tensor [B, C, H, W], spatial dims are H(0), W(1).
+        If None, defaults to the last two spatial dimensions.
+    prob : float
+        Probability of applying the rotation.
+    max_k : int
+        Maximum number of 90-degree rotations (0 to max_k).
+    """
+
+    def __init__(
+        self,
+        spatial_axes: tuple[int, int] | None = None,
+        prob: float = 0.1,
+        max_k: int = 3,
+    ) -> None:
+        RandomizableTransform.__init__(self, prob)
+        self.spatial_axes = spatial_axes
+        self.max_k = max_k
+
+    def _get_tensor_dims(
+        self, img: Tensor, spatial_axes: tuple[int, int] | None
+    ) -> tuple[int, int]:
+        """Convert spatial axis indices to tensor dimension indices.
+
+        Spatial axes can be:
+        - None: defaults to last two spatial dimensions (-2, -1)
+        - Positive integers: 0-indexed relative to spatial dimensions only
+          For [B, C, D, H, W], spatial dims are D(0), H(1), W(2)
+          For [B, C, H, W], spatial dims are H(0), W(1)
+        - Negative integers: tensor dimensions from the end (used directly)
+        """
+        ndim = img.ndim
+        if ndim not in (4, 5):
+            raise ValueError(f"Expected 4D or 5D tensor, got {ndim}D")
+
+        if spatial_axes is None:
+            # Default to last two spatial dimensions
+            return (-2, -1)
+
+        # Check if using negative indices (tensor dims from end)
+        if any(ax < 0 for ax in spatial_axes):
+            # Negative indices are already tensor dims, use directly
+            return spatial_axes
+
+        # Convert positive spatial indices to tensor indices
+        # Spatial dims start at index 2 (after batch and channel)
+        spatial_start = 2
+        tensor_dims = tuple(spatial_start + ax for ax in spatial_axes)
+        return tensor_dims
+
+    def randomize(self, img: Tensor) -> None:
+        """Generate random rotation counts for each image in the batch."""
+        batch_size = img.shape[0]
+        # Generate random k values (0 to max_k) for each sample in batch
+        self._k_values = torch.randint(
+            0, self.max_k + 1, (batch_size,), device=img.device
+        )
+        apply_mask = torch.rand(batch_size, device=img.device) < self.prob
+        self._k_values = self._k_values * apply_mask.long()
+
+    def __call__(self, data: Tensor, randomize: bool = True) -> Tensor:
+        if randomize:
+            self.randomize(data)
+
+        if not self._k_values.any():
+            return data
+
+        # Get tensor dims relative to full batch tensor [B, C, ...]
+        tensor_dims = self._get_tensor_dims(data, self.spatial_axes)
+
+        # Adjust for individual sample: data[i] has shape [C, ...] (no batch dim)
+        # For positive indices, subtract 1 to account for removed batch dimension
+        # For negative indices, they work relative to the end, so keep as-is
+        if any(d < 0 for d in tensor_dims):
+            # Negative indices: (-2, -1) work relative to end of data[i]
+            sample_dims = tensor_dims
+        else:
+            # Positive indices: subtract 1 since data[i] has one less dimension
+            # e.g., for [B,C,D,H,W] -> data[i] is [C,D,H,W], so dim 3->2, dim 4->3
+            sample_dims = tuple(d - 1 for d in tensor_dims)
+
+        out = torch.zeros_like(data)
+        for i in range(data.shape[0]):
+            k = self._k_values[i].item()
+            if k > 0:
+                # Apply rotation to individual sample (without batch dimension)
+                out[i] = torch.rot90(data[i], k=k, dims=sample_dims)
+            else:
+                out[i] = data[i]
+        return out
+
+
+class BatchedRandRotate90d(MapTransform, RandomizableTransform):
+    """Apply random 90-degree rotations to batch of images.
+
+    This transform applies random 90-degree rotations to a batch of images.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to apply the transform to.
+    prob : float
+        Probability of applying the transform.
+    spatial_axes : tuple[int, int] | None
+        Spatial axes to apply the transform to.
+    max_k : int
+        Maximum number of 90-degree rotations.
+    allow_missing_keys : bool
+        Whether to allow missing keys.
+    """
+
+    def __init__(
+        self,
+        keys: str | Iterable[str],
+        prob: float = 0.1,
+        spatial_axes: tuple[int, int] | None = None,
+        max_k: int = 3,
+        allow_missing_keys: bool = False,
+    ) -> None:
+        MapTransform.__init__(self, keys, allow_missing_keys)
+        RandomizableTransform.__init__(self, prob)
+        self.random_rotate = BatchedRandRotate90(
+            spatial_axes=spatial_axes,
+            prob=prob,
+            max_k=max_k,
+        )
+
+    def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        self.random_rotate.randomize(next(iter(sample.values())))
+        for key in self.key_iterator(sample):
+            sample[key] = self.random_rotate(sample[key], randomize=False)
+        return sample

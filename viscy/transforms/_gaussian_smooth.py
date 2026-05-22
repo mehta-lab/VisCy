@@ -49,10 +49,13 @@ def filter3d_separable(
 
 
 class BatchedRandGaussianSmooth(RandomizableTransform):
-    """Randomly apply 3D Gaussian blur to a batch of images.
+    """Randomly apply Gaussian blur to a batch of images.
 
-    Uses separable 3D filtering for efficiency. Dimensions with sigma=0.0 are
+    Supports both 2D (4D tensor [B, C, H, W]) and 3D (5D tensor [B, C, D, H, W]) data.
+    Uses separable filtering for efficiency. Dimensions with sigma=0.0 are
     skipped to avoid NaN values from degenerate Gaussian kernels.
+
+    For 2D data (4D tensors), set sigma_z=0.0 to skip the depth dimension.
 
     Parameters
     ----------
@@ -65,6 +68,7 @@ class BatchedRandGaussianSmooth(RandomizableTransform):
     sigma_z : tuple[float, float] | float
         Standard deviation range for z-axis blur. If tuple, samples between min and max.
         If float, uses fixed value. Use 0.0 to skip filtering in this dimension.
+        For 2D data (4D tensors), should be 0.0.
     truncated : float
         Factor for automatic kernel size estimation: size = sigma * truncated.
         Default is 4.0.
@@ -151,6 +155,12 @@ class BatchedRandGaussianSmooth(RandomizableTransform):
         data_to_transform = data[transform_indices]
         sigma_batch = self._sigma_samples
 
+        # Handle 4D tensors (2D spatial) by adding dummy depth dimension
+        is_4d = data_to_transform.ndim == 4
+        if is_4d:
+            # Add dummy depth dimension: [B, C, H, W] -> [B, C, 1, H, W]
+            data_to_transform = data_to_transform.unsqueeze(2)
+
         # Create 1D kernels for each dimension
         kernel_z = self._maybe_get_kernel(sigma_batch[:, 0])  # Z dimension
         kernel_y = self._maybe_get_kernel(sigma_batch[:, 1])  # Y dimension
@@ -162,6 +172,9 @@ class BatchedRandGaussianSmooth(RandomizableTransform):
             kernel_x,
             border_type=self.border_type.name.lower(),
         )
+
+        if is_4d:
+            blurred_data = blurred_data.squeeze(2)
 
         out = data.clone()
         out[transform_indices] = blurred_data
