@@ -274,36 +274,35 @@ def save_template_zarr(
         Additional attrs to merge into the store. Useful for
         method-specific metadata not covered by the shared schema.
     """
-    store = zarr.open(str(out_path), mode="w")
+    with zarr.open(str(out_path), mode="w") as store:
+        _save_flavor(store.create_group("raw"), raw_result, "raw")
+        _save_flavor(store.create_group("pca"), pca_result, "pca")
 
-    _save_flavor(store.create_group("raw"), raw_result, "raw")
-    _save_flavor(store.create_group("pca"), pca_result, "pca")
+        if raw_result.zscore_params:
+            zgrp = store.create_group("zscore_params")
+            for ds_id, (mean, std) in raw_result.zscore_params.items():
+                ds_grp = zgrp.create_group(ds_id)
+                ds_grp.create_array("mean", data=mean)
+                ds_grp.create_array("std", data=std)
 
-    if raw_result.zscore_params:
-        zgrp = store.create_group("zscore_params")
-        for ds_id, (mean, std) in raw_result.zscore_params.items():
-            ds_grp = zgrp.create_group(ds_id)
-            ds_grp.create_array("mean", data=mean)
-            ds_grp.create_array("std", data=std)
+        store.create_array("t_key_event", data=np.asarray(t_key_event_per_cell))
 
-    store.create_array("t_key_event", data=np.asarray(t_key_event_per_cell))
+        store.attrs["template_name"] = template_name
+        store.attrs["template_cell_ids"] = [list(c) for c in raw_result.template_cell_ids]
+        store.attrs["anchor_label"] = anchor_label
+        store.attrs["anchor_positive"] = anchor_positive
+        store.attrs["aggregator"] = aggregator
+        store.attrs["template_duration_minutes"] = float(template_duration_minutes)
+        store.attrs["build_frame_intervals_minutes"] = {k: float(v) for k, v in build_frame_intervals_minutes.items()}
+        store.attrs["config_snapshot"] = config_snapshot
 
-    store.attrs["template_name"] = template_name
-    store.attrs["template_cell_ids"] = [list(c) for c in raw_result.template_cell_ids]
-    store.attrs["anchor_label"] = anchor_label
-    store.attrs["anchor_positive"] = anchor_positive
-    store.attrs["aggregator"] = aggregator
-    store.attrs["template_duration_minutes"] = float(template_duration_minutes)
-    store.attrs["build_frame_intervals_minutes"] = {k: float(v) for k, v in build_frame_intervals_minutes.items()}
-    store.attrs["config_snapshot"] = config_snapshot
-
-    versions = get_dynaclr_versions()
-    for k, v in versions.items():
-        store.attrs[k] = v
-
-    if extra_attrs:
-        for k, v in extra_attrs.items():
+        versions = get_dynaclr_versions()
+        for k, v in versions.items():
             store.attrs[k] = v
+
+        if extra_attrs:
+            for k, v in extra_attrs.items():
+                store.attrs[k] = v
 
 
 def load_template_flavor(template_path: str | Path, flavor: str) -> tuple[TemplateResult, dict]:
@@ -330,69 +329,69 @@ def load_template_flavor(template_path: str | Path, flavor: str) -> tuple[Templa
     KeyError
         If the requested flavor is not present in the store.
     """
-    store = zarr.open(str(template_path), mode="r")
-    attrs = dict(store.attrs)
+    with zarr.open(str(template_path), mode="r") as store:
+        attrs = dict(store.attrs)
 
-    if flavor not in ("raw", "pca"):
-        raise ValueError(f"flavor must be 'raw' or 'pca', got {flavor!r}")
-    if flavor not in store:
-        raise KeyError(f"Flavor {flavor!r} not in template zarr {template_path}")
-    grp = store[flavor]
+        if flavor not in ("raw", "pca"):
+            raise ValueError(f"flavor must be 'raw' or 'pca', got {flavor!r}")
+        if flavor not in store:
+            raise KeyError(f"Flavor {flavor!r} not in template zarr {template_path}")
+        grp = store[flavor]
 
-    template = np.asarray(grp["template"])
-    time_calibration = np.asarray(grp["time_calibration"]) if "time_calibration" in grp else None
+        template = np.asarray(grp["template"])
+        time_calibration = np.asarray(grp["time_calibration"]) if "time_calibration" in grp else None
 
-    template_labels: dict[str, dict[str, np.ndarray]] | None = None
-    if "template_labels" in grp:
-        tl_grp = grp["template_labels"]
-        template_labels = {}
-        for col in tl_grp:
-            entry = tl_grp[col]
-            # New schema: per-column subgroup of {class_value: (T,)}.
-            # Legacy: flat array (T,) of the positive-class fraction.
-            if hasattr(entry, "keys") and not hasattr(entry, "shape"):
-                template_labels[col] = {cls: np.asarray(entry[cls]) for cls in entry}
-            else:
-                arr = np.asarray(entry)
-                template_labels[col] = {"positive": arr, "negative": 1.0 - arr}
+        template_labels: dict[str, dict[str, np.ndarray]] | None = None
+        if "template_labels" in grp:
+            tl_grp = grp["template_labels"]
+            template_labels = {}
+            for col in tl_grp:
+                entry = tl_grp[col]
+                # New schema: per-column subgroup of {class_value: (T,)}.
+                # Legacy: flat array (T,) of the positive-class fraction.
+                if hasattr(entry, "keys") and not hasattr(entry, "shape"):
+                    template_labels[col] = {cls: np.asarray(entry[cls]) for cls in entry}
+                else:
+                    arr = np.asarray(entry)
+                    template_labels[col] = {"positive": arr, "negative": 1.0 - arr}
 
-    pca = None
-    if flavor == "pca" and "components" in grp:
-        n_comp = int(grp.attrs["n_components"])
-        pca = PCA(n_components=n_comp)
-        pca.components_ = np.asarray(grp["components"])
-        pca.mean_ = np.asarray(grp["mean"])
-        if "explained_variance" in grp:
-            pca.explained_variance_ = np.asarray(grp["explained_variance"])
-        pca.explained_variance_ratio_ = np.asarray(grp["explained_variance_ratio"])
-        pca.n_components_ = n_comp
-        pca.n_features_in_ = pca.components_.shape[1]
+        pca = None
+        if flavor == "pca" and "components" in grp:
+            n_comp = int(grp.attrs["n_components"])
+            pca = PCA(n_components=n_comp)
+            pca.components_ = np.asarray(grp["components"])
+            pca.mean_ = np.asarray(grp["mean"])
+            if "explained_variance" in grp:
+                pca.explained_variance_ = np.asarray(grp["explained_variance"])
+            pca.explained_variance_ratio_ = np.asarray(grp["explained_variance_ratio"])
+            pca.n_components_ = n_comp
+            pca.n_features_in_ = pca.components_.shape[1]
 
-    zscore_params: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    if "zscore_params" in store:
-        zgrp = store["zscore_params"]
-        for ds_id in zgrp:
-            zscore_params[ds_id] = (
-                np.asarray(zgrp[ds_id]["mean"]),
-                np.asarray(zgrp[ds_id]["std"]),
-            )
+        zscore_params: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        if "zscore_params" in store:
+            zgrp = store["zscore_params"]
+            for ds_id in zgrp:
+                zscore_params[ds_id] = (
+                    np.asarray(zgrp[ds_id]["mean"]),
+                    np.asarray(zgrp[ds_id]["std"]),
+                )
 
-    template_id = str(grp.attrs.get("template_id", ""))
-    n_input_tracks = int(grp.attrs.get("n_input_tracks", 0))
-    cell_ids = [tuple(c) for c in attrs.get("template_cell_ids", [])]
+        template_id = str(grp.attrs.get("template_id", ""))
+        n_input_tracks = int(grp.attrs.get("n_input_tracks", 0))
+        cell_ids = [tuple(c) for c in attrs.get("template_cell_ids", [])]
 
-    result = TemplateResult(
-        template=template,
-        template_id=template_id,
-        pca=pca,
-        zscore_params=zscore_params,
-        template_cell_ids=cell_ids,
-        n_input_tracks=n_input_tracks,
-        explained_variance=float(grp.attrs.get("explained_variance", 0.0)) or None,
-        template_labels=template_labels,
-        time_calibration=time_calibration,
-    )
-    return result, attrs
+        result = TemplateResult(
+            template=template,
+            template_id=template_id,
+            pca=pca,
+            zscore_params=zscore_params,
+            template_cell_ids=cell_ids,
+            n_input_tracks=n_input_tracks,
+            explained_variance=float(grp.attrs.get("explained_variance", 0.0)) or None,
+            template_labels=template_labels,
+            time_calibration=time_calibration,
+        )
+        return result, attrs
 
 
 def read_template_attrs(template_path: str | Path) -> dict:
@@ -402,7 +401,8 @@ def read_template_attrs(template_path: str | Path) -> dict:
     only needs the metadata (config snapshot, anchor label, version
     stamps) and not the template arrays themselves.
     """
-    return dict(zarr.open(str(template_path), mode="r").attrs)
+    with zarr.open(str(template_path), mode="r") as store:
+        return dict(store.attrs)
 
 
 def read_time_calibration(template_path: str | Path, flavor: str) -> np.ndarray:
@@ -426,10 +426,11 @@ def read_time_calibration(template_path: str | Path, flavor: str) -> np.ndarray:
     """
     if flavor not in ("raw", "pca"):
         raise ValueError(f"flavor must be 'raw' or 'pca', got {flavor!r}")
-    grp = zarr.open(str(template_path), mode="r")[flavor]
-    if "time_calibration" not in grp:
-        raise KeyError(f"time_calibration missing for flavor {flavor!r} in {template_path}")
-    return np.asarray(grp["time_calibration"])
+    with zarr.open(str(template_path), mode="r") as store:
+        grp = store[flavor]
+        if "time_calibration" not in grp:
+            raise KeyError(f"time_calibration missing for flavor {flavor!r} in {template_path}")
+        return np.asarray(grp["time_calibration"])
 
 
 def read_tau_event_band(template_path: str | Path, flavor: str) -> tuple[float, float]:
@@ -449,8 +450,9 @@ def read_tau_event_band(template_path: str | Path, flavor: str) -> tuple[float, 
     """
     if flavor not in ("raw", "pca"):
         raise ValueError(f"flavor must be 'raw' or 'pca', got {flavor!r}")
-    grp = zarr.open(str(template_path), mode="r")[flavor]
-    if "tau_event_band" not in grp:
-        return (0.0, 1.0)
-    band = np.asarray(grp["tau_event_band"])
-    return (float(band[0]), float(band[1]))
+    with zarr.open(str(template_path), mode="r") as store:
+        grp = store[flavor]
+        if "tau_event_band" not in grp:
+            return (0.0, 1.0)
+        band = np.asarray(grp["tau_event_band"])
+        return (float(band[0]), float(band[1]))
