@@ -878,15 +878,11 @@ wheels = [
 
 [[package]]
 name = "cubic"
-version = "0.7.0a2"
-source = { registry = "https://pypi.org/simple" }
+version = "0.7.0a4"
+source = { git = "https://github.com/alxndrkalinin/cubic.git?rev=424343f5e1c9f34921936b037863479c91072b28#424343f5e1c9f34921936b037863479c91072b28" }
 dependencies = [
     { name = "numpy" },
     { name = "scikit-image" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/34/6a/0ffae8f7361a3f8032c61a32593a7b0bab0a129ad63d87dc0bc31bca2a01/cubic-0.7.0a2.tar.gz", hash = "sha256:5240ff307d0adb5a52237862365af216046d546aee68676ba81562d656842c76", size = 99514, upload-time = "2026-04-02T22:45:30.462Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/d3/32babe6b70c1770e7f7e061eb279d3d6b0ce4cf36396b47dded67ecf81bf/cubic-0.7.0a2-py3-none-any.whl", hash = "sha256:7502af10050d114a3898534e329d104a9e68159b10e024b4f2e9f4e80a32a228", size = 115747, upload-time = "2026-04-02T22:45:28.915Z" },
 ]
 
 [[package]]
@@ -1154,7 +1150,6 @@ eval = [
     { name = "iohub" },
     { name = "itk" },
     { name = "matplotlib" },
-    { name = "microssim" },
     { name = "pandas" },
     { name = "scikit-image" },
     { name = "scikit-learn" },
@@ -1199,7 +1194,7 @@ requires-dist = [
     { name = "aicsmlsegment", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git?branch=main" },
     { name = "aicssegmentation", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-segmentation.git?branch=main" },
     { name = "cellpose", marker = "extra == 'eval'" },
-    { name = "cubic", marker = "extra == 'eval'", specifier = "==0.7.0a2" },
+    { name = "cubic", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/cubic.git?rev=424343f5e1c9f34921936b037863479c91072b28" },
     { name = "cucim-cu12", marker = "extra == 'eval-gpu'" },
     { name = "cupy-cuda12x", marker = "extra == 'eval-gpu'" },
     { name = "dynaclr", marker = "extra == 'eval'", editable = "applications/dynaclr" },
@@ -1211,7 +1206,6 @@ requires-dist = [
     { name = "lightning", specifier = ">=2.3" },
     { name = "matplotlib", marker = "extra == 'eval'" },
     { name = "matplotlib", marker = "extra == 'report'" },
-    { name = "microssim", marker = "extra == 'eval'", git = "https://github.com/juglab/microssim.git?rev=8bccb17d" },
     { name = "monai" },
     { name = "omegaconf" },
     { name = "pandas", marker = "extra == 'eval'" },
@@ -2791,19 +2785,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-]
-
-[[package]]
-name = "microssim"
-version = "0.0.4.dev8+g8bccb17db"
-source = { git = "https://github.com/juglab/microssim.git?rev=8bccb17d#8bccb17db64a2a94aa1c268503ba4558b9c08308" }
-dependencies = [
-    { name = "numpy" },
-    { name = "scikit-image" },
-    { name = "scipy" },
-    { name = "torch" },
-    { name = "torchmetrics" },
-    { name = "tqdm" },
 ]
 
 [[package]]

@@ -4,11 +4,6 @@ import numpy as np
 import torch
 
 try:
-    from microssim import MicroMS3IM
-except ImportError:
-    MicroMS3IM = None  # type: ignore[assignment, misc]
-
-try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature.voxel import regionprops_table
     from cubic.metrics import fsc_resolution
@@ -22,11 +17,6 @@ except ImportError:
 
 from dynacell.evaluation.torch_ssim import ssim as torch_ssim
 from dynacell.evaluation.utils import _minmax_norm
-
-
-def _require_microssim():
-    if MicroMS3IM is None:
-        raise ImportError("microssim is required for MicroMS3IM computation. Install it with: pip install microssim")
 
 
 def _require_cubic():
@@ -259,8 +249,8 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
 def calculate_microssim(microssim_data):
     """Calculate MicroMS3IM scores across a collection of images."""
-    _require_microssim()
-    _require_cubic()
+    from cubic.metrics import MicroMS3IM
+
     targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
 

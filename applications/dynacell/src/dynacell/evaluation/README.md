@@ -250,7 +250,7 @@ eval_timing.csv                 # region timer log (always on)
 
 ## Installation
 
-Heavy optional deps (`aicssegmentation`, `segmenter-model-zoo`, `cubic`, `microssim`, `transformers`, `dynaclr`):
+Heavy optional deps (`aicssegmentation`, `segmenter-model-zoo`, `cubic`, `transformers`, `dynaclr`):
 
 ```bash
 uv pip install -e "applications/dynacell[eval]"
