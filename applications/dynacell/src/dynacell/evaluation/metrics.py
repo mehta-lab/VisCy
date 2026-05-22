@@ -6,12 +6,13 @@ import torch
 try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature.voxel import regionprops_table
-    from cubic.metrics import fsc_resolution
+    from cubic.metrics import fsc_resolution, pcc
     from cubic.metrics.bandlimited import spectral_pcc
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
+    pcc = None  # type: ignore[assignment]
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
 
@@ -66,18 +67,6 @@ def _min_max_normalize(
     x = (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
 
     return x
-
-
-@torch.inference_mode()
-def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Calculate the Pearson correlation coefficient between two PyTorch tensors."""
-    if a.shape != b.shape:
-        raise ValueError(f"Inputs must be same shape, got {a.shape} and {b.shape}")
-    num = (a - a.mean()) * (b - b.mean())
-    denom = a.std(correction=0) * b.std(correction=0)
-    if denom <= 1e-12:
-        return torch.tensor(float("nan"), device=a.device)
-    return num.mean() / denom
 
 
 @torch.inference_mode()
@@ -223,7 +212,7 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     target = target.to(device)
 
     metrics = {
-        "PCC": corr_coef(target, prediction).item(),
+        "PCC": pcc(target, prediction),
         "SSIM": ssim(target, prediction).item(),
         "NRMSE": nrmse(target, prediction).item(),
         "PSNR": psnr(target, prediction).item(),

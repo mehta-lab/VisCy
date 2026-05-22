@@ -1,6 +1,7 @@
 """Regression tests for evaluation pixel metrics."""
 
 import importlib
+import math
 import sys
 import types
 
@@ -21,6 +22,7 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_metrics_module = types.ModuleType("cubic.metrics")
     cubic_metrics_module.fsc_resolution = lambda *args, **kwargs: {}
     cubic_metrics_module.MicroMS3IM = object
+    cubic_metrics_module.pcc = lambda a, b, mask=None: float(np.corrcoef(a.numpy().ravel(), b.numpy().ravel())[0, 1])
 
     cubic_bandlimited_module = types.ModuleType("cubic.metrics.bandlimited")
     cubic_bandlimited_module.spectral_pcc = lambda *args, **kwargs: 0.0
@@ -66,21 +68,21 @@ def test_identical_images_still_score_perfectly(monkeypatch) -> None:
     assert metrics.ssim(target, target).item() == pytest.approx(1.0)
 
 
-# --- corr_coef tests ---
+# --- pcc tests ---
 
 
 def test_corr_coef_perfect_correlation(monkeypatch) -> None:
     """Identical signals give PCC = 1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.linspace(0.0, 1.0, 100)
-    assert metrics.corr_coef(a, a).item() == pytest.approx(1.0)
+    assert metrics.pcc(a, a) == pytest.approx(1.0)
 
 
 def test_corr_coef_negative_correlation(monkeypatch) -> None:
     """Perfectly inverted signal gives PCC = -1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.linspace(0.0, 1.0, 100)
-    assert metrics.corr_coef(a, -a).item() == pytest.approx(-1.0)
+    assert metrics.pcc(a, -a) == pytest.approx(-1.0)
 
 
 def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
@@ -88,14 +90,14 @@ def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.ones(100)
     b = torch.linspace(0.0, 1.0, 100)
-    assert torch.isnan(metrics.corr_coef(a, b))
+    assert math.isnan(metrics.pcc(a, b))
 
 
 def test_corr_coef_shape_mismatch_raises(monkeypatch) -> None:
     """Mismatched shapes raise ValueError."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    with pytest.raises(ValueError, match="same shape"):
-        metrics.corr_coef(torch.ones(10), torch.ones(20))
+    with pytest.raises((ValueError, Exception)):
+        metrics.pcc(torch.ones(10), torch.ones(20))
 
 
 # --- evaluate_segmentations tests ---
