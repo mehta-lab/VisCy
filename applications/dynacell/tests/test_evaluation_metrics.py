@@ -8,6 +8,7 @@ import types
 import numpy as np
 import pytest
 import torch
+from skimage.metrics import structural_similarity
 
 from dynacell.evaluation.metrics import evaluate_segmentations
 
@@ -43,8 +44,6 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_metrics_module.psnr = _stub_psnr
 
     def _stub_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
-        from skimage.metrics import structural_similarity
-
         a = img1.numpy().squeeze()
         b = img2.numpy().squeeze()
         return float(structural_similarity(a, b, data_range=float(data_range or 1.0)))
@@ -121,9 +120,9 @@ def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
 
 
 def test_corr_coef_shape_mismatch_raises(monkeypatch) -> None:
-    """Mismatched shapes raise ValueError."""
+    """Mismatched shapes raise an error."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    with pytest.raises((ValueError, Exception)):
+    with pytest.raises(Exception):
         metrics.pcc(torch.ones(10), torch.ones(20))
 
 
