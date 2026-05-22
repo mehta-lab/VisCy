@@ -177,8 +177,10 @@ class CellDinoFeatureExtractor:
     Wraps :class:`viscy_models.foundation.CellDinoModel` so the eval pipeline
     can use it via the same ``extract_features(image_2d)`` contract as the
     DINOv3 and DynaCLR extractors. The underlying model's ``preprocess_2d``
-    handles the 224×224 resize and per-image min/max scaling, so the caller
-    can feed the same masked 2-D cell crop used for the other backbones.
+    handles the 224×224 resize and per-image per-channel spatial z-score
+    (the ``self_normalize`` recipe used during CELL-DINO pretraining), so
+    the caller can feed the same masked 2-D cell crop used for the other
+    backbones.
     """
 
     def __init__(self, weights_path: str, img_size: int = 224, patch_size: int = 16):
