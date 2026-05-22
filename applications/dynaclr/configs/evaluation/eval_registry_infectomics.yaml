@@ -44,12 +44,12 @@ models:
 
   # --- DynaCLR-2D-MIP-BagOfChannels family (BoC variant bake-off) ----------
   # ✅ Baseline: pre fix-shuffler mixed-markers, 192→160, zext11
-  - name: DynaCLR-2D-BoC (192to160, zext11)
-    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/infectomics-annotated
+  # - name: DynaCLR-2D-BoC (192to160, zext11)
+  #   eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/infectomics-annotated
 
   # ✅ Single-marker batching (batch_group_by=marker), 192→160, zext11
-  - name: DynaCLR-2D-BoC (192to160, single-marker-fix)
-    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated
+  # - name: DynaCLR-2D-BoC (192to160, single-marker-fix)
+  #   eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated
 
   # ✅ Same run, later checkpoint (epoch=105-step=84800, run id jbrwhzr3) — completed 2026-05-11 (job 32657626)
   - name: DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
@@ -59,16 +59,21 @@ models:
   # Completed 2026-05-11 (job 32665175) after annotation.py spatial-NN patch landed. The patch handles
   # mitotic-split frames where two daughter cells briefly share the parent's track_id; the join now
   # resolves duplicates via (y, x) nearest within a 4-pixel Chebyshev kernel.
-  - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
-    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch91_step73600
+  # - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+  #   eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch91_step73600
+
+  # ✅ Same run, later checkpoint (epoch=146-step=117600, run id dt0ln63r) — latest after extended training
+  # Completed 2026-05-19 (job 33128577).
+  - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep146)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch146_step117600
 
   # ✅ Mixed-markers post fix-shuffler, 192→160, zext11
   - name: DynaCLR-2D-BoC (192to160, mixed-markers-fix)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated
 
   # ✅ Single-marker, larger patch (384→216→192) with zext16 — early ckpt (~Apr 29 last.ckpt)
-  - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
-    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated
+  # - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
+  #   eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-384to192-zext16-single-marker-fix-shuffler/evaluations/infectomics-annotated
 
   # ✅ Same run, later checkpoint (epoch=88-step=71200, 2026-05-08) — A/B vs the early ckpt above
   - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)
@@ -96,6 +101,7 @@ palette_anchor:
   - DynaCLR-2D-BoC (192to160, single-marker-fix)
   - DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
   - DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+  - DynaCLR-2D-BoC (classical, 192to160, single-marker, ep146)
   - DynaCLR-2D-BoC (192to160, mixed-markers-fix)
   - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
   - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)

@@ -25,6 +25,8 @@ models:
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800_grouped
   - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch91_step73600_grouped
+  - name: DynaCLR-2D-BoC (classical, 192to160, single-marker, ep146)
+    eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch146_step117600_grouped
   - name: DynaCLR-2D-BoC (192to160, mixed-markers-fix)
     eval_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated_grouped
   - name: DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
@@ -52,6 +54,7 @@ palette_anchor:
   - DynaCLR-2D-BoC (192to160, single-marker-fix)
   - DynaCLR-2D-BoC (192to160, single-marker-fix, ep105)
   - DynaCLR-2D-BoC (classical, 192to160, single-marker, ep91)
+  - DynaCLR-2D-BoC (classical, 192to160, single-marker, ep146)
   - DynaCLR-2D-BoC (192to160, mixed-markers-fix)
   - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix)
   - DynaCLR-2D-BoC (384to192, zext16, single-marker-fix, ep88)
