@@ -1,0 +1,30 @@
+# UNeXt2 (VSCyto3D) fit overlay — reproduces the Run 4 SEC61B config
+# from legacy commit 46e4c79 (`examples/configs/sec61b/fit_unext2.yml`).
+# Architecture: convnextv2_tiny z=15, MixedLoss(L1+DSSIM), 4-GPU DDP.
+#
+# Earlier runs in the wandb series (20260403-210816, 20260406-094805,
+# 20260406-225302) used lr=0.0002, bs=8, z=15; this overlay reproduces the
+# retuned Run 4 (20260409-020023) with lr=0.0004, bs=32, z=20.
+base:
+  - ../../../../../../recipes/models/unext2_3d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/ddp_4gpu.yml
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0004
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+trainer:
+  precision: 16-mixed
+  max_epochs: 200
+# HCS data hparams (bs=32, z=20, yx=384, augs) live in
+# data_overlays/unext2_fit.yml; single-store train leaves compose both,
+# joint (BatchedConcatDataModule) leaves compose only this one and
+# author data: themselves.

@@ -1,0 +1,6 @@
+# @package _global_
+# Target group: ER marked by SEC61B, iPSC dataset v4 test split.
+target_name: er
+benchmark:
+  dataset_ref:
+    target: sec61b

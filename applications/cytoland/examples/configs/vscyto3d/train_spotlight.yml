@@ -2,7 +2,8 @@
 # Requires: viscy preprocess --compute_otsu --compute_fg_masks
 # Usage: python -m cytoland fit --config vscyto3d/train_spotlight.yml
 base:
-  - ../recipes/trainer/fit_4gpu.yml
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
   - ../recipes/data/hcs_nuc_mem_3d.yml
   - ../recipes/modes/spotlight.yml
   - ../recipes/models/unext2_3d.yml
@@ -11,6 +12,10 @@ model:
   init_args:
     lr: 0.0002
     schedule: WarmupCosine
+
+trainer:
+  precision: 16-mixed
+  max_epochs: 200
 
 data:
   init_args:

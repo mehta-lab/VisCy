@@ -121,3 +121,87 @@ def test_configure_wandb_logger_does_not_double_prefix(monkeypatch):
 
     init_args = config["fit"]["trainer"]["logger"]["init_args"]
     assert init_args["name"] == "20260401-143045_FNet3D_iPSC_SEC61B"
+
+
+# ---------------------------------------------------------------------------
+# _maybe_compose_config — reserved-key stripping + base composition
+# ---------------------------------------------------------------------------
+
+
+import yaml  # noqa: E402
+
+from viscy_utils.cli import _maybe_compose_config  # noqa: E402
+
+
+def _write_yaml(path, data):
+    path.write_text(yaml.safe_dump(data))
+
+
+def _rewrite_argv_and_compose(monkeypatch, leaf):
+    """Drive _maybe_compose_config with a staged sys.argv and return composed YAML."""
+    monkeypatch.setattr(sys, "argv", ["viscy", "fit", "--config", str(leaf)])
+    _maybe_compose_config()
+    new_path = sys.argv[3]
+    with open(new_path) as f:
+        return yaml.safe_load(f), new_path
+
+
+def test_compose_passthrough_without_base_or_reserved(tmp_path, monkeypatch):
+    leaf = tmp_path / "leaf.yml"
+    _write_yaml(leaf, {"trainer": {"max_epochs": 1}, "model": {}})
+    monkeypatch.setattr(sys, "argv", ["viscy", "fit", "--config", str(leaf)])
+    _maybe_compose_config()
+    # argv unchanged (no base, no reserved keys)
+    assert sys.argv[3] == str(leaf)
+
+
+def test_compose_strips_reserved_without_base(tmp_path, monkeypatch):
+    leaf = tmp_path / "leaf.yml"
+    _write_yaml(
+        leaf,
+        {
+            "trainer": {"max_epochs": 1},
+            "launcher": {"mode": "fit"},
+            "benchmark": {"task": "virtual_staining"},
+        },
+    )
+    composed, new_path = _rewrite_argv_and_compose(monkeypatch, leaf)
+    assert new_path != str(leaf)
+    assert "launcher" not in composed
+    assert "benchmark" not in composed
+    assert composed["trainer"]["max_epochs"] == 1
+
+
+def test_compose_with_base_no_reserved(tmp_path, monkeypatch):
+    base = tmp_path / "base.yml"
+    _write_yaml(base, {"trainer": {"max_epochs": 10, "precision": "32-true"}})
+    leaf = tmp_path / "leaf.yml"
+    _write_yaml(leaf, {"base": ["base.yml"], "model": {"lr": 0.001}})
+
+    composed, _ = _rewrite_argv_and_compose(monkeypatch, leaf)
+    assert "base" not in composed
+    assert composed["trainer"]["max_epochs"] == 10
+    assert composed["trainer"]["precision"] == "32-true"
+    assert composed["model"]["lr"] == 0.001
+
+
+def test_compose_with_base_and_reserved(tmp_path, monkeypatch):
+    base = tmp_path / "base.yml"
+    _write_yaml(base, {"trainer": {"max_epochs": 5}, "launcher": {"mode": "predict"}})
+    leaf = tmp_path / "leaf.yml"
+    _write_yaml(
+        leaf,
+        {
+            "base": ["base.yml"],
+            "benchmark": {"experiment_id": "er__ipsc__celldiff"},
+            "model": {"lr": 0.0003},
+        },
+    )
+
+    composed, _ = _rewrite_argv_and_compose(monkeypatch, leaf)
+    # Both reserved keys stripped, even when only one was set by the base.
+    assert "launcher" not in composed
+    assert "benchmark" not in composed
+    # Composition still worked.
+    assert composed["trainer"]["max_epochs"] == 5
+    assert composed["model"]["lr"] == 0.0003

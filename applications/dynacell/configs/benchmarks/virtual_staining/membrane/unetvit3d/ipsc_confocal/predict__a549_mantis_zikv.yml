@@ -1,0 +1,49 @@
+# UNetViT3D predict: membrane trained on iPSC, predicting against a549-mantis-caax-zikv test.
+# A549 manifest keys membrane by gene (`caax`); override the iPSC-side `membrane`
+# target_id from targets/membrane.yml so the resolver finds the caax target on
+# a549-mantis-caax-zikv.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_caax_zikv.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/unetvit3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_caax_zikv
+  model_name: unetvit3d
+  experiment_id: membrane__ipsc_confocal__unetvit3d__a549_mantis_caax_zikv
+  # Override the iPSC-side `membrane` target to a549's gene-keyed `caax`.
+  dataset_ref:
+    target: caax
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/unetvit3d/checkpoints/last.ckpt
+
+data:
+  init_args:
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_unetvit3d_zikv.zarr
+
+launcher:
+  job_name: UNetViT3D_PRED_MEMB_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

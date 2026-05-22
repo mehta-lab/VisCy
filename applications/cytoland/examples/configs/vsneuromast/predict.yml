@@ -2,7 +2,8 @@
 # Checkpoint: https://public.czbiohub.org/comp.micro/viscy/VS_models/VSNeuromast/epoch=64-step=24960.ckpt
 # Usage: python -m cytoland predict --config vsneuromast/predict.yml
 base:
-  - ../recipes/trainer/predict_gpu.yml
+  - ../recipes/trainer/predict.yml
+  - ../recipes/topology/single_gpu.yml
   - ../recipes/data/hcs_nuc_mem_neuromast.yml
   - ../recipes/models/unext2_neuromast.yml
 

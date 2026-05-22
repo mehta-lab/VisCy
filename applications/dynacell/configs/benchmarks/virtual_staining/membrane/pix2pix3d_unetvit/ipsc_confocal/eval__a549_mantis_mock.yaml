@@ -1,0 +1,13 @@
+# @package _global_
+# Benchmark eval leaf: membrane (Membrane) predicted by pix2pix3d_unetvit on a549-mantis-caax-mock.
+defaults:
+  - override /target: membrane
+  - override /predict_set: a549_mantis_caax_mock
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_pix2pix3d_unetvit__caax_mock.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_memb_pix2pix3d_unetvit__caax_mock

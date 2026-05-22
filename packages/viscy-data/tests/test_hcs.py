@@ -5,12 +5,13 @@ import numpy as np
 import torch
 from imageio import imwrite
 from iohub import open_ome_zarr
+from lightning.pytorch.trainer.states import TrainerFn
 from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandFlipd, RandSpatialCropSamplesd
 from pytest import TempPathFactory, fixture, importorskip, mark, raises
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
-from viscy_transforms import BatchedRandFlipd, RandSpatialCropd
+from viscy_transforms import BatchedRandFlipd, NormalizeSampled, RandSpatialCropd
 
 
 @mark.parametrize("multi_sample_augmentation", [True, False])
@@ -63,6 +64,283 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
             z_window_size,
             *yx_patch_size,
         )
+
+
+def _fov_names(dataset_path: Path) -> list[str]:
+    with open_ome_zarr(dataset_path) as plate:
+        return [name for name, _ in plate.positions()]
+
+
+def test_fov_name_filters_applied(preprocessed_hcs_dataset):
+    """include_fov_names keeps only listed positions; exclude_fov_names drops them."""
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+
+    kept = all_fovs[:4]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        split_ratio=0.5,
+        yx_patch_size=[16, 16],
+        include_fov_names=kept,
+    )
+    dm.setup(stage="fit")
+    selected = {str(p.zgroup.path) for p in dm.train_dataset.positions} | {
+        str(p.zgroup.path) for p in dm.val_dataset.positions
+    }
+    assert all(any(name.endswith(f) for name in selected) for f in kept)
+    assert len(selected) == len(kept)
+
+    dropped = all_fovs[:2]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        split_ratio=0.5,
+        yx_patch_size=[16, 16],
+        exclude_fov_names=dropped,
+    )
+    dm.setup(stage="fit")
+    n_positions = len(dm.train_dataset.positions) + len(dm.val_dataset.positions)
+    assert n_positions == len(all_fovs) - len(dropped)
+
+
+def test_fov_name_filters_applied_in_predict(preprocessed_hcs_dataset):
+    """exclude_fov_names is honored during predict (used to resume crashed predicts)."""
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+
+    # Mock target stand-in: predict path doesn't strictly need a target channel,
+    # but the datamodule constructor requires one.
+    dropped = all_fovs[:2]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        exclude_fov_names=dropped,
+    )
+    dm.setup(stage="predict")
+    selected = {str(p.zgroup.path) for p in dm.predict_dataset.positions}
+    assert len(selected) == len(all_fovs) - len(dropped)
+    assert not any(name.endswith(d) for name in selected for d in dropped)
+
+    kept = all_fovs[:3]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        include_fov_names=kept,
+    )
+    dm.setup(stage="predict")
+    selected = {str(p.zgroup.path) for p in dm.predict_dataset.positions}
+    assert len(selected) == len(kept)
+
+
+def test_fov_name_filters_raise_when_empty_predict(preprocessed_hcs_dataset):
+    """Predict with a filter that excludes everything raises a clear ValueError."""
+    data_path = preprocessed_hcs_dataset
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        include_fov_names=["does/not/exist"],
+    )
+    with raises(ValueError, match="No positions"):
+        dm.setup(stage="predict")
+
+
+def test_fov_name_filters_raise_when_empty(preprocessed_hcs_dataset):
+    """Filtering to zero positions raises a clear ValueError."""
+    data_path = preprocessed_hcs_dataset
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        include_fov_names=["does/not/exist"],
+    )
+    with raises(ValueError, match="No positions"):
+        dm.setup(stage="fit")
+
+
+def test_fov_name_filters_with_mmap_preload(preprocessed_hcs_dataset, tmp_path):
+    """include/exclude_fov_names is honored during mmap_preload staging.
+
+    The mmap buffer is sized and indexed by the filtered position list, so
+    the buffer must contain only the kept FOVs — otherwise _setup_fit's
+    filtered orig_positions would alias the wrong entries.
+    """
+    importorskip("tensordict")
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    dropped = all_fovs[:2]
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+        exclude_fov_names=dropped,
+    )
+    dm.prepare_data()
+    dm.setup(stage="fit")
+    selected = {str(p.zgroup.path) for p in dm.train_dataset.positions} | {
+        str(p.zgroup.path) for p in dm.val_dataset.positions
+    }
+    assert len(selected) == len(all_fovs) - len(dropped)
+    assert not any(name.endswith(d) for name in selected for d in dropped)
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape[1] == 1
+        assert batch["target"].shape[1] == 1
+        break
+    assert (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_fov_name_filters_with_mmap_preload_cache_fingerprint(preprocessed_hcs_dataset, tmp_path):
+    """Different FOV filters must produce different mmap cache dirs.
+
+    Sharing a cache across filter configs would alias wrong FOVs because
+    the buffer layout is filter-dependent.
+    """
+    importorskip("tensordict")
+    data_path = preprocessed_hcs_dataset
+    all_fovs = _fov_names(data_path)
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    base_kwargs = dict(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm_no_filter = HCSDataModule(**base_kwargs)
+    dm_exclude = HCSDataModule(exclude_fov_names=all_fovs[:1], **base_kwargs)
+    dm_include = HCSDataModule(include_fov_names=all_fovs[:2], **base_kwargs)
+    dirs = {dm_no_filter._mmap_cache_dir, dm_exclude._mmap_cache_dir, dm_include._mmap_cache_dir}
+    assert len(dirs) == 3
+
+
+def _bad_filter_dm(data_path: Path, scratch_dir: Path) -> HCSDataModule:
+    with open_ome_zarr(data_path) as ds:
+        channel_names = ds.channel_names
+    return HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        mmap_preload=True,
+        scratch_dir=scratch_dir,
+        include_fov_names=["does/not/exist"],
+    )
+
+
+def test_mmap_preload_raises_for_fit_with_bad_filter(preprocessed_hcs_dataset, tmp_path):
+    """Fit-stage prepare_data() keeps the strict empty-filter signal.
+
+    Guards the stage gate: if a broken helper ever returned False for
+    FITTING, prepare_data() would silently skip and a ValueError on
+    config typos would only surface later in setup('fit').
+    """
+    importorskip("tensordict")
+    dm = _bad_filter_dm(preprocessed_hcs_dataset, tmp_path)
+    dm.trainer = MagicMock(state=MagicMock(fn=TrainerFn.FITTING))
+    with raises(ValueError, match="No positions left"):
+        dm.prepare_data()
+    assert not (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_mmap_preload_skipped_for_predict_with_bad_filter(preprocessed_hcs_dataset, tmp_path):
+    """Predict-only runs don't consume the mmap buffer, so prepare_data() skips.
+
+    Before this change, a bad include_fov_names filter would kill a
+    predict-only job even though _setup_predict ignores FOV filters
+    entirely and never opens the mmap cache.
+    """
+    importorskip("tensordict")
+    dm = _bad_filter_dm(preprocessed_hcs_dataset, tmp_path)
+    dm.trainer = MagicMock(state=MagicMock(fn=TrainerFn.PREDICTING))
+    dm.prepare_data()
+    assert not (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_mmap_preload_skipped_for_test_with_bad_filter(preprocessed_hcs_dataset, tmp_path):
+    """Test-only runs also skip mmap staging; mirror of predict."""
+    importorskip("tensordict")
+    dm = _bad_filter_dm(preprocessed_hcs_dataset, tmp_path)
+    dm.trainer = MagicMock(state=MagicMock(fn=TrainerFn.TESTING))
+    dm.prepare_data()
+    assert not (dm._mmap_cache_dir / ".done").exists()
+
+
+def test_setup_fit_raises_when_mmap_cache_missing(preprocessed_hcs_dataset, tmp_path):
+    """setup('fit') without a prior prepare_data() raises an actionable error.
+
+    Previously this failed inside MemoryMappedTensor.from_filename with
+    an opaque FileNotFoundError / RuntimeError. The pre-check in
+    _setup_fit now surfaces the missing-cache case with a clear hint.
+    """
+    importorskip("tensordict")
+    with open_ome_zarr(preprocessed_hcs_dataset) as ds:
+        channel_names = ds.channel_names
+    dm = HCSDataModule(
+        data_path=preprocessed_hcs_dataset,
+        source_channel=channel_names[:1],
+        target_channel=channel_names[1:2],
+        z_window_size=5,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    with raises(RuntimeError, match="cache not ready"):
+        dm.setup(stage="fit")
 
 
 def test_on_after_batch_transfer_shape_mismatch_raises(preprocessed_hcs_dataset):
@@ -322,6 +600,87 @@ def test_fg_mask_key_missing_errors(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# timepoint_statistics normalization
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_timepoint_norm_meta_flattens_requested_index():
+    """Helper flattens timepoint_statistics to the t-th entry; other levels pass through."""
+    meta = {
+        "Phase": {
+            "fov_statistics": {"mean": torch.tensor(0.5), "std": torch.tensor(0.1)},
+            "timepoint_statistics": {
+                "0": {"mean": torch.tensor(10.0), "std": torch.tensor(1.0)},
+                "1": {"mean": torch.tensor(1000.0), "std": torch.tensor(100.0)},
+            },
+        },
+    }
+    resolved = SlidingWindowDataset._resolve_timepoint_norm_meta(meta, t=1)
+    assert resolved["Phase"]["fov_statistics"]["mean"].item() == 0.5
+    assert resolved["Phase"]["timepoint_statistics"]["mean"].item() == 1000.0
+    assert resolved["Phase"]["timepoint_statistics"]["std"].item() == 100.0
+    assert SlidingWindowDataset._resolve_timepoint_norm_meta(None, t=0) is None
+
+
+@fixture(scope="function")
+def hcs_with_timepoint_stats(tmp_path):
+    """Two-timepoint HCS with per-timepoint normalization stats written to zattrs."""
+    dataset_path = tmp_path / "tp_stats.zarr"
+    ch_names = ["Phase", "Fluor"]
+    num_t = 2
+    rng = np.random.default_rng(0)
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names) as ds:
+        for fov_name in ("0", "1"):
+            pos = ds.create_position("A", "1", fov_name)
+            img = rng.random((num_t, len(ch_names), 4, 16, 16)).astype(np.float32)
+            pos.create_image("0", img, chunks=(1, 1, 1, 16, 16))
+    # Per-timepoint stats chosen to be very different so mis-selection is obvious.
+    tp_stats = {
+        "0": {"mean": 10.0, "std": 1.0},
+        "1": {"mean": 1000.0, "std": 100.0},
+    }
+    norm = {ch: {"timepoint_statistics": tp_stats} for ch in ch_names}
+    with open_ome_zarr(dataset_path, mode="r+") as ds:
+        for _, fov in ds.positions():
+            fov.zattrs["normalization"] = norm
+    return dataset_path
+
+
+def test_sliding_window_timepoint_statistics_normalize(hcs_with_timepoint_stats):
+    """NormalizeSampled(level='timepoint_statistics') uses the sample's timepoint stats."""
+    z_window = 4
+    tp_stats = {0: (10.0, 1.0), 1: (1000.0, 100.0)}
+    with open_ome_zarr(hcs_with_timepoint_stats, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        normalized = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluor"]},
+            z_window_size=z_window,
+            transform=NormalizeSampled(keys=["Phase"], level="timepoint_statistics"),
+        )
+        raw = SlidingWindowDataset(
+            positions=positions,
+            channels={"source": ["Phase"], "target": ["Fluor"]},
+            z_window_size=z_window,
+        )
+        assert len(normalized) == 4  # 2 FOVs * 2 timepoints * 1 z-window
+        seen_t = set()
+        for idx in range(len(normalized)):
+            norm_sample = normalized[idx]
+            raw_sample = raw[idx]
+            t = norm_sample["index"][1]
+            seen_t.add(t)
+            mean, std = tp_stats[t]
+            expected = (raw_sample["source"] - mean) / (std + 1e-8)
+            assert torch.allclose(norm_sample["source"], expected, atol=1e-6), (
+                f"Timepoint {t} (idx={idx}) normalization mismatch: "
+                f"expected ({mean}, {std}), got source range "
+                f"[{norm_sample['source'].min():.3f}, {norm_sample['source'].max():.3f}]"
+            )
+        assert seen_t == {0, 1}, f"Test did not exercise both timepoints (saw {seen_t})"
+
+
+# ---------------------------------------------------------------------------
 # fg_mask spatial co-alignment tests
 # ---------------------------------------------------------------------------
 
@@ -517,8 +876,8 @@ def test_sliding_window_preloaded_returns_copy(hcs_with_fg_mask):
     assert torch.equal(sample2["source"], original_source)
 
 
-def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
-    """prepare_data() + setup() + dataloader roundtrip with preload=True."""
+def test_mmap_preload_roundtrip(hcs_with_fg_mask, tmp_path):
+    """prepare_data() + setup() + dataloader roundtrip with mmap_preload=True."""
     importorskip("tensordict")
     z_window_size = 4
     yx_patch_size = [32, 32]
@@ -531,7 +890,7 @@ def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
         num_workers=0,
         yx_patch_size=yx_patch_size,
         split_ratio=0.5,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
     dm.prepare_data()
@@ -544,8 +903,8 @@ def test_preload_mmap_roundtrip(hcs_with_fg_mask, tmp_path):
     assert (dm._mmap_cache_dir / ".done").exists()
 
 
-def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
-    """prepare_data() is idempotent: skips preload if .done marker exists."""
+def test_mmap_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
+    """prepare_data() is idempotent: skips mmap preload if .done marker exists."""
     importorskip("tensordict")
     dm = HCSDataModule(
         data_path=hcs_with_fg_mask,
@@ -554,7 +913,7 @@ def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
     dm.prepare_data()
@@ -565,7 +924,7 @@ def test_preload_skips_when_done(hcs_with_fg_mask, tmp_path):
     assert mmap_file.stat().st_mtime == mtime_after_first
 
 
-def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
+def test_mmap_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
     """prepare_data() cleans up and rebuilds if a previous run was killed mid-write."""
     importorskip("tensordict")
     dm = HCSDataModule(
@@ -575,10 +934,10 @@ def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
-    # Simulate a killed preload: create the cache dir with a partial .mmap but no .done
+    # Simulate a killed mmap preload: create the cache dir with a partial .mmap but no .done
     cache_dir = dm._mmap_cache_dir
     cache_dir.mkdir(parents=True, exist_ok=True)
     (cache_dir / "data.mmap").write_bytes(b"partial garbage")
@@ -593,7 +952,7 @@ def test_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
         break
 
 
-def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
+def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
     import multiprocessing
 
@@ -607,7 +966,7 @@ def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
         z_window_size=4,
         batch_size=2,
         num_workers=0,
-        preload=True,
+        mmap_preload=True,
         scratch_dir=tmp_path,
     )
     dm.prepare_data()
@@ -639,3 +998,216 @@ def test_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     arr0 = positions[0]["0"]
     expected_n = len(positions) * arr0.frames
     assert value[0] == expected_n
+
+
+def test_mmap_preload_preserves_native_dtype_and_casts_on_read(tmp_path):
+    """mmap_preload stores native uint16 data and casts sampled patches to float32."""
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    dataset_path = tmp_path / "uint16_preload.zarr"
+    ch_names = ["Phase", "Fluorescence"]
+    rng = np.random.default_rng(7)
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names) as ds:
+        for fov in ("0", "1"):
+            pos = ds.create_position("A", "1", fov)
+            img = rng.integers(0, 4096, size=(1, len(ch_names), 8, 32, 32), dtype=np.uint16)
+            pos.create_image("0", img, chunks=(1, 1, 1, 32, 32))
+
+    dm = HCSDataModule(
+        data_path=dataset_path,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[32, 32],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    with open_ome_zarr(dataset_path, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        arr0 = positions[0]["0"]
+        shape = (len(positions) * arr0.frames, len(ch_names), arr0.slices, arr0.height, arr0.width)
+        preload_buf = MemoryMappedTensor.from_filename(
+            dm._mmap_cache_dir / "data.mmap",
+            dtype=torch.uint16,
+            shape=shape,
+        )
+        assert preload_buf.dtype == torch.uint16
+
+    dm.setup(stage="fit")
+    batch = next(iter(dm.train_dataloader()))
+    assert batch["source"].dtype == torch.float32
+    assert batch["target"].dtype == torch.float32
+
+
+def test_mmap_preload_fg_mask_preserves_native_dtype(hcs_with_fg_mask, tmp_path):
+    """fg_mask.mmap preserves native uint8 dtype; sampled masks cast to float32."""
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    dm = HCSDataModule(
+        data_path=hcs_with_fg_mask,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        fg_mask_key="fg_mask",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=[32, 32],
+        split_ratio=0.5,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
+        positions = [pos for _, pos in ds.positions()]
+        mask_arr0 = positions[0]["fg_mask"]
+        mask_shape = (len(positions) * mask_arr0.frames, 1, mask_arr0.slices, mask_arr0.height, mask_arr0.width)
+        mask_buf = MemoryMappedTensor.from_filename(
+            dm._mmap_cache_dir / "fg_mask.mmap",
+            dtype=torch.uint8,
+            shape=mask_shape,
+        )
+        assert mask_buf.dtype == torch.uint8
+
+    dm.setup(stage="fit")
+    batch = next(iter(dm.train_dataloader()))
+    assert batch["fg_mask"].dtype == torch.float32
+
+
+@fixture(scope="function")
+def hcs_heterogeneous_t(tmp_path):
+    """HCS dataset where positions have different T along axis 0.
+
+    Mirrors the layout of the a549 mantis_v1 pooled stores
+    (``SEC61B_all.zarr``, ``TOMM20_all.zarr``) where each FOV is one
+    condition's time-lapse and conditions have different frame counts.
+    """
+    dataset_path = tmp_path / "het_t.zarr"
+    ch_names = ["Phase", "Fluorescence"]
+    rng = np.random.default_rng(42)
+    # Three positions with T=2, T=3, T=4 — heterogeneous.
+    fov_t = [("0", 2), ("1", 3), ("2", 4)]
+    with open_ome_zarr(dataset_path, layout="hcs", mode="w", channel_names=ch_names) as dataset:
+        for fov, t in fov_t:
+            pos = dataset.create_position("A", "1", fov)
+            img = rng.random((t, len(ch_names), 8, 32, 32)).astype(np.float32)
+            pos.create_image("0", img, chunks=(1, 1, 1, 32, 32))
+        norm = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29}} for ch in ch_names}
+        for _, pos in dataset.positions():
+            pos.zattrs["normalization"] = norm
+    return dataset_path, fov_t
+
+
+def test_mmap_preload_heterogeneous_t(hcs_heterogeneous_t, tmp_path):
+    """prepare_data() + setup() + dataloader works when T varies per FOV.
+
+    Regression guard for the bug that hit a549 mantis SEC61B/TOMM20:
+    the buffer was sized as ``len(positions) * T_pos0`` and indexed by
+    ``i * T``, which crashed at the first FOV with a different T. The
+    fix uses a per-FOV cumulative offsets table; this test exercises
+    that path end-to-end (write, re-open, slice into per-FOV views,
+    sliding-window iteration).
+    """
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    data_path, fov_t = hcs_heterogeneous_t
+    expected_total_T = sum(t for _, t in fov_t)
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel="Phase",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[16, 16],
+        split_ratio=2 / 3,  # 2 FOVs train, 1 FOV val
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    # On-disk buffer must be sized at sum(T_i), not n * T_pos0.
+    with open_ome_zarr(data_path) as plate:
+        positions = [p for _, p in plate.positions()]
+    arr0 = positions[0]["0"]
+    buf = MemoryMappedTensor.from_filename(
+        dm._mmap_cache_dir / "data.mmap",
+        dtype=torch.float32,
+        shape=(expected_total_T, 2, arr0.slices, arr0.height, arr0.width),
+    )
+    assert buf.shape[0] == expected_total_T
+
+    # Per-FOV slabs in the buffer must equal each FOV's full-channel oindex read.
+    # Use the same helper the production code uses, so test divergence on a
+    # later refactor is impossible.
+    offsets = HCSDataModule._fov_t_offsets(positions, "0")
+    ch_idx = [positions[0].get_channel_index(c) for c in ("Phase", "Fluorescence")]
+    for i, pos in enumerate(positions):
+        staged = np.asarray(buf[offsets[i] : offsets[i + 1]])
+        expected = np.asarray(pos["0"].oindex[:, ch_idx, :])
+        assert staged.shape == expected.shape
+        np.testing.assert_array_equal(staged, expected)
+
+    # End-to-end: setup + iterate the train loader without crashing.
+    dm.setup(stage="fit")
+    saw_batch = False
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape[1] == 1
+        assert batch["target"].shape[1] == 1
+        saw_batch = True
+        break
+    assert saw_batch
+
+
+def test_mmap_preload_matches_oindex(preprocessed_hcs_dataset, tmp_path):
+    """Staged buffer is byte-equal to ``arr.oindex[:, ch_idx, :]`` per FOV.
+
+    Regression guard for the prepare_data read pattern: the production loop
+    selects channels by per-channel basic indexing + numpy concat instead
+    of zarr's ``oindex`` (which materializes O(prod(out_shape)) coordinate
+    arrays in CoordinateIndexer). This test asserts the two produce
+    identical bytes — runs against both v2 (unsharded) and v3 (sharded)
+    via the parameterized fixture.
+    """
+    importorskip("tensordict")
+    from tensordict.memmap import MemoryMappedTensor
+
+    # Pick non-adjacent source/target channel indices so ch_idx is a
+    # genuine list (not a contiguous slice) — exactly the case oindex
+    # was being used for.
+    dm = HCSDataModule(
+        data_path=preprocessed_hcs_dataset,
+        source_channel="Phase",
+        target_channel="GFP",
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        mmap_preload=True,
+        scratch_dir=tmp_path,
+    )
+    dm.prepare_data()
+
+    with open_ome_zarr(preprocessed_hcs_dataset) as plate:
+        positions = [p for _, p in plate.positions()]
+        ch_idx = [positions[0].get_channel_index(c) for c in ("Phase", "GFP")]
+        arr0 = positions[0]["0"]
+        T = arr0.frames
+        total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
+        buf = MemoryMappedTensor.from_filename(
+            dm._mmap_cache_dir / "data.mmap",
+            dtype=torch.float32,
+            shape=total_shape,
+        )
+        for i, pos in enumerate(positions):
+            staged = np.asarray(buf[i * T : (i + 1) * T])
+            expected = np.asarray(pos["0"].oindex[:, ch_idx, :])
+            assert staged.shape == expected.shape
+            np.testing.assert_array_equal(staged, expected)

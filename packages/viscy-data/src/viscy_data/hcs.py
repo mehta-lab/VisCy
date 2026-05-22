@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Callable, Iterable, Literal, Sequence
 
 import numpy as np
 import torch
@@ -19,6 +19,7 @@ try:
 except ImportError:
     MemoryMappedTensor = None
 from lightning.pytorch import LightningDataModule
+from lightning.pytorch.trainer.states import TrainerFn
 from monai.data import set_track_meta
 from monai.transforms import Compose, MapTransform, MultiSampleTrait, RandAffined
 from torch import Tensor
@@ -64,10 +65,15 @@ class HCSDataModule(LightningDataModule):
     augmentations : list of MapTransform or None, optional
         MONAI dictionary transforms applied to the training set,
         defaults to None (no augmentation).
-    preload : bool, optional
-        Whether to preload all FOVs to memory-mapped tensors on local
-        scratch before training. Eliminates zarr I/O during training.
+    mmap_preload : bool, optional
+        If ``True``, stage the entire dataset to a
+        :class:`~tensordict.MemoryMappedTensor` buffer under ``scratch_dir``
+        during ``prepare_data()`` and serve training samples via mmap
+        views. Eliminates zarr reads during the training loop. Point
+        ``scratch_dir`` at tmpfs (e.g. ``/dev/shm``) for RAM-backed I/O.
         Requires ``viscy-data[mmap]`` (tensordict). Default False.
+        Only effective during fit/validate runs; predict and test
+        stages silently ignore this flag and read from zarr directly.
     scratch_dir : Path or None, optional
         Directory for mmap cache files. Defaults to ``/tmp``.
         On SLURM, uses ``/tmp/$SLURM_JOB_ID/``.
@@ -99,6 +105,20 @@ class HCSDataModule(LightningDataModule):
         ``on_after_batch_transfer``. Use for validation-time spatial
         crops (e.g. ``BatchedDivisibleCropd``) when the FOV is not
         compatible with the model's downsampling factor.
+    include_fov_names : Iterable[str] or None, optional
+        If given, only positions whose plate-relative name (e.g.
+        ``"B/2/000000"``) is in this collection are used. Applied before
+        the train/val split. Stored as a ``set`` for O(1) lookup.
+        Honored during fit/validate (including mmap staging) and predict.
+        Test stage uses all plate positions.
+    exclude_fov_names : Iterable[str] or None, optional
+        If given, positions whose plate-relative name is in this
+        collection are skipped. Useful to hold out test FOVs from a plate
+        that also contains training FOVs, or to resume a predict run
+        without redoing already-written positions. Applied after
+        ``include_fov_names``. Stored as a ``set`` for O(1) lookup.
+        Honored during fit/validate (including mmap staging) and predict.
+        Test stage uses all plate positions.
     """
 
     def __init__(
@@ -114,7 +134,7 @@ class HCSDataModule(LightningDataModule):
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
-        preload: bool = False,
+        mmap_preload: bool = False,
         scratch_dir: Path | None = None,
         ground_truth_masks: Path | None = None,
         persistent_workers=False,
@@ -129,12 +149,19 @@ class HCSDataModule(LightningDataModule):
         gpu_augmentations: list[MapTransform] | None = None,
         val_augmentations: list[MapTransform] | None = None,
         val_gpu_augmentations: list[MapTransform] | None = None,
+        include_fov_names: Iterable[str] | None = None,
+        exclude_fov_names: Iterable[str] | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
         self.source_channel = _ensure_channel_list(source_channel)
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
+        # Set by BatchedConcatDataModule.setup before it calls each
+        # child's setup, so the divisibility check in _train_transform
+        # can skip itself when this module is a child of that joint
+        # wrapper. Standalone use leaves this False.
+        self._is_batched_concat_child = False
         self.num_workers = num_workers
         self.target_2d = target_2d
         self.z_window_size = z_window_size
@@ -142,7 +169,7 @@ class HCSDataModule(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.normalizations = normalizations or []
         self.augmentations = augmentations or []
-        self.preload = preload
+        self.mmap_preload = mmap_preload
         self.scratch_dir = Path(scratch_dir) if scratch_dir is not None else None
         self.ground_truth_masks = ground_truth_masks
         self.prepare_data_per_node = True
@@ -156,6 +183,8 @@ class HCSDataModule(LightningDataModule):
         self.max_nonzero_retries = max_nonzero_retries
         self.fg_mask_key = fg_mask_key
         self.val_augmentations = val_augmentations or []
+        self.include_fov_names = set(include_fov_names) if include_fov_names is not None else None
+        self.exclude_fov_names = set(exclude_fov_names) if exclude_fov_names is not None else None
         if gpu_augmentations and self.fg_mask_key is not None:
             ForegroundMaskSupport.patch_spatial_transforms(gpu_augmentations, ("target",), ("fg_mask",))
         if val_gpu_augmentations and self.fg_mask_key is not None:
@@ -188,50 +217,97 @@ class HCSDataModule(LightningDataModule):
 
     @property
     def _mmap_cache_dir(self) -> Path:
-        """Return path to the mmap cache directory for this dataset + channel config."""
+        """Return path to the mmap cache directory for this dataset + channel config.
+
+        The fingerprint includes include/exclude FOV filters so runs with
+        different filter specs do not share an mmap buffer (the buffer
+        layout is indexed by the filtered position list, so differing
+        filters would alias wrong FOVs).
+        """
         scratch = self.scratch_dir or Path(tempfile.gettempdir())
         ch_key = "|".join(self.source_channel) + "||" + "|".join(self.target_channel) + f"||{self.array_key}"
-        path_key = str(self.data_path.resolve()) + "||" + ch_key
+        include_key = "|".join(sorted(self.include_fov_names)) if self.include_fov_names else ""
+        exclude_key = "|".join(sorted(self.exclude_fov_names)) if self.exclude_fov_names else ""
+        filter_key = f"||incl={include_key}||excl={exclude_key}"
+        path_key = str(self.data_path.resolve()) + "||" + ch_key + filter_key
         fingerprint = hashlib.md5(path_key.encode()).hexdigest()[:12]
         return scratch / os.getenv("SLURM_JOB_ID", "viscy_cache") / f"{self.data_path.name}_{fingerprint}"
 
+    @staticmethod
+    def _torch_dtype_from_numpy(np_dtype: np.dtype | str) -> torch.dtype:
+        """Convert a numpy dtype to its matching torch dtype."""
+        return torch.from_numpy(np.empty((), dtype=np.dtype(np_dtype))).dtype
+
     def prepare_data(self):
-        """Preload FOVs to memory-mapped tensors on local scratch."""
-        if not self.preload:
+        """Stage FOVs to a memory-mapped tensor buffer on local scratch.
+
+        Runs only when the current stage is fit or validate. Predict
+        and test stages skip mmap staging entirely (they read from
+        zarr directly and ignore FOV filters). Manual
+        ``dm.prepare_data()`` calls without a trainer attached (or
+        with a trainer whose ``state.fn`` is ``None``) also run —
+        preserving existing standalone usage.
+        """
+        if not self.mmap_preload:
+            return
+        if not self._should_run_mmap_preload():
             return
         if MemoryMappedTensor is None:
-            raise ImportError("tensordict is required for preload=True. Install with: pip install 'viscy-data[mmap]'")
+            raise ImportError(
+                "tensordict is required for mmap_preload=True. Install with: pip install 'viscy-data[mmap]'"
+            )
         cache_dir = self._mmap_cache_dir
         done_marker = cache_dir / ".done"
         if done_marker.exists():
-            _logger.info(f"Preload cache found at {cache_dir}, skipping.")
+            _logger.info(f"Mmap preload cache found at {cache_dir}, skipping.")
             return
         # Clean up partial files from a previously killed preload.
         # MemoryMappedTensor.empty() raises RuntimeError if the file exists,
         # so stale .mmap files must be removed before we can recreate them.
         if cache_dir.exists():
-            _logger.warning(f"Partial preload cache at {cache_dir} (no .done marker), rebuilding.")
+            _logger.warning(f"Partial mmap preload cache at {cache_dir} (no .done marker), rebuilding.")
             shutil.rmtree(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
         try:
             all_ch = list(self.source_channel) + list(self.target_channel)
             with open_ome_zarr(self.data_path, mode="r") as plate:
-                positions = [pos for _, pos in plate.positions()]
+                # Honor include/exclude_fov_names: cache only the positions
+                # that will actually be iterated during fit, so the buffer
+                # layout matches what _setup_fit's orig_positions expects.
+                positions = self._filtered_positions(plate)
                 ch_idx = [positions[0].get_channel_index(c) for c in all_ch]
                 arr0 = positions[0][self.array_key]
-                T = arr0.frames
-                total_shape = (len(positions) * T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
+                # Per-FOV T may vary across positions in a pooled zarr (e.g.,
+                # a549 mantis pools mix T=7 and T=10 conditions). Compute a
+                # cumulative offset table so each FOV occupies its own slab
+                # in the mmap buffer.
+                offsets = self._fov_t_offsets(positions, self.array_key)
+                total_T = offsets[-1]
+                total_shape = (total_T, len(ch_idx), arr0.slices, arr0.height, arr0.width)
                 data_path = cache_dir / "data.mmap"
-                data_buf = MemoryMappedTensor.empty(total_shape, dtype=torch.float32, filename=data_path)
+                data_buf = MemoryMappedTensor.empty(
+                    total_shape,
+                    dtype=self._torch_dtype_from_numpy(arr0.dtype),
+                    filename=data_path,
+                )
 
                 def _write_fov(i_pos):
                     i, pos = i_pos
-                    data_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                        pos[self.array_key].oindex[:, ch_idx, :].astype(np.float32)
+                    # Read each channel as a basic slice and concatenate.
+                    # zarr's oindex builds CoordinateIndexer, which materializes
+                    # 5 dense int64 broadcast arrays sized prod(out_shape) per
+                    # call (see zarr/core/indexing.py CoordinateIndexer.__init__),
+                    # peaking at ~7x the output size for slab selections on
+                    # sharded arrays. Per-channel basic indexing routes through
+                    # BasicIndexer, which is proportional to the output only.
+                    src = np.concatenate(
+                        [np.asarray(pos[self.array_key][:, c : c + 1, :, :, :]) for c in ch_idx],
+                        axis=1,
                     )
+                    data_buf[offsets[i] : offsets[i + 1]] = torch.from_numpy(src)
 
                 n_threads = min(len(positions), 16)
-                _logger.info(f"Preloading {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
+                _logger.info(f"Mmap preload: staging {len(positions)} FOVs to {cache_dir} ({n_threads} threads)...")
                 with ThreadPoolExecutor(max_workers=n_threads) as pool:
                     list(pool.map(_write_fov, enumerate(positions)))
                 if self.fg_mask_key:
@@ -241,23 +317,30 @@ class HCSDataModule(LightningDataModule):
                     mask_ch_idx = ForegroundMaskSupport.resolve_mask_ch_indices(
                         mask_arr_0.channels, arr0.channels, n_target, target_ch_idx, self.fg_mask_key
                     )
-                    mask_shape = (len(positions) * T, n_target, arr0.slices, arr0.height, arr0.width)
+                    # fg_mask must align row-for-row with the data buffer.
+                    # Use the same offsets table from the data array, not a
+                    # fresh one from the mask array; if they ever drift the
+                    # split is silently wrong.
+                    mask_shape = (total_T, n_target, arr0.slices, arr0.height, arr0.width)
                     mask_buf = MemoryMappedTensor.empty(
                         mask_shape,
-                        dtype=torch.float32,
+                        dtype=self._torch_dtype_from_numpy(mask_arr_0.dtype),
                         filename=cache_dir / "fg_mask.mmap",
                     )
 
                     def _write_mask(i_pos):
                         i, pos = i_pos
-                        mask_buf[i * T : (i + 1) * T] = torch.from_numpy(
-                            pos[self.fg_mask_key].oindex[:, mask_ch_idx, :].astype(np.float32)
+                        # Same per-channel BasicIndexer pattern as _write_fov above.
+                        mask_src = np.concatenate(
+                            [np.asarray(pos[self.fg_mask_key][:, c : c + 1, :, :, :]) for c in mask_ch_idx],
+                            axis=1,
                         )
+                        mask_buf[offsets[i] : offsets[i + 1]] = torch.from_numpy(mask_src)
 
                     with ThreadPoolExecutor(max_workers=n_threads) as pool:
                         list(pool.map(_write_mask, enumerate(positions)))
             done_marker.touch()
-            _logger.info("Preload complete.")
+            _logger.info("Mmap preload complete.")
         except BaseException:
             # Clean up so the next attempt starts fresh instead of hitting
             # RuntimeError from MemoryMappedTensor.empty() on existing files.
@@ -265,11 +348,43 @@ class HCSDataModule(LightningDataModule):
                 shutil.rmtree(cache_dir)
             raise
 
+    @staticmethod
+    def _fov_t_offsets(positions: list[Position], array_key: str) -> list[int]:
+        """Cumulative T-axis offsets per FOV.
+
+        Pooled zarrs (e.g., mantis_v1 a549 SEC61B / TOMM20) mix FOVs with
+        different ``T`` along axis 0. The mmap buffer concatenates FOVs
+        along that axis, so each FOV needs its own ``[start, end)`` slot
+        rather than a uniform ``i*T``. This helper produces those slots
+        from the on-disk array shape — cheap because ``arr.frames`` only
+        reads zarr metadata.
+
+        Parameters
+        ----------
+        positions : list[Position]
+            Positions in the order they will be written to the buffer.
+        array_key : str
+            Array key whose first axis defines T per FOV.
+
+        Returns
+        -------
+        list[int]
+            ``len(positions) + 1`` offsets where ``offsets[i]`` is the
+            buffer row of FOV ``i`` and ``offsets[-1]`` is the total
+            number of rows.
+        """
+        offsets = [0]
+        for pos in positions:
+            offsets.append(offsets[-1] + pos[array_key].frames)
+        return offsets
+
     def _open_mmap_buffer(
         self,
         filename: Path,
         positions: list[Position],
+        offsets: list[int],
         n_channels: int | None = None,
+        array_key: str | None = None,
     ) -> "MemoryMappedTensor":
         """Open an existing mmap buffer created by prepare_data().
 
@@ -278,40 +393,55 @@ class HCSDataModule(LightningDataModule):
         filename : Path
             Path to the ``.mmap`` file.
         positions : list[Position]
-            All positions in the plate (used to compute buffer shape).
+            All positions in the plate, used only to read dtype and
+            spatial dims from ``positions[0][array_key]``.
+        offsets : list[int]
+            Cumulative T offsets from :meth:`_fov_t_offsets`. The buffer
+            is sized as ``(offsets[-1], C, Z, Y, X)``.
         n_channels : int or None
             Number of channels in the buffer. Defaults to
             ``len(source_channel) + len(target_channel)``.
+        array_key : str or None
+            Array key whose dtype and spatial dims (Z, Y, X) describe
+            this buffer's layout. Defaults to ``self.array_key``. Only
+            governs dtype + spatial shape — T offsets must come from
+            ``self.array_key`` via the ``offsets`` argument because both
+            data and fg_mask buffers are written with that layout in
+            ``prepare_data``.
 
         Returns
         -------
         MemoryMappedTensor
-            Memory-mapped tensor of shape ``(N*T, C, Z, Y, X)``.
+            Memory-mapped tensor of shape ``(sum(T_i), C, Z, Y, X)``.
         """
-        arr_shape = positions[0][self.array_key].shape
-        T = arr_shape[0]
+        dtype_key = array_key if array_key is not None else self.array_key
+        dtype_arr = positions[0][dtype_key]
         C = n_channels or (len(self.source_channel) + len(self.target_channel))
-        total_shape = (len(positions) * T, C, *arr_shape[2:])
-        return MemoryMappedTensor.from_filename(filename, dtype=torch.float32, shape=total_shape)
+        total_shape = (offsets[-1], C, *dtype_arr.shape[2:])
+        return MemoryMappedTensor.from_filename(
+            filename,
+            dtype=self._torch_dtype_from_numpy(dtype_arr.dtype),
+            shape=total_shape,
+        )
 
     @staticmethod
-    def _fov_views(buffer: torch.Tensor, positions: list[Position]) -> list[torch.Tensor]:
+    def _fov_views(buffer: torch.Tensor, offsets: list[int]) -> list[torch.Tensor]:
         """Split a contiguous mmap buffer into per-FOV tensor views.
 
         Parameters
         ----------
         buffer : Tensor
-            Contiguous buffer of shape ``(N*T, C, Z, Y, X)``.
-        positions : list[Position]
-            All positions (used to determine T per FOV).
+            Contiguous buffer of shape ``(sum(T_i), C, Z, Y, X)``.
+        offsets : list[int]
+            Cumulative T offsets from :meth:`_fov_t_offsets` matching
+            the order ``prepare_data`` wrote.
 
         Returns
         -------
         list[Tensor]
-            Per-FOV views, each of shape ``(T, C, Z, Y, X)``.
+            Per-FOV views, each of shape ``(T_i, C, Z, Y, X)``.
         """
-        T = buffer.shape[0] // len(positions)
-        return [buffer[i * T : (i + 1) * T] for i in range(len(positions))]
+        return [buffer[offsets[i] : offsets[i + 1]] for i in range(len(offsets) - 1)]
 
     @property
     def _base_dataset_settings(self) -> dict:
@@ -324,6 +454,14 @@ class HCSDataModule(LightningDataModule):
         if self.fg_mask_key is not None:
             settings["fg_mask_key"] = self.fg_mask_key
         return settings
+
+    def _keep_position(self, name: str) -> bool:
+        """Apply include/exclude FOV filters to a plate-relative position name."""
+        if self.include_fov_names is not None and name not in self.include_fov_names:
+            return False
+        if self.exclude_fov_names is not None and name in self.exclude_fov_names:
+            return False
+        return True
 
     @property
     def _train_filter_settings(self) -> dict:
@@ -355,12 +493,75 @@ class HCSDataModule(LightningDataModule):
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions)
 
+    def _should_run_mmap_preload(self) -> bool:
+        """Return True when mmap preload should run for the current stage.
+
+        ``prepare_data`` is stage-agnostic in Lightning's contract, but
+        ``mmap_preload`` is a fit/validate-only optimization:
+        ``_setup_predict`` and ``_setup_test`` bypass the buffer
+        entirely. Skip the staging work (and its strict
+        ``_filtered_positions`` check) for predict/test runs.
+
+        Defaults to True when no trainer is attached or ``state.fn``
+        is ``None`` (a trainer constructed but not yet driving a
+        subcommand) so manual pipelines and pre-subcommand attach
+        orders behave as before.
+        """
+        if self.trainer is None:
+            return True
+        return self.trainer.state.fn in (None, TrainerFn.FITTING, TrainerFn.VALIDATING)
+
+    def _check_mmap_cache_ready(self, cache_dir: Path) -> None:
+        """Raise with an actionable message if the mmap cache isn't consumable.
+
+        Turns three opaque failure modes of ``_open_mmap_buffer`` into
+        explicit errors before the buffer is re-opened in ``_setup_fit``:
+
+        1. tensordict not installed (``MemoryMappedTensor is None``) —
+           manual ``dm.setup("fit")`` bypasses ``prepare_data``'s import
+           check, so the missing-extra case would otherwise surface as
+           an ``AttributeError`` on ``None.from_filename(...)``.
+        2. ``.done`` marker missing — ``prepare_data`` was never called
+           or was interrupted before the marker was written.
+        3. ``.done`` present but ``data.mmap`` (or ``fg_mask.mmap`` when
+           ``fg_mask_key`` is set) missing — partial cleanup of the
+           cache dir (e.g. interrupted ``rm -rf``).
+        """
+        if MemoryMappedTensor is None:
+            raise ImportError(
+                "tensordict is required for mmap_preload=True. Install with: pip install 'viscy-data[mmap]'"
+            )
+        if not (cache_dir / ".done").exists():
+            raise RuntimeError(
+                f"mmap_preload=True but cache not ready at {cache_dir}. "
+                "Call dm.prepare_data() before dm.setup('fit'), or set mmap_preload=False."
+            )
+        required = [cache_dir / "data.mmap"]
+        if self.fg_mask_key is not None:
+            required.append(cache_dir / "fg_mask.mmap")
+        missing = [p.name for p in required if not p.exists()]
+        if missing:
+            raise RuntimeError(
+                f"mmap_preload cache corrupted at {cache_dir}: "
+                f"expected files missing ({missing}). "
+                "Delete the cache dir and re-run dm.prepare_data()."
+            )
+
+    def _filtered_positions(self, plate: Plate) -> list[Position]:
+        """Return plate positions kept by include/exclude_fov_names, raising if empty."""
+        positions = [pos for name, pos in plate.positions() if self._keep_position(name)]
+        if not positions:
+            raise ValueError(
+                f"No positions left in {self.data_path} after applying include_fov_names / exclude_fov_names filters"
+            )
+        return positions
+
     def _setup_fit(self, dataset_settings: dict):
         """Set up the training and validation datasets."""
         train_transform, val_transform = self._fit_transform()
         dataset_settings["channels"]["target"] = self.target_channel
         with open_ome_zarr(self.data_path, mode="r") as plate:
-            orig_positions = [pos for _, pos in plate.positions()]
+            orig_positions = self._filtered_positions(plate)
 
         # shuffle positions, randomness is handled globally
         shuffled_indices = self._set_fit_global_state(len(orig_positions))
@@ -376,15 +577,17 @@ class HCSDataModule(LightningDataModule):
             expanded_z -= expanded_z % 2
         train_dataset_settings["z_window_size"] = expanded_z
         train_dataset_settings.update(self._train_filter_settings)
-        # Preload mmap views — buffer stores FOVs in original plate order, so
-        # we create views from orig_positions, then reindex by shuffled_indices.
+        # Mmap views — buffer stores FOVs in filtered plate order, so we
+        # create views from orig_positions, then reindex by shuffled_indices.
         train_preloaded = None
         val_preloaded = None
-        if self.preload:
+        if self.mmap_preload:
             cache_dir = self._mmap_cache_dir
+            self._check_mmap_cache_ready(cache_dir)
+            offsets = self._fov_t_offsets(orig_positions, self.array_key)
             all_views = self._fov_views(
-                self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions),
-                orig_positions,
+                self._open_mmap_buffer(cache_dir / "data.mmap", orig_positions, offsets),
+                offsets,
             )
             shuffled_views = [all_views[i] for i in shuffled_indices]
             train_preloaded = shuffled_views[:num_train_fovs]
@@ -402,15 +605,17 @@ class HCSDataModule(LightningDataModule):
             preloaded_fovs=val_preloaded,
             **dataset_settings,
         )
-        if self.preload and self.fg_mask_key:
+        if self.mmap_preload and self.fg_mask_key:
             n_target = len(self.target_channel)
             all_mask_views = self._fov_views(
                 self._open_mmap_buffer(
                     cache_dir / "fg_mask.mmap",
                     orig_positions,
+                    offsets,
                     n_channels=n_target,
+                    array_key=self.fg_mask_key,
                 ),
-                orig_positions,
+                offsets,
             )
             shuffled_mask = [all_mask_views[i] for i in shuffled_indices]
             self.train_dataset.fg_mask_support._preloaded_masks = shuffled_mask[:num_train_fovs]
@@ -450,12 +655,10 @@ class HCSDataModule(LightningDataModule):
                     plate_path = self.data_path.parent.parent.parent
                     fov_name = self.data_path.relative_to(plate_path).as_posix()
                     with open_ome_zarr(plate_path, mode="r") as plate:
-                        positions = [plate[fov_name]]
+                        return [plate[fov_name]]
                 except (OSError, ValueError):
                     raise FileNotFoundError("Parent HCS store not found for single FOV input.")
-            elif isinstance(dataset, Plate):
-                positions = [p for _, p in dataset.positions()]
-        return positions
+            return self._filtered_positions(dataset)
 
     def _setup_predict(
         self,
@@ -477,8 +680,9 @@ class HCSDataModule(LightningDataModule):
     def on_after_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         """Apply GPU augmentations and validate output spatial shape.
 
-        Training: applies ``gpu_augmentations`` if configured, then validates
-        that ``source`` spatial dimensions match ``(z_window_size, *yx_patch_size)``.
+        Training: applies ``gpu_augmentations`` if configured. When no
+        ``gpu_augmentations`` are set, validates that ``source`` spatial
+        dimensions match ``(z_window_size, *yx_patch_size)``.
         Validation: applies ``val_gpu_augmentations`` if configured.
         Test/predict: pass through unchanged.
 
@@ -501,8 +705,9 @@ class HCSDataModule(LightningDataModule):
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
             if "fg_mask" in batch:
                 batch["fg_mask"] = batch["fg_mask"][:, :, slice(z_index, z_index + 1)]
-        # Validate spatial shape during training
-        if self.trainer and self.trainer.training and "source" in batch:
+        # Validate spatial shape during training (skip when gpu_augmentations
+        # handle cropping — they may intentionally reduce Z or YX).
+        if self.trainer and self.trainer.training and self._gpu_augmentations is None and "source" in batch:
             expected = (self.z_window_size, self.yx_patch_size[0], self.yx_patch_size[1])
             actual = tuple(batch["source"].shape[2:])
             if actual != expected:
@@ -598,7 +803,10 @@ class HCSDataModule(LightningDataModule):
                     # this trait does not have any concrete interface
                     # so this attribute may not be the same for other transforms
                     num_samples = aug.cropper.num_samples
-                    if self.batch_size % num_samples != 0:
+                    # Skip when wrapped in BatchedConcatDataModule — its
+                    # train_dataloader does not divide batch_size by
+                    # num_samples, so the constraint does not apply.
+                    if not self._is_batched_concat_child and self.batch_size % num_samples != 0:
                         raise ValueError(
                             "Batch size must be divisible by `num_samples` per stack. "
                             f"Got batch size {self.batch_size} and "

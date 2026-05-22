@@ -1,0 +1,8 @@
+# Canonical CELL-DINO checkpoint for organelle virtual-staining eval.
+# Channel-adaptive ViT-L/16 pretrained on cell images (HPA) — matches the
+# CellDinoModel wrapper's single-channel ViT-L/16 contract (img_size=224,
+# patch_size=16, init_values=1.0, block_chunks=4). Ed Hirata's weights tree
+# at /hpc/projects/organelle_phenotyping/models/CELL-DINO/model_weights/.
+weights_path: /hpc/projects/organelle_phenotyping/models/CELL-DINO/model_weights/weights/channel_adaptive_dino_vitl16_pretrain_cells-ef7c17ff.pth
+img_size: 224
+patch_size: 16

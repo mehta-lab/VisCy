@@ -1,0 +1,21 @@
+# pix2pix3d_unetvit predict overlay.
+# Binds the pix2pix3d_unetvit model recipe + predict trainer recipe, then
+# layers predict-time model hparams and data-loader settings.
+# Predict-time normalizations and data_path are leaf-owned (leaf overrides
+# target-inherited values to match each organelle's test_cropped store).
+# Predict path uses self.generator only via DynacellGAN.predict_step; the
+# discriminator is not exposed at inference.
+base:
+  - ../../../../../../recipes/models/pix2pix3d_unetvit.yml
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    predict_method: full_image
+    predict_overlap: [4, 256, 256]
+data:
+  init_args:
+    z_window_size: 8
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]

@@ -10,6 +10,7 @@ import torch
 from lightning.pytorch import LightningDataModule
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
 from monai.data import ThreadDataLoader
+from monai.data.utils import no_collation
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from viscy_data._utils import _collate_samples
@@ -146,6 +147,25 @@ class BatchedConcatDataset(ConcatDataset):
             sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return dataset_idx, sample_idx
 
+    @staticmethod
+    def _batched_get(dataset: Dataset, indices: list[int]) -> dict[str, torch.Tensor]:
+        """Return a batched sample dict from *dataset* for the given indices.
+
+        Fast path: delegate to ``dataset.__getitems__`` when implemented
+        (e.g. ``TripletDataset``, which amortizes zarr/tensorstore I/O
+        across a batch).
+
+        Fallback: call ``__getitem__`` per index and collate with
+        ``_collate_samples``. This lets datasets with single-sample
+        semantics (e.g. ``SlidingWindowDataset``, whose per-sample retry
+        logic for nonzero-fraction filtering doesn't map cleanly to a
+        batched read) participate in ``BatchedConcatDataModule`` without
+        having to duplicate their read path as a batched method.
+        """
+        if hasattr(dataset, "__getitems__"):
+            return dataset.__getitems__(indices)
+        return _collate_samples([dataset[i] for i in indices])
+
     def __getitems__(self, indices: list[int]) -> list[dict[str, torch.Tensor]]:
         """Return micro-batches grouped by constituent dataset."""
         grouped_indices = defaultdict(list)
@@ -156,7 +176,7 @@ class BatchedConcatDataset(ConcatDataset):
 
         micro_batches = []
         for dataset_idx, sample_indices in grouped_indices.items():
-            micro_batch = self.datasets[dataset_idx].__getitems__(sample_indices)
+            micro_batch = self._batched_get(self.datasets[dataset_idx], sample_indices)
             micro_batch["_dataset_idx"] = dataset_idx
             micro_batches.append(micro_batch)
 
@@ -174,6 +194,18 @@ class ConcatDataModule(LightningDataModule):
     ----------
     data_modules : Sequence[LightningDataModule]
         Data modules to concatenate.
+
+    Notes
+    -----
+    Trainer propagation to children happens in both ``prepare_data`` and
+    ``setup`` because ``prepare_data_per_node=True`` causes Lightning to
+    invoke ``prepare_data`` only on rank 0 of each node. Without the
+    ``setup`` propagation, non-rank-0 children keep ``self.trainer = None``
+    and silently skip trainer-gated paths such as
+    ``HCSDataModule.on_after_batch_transfer``'s
+    ``if self.trainer and self.trainer.training`` guard, producing
+    rank-asymmetric failures where non-rank-0 ranks receive un-cropped
+    batches because ``gpu_augmentations`` did not run.
     """
 
     _ConcatDataset = ConcatDataset
@@ -205,6 +237,7 @@ class ConcatDataModule(LightningDataModule):
             raise NotImplementedError("Only fit stage is supported")
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.setup(stage)
             if patches := getattr(dm, "train_patches_per_stack", 0):
                 if self.train_patches_per_stack == 0:
@@ -246,31 +279,57 @@ class ConcatDataModule(LightningDataModule):
 
 
 class BatchedConcatDataModule(ConcatDataModule):
-    """Concatenated data module with batched micro-batch GPU transforms."""
+    """Concatenated data module with batched micro-batch GPU transforms.
+
+    Under DDP, attaches ``ShardedDistributedSampler`` so each rank
+    iterates a disjoint shard while preserving the existing
+    micro-batch-to-single-batch contract.
+    """
 
     _ConcatDataset = BatchedConcatDataset
 
+    def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+        """Mark each child as a BatchedConcat child before parent setup.
+
+        ``train_dataloader`` here uses ``batch_size`` as-is (loads N
+        indices, each yielding ``num_samples`` patches via the child's
+        ``RandWeightedCropd``), so the divisibility constraint enforced
+        by ``HCSDataModule._train_transform`` for standalone use does
+        not apply. Setting the flag on each child before calling
+        ``super().setup`` (which iterates children's ``setup``) lets
+        the check skip itself.
+        """
+        for dm in self.data_modules:
+            dm._is_batched_concat_child = True
+        super().setup(stage)
+
+    def _maybe_sampler(self, dataset: Dataset, shuffle: bool) -> ShardedDistributedSampler | None:
+        """Return a distributed sampler if DDP is initialized, else None."""
+        return ShardedDistributedSampler(dataset, shuffle=shuffle) if torch.distributed.is_initialized() else None
+
     def train_dataloader(self):
-        """Return batched concatenated training data loader."""
+        """Return batched concatenated training data loader with optional DDP sampling."""
+        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         return ThreadDataLoader(
             self.train_dataset,
-            use_thread_workers=True,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False if sampler else True,
+            sampler=sampler,
             drop_last=True,
-            collate_fn=lambda x: x,
+            collate_fn=no_collation,
             **self._dataloader_kwargs(),
         )
 
     def val_dataloader(self):
-        """Return batched concatenated validation data loader."""
+        """Return batched concatenated validation data loader with optional DDP sampling."""
+        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         return ThreadDataLoader(
             self.val_dataset,
-            use_thread_workers=True,
             batch_size=self.batch_size,
             shuffle=False,
+            sampler=sampler,
             drop_last=False,
-            collate_fn=lambda x: x,
+            collate_fn=no_collation,
             **self._dataloader_kwargs(),
         )
 
@@ -295,15 +354,23 @@ class BatchedConcatDataModule(ConcatDataModule):
             processed_micro_batches.append(processed_micro_batch)
         combined_batch = {}
         for key in processed_micro_batches[0].keys():
-            if isinstance(processed_micro_batches[0][key], list):
+            first_val = processed_micro_batches[0][key]
+            if isinstance(first_val, list):
                 combined_batch[key] = []
                 for micro_batch in processed_micro_batches:
                     if key in micro_batch:
                         combined_batch[key].extend(micro_batch[key])
-            else:
+            elif isinstance(first_val, torch.Tensor):
                 tensors_to_concat = [micro_batch[key] for micro_batch in processed_micro_batches if key in micro_batch]
                 if tensors_to_concat:
                     combined_batch[key] = torch.cat(tensors_to_concat, dim=0)
+            # Non-tensor non-list values (e.g. ``norm_meta`` dicts of per-channel
+            # stats, ``index`` tuples of (img_name, t, z)) come from per-dataset
+            # metadata. Joint training across heterogeneous children has no
+            # well-defined combined semantic — channels and FOV identifiers do
+            # not align across zarrs — and Lightning's training/validation only
+            # reads ``source``/``target`` tensors. Drop the key from the joint
+            # batch instead of trying to ``torch.cat`` a dict.
 
         return combined_batch
 
@@ -315,6 +382,12 @@ class CachedConcatDataModule(LightningDataModule):
     ----------
     data_modules : Sequence[LightningDataModule]
         Data modules to concatenate.
+
+    Notes
+    -----
+    Trainer propagation to children happens in both ``prepare_data`` and
+    ``setup`` for the same reason as ``ConcatDataModule`` — see that
+    class's docstring.
     """
 
     def __init__(self, data_modules: Sequence[LightningDataModule]):
@@ -341,6 +414,7 @@ class CachedConcatDataModule(LightningDataModule):
             raise NotImplementedError("Only fit stage is supported")
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.setup(stage)
             if patches := getattr(dm, "train_patches_per_stack", 1):
                 if self.train_patches_per_stack == 0:

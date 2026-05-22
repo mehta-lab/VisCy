@@ -1,11 +1,42 @@
 """Test fixtures for dynacell application tests."""
 
+from importlib.resources import files
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
 from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
+
+# Bundled manifest registry. Resolver auto-discovers via the
+# ``dynacell.manifest_roots`` entry point declared in pyproject.toml, so
+# tests don't need to set ``DYNACELL_MANIFEST_ROOTS`` themselves. This
+# constant is kept for tests that need to construct an explicit roots
+# argument (e.g., precedence tests that override the env var).
+FIXTURE_MANIFEST_ROOT = Path(str(files("dynacell._manifests")))
+
+
+@pytest.fixture
+def fixture_manifest_root() -> Path:
+    """Path to the bundled manifest registry (``aics-hipsc`` etc.)."""
+    return FIXTURE_MANIFEST_ROOT
+
+
+@pytest.fixture
+def clear_global_hydra():
+    """Reset Hydra's global singleton before and after the test.
+
+    Opt-in rather than autouse: Hydra tests need this, non-Hydra tests
+    don't, and an autouse clear runs for every test in the suite.
+    """
+    from hydra.core.global_hydra import GlobalHydra
+
+    GlobalHydra.instance().clear()
+    yield
+    GlobalHydra.instance().clear()
+
 
 # UNetViT3D test spatial sizes.
 # With dims=[32,64,128], num_res_block=[2,2], stride (1,2,2):

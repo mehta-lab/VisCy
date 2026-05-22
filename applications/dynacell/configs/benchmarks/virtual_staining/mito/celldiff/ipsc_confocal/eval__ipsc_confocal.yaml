@@ -1,0 +1,13 @@
+# @package _global_
+# Benchmark eval leaf: Mitochondria (TOMM20) predicted by CellDiff on iPSC confocal.
+defaults:
+  - override /target: mito_tomm20
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_celldiff_iterative.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_tomm20_celldiff_iterative

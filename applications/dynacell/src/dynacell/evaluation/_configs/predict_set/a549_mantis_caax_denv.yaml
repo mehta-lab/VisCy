@@ -1,0 +1,5 @@
+# @package _global_
+# Predict set group: A549 mantis CAAX on DENV.
+benchmark:
+  dataset_ref:
+    dataset: a549-mantis-caax-denv

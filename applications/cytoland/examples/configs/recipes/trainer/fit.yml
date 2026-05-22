@@ -1,0 +1,22 @@
+# Topology (accelerator / devices / strategy / num_nodes) lives in
+# recipes/topology/*.yml. Precision lives in model overlays.
+# max_epochs and max_steps also live in model overlays or leaves.
+seed_everything: 42
+trainer:
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: cytoland
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true

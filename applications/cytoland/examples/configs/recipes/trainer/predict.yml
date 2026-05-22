@@ -1,0 +1,10 @@
+# Unified predict trainer recipe.
+# Topology lives in recipes/topology/single_gpu.yml.
+trainer:
+  precision: 32-true
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: #TODO output zarr path
+return_predictions: false
+ckpt_path: #TODO checkpoint path

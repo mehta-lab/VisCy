@@ -1,0 +1,22 @@
+# CellDiff flow-matching: predict from checkpoint.
+# Usage: cd applications/dynacell/configs/examples && uv run dynacell predict -c celldiff/predict.yml
+base:
+  - ../../recipes/trainer/predict.yml
+  - ../../recipes/topology/single_gpu.yml
+  - ../../recipes/data/hcs_phase_fluor_3d.yml
+  - ../../recipes/models/celldiff_fm.yml
+
+model:
+  init_args:
+    num_generate_steps: 100
+#    predict_method: generate
+    predict_method: iterative  # denoise, generate, sliding_window (non-overlapping), or iterative (overlapping)
+    predict_overlap: [4, 256, 256]
+    ckpt_path: #TODO checkpoint path
+
+data:
+  init_args:
+    data_path: #TODO HCS OME-Zarr test data
+    z_window_size: 40
+    batch_size: 1
+    yx_patch_size: [512, 512]

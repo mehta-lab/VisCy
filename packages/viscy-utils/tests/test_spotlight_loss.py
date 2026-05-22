@@ -5,6 +5,11 @@ import torch
 
 from viscy_utils.losses.spotlight import SpotlightLoss, _otsu_threshold, _tunable_sigmoid
 
+_skip_no_bf16 = pytest.mark.skipif(
+    not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
+    reason="CUDA + bf16 tensor-core support required",
+)
+
 
 def test_tunable_sigmoid_range():
     """Output is clamped to [0, 1]."""
@@ -269,3 +274,48 @@ def test_spotlight_loss_invalid_params():
         SpotlightLoss(lambda_mse=1.0)
     with pytest.raises(ValueError, match="eps"):
         SpotlightLoss(eps=0)
+
+
+@_skip_no_bf16
+def test_spotlight_loss_forward_under_bf16_autocast():
+    """Forward+backward under bf16 autocast produces finite scalar + grads.
+
+    Verifies the @torch.amp.custom_fwd(cast_inputs=fp32) decorator removal
+    didn't break the autocast path. SpotlightLoss has no conv-heavy ops;
+    autocast policy already promotes the squared error / reductions /
+    divisions to fp32, so the decorator was redundant.
+    """
+    loss_fn = SpotlightLoss().cuda()
+    torch.manual_seed(0)
+    pred = torch.rand(2, 1, 4, 32, 32, device="cuda", requires_grad=True)
+    target = torch.rand(2, 1, 4, 32, 32, device="cuda")
+
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        loss = loss_fn(pred, target)
+    loss.backward()
+
+    assert torch.isfinite(loss).item()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all().item()
+
+
+@_skip_no_bf16
+def test_spotlight_loss_autocast_matches_fp32_baseline():
+    """No-decorator autocast result tracks the explicit-fp32 baseline.
+
+    Drift is bounded by rtol=1e-3, atol=1e-3 — SpotlightLoss has no convs
+    (sigmoid is the only autocast-affected op) and the autocast policy
+    promotes the precision-sensitive parts to fp32; in practice the
+    measured drift is 0.0.
+    """
+    loss_fn = SpotlightLoss().cuda()
+    torch.manual_seed(1)
+    pred = torch.rand(2, 1, 4, 32, 32, device="cuda")
+    target = torch.rand(2, 1, 4, 32, 32, device="cuda")
+
+    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        loss_autocast = loss_fn(pred, target)
+
+    loss_fp32 = loss_fn(pred.float(), target.float())
+
+    torch.testing.assert_close(loss_autocast.float(), loss_fp32, rtol=1e-3, atol=1e-3)

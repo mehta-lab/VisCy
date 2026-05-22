@@ -4,7 +4,6 @@ Provides a configurable combination of L1, L2, and MS-DSSIM losses
 for image reconstruction tasks, adapted from Zhao et al.
 """
 
-import torch
 import torch.nn.functional as F
 from torch import nn
 
@@ -40,7 +39,6 @@ class MixedLoss(nn.Module):
         self.l2_alpha = l2_alpha
         self.ms_dssim_alpha = ms_dssim_alpha
 
-    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, preds, target):
         """Compute the mixed reconstruction loss.
 

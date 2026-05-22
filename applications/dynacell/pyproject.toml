@@ -31,16 +31,69 @@ dynamic = [ "version" ]
 dependencies = [
   "lightning>=2.3",
   "monai",
-  "viscy-data",
+  "omegaconf",
+  "pydantic>=2",
+  "viscy-data[mmap]",
   "viscy-models[celldiff]",
   "viscy-transforms",
   "viscy-utils",
 ]
-
+optional-dependencies.eval = [
+  "accelerate>=1.13",
+  "aicsmlsegment",
+  "aicssegmentation",
+  "cellpose",
+  "cubic==0.7.0a2",
+  "dynaclr",
+  "hydra-core>=1.2",
+  "iohub",
+  "itk",
+  "matplotlib",
+  "microssim @ git+https://github.com/juglab/microssim.git@8bccb17d",
+  "pandas",
+  "scikit-image",
+  "scikit-learn>=1.4",
+  "scipy",
+  "segmenter-model-zoo",
+  # Pinned to a commit on toshas/torch-fidelity master that includes MIND
+  # (commit a51aa64 "add Monge Inception Distance") on top of v0.4.0.
+  # Upgrade path: drop the `@5e211a9` suffix and pin a tagged release once
+  # upstream cuts one that includes MIND (target: `torch-fidelity>=0.5.0`).
+  "torch-fidelity @ git+https://github.com/toshas/torch-fidelity.git@5e211a9",
+  "tqdm",
+  "transformers",
+]
+optional-dependencies.eval_gpu = [
+  "cucim-cu12",
+  "cupy-cuda12x",
+]
+optional-dependencies.preprocess = [
+  "iohub",
+  "tqdm",
+]
+optional-dependencies.report = [
+  "hydra-core>=1.2",
+  "matplotlib",
+  "pandas",
+]
+# Default fit/predict trainer logger in configs/recipes/trainer/fit.yml is
+# WandbLogger. Install with `pip install dynacell[wandb]` to satisfy that
+# default, or override `trainer.logger=null` (or supply your own logger
+# block) in the leaf / via `--override` to opt out of W&B entirely.
+optional-dependencies.wandb = [
+  "wandb",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
+
 scripts.dynacell = "dynacell.__main__:main_cli"
+
+# Default manifest registry. Auto-discovered by
+# ``dynacell.data.resolver.discover_manifest_roots`` so the resolver
+# works without ``DYNACELL_MANIFEST_ROOTS`` on a fresh clone. Override
+# the env var (or pass cli_roots) to point at a different registry.
+entry-points."dynacell.manifest_roots".dynacell_default = "dynacell._manifests"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
@@ -49,6 +102,9 @@ test = [
   "pytest-cov>=7",
   "tensorboard",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

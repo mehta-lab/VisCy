@@ -1,0 +1,45 @@
+# CellDiff r2 predict: membrane trained on A549 mantis, predicting against a549_mantis_caax_zikv test.
+# A549 manifest keys membrane by gene (`caax`); override the target_id so the resolver finds caax.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_caax_zikv.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: a549_mantis
+  predict_set: a549_mantis_caax_zikv
+  model_name: celldiff
+  experiment_id: membrane__a549_mantis__celldiff__a549_mantis_caax_zikv
+  dataset_ref:
+    target: caax
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff_r2/checkpoints/last.ckpt
+    predict_method: iterative
+    predict_overlap: [4, 256, 256]
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+    augmentations: []
+    z_window_size: 48
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_r2_a549trained_zikv.zarr
+
+launcher:
+  job_name: CELLDiff_A549_PRED_MEMB_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

@@ -1,0 +1,45 @@
+# FCMAE_VSCyto3D_Pretrained predict: nucleus (H2B) against ipsc_confocal test_cropped.
+#
+# Pinned to best-val checkpoint from training run J31475094
+# (val 0.3921, epoch 89). Run cancelled at epoch 172 — val plateaued
+# at epoch 89 and never recovered (~83 epochs without improvement).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: nucleus__ipsc_confocal__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_pretrained/checkpoints/epoch=89-step=28080.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_pretrained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_NUCL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

@@ -1,0 +1,62 @@
+mode: all                # "compute", "plot", or "all"
+input_zarr: ???          # Path to GT zarr (required)
+pred_zarr: null          # Path to prediction zarr (null = use input_zarr)
+
+# Channel selection (gt_channel/pred_channel override channel for each store)
+channel: nuclei          # Default channel name (used if gt_channel/pred_channel not set)
+gt_channel: null         # GT channel name override (defaults to channel)
+pred_channel: null       # Pred channel name override (defaults to channel)
+
+# Position filtering (null = all positions)
+positions: null
+
+# Voxel spacing fallback [z, y, x] in um (overridden by zarr metadata if available)
+spacing:
+  - 0.2
+  - 0.065
+  - 0.065
+
+output_dir: ./output
+
+fsc:
+  bin_delta: 1
+  angle_delta: 15
+  backend: hist
+  resample_isotropic: true
+  exclude_axis_angle: 5.0
+  resolution_threshold: fixed   # "fixed", "one-bit", "half-bit", "three-sigma"
+  threshold_value: 0.143        # 1/7 threshold (Koho et al. 2019)
+
+dcr:
+  num_radii: 100
+  num_highpass: 10
+  exclude_axis_angle: 5.0
+  use_sectioned: true
+  windowing: true               # Tukey edge apodization (false if external windowing)
+  refine: true                  # Two-pass refinement (NanoPyx strategy, 2D only)
+
+spectral_pcc:
+  bin_delta: 1.0
+  tail_fraction: 0.2
+  apodization: tukey
+  nbins_low: 3                 # exclude first N radial bins (DC/background)
+  frcw_threshold: 0.143
+  frcw_alpha: 2.0
+  frcw_nbins_low: 3
+  frcw_smooth_window: 5
+
+bandlimited:
+  modality: lightsheet
+  filter_order: 2
+  apodization: tukey
+  method: dcr                   # Cutoff estimation: "dcr", "frc", or "both"
+
+optics:
+  numerical_aperture: 1.35      # Detection objective NA
+  wavelength_emission: 0.698    # Cy5 center emission in um (same units as spacing)
+  modality: lightsheet
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

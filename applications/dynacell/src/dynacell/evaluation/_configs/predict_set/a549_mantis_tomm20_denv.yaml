@@ -1,0 +1,5 @@
+# @package _global_
+# Predict set group: A549 mantis TOMM20 on DENV.
+benchmark:
+  dataset_ref:
+    dataset: a549-mantis-tomm20-denv

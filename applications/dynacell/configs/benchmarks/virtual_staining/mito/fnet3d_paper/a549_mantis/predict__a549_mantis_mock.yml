@@ -1,0 +1,46 @@
+# FNet3D paper-baseline predict: mito trained on a549_mantis (tomm20),
+# predicting against a549-mantis-tomm20-mock test.
+# Best val-loss checkpoint from job 31965119 (epoch 248, val 0.8291). See
+# predict__ipsc_confocal.yml in this dir for full provenance.
+# Both iPSC and a549 manifests use `tomm20`; targets/mito_tomm20.yml handles
+# both natively, no dataset_ref override needed.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_tomm20_mock.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: a549_mantis
+  predict_set: a549_mantis_tomm20_mock
+  model_name: fnet3d_paper
+  experiment_id: mito__a549_mantis__fnet3d_paper__a549_mantis_tomm20_mock
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fnet3d_paper/checkpoints/epoch=248-step=126990.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fnet3d_paper_a549trained_mock.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_TOMM20_A549TR_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

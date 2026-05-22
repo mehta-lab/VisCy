@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -98,11 +99,37 @@ class VisCyCLI(LightningCLI):
         parser.set_defaults(defaults)
 
     def _parse_ckpt_path(self) -> None:
+        # For predict/test/validate: snapshot model init_args before checkpoint
+        # hparams overwrite them, then restore after.  This lets the user config
+        # win over stale checkpoint values (e.g. predict_method, predict_overlap).
+        #
+        # For fit: skip the snapshot so checkpoint hparams correctly override
+        # parser defaults (important for training resumption — lr, architecture,
+        # model_config, etc. must come from the checkpoint, not defaults).
+        subcommand = self.config.get("subcommand")
+        saved_init_args: dict = {}
+        if subcommand and subcommand != "fit":
+            sc = self.config.get(subcommand)
+            if isinstance(sc, Namespace):
+                model = sc.get("model")
+                if isinstance(model, Namespace):
+                    init_args = model.get("init_args")
+                    if isinstance(init_args, Namespace):
+                        saved_init_args = vars(init_args).copy()
         try:
-            return super()._parse_ckpt_path()
+            super()._parse_ckpt_path()
         except SystemExit:
             # FIXME: https://github.com/Lightning-AI/pytorch-lightning/issues/21255
             return None
+        if saved_init_args:
+            sc = self.config.get(subcommand)
+            if isinstance(sc, Namespace):
+                model = sc.get("model")
+                if isinstance(model, Namespace):
+                    init_args = model.get("init_args")
+                    if isinstance(init_args, Namespace):
+                        for key, val in saved_init_args.items():
+                            init_args[key] = val
 
     def before_instantiate_classes(self) -> None:
         """Apply shared config rewrites before Lightning object creation."""
@@ -116,61 +143,76 @@ def _setup_environment() -> None:
     torch.set_float32_matmul_precision("high")
 
 
-def _maybe_compose_config() -> None:
-    """Compose config from ``base:`` references if present.
+_RESERVED_TOP_LEVEL_KEYS = ("launcher", "benchmark")
 
-    Scans ``sys.argv`` for ``--config`` or ``-c``, loads the YAML file,
-    and if it contains a ``base:`` key, recursively merges the referenced
-    recipe fragments via :func:`viscy_utils.compose.load_composed_config`.
-    The composed config is written to a temp file and ``sys.argv`` is
-    updated in place.  Configs without ``base:`` pass through unchanged.
-    """
-    # Match "--config path", "-c path", "--config=path", or "-c=path".
-    config_idx: int | None = None
-    config_path_str: str | None = None
+
+def _find_config_arg() -> tuple[int | None, str | None]:
+    """Scan sys.argv for --config/-c and return (index, path)."""
     for i, a in enumerate(sys.argv):
         if a in ("--config", "-c"):
             if i + 1 < len(sys.argv):
-                config_idx = i
-                config_path_str = sys.argv[i + 1]
-            break
+                return i, sys.argv[i + 1]
+            return None, None
         for prefix in ("--config=", "-c="):
             if a.startswith(prefix):
-                config_idx = i
-                config_path_str = a[len(prefix) :]
-                break
-        if config_idx is not None:
-            break
+                return i, a[len(prefix) :]
+    return None, None
+
+
+def _replace_config_path_in_argv(config_idx: int, new_path: str) -> None:
+    """Rewrite sys.argv so --config/-c points at *new_path*."""
+    if "=" in sys.argv[config_idx]:
+        prefix = sys.argv[config_idx].split("=", 1)[0]
+        sys.argv[config_idx] = f"{prefix}={new_path}"
+    else:
+        sys.argv[config_idx + 1] = new_path
+
+
+def _maybe_compose_config(resolver: Callable[[dict], dict] | None = None) -> None:
+    """Compose config from ``base:`` references and strip reserved keys.
+
+    Scans ``sys.argv`` for ``--config`` or ``-c`` and loads the YAML.
+    When the file has a ``base:`` key or a reserved top-level key
+    (``launcher`` / ``benchmark``), it is passed through
+    :func:`viscy_utils.compose.load_composed_config` with the optional
+    ``resolver`` — applications (e.g. dynacell) inject a callable here
+    to transform the composed dict before LightningCLI consumes it.
+    Reserved top-level keys are then stripped because LightningCLI
+    rejects unknown top-level keys. Configs without either ``base:`` or
+    reserved keys pass through unchanged.
+    """
+    config_idx, config_path_str = _find_config_arg()
     if config_idx is None or config_path_str is None:
         return
     config_path = Path(config_path_str)
-    try:
-        with open(config_path) as f:
-            raw = yaml.safe_load(f)
-    except (OSError, yaml.YAMLError):
-        return  # let LightningCLI give its own diagnostic
-    if not isinstance(raw, dict) or "base" not in raw:
+    with open(config_path) as f:
+        raw = yaml.safe_load(f)
+    if not isinstance(raw, dict):
         return
-    composed = load_composed_config(config_path)
+    has_base = "base" in raw
+    has_reserved = any(k in raw for k in _RESERVED_TOP_LEVEL_KEYS)
+    if not (has_base or has_reserved):
+        return
+    composed = load_composed_config(config_path, resolver=resolver)
+    for k in _RESERVED_TOP_LEVEL_KEYS:
+        composed.pop(k, None)
     with tempfile.NamedTemporaryFile(suffix=".yml", delete=False, mode="w") as tmp:
         yaml.dump(composed, tmp, default_flow_style=False)
     atexit.register(lambda p=tmp.name: Path(p).unlink(missing_ok=True))
-    # Replace the path in argv, handling both "--config path" and "--config=path".
-    if "=" in sys.argv[config_idx]:
-        prefix = sys.argv[config_idx].split("=", 1)[0]
-        sys.argv[config_idx] = f"{prefix}={tmp.name}"
-    else:
-        sys.argv[config_idx + 1] = tmp.name
+    _replace_config_path_in_argv(config_idx, tmp.name)
 
 
-def main() -> None:
+def main(*, resolver: Callable[[dict], dict] | None = None) -> None:
     """Run the Lightning CLI with VisCy defaults.
 
     Set log level, TF32 precision, and default random seed to 42.
-    Compose config from ``base:`` references if present.
+    Compose config from ``base:`` references if present. The optional
+    ``resolver`` is threaded into
+    :func:`viscy_utils.compose.load_composed_config` so callers can
+    transform the composed dict before LightningCLI parses it.
     """
     _setup_environment()
-    _maybe_compose_config()
+    _maybe_compose_config(resolver=resolver)
     require_model = {
         "preprocess",
         "precompute",

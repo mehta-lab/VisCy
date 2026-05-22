@@ -1,0 +1,20 @@
+# CellDiff fit overlay — model + trainer only.
+# HCS data hparams live in data_overlays/celldiff_fit.yml; single-store
+# train leaves compose both, joint (BatchedConcatDataModule) leaves
+# compose only this one and author data: themselves.
+base:
+  - ../../../../../../recipes/models/celldiff_fm.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  init_args:
+    net_config:
+      input_spatial_size: [8, 512, 512]
+    lr: 0.0003
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+    num_log_steps: 10
+trainer:
+  precision: bf16-mixed
+  max_epochs: 20

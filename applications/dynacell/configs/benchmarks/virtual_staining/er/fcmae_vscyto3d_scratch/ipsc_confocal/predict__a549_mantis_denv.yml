@@ -1,0 +1,47 @@
+# FCMAE_VSCyto3D_Scratch predict: ER (SEC61B) trained on iPSC,
+# predicting against a549_mantis_sec61b_denv test.
+#
+# Pinned to best-val checkpoint from training run J31483778
+# (val 0.4119, epoch 122). Run cancelled at epoch 164 — val plateaued
+# at epoch 122 and never recovered (~42 epochs without improvement,
+# drifting up in last 5 epochs).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_denv.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_sec61b_denv
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: er__ipsc_confocal__fcmae_vscyto3d_scratch__a549_mantis_sec61b_denv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_scratch/checkpoints/epoch=122-step=32472.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_scratch__sec61b_denv.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_SEC61B_ON_A549_sec61b_denv
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

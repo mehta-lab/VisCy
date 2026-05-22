@@ -145,6 +145,24 @@ class SlidingWindowDataset(Dataset):
         tz = index - self.window_keys[arr_idx - 1] if arr_idx > 0 else index
         return (self.window_arrays[arr_idx], tz, self.window_norm_meta[arr_idx], arr_idx)
 
+    @staticmethod
+    def _resolve_timepoint_norm_meta(norm_meta: NormMeta | None, t: int) -> NormMeta | None:
+        """Select the per-timepoint entry inside any ``timepoint_statistics`` level.
+
+        ``NormalizeSampled(level='timepoint_statistics')`` expects a flat
+        ``{stat_name: Tensor}`` dict. The zattrs layout stores a nested
+        ``{tp_idx: {stat_name: Tensor}}``, so the dataset must pick the
+        current-sample's timepoint before the transform runs.
+        """
+        if norm_meta is None:
+            return None
+        resolved = {}
+        for ch, levels in norm_meta.items():
+            resolved[ch] = {
+                name: values[str(t)] if name == "timepoint_statistics" else values for name, values in levels.items()
+            }
+        return resolved
+
     def _read_img_window(
         self,
         img: ImageArray,
@@ -182,7 +200,7 @@ class SlidingWindowDataset(Dataset):
         z = tz - t * zs
         preloaded = _preloaded if _preloaded is not None else self._preloaded
         if preloaded is not None and arr_idx >= 0:
-            data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].clone()
+            data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].to(torch.float32, copy=True)
             return data.unbind(dim=1), (f"/{img.path}", t, z)
         data = img.oindex[
             slice(t, t + 1),
@@ -249,6 +267,7 @@ class SlidingWindowDataset(Dataset):
             # spatial transform co-alignment. This does not copy the tensor.
             sample_images["weight"] = sample_images[self.channels["target"][0]]
         if norm_meta is not None:
+            norm_meta = self._resolve_timepoint_norm_meta(norm_meta, sample_index[1])
             sample_images["norm_meta"] = norm_meta
         if self.transform:
             sample_images = self.transform(sample_images)
