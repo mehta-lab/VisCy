@@ -40,26 +40,6 @@ def _require_cubic():
 
 
 @torch.inference_mode()
-def _normalize_to_target_scale(
-    y_true: torch.Tensor,
-    y_pred: torch.Tensor,
-    eps: float = 1e-8,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Map both tensors onto the target's intensity scale."""
-    if y_true.shape != y_pred.shape:
-        raise ValueError(f"Shape mismatch: y_true {y_true.shape} vs y_pred {y_pred.shape}")
-
-    y_true = y_true.float()
-    y_pred = y_pred.float()
-
-    target_min = y_true.min()
-    target_range = y_true.max() - target_min
-    denom = target_range.clamp_min(eps)
-
-    return (y_true - target_min) / denom, (y_pred - target_min) / denom
-
-
-@torch.inference_mode()
 def _min_max_normalize(
     x: torch.Tensor,
     eps: float = 1e-8,
