@@ -120,18 +120,13 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     Notes
     -----
-    Pre-refactor the function pulled both tensors back to host
-    (``.cpu().numpy()``) before calling cubic's spectral PCC and FSC,
-    which dominated wall time on long timelapses. cubic's metrics are
-    array-module-agnostic, so we keep the tensors on the chosen device
-    and hand them off via ``cubic.cuda.ascupy``/``asnumpy`` — zero-copy
-    on CUDA through the CUDA Array Interface.
+    PCC/SSIM/NRMSE/PSNR are computed on CPU tensors (cubic converts internally).
+    Spectral metrics (spectral_pcc, fsc_resolution) benefit from cupy zero-copy
+    via the CUDA Array Interface, so tensors are moved to GPU only when those
+    kwargs are present.
     """
     prediction = torch.as_tensor(prediction)
     target = torch.as_tensor(target)
-    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    prediction = prediction.to(device)
-    target = target.to(device)
 
     metrics = {
         "PCC": pcc(target, prediction),
@@ -144,6 +139,9 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
         return metrics
 
     _require_cubic()
+    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
+    prediction = prediction.to(device)
+    target = target.to(device)
     to_xp = ascupy if device.type == "cuda" else asnumpy
     prediction, target = to_xp(prediction), to_xp(target)
 
