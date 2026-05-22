@@ -6,16 +6,20 @@ import torch
 try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature.voxel import regionprops_table
-    from cubic.metrics import fsc_resolution
+    from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
+    from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
+    cubic_ssim = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
+    nrmse = None  # type: ignore[assignment]
+    pcc = None  # type: ignore[assignment]
+    psnr = None  # type: ignore[assignment]
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
 
-from dynacell.evaluation.torch_ssim import ssim as torch_ssim
 from dynacell.evaluation.utils import _minmax_norm
 
 
@@ -36,26 +40,6 @@ def _require_cubic():
 
 
 @torch.inference_mode()
-def _normalize_to_target_scale(
-    y_true: torch.Tensor,
-    y_pred: torch.Tensor,
-    eps: float = 1e-8,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Map both tensors onto the target's intensity scale."""
-    if y_true.shape != y_pred.shape:
-        raise ValueError(f"Shape mismatch: y_true {y_true.shape} vs y_pred {y_pred.shape}")
-
-    y_true = y_true.float()
-    y_pred = y_pred.float()
-
-    target_min = y_true.min()
-    target_range = y_true.max() - target_min
-    denom = target_range.clamp_min(eps)
-
-    return (y_true - target_min) / denom, (y_pred - target_min) / denom
-
-
-@torch.inference_mode()
 def _min_max_normalize(
     x: torch.Tensor,
     eps: float = 1e-8,
@@ -69,88 +53,17 @@ def _min_max_normalize(
 
 
 @torch.inference_mode()
-def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Calculate the Pearson correlation coefficient between two PyTorch tensors."""
-    if a.shape != b.shape:
-        raise ValueError(f"Inputs must be same shape, got {a.shape} and {b.shape}")
-    num = (a - a.mean()) * (b - b.mean())
-    denom = a.std(correction=0) * b.std(correction=0)
-    if denom <= 1e-12:
-        return torch.tensor(float("nan"), device=a.device)
-    return num.mean() / denom
-
-
-@torch.inference_mode()
-def nrmse(y_true: torch.Tensor, y_pred: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute normalized root mean squared error (NRMSE) for two PyTorch tensors.
-
-    Both tensors are mapped onto the ground-truth intensity scale before
-    computing RMSE, so gain and offset errors remain visible.
-
-    Parameters
-    ----------
-    y_true : torch.Tensor
-        Ground truth tensor.
-    y_pred : torch.Tensor
-        Predicted tensor, same shape as y_true.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    torch.Tensor
-        A scalar tensor containing the NRMSE.
-    """
-    y_true_norm = _min_max_normalize(y_true, eps=eps)
-    y_pred_norm = _min_max_normalize(y_pred, eps=eps)
-    mse = torch.mean((y_true_norm - y_pred_norm) ** 2)
-    rmse = torch.sqrt(mse)
-
-    return rmse
-
-
-@torch.inference_mode()
-def psnr(image_true: torch.Tensor, image_test: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute peak signal-to-noise ratio (PSNR) for two PyTorch tensors.
-
-    Both tensors are mapped onto the ground-truth intensity scale before
-    computing PSNR, so gain and offset errors remain visible.
-
-    Parameters
-    ----------
-    image_true : torch.Tensor
-        Ground-truth tensor.
-    image_test : torch.Tensor
-        Predicted / reconstructed tensor, same shape as image_true.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    torch.Tensor
-        A scalar tensor containing the PSNR value in dB.
-    """
-    image_true = _min_max_normalize(image_true, eps=eps)
-    image_test = _min_max_normalize(image_test, eps=eps)
-    mse = torch.mean((image_true - image_test) ** 2)
-
-    if mse <= eps:
-        return torch.tensor(float("inf"), device=image_true.device)
-
-    psnr_val = 20 * torch.log10(torch.tensor(1.0, device=image_true.device)) - 10 * torch.log10(mse)
-    return psnr_val
-
-
-@torch.inference_mode()
-def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> float:
     """Compute mean structural similarity index (SSIM)."""
+    if cubic_ssim is None:
+        raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
     img1 = _min_max_normalize(img1, eps=eps)
     img2 = _min_max_normalize(img2, eps=eps)
 
-    img1 = img1.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
-    img2 = img2.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
+    img1 = img1.unsqueeze(0).unsqueeze(0)  # (D,H,W) → (1,1,D,H,W) — cubic's 5D contract
+    img2 = img2.unsqueeze(0).unsqueeze(0)
 
-    return torch_ssim(img1, img2, data_range=1.0)
+    return cubic_ssim(img1, img2, spatial_dims=3, data_range=1.0, gaussian_weights=True)
 
 
 def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
@@ -209,30 +122,30 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     Notes
     -----
-    Pre-refactor the function pulled both tensors back to host
-    (``.cpu().numpy()``) before calling cubic's spectral PCC and FSC,
-    which dominated wall time on long timelapses. cubic's metrics are
-    array-module-agnostic, so we keep the tensors on the chosen device
-    and hand them off via ``cubic.cuda.ascupy``/``asnumpy`` — zero-copy
-    on CUDA through the CUDA Array Interface.
+    PCC/SSIM/NRMSE/PSNR are computed on CPU tensors (cubic converts internally).
+    Spectral metrics (spectral_pcc, fsc_resolution) benefit from cupy zero-copy
+    via the CUDA Array Interface, so tensors are moved to GPU only when those
+    kwargs are present.
     """
+    if pcc is None:
+        raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
     prediction = torch.as_tensor(prediction)
     target = torch.as_tensor(target)
-    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    prediction = prediction.to(device)
-    target = target.to(device)
 
     metrics = {
-        "PCC": corr_coef(target, prediction).item(),
-        "SSIM": ssim(target, prediction).item(),
-        "NRMSE": nrmse(target, prediction).item(),
-        "PSNR": psnr(target, prediction).item(),
+        "PCC": pcc(target, prediction),
+        "SSIM": ssim(target, prediction),
+        "NRMSE": nrmse(target, prediction, normalize="min_max"),
+        "PSNR": psnr(target, prediction, normalize="min_max"),
     }
 
     if spectral_pcc_kwargs is None and fsc_kwargs is None:
         return metrics
 
     _require_cubic()
+    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
+    prediction = prediction.to(device)
+    target = target.to(device)
     to_xp = ascupy if device.type == "cuda" else asnumpy
     prediction, target = to_xp(prediction), to_xp(target)
 

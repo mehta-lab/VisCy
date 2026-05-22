@@ -16,7 +16,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 | `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, `CellDinoFeatureExtractor`, plot helpers. |
 | `_configs/*.yaml` | Hydra schemas: `eval.yaml`, `precompute.yaml`, `eval_grouped.yaml`. |
 
-Other files (`io.py`, `torch_ssim.py`, `formatting.py`, `spectral_pcc/`) house readers, GPU SSIM, and bead/PSF diagnostics.
+Other files (`io.py`, `formatting.py`, `spectral_pcc/`) house readers and bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are now backed by `cubic.metrics`.
 
 ## Inputs
 
