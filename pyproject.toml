@@ -58,11 +58,6 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
 dynacell = { workspace = true }
-# Temporary: cubic 0.7.0a4 is not yet on PyPI. Remove this entry once the
-# release is published; the workspace falls back to PyPI for `cubic==0.7.0a4`
-# pinned in `applications/dynacell/pyproject.toml`. The URL is the canonical
-# cubic Repository (per PyPI metadata).
-cubic = { git = "https://github.com/alxndrkalinin/cubic.git", rev = "424343f5e1c9f34921936b037863479c91072b28" }
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
