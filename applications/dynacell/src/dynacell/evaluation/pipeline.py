@@ -422,8 +422,8 @@ def _process_one_fov(
     seg_array = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
 
     if config.compute_microssim:
-        with region_timer("microssim", pos_name_pred):
-            microssim_scores = calculate_microssim(microssim_data)
+        with region_timer("microssim", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            microssim_scores = calculate_microssim(microssim_data, use_gpu=use_gpu)
             for i in range(T):
                 fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
