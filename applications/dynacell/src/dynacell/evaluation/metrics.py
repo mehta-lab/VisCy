@@ -55,6 +55,8 @@ def _min_max_normalize(
 @torch.inference_mode()
 def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> float:
     """Compute mean structural similarity index (SSIM)."""
+    if cubic_ssim is None:
+        raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
     img1 = _min_max_normalize(img1, eps=eps)
     img2 = _min_max_normalize(img2, eps=eps)
 
