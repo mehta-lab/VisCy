@@ -23,7 +23,13 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_metrics_module = types.ModuleType("cubic.metrics")
     cubic_metrics_module.fsc_resolution = lambda *args, **kwargs: {}
     cubic_metrics_module.MicroMS3IM = object
-    cubic_metrics_module.pcc = lambda a, b, mask=None: float(np.corrcoef(a.numpy().ravel(), b.numpy().ravel())[0, 1])
+
+    def _stub_pcc(a, b, mask=None):
+        if a.shape != b.shape:
+            raise ValueError(f"Inputs must have same shape, got {a.shape} and {b.shape}")
+        return float(np.corrcoef(a.numpy().ravel(), b.numpy().ravel())[0, 1])
+
+    cubic_metrics_module.pcc = _stub_pcc
 
     def _stub_nrmse(y_true, y_pred, normalization=None, normalize=None, data_range=None, mask=None):
         a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
@@ -119,10 +125,10 @@ def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
     assert math.isnan(metrics.pcc(a, b))
 
 
-def test_corr_coef_shape_mismatch_raises(monkeypatch) -> None:
-    """Mismatched shapes raise an error."""
+def test_pcc_shape_mismatch_raises(monkeypatch) -> None:
+    """Mismatched shapes raise ValueError."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         metrics.pcc(torch.ones(10), torch.ones(20))
 
 
