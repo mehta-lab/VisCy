@@ -449,7 +449,7 @@ class ScaleIntensityRangePercentilesd(_ScaleIntensityRangePercentilesd):
         clip: bool = False,
         relative: bool = False,
         channel_wise: bool = False,
-        dtype: DTypeLike | None = None,
+        dtype: str | None = None,
         allow_missing_keys: bool = False,
     ):
         super().__init__(

@@ -43,8 +43,10 @@ dependencies = [
 
 optional-dependencies.eval = [
   "anndata",
+  "joblib",
   "natsort",
   "phate",
+  "pot",
   "scikit-learn",
   "seaborn",
   "statsmodels",
