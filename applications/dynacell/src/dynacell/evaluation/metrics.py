@@ -6,13 +6,15 @@ import torch
 try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature.voxel import regionprops_table
-    from cubic.metrics import fsc_resolution, pcc
+    from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics.bandlimited import spectral_pcc
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
+    nrmse = None  # type: ignore[assignment]
     pcc = None  # type: ignore[assignment]
+    psnr = None  # type: ignore[assignment]
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
 
@@ -67,67 +69,6 @@ def _min_max_normalize(
     x = (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
 
     return x
-
-
-@torch.inference_mode()
-def nrmse(y_true: torch.Tensor, y_pred: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute normalized root mean squared error (NRMSE) for two PyTorch tensors.
-
-    Both tensors are mapped onto the ground-truth intensity scale before
-    computing RMSE, so gain and offset errors remain visible.
-
-    Parameters
-    ----------
-    y_true : torch.Tensor
-        Ground truth tensor.
-    y_pred : torch.Tensor
-        Predicted tensor, same shape as y_true.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    torch.Tensor
-        A scalar tensor containing the NRMSE.
-    """
-    y_true_norm = _min_max_normalize(y_true, eps=eps)
-    y_pred_norm = _min_max_normalize(y_pred, eps=eps)
-    mse = torch.mean((y_true_norm - y_pred_norm) ** 2)
-    rmse = torch.sqrt(mse)
-
-    return rmse
-
-
-@torch.inference_mode()
-def psnr(image_true: torch.Tensor, image_test: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute peak signal-to-noise ratio (PSNR) for two PyTorch tensors.
-
-    Both tensors are mapped onto the ground-truth intensity scale before
-    computing PSNR, so gain and offset errors remain visible.
-
-    Parameters
-    ----------
-    image_true : torch.Tensor
-        Ground-truth tensor.
-    image_test : torch.Tensor
-        Predicted / reconstructed tensor, same shape as image_true.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    torch.Tensor
-        A scalar tensor containing the PSNR value in dB.
-    """
-    image_true = _min_max_normalize(image_true, eps=eps)
-    image_test = _min_max_normalize(image_test, eps=eps)
-    mse = torch.mean((image_true - image_test) ** 2)
-
-    if mse <= eps:
-        return torch.tensor(float("inf"), device=image_true.device)
-
-    psnr_val = 20 * torch.log10(torch.tensor(1.0, device=image_true.device)) - 10 * torch.log10(mse)
-    return psnr_val
 
 
 @torch.inference_mode()
@@ -214,8 +155,8 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     metrics = {
         "PCC": pcc(target, prediction),
         "SSIM": ssim(target, prediction).item(),
-        "NRMSE": nrmse(target, prediction).item(),
-        "PSNR": psnr(target, prediction).item(),
+        "NRMSE": nrmse(target, prediction, normalize="min_max"),
+        "PSNR": psnr(target, prediction, normalize="min_max"),
     }
 
     if spectral_pcc_kwargs is None and fsc_kwargs is None:
