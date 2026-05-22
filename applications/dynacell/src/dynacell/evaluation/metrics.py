@@ -172,7 +172,7 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     return metrics
 
 
-def calculate_microssim(microssim_data):
+def calculate_microssim(microssim_data, use_gpu: bool = True):
     """Calculate MicroMS3IM scores across a collection of images."""
     try:
         from cubic.metrics import MicroMS3IM
@@ -183,6 +183,12 @@ def calculate_microssim(microssim_data):
 
     targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
+
+    # Convert to cupy when GPU is requested — cubic.skimage dispatches to
+    # cucim (GPU Gaussian filters) when inputs carry a .device attribute.
+    to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
+    targets = to_xp(targets)
+    predictions = to_xp(predictions)
 
     def microssim_with_condition(condition):
         masked_targets = np.where(condition, targets, 0)
