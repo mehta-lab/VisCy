@@ -1,7 +1,7 @@
 """Configuration models for smoothness evaluation."""
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -48,7 +48,7 @@ class SmoothnessEvalConfig(BaseModel):
     save_distributions: bool = False
     use_optimized: bool = True
     verbose: bool = False
-    group_by: Optional[str] = "marker"
+    group_by: str | None = "marker"
 
     @model_validator(mode="after")
     def validate_paths(self):
@@ -75,7 +75,7 @@ class CompareModelsConfig(BaseModel):
         List of CSV result files to compare.
     metrics : list[str]
         Metric columns to include in the comparison table.
-    output_path : Optional[str]
+    output_path : str | None
         Path to save combined results.
     output_format : str
         Output format for combined results.
@@ -92,5 +92,5 @@ class CompareModelsConfig(BaseModel):
             "random_frame_peak",
         ]
     )
-    output_path: Optional[str] = None
+    output_path: str | None = None
     output_format: Literal["markdown", "csv", "json"] = "markdown"

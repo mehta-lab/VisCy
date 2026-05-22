@@ -1,7 +1,6 @@
 """Configuration models for dimensionality reduction."""
 
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -9,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 class PCAConfig(BaseModel):
     """PCA reduction parameters."""
 
-    n_components: Optional[int] = None
+    n_components: int | None = None
     normalize_features: bool = True
 
 
@@ -30,8 +29,8 @@ class PHATEConfig(BaseModel):
     knn_dist: str = "cosine"
     scale_embeddings: bool = False
     random_state: int = 42
-    n_pca: Optional[int] = 50
-    subsample: Optional[int] = 50_000
+    n_pca: int | None = 50
+    subsample: int | None = 50_000
     n_jobs: int = 1
 
 
@@ -55,10 +54,10 @@ class DimensionalityReductionConfig(BaseModel):
     """
 
     input_path: str = Field(...)
-    output_path: Optional[str] = None
-    pca: Optional[PCAConfig] = None
-    umap: Optional[UMAPConfig] = None
-    phate: Optional[PHATEConfig] = None
+    output_path: str | None = None
+    pca: PCAConfig | None = None
+    umap: UMAPConfig | None = None
+    phate: PHATEConfig | None = None
     overwrite_keys: bool = False
 
     @model_validator(mode="after")
@@ -82,7 +81,7 @@ class CombinedDatasetConfig(BaseModel):
     """
 
     anndata: str = Field(...)
-    hcs_plate: Optional[str] = None
+    hcs_plate: str | None = None
 
 
 class CombinedDimensionalityReductionConfig(BaseModel):
@@ -106,11 +105,11 @@ class CombinedDimensionalityReductionConfig(BaseModel):
         If True, overwrite existing ``.obsm`` keys. Otherwise raise on conflict.
     """
 
-    input_paths: Optional[list[str]] = None
-    datasets: Optional[dict[str, CombinedDatasetConfig]] = None
-    pca: Optional[PCAConfig] = None
-    umap: Optional[UMAPConfig] = None
-    phate: Optional[PHATEConfig] = None
+    input_paths: list[str] | None = None
+    datasets: dict[str, CombinedDatasetConfig] | None = None
+    pca: PCAConfig | None = None
+    umap: UMAPConfig | None = None
+    phate: PHATEConfig | None = None
     overwrite_keys: bool = False
 
     @model_validator(mode="after")

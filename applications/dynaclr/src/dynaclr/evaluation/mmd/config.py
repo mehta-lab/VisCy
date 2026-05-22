@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from pydantic import BaseModel, model_validator
 
@@ -52,11 +50,11 @@ class MMDSettings(BaseModel):
     """
 
     n_permutations: int = 1000
-    max_cells: Optional[int] = 2000
+    max_cells: int | None = 2000
     min_cells: int = 20
     seed: int = 42
     balance_samples: bool = False
-    share_bandwidth_from: Optional[str] = None
+    share_bandwidth_from: str | None = None
 
 
 class MAPSettings(BaseModel):
@@ -110,12 +108,12 @@ class _MMDBaseConfig(BaseModel):
 
     output_dir: str
     group_by: str = "perturbation"
-    obs_filter: Optional[dict[str, str]] = None
-    embedding_key: Optional[str] = None
+    obs_filter: dict[str, str] | None = None
+    embedding_key: str | None = None
     mmd: MMDSettings = MMDSettings()
     map_settings: MAPSettings = MAPSettings()
-    temporal_bin_size: Optional[float] = None
-    temporal_bins: Optional[list[float]] = None
+    temporal_bin_size: float | None = None
+    temporal_bins: list[float] | None = None
     save_plots: bool = True
 
     @model_validator(mode="after")
@@ -126,10 +124,10 @@ class _MMDBaseConfig(BaseModel):
 
 
 def _resolve_bin_edges(
-    temporal_bin_size: Optional[float],
-    temporal_bins: Optional[list[float]],
+    temporal_bin_size: float | None,
+    temporal_bins: list[float] | None,
     max_hours: float,
-) -> Optional[list[tuple[float, float]]]:
+) -> list[tuple[float, float]] | None:
     """Return a list of (start, end) bin edge pairs, or None if no temporal binning.
 
     Parameters
@@ -215,7 +213,7 @@ class MMDPooledConfig(_MMDBaseConfig):
 
     input_paths: list[str]
     comparisons: list[ComparisonSpec]
-    condition_aliases: Optional[dict[str, list[str]]] = None
+    condition_aliases: dict[str, list[str]] | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "MMDPooledConfig":

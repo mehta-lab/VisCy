@@ -11,7 +11,6 @@ dynaclr plot-embeddings -c plot_config.yaml
 """
 
 from pathlib import Path
-from typing import Optional
 
 import anndata as ad
 import click
@@ -54,8 +53,8 @@ class PlotEmbeddingsConfig(BaseModel):
         instead of pairplot. Default: 4.
     """
 
-    input_path: Optional[str] = None
-    input_paths: Optional[list[str]] = None
+    input_path: str | None = None
+    input_paths: list[str] | None = None
     output_dir: str = Field(...)
     embedding_keys: list[str] = ["X_pca_combined", "X_phate_combined"]
     color_by: list[str] = ["perturbation", "hours_post_perturbation", "experiment", "marker"]

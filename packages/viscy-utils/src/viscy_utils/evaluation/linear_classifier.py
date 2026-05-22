@@ -6,7 +6,7 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import joblib
 import numpy as np
@@ -31,9 +31,9 @@ class LinearClassifierPipeline:
     ----------
     classifier : LogisticRegression
         Trained logistic regression classifier.
-    scaler : Optional[StandardScaler]
+    scaler : StandardScaler | None
         Fitted StandardScaler, if feature scaling was used.
-    pca : Optional[PCA]
+    pca : PCA | None
         Fitted PCA transformer, if dimensionality reduction was used.
     config : dict
         Configuration used for training.
@@ -44,8 +44,8 @@ class LinearClassifierPipeline:
     def __init__(
         self,
         classifier: LogisticRegression,
-        scaler: Optional[StandardScaler],
-        pca: Optional[PCA],
+        scaler: StandardScaler | None,
+        pca: PCA | None,
         config: dict,
         task: str,
     ):
@@ -199,11 +199,11 @@ def train_linear_classifier(
     task: str,
     use_scaling: bool = True,
     use_pca: bool = False,
-    n_pca_components: Optional[int] = None,
-    classifier_params: Optional[dict[str, Any]] = None,
+    n_pca_components: int | None = None,
+    classifier_params: dict[str, Any] | None = None,
     split_train_data: float = 0.8,
     random_seed: int = 42,
-    groups: Optional[np.ndarray] = None,
+    groups: np.ndarray | None = None,
 ) -> tuple[LinearClassifierPipeline, dict[str, float], dict[str, Any]]:
     """Train a linear classifier on embeddings with preprocessing and evaluation.
 
@@ -217,9 +217,9 @@ def train_linear_classifier(
         Whether to apply StandardScaler normalization.
     use_pca : bool
         Whether to apply PCA dimensionality reduction.
-    n_pca_components : Optional[int]
+    n_pca_components : int | None
         Number of PCA components (required if use_pca=True).
-    classifier_params : Optional[dict]
+    classifier_params : dict | None
         Parameters for LogisticRegression classifier.
     split_train_data : float
         Fraction of data to use for training (rest for validation).
@@ -347,7 +347,7 @@ def train_linear_classifier(
             train_metrics[f"train_{class_name}_support"] = int(train_report[class_name]["support"])
 
     val_metrics = {}
-    y_val_proba: Optional[np.ndarray] = None
+    y_val_proba: np.ndarray | None = None
     if X_val is not None and y_val is not None:
         y_val_pred = classifier.predict(X_val)
         val_report = classification_report(y_val, y_val_pred, digits=3, output_dict=True)
@@ -420,8 +420,8 @@ def predict_with_classifier(
     adata: ad.AnnData,
     pipeline: LinearClassifierPipeline,
     task: str,
-    artifact_metadata: Optional[dict] = None,
-    include_wells: Optional[list[str]] = None,
+    artifact_metadata: dict | None = None,
+    include_wells: list[str] | None = None,
 ) -> ad.AnnData:
     """Apply trained classifier to make predictions on new data.
 
@@ -433,12 +433,12 @@ def predict_with_classifier(
         Trained classifier pipeline with preprocessing.
     task : str
         Name of the classification task (used as column suffix).
-    artifact_metadata : Optional[dict]
+    artifact_metadata : dict | None
         W&B artifact metadata from ``load_pipeline_from_wandb``. When provided,
         provenance keys are stored in ``adata.uns`` under
         ``classifier_{task}_artifact``, ``classifier_{task}_id``, and
         ``classifier_{task}_version``.
-    include_wells : Optional[list[str]]
+    include_wells : list[str] | None
         Well prefixes to restrict prediction to (e.g. ``["A/1", "B/2"]``).
         Cells in other wells will have ``NaN`` for prediction columns.
         When ``None``, all cells are predicted.
@@ -497,8 +497,8 @@ def save_pipeline_to_wandb(
     metrics: dict[str, float],
     config: dict[str, Any],
     wandb_project: str,
-    wandb_entity: Optional[str] = None,
-    tags: Optional[list[str]] = None,
+    wandb_entity: str | None = None,
+    tags: list[str] | None = None,
 ) -> str:
     """Save trained pipeline and metrics to Weights & Biases.
 
@@ -512,9 +512,9 @@ def save_pipeline_to_wandb(
         Full training configuration.
     wandb_project : str
         W&B project name.
-    wandb_entity : Optional[str]
+    wandb_entity : str | None
         W&B entity (username or team).
-    tags : Optional[list[str]]
+    tags : list[str] | None
         Tags to add to the run.
 
     Returns
@@ -602,7 +602,7 @@ def load_pipeline_from_wandb(
     wandb_project: str,
     model_name: str,
     version: str = "latest",
-    wandb_entity: Optional[str] = None,
+    wandb_entity: str | None = None,
 ) -> tuple[LinearClassifierPipeline, dict, dict]:
     """Load trained pipeline and config from Weights & Biases.
 
@@ -614,7 +614,7 @@ def load_pipeline_from_wandb(
         Name of the model artifact.
     version : str
         Version of the artifact (default: 'latest').
-    wandb_entity : Optional[str]
+    wandb_entity : str | None
         W&B entity (username or team).
 
     Returns
