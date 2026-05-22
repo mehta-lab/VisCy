@@ -174,7 +174,12 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
 def calculate_microssim(microssim_data):
     """Calculate MicroMS3IM scores across a collection of images."""
-    from cubic.metrics import MicroMS3IM
+    try:
+        from cubic.metrics import MicroMS3IM
+    except ImportError as e:
+        raise ImportError(
+            "cubic>=0.7.0a4 is required for MicroMS3IM. Install via the `eval` extra: `uv sync --extra eval`."
+        ) from e
 
     targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
