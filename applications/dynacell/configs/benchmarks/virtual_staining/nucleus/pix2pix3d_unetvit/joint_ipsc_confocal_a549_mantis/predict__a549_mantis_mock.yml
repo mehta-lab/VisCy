@@ -1,0 +1,43 @@
+# pix2pix3d_unetvit predict: nucleus (Nuclei marker) trained on joint iPSC+A549, predicting against a549_mantis_h2b_mock test.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_mock.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: a549_mantis_h2b_mock
+  model_name: pix2pix3d_unetvit
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__pix2pix3d_unetvit__a549_mantis_h2b_mock
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/pix2pix3d_unetvit/checkpoints/last.ckpt
+
+data:
+  init_args:
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_mock.zarr
+
+launcher:
+  job_name: pix2pix3d_unetvit_JOINT_PRED_NUCL_ON_A549_h2b_mock
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions

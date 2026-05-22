@@ -7,5 +7,7 @@ defaults:
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_unetvit3d__sec61b_denv.zarr
 
+compute_feature_metrics: true
+
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_sec61b_unetvit3d__sec61b_denv

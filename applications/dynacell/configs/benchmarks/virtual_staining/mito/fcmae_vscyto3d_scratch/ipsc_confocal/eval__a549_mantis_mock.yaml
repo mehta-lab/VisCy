@@ -7,5 +7,7 @@ defaults:
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_scratch__tomm20_mock.zarr
 
+compute_feature_metrics: true
+
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_tomm20_fcmae_vscyto3d_scratch__tomm20_mock

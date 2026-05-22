@@ -13,5 +13,7 @@ benchmark:
 io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fnet3d_paper_denv.zarr
 
+compute_feature_metrics: true
+
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/eval_memb_fnet3d_paper_denv

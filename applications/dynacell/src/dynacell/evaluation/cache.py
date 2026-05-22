@@ -1,11 +1,11 @@
-"""GT artifact cache for the dynacell evaluation pipeline.
+"""Artifact cache for the dynacell evaluation pipeline.
 
-Stores target-side organelle masks and feature embeddings under an explicit
-cache directory so successive eval runs against the same GT dataset skip
-the expensive segmentation and feature-extraction work.
+Stores organelle masks and feature embeddings under an explicit cache
+directory so successive eval runs against the same source dataset skip the
+expensive segmentation and feature-extraction work.
 
-Cache identity is the tuple
-``(cache_schema_version, gt_plate_path, gt_channel_name, cell_segmentation_path)``.
+Cache identity is rooted in the source plate/channel plus
+``cell_segmentation_path`` when cell-level features are involved.
 Per-artifact invalidation is driven by extra params recorded in the manifest
 (e.g. spacing, patch_size, checkpoint hash).
 """
@@ -39,7 +39,7 @@ class StaleCacheError(RuntimeError):
 
 @dataclass(frozen=True)
 class CachePaths:
-    """Filesystem layout for one GT cache directory."""
+    """Filesystem layout for one artifact cache directory."""
 
     root: Path
     manifest: Path
@@ -67,9 +67,9 @@ class CachePaths:
         return self.features_dir / "celldino" / f"{weights_sha12}.zarr"
 
 
-def cache_paths(gt_cache_dir: Path | str) -> CachePaths:
-    """Build a CachePaths rooted at *gt_cache_dir* (does not create directories)."""
-    root = Path(gt_cache_dir)
+def cache_paths(cache_dir: Path | str) -> CachePaths:
+    """Build a CachePaths rooted at *cache_dir* (does not create directories)."""
+    root = Path(cache_dir)
     return CachePaths(
         root=root,
         manifest=root / "manifest.yaml",
@@ -84,12 +84,16 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
         return {
             "cache_schema_version": CACHE_SCHEMA_VERSION,
             "gt": None,
+            "pred": None,
             "cell_segmentation": None,
             "artifacts": {},
         }
     raw = OmegaConf.to_container(OmegaConf.load(paths.manifest), resolve=True)
     if not isinstance(raw, dict):
         raise StaleCacheError(f"Manifest at {paths.manifest} is not a mapping")
+    raw.setdefault("gt", None)
+    raw.setdefault("pred", None)
+    raw.setdefault("cell_segmentation", None)
     raw.setdefault("artifacts", {})
     return raw
 
@@ -103,9 +107,10 @@ def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
 def check_cache_identity(
     manifest: dict[str, Any],
     *,
-    gt_plate_path: str,
-    gt_channel_name: str,
-    cell_segmentation_path: str | None,
+    source: Literal["gt", "pred"] | None = None,
+    plate_path: str | None = None,
+    channel_name: str | None = None,
+    cell_segmentation_path: str | None = None,
 ) -> None:
     """Raise if the manifest's cache identity disagrees with the current config.
 
@@ -113,10 +118,15 @@ def check_cache_identity(
     ----------
     manifest
         Loaded manifest dict (may be the empty skeleton from :func:`load_manifest`).
-    gt_plate_path
-        Current ``io.gt_path``.
-    gt_channel_name
-        Current ``io.gt_channel_name``.
+    source
+        Which side to check (``"gt"`` or ``"pred"``); ``None`` skips per-side
+        identity and only validates ``cell_segmentation_path``.
+    plate_path
+        Current ``io.gt_path`` (when ``source="gt"``) or ``io.pred_path``
+        (when ``source="pred"``).
+    channel_name
+        Current ``io.gt_channel_name`` or ``io.pred_channel_name``, matching
+        *source*.
     cell_segmentation_path
         Current ``io.cell_segmentation_path``. ``None`` skips the check.
     """
@@ -126,15 +136,15 @@ def check_cache_identity(
             f"Cache schema version mismatch: manifest has {version}, current is {CACHE_SCHEMA_VERSION}. "
             "Delete the cache directory or bump cache_schema_version."
         )
-    gt_entry = manifest.get("gt")
-    if gt_entry is not None:
-        if gt_entry.get("plate_path") != gt_plate_path:
+    if source is not None:
+        entry = manifest.get(source)
+        if entry is not None and plate_path is not None and entry.get("plate_path") != plate_path:
             raise StaleCacheError(
-                f"gt.plate_path mismatch: manifest={gt_entry.get('plate_path')!r}, config={gt_plate_path!r}"
+                f"{source}.plate_path mismatch: manifest={entry.get('plate_path')!r}, config={plate_path!r}"
             )
-        if gt_entry.get("channel_name") != gt_channel_name:
+        if entry is not None and channel_name is not None and entry.get("channel_name") != channel_name:
             raise StaleCacheError(
-                f"gt.channel_name mismatch: manifest={gt_entry.get('channel_name')!r}, config={gt_channel_name!r}"
+                f"{source}.channel_name mismatch: manifest={entry.get('channel_name')!r}, config={channel_name!r}"
             )
     seg_entry = manifest.get("cell_segmentation")
     if seg_entry is not None and cell_segmentation_path is not None:
@@ -148,19 +158,24 @@ def check_cache_identity(
 def seed_cache_identity(
     manifest: dict[str, Any],
     *,
-    gt_plate_path: str,
-    gt_channel_name: str,
-    cell_segmentation_path: str | None,
+    source: Literal["gt", "pred"] | None = None,
+    plate_path: str | None = None,
+    channel_name: str | None = None,
+    cell_segmentation_path: str | None = None,
 ) -> None:
-    """Populate the ``gt`` / ``cell_segmentation`` manifest entries if absent.
+    """Populate source identity manifest entries if absent.
 
     Called before the first artifact is written. Safe to call repeatedly;
     later calls with conflicting values should be preceded by
-    :func:`check_cache_identity`.
+    :func:`check_cache_identity`. Pass *source* once per side — seeding both
+    sides in a single call is no longer supported.
     """
     manifest["cache_schema_version"] = CACHE_SCHEMA_VERSION
-    if manifest.get("gt") is None:
-        manifest["gt"] = {"plate_path": gt_plate_path, "channel_name": gt_channel_name}
+    if source is not None:
+        if (plate_path is None) != (channel_name is None):
+            raise ValueError(f"plate_path and channel_name must be provided together for source={source!r}")
+        if plate_path is not None and channel_name is not None and manifest.get(source) is None:
+            manifest[source] = {"plate_path": plate_path, "channel_name": channel_name}
     if cell_segmentation_path is not None and manifest.get("cell_segmentation") is None:
         manifest["cell_segmentation"] = {"plate_path": cell_segmentation_path}
 
@@ -262,6 +277,8 @@ def write_mask(
     target_name: str,
     pos_name: str,
     masks: np.ndarray,
+    *,
+    channel_name: str = _MASK_CHANNEL,
 ) -> None:
     """Append masks for a single position to the ``{target_name}.zarr`` plate.
 
@@ -275,6 +292,8 @@ def write_mask(
         HCS position name in ``row/col/fov`` form.
     masks
         Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
+    channel_name
+        OME-Zarr channel label to write for this mask plate.
     """
     if masks.ndim != 4:
         raise ValueError(f"masks must be 4-D (T, D, H, W); got shape {masks.shape}")
@@ -289,7 +308,7 @@ def write_mask(
         plate_path,
         mode=mode,
         layout="hcs",
-        channel_names=[_MASK_CHANNEL],
+        channel_names=[channel_name],
         version="0.5",
     ) as plate:
         row, col, fov = pos_name.split("/")

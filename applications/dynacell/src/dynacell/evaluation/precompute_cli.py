@@ -16,62 +16,71 @@ from pathlib import Path
 import hydra
 import numpy as np
 from iohub.ngff import open_ome_zarr
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.metrics import build_crops
+from dynacell.evaluation.model_loader import LoadFlags, init_gt_cache_context, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
+    DeepFeatureBatcher,
     flush_manifest,
-    fov_gt_cp_features,
-    fov_gt_deep_features,
-    fov_gt_masks,
-    init_cache_context,
-    resolve_dynaclr_encoder_cfg,
+    fov_cp_features,
+    fov_masks,
 )
 
 
 def precompute_gt_artifacts(config: DictConfig) -> None:
     """Build every GT-side artifact toggled on in ``config.build``."""
-    from dynacell.evaluation.segmentation import prepare_segmentation_model
-    from dynacell.evaluation.utils import DinoV3FeatureExtractor, DynaCLRFeatureExtractor
+    from dynacell.evaluation.runtime import apply_thread_budget, resolve_runtime
 
     if config.io.gt_cache_dir is None:
         raise ValueError("io.gt_cache_dir is required for dynacell precompute-gt")
 
+    # Precompute is single-process by design (DeepFeatureBatcher accumulates
+    # state across FOVs). Apply the thread cap but raise if the user requested
+    # FOV-level parallelism here — that belongs to evaluate_predictions only.
+    runtime = resolve_runtime(config)
+    if runtime.executor != "serial" or runtime.fov_workers != 1:
+        raise ValueError(
+            "dynacell precompute-gt does not support FOV-level parallelism. "
+            f"Got runtime.executor={runtime.executor!r}, "
+            f"runtime.fov_workers={runtime.fov_workers}. "
+            "Set runtime.executor='serial' and runtime.fov_workers=1 (or omit)."
+        )
+    apply_thread_budget(runtime.threads_per_worker)
+
     build = config.build
-    build_any_features = bool(build.cp or build.dinov3 or build.dynaclr)
+    build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino)
 
     if build_any_features and config.io.cell_segmentation_path is None:
         raise ValueError(
-            "io.cell_segmentation_path is required when any of build.cp / build.dinov3 / build.dynaclr is true"
+            "io.cell_segmentation_path is required when any of "
+            "build.cp / build.dinov3 / build.dynaclr / build.celldino is true"
         )
 
-    seg_model = prepare_segmentation_model(config) if build.masks else None
+    # Stricter celldino gate than evaluate_predictions: precompute-gt
+    # requires an explicit weights path when build.celldino=true (the
+    # eval path soft-skips a null weights_path; here it would silently
+    # produce no cache, so we surface it as an error).
+    if build.celldino and config.feature_extractor.celldino.weights_path is None:
+        raise ValueError("feature_extractor.celldino.weights_path is required when build.celldino=true")
 
-    dinov3_model_name = None
-    dynaclr_ckpt_path = None
-    dynaclr_encoder_cfg = None
-    dinov3_feature_extractor = None
-    dynaclr_feature_extractor = None
-
-    if build.dinov3:
-        dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
-        dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
-    if build.dynaclr:
-        dynaclr_config = config.feature_extractor.dynaclr
-        dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
-        dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
-        dynaclr_feature_extractor = DynaCLRFeatureExtractor(
-            checkpoint=dynaclr_config.checkpoint,
-            encoder_config=dynaclr_encoder_cfg,
-        )
-
-    cache_ctx = init_cache_context(
+    models = load_eval_models(
         config,
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
+        flags=LoadFlags(
+            masks=bool(build.masks),
+            dinov3=bool(build.dinov3),
+            dynaclr=bool(build.dynaclr),
+            celldino=bool(build.celldino),
+        ),
     )
+    seg_model = models.seg_model
+    dinov3_feature_extractor = models.dinov3
+    dynaclr_feature_extractor = models.dynaclr
+    celldino_feature_extractor = models.celldino
+
+    cache_ctx = init_gt_cache_context(config, models)
 
     gt_path = Path(config.io.gt_path)
     seg_path = Path(config.io.cell_segmentation_path) if config.io.cell_segmentation_path is not None else None
@@ -92,6 +101,21 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 gt_positions = gt_positions[:limit]
                 seg_positions = seg_positions[:limit]
 
+            deep_extractors = {}
+            if build.dinov3:
+                deep_extractors["dinov3"] = dinov3_feature_extractor
+            if build.dynaclr:
+                deep_extractors["dynaclr"] = dynaclr_feature_extractor
+            if build.celldino:
+                deep_extractors["celldino"] = celldino_feature_extractor
+
+            flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
+            batcher = (
+                DeepFeatureBatcher(cache_ctx, deep_extractors, flush_threshold=flush_threshold)
+                if deep_extractors and cache_ctx.enabled
+                else None
+            )
+
             for (pos_name_gt, pos_gt), (pos_name_seg, pos_seg) in tqdm(
                 zip(gt_positions, seg_positions),
                 total=len(gt_positions),
@@ -105,18 +129,27 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
 
                 if build.masks:
-                    fov_gt_masks(cache_ctx, pos_name_gt, target, seg_model)
+                    fov_masks(cache_ctx, pos_name_gt, target, seg_model)
                 if build.cp:
-                    fov_gt_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
-                if build.dinov3:
-                    fov_gt_deep_features(
-                        cache_ctx, pos_name_gt, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
-                    )
-                if build.dynaclr:
-                    fov_gt_deep_features(
-                        cache_ctx, pos_name_gt, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
-                    )
+                    fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
 
+                # Deep features stream in-loop via the batcher — no second
+                # plate read. The batcher's pending_kinds_per_t reflects
+                # already-cached slots so warm-cache positions skip work.
+                if batcher is not None and cell_segmentation is not None:
+                    t_count = target.shape[0]
+                    needs = batcher.pending_kinds_per_t(pos_name_gt, t_count)
+                    for t in range(t_count):
+                        kinds_for_t = [k for k in deep_extractors if t in needs[k]]
+                        if not kinds_for_t:
+                            continue
+                        crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size)
+                        batcher.push(pos_name_gt, t, crops, kinds_for_t)
+
+                flush_manifest(cache_ctx)
+
+            if batcher is not None:
+                batcher.drain()
                 flush_manifest(cache_ctx)
         finally:
             if seg_plate is not None:

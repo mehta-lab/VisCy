@@ -184,8 +184,8 @@ def test_deep_target_and_pred_features_same_cell_order(monkeypatch) -> None:
     extractor = _IdentityExtractor()
     patch_size = 4
 
-    gt = metrics.deep_target_features(target, cell_seg, extractor, patch_size)
-    pred = metrics.deep_pred_features(prediction, cell_seg, extractor, patch_size)
+    gt = metrics.deep_features(target, cell_seg, extractor, patch_size)
+    pred = metrics.deep_features(prediction, cell_seg, extractor, patch_size)
 
     # Same number of cells (3), same feature_dim (4x4 flat = 16).
     assert gt.shape == (3, 16)
@@ -198,22 +198,22 @@ def test_deep_target_and_pred_features_same_cell_order(monkeypatch) -> None:
     assert np.allclose(ratio[gt > 0], 2.0)
 
 
-def test_deep_target_features_empty_segmentation_returns_empty(monkeypatch) -> None:
+def test_deep_features_empty_segmentation_returns_empty(monkeypatch) -> None:
     """Segmentation with only the background label returns an empty feature matrix."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     cell_seg = np.zeros((1, 4, 4), dtype=np.int32)
     target = np.ones((1, 4, 4), dtype=np.float32)
-    result = metrics.deep_target_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
+    result = metrics.deep_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
     assert result.shape == (0, 0)
 
 
-def test_deep_target_features_shape_mismatch_raises(monkeypatch) -> None:
-    """Target and cell_segmentation must match in shape."""
+def test_deep_features_shape_mismatch_raises(monkeypatch) -> None:
+    """Image and cell_segmentation must match in shape."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     target = np.zeros((1, 4, 4), dtype=np.float32)
     cell_seg = np.zeros((1, 4, 5), dtype=np.int32)
     with pytest.raises(ValueError, match="Shape mismatch"):
-        metrics.deep_target_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
+        metrics.deep_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
 
 
 class _BatchAwareExtractor:

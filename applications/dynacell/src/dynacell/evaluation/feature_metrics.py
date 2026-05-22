@@ -53,8 +53,12 @@ def _fid(pred: np.ndarray, target: np.ndarray) -> float:
     Mirrors the math at ``torch_fidelity.metric_fid.fid_statistics_to_metric``:
     for symmetric PSD ``Σ₁, Σ₂``, ``Σᵢ √λᵢ(Σ₁·Σ₂) == Tr(sqrt(Σ₁·Σ₂))``.
     Faster than ``scipy.linalg.sqrtm`` and avoids its convergence warnings.
+
+    Returns ``nan`` for cohorts with fewer than 2 rows on either side —
+    ``np.cov`` is undefined at N<2 and would produce a NaN covariance
+    that crashes ``np.linalg.eigvals`` downstream.
     """
-    if pred.shape[0] == 0 or target.shape[0] == 0:
+    if pred.shape[0] < 2 or target.shape[0] < 2:
         return float("nan")
     stats_pred = fid_features_to_statistics(_to_tensor(pred))
     stats_target = fid_features_to_statistics(_to_tensor(target))
@@ -77,7 +81,7 @@ def _kid(
     """
     n_pred = pred.shape[0]
     n_target = target.shape[0]
-    if n_pred == 0 or n_target == 0:
+    if n_pred < 2 or n_target < 2:
         return float("nan"), float("nan")
     effective_size = min(kid_subset_size, n_pred, n_target)
     if effective_size < _KID_MIN_SUBSET_SIZE:

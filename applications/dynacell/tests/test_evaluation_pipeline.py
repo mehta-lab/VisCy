@@ -26,13 +26,11 @@ def _import_pipeline_with_stubs(monkeypatch):
     metrics_module.calculate_microssim = lambda *args, **kwargs: []
     metrics_module.compute_pixel_metrics = lambda *args, **kwargs: {}
     metrics_module.evaluate_segmentations = lambda *args, **kwargs: {}
-    metrics_module.cp_target_regionprops = lambda *args, **kwargs: None
-    metrics_module.cp_pred_regionprops = lambda *args, **kwargs: None
-    metrics_module.deep_target_features = lambda *args, **kwargs: None
-    metrics_module.deep_pred_features = lambda *args, **kwargs: None
-    metrics_module.build_pred_crops = lambda *args, **kwargs: []
-    metrics_module.build_target_crops = lambda *args, **kwargs: []
+    metrics_module.cp_regionprops = lambda *args, **kwargs: None
+    metrics_module.deep_features = lambda *args, **kwargs: None
+    metrics_module.build_crops = lambda *args, **kwargs: []
     metrics_module.features_from_crops = lambda *args, **kwargs: np.empty((0, 0), dtype=np.float32)
+    metrics_module.drop_paired_nonfinite_rows = lambda p, t: (p, t)
 
     feature_metrics_module = types.ModuleType("dynacell.evaluation.feature_metrics")
     feature_metrics_module.compute_feature_similarity = lambda *args, **kwargs: {}

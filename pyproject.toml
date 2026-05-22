@@ -86,8 +86,11 @@ lint.pydocstyle.convention = "numpy"
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests" ]
-addopts = [ "-ra", "-q", "--import-mode=importlib" ]
+addopts = [ "-ra", "-q", "--import-mode=importlib", "-m", "not slow" ]
 pythonpath = [ "applications/dynacell/tools" ]
+markers = [
+  "slow: marks tests requiring GPU/HPC resources (deselect with -m 'not slow')",
+]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

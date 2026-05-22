@@ -2,13 +2,15 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import hydra
 import numpy as np
 import pandas as pd
 from iohub.ngff import open_ome_zarr
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
@@ -25,21 +27,35 @@ from dynacell.evaluation.feature_select import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
-    build_pred_crops,
+    build_crops,
     calculate_microssim,
     compute_pixel_metrics,
-    cp_pred_regionprops,
+    cp_regionprops,
     drop_paired_nonfinite_rows,
     evaluate_segmentations,
     features_from_crops,
 )
+from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
     flush_manifest,
-    fov_gt_cp_features,
-    fov_gt_deep_features,
-    fov_gt_masks,
-    init_cache_context,
-    resolve_dynaclr_encoder_cfg,
+    fov_cp_features,
+    fov_deep_features,
+    fov_masks,
+    precompute_deep_features,
+)
+from dynacell.evaluation.runtime import (
+    apply_thread_budget,
+    dump_timings_csv,
+    extend_timings,
+    get_timings,
+    gpu_serialization_lock,
+    is_worker,
+    make_fov_executor,
+    maybe_empty_cuda_cache,
+    maybe_gc_collect,
+    region_timer,
+    reset_timings,
+    resolve_runtime,
 )
 from dynacell.evaluation.utils import plot_metrics
 
@@ -83,6 +99,58 @@ def _real_vs_pred_probe(
     }
 
 
+def _fov_pred_features_per_t(
+    pred_cache_ctx,
+    pos_name: str,
+    predict: np.ndarray,
+    cell_segmentation: np.ndarray | None,
+    dinov3_feature_extractor,
+    dynaclr_feature_extractor,
+    celldino_feature_extractor,
+    patch_size: int,
+    spacing,
+) -> dict[str, list[np.ndarray] | None]:
+    """Return per-backbone per-t prediction features.
+
+    Uses the pred cache when configured; otherwise computes fresh
+    per-timepoint, sharing one set of 2-D crops across all deep backbones
+    to avoid redundant max-projection + crop construction per backbone.
+    """
+    if pred_cache_ctx.enabled:
+        return {
+            "cp": fov_cp_features(pred_cache_ctx, pos_name, predict, cell_segmentation),
+            "dinov3": fov_deep_features(
+                pred_cache_ctx, pos_name, predict, cell_segmentation, dinov3_feature_extractor, "dinov3"
+            ),
+            "dynaclr": fov_deep_features(
+                pred_cache_ctx, pos_name, predict, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+            ),
+            "celldino": (
+                fov_deep_features(
+                    pred_cache_ctx, pos_name, predict, cell_segmentation, celldino_feature_extractor, "celldino"
+                )
+                if celldino_feature_extractor is not None
+                else None
+            ),
+        }
+    t_count = predict.shape[0]
+    # Single per-t pass: build crops once per timepoint, fan out to every
+    # deep backbone, then drop them before moving to the next t — avoids
+    # holding ``t_count`` crop tensors in memory at once.
+    cp: list[np.ndarray] = []
+    dinov3: list[np.ndarray] = []
+    dynaclr: list[np.ndarray] = []
+    celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    for t in range(t_count):
+        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing))
+        crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
+        dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
+        dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
+        if celldino is not None:
+            celldino.append(features_from_crops(crops_t, celldino_feature_extractor))
+    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino}
+
+
 def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]]) -> None:
     """Save concatenated single-cell embeddings with FOV and Timepoint metadata."""
     embed_dir = save_dir / "embeddings"
@@ -100,10 +168,493 @@ def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]])
         print(f"Saved embeddings → {out_path}")
 
 
-def evaluate_predictions(config: DictConfig):
-    """Evaluate predictions on all test images."""
-    from dynacell.evaluation.segmentation import prepare_segmentation_model, segment
-    from dynacell.evaluation.utils import CellDinoFeatureExtractor, DinoV3FeatureExtractor, DynaCLRFeatureExtractor
+@dataclass
+class _BackboneLists:
+    """Per-FOV per-backbone single-cell feature lists.
+
+    Each list holds one entry per timepoint with non-empty cell features.
+    ``pred_*`` and ``gt_*`` indices align: ``pred_feats[i]`` and
+    ``gt_feats[i]`` come from the same (pos_name, t) pair, with
+    ``pred_fovs[i] == gt_fovs[i]`` and ``pred_ts[i] == gt_ts[i]``.
+    """
+
+    pred_feats: list[np.ndarray] = field(default_factory=list)
+    gt_feats: list[np.ndarray] = field(default_factory=list)
+    pred_fovs: list[np.ndarray] = field(default_factory=list)
+    gt_fovs: list[np.ndarray] = field(default_factory=list)
+    pred_ts: list[np.ndarray] = field(default_factory=list)
+    gt_ts: list[np.ndarray] = field(default_factory=list)
+
+
+@dataclass
+class FovResult:
+    """Output of ``_process_one_fov``: everything one FOV contributes to the run.
+
+    Designed for cross-process transport via pickle: all fields are picklable
+    types (str, list[dict], list[np.ndarray], np.ndarray) — no iohub handles,
+    no torch modules.
+
+    Microssim scores are merged into ``per_t_pixel_rows`` before return
+    (matching the existing serial path at ``pipeline.py:478-481``); no
+    separate microssim field.
+    """
+
+    pos_name: str
+    row: str
+    col: str
+    fov: str
+    per_t_pixel_rows: list[dict]
+    per_t_mask_rows: list[dict]
+    per_t_feature_rows: list[dict]
+    seg_array: np.ndarray  # (T, 2, D, H, W) bool: channel 0 = pred, channel 1 = GT
+    cp: _BackboneLists = field(default_factory=_BackboneLists)
+    dinov3: _BackboneLists = field(default_factory=_BackboneLists)
+    dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
+    celldino: _BackboneLists = field(default_factory=_BackboneLists)
+    timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
+
+
+def _process_one_fov(
+    config: DictConfig,
+    cuda_empty_cache_every_n_timepoints: int,
+    pos_name_pred: str,
+    pos_pred,
+    pos_gt,
+    pos_seg,
+    io_config,
+    cache_ctx,
+    pred_cache_ctx,
+    seg_model,
+    dinov3_feature_extractor,
+    dynaclr_feature_extractor,
+    celldino_feature_extractor,
+) -> FovResult:
+    """Compute everything one FOV contributes to the eval and return a FovResult.
+
+    No side effects on shared parent state (no segmentation_results plate
+    writes, no manifest flush). The parent aggregator handles those — see
+    ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
+    paths in ``evaluate_predictions``.
+    """
+    from dynacell.evaluation.segmentation import segment
+
+    timings_start = len(get_timings())
+    # Inner per-T tqdm is noise when N workers each emit it to the shared
+    # parent stderr — outer per-FOV tqdm in the parent stays visible either way.
+    suppress_inner_tqdm = is_worker()
+    # GPU serialization lock is a no-op when use_gpu=false: under that
+    # setting compute_pixel_metrics, cellpose, and feature extractors all
+    # run CPU-only, so cross-worker fcntl serialization would just add
+    # latency for nothing.
+    use_gpu = bool(getattr(config, "use_gpu", True))
+
+    pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
+    gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
+
+    predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
+    target = np.asarray(pos_gt.data[:, gt_channel_index])
+    cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
+
+    T = predict.shape[0]
+
+    with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+        gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
+    if pred_cache_ctx.enabled:
+        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+    else:
+        pred_mask_stack = None
+
+    gt_cp_per_t = None
+    gt_dinov3_per_t = None
+    gt_dynaclr_per_t = None
+    gt_celldino_per_t = None
+    pred_per_t = None
+    if config.compute_feature_metrics:
+        with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
+        with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_dinov3_per_t = fov_deep_features(
+                cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
+            )
+        with region_timer("deep_gt_dynaclr", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_dynaclr_per_t = fov_deep_features(
+                cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+            )
+        if celldino_feature_extractor is not None:
+            with region_timer("deep_gt_celldino", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_celldino_per_t = fov_deep_features(
+                    cache_ctx,
+                    pos_name_pred,
+                    target,
+                    cell_segmentation,
+                    celldino_feature_extractor,
+                    "celldino",
+                )
+        with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            pred_per_t = _fov_pred_features_per_t(
+                pred_cache_ctx,
+                pos_name_pred,
+                predict,
+                cell_segmentation,
+                dinov3_feature_extractor,
+                dynaclr_feature_extractor,
+                celldino_feature_extractor,
+                config.feature_metrics.patch_size,
+                config.pixel_metrics.spacing,
+            )
+
+    microssim_data: list[dict] = []
+    fov_pixel_metrics: list[dict] = []
+    fov_mask_metrics: list[dict] = []
+    fov_feature_metrics: list[dict] = []
+    segmentations: list[np.ndarray] = []
+    cp = _BackboneLists()
+    dinov3 = _BackboneLists()
+    dynaclr = _BackboneLists()
+    celldino = _BackboneLists()
+
+    for t in tqdm(range(T), desc="Processing timepoints", leave=False, disable=suppress_inner_tqdm):
+        data_info = {"FOV": pos_name_pred, "Timepoint": t}
+
+        with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
+            pixel_metrics = compute_pixel_metrics(
+                predict[t],
+                target[t],
+                spacing=config.pixel_metrics.spacing,
+                fsc_kwargs=config.pixel_metrics.fsc,
+                spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
+                use_gpu=config.use_gpu,
+            )
+        if config.compute_microssim:
+            microssim_data.append({"target": target[t], "predict": predict[t]})
+        fov_pixel_metrics.append({**data_info, **pixel_metrics})
+
+        with region_timer("mask_metrics", pos_name_pred, t):
+            segmented_target = gt_mask_stack[t]
+            if pred_mask_stack is not None:
+                segmented_predict = pred_mask_stack[t]
+            else:
+                with gpu_serialization_lock(gate=use_gpu):
+                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
+                        bool
+                    )
+            fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
+            segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
+
+        if config.compute_feature_metrics:
+            with region_timer("feature_pairwise", pos_name_pred, t):
+                pred_cp = pred_per_t["cp"][t]
+                pred_dinov3 = pred_per_t["dinov3"][t]
+                pred_dynaclr = pred_per_t["dynaclr"][t]
+                pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
+                pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
+                if pred_cp.size and gt_cp_t.size:
+                    pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
+                else:
+                    pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
+                pairwise_metrics = {
+                    **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
+                    **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
+                    **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
+                }
+                if pred_celldino is not None:
+                    pairwise_metrics.update(
+                        compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
+                    )
+                fov_feature_metrics.append({**data_info, **pairwise_metrics})
+                if pred_cp.size > 0:
+                    cp.pred_feats.append(pred_cp)
+                    cp.gt_feats.append(gt_cp_t)
+                    fov_arr = np.full(len(pred_cp), pos_name_pred)
+                    t_arr = np.full(len(pred_cp), t, dtype=np.int32)
+                    cp.pred_fovs.append(fov_arr)
+                    cp.gt_fovs.append(fov_arr)
+                    cp.pred_ts.append(t_arr)
+                    cp.gt_ts.append(t_arr)
+                if pred_dinov3.size > 0:
+                    dinov3.pred_feats.append(pred_dinov3)
+                    dinov3.gt_feats.append(gt_dinov3_per_t[t])
+                    fov_arr = np.full(len(pred_dinov3), pos_name_pred)
+                    t_arr = np.full(len(pred_dinov3), t, dtype=np.int32)
+                    dinov3.pred_fovs.append(fov_arr)
+                    dinov3.gt_fovs.append(fov_arr)
+                    dinov3.pred_ts.append(t_arr)
+                    dinov3.gt_ts.append(t_arr)
+                if pred_dynaclr.size > 0:
+                    dynaclr.pred_feats.append(pred_dynaclr)
+                    dynaclr.gt_feats.append(gt_dynaclr_per_t[t])
+                    fov_arr = np.full(len(pred_dynaclr), pos_name_pred)
+                    t_arr = np.full(len(pred_dynaclr), t, dtype=np.int32)
+                    dynaclr.pred_fovs.append(fov_arr)
+                    dynaclr.gt_fovs.append(fov_arr)
+                    dynaclr.pred_ts.append(t_arr)
+                    dynaclr.gt_ts.append(t_arr)
+                if pred_celldino is not None and pred_celldino.size > 0:
+                    celldino.pred_feats.append(pred_celldino)
+                    celldino.gt_feats.append(gt_celldino_per_t[t])
+                    fov_arr = np.full(len(pred_celldino), pos_name_pred)
+                    t_arr = np.full(len(pred_celldino), t, dtype=np.int32)
+                    celldino.pred_fovs.append(fov_arr)
+                    celldino.gt_fovs.append(fov_arr)
+                    celldino.pred_ts.append(t_arr)
+                    celldino.gt_ts.append(t_arr)
+
+        maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
+
+    seg_array = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
+
+    if config.compute_microssim:
+        with region_timer("microssim", pos_name_pred):
+            microssim_scores = calculate_microssim(microssim_data)
+            for i in range(T):
+                fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
+
+    row, col, fov = pos_name_pred.split("/")
+    return FovResult(
+        pos_name=pos_name_pred,
+        row=row,
+        col=col,
+        fov=fov,
+        per_t_pixel_rows=fov_pixel_metrics,
+        per_t_mask_rows=fov_mask_metrics,
+        per_t_feature_rows=fov_feature_metrics,
+        seg_array=seg_array.astype(bool),
+        cp=cp,
+        dinov3=dinov3,
+        dynaclr=dynaclr,
+        celldino=celldino,
+        timings=get_timings()[timings_start:],
+    )
+
+
+def _aggregate_fov_result(
+    result: FovResult,
+    segmentation_results,
+    all_pixel_metrics: list[dict],
+    all_mask_metrics: list[dict],
+    all_feature_metrics: list[dict],
+    pred_cp_feats: list[np.ndarray],
+    pred_cp_fovs: list[np.ndarray],
+    pred_cp_ts: list[np.ndarray],
+    gt_cp_feats: list[np.ndarray],
+    gt_cp_fovs: list[np.ndarray],
+    gt_cp_ts: list[np.ndarray],
+    pred_dinov3_feats: list[np.ndarray],
+    pred_dinov3_fovs: list[np.ndarray],
+    pred_dinov3_ts: list[np.ndarray],
+    gt_dinov3_feats: list[np.ndarray],
+    gt_dinov3_fovs: list[np.ndarray],
+    gt_dinov3_ts: list[np.ndarray],
+    pred_dynaclr_feats: list[np.ndarray],
+    pred_dynaclr_fovs: list[np.ndarray],
+    pred_dynaclr_ts: list[np.ndarray],
+    gt_dynaclr_feats: list[np.ndarray],
+    gt_dynaclr_fovs: list[np.ndarray],
+    gt_dynaclr_ts: list[np.ndarray],
+    pred_celldino_feats: list[np.ndarray],
+    pred_celldino_fovs: list[np.ndarray],
+    pred_celldino_ts: list[np.ndarray],
+    gt_celldino_feats: list[np.ndarray],
+    gt_celldino_fovs: list[np.ndarray],
+    gt_celldino_ts: list[np.ndarray],
+    *,
+    extend_worker_timings: bool,
+) -> None:
+    """Apply one FOV's contributions to the parent-side run state.
+
+    Writes the segmentation array to the HCS plate, extends the per-T row
+    lists, and extends the 24 dataset-level accumulator lists.
+
+    ``extend_worker_timings`` toggles whether to append ``result.timings``
+    to the parent's global ``_TIMINGS`` collector. Set ``False`` in serial
+    mode (workers and parent share one collector, so the timings are
+    already there); set ``True`` in process mode (workers have separate
+    per-process collectors, so the parent must aggregate).
+    """
+    if extend_worker_timings:
+        extend_timings(result.timings)
+
+    with region_timer("seg_write", result.pos_name):
+        seg_pos = segmentation_results.create_position(result.row, result.col, result.fov)
+        seg_pos.create_image("0", result.seg_array)
+
+    all_pixel_metrics.extend(result.per_t_pixel_rows)
+    all_mask_metrics.extend(result.per_t_mask_rows)
+    all_feature_metrics.extend(result.per_t_feature_rows)
+
+    pred_cp_feats.extend(result.cp.pred_feats)
+    pred_cp_fovs.extend(result.cp.pred_fovs)
+    pred_cp_ts.extend(result.cp.pred_ts)
+    gt_cp_feats.extend(result.cp.gt_feats)
+    gt_cp_fovs.extend(result.cp.gt_fovs)
+    gt_cp_ts.extend(result.cp.gt_ts)
+    pred_dinov3_feats.extend(result.dinov3.pred_feats)
+    pred_dinov3_fovs.extend(result.dinov3.pred_fovs)
+    pred_dinov3_ts.extend(result.dinov3.pred_ts)
+    gt_dinov3_feats.extend(result.dinov3.gt_feats)
+    gt_dinov3_fovs.extend(result.dinov3.gt_fovs)
+    gt_dinov3_ts.extend(result.dinov3.gt_ts)
+    pred_dynaclr_feats.extend(result.dynaclr.pred_feats)
+    pred_dynaclr_fovs.extend(result.dynaclr.pred_fovs)
+    pred_dynaclr_ts.extend(result.dynaclr.pred_ts)
+    gt_dynaclr_feats.extend(result.dynaclr.gt_feats)
+    gt_dynaclr_fovs.extend(result.dynaclr.gt_fovs)
+    gt_dynaclr_ts.extend(result.dynaclr.gt_ts)
+    pred_celldino_feats.extend(result.celldino.pred_feats)
+    pred_celldino_fovs.extend(result.celldino.pred_fovs)
+    pred_celldino_ts.extend(result.celldino.pred_ts)
+    gt_celldino_feats.extend(result.celldino.gt_feats)
+    gt_celldino_fovs.extend(result.celldino.gt_fovs)
+    gt_celldino_ts.extend(result.celldino.gt_ts)
+
+
+# Worker-side state for ``executor=process``. A spawn-context child Python
+# interpreter calls ``_worker_run_fov`` once per submitted FOV; the first
+# call triggers ``_worker_setup`` which lazy-loads seg model + extractors +
+# cache contexts under the GPU serialization lock and caches them here.
+# Subsequent FOVs in the same worker reuse the cached state.
+#
+# Plate handles are intentionally *not* cached here — they're context-managed
+# per-FOV inside ``_worker_run_fov`` so iohub file descriptors close when the
+# worker is between FOVs, and so the worker has nothing to clean up on
+# ProcessPoolExecutor shutdown.
+_WORKER_STATE: dict[str, Any] = {}
+
+
+def _worker_setup(config: DictConfig) -> None:
+    """First-FOV-per-worker initialization: load models + init cache contexts.
+
+    GPU touch sites (model + extractor loads) run under
+    ``gpu_serialization_lock(gate=use_gpu)`` so under ``use_gpu=true`` N workers don't initialize CUDA + load
+    weights concurrently. Cache contexts (no GPU touch) are built outside
+    the lock. Plate handles are opened lazily per-FOV in ``_worker_run_fov``.
+    """
+    if _WORKER_STATE.get("initialized"):
+        return
+
+    use_gpu = bool(getattr(config, "use_gpu", True))
+    with gpu_serialization_lock(gate=use_gpu):
+        models = load_eval_models(config)
+
+    cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
+
+    _WORKER_STATE.update(
+        {
+            "initialized": True,
+            "seg_model": models.seg_model,
+            "dinov3": models.dinov3,
+            "dynaclr": models.dynaclr,
+            "celldino": models.celldino,
+            "cache_ctx": cache_ctx,
+            "pred_cache_ctx": pred_cache_ctx,
+        }
+    )
+
+
+def _find_position(plate, pos_name: str):
+    """Return the iohub Position with name ``pos_name`` from ``plate``.
+
+    Scans ``plate.positions()`` since iohub doesn't index by name. Cheap
+    for the ≤ tens of positions per eval.
+    """
+    for name, pos in plate.positions():
+        if name == pos_name:
+            return pos
+    raise KeyError(f"position {pos_name!r} not found in plate")
+
+
+def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) -> FovResult:
+    """Worker entry point: process one FOV by name and return FovResult.
+
+    Submitted via ``pool.submit`` in ``executor=process`` mode. Plates
+    are opened with a context manager scoped to this single call — iohub
+    file descriptors close before the worker accepts its next FOV. Models
+    + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
+    """
+    _worker_setup(config)
+    state = _WORKER_STATE
+
+    seg_path = config.io.cell_segmentation_path
+    with (
+        open_ome_zarr(Path(config.io.pred_path), mode="r") as pred_plate,
+        open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate,
+    ):
+        pos_pred = _find_position(pred_plate, pos_name)
+        pos_gt = _find_position(gt_plate, pos_name)
+
+        if seg_path is not None:
+            with open_ome_zarr(Path(seg_path), mode="r") as seg_plate:
+                pos_seg = _find_position(seg_plate, pos_name)
+                result = _process_one_fov(
+                    config,
+                    cuda_empty_every_n,
+                    pos_name,
+                    pos_pred,
+                    pos_gt,
+                    pos_seg,
+                    config.io,
+                    state["cache_ctx"],
+                    state["pred_cache_ctx"],
+                    state["seg_model"],
+                    state["dinov3"],
+                    state["dynaclr"],
+                    state["celldino"],
+                )
+        else:
+            result = _process_one_fov(
+                config,
+                cuda_empty_every_n,
+                pos_name,
+                pos_pred,
+                pos_gt,
+                None,
+                config.io,
+                state["cache_ctx"],
+                state["pred_cache_ctx"],
+                state["seg_model"],
+                state["dinov3"],
+                state["dynaclr"],
+                state["celldino"],
+            )
+
+    # Worker-side manifest flush so interrupted runs preserve progress even
+    # when the parent dies. The global manifest lock at
+    # _pos_write_lock(ctx, "manifest", "global") serializes flushes across
+    # workers.
+    flush_manifest(state["cache_ctx"])
+    flush_manifest(state["pred_cache_ctx"])
+    return result
+
+
+def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None):
+    """Evaluate predictions on all test images.
+
+    Parameters
+    ----------
+    config : DictConfig
+        Resolved eval config.
+    models : EvalModels | None, optional
+        Pre-loaded segmenter + feature extractors. When provided, the
+        inline ``load_eval_models(config)`` call is skipped — used by the
+        grouped multi-condition driver to amortize model loads across
+        conditions sharing the same target/extractors. Default ``None``
+        preserves the historical single-condition behavior. Note: under
+        ``runtime.executor=process``, workers still load their own model
+        copies; this kwarg saves only the parent-side load.
+    """
+    # Phase 1 runtime resolution: lock in executor + thread caps before any
+    # heavy work. fov_workers may be provisional when "auto"; re-resolved in
+    # Phase 2 once the position list is known (C4). threads_per_worker stays
+    # frozen across phases for parent/worker BLAS-cap consistency.
+    runtime = resolve_runtime(config)
+    apply_thread_budget(runtime.threads_per_worker)
+    # Resolve ${...} interpolations in-place so spawn workers don't lazy-resolve
+    # refs in their child interpreters. ??? MISSING fields stay unresolved
+    # (OmegaConf 2.3 _resolve walks only interpolation nodes, not value nodes),
+    # so this is safe under feature-metrics-disabled runs.
+    OmegaConf.resolve(config)
+    reset_timings()
 
     all_pixel_metrics = []
     all_mask_metrics = []
@@ -115,44 +666,17 @@ def evaluate_predictions(config: DictConfig):
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    seg_model = prepare_segmentation_model(config)
+    if config.compute_feature_metrics and io_config.cell_segmentation_path is None:
+        raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
 
-    dinov3_model_name = None
-    dynaclr_ckpt_path = None
-    dynaclr_encoder_cfg = None
-    celldino_weights_path = None
-    dinov3_feature_extractor = None
-    dynaclr_feature_extractor = None
-    celldino_feature_extractor = None
+    if models is None:
+        models = load_eval_models(config)
+    seg_model = models.seg_model
+    dinov3_feature_extractor = models.dinov3
+    dynaclr_feature_extractor = models.dynaclr
+    celldino_feature_extractor = models.celldino
 
-    if config.compute_feature_metrics:
-        if io_config.cell_segmentation_path is None:
-            raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
-        dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
-        dinov3_feature_extractor = DinoV3FeatureExtractor(dinov3_model_name)
-        dynaclr_config = config.feature_extractor.dynaclr
-        dynaclr_ckpt_path = str(dynaclr_config.checkpoint)
-        dynaclr_encoder_cfg = resolve_dynaclr_encoder_cfg(config)
-        dynaclr_feature_extractor = DynaCLRFeatureExtractor(
-            checkpoint=dynaclr_config.checkpoint,
-            encoder_config=dynaclr_encoder_cfg,
-        )
-        celldino_cfg = config.feature_extractor.celldino
-        if celldino_cfg.weights_path is not None:
-            celldino_weights_path = str(celldino_cfg.weights_path)
-            celldino_feature_extractor = CellDinoFeatureExtractor(
-                weights_path=celldino_weights_path,
-                img_size=int(celldino_cfg.img_size),
-                patch_size=int(celldino_cfg.patch_size),
-            )
-
-    cache_ctx = init_cache_context(
-        config,
-        dinov3_model_name=dinov3_model_name,
-        dynaclr_ckpt_path=dynaclr_ckpt_path,
-        dynaclr_encoder_cfg=dynaclr_encoder_cfg,
-        celldino_weights_path=celldino_weights_path,
-    )
+    cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
@@ -213,162 +737,194 @@ def evaluate_predictions(config: DictConfig):
             gt_positions = gt_positions[:limit]
             seg_positions = seg_positions[:limit]
         try:
-            for p1, p2, p3 in tqdm(
-                zip(pred_positions, gt_positions, seg_positions),
-                total=len(pred_positions),
-                desc="Processing positions",
+            # Hoist paired-name validation so precompute (which runs before
+            # the per-FOV loop) cannot write to mismatched cache slots.
+            for (pos_name_pred, _), (pos_name_gt, _), (pos_name_seg, _) in zip(
+                pred_positions, gt_positions, seg_positions
             ):
-                pos_name_pred, pos_pred = p1
-                pos_name_gt, pos_gt = p2
-                pos_name_seg, pos_seg = p3
                 if pos_name_pred != pos_name_gt:
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, gt={pos_name_gt!r}")
                 if seg_plate is not None and pos_name_seg != pos_name_pred:
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
 
-                pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
-                gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
-
-                predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
-                target = np.asarray(pos_gt.data[:, gt_channel_index])  # shape: (T, D, H, W)
-                cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
-
-                T = predict.shape[0]
-
-                gt_mask_stack = fov_gt_masks(cache_ctx, pos_name_pred, target, seg_model)
-
-                if config.compute_feature_metrics:
-                    gt_cp_per_t = fov_gt_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
-                    gt_dinov3_per_t = fov_gt_deep_features(
-                        cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
+            if config.compute_feature_metrics:
+                deep_extractors = {
+                    "dinov3": dinov3_feature_extractor,
+                    "dynaclr": dynaclr_feature_extractor,
+                }
+                if celldino_feature_extractor is not None:
+                    deep_extractors["celldino"] = celldino_feature_extractor
+                flush_threshold = int(
+                    OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256)
+                )
+                # Skip precompute on any side under require_complete_cache;
+                # the per-FOV path will fail-loud on misses for that side.
+                sides_for_precompute: dict = {}
+                side_positions: dict = {}
+                side_channels: dict = {}
+                if cache_ctx.enabled and not cache_ctx.require_complete:
+                    sides_for_precompute["gt"] = cache_ctx
+                    side_positions["gt"] = gt_positions
+                    side_channels["gt"] = io_config.gt_channel_name
+                if pred_cache_ctx.enabled and not pred_cache_ctx.require_complete:
+                    sides_for_precompute["pred"] = pred_cache_ctx
+                    side_positions["pred"] = pred_positions
+                    side_channels["pred"] = io_config.pred_channel_name
+                if sides_for_precompute:
+                    precompute_deep_features(
+                        sides_for_precompute,
+                        side_positions,
+                        side_channels,
+                        seg_positions,
+                        deep_extractors,
+                        flush_threshold=flush_threshold,
                     )
-                    gt_dynaclr_per_t = fov_gt_deep_features(
-                        cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+                    for ctx in sides_for_precompute.values():
+                        flush_manifest(ctx)
+
+            # Phase 2 runtime resolution: clamp fov_workers to n_positions
+            # now that we know it. threads_per_worker is frozen at Phase 1
+            # so the parent's BLAS cap matches what workers see.
+            runtime = resolve_runtime(
+                config,
+                n_positions=len(pred_positions),
+                freeze_threads_per_worker=runtime.threads_per_worker,
+            )
+
+            # Under executor=process, workers lazy-load their own seg_model
+            # copies (under the GPU lock). The parent's copy is held only for
+            # the checkpoint-cache-warm side effect (segmenter_model_zoo's
+            # validate_model has no file lock around its quilt download, so
+            # pre-warming in the parent prevents N workers from racing on a
+            # cold cache). After Phase 2 we know the final executor — if it's
+            # process, drop the parent copy so we don't keep two seg model
+            # copies resident on the GPU.
+            if runtime.executor == "process" and seg_model is not None:
+                del seg_model
+                seg_model = None
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+            # Whether to fold result.timings into the parent's _TIMINGS:
+            # only when results come from spawn workers (separate per-process
+            # collector). In serial mode, _process_one_fov already wrote to
+            # the parent's collector via region_timer; re-extending here
+            # would double-count every row.
+            extend_worker_timings = runtime.executor == "process"
+
+            def _aggregate(result: FovResult) -> None:
+                _aggregate_fov_result(
+                    result,
+                    segmentation_results,
+                    all_pixel_metrics,
+                    all_mask_metrics,
+                    all_feature_metrics,
+                    pred_cp_feats,
+                    pred_cp_fovs,
+                    pred_cp_ts,
+                    gt_cp_feats,
+                    gt_cp_fovs,
+                    gt_cp_ts,
+                    pred_dinov3_feats,
+                    pred_dinov3_fovs,
+                    pred_dinov3_ts,
+                    gt_dinov3_feats,
+                    gt_dinov3_fovs,
+                    gt_dinov3_ts,
+                    pred_dynaclr_feats,
+                    pred_dynaclr_fovs,
+                    pred_dynaclr_ts,
+                    gt_dynaclr_feats,
+                    gt_dynaclr_fovs,
+                    gt_dynaclr_ts,
+                    pred_celldino_feats,
+                    pred_celldino_fovs,
+                    pred_celldino_ts,
+                    gt_celldino_feats,
+                    gt_celldino_fovs,
+                    gt_celldino_ts,
+                    extend_worker_timings=extend_worker_timings,
+                )
+
+            if runtime.executor == "serial":
+                for fov_idx, (p1, p2, p3) in enumerate(
+                    tqdm(
+                        zip(pred_positions, gt_positions, seg_positions),
+                        total=len(pred_positions),
+                        desc="Processing positions",
                     )
-                    gt_celldino_per_t = (
-                        fov_gt_deep_features(
-                            cache_ctx, pos_name_pred, target, cell_segmentation, celldino_feature_extractor, "celldino"
-                        )
-                        if celldino_feature_extractor is not None
-                        else None
+                ):
+                    pos_name_pred, pos_pred = p1
+                    _, pos_gt = p2
+                    _, pos_seg = p3
+
+                    result = _process_one_fov(
+                        config,
+                        runtime.cuda_empty_cache_every_n_timepoints,
+                        pos_name_pred,
+                        pos_pred,
+                        pos_gt,
+                        pos_seg,
+                        io_config,
+                        cache_ctx,
+                        pred_cache_ctx,
+                        seg_model,
+                        dinov3_feature_extractor,
+                        dynaclr_feature_extractor,
+                        celldino_feature_extractor,
                     )
+                    _aggregate(result)
 
-                microssim_data = []
-                fov_pixel_metrics = []
-                segmentations = []
+                    # Flush manifest after each position so interrupted runs preserve progress.
+                    flush_manifest(cache_ctx)
+                    flush_manifest(pred_cache_ctx)
 
-                for t in tqdm(range(T), desc="Processing timepoints"):
-                    data_info = {"FOV": pos_name_pred, "Timepoint": t}
+                    maybe_gc_collect(fov_idx, runtime.gc_collect_every_n_fovs)
+            else:
+                # executor == "process": spawn-context ProcessPoolExecutor.
+                # Workers lazy-load their own seg_model + extractors under the
+                # GPU lock; parent's copy was discarded after Phase-2 resolve.
+                #
+                # Streaming aggregation: futures arrive in completion order
+                # but we want deterministic per-FOV CSV / embedding NPZ row
+                # order, so the next-expected pos_name index advances
+                # opportunistically as results land. Only out-of-order
+                # FovResults stay buffered — once the expected position
+                # completes, we drain the buffer in order. Bounds peak
+                # parent-side memory to the number of out-of-order FOVs
+                # rather than the full N×seg_array (~N × 440 MB).
+                from concurrent.futures import as_completed
 
-                    pixel_metrics = compute_pixel_metrics(
-                        predict[t],
-                        target[t],
-                        spacing=config.pixel_metrics.spacing,
-                        fsc_kwargs=config.pixel_metrics.fsc,
-                        spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
-                        use_gpu=config.use_gpu,
-                    )
-                    if config.compute_microssim:
-                        microssim_data.append({"target": target[t], "predict": predict[t]})
-                    fov_pixel_metrics.append({**data_info, **pixel_metrics})
-
-                    # Mask: target side from cache/precompute; predict side always fresh.
-                    segmented_target = gt_mask_stack[t]
-                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
-                        bool
-                    )
-                    all_mask_metrics.append(
-                        {**data_info, **evaluate_segmentations(segmented_predict, segmented_target)}
-                    )
-                    segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
-
-                    if config.compute_feature_metrics:
-                        pred_cp = cp_pred_regionprops(predict[t], cell_segmentation[t], config.pixel_metrics.spacing)
-                        pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
-                        # Build the per-cell 2-D crops once per timepoint and
-                        # reuse them across all 3-4 deep backbones (max-z
-                        # projection + cell-iteration + crop construction
-                        # are otherwise redundant per backbone).
-                        pred_crops_2d = build_pred_crops(
-                            predict[t], cell_segmentation[t], config.feature_metrics.patch_size
-                        )
-                        pred_dinov3 = features_from_crops(pred_crops_2d, dinov3_feature_extractor)
-                        pred_dynaclr = features_from_crops(pred_crops_2d, dynaclr_feature_extractor)
-                        pred_celldino = (
-                            features_from_crops(pred_crops_2d, celldino_feature_extractor)
-                            if celldino_feature_extractor is not None
-                            else None
-                        )
-                        # Per-timepoint CP: drop target-zero columns + per-side z-score.
-                        # Deep features stay untouched.
-                        if pred_cp.size and gt_cp_t.size:
-                            pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
-                        else:
-                            pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
-                        pairwise_metrics = {
-                            **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
-                            **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
-                            **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
-                        }
-                        if pred_celldino is not None:
-                            pairwise_metrics.update(
-                                compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
-                            )
-                        all_feature_metrics.append({**data_info, **pairwise_metrics})
-                        # pred/gt fov+timepoint arrays are byte-identical per
-                        # backbone; share one reference each (consumers only
-                        # concatenate, never mutate in place).
-                        if pred_cp.size > 0:
-                            pred_cp_feats.append(pred_cp)
-                            gt_cp_feats.append(gt_cp_t)
-                            fov_arr = np.full(len(pred_cp), pos_name_pred)
-                            t_arr = np.full(len(pred_cp), t, dtype=np.int32)
-                            pred_cp_fovs.append(fov_arr)
-                            gt_cp_fovs.append(fov_arr)
-                            pred_cp_ts.append(t_arr)
-                            gt_cp_ts.append(t_arr)
-                        if pred_dinov3.size > 0:
-                            pred_dinov3_feats.append(pred_dinov3)
-                            gt_dinov3_feats.append(gt_dinov3_per_t[t])
-                            fov_arr = np.full(len(pred_dinov3), pos_name_pred)
-                            t_arr = np.full(len(pred_dinov3), t, dtype=np.int32)
-                            pred_dinov3_fovs.append(fov_arr)
-                            gt_dinov3_fovs.append(fov_arr)
-                            pred_dinov3_ts.append(t_arr)
-                            gt_dinov3_ts.append(t_arr)
-                        if pred_dynaclr.size > 0:
-                            pred_dynaclr_feats.append(pred_dynaclr)
-                            gt_dynaclr_feats.append(gt_dynaclr_per_t[t])
-                            fov_arr = np.full(len(pred_dynaclr), pos_name_pred)
-                            t_arr = np.full(len(pred_dynaclr), t, dtype=np.int32)
-                            pred_dynaclr_fovs.append(fov_arr)
-                            gt_dynaclr_fovs.append(fov_arr)
-                            pred_dynaclr_ts.append(t_arr)
-                            gt_dynaclr_ts.append(t_arr)
-                        if pred_celldino is not None and pred_celldino.size > 0:
-                            pred_celldino_feats.append(pred_celldino)
-                            gt_celldino_feats.append(gt_celldino_per_t[t])
-                            fov_arr = np.full(len(pred_celldino), pos_name_pred)
-                            t_arr = np.full(len(pred_celldino), t, dtype=np.int32)
-                            pred_celldino_fovs.append(fov_arr)
-                            gt_celldino_fovs.append(fov_arr)
-                            pred_celldino_ts.append(t_arr)
-                            gt_celldino_ts.append(t_arr)
-
-                seg = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
-                row, col, fov = pos_name_pred.split("/")
-                seg_pos = segmentation_results.create_position(row, col, fov)
-                seg_pos.create_image("0", seg.astype(bool))
-
-                if config.compute_microssim:
-                    microssim_scores = calculate_microssim(microssim_data)
-                    for i in range(T):
-                        fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
-
-                all_pixel_metrics.extend(fov_pixel_metrics)
-
-                # Flush manifest after each position so interrupted runs preserve progress.
-                flush_manifest(cache_ctx)
+                pos_names_in_order = [p[0] for p, _, _ in zip(pred_positions, gt_positions, seg_positions)]
+                next_idx = 0
+                buffer: dict[str, FovResult] = {}
+                with make_fov_executor(runtime) as pool:
+                    if pool is None:
+                        raise RuntimeError("make_fov_executor returned None for executor='process'")
+                    futures = {
+                        pool.submit(
+                            _worker_run_fov, config, pos_name, runtime.cuda_empty_cache_every_n_timepoints
+                        ): pos_name
+                        for pos_name in pos_names_in_order
+                    }
+                    with tqdm(total=len(futures), desc="Processing positions") as pbar:
+                        for fut in as_completed(futures):
+                            pos_name = futures[fut]
+                            buffer[pos_name] = fut.result()
+                            # Advance the bar on every worker completion so the
+                            # operator sees real progress even when FOVs arrive
+                            # out of order. The in-order drain below releases
+                            # seg_array refs as soon as the aggregator's plate
+                            # write completes; that's an internal step, not a
+                            # user-visible unit of work.
+                            pbar.update(1)
+                            while next_idx < len(pos_names_in_order) and (pos_names_in_order[next_idx] in buffer):
+                                expected = pos_names_in_order[next_idx]
+                                _aggregate(buffer.pop(expected))
+                                maybe_gc_collect(next_idx, runtime.gc_collect_every_n_fovs)
+                                next_idx += 1
         finally:
             if seg_plate is not None:
                 seg_plate.close()
@@ -486,6 +1042,8 @@ def evaluate_predictions(config: DictConfig):
             embedding_groups["gt_celldino"] = (gt_celldino_feats, gt_celldino_fovs, gt_celldino_ts)
         _save_embeddings(save_dir, embedding_groups)
 
+    dump_timings_csv(save_dir)
+
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 
 
@@ -522,22 +1080,259 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     return pixel_ok and mask_ok and feature_ok
 
 
+def _load_cached_final_metrics(config: DictConfig) -> tuple[list, list, list]:
+    """Reload the (pixel, mask, feature) NPY caches saved by ``save_metrics``."""
+    save_dir = Path(config.save.save_dir)
+    pixel = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
+    mask = np.load(save_dir / config.save.mask_metrics_filename, allow_pickle=True).tolist()
+    if config.compute_feature_metrics:
+        feature = np.load(save_dir / config.save.feature_metrics_filename, allow_pickle=True).tolist()
+    else:
+        feature = []
+    return pixel, mask, feature
+
+
+_MODEL_LOADING_FIELDS: tuple[str, ...] = (
+    "target_name",
+    "feature_extractor",
+    "compute_feature_metrics",
+    "use_gpu",
+    # require_complete_cache flips ``prepare_segmentation_model`` between
+    # "load real SuperModel" and "return None" — letting a condition
+    # override it would mean the shared seg_model bundle is wrong for that
+    # condition (None when cache-miss expects a real model, or loaded but
+    # never used). Treat as a grouped invariant.
+    "io.require_complete_cache",
+)
+
+
+def _snapshot_field(cfg: DictConfig, cfg_field: str):
+    """Resolve a model-loading field to a comparable plain Python value."""
+    node = OmegaConf.select(cfg, cfg_field, default=None)
+    if OmegaConf.is_config(node):
+        return OmegaConf.to_container(node, resolve=False)
+    return node
+
+
+def _seg_model_required(cfg: DictConfig) -> bool:
+    """Mirror ``prepare_segmentation_model``'s load decision without instantiating.
+
+    Returns ``True`` iff a real ``SuperModel`` would be loaded for *cfg*.
+    Used as a derived grouped-eval invariant so a per-condition override of
+    ``io.pred_cache_dir`` cannot silently flip whether the shared seg_model
+    is needed (per-condition pred caches are otherwise free to differ).
+
+    Mirrors ``segmentation.prepare_segmentation_model``:
+
+    - Organelle targets (``er``, ``mitochondria``, ``nucleoli``,
+      ``lysosomes``) use ``aicssegmentation`` workflows that don't take a
+      ``seg_model`` arg → ``False``.
+    - Nucleus/membrane with ``require_complete_cache=false`` → ``True``
+      (cellpose loads to compute fresh masks on cache miss).
+    - Nucleus/membrane with ``require_complete_cache=true`` AND
+      ``io.pred_cache_dir`` set → ``False`` (pred masks served from cache;
+      per-T loop never falls back to ``segment(predict[t], seg_model=...)``).
+    - Nucleus/membrane with ``require_complete_cache=true`` AND
+      ``io.pred_cache_dir is None`` → ``True`` (per-T loop falls back to
+      ``segment(predict[t], seg_model=...)``; the seg_model is required).
+    """
+    target_name = OmegaConf.select(cfg, "target_name", default=None)
+    if target_name not in ("nucleus", "membrane"):
+        return False
+    require_complete = bool(OmegaConf.select(cfg, "io.require_complete_cache", default=False))
+    if not require_complete:
+        return True
+    pred_cache_dir = OmegaConf.select(cfg, "io.pred_cache_dir", default=None)
+    return pred_cache_dir is None
+
+
+def _merge_condition(base: DictConfig, overrides: DictConfig | dict) -> DictConfig:
+    """Return a fresh DictConfig with ``overrides`` deep-merged into ``base``.
+
+    Hydra composition always returns struct-mode configs. ``OmegaConf.merge``
+    propagates struct mode from its first argument, so merging an overlay
+    that carries fields outside the base's schema (notably the per-condition
+    ``name`` label) raises ``ConfigKeyError``, and deleting the
+    ``conditions`` / ``name`` keys raises ``ConfigTypeError`` even when the
+    merge succeeds. The to_container round-trip below escapes struct mode
+    while still producing a config that's independent of ``base``.
+    """
+    base_copy = OmegaConf.create(OmegaConf.to_container(base, resolve=False))
+    merged = OmegaConf.merge(base_copy, OmegaConf.create(overrides))
+    for key in ("conditions", "name"):
+        if key in merged:
+            del merged[key]
+    return merged  # type: ignore[return-value]
+
+
+def _check_grouped_field_invariants(
+    base_snapshot: dict[str, object],
+    base_seg_required: bool,
+    merged: DictConfig,
+    condition_name: str,
+) -> None:
+    """Raise if a per-condition merged config disagrees with the baseline on model-loading fields.
+
+    ``base_snapshot`` is computed once per grouped run from the
+    conditions-stripped base, so condition 0 is validated symmetrically
+    with all later conditions (a condition 0 overlay that sneaks in e.g.
+    ``target_name`` would be rejected, not silently adopted as the new
+    "base").
+
+    ``base_seg_required`` is the baseline value of :func:`_seg_model_required`.
+    ``io.pred_cache_dir`` is intentionally NOT in :data:`_MODEL_LOADING_FIELDS`
+    (per-condition pred caches are the canonical grouped-run use case), but a
+    pred_cache_dir flip *can* indirectly change whether SuperModel is needed
+    for nucleus/membrane targets under ``require_complete_cache=true``. Catch
+    that specific case here so the shared seg_model bundle is never wrong.
+    """
+    for cfg_field in _MODEL_LOADING_FIELDS:
+        merged_val = _snapshot_field(merged, cfg_field)
+        if base_snapshot[cfg_field] != merged_val:
+            raise ValueError(
+                f"Condition {condition_name!r}: overrides changed model-loading field "
+                f"{cfg_field!r}. Move it to the base config or run this condition separately."
+            )
+    if _seg_model_required(merged) and not base_seg_required:
+        raise ValueError(
+            f"Condition {condition_name!r}: io.pred_cache_dir override flips "
+            f"prepare_segmentation_model's load decision in the dangerous direction. "
+            f"The base config does NOT load SuperModel "
+            f"(target_name={base_snapshot['target_name']!r}, "
+            f"require_complete_cache={base_snapshot['io.require_complete_cache']!r}, "
+            f"base io.pred_cache_dir is set), but this condition sets "
+            f"io.pred_cache_dir=None which makes the per-T loop fall back to "
+            f"segment(predict[t], seg_model=...) — that call would receive None "
+            f"and raise. Set io.pred_cache_dir on this condition, or run it separately."
+        )
+
+
+def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
+    """Run ``evaluate_predictions`` over a list of conditions sharing one model load.
+
+    Reads ``config.conditions`` (list of per-condition overrides). For each
+    condition, merges its overrides into a copy of the base config and
+    calls :func:`evaluate_predictions` with the shared ``EvalModels``.
+    Models are loaded lazily on the first condition that misses its
+    ``_final_metrics_cache_valid`` short-circuit, so restarts where every
+    condition is cache-hit pay no cold-start.
+
+    Conditions may freely override ``io.*``, ``save.*``, ``runtime.*``,
+    ``limit_positions``, and ``force_recompute.*``. They must NOT change
+    ``target_name``, ``feature_extractor.*``, ``compute_feature_metrics``,
+    or ``use_gpu`` — those gate which models get loaded.
+
+    Parameters
+    ----------
+    config : DictConfig
+        Eval config with an extra top-level ``conditions: [...]`` list.
+        Each entry is a dict-like overlay applied to the base.
+
+    Returns
+    -------
+    list[tuple[str, tuple]]
+        ``[(condition_name, (pixel_rows, mask_rows, feature_rows)), ...]``
+        in input order. ``condition_name`` is taken from the entry's
+        ``name`` field, falling back to its index as a string.
+
+    Notes
+    -----
+    Under ``runtime.executor=process``, workers still load their own
+    model copies per condition (the pool is rebuilt inside each
+    ``evaluate_predictions`` call). Only the parent-side load is shared.
+    Use ``executor=serial`` to maximize the amortization benefit.
+    """
+    conditions = OmegaConf.select(config, "conditions", default=None)
+    if not conditions:
+        raise ValueError("evaluate_predictions_grouped requires a non-empty top-level 'conditions' list")
+
+    executor = OmegaConf.select(config, "runtime.executor", default="serial")
+    require_complete = bool(OmegaConf.select(config, "io.require_complete_cache", default=False))
+    n_conditions = len(conditions)
+    if executor == "process" and n_conditions > 1:
+        if require_complete:
+            # Cache-only path: workers still re-init per condition (pool spawn +
+            # thread budget + ``load_eval_models`` call). Under
+            # ``require_complete_cache=true`` the segmenter usually short-circuits
+            # to ``None``, but deep extractors still load when
+            # ``compute_feature_metrics=true``. Mild informational note.
+            print(
+                "[grouped] note: runtime.executor=process with require_complete_cache=true — "
+                f"workers re-init per condition (segmenter usually skipped; deep extractors "
+                f"still load when compute_feature_metrics=true). {n_conditions} pool spawns "
+                f"total; use executor=serial to amortize the per-condition load."
+            )
+        else:
+            # Worst-case: each condition's worker pool independently loads
+            # SuperModel + DINOv3 + DynaCLR + CELL-DINO. Total wasted
+            # cold-start ≈ load_time × N_workers × N_conditions.
+            print(
+                "\n"
+                "[grouped] !!! WARNING: runtime.executor=process + "
+                f"{n_conditions} conditions + require_complete_cache=false !!!\n"
+                "  Each condition's worker pool independently loads SuperModel + "
+                "DINOv3 + DynaCLR + CELL-DINO.\n"
+                "  Expected waste: ~30-90 s × N_workers × "
+                f"{n_conditions} conditions of redundant cold-start.\n"
+                "  Fix: set runtime.executor=serial to share the parent's pre-loaded "
+                "models across conditions.\n"
+                "  Use process mode only when you need per-FOV parallelism within a "
+                "single condition.\n"
+            )
+
+    # Canonical baseline for invariant checks: the input config with the
+    # ``conditions`` list dropped. Snapshot once; conditions are validated
+    # against this, including condition 0. Round-trip through to_container
+    # to escape Hydra's struct-mode flag — ``del`` on a struct DictConfig
+    # raises ``ConfigTypeError``.
+    models_base = OmegaConf.create(OmegaConf.to_container(config, resolve=False))
+    if "conditions" in models_base:
+        del models_base["conditions"]
+    base_snapshot = {field: _snapshot_field(models_base, field) for field in _MODEL_LOADING_FIELDS}
+    base_seg_required = _seg_model_required(models_base)
+
+    models: EvalModels | None = None
+
+    def get_models() -> EvalModels:
+        nonlocal models
+        if models is None:
+            print(f"[grouped] loading shared models for {len(conditions)} conditions ...")
+            models = load_eval_models(models_base)
+        return models
+
+    results: list[tuple[str, tuple]] = []
+    for idx, cond in enumerate(conditions):
+        name = (
+            cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
+        )
+        merged = _merge_condition(config, cond)
+        apply_dataset_ref(merged)
+        _check_grouped_field_invariants(base_snapshot, base_seg_required, merged, name)
+        print(f"[grouped] ({idx + 1}/{len(conditions)}) evaluating {name!r} → {merged.save.save_dir}")
+
+        if _final_metrics_cache_valid(merged):
+            print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
+            pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
+        else:
+            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(merged, models=get_models())
+            save_metrics(
+                merged,
+                pixel_metrics=pixel_metrics,
+                mask_metrics=mask_metrics,
+                feature_metrics=feature_metrics,
+            )
+        results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
+
+    return results
+
+
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
     apply_dataset_ref(config)
-    save_dir = Path(config.save.save_dir)
-    pixel_metrics_path = save_dir / config.save.pixel_metrics_filename
-    mask_metrics_path = save_dir / config.save.mask_metrics_filename
-    feature_metrics_path = save_dir / config.save.feature_metrics_filename
     if _final_metrics_cache_valid(config):
         print("Found existing metrics.")
-        pixel_metrics = np.load(pixel_metrics_path, allow_pickle=True).tolist()
-        mask_metrics = np.load(mask_metrics_path, allow_pickle=True).tolist()
-        if config.compute_feature_metrics:
-            feature_metrics = np.load(feature_metrics_path, allow_pickle=True).tolist()
-        else:
-            feature_metrics = []
+        pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(config)
     else:
         pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config)
         save_metrics(
@@ -547,6 +1342,12 @@ def evaluate_model(config: DictConfig):
             feature_metrics=feature_metrics,
         )
     return pixel_metrics, mask_metrics, feature_metrics
+
+
+@hydra.main(version_base="1.2", config_path="_configs", config_name="eval_grouped")
+def evaluate_model_grouped(config: DictConfig):
+    """Run grouped multi-condition eval, amortizing model loads across conditions."""
+    return evaluate_predictions_grouped(config)
 
 
 if __name__ == "__main__":

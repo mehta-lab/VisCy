@@ -13,5 +13,5 @@ uv run dynacell evaluate \
     io.gt_channel_name=Nuclei \
     pixel_metrics.spacing=[0.174,0.1494,0.1494] \
     save.save_dir=/hpc/projects/virtual_staining/training/dynacell/a549/joint_evaluations/eval_fnet3d_joint_nucleus_mock \
-    compute_feature_metrics=false \
+    compute_feature_metrics=true \
     force_recompute.all=true

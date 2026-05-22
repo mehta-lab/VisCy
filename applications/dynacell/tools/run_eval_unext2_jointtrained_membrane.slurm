@@ -26,6 +26,13 @@
 
 set -euo pipefail
 
+# Cap BLAS/OMP threads to the SLURM allocation before any C extension loads.
+# applications/dynacell/CLAUDE.md "Eval runtime / parallelism" section.
+export DYNACELL_THREADS_PER_WORKER="${SLURM_CPUS_PER_TASK}"
+# To enable FOV-level parallelism in a future multi-FOV run, pass these
+# overrides to the wrapped eval invocation (see the .sh script):
+#   runtime.executor=process runtime.fov_workers=4 runtime.threads_per_worker=4
+
 REPO=/hpc/mydata/alex.kalinin/VisCy
 EVAL_DIR="${REPO}/applications/dynacell/configs/evaluations"
 

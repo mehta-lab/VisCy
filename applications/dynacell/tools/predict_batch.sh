@@ -1,8 +1,9 @@
 #!/bin/bash
-# Submit one sbatch job that runs every per-plate predict leaf for a given
-# (organelle, model, train_set, test_set) tuple, in series. Path-1 batching:
-# amortizes queue submission + GPU allocation; total compute is the same as
-# N per-plate jobs.
+# Submit predict leaves for a given (organelle, model, train_set, test_set)
+# tuple via submit_benchmark_batch.py. By default leaves run in series in
+# ONE sbatch allocation (amortizes queue + GPU cold-start); pass --array to
+# instead emit a SLURM array (one task per leaf, up to
+# --max-array-concurrency running in parallel).
 #
 # Usage:
 #   predict_batch.sh <organelle> <model> <train_set> <test_set> [submit_benchmark_batch.py args...]
@@ -15,17 +16,31 @@
 #                a549_mantis, joint_ipsc_confocal_a549_mantis)
 #   <test_set>   ipsc | a549          (or full names: ipsc_confocal, a549_mantis)
 #
-# Examples:
+# Examples (serial, one allocation):
 #   predict_batch.sh er    fnet3d_paper             ipsc  a549             # iPSC-trained → A549
 #   predict_batch.sh er    fnet3d_paper             ipsc  a549  --dry-run  # render only
 #   predict_batch.sh nucleus fcmae_vscyto3d_scratch a549  ipsc             # A549-trained → iPSC
 #   predict_batch.sh nucleus fcmae_vscyto3d_scratch joint a549             # joint-trained → A549
 #   predict_batch.sh er    fnet3d_paper             ipsc  a549  --overwrite
 #
-# Extra args are forwarded verbatim to submit_benchmark_batch.py — including
-# --overwrite (alias for HCSPredictionWriter.overwrite=True on every leaf;
-# required to re-run a plate whose output store already has predictions) and
-# --override KEY.PATH=VALUE (dict-key dotlist, deep-merged after compose).
+# Examples (SLURM array, parallel tasks):
+#   predict_batch.sh er  celldiff  a549  a549  --array
+#       # All 3 per-plate leaves run concurrently as one array job.
+#   predict_batch.sh er  celldiff  a549  a549  --array --max-array-concurrency 2
+#       # Cap to 2 concurrent tasks (renders as --array=0-(N-1)%2).
+#
+# Extra args are forwarded verbatim to submit_benchmark_batch.py. Notable
+# passthrough flags:
+#   --array                       SLURM array submission (one task per leaf)
+#   --max-array-concurrency N     concurrency cap for --array
+#   --allow-mixed-directives      with --array, bucket by SBATCH directives +
+#                                 run_root (rare; predict_batch.sh's tuple
+#                                 selection normally yields one bucket)
+#   --overwrite                   alias for HCSPredictionWriter.overwrite=True
+#                                 on every leaf (required to re-run a plate
+#                                 whose output store already has predictions)
+#   --override KEY.PATH=VALUE     dict-key dotlist, deep-merged after compose
+#   --dry-run / --print-script    render artifacts, skip submission
 #
 # Discovers leaves under
 #   configs/benchmarks/virtual_staining/<organelle>/<model>/<train_set>/
