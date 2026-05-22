@@ -1,12 +1,7 @@
-"""Metric computation for evaluation: pixel metrics, mask metrics, MicroSSIM."""
+"""Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
 import numpy as np
 import torch
-
-try:
-    from microssim import MicroMS3IM
-except ImportError:
-    MicroMS3IM = None  # type: ignore[assignment, misc]
 
 try:
     from cubic.cuda import ascupy, asnumpy
@@ -22,11 +17,6 @@ except ImportError:
 
 from dynacell.evaluation.torch_ssim import ssim as torch_ssim
 from dynacell.evaluation.utils import _minmax_norm
-
-
-def _require_microssim():
-    if MicroMS3IM is None:
-        raise ImportError("microssim is required for MicroMS3IM computation. Install it with: pip install microssim")
 
 
 def _require_cubic():
@@ -259,14 +249,14 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
 def calculate_microssim(microssim_data):
     """Calculate MicroMS3IM scores across a collection of images."""
-    _require_microssim()
-    _require_cubic()
+    from cubic.metrics import MicroMS3IM
+
     targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
 
     def microssim_with_condition(condition):
-        masked_targets = asnumpy(np.where(condition, targets, 0))
-        masked_predictions = asnumpy(np.where(condition, predictions, 0))
+        masked_targets = np.where(condition, targets, 0)
+        masked_predictions = np.where(condition, predictions, 0)
 
         sim = MicroMS3IM()
         sim.fit(masked_targets, masked_predictions)

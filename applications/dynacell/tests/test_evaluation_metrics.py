@@ -13,9 +13,6 @@ from dynacell.evaluation.metrics import evaluate_segmentations
 
 def _import_metrics_with_stubs(monkeypatch):
     """Import the metrics module with lightweight optional-dependency stubs."""
-    microssim_module = types.ModuleType("microssim")
-    microssim_module.MicroMS3IM = object
-
     cubic_module = types.ModuleType("cubic")
     cubic_cuda_module = types.ModuleType("cubic.cuda")
     cubic_cuda_module.ascupy = lambda x: x
@@ -23,6 +20,7 @@ def _import_metrics_with_stubs(monkeypatch):
 
     cubic_metrics_module = types.ModuleType("cubic.metrics")
     cubic_metrics_module.fsc_resolution = lambda *args, **kwargs: {}
+    cubic_metrics_module.MicroMS3IM = object
 
     cubic_bandlimited_module = types.ModuleType("cubic.metrics.bandlimited")
     cubic_bandlimited_module.spectral_pcc = lambda *args, **kwargs: 0.0
@@ -31,7 +29,6 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_feature_voxel_module = types.ModuleType("cubic.feature.voxel")
     cubic_feature_voxel_module.regionprops_table = lambda *args, **kwargs: {}
 
-    monkeypatch.setitem(sys.modules, "microssim", microssim_module)
     monkeypatch.setitem(sys.modules, "cubic", cubic_module)
     monkeypatch.setitem(sys.modules, "cubic.cuda", cubic_cuda_module)
     monkeypatch.setitem(sys.modules, "cubic.metrics", cubic_metrics_module)
