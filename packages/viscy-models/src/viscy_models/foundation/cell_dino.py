@@ -97,10 +97,18 @@ class CellDinoModel(nn.Module):
     def preprocess_2d(self, x: Tensor) -> Tensor:
         """Convert a raw dataloader tensor to CELL-DINO input.
 
-        Squeezes singleton Z (or takes the middle slice if Z>1), resizes to
-        ``self.target_size``, and per-image min/max scales each
-        ``(B*C)`` map to ``[0, 1]``.  No ImageNet mean/std is applied —
-        CELL-DINO uses simple ``[0,1]`` normalization in training.
+        Squeezes singleton Z (or takes the middle slice if Z>1), resizes
+        to ``self.target_size``, then applies per-image per-channel
+        spatial z-score: for each ``(B, C)`` map, subtract the spatial
+        mean over ``(H, W)`` and divide by the spatial std.
+
+        This matches the ``self_normalize`` recipe used during CELL-DINO
+        pretraining and recommended by the official inference notebook
+        (``dinov2/notebooks/cell_dino/inference.ipynb``).  Per-image
+        z-score makes the input statistics independent of upstream
+        normalization — whether the dataloader fed raw zarr values or
+        ``NormalizeSampled``-prepped (per-FOV-stat) crops, the final
+        input to the network matches the training distribution.
 
         Parameters
         ----------
@@ -122,12 +130,9 @@ class CellDinoModel(nn.Module):
 
         x = F.interpolate(x, size=self.target_size, mode="bilinear", align_corners=False)
 
-        b, c, h, w = x.shape
-        x = x.view(b * c, 1, h, w)
-        x_min = x.amin(dim=(2, 3), keepdim=True)
-        x_max = x.amax(dim=(2, 3), keepdim=True)
-        x = (x - x_min) / (x_max - x_min).clamp(min=1e-8)
-        return x.view(b, c, h, w)
+        m = x.mean(dim=(-2, -1), keepdim=True)
+        s = x.std(dim=(-2, -1), unbiased=False, keepdim=True)
+        return (x - m) / (s + 1e-7)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Run CELL-DINO on an image batch and mean-pool over channels.
