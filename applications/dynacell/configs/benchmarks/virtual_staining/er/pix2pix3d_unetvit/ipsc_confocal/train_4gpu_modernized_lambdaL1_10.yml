@@ -1,0 +1,57 @@
+# pix2pix3d_unetvit MODERNIZED Run B (lambda_L1=10) on ER (SEC61B) — 4-GPU DDP.
+#
+# Single-knob ablation of the modernized recipe (Run A,
+# train_4gpu_modernized.yml): drop lambda_l1 from 100 to 10 so the
+# adversarial loss carries ~17% of G's gradient budget instead of ~2%.
+# Everything else (loss_type=nonsat, r1_gamma=10, r1_every=16,
+# ema_kimg=10, equal LR 2e-4, warmup, schedule, max_epochs, EMA-monitor
+# checkpoint, save-dir layout) matches Run A exactly.
+#
+# Rationale: Run A converged but produced UNetViT3D-blurry samples
+# because L1's gradient dominated G updates 50:1. Pix2pix-HD uses
+# lambda_l1=10; that's the established sharpness-preserving balance for
+# adversarial + L1 regression. See PR #428 discussion thread.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: er__ipsc_confocal__pix2pix3d_unetvit_modernized_lambdaL1_10
+
+model:
+  init_args:
+    # Single-knob change vs Run A: rebalance L1 vs adversarial gradients.
+    # Run A: lambda_l1=100, lambda_adv=1.0 -> 98% L1 / 2% adv -> blurry.
+    # Run B: lambda_l1=10,  lambda_adv=1.0 -> 83% L1 / 17% adv -> let G fight back.
+    lambda_l1: 10.0
+
+trainer:
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_SEC61B_4gpu_modernized_lambdaL1_10
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        # Same EMA-monitor as Run A. predict_step uses the EMA generator.
+        monitor: loss/validate_ema
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_SEC61B_4gpu_modernized_lambdaL1_10
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10
