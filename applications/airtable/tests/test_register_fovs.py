@@ -29,6 +29,7 @@ def _make_well_template(well_id: str, record_id: str | None = None, **overrides)
         "fov": None,
         "cell_type": "A549",
         "cell_state": "Live",
+        "cell_line": ["recCELLLINE1"],
         "marker": "TOMM20",
         "organelle": "mitochondria",
         "perturbation": "ZIKV",
@@ -36,6 +37,10 @@ def _make_well_template(well_id: str, record_id: str | None = None, **overrides)
         "moi": 5.0,
         "time_interval_min": 30.0,
         "fluorescence_modality": "Light-sheet",
+        "microscope": "mantis",
+        "labelfree_modality": "widefield",
+        "treatment": "DMSO",
+        "hours_post_treatment": 2.0,
         "channel_0_marker": "brightfield",
         "channel_1_marker": "mitochondria",
         "record_id": record_id,
@@ -51,6 +56,7 @@ def _make_fov_record(well_id: str, fov: str, record_id: str, **overrides) -> Dat
         "well_id": well_id,
         "fov": fov,
         "cell_type": "A549",
+        "cell_line": ["recCELLLINE1"],
         "marker": "TOMM20",
         "organelle": "mitochondria",
         "record_id": record_id,
@@ -133,7 +139,10 @@ class TestRegisterFovs:
             Path("/data/test_dataset.zarr/A/1/000000"),
             Path("/data/test_dataset.zarr/A/1/000001"),
         ]
-        with patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate):
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
             result = register_fovs(paths, db=db)
 
         assert result.dataset == "test_dataset"
@@ -159,8 +168,13 @@ class TestRegisterFovs:
         assert rec0["organelle"] == "mitochondria"
         assert rec0["perturbation"] == "ZIKV"
         assert rec0["moi"] == 5.0
+        assert rec0["microscope"] == "mantis"
+        assert rec0["labelfree_modality"] == "widefield"
+        assert rec0["treatment"] == "DMSO"
+        assert rec0["hours_post_treatment"] == 2.0
         assert rec0["channel_0_marker"] == "brightfield"
         assert rec0["channel_1_marker"] == "mitochondria"
+        assert result.template_ids_to_delete == ["recWELL1"]
 
     def test_updates_existing_fov_records(self):
         """Existing per-FOV records get updated with zarr-derived fields only."""
@@ -172,7 +186,10 @@ class TestRegisterFovs:
         mock_plate = _make_mock_plate(positions)
 
         paths = [Path("/data/test_dataset.zarr/A/1/000000")]
-        with patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate):
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
             result = register_fovs(paths, db=db)
 
         assert len(result.created) == 0
@@ -202,7 +219,10 @@ class TestRegisterFovs:
             Path("/data/test_dataset.zarr/A/1/000000"),
             Path("/data/test_dataset.zarr/B/2/000000"),
         ]
-        with patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate):
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
             result = register_fovs(paths, db=db)
 
         assert len(result.created) == 1
@@ -226,7 +246,10 @@ class TestRegisterFovs:
             Path("/data/test_dataset.zarr/A/1/000000"),
             Path("/data/test_dataset.zarr/A/1/000001"),
         ]
-        with patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate):
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
             result = register_fovs(paths, db=db)
 
         assert len(result.updated) == 1
@@ -259,6 +282,23 @@ class TestRegisterFovs:
         with pytest.raises(ValueError, match="same zarr store"):
             register_fovs(paths, db=db)
 
+    def test_raises_when_cell_line_missing(self):
+        """ValueError raised when a well template has no cell_line set."""
+        template_no_cell_line = _make_well_template("A/1", cell_line=None)
+        db = MagicMock()
+        db.get_dataset_records.return_value = [template_no_cell_line]
+
+        positions = {"A/1/000000": (10, 3, 1, 512, 512)}
+        mock_plate = _make_mock_plate(positions)
+
+        paths = [Path("/data/test_dataset.zarr/A/1/000000")]
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            with pytest.raises(ValueError, match="cell_line is required"):
+                register_fovs(paths, db=db)
+
     def test_all_records_already_per_fov_no_templates(self):
         """When all records are per-FOV and no templates exist, only updates happen."""
         existing = _make_fov_record("A/1", "000000", record_id="recFOV1")
@@ -275,7 +315,10 @@ class TestRegisterFovs:
             Path("/data/test_dataset.zarr/A/1/000000"),
             Path("/data/test_dataset.zarr/A/1/000001"),
         ]
-        with patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate):
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
             result = register_fovs(paths, db=db)
 
         assert len(result.updated) == 1
@@ -341,12 +384,112 @@ class TestCopyWellTemplateFields:
         assert fields["perturbation"] == "ZIKV"
         assert fields["moi"] == 5.0
         assert fields["time_interval_min"] == 30.0
+        assert fields["microscope"] == "mantis"
+        assert fields["labelfree_modality"] == "widefield"
+        assert fields["treatment"] == "DMSO"
+        assert fields["hours_post_treatment"] == 2.0
         assert fields["channel_0_marker"] == "brightfield"
         assert fields["channel_1_marker"] == "mitochondria"
 
     def test_skips_none_fields(self):
-        template = _make_well_template("A/1", seeding_density=None, treatment_concentration_nm=None)
+        template = _make_well_template(
+            "A/1",
+            seeding_density=None,
+            treatment_concentration_nm=None,
+            microscope=None,
+            labelfree_modality=None,
+        )
         fields = copy_well_template_fields(template)
 
         assert "seeding_density" not in fields
         assert "treatment_concentration_nm" not in fields
+        assert "microscope" not in fields
+        assert "labelfree_modality" not in fields
+
+
+# ---------------------------------------------------------------------------
+# template deletion tracking
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateDeletion:
+    """Tests for template_ids_to_delete population in register_fovs."""
+
+    def test_template_deleted_when_fov_created(self):
+        """Template record ID appears in deletion list when FOVs are created from it."""
+        template_a1 = _make_well_template("A/1", record_id="recWELL1")
+        db = MagicMock()
+        db.get_dataset_records.return_value = [template_a1]
+
+        positions = {"A/1/000000": (10, 3, 1, 512, 512)}
+        mock_plate = _make_mock_plate(positions)
+
+        paths = [Path("/data/test_dataset.zarr/A/1/000000")]
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            result = register_fovs(paths, db=db)
+
+        assert len(result.created) == 1
+        assert result.template_ids_to_delete == ["recWELL1"]
+
+    def test_template_not_deleted_when_all_positions_unmatched(self):
+        """Template with no created FOVs is not in deletion list."""
+        template_a1 = _make_well_template("A/1", record_id="recWELL1")
+        db = MagicMock()
+        db.get_dataset_records.return_value = [template_a1]
+
+        # B/2 has no template — will be unmatched
+        positions = {"B/2/000000": (10, 3, 1, 512, 512)}
+        mock_plate = _make_mock_plate(positions)
+
+        paths = [Path("/data/test_dataset.zarr/B/2/000000")]
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            result = register_fovs(paths, db=db)
+
+        assert len(result.unmatched) == 1
+        assert result.template_ids_to_delete == []
+
+    def test_only_used_templates_deleted(self):
+        """Only templates where at least one FOV was created appear in deletion list."""
+        template_a1 = _make_well_template("A/1", record_id="recWELL_A1")
+        template_b2 = _make_well_template("B/2", record_id="recWELL_B2")
+        db = MagicMock()
+        db.get_dataset_records.return_value = [template_a1, template_b2]
+
+        # A/1 gets a FOV; B/2 gets no positions in this batch
+        positions = {"A/1/000000": (10, 3, 1, 512, 512)}
+        mock_plate = _make_mock_plate(positions)
+
+        paths = [Path("/data/test_dataset.zarr/A/1/000000")]
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            result = register_fovs(paths, db=db)
+
+        assert len(result.created) == 1
+        assert result.template_ids_to_delete == ["recWELL_A1"]
+
+    def test_template_without_record_id_not_added(self):
+        """Template with no record_id is skipped in deletion list."""
+        template_a1 = _make_well_template("A/1", record_id=None)
+        db = MagicMock()
+        db.get_dataset_records.return_value = [template_a1]
+
+        positions = {"A/1/000000": (10, 3, 1, 512, 512)}
+        mock_plate = _make_mock_plate(positions)
+
+        paths = [Path("/data/test_dataset.zarr/A/1/000000")]
+        with (
+            patch("airtable_utils.registration.open_ome_zarr", return_value=mock_plate),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            result = register_fovs(paths, db=db)
+
+        assert len(result.created) == 1
+        assert result.template_ids_to_delete == []

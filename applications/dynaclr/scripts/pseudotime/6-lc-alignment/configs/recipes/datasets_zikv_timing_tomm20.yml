@@ -1,0 +1,12 @@
+# TOMM20 (mitochondria) timing roster — ZIKV datasets with TOMM20 imaging.
+# Note: TOMM20 embeddings live in a separate eval dir
+# (`infectomics-annotated-tomm20/embeddings/`) because TOMM20 was not in the
+# original infectomics eval cell-index. The leaf YAML overrides
+# `organelle_embedding_dir` accordingly.
+
+datasets:
+  - name: 07_24_ZIKV
+    organelle_embedding_filename: 2025_07_24_A549_TOMM20_ZIKV.zarr
+    registration_filename: 07_24_ZIKV_lc_registration.parquet
+    marker: TOMM20
+    organelle: mitochondria

@@ -1,0 +1,21 @@
+# Evaluation: DynaCLR-2D-MIP-BagOfChannels classical (NTXent, 192->160, zext11, single-marker)
+# x infectomics-annotated.
+# Variant: epoch=91-step=73600 checkpoint (run id dt0ln63r).
+# Pinning to the versioned ckpt name forces a fresh Nextflow run (no cache collision).
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-classical-single-marker/run_infectomics_annotated_epoch91_step73600.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/config.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/DynaCLR-2D-MIP-BagOfChannels/dt0ln63r/checkpoints/epoch=91-step=73600.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-classical-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker/evaluations/infectomics-annotated_epoch91_step73600/
+
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels-classical-single-marker/infectomics_epoch91_step73600/

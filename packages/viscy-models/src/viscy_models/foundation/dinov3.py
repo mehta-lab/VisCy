@@ -65,21 +65,31 @@ class DINOv3Model(nn.Module):
             self.model.eval()
         return self
 
-    def preprocess_2d(self, x: Tensor) -> Tensor:
+    def preprocess_2d(self, x: Tensor, normalize: bool = False) -> Tensor:
         """Convert a raw dataloader tensor to a normalised RGB image.
 
         Handles squeezing a singleton Z dim, repeating/trimming channels
-        to 3, resizing to the model's expected spatial size, rescaling to
-        [0, 1], and applying ImageNet normalisation.
+        to 3, resizing to the model's expected spatial size, and
+        applying ImageNet mean/std.
 
-        Z-slice selection should happen upstream (e.g. via ``z_range`` in
-        ``TripletDataModule``).  If ``D > 1`` is passed, the middle slice
-        is taken as a fallback.
+        ``normalize`` defaults to ``False`` because the production path
+        feeds dataloader-normalized input (e.g. ``NormalizeSampled``
+        per-FOV stats); per-image min-max on top of that reintroduces
+        saturation from outlier patches.  In that case the input is
+        treated as already z-scored and clipped to ``±3σ`` →
+        ``[0, 1]`` deterministically before the ImageNet step.
+
+        Set ``normalize=True`` only when feeding raw zarr values without
+        any upstream normalization — this reverts to per-image min-max.
 
         Parameters
         ----------
         x : Tensor
             ``(B, C, D, H, W)`` or ``(B, C, H, W)``.
+        normalize : bool
+            Apply per-image min-max scale to ``[0, 1]`` before the
+            ImageNet step.  Default ``False`` (dataloader is expected
+            to z-score upstream).
 
         Returns
         -------
@@ -101,10 +111,13 @@ class DINOv3Model(nn.Module):
 
         x = F.interpolate(x, size=self.target_size, mode="bilinear", align_corners=False)
 
-        x_min = x.flatten(1).min(dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
-        x_max = x.flatten(1).max(dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
-        scale = (x_max - x_min).clamp(min=1e-8)
-        x = (x - x_min) / scale
+        if normalize:
+            x_min = x.flatten(1).min(dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            x_max = x.flatten(1).max(dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            scale = (x_max - x_min).clamp(min=1e-8)
+            x = (x - x_min) / scale
+        else:
+            x = (x.clamp(-3.0, 3.0) + 3.0) / 6.0
 
         x = (x - self.image_mean) / self.image_std
         return x

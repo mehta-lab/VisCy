@@ -1,0 +1,5 @@
+# Stage D defaults — sequence-of-events estimator choice.
+# Switch estimator_col to compare on a different Stage B Δt column.
+
+estimator_col: path2_predicted_organelle_state_delta_t_minutes
+estimator_detected_col: path2_predicted_organelle_state_detected

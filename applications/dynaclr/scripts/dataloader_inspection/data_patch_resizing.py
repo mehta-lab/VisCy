@@ -1,29 +1,32 @@
 """End-to-end proof that DynaCLR pixel-size normalization works.
 
-Creates a temporary parquet with modified pixel sizes, feeds it through the
-real ``MultiExperimentDataModule`` dataloader, and plots the output patches.
+Builds the datamodule once to get sample metadata (cell coordinates),
+then reads native zarr crops at different pixel-size-derived scales
+and rescales them to show how the pipeline normalizes physical extent.
 
-The Mantis experiment (0.1494 um/px) is the reference. The Dragonfly experiment
-natively has 0.206 um/px — we test with both the real value and an artificial
-override to show the dataloader responds correctly.
+Row 0: Raw FOV with bounding boxes for each pixel-size variant.
+Row 1: Native zarr crop → _rescale_patch → center crop = model input (160×160).
 
 Usage::
 
     uv run python applications/dynaclr/scripts/dataloader_inspection/data_patch_resizing.py
 """
 
+# %%
 # ruff: noqa: D103
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+import torch
+from iohub.ngff.nodes import open_ome_zarr
 
 from dynaclr.data.datamodule import MultiExperimentDataModule
+from dynaclr.data.dataset import _rescale_patch
 from viscy_transforms._crop import BatchedCenterSpatialCrop
 
 # ---------------------------------------------------------------------------
@@ -32,7 +35,7 @@ from viscy_transforms._crop import BatchedCenterSpatialCrop
 
 _ROOT = Path(__file__).resolve().parents[4]
 
-CELL_INDEX_PATH = _ROOT / "applications/dynaclr/configs/cell_index/dragonfly_mantis_demo.parquet"
+CELL_INDEX_PATH = _ROOT / "applications/dynaclr/configs/cell_index/example_mantis_dragonfly.parquet"
 OUTPUT_DIR = _ROOT / "applications/dynaclr/scripts/dataloader_inspection/output"
 OUTPUT_PATH = OUTPUT_DIR / "data_patch_resizing.png"
 
@@ -40,115 +43,193 @@ Z_WINDOW = 1
 YX_PATCH_SIZE = (200, 200)
 FINAL_YX_PATCH_SIZE = (160, 160)
 REFERENCE_PIXEL_SIZE_XY_UM = 0.1494
-REFERENCE_PIXEL_SIZE_Z_UM = 0.2878
 CHANNEL_NAME = "Phase3D"
 
 DRAGONFLY_EXP = "2024_08_14_ZIKV_pal17_48h"
-MANTIS_EXP = "2025_07_24_A549_SEC61B_ZIKV"
+MANTIS_EXP = "2025_07_24_A549_SEC61_ZIKV"
 
-# Pixel sizes to test for Dragonfly (real + artificial overrides)
+# Pixel sizes to visualize for Dragonfly
 DRAGONFLY_PIXEL_SIZES = {
     "real (0.206)": 0.206,
-    "override (0.1494)": 0.1494,  # same as reference — should be no-op
-    "override (0.7)": 0.7,  # even coarser — should crop fewer pixels
+    "same as ref (0.1494)": 0.1494,
+    "coarser (0.7)": 0.7,
 }
 
+BBOX_COLORS = ["#e74c3c", "#2ecc71", "#3498db"]
+INCLUDE_WELLS = ["A/2", "0/4"]
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Step 1: Build datamodule once to get sample metadata
 # ---------------------------------------------------------------------------
 
+print("Building datamodule...")
+dm = MultiExperimentDataModule(
+    cell_index_path=str(CELL_INDEX_PATH),
+    z_window=Z_WINDOW,
+    yx_patch_size=YX_PATCH_SIZE,
+    final_yx_patch_size=FINAL_YX_PATCH_SIZE,
+    batch_size=8,
+    num_workers=0,
+    channels_per_sample=[CHANNEL_NAME],
+    reference_pixel_size_xy_um=REFERENCE_PIXEL_SIZE_XY_UM,
+    reference_pixel_size_z_um=None,
+    positive_cell_source="self",
+    tau_range=(0.0, 100.0),
+    stratify_by=None,
+    include_wells=INCLUDE_WELLS,
+)
+dm.setup("fit")
 
-def make_tmp_parquet(pixel_size_xy: float, pixel_size_z: float = REFERENCE_PIXEL_SIZE_Z_UM) -> str:
-    """Write a temp parquet with Dragonfly pixel sizes overridden."""
-    df = pd.read_parquet(CELL_INDEX_PATH)
-    mask = df["experiment"] == DRAGONFLY_EXP
-    df.loc[mask, "pixel_size_xy_um"] = pixel_size_xy
-    df.loc[mask, "pixel_size_z_um"] = pixel_size_z
-    tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-    df.to_parquet(tmp.name)
-    return tmp.name
+registry = dm.train_dataset.index.registry
 
+print("Drawing samples for metadata...")
+loader = dm.train_dataloader()
+per_exp: dict[str, dict] = {}
+needed = {e.name for e in registry.experiments}
 
-def draw_one_sample(parquet_path: str) -> dict:
-    """Build a datamodule, draw one batch, return first anchor patch + metadata."""
-    dm = MultiExperimentDataModule(
-        collection_path=None,
-        cell_index_path=parquet_path,
-        z_window=Z_WINDOW,
-        yx_patch_size=YX_PATCH_SIZE,
-        final_yx_patch_size=FINAL_YX_PATCH_SIZE,
-        batch_size=8,
-        num_workers=0,
-        channels_per_sample=[CHANNEL_NAME],
-        reference_pixel_size_xy_um=REFERENCE_PIXEL_SIZE_XY_UM,
-        reference_pixel_size_z_um=REFERENCE_PIXEL_SIZE_Z_UM,
-        positive_cell_source="self",
-        tau_range=(0.0, 100.0),
-        stratify_by=None,
-    )
-    dm.setup("fit")
+MAX_BATCHES = 200
+for batch_idx, batch in enumerate(loader):
+    anchor = batch["anchor"]
+    meta = batch["anchor_meta"]
+    for i in range(len(meta)):
+        exp_name = meta[i]["experiment"]
+        if exp_name not in per_exp:
+            per_exp[exp_name] = {"meta": meta[i], "patch": anchor[i]}
+    if per_exp.keys() >= needed:
+        break
+    if batch_idx >= MAX_BATCHES:
+        print(f"  WARNING: only found experiments {set(per_exp.keys())} after {MAX_BATCHES} batches")
+        break
 
-    registry = dm.train_dataset.index.registry
-    scale_factors = {e.name: registry.scale_factors[e.name] for e in registry.experiments}
-
-    # Draw batches until we get one from each experiment
-    loader = dm.train_dataloader()
-    per_exp: dict[str, dict] = {}
-    needed = {e.name for e in registry.experiments}
-
-    for batch in loader:
-        anchor = batch["anchor"]
-        meta = batch["anchor_meta"]
-        for i in range(anchor.shape[0]):
-            exp_name = meta[i]["experiment"]
-            if exp_name not in per_exp:
-                per_exp[exp_name] = {
-                    "patch": anchor[i],
-                    "meta": meta[i],
-                    "scale": scale_factors[exp_name],
-                }
-        if per_exp.keys() >= needed:
-            break
-
-    return per_exp
+for exp_name, d in per_exp.items():
+    m = d["meta"]
+    print(f"  {exp_name}: fov={m['fov_name']}, t={m['t']}, y={m['y_clamp']}, x={m['x_clamp']}")
 
 
 # ---------------------------------------------------------------------------
-# Run the dataloader for each Dragonfly pixel size configuration
+# Step 2: Read raw FOV slices and native crops from zarr
 # ---------------------------------------------------------------------------
+
+
+def read_fov_and_crop(
+    meta: dict,
+    pixel_size_xy: float,
+    z_focus: int,
+    channel_name: str = CHANNEL_NAME,
+) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """Read the focus Z-slice FOV and a native crop at the given pixel size.
+
+    Returns
+    -------
+    fov : np.ndarray
+        Full FOV 2D image at the focus Z-slice.
+    crop : np.ndarray
+        Native crop at the scale implied by pixel_size_xy.
+    y_half, x_half : int
+        Half-widths of the native crop in pixels.
+    """
+    store_path = meta["store_path"]
+    fov_name = meta["fov_name"]
+    t = int(meta["t"])
+    y_center = int(meta["y_clamp"])
+    x_center = int(meta["x_clamp"])
+
+    scale_yx = REFERENCE_PIXEL_SIZE_XY_UM / pixel_size_xy
+    y_half = round((YX_PATCH_SIZE[0] // 2) * scale_yx)
+    x_half = round((YX_PATCH_SIZE[1] // 2) * scale_yx)
+
+    fov_path = f"{store_path}/{fov_name}"
+    with open_ome_zarr(fov_path, mode="r") as pos:
+        ch_idx = list(pos.channel_names).index(channel_name)
+        _, _, _, img_h, img_w = pos.data.shape
+
+        fov = pos.data.oindex[t, ch_idx, z_focus, :, :]
+
+        y0 = max(0, y_center - y_half)
+        y1 = min(img_h, y_center + y_half)
+        x0 = max(0, x_center - x_half)
+        x1 = min(img_w, x_center + x_half)
+        crop = pos.data.oindex[t, ch_idx, z_focus, y0:y1, x0:x1]
+
+    return fov, crop, y_half, x_half
+
 
 center_crop = BatchedCenterSpatialCrop(roi_size=(Z_WINDOW, FINAL_YX_PATCH_SIZE[0], FINAL_YX_PATCH_SIZE[1]))
 
-all_results = {}
-for label, px_size in DRAGONFLY_PIXEL_SIZES.items():
-    print(f"\n--- Dragonfly pixel_size_xy_um = {px_size} ({label}) ---")
-    tmp_path = make_tmp_parquet(px_size)
-    per_exp = draw_one_sample(tmp_path)
+z_focuses = {}
+for e in registry.experiments:
+    zr = registry.z_ranges[e.name]
+    z_focuses[e.name] = (zr[0] + zr[1]) // 2
+    print(f"  {e.name}: z_range={zr}, z_focus={z_focuses[e.name]}")
 
-    for exp_name, data in per_exp.items():
-        scale = data["scale"]
-        patch = data["patch"]  # (C, Z, Y, X) at yx_patch_size
-        final = center_crop(patch[None])[0]
-        key = f"{exp_name}\n{label}" if exp_name == DRAGONFLY_EXP else exp_name
-        if exp_name == MANTIS_EXP and label != "real (0.206)":
-            continue  # Mantis is unchanged, only show once
-        print(f"  {exp_name}: scale_yx={scale[1]:.3f}, patch={tuple(patch.shape)}")
-        all_results[key] = {
-            "patch_2d": patch[0, 0].numpy(),
+print("Reading zarr crops...")
+
+results: list[dict] = []
+
+# Mantis (reference — scale ≈ 1.0)
+m_meta = per_exp[MANTIS_EXP]["meta"]
+m_fov, m_crop, m_yh, m_xh = read_fov_and_crop(m_meta, REFERENCE_PIXEL_SIZE_XY_UM, z_focuses[MANTIS_EXP])
+m_tensor = torch.from_numpy(m_crop).float().unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+m_rescaled = _rescale_patch(m_tensor, (1.0, 1.0, 1.0), (Z_WINDOW, YX_PATCH_SIZE[0], YX_PATCH_SIZE[1]))
+m_final = center_crop(m_rescaled[None])[0]
+m_dl_patch = per_exp[MANTIS_EXP]["patch"]
+m_dl_final = center_crop(m_dl_patch[None])[0]
+results.append(
+    {
+        "label": f"{MANTIS_EXP}\nreference ({REFERENCE_PIXEL_SIZE_XY_UM} µm/px)",
+        "exp": MANTIS_EXP,
+        "fov": m_fov,
+        "native_crop": m_crop,
+        "final_2d": m_final[0, 0].numpy(),
+        "dl_final_2d": m_dl_final[0, 0].numpy(),
+        "scale_yx": 1.0,
+        "pixel_size": REFERENCE_PIXEL_SIZE_XY_UM,
+        "y_half": m_yh,
+        "x_half": m_xh,
+        "meta": m_meta,
+    }
+)
+
+# Dragonfly — one entry per pixel-size variant
+d_meta = per_exp[DRAGONFLY_EXP]["meta"]
+d_dl_patch = per_exp[DRAGONFLY_EXP]["patch"]
+d_dl_final = center_crop(d_dl_patch[None])[0]
+d_fov = None
+
+for i, (label, px_size) in enumerate(DRAGONFLY_PIXEL_SIZES.items()):
+    fov, crop, y_half, x_half = read_fov_and_crop(d_meta, px_size, z_focuses[DRAGONFLY_EXP])
+    if d_fov is None:
+        d_fov = fov
+
+    scale_yx = REFERENCE_PIXEL_SIZE_XY_UM / px_size
+    scale = (1.0, scale_yx, scale_yx)
+    target = (Z_WINDOW, YX_PATCH_SIZE[0], YX_PATCH_SIZE[1])
+
+    crop_tensor = torch.from_numpy(crop).float().unsqueeze(0).unsqueeze(0)
+    rescaled = _rescale_patch(crop_tensor, scale, target)
+    final = center_crop(rescaled[None])[0]
+
+    print(f"  {label}: scale_yx={scale_yx:.3f}, native_crop={crop.shape}, rescaled={tuple(rescaled.shape)}")
+
+    results.append(
+        {
+            "label": f"{DRAGONFLY_EXP}\n{label}",
+            "exp": DRAGONFLY_EXP,
+            "fov": d_fov,
+            "native_crop": crop,
             "final_2d": final[0, 0].numpy(),
-            "scale": scale,
-            "pixel_size_label": label if exp_name == DRAGONFLY_EXP else "reference",
+            "dl_final_2d": d_dl_final[0, 0].numpy(),
+            "scale_yx": scale_yx,
+            "pixel_size": px_size,
+            "y_half": y_half,
+            "x_half": x_half,
+            "meta": d_meta,
         }
+    )
 
 # ---------------------------------------------------------------------------
-# Plot
+# Step 3: Plot
 # ---------------------------------------------------------------------------
-
-n = len(all_results)
-fig, axes = plt.subplots(2, n, figsize=(5 * n, 10))
-if n == 1:
-    axes = axes[:, None]
 
 
 def add_scalebar(ax, pixel_size_um, patch_px, bar_um=5.0):
@@ -165,7 +246,7 @@ def add_scalebar(ax, pixel_size_um, patch_px, bar_um=5.0):
     ax.text(
         x0 + bar_px / 2,
         y - 8,
-        f"{bar_um:.0f} um",
+        f"{bar_um:.0f} µm",
         color="white",
         fontsize=9,
         ha="center",
@@ -173,30 +254,73 @@ def add_scalebar(ax, pixel_size_um, patch_px, bar_um=5.0):
     )
 
 
-for col, (key, r) in enumerate(all_results.items()):
-    scale = r["scale"]
-
-    # Row 0: Dataloader output (yx_patch_size, after _rescale_patch)
-    ax = axes[0, col]
-    patch = r["patch_2d"]
-    vmin, vmax = np.percentile(patch, (1, 99))
-    ax.imshow(patch, cmap="gray", vmin=vmin, vmax=vmax)
-    add_scalebar(ax, REFERENCE_PIXEL_SIZE_XY_UM, YX_PATCH_SIZE[0])
-    ax.set_title(
-        f"{key}\nscale_yx=({scale[1]:.3f}, {scale[2]:.3f})\nDataloader: {YX_PATCH_SIZE[0]}x{YX_PATCH_SIZE[1]} px",
-        fontsize=9,
-        fontweight="bold",
+def add_bbox(ax, y_center, x_center, y_half, x_half, color, label, img_shape):
+    y0 = max(0, y_center - y_half)
+    x0 = max(0, x_center - x_half)
+    h = min(y_center + y_half, img_shape[0]) - y0
+    w = min(x_center + x_half, img_shape[1]) - x0
+    rect = mpatches.Rectangle(
+        (x0, y0),
+        w,
+        h,
+        linewidth=2,
+        edgecolor=color,
+        facecolor="none",
+        linestyle="-",
+        label=label,
     )
+    ax.add_patch(rect)
+
+
+n = len(results)
+fig, axes = plt.subplots(3, n, figsize=(5 * n, 14))
+if n == 1:
+    axes = axes[:, None]
+
+for col, r in enumerate(results):
+    meta = r["meta"]
+    exp_name = r["exp"]
+    y_center = int(meta["y_clamp"])
+    x_center = int(meta["x_clamp"])
+
+    # Row 0: Raw FOV with bounding box
+    ax = axes[0, col]
+    fov = r["fov"]
+    vmin_raw, vmax_raw = np.percentile(fov, (1, 99))
+    ax.imshow(fov, cmap="gray", vmin=vmin_raw, vmax=vmax_raw)
+
+    if exp_name == DRAGONFLY_EXP:
+        for i, (lbl, px_size) in enumerate(DRAGONFLY_PIXEL_SIZES.items()):
+            s = REFERENCE_PIXEL_SIZE_XY_UM / px_size
+            yh = round((YX_PATCH_SIZE[0] // 2) * s)
+            xh = round((YX_PATCH_SIZE[1] // 2) * s)
+            add_bbox(ax, y_center, x_center, yh, xh, BBOX_COLORS[i], lbl, fov.shape)
+        ax.legend(loc="upper left", fontsize=7, framealpha=0.7)
+    else:
+        add_bbox(
+            ax,
+            y_center,
+            x_center,
+            r["y_half"],
+            r["x_half"],
+            BBOX_COLORS[0],
+            "reference",
+            fov.shape,
+        )
+
+    ax.set_title(f"{r['label']}\nRaw FOV (mid-Z)", fontsize=9, fontweight="bold")
     ax.axis("off")
 
-    # Row 1: After center crop = MODEL INPUT
+    # Row 1: Model input (native crop → rescale → center crop)
     ax = axes[1, col]
     final = r["final_2d"]
+    vmin, vmax = np.percentile(final, (1, 99))
     ax.imshow(final, cmap="gray", vmin=vmin, vmax=vmax)
     add_scalebar(ax, REFERENCE_PIXEL_SIZE_XY_UM, FINAL_YX_PATCH_SIZE[0])
     phys = FINAL_YX_PATCH_SIZE[0] * REFERENCE_PIXEL_SIZE_XY_UM
     ax.set_title(
-        f"Model input: {FINAL_YX_PATCH_SIZE[0]}x{FINAL_YX_PATCH_SIZE[1]} px | {phys:.1f} um",
+        f"Model input: {FINAL_YX_PATCH_SIZE[0]}×{FINAL_YX_PATCH_SIZE[1]} px | {phys:.1f} µm\n"
+        f"native crop: {r['native_crop'].shape} → scale_yx={r['scale_yx']:.3f}",
         fontsize=9,
     )
     ax.axis("off")
@@ -205,9 +329,27 @@ for col, (key, r) in enumerate(all_results.items()):
         spine.set_edgecolor("#2ecc71")
         spine.set_linewidth(3)
 
+    # Row 2: Actual dataloader output (for comparison with "real" variant)
+    ax = axes[2, col]
+    dl_final = r["dl_final_2d"]
+    vmin_dl, vmax_dl = np.percentile(dl_final, (1, 99))
+    ax.imshow(dl_final, cmap="gray", vmin=vmin_dl, vmax=vmax_dl)
+    add_scalebar(ax, REFERENCE_PIXEL_SIZE_XY_UM, FINAL_YX_PATCH_SIZE[0])
+    ax.set_title(
+        f"Dataloader output: {FINAL_YX_PATCH_SIZE[0]}×{FINAL_YX_PATCH_SIZE[1]} px\n"
+        f"(same for all variants — real pixel size)",
+        fontsize=9,
+    )
+    ax.axis("off")
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_edgecolor("#e67e22")
+        spine.set_linewidth(3)
+
 row_labels = [
-    "Dataloader output\n(after _rescale_patch)",
-    "Model input\n(after center crop)",
+    "Raw FOV + crop region",
+    "Expected\n(native crop → rescale → crop)",
+    "Dataloader output\n(real pixel size)",
 ]
 for row_idx, label in enumerate(row_labels):
     axes[row_idx, 0].annotate(
@@ -222,8 +364,9 @@ for row_idx, label in enumerate(row_labels):
     )
 
 fig.suptitle(
-    f"Pixel-size normalization proof: reference={REFERENCE_PIXEL_SIZE_XY_UM} um/px\n"
-    f"Same Dragonfly data with different declared pixel sizes -> different scale factors",
+    f"Pixel-size normalization: reference={REFERENCE_PIXEL_SIZE_XY_UM} µm/px\n"
+    f"Different pixel sizes → different native crops"
+    f" → same {FINAL_YX_PATCH_SIZE[0]}×{FINAL_YX_PATCH_SIZE[1]} model input",
     fontsize=12,
     fontweight="bold",
     y=0.99,
@@ -233,3 +376,5 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 fig.savefig(OUTPUT_PATH, dpi=150, bbox_inches="tight")
 print(f"\nSaved: {OUTPUT_PATH}")
 plt.close(fig)
+
+# %%

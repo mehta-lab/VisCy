@@ -1,0 +1,3 @@
+# Stage A/B/C/D outputs — reproducible artifacts, not source.
+# The configs live alongside the scripts (configs/); only outputs go here.
+out/

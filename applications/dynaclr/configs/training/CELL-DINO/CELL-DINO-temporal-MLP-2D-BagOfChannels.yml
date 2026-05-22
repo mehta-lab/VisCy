@@ -1,0 +1,138 @@
+# CELL-DINO-temporal-MLP-2D-BagOfChannels
+# =========================================
+# Frozen CELL-DINO (channel-adaptive ViT-L/16) backbone + trainable MLP
+# projection head. 2D bag-of-channels with MIP z-reduction (same data
+# pipeline as DINOv3-temporal-MLP-2D-BagOfChannels), but uses the v3
+# parquet collection.
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/CELL-DINO/CELL-DINO-temporal-MLP-2D-BagOfChannels.sh
+#
+# Resume:
+#   CKPT_PATH=.../last.ckpt sbatch .../CELL-DINO-temporal-MLP-2D-BagOfChannels.sh
+
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_2gpu.yml
+  - ../recipes/model/cell_dino_frozen_mlp.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 100
+  # Cap epoch length so wall time stays bounded and the val signal lands
+  # often. Matches DynaCLR-2D-MIP-BagOfChannels. Also avoids host-OOM
+  # observed at ~2h elapsed on the prior unbounded run (job 32536880),
+  # likely from accumulated MetaTensors in training-step logging.
+  limit_train_batches: 800
+  limit_val_batches: 200
+  logger:
+    init_args:
+      project: CELL-DINO-temporal-MLP-2D-BagOfChannels-v1
+      name: null
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+    - class_path: viscy_utils.callbacks.OnlineEvalCallback
+      init_args:
+        every_n_epochs: 5
+        label_key: perturbation
+        k: 20
+        track_id_key: global_track_id
+        timepoint_key: t
+
+model:
+  init_args:
+    pca_color_keys: [perturbation, hours_post_perturbation, experiment, marker]
+    log_negative_metrics_every_n_epochs: 2
+    example_input_array_shape: [1, 1, 1, 160, 160]
+
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v3.parquet
+    focus_channel: Phase3D
+    reference_pixel_size_xy_um: 0.1494
+    z_window: 1
+    z_extraction_window: 11
+    z_focus_offset: 0.5
+    yx_patch_size: [256, 256]
+    final_yx_patch_size: [160, 160]
+    channels_per_sample: 1
+    positive_cell_source: lookup
+    positive_match_columns: [lineage_id]
+    positive_channel_source: same
+    tau_range: [0.5, 2.0]
+    tau_decay_rate: 2.0
+    stratify_by: [perturbation, marker]
+    split_ratio: 0.8
+    # CELL-DINO ViT-L/16 upsamples patches to 224² before forward, which
+    # roughly doubles per-batch host RAM vs. ConvNeXt-tiny at 160². Combined
+    # with random plate sampling (zero cache hit rate across 26 plates, each
+    # tensorstore.Context costs ~500 MB), the BoC parquet pegs the 240 GB
+    # cgroup ceiling within an hour at bs=512/nw=2 (jobs 32536880, 32568006).
+    # Match the DynaCLR-2D-MIP-BagOfChannels tunings: smaller batches, more
+    # workers (so each holds less queue), prefetch=1, buffer=1, cache pools
+    # disabled.
+    batch_size: 256
+    num_workers: 4
+    prefetch_factor: 1
+    buffer_size: 1
+    cache_pool_bytes: 0
+    file_io_concurrency: 32
+    seed: 42
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel_0]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel_0]
+          prob: 0.8
+          scale_range: [[0.9, 1.1], [0.9, 1.1], [0.9, 1.1]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          gamma: [0.8, 1.3]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          sigma_x: [0.25, 0.50]
+          sigma_y: [0.25, 0.50]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.08
+      # Z-reduction: MIP for fluorescence, center-slice for label-free.
+      # Must be LAST augmentation (before implicit final spatial crop).
+      - class_path: viscy_transforms.BatchedChannelWiseZReductiond
+        init_args:
+          keys: [channel_0]
+          allow_missing_keys: true

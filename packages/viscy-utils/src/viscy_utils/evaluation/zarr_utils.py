@@ -7,6 +7,7 @@ import anndata as ad
 import pandas as pd
 import zarr
 from anndata.io import write_elem
+from pandas.arrays import ArrowStringArray
 
 
 def append_to_anndata_zarr(
@@ -31,12 +32,25 @@ def append_to_anndata_zarr(
     obs : pd.DataFrame, optional
         Observation metadata. Replaces the entire ``obs`` group.
     uns : dict, optional
-        Unstructured annotation. Replaces the entire ``uns`` group.
+        Mapping of uns keys to values. Each key is written to ``uns/{key}``,
+        replacing any existing entry while preserving other uns keys.
     """
     store = zarr.open(str(zarr_path), mode="a", use_consolidated=False)
     ad.settings.allow_write_nullable_strings = True
 
     if obs is not None:
+        # TODO: remove once anndata 0.13 supports pandas 3 Arrow-backed strings natively.
+        # anndata 0.12.9+ requires pandas <3, so we stay on 0.12.6 + pandas 3 and
+        # must manually downcast ArrowStringArray columns to object dtype before writing.
+        obs = obs.copy()
+        for col in obs.columns:
+            arr = obs[col].array
+            if isinstance(arr, ArrowStringArray):
+                obs[col] = obs[col].astype(object)
+            elif isinstance(arr, pd.Categorical) and isinstance(arr.categories._values, ArrowStringArray):
+                obs[col] = obs[col].cat.rename_categories(arr.categories.astype(object))
+        if isinstance(obs.index._values, ArrowStringArray):
+            obs.index = obs.index.astype(object)
         if "obs" in store:
             del store["obs"]
         write_elem(store, "obs", obs)
@@ -49,9 +63,13 @@ def append_to_anndata_zarr(
             write_elem(store, obsm_path, value)
 
     if uns is not None:
-        if "uns" in store:
-            del store["uns"]
-        write_elem(store, "uns", uns)
+        if "uns" not in store:
+            store.create_group("uns")
+        for key, value in uns.items():
+            uns_path = f"uns/{key}"
+            if uns_path in store:
+                del store[uns_path]
+            write_elem(store, uns_path, value)
 
     zarr.consolidate_metadata(str(zarr_path))
 

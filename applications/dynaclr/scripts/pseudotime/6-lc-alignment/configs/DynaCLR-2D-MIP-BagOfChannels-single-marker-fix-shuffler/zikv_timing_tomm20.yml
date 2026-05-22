@@ -1,0 +1,12 @@
+# Stage B leaf — TOMM20 event timing for the current 2D-MIP-BoC model.
+# TOMM20 embeddings live in a separate eval dir from the
+# annotated infectomics eval (no TOMM20 LC was trained, hence no
+# annotation-driven LC inference; the panel reads the embedding zarr
+# directly via the annotation-free MMD path).
+
+base:
+  - ../recipes/timing_defaults.yml
+  - ../recipes/datasets_zikv_timing_tomm20.yml
+
+organelle_embedding_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated-tomm20/embeddings
+registration_dir: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/pseudotime/6-lc-alignment/out/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/zikv_register

@@ -1,0 +1,14 @@
+# G3BP1 (stress granule) timing roster — ZIKV datasets with G3BP1 imaging.
+
+datasets:
+  - name: 07_22_ZIKV
+    organelle_embedding_filename: 2025_07_22_A549_G3BP1_ZIKV.zarr
+    registration_filename: 07_22_ZIKV_lc_registration.parquet
+    marker: G3BP1
+    organelle: stress_granule
+
+  - name: 07_24_ZIKV
+    organelle_embedding_filename: 2025_07_24_A549_G3BP1_ZIKV.zarr
+    registration_filename: 07_24_ZIKV_lc_registration.parquet
+    marker: G3BP1
+    organelle: stress_granule
