@@ -54,9 +54,19 @@ def _min_max_normalize(
 
 @torch.inference_mode()
 def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> float:
-    """Compute mean structural similarity index (SSIM)."""
+    """Compute mean structural similarity index (SSIM) for 3D volumetric inputs.
+
+    Parameters
+    ----------
+    img1, img2 : torch.Tensor
+        3-D tensors of shape ``(D, H, W)``.
+    eps : float
+        Small constant for min-max normalization stability.
+    """
     if cubic_ssim is None:
         raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
+    if img1.ndim != 3:
+        raise ValueError(f"ssim expects 3-D (D, H, W) input, got {img1.ndim}-D tensor of shape {tuple(img1.shape)}")
     img1 = _min_max_normalize(img1, eps=eps)
     img2 = _min_max_normalize(img2, eps=eps)
 
