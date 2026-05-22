@@ -13,7 +13,7 @@ Source data
         channel "Structure"
 - Pred: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_iterative.zarr
         channel "Structure_prediction"
-- FOV : 4/38452/5187  t=0  crop (Z=8, Y=256, X=256)
+- FOV : 4/38452/5187  t=0  crop (Z=20, Y=256, X=256)
 - Spacing: [0.290, 0.108, 0.108] µm  (aics-hipsc manifest)
 """
 
@@ -32,7 +32,7 @@ _GT_CHANNEL = "Structure"
 _PRED_CHANNEL = "Structure_prediction"
 _FOV = "4/38452/5187"
 _T = 0
-_CROP_Z = slice(16, 24)  # 8 slices from the middle
+_CROP_Z = slice(10, 30)  # 20 slices from the middle (≥11 for Gaussian SSIM kernel)
 _CROP_Y = slice(128, 384)  # 256 px
 _CROP_X = slice(128, 384)  # 256 px
 _SPACING = [0.290, 0.108, 0.108]
@@ -63,9 +63,11 @@ def main() -> None:
 
     use_gpu = torch.cuda.is_available()
     print(f"Running compute_pixel_metrics  use_gpu={use_gpu}")
+    pred_t = torch.as_tensor(pred)
+    gt_t = torch.as_tensor(gt)
     metrics = compute_pixel_metrics(
-        torch.as_tensor(pred),
-        torch.as_tensor(gt),
+        pred_t,
+        gt_t,
         spacing=_SPACING,
         fsc_kwargs={},
         spectral_pcc_kwargs={},

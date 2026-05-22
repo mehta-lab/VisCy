@@ -42,6 +42,15 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_metrics_module.nrmse = _stub_nrmse
     cubic_metrics_module.psnr = _stub_psnr
 
+    def _stub_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
+        from skimage.metrics import structural_similarity
+
+        a = img1.numpy().squeeze()
+        b = img2.numpy().squeeze()
+        return float(structural_similarity(a, b, data_range=float(data_range or 1.0)))
+
+    cubic_metrics_module.ssim = _stub_ssim
+
     cubic_bandlimited_module = types.ModuleType("cubic.metrics.bandlimited")
     cubic_bandlimited_module.spectral_pcc = lambda *args, **kwargs: 0.0
 
@@ -72,7 +81,7 @@ def test_gain_and_offset_errors_are_not_scale_invariant(monkeypatch) -> None:
 
     assert metrics.nrmse(target, prediction) == pytest.approx(expected_rmse.item())
     assert metrics.psnr(target, prediction) == pytest.approx(expected_psnr.item())
-    assert metrics.ssim(target, prediction).item() < 0.99
+    assert metrics.ssim(target, prediction) < 0.99
 
 
 def test_identical_images_still_score_perfectly(monkeypatch) -> None:
@@ -83,7 +92,7 @@ def test_identical_images_still_score_perfectly(monkeypatch) -> None:
 
     assert metrics.nrmse(target, target) == pytest.approx(0.0)
     assert metrics.psnr(target, target) == float("inf")
-    assert metrics.ssim(target, target).item() == pytest.approx(1.0)
+    assert metrics.ssim(target, target) == pytest.approx(1.0)
 
 
 # --- pcc tests ---

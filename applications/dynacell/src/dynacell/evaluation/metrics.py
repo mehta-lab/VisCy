@@ -7,10 +7,12 @@ try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature.voxel import regionprops_table
     from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
+    from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
+    cubic_ssim = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
     nrmse = None  # type: ignore[assignment]
     pcc = None  # type: ignore[assignment]
@@ -18,7 +20,6 @@ except ImportError:
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
 
-from dynacell.evaluation.torch_ssim import ssim as torch_ssim
 from dynacell.evaluation.utils import _minmax_norm
 
 
@@ -72,15 +73,15 @@ def _min_max_normalize(
 
 
 @torch.inference_mode()
-def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> float:
     """Compute mean structural similarity index (SSIM)."""
     img1 = _min_max_normalize(img1, eps=eps)
     img2 = _min_max_normalize(img2, eps=eps)
 
-    img1 = img1.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
-    img2 = img2.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
+    img1 = img1.unsqueeze(0).unsqueeze(0)  # (D,H,W) → (1,1,D,H,W) — cubic's 5D contract
+    img2 = img2.unsqueeze(0).unsqueeze(0)
 
-    return torch_ssim(img1, img2, data_range=1.0)
+    return cubic_ssim(img1, img2, spatial_dims=3, data_range=1.0, gaussian_weights=True)
 
 
 def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
@@ -154,7 +155,7 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     metrics = {
         "PCC": pcc(target, prediction),
-        "SSIM": ssim(target, prediction).item(),
+        "SSIM": ssim(target, prediction),
         "NRMSE": nrmse(target, prediction, normalize="min_max"),
         "PSNR": psnr(target, prediction, normalize="min_max"),
     }
