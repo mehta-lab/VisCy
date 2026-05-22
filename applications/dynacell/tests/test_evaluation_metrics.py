@@ -103,21 +103,21 @@ def test_identical_images_still_score_perfectly(monkeypatch) -> None:
 # --- pcc tests ---
 
 
-def test_corr_coef_perfect_correlation(monkeypatch) -> None:
+def test_pcc_perfect_correlation(monkeypatch) -> None:
     """Identical signals give PCC = 1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.linspace(0.0, 1.0, 100)
     assert metrics.pcc(a, a) == pytest.approx(1.0)
 
 
-def test_corr_coef_negative_correlation(monkeypatch) -> None:
+def test_pcc_negative_correlation(monkeypatch) -> None:
     """Perfectly inverted signal gives PCC = -1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.linspace(0.0, 1.0, 100)
     assert metrics.pcc(a, -a) == pytest.approx(-1.0)
 
 
-def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
+def test_pcc_constant_input_returns_nan(monkeypatch) -> None:
     """Zero-variance input (constant signal) returns NaN."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.ones(100)
