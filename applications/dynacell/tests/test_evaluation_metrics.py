@@ -74,26 +74,27 @@ def _import_metrics_with_stubs(monkeypatch):
     return importlib.import_module("dynacell.evaluation.metrics")
 
 
-def test_gain_and_offset_errors_are_not_scale_invariant(monkeypatch) -> None:
-    """Shared-scale metrics should penalize intensity calibration errors."""
+def test_per_input_normalization_absorbs_gain_and_offset(monkeypatch) -> None:
+    """cubic normalize='min_max' normalizes each input independently.
+
+    Gain and offset errors disappear after per-input min-max normalization —
+    both target and prediction map to the same [0, 1] range.
+    """
     metrics = _import_metrics_with_stubs(monkeypatch)
 
-    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(16, 16)
-    prediction = target * 2.0 + 0.25
-    target_range = target.max() - target.min()
-    expected_rmse = torch.sqrt(torch.mean(((prediction - target) / target_range) ** 2))
-    expected_psnr = -10 * torch.log10(expected_rmse**2)
+    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
+    prediction = target * 2.0 + 0.25  # gain+offset — absorbed by per-input normalization
 
-    assert metrics.nrmse(target, prediction) == pytest.approx(expected_rmse.item())
-    assert metrics.psnr(target, prediction) == pytest.approx(expected_psnr.item())
-    assert metrics.ssim(target, prediction) < 0.99
+    assert metrics.nrmse(target, prediction) == pytest.approx(0.0, abs=1e-6)
+    assert metrics.psnr(target, prediction) == float("inf")
+    assert metrics.ssim(target, prediction) == pytest.approx(1.0, abs=5e-2)
 
 
 def test_identical_images_still_score_perfectly(monkeypatch) -> None:
-    """Shared-scale normalization should preserve perfect self-similarity."""
+    """Per-input normalization should preserve perfect self-similarity."""
     metrics = _import_metrics_with_stubs(monkeypatch)
 
-    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(16, 16)
+    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
 
     assert metrics.nrmse(target, target) == pytest.approx(0.0)
     assert metrics.psnr(target, target) == float("inf")
