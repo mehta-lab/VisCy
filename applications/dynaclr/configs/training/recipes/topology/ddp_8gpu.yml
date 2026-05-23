@@ -1,0 +1,6 @@
+# Topology recipe: 8-GPU DDP training on a single node (e.g. A100/H100 8x).
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 8
+  num_nodes: 1

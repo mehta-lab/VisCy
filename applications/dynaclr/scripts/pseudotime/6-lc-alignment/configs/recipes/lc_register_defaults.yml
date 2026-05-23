@@ -1,0 +1,8 @@
+# Defaults for register_by_lc.py and evaluate_registered_organelle.py.
+# Merged into per-model leaves via `base:`.
+
+task: infection_state
+positive_class: infected
+tau: 0.5
+test_size: 0.2
+random_state: 42

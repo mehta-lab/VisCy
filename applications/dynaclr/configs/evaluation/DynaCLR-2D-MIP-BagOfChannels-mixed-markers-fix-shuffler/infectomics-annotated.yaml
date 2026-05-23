@@ -1,0 +1,21 @@
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels-mixed-markers-fix-shuffler × infectomics-annotated (Wave 1)
+# Sibling row to DynaCLR-2D-MIP-BagOfChannels for direct comparison.
+# mixed-markers (vs single-marker) variant + shuffler fix.
+# Run-id: dlzt3s65 (most recent under this training dir).
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-mixed-markers-fix-shuffler/run_infectomics_annotated.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/config.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/dlzt3s65/checkpoints/last.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-mixed-markers-fix-shuffler/evaluations/infectomics-annotated/
+
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DynaCLR-2D-MIP-BagOfChannels-mixed-markers-fix-shuffler/infectomics/

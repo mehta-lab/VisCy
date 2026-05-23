@@ -42,11 +42,13 @@ def synthetic_adata_with_unknowns():
 class TestLinearClassifierPipeline:
     @pytest.fixture
     def trained_pipeline(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(annotated_adata, task="cell_death_state", use_scaling=True, use_pca=False)
+        pipeline, _, _ = train_linear_classifier(
+            annotated_adata, task="cell_death_state", use_scaling=True, use_pca=False
+        )
         return pipeline
 
     def test_transform_with_scaler_and_pca(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(
+        pipeline, _, _ = train_linear_classifier(
             annotated_adata,
             task="cell_death_state",
             use_scaling=True,
@@ -58,7 +60,7 @@ class TestLinearClassifierPipeline:
         assert X_transformed.shape == (X.shape[0], 5)
 
     def test_transform_scaler_only(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(
+        pipeline, _, _ = train_linear_classifier(
             annotated_adata,
             task="cell_death_state",
             use_scaling=True,
@@ -70,7 +72,7 @@ class TestLinearClassifierPipeline:
         assert pipeline.pca is None
 
     def test_transform_no_preprocessing(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(
+        pipeline, _, _ = train_linear_classifier(
             annotated_adata,
             task="cell_death_state",
             use_scaling=False,
@@ -94,18 +96,18 @@ class TestLinearClassifierPipeline:
 
 class TestTrainLinearClassifier:
     def test_train_basic(self, annotated_adata):
-        pipeline, metrics = train_linear_classifier(annotated_adata, task="cell_death_state")
+        pipeline, metrics, _ = train_linear_classifier(annotated_adata, task="cell_death_state")
         assert isinstance(pipeline, LinearClassifierPipeline)
         assert isinstance(metrics, dict)
         assert "train_accuracy" in metrics
         assert "train_weighted_f1" in metrics
 
     def test_train_with_scaling(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(annotated_adata, task="cell_death_state", use_scaling=True)
+        pipeline, _, _ = train_linear_classifier(annotated_adata, task="cell_death_state", use_scaling=True)
         assert pipeline.scaler is not None
 
     def test_train_with_pca(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(
+        pipeline, _, _ = train_linear_classifier(
             annotated_adata,
             task="cell_death_state",
             use_pca=True,
@@ -115,26 +117,26 @@ class TestTrainLinearClassifier:
         assert pipeline.pca.n_components == 5
 
     def test_train_no_split(self, annotated_adata):
-        pipeline, metrics = train_linear_classifier(annotated_adata, task="cell_death_state", split_train_data=1.0)
+        pipeline, metrics, _ = train_linear_classifier(annotated_adata, task="cell_death_state", split_train_data=1.0)
         assert "train_accuracy" in metrics
         assert "val_accuracy" not in metrics
 
     def test_train_metrics_keys(self, annotated_adata):
-        _, metrics = train_linear_classifier(annotated_adata, task="cell_death_state", split_train_data=0.8)
+        _, metrics, _ = train_linear_classifier(annotated_adata, task="cell_death_state", split_train_data=0.8)
         assert "train_accuracy" in metrics
         assert "train_weighted_f1" in metrics
         for class_name in ["alive", "dead", "apoptotic"]:
             assert f"train_{class_name}_f1" in metrics
 
     def test_train_reproducibility(self, annotated_adata):
-        _, metrics_a = train_linear_classifier(annotated_adata, task="cell_death_state", random_seed=123)
-        _, metrics_b = train_linear_classifier(annotated_adata, task="cell_death_state", random_seed=123)
+        _, metrics_a, _ = train_linear_classifier(annotated_adata, task="cell_death_state", random_seed=123)
+        _, metrics_b, _ = train_linear_classifier(annotated_adata, task="cell_death_state", random_seed=123)
         assert metrics_a == metrics_b
 
     def test_train_sparse_matrix(self, annotated_adata):
         sparse_adata = annotated_adata.copy()
         sparse_adata.X = scipy.sparse.csr_matrix(sparse_adata.X)
-        pipeline, metrics = train_linear_classifier(sparse_adata, task="cell_death_state")
+        pipeline, metrics, _ = train_linear_classifier(sparse_adata, task="cell_death_state")
         assert isinstance(pipeline, LinearClassifierPipeline)
         assert "train_accuracy" in metrics
 
@@ -142,7 +144,7 @@ class TestTrainLinearClassifier:
 class TestPredictWithClassifier:
     @pytest.fixture
     def pipeline_and_adata(self, annotated_adata):
-        pipeline, _ = train_linear_classifier(annotated_adata, task="cell_death_state")
+        pipeline, _, _ = train_linear_classifier(annotated_adata, task="cell_death_state")
         return pipeline, annotated_adata
 
     def test_predict_adds_obs_columns(self, pipeline_and_adata):

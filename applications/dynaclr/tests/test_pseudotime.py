@@ -10,13 +10,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dynaclr.evaluation.pseudotime.alignment import (
+from dynaclr.pseudotime.alignment import (
     align_tracks,
     assign_t_perturb,
     filter_tracks,
     identify_lineages,
 )
-from dynaclr.evaluation.pseudotime.metrics import (
+from dynaclr.pseudotime.dtw_alignment import (
+    alignment_results_to_dataframe,
+    build_template,
+    dtw_align_tracks,
+)
+from dynaclr.pseudotime.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -24,13 +29,13 @@ from dynaclr.evaluation.pseudotime.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from dynaclr.evaluation.pseudotime.plotting import (
+from dynaclr.pseudotime.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from dynaclr.evaluation.pseudotime.signals import (
+from dynaclr.pseudotime.signals import (
     extract_annotation_signal,
     extract_embedding_distance,
     extract_prediction_signal,
@@ -385,3 +390,120 @@ class TestPlotting:
         assert isinstance(fig, plt.Figure)
         assert (tmp_path / "onset_comparison.pdf").exists()
         assert (tmp_path / "onset_comparison.png").exists()
+
+
+# ── TestTimeCalibration ───────────────────────────────────────────────
+
+
+class TestTimeCalibration:
+    """Tests for pseudotime-to-minutes template calibration."""
+
+    @pytest.fixture
+    def simple_template_inputs(self):
+        """Two synthetic 5-timepoint tracks with known t_relative_minutes."""
+        rng = np.random.default_rng(0)
+        D = 8
+        n_tracks = 6
+        tracks = []
+        for i in range(n_tracks):
+            # Each track: 10 frames, t_relative_minutes from -150 to +150
+            fov = "C/2/000"
+            track_id = i
+            emb = rng.normal(0, 1, (10, D)).astype(np.float32)
+            obs = pd.DataFrame(
+                {
+                    "fov_name": fov,
+                    "track_id": track_id,
+                    "t": np.arange(10),
+                    "infection_state": ["not_infected"] * 5 + ["infected"] * 5,
+                    "organelle_state": ["noremodel"] * 10,
+                    "parent_track_id": -1,
+                }
+            )
+            tracks.append((fov, track_id, emb, obs))
+
+        # Build AnnData for one "dataset"
+        all_obs = pd.concat([t[3] for t in tracks], ignore_index=True)
+        all_emb = np.vstack([t[2] for t in tracks])
+        adata = ad.AnnData(X=all_emb, obs=all_obs)
+
+        # Build aligned_df: t_perturb = 5 for all, t_relative_minutes = (t - 5) * 30
+        df = all_obs.copy()
+        df["t_perturb"] = 5
+        df["t_relative_minutes"] = (df["t"] - 5) * 30.0
+
+        return {"test": adata}, {"test": df}
+
+    def test_build_template_has_time_calibration(self, simple_template_inputs):
+        adata_dict, aligned_df_dict = simple_template_inputs
+        result = build_template(adata_dict, aligned_df_dict, pca_n_components=None)
+        assert result.time_calibration is not None
+        T = result.template.shape[0]
+        assert result.time_calibration.shape == (T,)
+        # Calibration should span a reasonable real-time range
+        assert result.time_calibration.min() < 0
+        assert result.time_calibration.max() > 0
+
+    def test_time_calibration_monotonically_increasing(self, simple_template_inputs):
+        adata_dict, aligned_df_dict = simple_template_inputs
+        result = build_template(adata_dict, aligned_df_dict, pca_n_components=None)
+        cal = result.time_calibration
+        # After gap interpolation, calibration should be non-decreasing
+        diffs = np.diff(cal)
+        assert np.all(diffs >= -1e-6), f"Non-monotonic calibration: {diffs}"
+
+    def test_estimated_t_rel_in_alignment_output(self, simple_template_inputs):
+        adata_dict, aligned_df_dict = simple_template_inputs
+        template = build_template(adata_dict, aligned_df_dict, pca_n_components=None)
+        assert template.time_calibration is not None
+
+        # Align one dataset against the template
+        adata = list(adata_dict.values())[0]
+        df = list(aligned_df_dict.values())[0]
+        results = dtw_align_tracks(adata, df, template, "test", min_track_timepoints=3)
+        flat = alignment_results_to_dataframe(results, template.template_id, time_calibration=template.time_calibration)
+
+        assert "estimated_t_rel_minutes" in flat.columns
+        cal_min = template.time_calibration.min()
+        cal_max = template.time_calibration.max()
+        est = flat["estimated_t_rel_minutes"].dropna()
+        assert len(est) > 0
+        assert est.min() >= cal_min - 1.0
+        assert est.max() <= cal_max + 1.0
+
+
+# ── TestMetricsContinuous ─────────────────────────────────────────────
+
+
+class TestMetricsContinuous:
+    """Tests for continuous-signal metrics (onset, peak)."""
+
+    def test_find_onset_continuous_signal(self):
+        rows = []
+        for t in range(-600, 901, 30):
+            val = 3.0 if t >= 120 else 0.0
+            rows.append({"time_minutes": t, "mean": val, "n_cells": 20})
+        pop_df = pd.DataFrame(rows)
+        onset, threshold, bl_mean, bl_std = find_onset_time(
+            pop_df, baseline_window=(-600, -60), sigma_threshold=2.0, signal_col="mean"
+        )
+        assert onset is not None
+        assert onset == 120
+
+    def test_find_peak_metrics_continuous(self):
+        rows = []
+        for t in range(-300, 601, 30):
+            if t < 0:
+                val = 0.0
+            elif t <= 150:
+                val = t / 150.0 * 5.0
+            elif t <= 300:
+                val = 5.0 - (t - 150) / 150.0 * 5.0
+            else:
+                val = 0.0
+            rows.append({"time_minutes": t, "mean": val, "n_cells": 20})
+        pop_df = pd.DataFrame(rows)
+        metrics = find_peak_metrics(pop_df, signal_col="mean")
+        assert not np.isnan(metrics["T_peak_minutes"])
+        assert metrics["peak_amplitude"] > 0
+        assert metrics["auc"] > 0

@@ -1,8 +1,18 @@
-"""Click-based CLI for DynaCLR evaluation and analysis tools."""
+"""DynaCLR command-line entry point.
+
+Routes Lightning subcommands (``fit``, ``predict``, ``test``, ``validate``) to
+:func:`viscy_utils.cli.main` so leaf YAMLs composed via ``base:`` recipe
+inheritance can be trained directly with ``dynaclr fit -c …``. All other
+subcommands (eval tooling, plotting, etc.) dispatch through the Click group
+defined below.
+"""
 
 import importlib
+import sys
 
 import click
+
+_LIGHTNING_SUBCOMMANDS = frozenset({"fit", "predict", "test", "validate"})
 
 
 class LazyCommand(click.Command):
@@ -87,6 +97,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="evaluate-tracking-accuracy",
+        import_path="dynaclr.evaluation.benchmarking.tracking_accuracy.evaluate_tracking.main",
+        short_help="Evaluate CTC tracking accuracy with DynaCLR ONNX embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="append-obs",
         import_path="dynaclr.evaluation.append_obs.main",
         short_help="Append columns from a CSV to an AnnData zarr obs",
@@ -103,9 +121,33 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="combined-dim-reduction",
+        import_path="dynaclr.evaluation.dimensionality_reduction.reduce_combined.main",
+        short_help="Joint PCA/PHATE across multiple AnnData stores",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="cross-validate",
         import_path="dynaclr.evaluation.linear_classifiers.cross_validation.main",
         short_help="Run rotating leave-one-dataset-out cross-validation",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="run-linear-classifiers",
+        import_path="dynaclr.evaluation.linear_classifiers.orchestrated.main",
+        short_help="Run linear classifiers on orchestrator embeddings (batch, CSV metrics)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="split-embeddings",
+        import_path="dynaclr.evaluation.split_embeddings.main",
+        short_help="Split combined embeddings zarr into one zarr per experiment",
     )
 )
 
@@ -122,6 +164,14 @@ dynaclr.add_command(
         name="build-cell-index",
         import_path="dynaclr.data.build_cell_index.main",
         short_help="Build cell index parquet from time-lapse experiment config",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="preprocess-cell-index",
+        import_path="dynaclr.data.preprocess_cell_index.main",
+        short_help="Remove empty-frame rows from a cell index parquet",
     )
 )
 
@@ -157,9 +207,77 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="compute-mmd",
+        import_path="dynaclr.evaluation.mmd.compute_mmd.main",
+        short_help="Compute MMD between perturbation groups in cell embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="plot-mmd-heatmap",
+        import_path="dynaclr.evaluation.mmd.compute_mmd.plot_mmd_heatmap_cmd",
+        short_help="Plot combined MMD heatmap (all markers) from per-experiment CSVs",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="prepare-eval-configs",
+        import_path="dynaclr.evaluation.evaluate.main",
+        short_help="Generate evaluation YAML configs and print JSON manifest (Nextflow entry point)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="check-evals",
+        import_path="dynaclr.evaluation.check_evals.main",
+        short_help="Check eval completion status for all models in the registry",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="append-annotations",
+        import_path="dynaclr.evaluation.append_annotations.main",
+        short_help="Append annotation columns to per-experiment zarrs",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="append-predictions",
+        import_path="dynaclr.evaluation.append_predictions.main",
+        short_help="Apply saved classifiers and write predictions to per-experiment zarrs",
+    )
+)
+
+
+dynaclr.add_command(
+    LazyCommand(
+        name="plot-embeddings",
+        import_path="dynaclr.evaluation.plot_embeddings.main",
+        short_help="Generate scatter plots from an AnnData embedding store",
+    )
+)
+
 
 def main():
-    """Run the DynaCLR CLI."""
+    """Run the DynaCLR CLI.
+
+    Lightning subcommands (``fit``, ``predict``, ``test``, ``validate``)
+    are routed to :func:`viscy_utils.cli.main`, which handles ``base:``
+    recipe composition before LightningCLI parses the resolved config.
+    All other subcommands dispatch through the Click group.
+    """
+    if len(sys.argv) >= 2 and sys.argv[1] in _LIGHTNING_SUBCOMMANDS:
+        from viscy_utils.cli import main as viscy_main
+
+        viscy_main()
+        return
     dynaclr()
 
 

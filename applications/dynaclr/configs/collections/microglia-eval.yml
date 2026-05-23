@@ -1,0 +1,73 @@
+name: microglia-eval
+description: "Microglia dynamorph evaluation collection. All 3 label-free channels (Brightfield, Phase3D, Retardance), all 5 perturbation conditions."
+datasets_root: /hpc/projects/organelle_phenotyping
+
+experiments:
+  - name: 20191107_GW23_dynamorph_Brightfield
+    data_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/20191107_1209_1_GW23_dynamorph.zarr
+    tracks_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/tracking.zarr
+    channels:
+      - name: Brightfield
+        marker: Brightfield
+    perturbation_wells:
+      untreated:
+        - C/5
+      IL17:
+        - B/4
+      IFN-beta:
+        - B/5
+      Rubella:
+        - C/4
+      Glioblastoma_supernatant:
+        - B/2
+    interval_minutes: 9.0
+    start_hpi: 0.0
+    marker: Brightfield
+    organelle: Brightfield
+    pixel_size_xy_um: 0.325
+
+  - name: 20191107_GW23_dynamorph_Phase3D
+    data_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/20191107_1209_1_GW23_dynamorph.zarr
+    tracks_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      untreated:
+        - C/5
+      IL17:
+        - B/4
+      IFN-beta:
+        - B/5
+      Rubella:
+        - C/4
+      Glioblastoma_supernatant:
+        - B/2
+    interval_minutes: 9.0
+    start_hpi: 0.0
+    marker: Phase3D
+    organelle: Phase3D
+    pixel_size_xy_um: 0.325
+
+  - name: 20191107_GW23_dynamorph_Retardance
+    data_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/20191107_1209_1_GW23_dynamorph.zarr
+    tracks_path: ${datasets_root}/datasets/20191107_1209_1_GW23_dynamorph/tracking.zarr
+    channels:
+      - name: Retardance
+        marker: Retardance
+    perturbation_wells:
+      untreated:
+        - C/5
+      IL17:
+        - B/4
+      IFN-beta:
+        - B/5
+      Rubella:
+        - C/4
+      Glioblastoma_supernatant:
+        - B/2
+    interval_minutes: 9.0
+    start_hpi: 0.0
+    marker: Retardance
+    organelle: Retardance
+    pixel_size_xy_um: 0.325

@@ -54,6 +54,14 @@ class FOVRecord(BaseModel):
         Treatment concentration in nanomolar.
     fluorescence_modality : str or None
         Fluorescence imaging modality.
+    microscope : str or None
+        Microscope identifier (e.g. ``"mantis"``, ``"dragonfly"``).
+    labelfree_modality : str or None
+        Label-free imaging modality (e.g. ``"widefield"``, ``"oblique"``).
+    treatment : str or None
+        Treatment name (e.g. ``"DMSO"``, ``"Bafilomycin"``).
+    hours_post_treatment : float or None
+        Hours post treatment at imaging start.
     t_shape : int or None
         Number of timepoints.
     c_shape : int or None
@@ -68,6 +76,10 @@ class FOVRecord(BaseModel):
         Physical pixel size in the XY plane (micrometers).
     pixel_size_z_um : float or None
         Physical pixel size in Z (micrometers).
+    channel_markers : dict[str, str]
+        Maps zarr channel name to marker for this well.
+        Only channels with a non-None marker in Airtable are included.
+        Empty dict means no per-well channel marker information is available.
     """
 
     dataset: str
@@ -88,6 +100,10 @@ class FOVRecord(BaseModel):
     seeding_density: int | None = None
     treatment_concentration_nm: float | None = None
     fluorescence_modality: str | None = None
+    microscope: str | None = None
+    labelfree_modality: str | None = None
+    treatment: str | None = None
+    hours_post_treatment: float | None = None
     t_shape: int | None = None
     c_shape: int | None = None
     z_shape: int | None = None
@@ -95,3 +111,4 @@ class FOVRecord(BaseModel):
     x_shape: int | None = None
     pixel_size_xy_um: float | None = None
     pixel_size_z_um: float | None = None
+    channel_markers: dict[str, str] = {}

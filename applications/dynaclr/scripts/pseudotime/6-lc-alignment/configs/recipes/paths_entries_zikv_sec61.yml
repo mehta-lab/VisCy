@@ -1,0 +1,10 @@
+# Stage C entries — SEC61B timing parquets to cross-validate.
+
+entries:
+  - name: 07_24_ZIKV
+    organelle: SEC61B
+    timing_filename: 07_24_ZIKV_event_timing.parquet
+
+  - name: 08_26_ZIKV
+    organelle: SEC61B
+    timing_filename: 08_26_ZIKV_event_timing.parquet
