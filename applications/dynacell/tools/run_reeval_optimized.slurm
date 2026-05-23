@@ -39,7 +39,7 @@ echo "[reeval-optimized] task ${SLURM_ARRAY_TASK_ID}: leaf=${LEAF}"
 echo "[reeval-optimized] node=$(hostname) gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits | head -1)"
 echo "[reeval-optimized] commit=$(cd /hpc/mydata/alex.kalinin/VisCy && git rev-parse --short HEAD)"
 
-export DYNACELL_THREADS_PER_WORKER=32
+export DYNACELL_THREADS_PER_WORKER="${SLURM_CPUS_PER_TASK}"
 
 cd /hpc/mydata/alex.kalinin/VisCy
 exec uv run dynacell evaluate-grouped "leaf=${LEAF}"
