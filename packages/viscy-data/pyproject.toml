@@ -53,7 +53,7 @@ urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
-test = [ "pytest>=9.0.2", "pytest-cov>=7", "tensorstore" ]
+test = [ "pytest>=9.0.2", "pytest-cov>=7", "tensorstore", "viscy-transforms" ]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

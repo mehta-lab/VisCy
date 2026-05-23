@@ -1279,6 +1279,7 @@ wheels = [
 name = "dynacell"
 source = { editable = "applications/dynacell" }
 dependencies = [
+    { name = "hydra-core" },
     { name = "lightning" },
     { name = "monai" },
     { name = "omegaconf" },
@@ -1350,6 +1351,7 @@ requires-dist = [
     { name = "cucim-cu12", marker = "extra == 'eval-gpu'" },
     { name = "cupy-cuda12x", marker = "extra == 'eval-gpu'" },
     { name = "dynaclr", marker = "extra == 'eval'", editable = "applications/dynaclr" },
+    { name = "hydra-core", specifier = ">=1.2" },
     { name = "hydra-core", marker = "extra == 'eval'", specifier = ">=1.2" },
     { name = "hydra-core", marker = "extra == 'report'", specifier = ">=1.2" },
     { name = "iohub", marker = "extra == 'eval'" },
@@ -6458,11 +6460,13 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "tensorstore" },
+    { name = "viscy-transforms" },
 ]
 test = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "tensorstore" },
+    { name = "viscy-transforms" },
 ]
 
 [package.metadata]
@@ -6496,11 +6500,13 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "tensorstore" },
+    { name = "viscy-transforms", editable = "packages/viscy-transforms" },
 ]
 test = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "tensorstore" },
+    { name = "viscy-transforms", editable = "packages/viscy-transforms" },
 ]
 
 [[package]]
