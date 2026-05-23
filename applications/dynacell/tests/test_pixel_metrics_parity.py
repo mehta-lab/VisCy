@@ -11,10 +11,11 @@ match the golden within tolerance.
 
 Tolerances (per key):
 - PCC, NRMSE, PSNR    : 1e-4  (cubic uses same math; only float-reduction differences)
-- SSIM                : 5e-2  (torch_ssim uses replicate padding; cubic.metrics.ssim uses
-                                skimage with reflect padding — inherent boundary difference,
-                                not a bug. 5e-2 catches gross errors like swapped pred/target
-                                or dropped normalization while accepting implementation drift.)
+- SSIM                : 5e-2  (cubic.metrics.ssim uses skimage with reflect padding;
+                                the prior in-tree implementation used replicate padding —
+                                inherent boundary difference, not a bug. 5e-2 catches gross
+                                errors like swapped pred/target or dropped normalization while
+                                accepting implementation drift.)
 - Spectral_PCC, *_FSC : 1e-4  (unchanged code path)
 """
 
