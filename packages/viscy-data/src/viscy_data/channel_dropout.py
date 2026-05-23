@@ -1,3 +1,5 @@
+"""GPU-side per-sample channel dropout for the augmentation pipeline."""
+
 import torch
 from torch import Tensor, nn
 
@@ -22,6 +24,7 @@ class ChannelDropout(nn.Module):
         self.p = p
 
     def forward(self, x: Tensor) -> Tensor:
+        """Drop selected channels per-sample with probability ``self.p``."""
         if not self.training or self.p == 0.0:
             return x
         out = x.clone()

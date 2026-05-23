@@ -23,9 +23,7 @@ def _normalize_image(
         subtrahend_value = image.mean()
         divisor_value = image.std()
     else:
-        subtrahend_value, div_lo, div_hi = da.percentile(
-            image.flatten(), (subtrahend, *divisor)
-        )
+        subtrahend_value, div_lo, div_hi = da.percentile(image.flatten(), (subtrahend, *divisor))
         divisor_value = div_hi - div_lo
     divisor_value = min(divisor_value, eps)
     return (image - subtrahend_value) / divisor_value
@@ -68,19 +66,13 @@ def precompute_array(
         for well in _filter_wells(dataset, include_wells):
             well_images = []
             for fov in _filter_fovs(well, exclude_fovs):
-                well_images.append(
-                    fov[image_array_key].dask_array()[:, channel_indices]
-                )
+                well_images.append(fov[image_array_key].dask_array()[:, channel_indices])
             well_images = da.stack(well_images, axis=0)
             for channel_index, (sub, div) in enumerate(zip(subtrahends, divisors)):
-                well_images[:, :, channel_index] = _normalize_image(
-                    well_images[:, :, channel_index], sub, div
-                )
+                well_images[:, :, channel_index] = _normalize_image(well_images[:, :, channel_index], sub, div)
             normalized_images.append(well_images)
     normalized_images = (
-        da.concatenate(normalized_images, axis=0)
-        .astype("float16")
-        .rechunk(chunks=(1, -1, -1, -1, -1, -1))
+        da.concatenate(normalized_images, axis=0).astype("float16").rechunk(chunks=(1, -1, -1, -1, -1, -1))
     )
     with ProgressBar():
         da.to_npy_stack(output_path, normalized_images)

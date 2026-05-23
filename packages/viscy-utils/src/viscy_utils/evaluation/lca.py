@@ -116,14 +116,9 @@ def fit_logistic_regression(
     print("Trained logistic regression classifier.")
     print(
         "Training set accuracy:\n"
-        + classification_report(
-            logistic_regression.predict(train_features), train_annotations, digits=3
-        )
+        + classification_report(logistic_regression.predict(train_features), train_annotations, digits=3)
     )
-    print(
-        "Test set accuracy:\n"
-        + classification_report(prediction, test_annotations, digits=3)
-    )
+    print("Test set accuracy:\n" + classification_report(prediction, test_annotations, digits=3))
     return logistic_regression, (
         (train_features, train_annotations),
         (test_features, test_annotations),

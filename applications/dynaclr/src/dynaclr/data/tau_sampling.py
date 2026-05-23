@@ -1,3 +1,5 @@
+"""Temporal-offset (tau) sampling for triplet construction."""
+
 import numpy as np
 
 
