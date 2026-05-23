@@ -68,6 +68,9 @@ def register(position_paths: list[Path], dry_run: bool = False, dataset: str | N
         if result.updated:
             db.batch_update(result.updated)
             logger.info("Updated %d existing records", len(result.updated))
+        if result.template_ids_to_delete:
+            db.batch_delete(result.template_ids_to_delete)
+            logger.info("Deleted %d well template records", len(result.template_ids_to_delete))
 
     print(format_register_summary(result, dry_run=dry_run))
 

@@ -2,6 +2,7 @@
 
 import logging
 
+import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 from xarray import Dataset
@@ -18,6 +19,11 @@ def compute_phate(
     knn_dist: str = "cosine",
     update_dataset: bool = False,
     random_state: int = 42,
+    n_pca: int | None = 50,
+    subsample: int | None = None,
+    lineage_ids: NDArray | None = None,
+    fit_idx: NDArray | None = None,
+    n_jobs: int = 1,
     **phate_kwargs,
 ) -> tuple[object, NDArray]:
     """Compute PHATE embeddings.
@@ -38,6 +44,24 @@ def compute_phate(
         Whether to update the dataset, by default False.
     random_state : int, optional
         Random state, by default 42.
+    n_pca : int or None, optional
+        Pre-reduce to this many PCs inside PHATE before graph construction.
+        Pass ``None`` to skip PHATE's internal PCA — useful when the input is
+        already PCA-reduced (e.g., ``X_pca_combined``), and avoids the
+        scipy 1.17.1 / sklearn 1.8.0 ``scipy.linalg.lu`` deadlock that hangs
+        PHATE's internal pre-PCA step at near-zero CPU. Default 50.
+    subsample : int or None, optional
+        Lineage- or row-level subsample drawn here. Mutually exclusive with
+        ``fit_idx``: when ``fit_idx`` is provided, ``subsample`` is ignored.
+    lineage_ids : NDArray or None, optional
+        Per-row lineage identifier (e.g., ``f"{fov}|{track_id}"``). Used by
+        the internal ``subsample`` path to draw whole lineages instead of
+        random rows. Ignored when ``fit_idx`` is provided.
+    fit_idx : NDArray or None, optional
+        Precomputed row indices to fit PHATE on. When provided, PHATE fits on
+        ``embeddings[fit_idx]`` and transforms the full input — the caller
+        owns the subsampling policy (e.g., per-store cap). Disables this
+        function's internal subsampling.
 
     Returns
     -------
@@ -72,11 +96,35 @@ def compute_phate(
         decay=decay,
         knn_dist=knn_dist,
         random_state=random_state,
-        n_jobs=-1,
+        n_jobs=n_jobs,
+        n_pca=n_pca,
         **phate_kwargs,
     )
 
-    phate_embedding = phate_model.fit_transform(embeddings_scaled)
+    n_samples = embeddings_scaled.shape[0]
+    if fit_idx is not None:
+        # Caller-provided fit set — owns the subsampling policy.
+        _logger.info(f"PHATE: fitting on caller-supplied {len(fit_idx):,} / {n_samples:,} cells, projecting the rest")
+        phate_model.fit(embeddings_scaled[fit_idx])
+        phate_embedding = phate_model.transform(embeddings_scaled)
+    elif subsample is not None and subsample < n_samples:
+        rng = np.random.default_rng(random_state)
+        if lineage_ids is not None:
+            unique_lineages = np.unique(lineage_ids)
+            n_lineages = min(subsample, len(unique_lineages))
+            chosen_lineages = rng.choice(unique_lineages, size=n_lineages, replace=False)
+            idx = np.where(np.isin(lineage_ids, chosen_lineages))[0]
+            _logger.info(
+                f"PHATE: fitting on {len(idx):,} cells ({n_lineages:,} lineages) "
+                f"/ {n_samples:,} total, projecting the rest"
+            )
+        else:
+            idx = rng.choice(n_samples, size=subsample, replace=False)
+            _logger.info(f"PHATE: fitting on {subsample:,} / {n_samples:,} cells, projecting the rest")
+        phate_model.fit(embeddings_scaled[idx])
+        phate_embedding = phate_model.transform(embeddings_scaled)
+    else:
+        phate_embedding = phate_model.fit_transform(embeddings_scaled)
 
     if update_dataset and isinstance(embedding_dataset, Dataset):
         for i in range(min(2, phate_embedding.shape[1])):

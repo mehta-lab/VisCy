@@ -1,0 +1,29 @@
+# Default dimensionality reduction settings for DynaCLR evaluation.
+# PHATE runs only in reduce_combined; per-experiment reduce_dimensionality uses PCA only.
+# Override n_jobs for reduce_combined.phate in the leaf config if needed.
+reduce_dimensionality:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+
+reduce_combined:
+  overwrite_keys: true
+  pca:
+    n_components: 32
+    normalize_features: true
+
+  phate:
+    n_components: 2
+    knn: 5
+    decay: 40
+    knn_dist: cosine
+    scale_embeddings: false
+    random_state: 42
+    n_pca: null         # skip PHATE's internal PCA — fit on X_pca_combined
+    subsample: 100      # per-store lineage cap — fast iteration; bump for paper figures (e.g. 5000)
+    # -1 = sklearn convention "use all CPUs", resolved SLURM-aware via
+    # viscy_utils.mp_utils.available_cpus (reads SLURM_CPUS_PER_TASK).
+    # KNN search dominates wall time; BLAS env vars in reduce_combined.nf
+    # are pinned to 1 to avoid n_jobs * BLAS oversubscription.
+    n_jobs: -1

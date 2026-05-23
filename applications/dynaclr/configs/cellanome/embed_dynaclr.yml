@@ -1,0 +1,46 @@
+# DynaCLR embedding extraction for cellanome dataset.
+# Reads primary_analysis.csv directly, outputs cell-level anndata.
+# Usage: uv run python applications/dynaclr/scripts/cellanome/embed_dynaclr.py configs/cellanome/embed_dynaclr.yml
+
+# --- Data paths ---
+zarr_store: /hpc/projects/multimodal/datasets/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes.zarr
+analysis_base: /hpc/instruments/cm.r3200/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/image_analysis_output-12032025-143316
+transcriptome_anndata: /hpc/projects/multimodal/datasets/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/anndata/seurat-bc3a-l_all.zarr
+output_path: /hpc/projects/multimodal/datasets/20251203141914_P-05_R000414_FC_BH_120325_try4_Adherent_with_SRA_training_4lanes/2-embeddings/dynaclr-2d-boc-BF.zarr
+
+# --- Experiment ---
+# scan_ids: [5]
+# lane_ids: [3, 4, 5, 6]
+
+# --- Model ---
+ckpt_path: /hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt
+encoder_config:
+  backbone: convnext_tiny
+  in_channels: 1
+  in_stack_depth: 1
+  stem_kernel_size: [1, 4, 4]
+  stem_stride: [1, 4, 4]
+  embedding_dim: 768
+  projection_dim: 32
+
+# --- Channel ---
+channel_name: White
+
+# --- Crop ---
+# Trained on 160x160 at 0.149 µm/px (~23.8 µm physical).
+# Cellanome is 20x at 0.247 µm/px.
+# raw_crop = 160 * 0.149 / 0.247 = 96 px, resized to 160.
+patch_size: 160
+reference_pixel_size: 0.149
+source_pixel_size: 0.247
+
+# --- Filtering ---
+filters:
+  object_class:
+    isin: [cell, cell-adhered]
+  object_radius_px:
+    min: 39
+
+# --- Inference ---
+batch_size: 128
+device: cuda

@@ -1,5 +1,6 @@
 name: DynaCLR-3D-BagOfChannels-v2
 description: "Multi-organelle bag-of-channels 3D DynaCLR training collection. Each experiment entry is a single-channel bag: H2B (chromatin), CAAX (membrane), TOMM20 (mitochondria), SEC61B (ER), G3BP1 (stress granules), viral sensor (mCherry/pAL10), and Phase3D (label-free). Includes dragonfly confocal (2024_08_14_ZIKV_pal17_48h) for cross-microscope training. All data paths point to VAST (zarr v3, rechunked)."
+datasets_root: /hpc/projects/organelle_phenotyping
 
 provenance:
   airtable_base_id: app8vqaoWyOwa0sB5
@@ -11,8 +12,8 @@ provenance:
 experiments:
   # ── G3BP1 (stress granules) ──
   - name: 2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: G3BP1
@@ -30,9 +31,49 @@ experiments:
     pixel_size_xy_um: 0.1494
     pixel_size_z_um: 0.174
 
+  - name: 2025_01_28_A549_viral_sensor_ZIKV_DENV
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - B/2
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2025_01_28_A549_Phase3D_ZIKV_DENV
+    data_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - B/2
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    marker: Phase3D
+    organelle: label_free
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
   - name: 2025_07_24_A549_G3BP1_ZIKV
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: G3BP1
@@ -51,8 +92,8 @@ experiments:
 
   # ── CAAX (membrane) ──
   - name: 2025_04_15_A549_H2B_CAAX_ZIKV_DENV_CAAX
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/2025_04_15_A549_H2B_CAAX_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/2025_04_15_A549_H2B_CAAX_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw mCherry EX561 EM600-37
         marker: CAAX
@@ -70,8 +111,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2025_04_17_A549_H2B_CAAX_DENV_CAAX
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_17_A549_H2B_CAAX_DENV/2025_04_17_A549_H2B_CAAX_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_17_A549_H2B_CAAX_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_04_17_A549_H2B_CAAX_DENV/2025_04_17_A549_H2B_CAAX_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_04_17_A549_H2B_CAAX_DENV/tracking.zarr
     channels:
       - name: raw mCherry EX561 EM600-37
         marker: CAAX
@@ -90,8 +131,8 @@ experiments:
 
   # ── H2B (chromatin) ──
   - name: 2025_04_15_A549_H2B_CAAX_ZIKV_DENV_H2B
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/2025_04_15_A549_H2B_CAAX_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/2025_04_15_A549_H2B_CAAX_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_04_15_A549_H2B_CAAX_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw Cy5 EX639 EM698-70
         marker: HIST2H2BE
@@ -109,8 +150,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2025_04_17_A549_H2B_CAAX_DENV_H2B
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_17_A549_H2B_CAAX_DENV/2025_04_17_A549_H2B_CAAX_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_04_17_A549_H2B_CAAX_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_04_17_A549_H2B_CAAX_DENV/2025_04_17_A549_H2B_CAAX_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_04_17_A549_H2B_CAAX_DENV/tracking.zarr
     channels:
       - name: raw Cy5 EX639 EM698-70
         marker: HIST2H2BE
@@ -129,8 +170,8 @@ experiments:
 
   # ── TOMM20 (mitochondria) ──
   - name: 2024_10_09_A549_TOMM20_ZIKV_DENV
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/2024_10_09_A549_TOMM20_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/2024_10_09_A549_TOMM20_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: TOMM20
@@ -147,9 +188,47 @@ experiments:
     pixel_size_xy_um: 0.1494
     pixel_size_z_um: 0.174
 
+  - name: 2024_10_09_A549_TOMM20_ZIKV_DENV_viral_sensor
+    data_path: ${datasets_root}/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/2024_10_09_A549_TOMM20_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - A/4
+      infected:
+        - B/4
+    interval_minutes: 30.0
+    start_hpi: 5.0
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2024_10_09_A549_TOMM20_ZIKV_DENV_Phase3D
+    data_path: ${datasets_root}/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/2024_10_09_A549_TOMM20_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_09_A549_TOMM20_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - A/4
+      infected:
+        - B/4
+    interval_minutes: 30.0
+    start_hpi: 5.0
+    marker: Phase3D
+    organelle: label_free
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
   - name: 2024_11_05_A549_TOMM20_ZIKV_DENV_TOMM20
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: TOMM20
@@ -167,8 +246,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2025_07_24_A549_TOMM20_ZIKV
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: TOMM20
@@ -187,8 +266,8 @@ experiments:
 
   # ── SEC61B (endoplasmic reticulum) ──
   - name: 2024_10_16_A549_SEC61_ZIKV_DENV
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: SEC61B
@@ -205,9 +284,47 @@ experiments:
     pixel_size_xy_um: 0.1494
     pixel_size_z_um: 0.174
 
+  - name: 2024_10_16_A549_SEC61_ZIKV_DENV_viral_sensor
+    data_path: ${datasets_root}/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: viral_sensor
+    organelle: viral_sensor
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2024_10_16_A549_SEC61_ZIKV_DENV_Phase3D
+    data_path: ${datasets_root}/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_16_A549_SEC61_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - B/4
+      infected:
+        - C/4
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    marker: Phase3D
+    organelle: label_free
+    moi: 5.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
   - name: 2024_10_31_A549_SEC61_ZIKV_DENV_SEC61
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: SEC61B
@@ -225,8 +342,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2025_07_24_A549_SEC61_ZIKV
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
     channels:
       - name: raw GFP EX488 EM525-45
         marker: SEC61B
@@ -244,9 +361,9 @@ experiments:
     pixel_size_z_um: 0.174
 
   # ── Viral sensor (mCherry) ──
-  - name: 2025_07_24_A549_viral_sensor
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+  - name: 2025_07_24_A549_viral_sensor_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
     channels:
       - name: raw mCherry EX561 EM600-37
         marker: viral_sensor
@@ -267,8 +384,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2024_11_05_A549_TOMM20_ZIKV_DENV_viral_sensor
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw mCherry EX561 EM600-37
         marker: viral_sensor
@@ -286,8 +403,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2024_10_31_A549_SEC61_ZIKV_DENV_viral_sensor
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/tracking.zarr
     channels:
       - name: raw mCherry EX561 EM600-37
         marker: viral_sensor
@@ -305,9 +422,9 @@ experiments:
     pixel_size_z_um: 0.174
 
   # ── Phase3D (label-free) ──
-  - name: 2025_07_24_A549_Phase3D
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+  - name: 2025_07_24_A549_Phase3D_ZIKV
+    data_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
     channels:
       - name: Phase3D
         marker: Phase3D
@@ -328,8 +445,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2024_11_05_A549_TOMM20_ZIKV_DENV_Phase3D
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_11_05_A549_TOMM20_ZIKV_DENV/tracking.zarr
     channels:
       - name: Phase3D
         marker: Phase3D
@@ -347,8 +464,8 @@ experiments:
     pixel_size_z_um: 0.174
 
   - name: 2024_10_31_A549_SEC61_ZIKV_DENV_Phase3D
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
-    tracks_path: /hpc/projects/organelle_phenotyping/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/tracking.zarr
+    data_path: ${datasets_root}/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/2024_10_31_A549_SEC61_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/datasets/2024_10_31_A549_SEC61_ZIKV_DENV/tracking.zarr
     channels:
       - name: Phase3D
         marker: Phase3D
@@ -367,8 +484,8 @@ experiments:
 
   # ── Dragonfly confocal — viral sensor (pAL10) ──
   - name: 2024_08_14_ZIKV_pal17_48h_pAL10
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h_sharded.zarr
-    tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_08_14_ZIKV_pal17_48h/5-tracking/2024_08_14_ZIKV_pal17_48h.zarr
+    data_path: ${datasets_root}/datasets/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h_sharded.zarr
+    tracks_path: ${datasets_root}/datasets/2024_08_14_ZIKV_pal17_48h/tracking.zarr
     channels:
       - name: MultiCam_GFP_BF
         marker: pAL10
@@ -389,8 +506,8 @@ experiments:
 
   # ── Dragonfly confocal — Phase3D (label-free) ──
   - name: 2024_08_14_ZIKV_pal17_48h_Phase3D
-    data_path: /hpc/projects/organelle_phenotyping/datasets/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h_sharded.zarr
-    tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_08_14_ZIKV_pal17_48h/5-tracking/2024_08_14_ZIKV_pal17_48h.zarr
+    data_path: ${datasets_root}/datasets/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h_sharded.zarr
+    tracks_path: ${datasets_root}/datasets/2024_08_14_ZIKV_pal17_48h/tracking.zarr
     channels:
       - name: Phase3D
         marker: Phase3D

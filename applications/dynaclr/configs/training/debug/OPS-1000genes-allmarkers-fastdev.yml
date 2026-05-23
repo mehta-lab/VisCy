@@ -1,0 +1,30 @@
+# Local fast-dev-run override for OPS-1000genes-allmarkers.
+# Goal: reproduce the OOM path from job 31264591 on a single A40 locally.
+#
+# Run:
+#   uv run viscy fit \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers.yml \
+#     --config applications/dynaclr/configs/training/OPS-1000genes-allmarkers-fastdev.yml
+
+trainer:
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  fast_dev_run: true
+  logger: null
+  callbacks: []
+  # fast_dev_run already caps batches/epochs; the explicit limits are defensive.
+  limit_train_batches: 1
+  limit_val_batches: 1
+  max_epochs: 1
+
+data:
+  init_args:
+    batch_size: 8
+    num_workers: 0
+    prefetch_factor: null
+    # Skip warm-start checkpoint to keep this self-contained.
+
+model:
+  init_args:
+    ckpt_path: null

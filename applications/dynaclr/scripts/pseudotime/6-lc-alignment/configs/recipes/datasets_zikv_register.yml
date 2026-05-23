@@ -1,0 +1,18 @@
+# Dataset roster for the LC-registration step.
+# Each entry names the viral_sensor embedding zarr (per-model relative path)
+# and the annotation CSV (absolute, lives in dataset land).
+# Add more datasets by appending entries — names should match the
+# datasets_zikv_register_organelle.yml entries below.
+
+datasets:
+  - name: 07_22_ZIKV
+    embedding_filename: 2025_07_22_A549_viral_sensor_ZIKV.zarr
+    annotation_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+
+  - name: 07_24_ZIKV
+    embedding_filename: 2025_07_24_A549_viral_sensor_ZIKV.zarr
+    annotation_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+
+  - name: 08_26_ZIKV
+    embedding_filename: 2025_08_26_A549_viral_sensor_ZIKV.zarr
+    annotation_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV_combined_annotations.csv

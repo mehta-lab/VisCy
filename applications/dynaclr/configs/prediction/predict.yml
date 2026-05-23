@@ -11,6 +11,9 @@ trainer:
   num_nodes: 1
   precision: 32-true
   callbacks:
+    - class_path: lightning.pytorch.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 10
     - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
       init_args:
         output_path: #TODO point to the path to save the embeddings

@@ -225,11 +225,15 @@ class ContrastiveModule(LightningModule):
         plt.close(fig)
 
     def _get_labels(self, batch: TripletSample, batch_key: str) -> Tensor | None:
-        """Extract integer labels for a head from the batch.
+        """Extract labels (scalar or vector) for a head from the batch.
 
         Checks top-level batch keys first, then falls back to
         ``anchor_meta[i]["labels"][batch_key]`` for metadata-carried labels.
         Returns ``None`` if the key is not found in either location.
+
+        Vector-valued entries (e.g. paired transcriptomic embeddings) are
+        stacked into a ``(B, D)`` float tensor; scalar entries are stacked
+        into a ``(B,)`` long tensor.
         """
         if batch_key in batch:
             return batch[batch_key]
@@ -237,6 +241,10 @@ class ContrastiveModule(LightningModule):
         if not meta or "labels" not in meta[0] or batch_key not in meta[0]["labels"]:
             return None
         vals = [m["labels"][batch_key] for m in meta]
+        first = vals[0]
+        if isinstance(first, (list, tuple, np.ndarray, Tensor)):
+            arr = np.asarray(vals, dtype=np.float32)
+            return torch.from_numpy(arr).to(self.device)
         return torch.tensor(vals, dtype=torch.long, device=self.device)
 
     def _run_auxiliary_heads(self, anchor_features: Tensor, batch: TripletSample, stage: str) -> Tensor:
