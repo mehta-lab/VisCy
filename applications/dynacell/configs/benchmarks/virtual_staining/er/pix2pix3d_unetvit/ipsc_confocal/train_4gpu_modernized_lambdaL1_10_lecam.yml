@@ -1,0 +1,56 @@
+# pix2pix3d_unetvit MODERNIZED Run D (lambda_L1=10 + LeCam) on ER (SEC61B) — 4-GPU DDP.
+#
+# Adds LeCam regularization on top of Run B (lambda_l1=10). LeCam anchors
+# the discriminator's outputs to running EMAs of past real/fake scores,
+# penalising scale drift between D(real) and D(fake) (Tseng et al. 2021).
+# Goal: stop the slow climb of g_adv that Run B exhibited (+0.037 over
+# 19 epochs) by preventing D from drifting toward overconfidence.
+#
+# Everything else (loss_type=nonsat, r1_gamma=10, r1_every=16,
+# ema_kimg=10, equal LR 2e-4, lambda_l1=10, warmup, schedule, max_epochs)
+# matches Run B exactly. lecam_decay=0.9 matches the StyleGAN-XL /
+# original Tseng reference. lecam_gamma=0.3 is the StyleGAN-XL setting.
+#
+# See PR #428 discussion thread.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: er__ipsc_confocal__pix2pix3d_unetvit_modernized_lambdaL1_10_lecam
+
+model:
+  init_args:
+    lambda_l1: 10.0       # matches Run B
+    lecam_gamma: 0.3      # StyleGAN-XL default; off in Runs A/B/C
+    lecam_decay: 0.9      # Tseng et al. / StyleGAN-XL reference EMA decay
+
+trainer:
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_SEC61B_4gpu_modernized_lambdaL1_10_lecam
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_SEC61B_4gpu_modernized_lambdaL1_10_lecam
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam
