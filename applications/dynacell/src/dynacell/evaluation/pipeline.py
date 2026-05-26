@@ -29,12 +29,13 @@ from dynacell.evaluation.feature_select import (
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
     build_crops,
-    calculate_microssim,
     compute_pixel_metrics,
     cp_regionprops,
     drop_paired_nonfinite_rows,
     evaluate_segmentations,
     features_from_crops,
+    fit_microssim,
+    score_microssim,
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
@@ -262,6 +263,40 @@ class FovResult:
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
+def _calibrate_microssim(pred_positions, gt_positions, io_config, use_gpu: bool):
+    """Fit MicroMS3IM once per leaf on the concatenated (gt, pred) slice pool.
+
+    The microSSIM paper (Ashesh & Jug, 2024) is explicit that the RI factor
+    α should be a single scalar fit over the whole dataset, not refit per
+    image pair. Per-pair fitting inflates scores and prevents cross-FOV /
+    cross-leaf comparison. This helper walks every position in the leaf,
+    flattens (T, D, H, W) → (T·D, H, W) for both pred and gt, concatenates
+    across positions, and calls :func:`fit_microssim` exactly once.
+
+    Memory note: holds the full pool of slices in RAM long enough for one
+    ``sim.fit()``. For a typical eval (100 FOVs × T=1 × D=40 × 512² × float32
+    × 2 sides) this is ~8 GB — fits the HPC node budget. Multi-T runs
+    scale linearly; if memory becomes the constraint, the caller can
+    set ``limit_positions`` to subsample.
+
+    Returns the fitted ``MicroMS3IM`` instance; pass it to every
+    ``_process_one_fov`` call in the leaf so all FOVs score against the
+    same α.
+    """
+    all_targets: list[np.ndarray] = []
+    all_predictions: list[np.ndarray] = []
+    for (_, pos_pred), (_, pos_gt) in zip(pred_positions, gt_positions):
+        pred_ci = pos_pred.get_channel_index(io_config.pred_channel_name)
+        gt_ci = pos_gt.get_channel_index(io_config.gt_channel_name)
+        predict = np.asarray(pos_pred.data[:, pred_ci])  # (T, D, H, W)
+        target = np.asarray(pos_gt.data[:, gt_ci])
+        all_predictions.append(predict.reshape(-1, *predict.shape[-2:]))
+        all_targets.append(target.reshape(-1, *target.shape[-2:]))
+    targets = np.concatenate(all_targets, axis=0)
+    predictions = np.concatenate(all_predictions, axis=0)
+    return fit_microssim(targets, predictions, use_gpu=use_gpu)
+
+
 def _process_one_fov(
     config: DictConfig,
     cuda_empty_cache_every_n_timepoints: int,
@@ -276,6 +311,7 @@ def _process_one_fov(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    microssim_sim,
 ) -> FovResult:
     """Compute everything one FOV contributes to the eval and return a FovResult.
 
@@ -422,8 +458,14 @@ def _process_one_fov(
     seg_array = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
 
     if config.compute_microssim:
+        if microssim_sim is None:
+            raise RuntimeError(
+                f"compute_microssim=true but no leaf-level MicroMS3IM was passed into _process_one_fov "
+                f"for {pos_name_pred!r}. The parent must call _calibrate_microssim once per leaf and "
+                f"forward the fitted sim to every per-FOV call (serial loop + worker submissions)."
+            )
         with region_timer("microssim", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            microssim_scores = calculate_microssim(microssim_data, use_gpu=use_gpu)
+            microssim_scores = score_microssim(microssim_data, microssim_sim, use_gpu=use_gpu)
             for i in range(T):
                 fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
@@ -542,13 +584,23 @@ def _find_position(plate, pos_name: str):
     raise KeyError(f"position {pos_name!r} not found in plate")
 
 
-def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) -> FovResult:
+def _worker_run_fov(
+    config: DictConfig,
+    pos_name: str,
+    cuda_empty_every_n: int,
+    microssim_sim,
+) -> FovResult:
     """Worker entry point: process one FOV by name and return FovResult.
 
     Submitted via ``pool.submit`` in ``executor=process`` mode. Plates
     are opened with a context manager scoped to this single call — iohub
     file descriptors close before the worker accepts its next FOV. Models
     + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
+
+    ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
+    ``compute_microssim=false``); shipped per submission rather than via
+    worker state because the parent fits it after the position list is
+    finalized and before any worker pool spawns.
     """
     _worker_setup(config)
     state = _WORKER_STATE
@@ -578,6 +630,7 @@ def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) 
                     state["dinov3"],
                     state["dynaclr"],
                     state["celldino"],
+                    microssim_sim,
                 )
         else:
             result = _process_one_fov(
@@ -594,6 +647,7 @@ def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) 
                 state["dinov3"],
                 state["dynaclr"],
                 state["celldino"],
+                microssim_sim,
             )
 
     # Worker-side manifest flush so interrupted runs preserve progress even
@@ -702,6 +756,18 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 if seg_plate is not None and pos_name_seg != pos_name_pred:
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
 
+            # Leaf-level MicroMS3IM calibration: fit α once on every (gt, pred)
+            # 2-D slice in this leaf and reuse the fitted sim for scoring every
+            # FOV. Per the microSSIM paper (Ashesh & Jug, 2024 §3.3), per-pair
+            # fitting inflates the metric and breaks cross-FOV comparability —
+            # so the fit must happen exactly once per (model, organelle, test
+            # set). Skipped when ``compute_microssim=false``.
+            microssim_sim = None
+            if config.compute_microssim:
+                use_gpu = bool(getattr(config, "use_gpu", True))
+                with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
+                    microssim_sim = _calibrate_microssim(pred_positions, gt_positions, io_config, use_gpu=use_gpu)
+
             if config.compute_feature_metrics:
                 deep_extractors = {
                     "dinov3": dinov3_feature_extractor,
@@ -806,6 +872,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dinov3_feature_extractor,
                         dynaclr_feature_extractor,
                         celldino_feature_extractor,
+                        microssim_sim,
                     )
                     _aggregate(result)
 
@@ -837,7 +904,11 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         raise RuntimeError("make_fov_executor returned None for executor='process'")
                     futures = {
                         pool.submit(
-                            _worker_run_fov, config, pos_name, runtime.cuda_empty_cache_every_n_timepoints
+                            _worker_run_fov,
+                            config,
+                            pos_name,
+                            runtime.cuda_empty_cache_every_n_timepoints,
+                            microssim_sim,
                         ): pos_name
                         for pos_name in pos_names_in_order
                     }

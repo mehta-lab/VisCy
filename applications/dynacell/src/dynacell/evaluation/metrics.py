@@ -172,48 +172,87 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     return metrics
 
 
-def calculate_microssim(microssim_data, use_gpu: bool = True):
-    """Calculate MicroMS3IM scores across a collection of images."""
+def _require_microms3im():
+    """Import MicroMS3IM, raising the same install hint both fit/score share."""
     try:
         from cubic.metrics import MicroMS3IM
     except ImportError as e:
         raise ImportError(
             "cubic>=0.7.0a4 is required for MicroMS3IM. Install via the `eval` extra: `uv sync --extra eval`."
         ) from e
+    return MicroMS3IM
 
-    targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
-    predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
 
+def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = True):
+    """Fit a single MicroMS3IM instance on a batch of (target, prediction) pairs.
+
+    Per the microSSIM paper (Ashesh & Jug, 2024, sec. 3.3):
+
+        "we learn a single scalar for the entire dataset. Had we optimized
+        for every (x, y) pair, we would get a higher measure value on
+        average, but this does not align well with the motivation for
+        this measure, which is to estimate an optimal linear
+        transformation between the space of predictions to their
+        corresponding high-SNR micrographs."
+
+    Callers therefore fit ONCE over all (gt, pred) slices in a leaf and
+    reuse the fitted ``sim`` for scoring every FOV/timepoint pair, instead
+    of refitting per FOV (which inflates scores and breaks cross-FOV
+    comparability).
+
+    Parameters
+    ----------
+    targets, predictions : np.ndarray
+        Arrays of shape ``(N, H, W)`` aligned along the leading axis — the
+        full pool of 2D slices used for fitting the relative-intensity
+        factor α.
+    use_gpu : bool
+        When ``True`` and cupy/cucim are available, dispatches to cubic's
+        GPU path via ``cubic.cuda.ascupy``.
+
+    Returns
+    -------
+    MicroMS3IM
+        Fitted instance — ``sim.score(target_slice, pred_slice)`` may
+        then be called without further fitting.
+    """
+    MicroMS3IM = _require_microms3im()
     # Convert to cupy when GPU is requested — cubic.skimage dispatches to
     # cucim (GPU Gaussian filters) when inputs carry a .device attribute.
     to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
     targets = to_xp(targets)
     predictions = to_xp(predictions)
+    sim = MicroMS3IM()
+    sim.fit(targets, predictions)
+    return sim
 
-    def microssim_with_condition(condition):
-        masked_targets = np.where(condition, targets, 0)
-        masked_predictions = np.where(condition, predictions, 0)
 
-        sim = MicroMS3IM()
-        sim.fit(masked_targets, masked_predictions)
+def score_microssim(microssim_data, sim, use_gpu: bool = True):
+    """Score MicroMS3IM per FOV-T using a pre-fitted ``sim`` (no refit).
 
-        scores = []
-        slice_idx = 0
-        for img in microssim_data:
-            num_slices = len(img["target"])
-            img_masked_targets = masked_targets[slice_idx : slice_idx + num_slices]
-            img_masked_predictions = masked_predictions[slice_idx : slice_idx + num_slices]
+    Each entry of ``microssim_data`` contributes one row to the returned
+    list, averaging ``sim.score(target_slice, pred_slice)`` over that
+    entry's z-slices. ``sim`` must have been fitted via :func:`fit_microssim`
+    on the leaf-level pool of pairs — refitting inside this function
+    would re-introduce the per-call α drift the leaf-level calibration
+    pass is here to prevent.
+    """
+    targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
+    predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
+    to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
+    targets = to_xp(targets)
+    predictions = to_xp(predictions)
 
-            slice_scores = []
-            for i in range(num_slices):
-                slice_scores.append(sim.score(img_masked_targets[i], img_masked_predictions[i]))
-
-            slice_idx += num_slices
-            scores.append({"MicroMS3IM": np.mean(np.nan_to_num(slice_scores))})
-
-        return scores
-
-    return microssim_with_condition(np.ones_like(targets, dtype=bool))
+    scores: list[dict[str, float]] = []
+    slice_idx = 0
+    for img in microssim_data:
+        num_slices = len(img["target"])
+        img_targets = targets[slice_idx : slice_idx + num_slices]
+        img_predictions = predictions[slice_idx : slice_idx + num_slices]
+        slice_scores = [sim.score(img_targets[i], img_predictions[i]) for i in range(num_slices)]
+        slice_idx += num_slices
+        scores.append({"MicroMS3IM": float(np.mean(np.nan_to_num(slice_scores)))})
+    return scores
 
 
 PROPS_3D = (
