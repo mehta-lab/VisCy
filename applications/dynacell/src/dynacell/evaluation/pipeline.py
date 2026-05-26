@@ -681,48 +681,46 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             seg_plate = None
             seg_positions = [(name, None) for name, _ in pred_positions]
 
-        # Position-count alignment.
-        #
-        # When ``limit_positions`` is unset (production), require strict
-        # equality so partial pred zarrs cannot silently eval against the
-        # wrong gt — historical behavior.
-        #
-        # When ``limit_positions=N`` is set (smoke / iteration), allow pred
-        # to be a strict subset of gt by name: reorder gt + seg to align
-        # with pred, then truncate. Catches the ``--fast_dev_run`` predict
-        # → ``limit_positions=N`` eval case where pred has only the first
-        # N FOVs but gt has all of them.
-        limit = getattr(config, "limit_positions", None)
-        if limit is None:
-            if len(pred_positions) != len(gt_positions):
-                raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, gt={len(gt_positions)}")
-            if seg_plate is not None and len(seg_positions) != len(pred_positions):
-                seg_plate.close()
-                raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, seg={len(seg_positions)}")
-        else:
-            pred_name_set = {name for name, _ in pred_positions}
-            extra_in_pred = pred_name_set - {name for name, _ in gt_positions}
-            if extra_in_pred:
-                raise ValueError(
-                    "limit_positions: pred contains positions not present in gt: "
-                    f"{sorted(extra_in_pred)!r}. The relaxed alignment only works "
-                    "when pred is a subset of gt by position name."
-                )
-            gt_by_name = dict(gt_positions)
-            gt_positions = [(name, gt_by_name[name]) for name, _ in pred_positions]
-            if seg_plate is not None:
-                seg_by_name = dict(seg_positions)
-                missing_seg = pred_name_set - set(seg_by_name)
-                if missing_seg:
-                    seg_plate.close()
-                    raise ValueError(
-                        f"limit_positions: pred contains positions not present in seg: {sorted(missing_seg)!r}."
-                    )
-                seg_positions = [(name, seg_by_name[name]) for name, _ in pred_positions]
-            pred_positions = pred_positions[:limit]
-            gt_positions = gt_positions[:limit]
-            seg_positions = seg_positions[:limit]
         try:
+            # Position-count alignment.
+            #
+            # When ``limit_positions`` is unset (production), require strict
+            # equality so partial pred zarrs cannot silently eval against the
+            # wrong gt — historical behavior.
+            #
+            # When ``limit_positions=N`` is set (smoke / iteration), allow pred
+            # to be a strict subset of gt by name: reorder gt + seg to align
+            # with pred, then truncate. Catches the ``--fast_dev_run`` predict
+            # → ``limit_positions=N`` eval case where pred has only the first
+            # N FOVs but gt has all of them.
+            limit = getattr(config, "limit_positions", None)
+            if limit is None:
+                if len(pred_positions) != len(gt_positions):
+                    raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, gt={len(gt_positions)}")
+                if seg_plate is not None and len(seg_positions) != len(pred_positions):
+                    raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, seg={len(seg_positions)}")
+            else:
+                pred_name_set = {name for name, _ in pred_positions}
+                extra_in_pred = pred_name_set - {name for name, _ in gt_positions}
+                if extra_in_pred:
+                    raise ValueError(
+                        "limit_positions: pred contains positions not present in gt: "
+                        f"{sorted(extra_in_pred)!r}. The relaxed alignment only works "
+                        "when pred is a subset of gt by position name."
+                    )
+                gt_by_name = dict(gt_positions)
+                gt_positions = [(name, gt_by_name[name]) for name, _ in pred_positions]
+                if seg_plate is not None:
+                    seg_by_name = dict(seg_positions)
+                    missing_seg = pred_name_set - set(seg_by_name)
+                    if missing_seg:
+                        raise ValueError(
+                            f"limit_positions: pred contains positions not present in seg: {sorted(missing_seg)!r}."
+                        )
+                    seg_positions = [(name, seg_by_name[name]) for name, _ in pred_positions]
+                pred_positions = pred_positions[:limit]
+                gt_positions = gt_positions[:limit]
+                seg_positions = seg_positions[:limit]
             # Hoist paired-name validation so precompute (which runs before
             # the per-FOV loop) cannot write to mismatched cache slots.
             for (pos_name_pred, _), (pos_name_gt, _), (pos_name_seg, _) in zip(
