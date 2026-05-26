@@ -17,8 +17,8 @@ Three submission shapes are supported (pick one):
   ``ceil(N/P)`` independent sbatch jobs; each sbatch runs up to P leaves
   concurrently as bare-background processes on the shared GPU allocation
   (no per-process srun — that would try to subdivide GRES). cpus_per_task
-  scales with the chunk size and OMP/MKL_NUM_THREADS are pinned per
-  process so threads don't oversubscribe. Mutually exclusive with --array.
+  scales with the chunk size and OMP/MKL/OPENBLAS_NUM_THREADS are pinned
+  per process so threads don't oversubscribe. Mutually exclusive with --array.
 
 Constraints (predict-only by design):
   * All leaves must share ``launcher.mode == 'predict'`` and the same
@@ -332,8 +332,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "chunk's sbatch runs its <=P leaves as bare-background processes on the "
         "shared GPU allocation (no per-process srun — that would subdivide "
         "GRES), each writing its own log under run_root/slurm. cpus_per_task "
-        "scales with the chunk size and OMP/MKL_NUM_THREADS are pinned per "
-        "process so threads don't oversubscribe. Mutually exclusive with --array.",
+        "scales with the chunk size and OMP/MKL/OPENBLAS_NUM_THREADS are pinned "
+        "per process so threads don't oversubscribe. Mutually exclusive with --array.",
     )
     return ap.parse_args(argv)
 
@@ -507,11 +507,14 @@ def _render_chunked_sbatch(
             f"head profile with a smaller cpus_per_task.\n"
         )
 
-    # Pin OMP_NUM_THREADS per process so the P × base_cpus allocation isn't
-    # oversubscribed by every child reading SLURM_CPUS_PER_TASK. Build the log
-    # redirection by concatenating shell-quoted fragments with the unquoted
-    # ${SLURM_JOB_ID} so bash expands the job-id at runtime while keeping the
-    # directory and stem safe from metachars leaking from experiment_id.
+    # Pin per-process BLAS/OMP threads so the P × base_cpus allocation isn't
+    # oversubscribed by every child reading SLURM_CPUS_PER_TASK. Cover all three
+    # vars dynacell/eval pin elsewhere (see ``evaluation/runtime.py``) so
+    # OpenBLAS-backed NumPy/SciPy doesn't oversubscribe on clusters where it's
+    # the active BLAS. Build the log redirection by concatenating shell-quoted
+    # fragments with the unquoted ${SLURM_JOB_ID} so bash expands the job-id at
+    # runtime while keeping the directory and stem safe from metachars leaking
+    # from experiment_id.
     slurm_dir_q = shlex.quote(str(slurm_dir))
     lines = [
         f"echo '[batch] chunk {chunk_idx + 1}/{n_chunks}: {len(chunk_paths)} concurrent'",
@@ -524,6 +527,7 @@ def _render_chunked_sbatch(
         log = f"{slurm_dir_q}/${{SLURM_JOB_ID}}_{stem_q}.log"
         lines.append(
             f"OMP_NUM_THREADS={base_cpus} MKL_NUM_THREADS={base_cpus} "
+            f"OPENBLAS_NUM_THREADS={base_cpus} "
             f"uv run python -m dynacell predict --config {p_q} > {log} 2>&1 &"
         )
         lines.append("pids+=($!)")

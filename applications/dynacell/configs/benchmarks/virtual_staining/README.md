@@ -225,8 +225,8 @@ ablation sweep), pick a mode by parallelism shape:
 
 `--parallel` is mutually exclusive with `--array` (rejected at parse
 time). With `--parallel > 1`, `cpus_per_task` scales by the chunk
-size, `OMP_NUM_THREADS`/`MKL_NUM_THREADS` are pinned per backgrounded
-process, and per-leaf logs land at
+size, `OMP_NUM_THREADS`/`MKL_NUM_THREADS`/`OPENBLAS_NUM_THREADS` are
+pinned per backgrounded process, and per-leaf logs land at
 `{run_root}/slurm/${SLURM_JOB_ID}_<exp_id>.log`. Soft warning at
 `cpus_per_task > 128` if the scaled request would exceed typical node
 geometry.

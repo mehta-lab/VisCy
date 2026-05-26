@@ -178,7 +178,7 @@ Selection guide:
 
 Hardening to know about when you read the rendered sbatch:
 
-- `--parallel > 1` scales `cpus_per_task` by the chunk size and pins `OMP_NUM_THREADS`/`MKL_NUM_THREADS` per backgrounded process so concurrent children don't oversubscribe by all reading `SLURM_CPUS_PER_TASK`. Per-leaf logs land at `{run_root}/slurm/${SLURM_JOB_ID}_<exp_id>.log`; the sbatch's own `%j.out` only sees the driver banner and any chunk-level failure summary.
+- `--parallel > 1` scales `cpus_per_task` by the chunk size and pins `OMP_NUM_THREADS`/`MKL_NUM_THREADS`/`OPENBLAS_NUM_THREADS` per backgrounded process so concurrent children don't oversubscribe by all reading `SLURM_CPUS_PER_TASK`. Per-leaf logs land at `{run_root}/slurm/${SLURM_JOB_ID}_<exp_id>.log`; the sbatch's own `%j.out` only sees the driver banner and any chunk-level failure summary.
 - PIDs are captured and `wait $pid` is called per child. Bare `wait` (no args) returns only the LAST child's status and would silently mask earlier crashes as `COMPLETED` — the rendered bash propagates non-zero exit codes explicitly.
 - Submission loop catches `sbatch` failures per script and reports queued-vs-skipped (matters for `--parallel > 1` and `--array --allow-mixed-directives` since both produce multiple sbatches per invocation). Single-failure no longer hides an opaque traceback.
 - Soft warning at `cpus_per_task > 128`. Most cluster nodes top out around there; scaling `--parallel` past that often makes chunks pend forever.
