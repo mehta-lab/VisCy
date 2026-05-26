@@ -263,38 +263,107 @@ class FovResult:
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
-def _calibrate_microssim(pred_positions, gt_positions, io_config, use_gpu: bool):
-    """Fit MicroMS3IM once per leaf on the concatenated (gt, pred) slice pool.
+def _calibrate_microssim(
+    pred_positions,
+    gt_positions,
+    io_config,
+    *,
+    use_gpu: bool,
+    max_pairs: int,
+    seed: int,
+    cache_reads: bool,
+) -> tuple[Any, dict[str, tuple[np.ndarray, np.ndarray]]]:
+    """Fit MicroMS3IM once per leaf on a random subsample of (FOV, t) volumes.
 
-    The microSSIM paper (Ashesh & Jug, 2024) is explicit that the RI factor
-    α should be a single scalar fit over the whole dataset, not refit per
-    image pair. Per-pair fitting inflates scores and prevents cross-FOV /
-    cross-leaf comparison. This helper walks every position in the leaf,
-    flattens (T, D, H, W) → (T·D, H, W) for both pred and gt, concatenates
-    across positions, and calls :func:`fit_microssim` exactly once.
+    The microSSIM paper (Ashesh & Jug, 2024) is explicit that α is a
+    single scalar fit over the whole dataset, not refit per image pair.
+    Per-pair fitting inflates scores and prevents cross-FOV / cross-leaf
+    comparison. α is a population statistic, so a representative
+    subsample is sufficient — fitting on the full pool was OOMing on
+    80 GB GPUs (~78 GB allocated for 100 FOVs × D=40 × 512² × 2 sides
+    plus cubic's SSIM working buffers).
 
-    Memory note: holds the full pool of slices in RAM long enough for one
-    ``sim.fit()``. For a typical eval (100 FOVs × T=1 × D=40 × 512² × float32
-    × 2 sides) this is ~8 GB — fits the HPC node budget. Multi-T runs
-    scale linearly; if memory becomes the constraint, the caller can
-    set ``limit_positions`` to subsample.
+    Strategy: build the joint pool of `(pos_idx, t_idx)` pairs across all
+    positions and their actual T, draw ``max_pairs`` of them with a
+    seeded RNG, then load the full ``(D, H, W)`` volume for each sampled
+    pair. Concatenating along the D-axis gives a `(sum_D, H, W)` stack
+    that's fed to :func:`fit_microssim` exactly once.
 
-    Returns the fitted ``MicroMS3IM`` instance; pass it to every
-    ``_process_one_fov`` call in the leaf so all FOVs score against the
-    same α.
+    Volumes stay whole — only the (FOV, t) axis is sampled. The in-focus
+    z-plane shifts across FOVs/timepoints in live-cell data, so taking
+    full z-stacks preserves whatever axial distribution biology has.
+
+    Parameters
+    ----------
+    max_pairs : int
+        Cap on the number of (FOV, t) volumes used for fitting. Default
+        from the caller is 12 (small enough to keep ~960 MB headroom on
+        GPU even with feature extractors + segmenter resident).
+    seed : int
+        RNG seed; deterministic across re-runs.
+    cache_reads : bool
+        When ``True``, the returned ``read_cache`` dict maps each sampled
+        position's name to ``(predict_TDHW, target_TDHW)`` arrays so the
+        serial per-FOV loop can skip re-reading those positions from zarr.
+        Worth ~1 GB host RAM per 12 cached FOVs. Process-mode workers
+        can't see the parent's cache and silently re-read; pass
+        ``cache_reads=True`` only when ``runtime.executor=serial``.
+
+    Returns
+    -------
+    (sim, read_cache)
+        ``sim`` is the fitted MicroMS3IM (or raises on degenerate input).
+        ``read_cache`` is the per-position array dict; empty when
+        ``cache_reads=False``.
+
+    Raises
+    ------
+    ValueError, RuntimeError
+        Propagated from ``fit_microssim``; the caller wraps this call in
+        ``try/except`` so a degenerate leaf falls back to MicroMS3IM=NaN
+        instead of aborting the rest of the eval.
     """
+    n_positions = len(pred_positions)
+    if n_positions == 0:
+        return None, {}
+
+    pairs: list[tuple[int, int]] = []
+    for pos_idx, (_, pos_pred) in enumerate(pred_positions):
+        T_pos = int(pos_pred.data.shape[0])
+        pairs.extend((pos_idx, t) for t in range(T_pos))
+
+    if not pairs:
+        return None, {}
+
+    n_sample = min(max_pairs, len(pairs))
+    rng = np.random.default_rng(seed)
+    sample_idx = rng.choice(len(pairs), size=n_sample, replace=False)
+    sampled_by_pos: dict[int, list[int]] = {}
+    for s in sample_idx:
+        pos_idx, t_idx = pairs[int(s)]
+        sampled_by_pos.setdefault(pos_idx, []).append(t_idx)
+
     all_targets: list[np.ndarray] = []
     all_predictions: list[np.ndarray] = []
-    for (_, pos_pred), (_, pos_gt) in zip(pred_positions, gt_positions):
+    read_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    for pos_idx, t_indices in sampled_by_pos.items():
+        pos_name, pos_pred = pred_positions[pos_idx]
+        _, pos_gt = gt_positions[pos_idx]
         pred_ci = pos_pred.get_channel_index(io_config.pred_channel_name)
         gt_ci = pos_gt.get_channel_index(io_config.gt_channel_name)
         predict = np.asarray(pos_pred.data[:, pred_ci])  # (T, D, H, W)
         target = np.asarray(pos_gt.data[:, gt_ci])
-        all_predictions.append(predict.reshape(-1, *predict.shape[-2:]))
-        all_targets.append(target.reshape(-1, *target.shape[-2:]))
+        for t_idx in t_indices:
+            all_predictions.append(predict[t_idx])  # (D, H, W)
+            all_targets.append(target[t_idx])
+        if cache_reads:
+            read_cache[pos_name] = (predict, target)
+
     targets = np.concatenate(all_targets, axis=0)
     predictions = np.concatenate(all_predictions, axis=0)
-    return fit_microssim(targets, predictions, use_gpu=use_gpu)
+    sim = fit_microssim(targets, predictions, use_gpu=use_gpu)
+    return sim, read_cache
 
 
 def _process_one_fov(
@@ -312,6 +381,8 @@ def _process_one_fov(
     dynaclr_feature_extractor,
     celldino_feature_extractor,
     microssim_sim,
+    predict_cached=None,
+    target_cached=None,
 ) -> FovResult:
     """Compute everything one FOV contributes to the eval and return a FovResult.
 
@@ -332,11 +403,17 @@ def _process_one_fov(
     # latency for nothing.
     use_gpu = bool(getattr(config, "use_gpu", True))
 
-    pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
-    gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
-
-    predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
-    target = np.asarray(pos_gt.data[:, gt_channel_index])
+    if predict_cached is not None and target_cached is not None:
+        # Reuse arrays already read by _calibrate_microssim (serial mode opt-in
+        # via microssim.calibration.cache=true). Avoids the double zarr read
+        # for the small subset of FOVs that contributed to the leaf-level fit.
+        predict = predict_cached
+        target = target_cached
+    else:
+        pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
+        gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
+        predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
+        target = np.asarray(pos_gt.data[:, gt_channel_index])
     cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
 
     T = predict.shape[0]
@@ -459,15 +536,17 @@ def _process_one_fov(
 
     if config.compute_microssim:
         if microssim_sim is None:
-            raise RuntimeError(
-                f"compute_microssim=true but no leaf-level MicroMS3IM was passed into _process_one_fov "
-                f"for {pos_name_pred!r}. The parent must call _calibrate_microssim once per leaf and "
-                f"forward the fitted sim to every per-FOV call (serial loop + worker submissions)."
-            )
-        with region_timer("microssim", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            microssim_scores = score_microssim(microssim_data, microssim_sim, use_gpu=use_gpu)
+            # Leaf-level calibration failed (degenerate slice / OOM / cubic
+            # bracket failure) — the parent already logged the cause. Emit
+            # NaN per timepoint so the column exists and the rest of the
+            # pixel / mask / feature metrics still get computed.
             for i in range(T):
-                fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
+                fov_pixel_metrics[i]["MicroMS3IM"] = float("nan")
+        else:
+            with region_timer("microssim", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                microssim_scores = score_microssim(microssim_data, microssim_sim, use_gpu=use_gpu)
+                for i in range(T):
+                    fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
     row, col, fov = pos_name_pred.split("/")
     return FovResult(
@@ -756,17 +835,41 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 if seg_plate is not None and pos_name_seg != pos_name_pred:
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
 
-            # Leaf-level MicroMS3IM calibration: fit α once on every (gt, pred)
-            # 2-D slice in this leaf and reuse the fitted sim for scoring every
-            # FOV. Per the microSSIM paper (Ashesh & Jug, 2024 §3.3), per-pair
-            # fitting inflates the metric and breaks cross-FOV comparability —
-            # so the fit must happen exactly once per (model, organelle, test
-            # set). Skipped when ``compute_microssim=false``.
+            # Leaf-level MicroMS3IM calibration: fit α once on a random
+            # subsample of (FOV, t) volumes and reuse the fitted sim for
+            # scoring every FOV. Per the microSSIM paper (Ashesh & Jug, 2024
+            # §3.3) α is a single scalar fit over the dataset — per-pair
+            # fitting inflates the metric and breaks cross-FOV comparability.
+            # Default ``max_pairs=12`` keeps the GPU fit pool ~960 MB even
+            # with extractors + segmenter resident; the full pool (100+ FOVs)
+            # was OOMing at ~78 GB during the 2026-05-26 CellDINO regen.
+            # Cache is opt-in (serial-only, ~1 GB host RAM held longer to
+            # skip re-reading the subsampled FOVs in the per-FOV pass).
             microssim_sim = None
+            microssim_read_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
             if config.compute_microssim:
                 use_gpu = bool(getattr(config, "use_gpu", True))
-                with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
-                    microssim_sim = _calibrate_microssim(pred_positions, gt_positions, io_config, use_gpu=use_gpu)
+                max_pairs = int(OmegaConf.select(config, "microssim.calibration.max_pairs", default=12))
+                seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
+                cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
+                try:
+                    with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
+                        microssim_sim, microssim_read_cache = _calibrate_microssim(
+                            pred_positions,
+                            gt_positions,
+                            io_config,
+                            use_gpu=use_gpu,
+                            max_pairs=max_pairs,
+                            seed=seed,
+                            cache_reads=cache_reads,
+                        )
+                except (ValueError, RuntimeError, MemoryError) as exc:
+                    print(
+                        f"[microssim] leaf-level calibration failed "
+                        f"({type(exc).__name__}: {exc}); MicroMS3IM will be NaN for all FOVs."
+                    )
+                    microssim_sim = None
+                    microssim_read_cache = {}
 
             if config.compute_feature_metrics:
                 deep_extractors = {
@@ -858,6 +961,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     _, pos_gt = p2
                     _, pos_seg = p3
 
+                    cached_pair = microssim_read_cache.get(pos_name_pred, (None, None))
                     result = _process_one_fov(
                         config,
                         runtime.cuda_empty_cache_every_n_timepoints,
@@ -873,6 +977,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dynaclr_feature_extractor,
                         celldino_feature_extractor,
                         microssim_sim,
+                        predict_cached=cached_pair[0],
+                        target_cached=cached_pair[1],
                     )
                     _aggregate(result)
 
