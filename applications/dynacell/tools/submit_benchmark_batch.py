@@ -1,12 +1,19 @@
-r"""Submit a sequence of dynacell predict leaves as ONE sbatch job.
+r"""Submit dynacell predict leaves as one or more chunked sbatch jobs.
 
 Composes each leaf via :func:`viscy_utils.compose.load_composed_config`,
 strips reserved keys, writes one resolved config per leaf to
 ``{run_root}/resolved/`` with stable plate-scoped filenames, then renders
-ONE sbatch script (from ``sbatch_template_batch.sbatch``) that invokes
-``python -m dynacell predict --config <resolved>`` for each leaf in
-order. Useful for chaining per-plate predict leaves into a single sbatch
-to amortize queue submission and GPU allocation.
+sbatch script(s) (from ``sbatch_template_batch.sbatch``) that invoke
+``python -m dynacell predict --config <resolved>``.
+
+Two layouts, selected by ``--parallel P`` (default 1):
+  * ``P=1``: one sbatch job runs all N leaves sequentially via ``srun``.
+  * ``P>1``: leaves are split into ``ceil(N/P)`` independent sbatch jobs,
+    each running up to P leaves concurrently as bare-background processes
+    on the shared GPU allocation (no per-process srun — that would try to
+    subdivide GRES). ``cpus_per_task`` scales with chunk size and
+    ``OMP_NUM_THREADS`` is pinned per process so threads don't
+    oversubscribe.
 
 Constraints (predict-only by design):
   * All leaves must share ``launcher.mode == 'predict'`` and the same
@@ -15,10 +22,18 @@ Constraints (predict-only by design):
     ``launcher.sbatch`` block; subsequent leaves' sbatch blocks must
     match (same hardware profile). The composite job_name is taken
     from ``--job-name`` if provided, else derived from the first
-    leaf with a ``_batch`` suffix.
-  * Wall time defaults to ``--time`` if provided; else uses the first
-    leaf's ``sbatch.time`` multiplied by len(leaves) (rounded up to
-    the next hour).
+    leaf with a ``_batch`` suffix; chunked jobs append ``_{i:02d}of{n:02d}``.
+  * Wall time defaults to ``--time`` if provided; else keeps the head
+    leaf's ``sbatch.time`` verbatim (a chunked job runs at most P leaves
+    concurrently, so per-leaf wall time is usually enough).
+
+Failure handling:
+  * For ``P>1``, the rendered bash captures each background PID and
+    propagates non-zero exit codes via ``wait $pid`` per child, so a
+    single crashed predict fails the whole sbatch (no silent partial
+    success masked by ``wait`` returning only the last child's status).
+  * The submit loop catches ``sbatch`` failures per chunk, reports which
+    chunks made it into the queue and which were skipped, and exits 1.
 
 Usage::
 
@@ -29,6 +44,7 @@ Usage::
         $LEAVES/predict__a549_mantis_2025_07_24.yml \
         $LEAVES/predict__a549_mantis_2025_08_26.yml \
         --job-name FNet3DPaper_PRED_SEC61B_ON_A549_ALL \
+        --parallel 2 \
         --dry-run
 
 Re-running over plates whose output stores already contain the prediction
@@ -72,6 +88,22 @@ _SBATCH_DIRECTIVE_ORDER = (
     ("exclude", "--exclude"),
 )
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
+
+# Soft cap for the rendered ``cpus_per_task`` under --parallel > 1. Most cluster
+# nodes top out at 64–128 cores; requesting more makes the chunk pend forever or
+# get rejected. Emit a warning above this threshold and let the user decide.
+_CPUS_SOFT_CAP = 128
+
+
+def _positive_int(value: str) -> int:
+    """Argparse ``type=`` validator that rejects non-positive ints."""
+    try:
+        ivalue = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an int, got {value!r}") from exc
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {ivalue}")
+    return ivalue
 
 
 class SbatchTemplate(string.Template):
@@ -197,6 +229,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "in every leaf, after compose. Required to re-run a leaf whose output "
         "store already contains the prediction channel. Off by default.",
     )
+    ap.add_argument(
+        "--parallel",
+        type=_positive_int,
+        default=1,
+        metavar="P",
+        help="run P predict invocations concurrently per sbatch job, and split "
+        "the N leaves across ceil(N/P) sbatch jobs (default 1 = one sbatch, "
+        "N leaves sequential). With P>1 each chunk's sbatch runs its <=P leaves "
+        "as bare-background processes on the shared GPU allocation (no per-"
+        "process srun — that would subdivide GRES), each writing its own log "
+        "under run_root/slurm. cpus_per_task scales with the chunk size and "
+        "OMP_NUM_THREADS is pinned per process so threads don't oversubscribe. "
+        "Mem is left at the head leaf's value (predict at batch_size=1 has a "
+        "tiny footprint for the current dynacell configs; recipes with larger "
+        "models or num_workers>0 may need a head-leaf bump). 2-4 fit comfortably "
+        "on a single H200 or A40.",
+    )
     return ap.parse_args(argv)
 
 
@@ -305,48 +354,176 @@ def submit(argv: list[str] | None = None) -> int:
             raise SystemExit(f"{leaf_path}: missing benchmark.experiment_id")
         resolved_paths.append(resolved_dir / f"{exp_id}__{timestamp}.yml")
 
-    # Render the predict invocation block: one srun per leaf, in order.
-    invocations = "\n\n".join(
-        f"echo '[batch] step {i + 1}/{len(args.leaves)}: {p.name}'\nsrun uv run python -m dynacell predict --config {p}"
-        for i, p in enumerate(resolved_paths)
-    )
+    # P=1 (default) keeps the original single-sbatch chained-srun layout:
+    # ALL leaves run sequentially inside one allocation. P>1 splits the N
+    # leaves into ceil(N/P) sbatches, each running up to P concurrent leaves
+    # as bare-background processes on the shared GPU (no per-process srun,
+    # which would try to subdivide the GRES). Each concurrent process writes
+    # its own log under run_root/slurm so output doesn't interleave.
+    if args.parallel > len(resolved_paths):
+        sys.stderr.write(
+            f"[submit] --parallel {args.parallel} capped to {len(resolved_paths)} "
+            f"(only {len(resolved_paths)} leaf(s))\n"
+        )
+    parallel = min(args.parallel, len(resolved_paths))
+    n_chunks = 1 if parallel == 1 else (len(resolved_paths) + parallel - 1) // parallel
+
+    # Pre-write all resolved YAMLs once; chunks reference the same files.
+    if not args.print_script:
+        resolved_dir.mkdir(parents=True, exist_ok=True)
+        slurm_dir.mkdir(parents=True, exist_ok=True)
+        for composed, p in zip(composed_list, resolved_paths):
+            p.write_text(yaml.safe_dump(composed, default_flow_style=False))
 
     template_text = (Path(__file__).parent / "sbatch_template_batch.sbatch").read_text()
-    rendered = SbatchTemplate(template_text).substitute(
-        sbatch_directives=_render_sbatch_directives(job_name, str(run_root), head_sbatch),
-        run_root=str(run_root),
-        env_block=_render_env_block(head_env),
-        repo_root=str(_REPO_ROOT),
-        predict_invocations=invocations,
-    )
+    base_cpus = int(head_sbatch.get("cpus_per_task", 1))
 
-    sbatch_path = slurm_dir / f"{timestamp}_{job_name}.sbatch"
+    def _render_chunk(chunk_idx: int, chunk_paths: list[Path]) -> tuple[Path, str, str]:
+        """Render the sbatch script for one chunk; return (script_path, name, body)."""
+        suffix = f"_{chunk_idx + 1:02d}of{n_chunks:02d}"
+        chunk_job_name = job_name if n_chunks == 1 else f"{job_name}{suffix}"
+        # Scale cpus_per_task by chunk size so each concurrent predict gets the
+        # head leaf's per-process CPU budget. Mem is NOT scaled — predict at
+        # batch_size=1 has a tiny footprint for the current dynacell configs
+        # (model ~128 MB, no backward activations, num_workers=0). Keep
+        # ntasks_per_node/gpus unchanged — concurrent leaves share the single GPU.
+        chunk_sbatch = dict(head_sbatch)
+        if parallel > 1:
+            scaled_cpus = base_cpus * len(chunk_paths)
+            chunk_sbatch["cpus_per_task"] = scaled_cpus
+            if scaled_cpus > _CPUS_SOFT_CAP:
+                sys.stderr.write(
+                    f"[submit] WARNING: chunk {chunk_idx + 1}/{n_chunks} requests "
+                    f"cpus_per_task={scaled_cpus} (> soft cap {_CPUS_SOFT_CAP}); "
+                    f"may pend forever or be rejected. Lower --parallel or pick a "
+                    f"head profile with a smaller cpus_per_task.\n"
+                )
+
+        if parallel == 1:
+            # P=1: srun-based sequential layout. srun handles signal propagation
+            # and exit codes natively; no PID gymnastics needed.
+            lines = []
+            for i, p in enumerate(chunk_paths):
+                p_q = shlex.quote(str(p))
+                lines.append(f"echo '[batch] step {i + 1}/{len(chunk_paths)}: {p.name}'")
+                lines.append(f"srun uv run python -m dynacell predict --config {p_q}")
+                lines.append("")
+            invocations = "\n".join(lines).rstrip()
+        else:
+            # P>1: bare-background processes share the GPU. Pin OMP_NUM_THREADS
+            # per process so the P × base_cpus allocation isn't oversubscribed
+            # by every child reading SLURM_CPUS_PER_TASK. Capture PIDs and
+            # propagate non-zero exit codes — bare `wait` (no args) returns only
+            # the LAST child's status, masking earlier crashes.
+            lines = [
+                f"echo '[batch] chunk {chunk_idx + 1}/{n_chunks}: {len(chunk_paths)} concurrent'",
+                "pids=()",
+                "fail=0",
+            ]
+            # Build the log redirection path by concatenating shell-quoted
+            # fragments with the unquoted ``${SLURM_JOB_ID}`` so bash expands the
+            # job-id at runtime while keeping the directory and stem safe from
+            # metachars leaking from ``experiment_id``.
+            slurm_dir_q = shlex.quote(str(slurm_dir))
+            for p in chunk_paths:
+                stem_q = shlex.quote(p.stem)
+                p_q = shlex.quote(str(p))
+                log = f"{slurm_dir_q}/${{SLURM_JOB_ID}}_{stem_q}.log"
+                lines.append(
+                    f"OMP_NUM_THREADS={base_cpus} MKL_NUM_THREADS={base_cpus} "
+                    f"uv run python -m dynacell predict --config {p_q} > {log} 2>&1 &"
+                )
+                lines.append("pids+=($!)")
+            lines.extend(
+                [
+                    'for pid in "${pids[@]}"; do',
+                    '  wait "$pid" || fail=$?',
+                    "done",
+                    'if [ "$fail" -ne 0 ]; then',
+                    '  echo "[batch] one or more concurrent predicts failed (exit=$fail); see per-leaf logs" >&2',
+                    '  exit "$fail"',
+                    "fi",
+                ]
+            )
+            invocations = "\n".join(lines)
+
+        body = SbatchTemplate(template_text).substitute(
+            sbatch_directives=_render_sbatch_directives(chunk_job_name, str(run_root), chunk_sbatch),
+            run_root=str(run_root),
+            env_block=_render_env_block(head_env),
+            repo_root=str(_REPO_ROOT),
+            predict_invocations=invocations,
+        )
+        script_path = slurm_dir / f"{timestamp}_{chunk_job_name}.sbatch"
+        return script_path, chunk_job_name, body
+
+    # P=1 packs ALL leaves into a single chunk (sequential sbatch). P>1 slices
+    # into chunks of P; the final chunk may be shorter when N is not divisible.
+    chunk_size = len(resolved_paths) if parallel == 1 else parallel
+    chunk_artifacts: list[tuple[Path, str, str, list[Path]]] = []
+    for chunk_idx in range(n_chunks):
+        start = chunk_idx * chunk_size
+        chunk_paths = resolved_paths[start : start + chunk_size]
+        script_path, chunk_name, body = _render_chunk(chunk_idx, chunk_paths)
+        chunk_artifacts.append((script_path, chunk_name, body, chunk_paths))
 
     if args.print_script:
-        sys.stdout.write(rendered)
+        # Single chunk → emit the body verbatim (pipeable to sbatch). Multi-chunk
+        # output is for inspection only; refuse to print since concatenated
+        # #!/bin/bash + #SBATCH blocks would not parse as one sbatch.
+        if n_chunks > 1:
+            raise SystemExit(
+                "--print-script is single-chunk only; with --parallel > 1 over "
+                f"{len(resolved_paths)} leaf(s), {n_chunks} sbatch scripts would be "
+                "rendered. Use --dry-run to write them all to disk and inspect."
+            )
+        sys.stdout.write(chunk_artifacts[0][2])
         return 0
 
-    resolved_dir.mkdir(parents=True, exist_ok=True)
-    slurm_dir.mkdir(parents=True, exist_ok=True)
-    for composed, p in zip(composed_list, resolved_paths):
-        p.write_text(yaml.safe_dump(composed, default_flow_style=False))
-    sbatch_path.write_text(rendered)
+    for script_path, _name, body, _paths in chunk_artifacts:
+        script_path.write_text(body)
 
     if args.dry_run:
-        print(f"[dry-run] sbatch script: {sbatch_path}")
-        for p in resolved_paths:
-            print(f"[dry-run] resolved:    {p}")
+        for script_path, _name, _body, paths in chunk_artifacts:
+            print(f"[dry-run] sbatch script: {script_path}")
+            for p in paths:
+                print(f"[dry-run] resolved:    {p}")
         return 0
 
-    sbatch_cmd = ["sbatch"]
-    if args.parsable:
-        sbatch_cmd.append("--parsable")
-    sbatch_cmd.append(str(sbatch_path))
-    if args.parsable:
-        result = subprocess.run(sbatch_cmd, check=True, stdout=subprocess.PIPE, text=True)
-        print(result.stdout.strip())
-    else:
-        subprocess.run(sbatch_cmd, check=True)
+    # Submit each chunk; on failure, report submitted-vs-skipped so the user
+    # can scancel orphans manually rather than chasing an opaque traceback.
+    job_ids: list[str] = []
+    failures: list[tuple[str, str]] = []
+    for script_path, name, _body, _paths in chunk_artifacts:
+        sbatch_cmd = ["sbatch"]
+        if args.parsable:
+            sbatch_cmd.append("--parsable")
+        sbatch_cmd.append(str(script_path))
+        try:
+            if args.parsable:
+                result = subprocess.run(sbatch_cmd, check=True, stdout=subprocess.PIPE, text=True)
+                jid = result.stdout.strip()
+                job_ids.append(jid)
+                # One job ID per line on stdout (back-compat with single-chunk
+                # callers parsing $(... --parsable)); name annotation on stderr.
+                print(jid)
+                sys.stderr.write(f"[submit] {jid}\t{name}\n")
+            else:
+                subprocess.run(sbatch_cmd, check=True)
+                sys.stderr.write(f"[submit] queued {name}\n")
+        except subprocess.CalledProcessError as exc:
+            failures.append((name, str(exc)))
+            sys.stderr.write(f"[submit] FAILED to queue {name}: {exc}\n")
+
+    if failures:
+        sys.stderr.write(
+            f"[submit] {len(failures)}/{len(chunk_artifacts)} chunk(s) failed to submit; "
+            f"{len(job_ids)} already queued: {','.join(job_ids) if job_ids else '<none>'}\n"
+            f"[submit] scancel the queued chunk(s) above if you want to abort the whole batch.\n"
+        )
+        return 1
+    if job_ids:
+        sys.stderr.write(f"[submit] queued {len(job_ids)} job(s): {','.join(job_ids)}\n")
     return 0
 
 
