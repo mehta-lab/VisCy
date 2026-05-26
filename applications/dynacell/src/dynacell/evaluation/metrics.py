@@ -249,7 +249,15 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
         num_slices = len(img["target"])
         img_targets = targets[slice_idx : slice_idx + num_slices]
         img_predictions = predictions[slice_idx : slice_idx + num_slices]
-        slice_scores = [sim.score(img_targets[i], img_predictions[i]) for i in range(num_slices)]
+        slice_scores: list[float] = []
+        for i in range(num_slices):
+            # Degenerate slices (constant target → data_range=0) raise inside
+            # cubic.ms_ssim. Treat them as NaN so np.nan_to_num penalizes the
+            # FOV instead of aborting the whole leaf.
+            try:
+                slice_scores.append(float(sim.score(img_targets[i], img_predictions[i])))
+            except (ValueError, RuntimeError):
+                slice_scores.append(float("nan"))
         slice_idx += num_slices
         scores.append({"MicroMS3IM": float(np.mean(np.nan_to_num(slice_scores)))})
     return scores
