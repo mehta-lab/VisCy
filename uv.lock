@@ -926,15 +926,15 @@ wheels = [
 
 [[package]]
 name = "cubic"
-version = "0.7.0a6"
+version = "0.7.0a7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "scikit-image" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/8a/aa8828fff81bd013452af148f4ca8f172f76f7ac19f4c15683c15dcba5e9/cubic-0.7.0a6.tar.gz", hash = "sha256:08a74c4311b5dca1d1faa0a7507c93d2e0cd5df291d560de74d6d922aa349d04", size = 134381, upload-time = "2026-05-23T01:00:52.917Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/25/ec0cfc3bcf95d805fd04f130e0eb8752da93e25ec5d886362e4cb6ac3a37/cubic-0.7.0a7.tar.gz", hash = "sha256:a024a93594a2cf4d62fef039fc3ba7802271f97755bbe23a758a94af5c496f1a", size = 138399, upload-time = "2026-05-26T21:11:14.692Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/52/1b1b69ebe6fb0385bc89b8a9deb8ec2b98ce71917692a7318d8c64fbf35e/cubic-0.7.0a6-py3-none-any.whl", hash = "sha256:f9ebe95fe6c69be511b34e2898bce235aab7f939e208db9e4984aafb102d6961", size = 162663, upload-time = "2026-05-23T01:00:50.937Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/e2/24c3e0777f94db6b043f556601a36e4fb69ac581d32aefb5d698546354ee/cubic-0.7.0a7-py3-none-any.whl", hash = "sha256:90e5479472156e4a2db154a15610f23b1bf5d083bd97d766a7478def32cb9de5", size = 167487, upload-time = "2026-05-26T21:11:13.054Z" },
 ]
 
 [[package]]
@@ -1342,7 +1342,7 @@ requires-dist = [
     { name = "aicsmlsegment", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git?branch=main" },
     { name = "aicssegmentation", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-segmentation.git?branch=main" },
     { name = "cellpose", marker = "extra == 'eval'" },
-    { name = "cubic", marker = "extra == 'eval'", specifier = "==0.7.0a6" },
+    { name = "cubic", marker = "extra == 'eval'", specifier = "==0.7.0a7" },
     { name = "cucim-cu12", marker = "extra == 'eval-gpu'" },
     { name = "cupy-cuda12x", marker = "extra == 'eval-gpu'" },
     { name = "dynaclr", marker = "extra == 'eval'", editable = "applications/dynaclr" },
