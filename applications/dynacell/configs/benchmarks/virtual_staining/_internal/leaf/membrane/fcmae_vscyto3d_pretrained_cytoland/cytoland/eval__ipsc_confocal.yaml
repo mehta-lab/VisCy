@@ -1,0 +1,15 @@
+# @package _global_
+# Track B (Cytoland, no FT) eval for membrane channel of the dual
+# predict zarr on iPSC. _ref_hook derives pred_channel_name from dataset_ref.target
+# so this leaf reads the Membrane_prediction channel from the dual zarr.
+defaults:
+  - override /target: membrane
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_cytoland/eval_vscyto3d_cytoland_membrane

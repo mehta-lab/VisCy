@@ -1,0 +1,46 @@
+# VSCyto3D random-init predict: nucleus (frozen randinit ckpt), A549 zikv plate.
+# Control ablation. A549 manifest keys nucleus by gene (`h2b`); override the
+# iPSC-side `nucleus` target_id from targets/nucleus.yml so the resolver finds the
+# h2b target on a549-mantis-h2b-zikv.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_zikv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: randinit
+  predict_set: a549_mantis_h2b_zikv
+  model_name: fcmae_vscyto3d_pretrained_randinit
+  experiment_id: nucleus__randinit__fcmae_vscyto3d_pretrained__a549_mantis_h2b_zikv
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/randinit/nucl/fcmae_vscyto3d_pretrained/checkpoints/randinit.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_pretrained_randinit_zikv.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_RandInit_PRED_NUCL_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
