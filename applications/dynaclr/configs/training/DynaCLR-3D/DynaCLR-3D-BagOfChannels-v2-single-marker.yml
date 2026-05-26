@@ -1,0 +1,7 @@
+# Override: single-marker batches for DynaCLR-3D-BoC-v2.
+# Matches the OPS strategy — every batch is one marker.
+
+data:
+  init_args:
+    batch_group_by: marker
+    stratify_by: null

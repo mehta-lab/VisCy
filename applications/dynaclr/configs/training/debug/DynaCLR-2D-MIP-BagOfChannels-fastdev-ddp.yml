@@ -1,0 +1,29 @@
+# SLURM fast-dev-run override for DynaCLR-2D-MIP-BagOfChannels.
+# Tests DDP end-to-end on a 20k-row slice: 4 ranks × sampler __iter__ +
+# NCCL init + first batch + backward + val.
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/DynaCLR-2D-MIP-BagOfChannels-fastdev-ddp.sh
+
+trainer:
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  fast_dev_run: 5
+  logger: null
+  callbacks: []
+  max_epochs: 1
+
+data:
+  init_args:
+    # 20k-row slice, enough to exercise sampler/dataset without load cost.
+    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/tmp/boc_tiny.parquet
+    batch_size: 8
+    num_workers: 1
+    prefetch_factor: 2
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null

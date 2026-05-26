@@ -1,6 +1,6 @@
 defaults:
-  - eval
   - _self_
+  - eval
 
 # Per-condition overlays for grouped multi-condition eval. Each entry is a
 # deep merge applied to the base config above. Use this to run e.g. all three

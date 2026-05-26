@@ -1,0 +1,12 @@
+# Sequence-of-events: SEC61B (ER) vs G3BP1 (stress granules), ZIKV.
+# Only datasets with both organelle channels imaged appear here.
+# 07_24_ZIKV imaged SEC61, TOMM20, and G3BP1 simultaneously on the same FOVs.
+
+pairings:
+  - dataset: 07_24_ZIKV
+    organelle_a:
+      label: SEC61B
+      timing_filename: 07_24_ZIKV_event_timing.parquet
+    organelle_b:
+      label: G3BP1
+      timing_filename: 07_24_ZIKV_event_timing.parquet

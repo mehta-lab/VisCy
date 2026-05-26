@@ -25,7 +25,7 @@ from omegaconf import OmegaConf
 
 N_POSITIONS = 3
 T = 2
-D = 4
+D = 11  # must be ≥7 for skimage SSIM gaussian window (win_size=7 minimum)
 H = 32
 W = 32
 

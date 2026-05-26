@@ -773,3 +773,156 @@ def test_precompute_deep_features_skips_cached_slots(tmp_path: Path) -> None:
     finally:
         gt_plate.close()
         seg_plate.close()
+
+
+def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> None:
+    """A pre-version-tracking manifest entry must NOT auto-invalidate.
+
+    The bootstrap transition is the operator's responsibility (set the
+    matching ``force_recompute.<side>_<kind>`` flag explicitly). Missing
+    cached version is treated as 'no constraint'.
+    """
+    from dynacell.evaluation.cache import save_manifest
+
+    cache_dir = tmp_path
+    paths = cache_paths(cache_dir)
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {
+                "celldino_features": {
+                    "abc123def456": {
+                        "path": "features/celldino/abc123def456.zarr",
+                        "weights_sha256_12": "abc123def456",
+                        "patch_size": 4,
+                        "source": "prediction",
+                        # NOTE: no preprocess_version field — pre-tracking entry
+                    }
+                }
+            },
+        },
+    )
+
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_weights_path=None,
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    # Without celldino_weights_sha12 we can't even reach the entry; provide it.
+    # Re-init with the right sha so the entry lookup hits.
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_weights_path=None,
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    # Manually set the sha to simulate a loaded extractor with a matching sha
+    # (in production this comes from ckpt_sha256_12(weights_path)):
+    ctx.celldino_weights_sha12 = "abc123def456"
+    # Re-run the validator manually with the populated sha:
+    from dynacell.evaluation.pipeline_cache import (
+        _auto_invalidate_on_preprocess_version_mismatch,
+    )
+
+    _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    assert ctx.force["pred_celldino"] is False, "missing preprocess_version must not invalidate"
+
+
+def test_preprocess_version_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A known cached version different from current auto-sets force_recompute.
+
+    This is the auto-invalidation case: the cache stored
+    ``preprocess_version: self_normalize_v0`` (hypothetical prior), the
+    current run advertises ``self_normalize_v1``. The validator must set
+    ``force["pred_celldino"] = True`` and emit a warning.
+    """
+    from dynacell.evaluation.cache import save_manifest
+
+    cache_dir = tmp_path
+    paths = cache_paths(cache_dir)
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {
+                "celldino_features": {
+                    "abc123def456": {
+                        "path": "features/celldino/abc123def456.zarr",
+                        "weights_sha256_12": "abc123def456",
+                        "patch_size": 4,
+                        "source": "prediction",
+                        "preprocess_version": "self_normalize_v0",
+                    }
+                }
+            },
+        },
+    )
+
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    ctx.celldino_weights_sha12 = "abc123def456"
+    import warnings as _warnings
+
+    from dynacell.evaluation.pipeline_cache import (
+        _auto_invalidate_on_preprocess_version_mismatch,
+    )
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    assert ctx.force["pred_celldino"] is True
+    assert any("preprocess_version mismatch" in str(w.message) for w in caught), (
+        f"expected mismatch warning; got {[str(w.message) for w in caught]}"
+    )
+
+
+def test_preprocess_version_match_is_noop(tmp_path: Path) -> None:
+    """A cached version equal to current must NOT trigger invalidation."""
+    from dynacell.evaluation.cache import save_manifest
+
+    cache_dir = tmp_path
+    paths = cache_paths(cache_dir)
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {
+                "celldino_features": {
+                    "abc123def456": {
+                        "path": "features/celldino/abc123def456.zarr",
+                        "weights_sha256_12": "abc123def456",
+                        "patch_size": 4,
+                        "source": "prediction",
+                        "preprocess_version": "self_normalize_v1",
+                    }
+                }
+            },
+        },
+    )
+
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    ctx.celldino_weights_sha12 = "abc123def456"
+    from dynacell.evaluation.pipeline_cache import (
+        _auto_invalidate_on_preprocess_version_mismatch,
+    )
+
+    _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    assert ctx.force["pred_celldino"] is False

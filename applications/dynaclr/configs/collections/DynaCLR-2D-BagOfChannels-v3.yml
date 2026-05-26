@@ -1,5 +1,5 @@
 name: DynaCLR-2D-BagOfChannels-v3
-description: "Multi-organelle bag-of-channels DynaCLR training collection. Includes SEC61B (ER), TOMM20 (mitochondria), and G3BP1 (stress granules) experiments with ZIKV/DENV infection. All 3 channels (Phase3D, GFP, mCherry) trained jointly."
+description: "[LEGACY] Multi-organelle bag-of-channels DynaCLR training collection. Includes SEC61B (ER), TOMM20 (mitochondria), and G3BP1 (stress granules) experiments with ZIKV/DENV infection. All 3 channels (Phase3D, GFP, mCherry) trained jointly."
 
 provenance:
   airtable_base_id: app8vqaoWyOwa0sB5

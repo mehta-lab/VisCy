@@ -1,0 +1,31 @@
+# pix2pix3d_unetvit fit overlay — modernized recipe, 4-GPU DDP variant.
+#
+# Sibling of pix2pix3d_unetvit_fit_modernized.yml that swaps in the
+# GAN-aware DDP topology (find_unused_parameters=True). All model knobs
+# match the single-GPU modernized overlay — DDP runs at the same per-rank
+# settings.
+#
+# See pix2pix3d_unetvit_fit_modernized.yml for rationale and plan reference.
+base:
+  - ../../../../../../recipes/models/pix2pix3d_unetvit.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/ddp_4gpu_gan.yml
+model:
+  init_args:
+    loss_type: nonsat
+    lambda_adv: 1.0
+    r1_gamma: 10.0
+    r2_gamma: 0.0
+    r1_every: 16
+    ema_kimg: 10.0
+    lecam_gamma: 0.0
+    lecam_decay: 0.9
+    use_ema_at_predict: true
+    lr_g: 2.0e-4
+    lr_d: 2.0e-4
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+trainer:
+  precision: bf16-mixed
+  max_epochs: 20

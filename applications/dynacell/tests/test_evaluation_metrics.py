@@ -1,21 +1,20 @@
 """Regression tests for evaluation pixel metrics."""
 
 import importlib
+import math
 import sys
 import types
 
 import numpy as np
 import pytest
 import torch
+from skimage.metrics import structural_similarity
 
 from dynacell.evaluation.metrics import evaluate_segmentations
 
 
 def _import_metrics_with_stubs(monkeypatch):
     """Import the metrics module with lightweight optional-dependency stubs."""
-    microssim_module = types.ModuleType("microssim")
-    microssim_module.MicroMS3IM = object
-
     cubic_module = types.ModuleType("cubic")
     cubic_cuda_module = types.ModuleType("cubic.cuda")
     cubic_cuda_module.ascupy = lambda x: x
@@ -23,6 +22,39 @@ def _import_metrics_with_stubs(monkeypatch):
 
     cubic_metrics_module = types.ModuleType("cubic.metrics")
     cubic_metrics_module.fsc_resolution = lambda *args, **kwargs: {}
+    cubic_metrics_module.MicroMS3IM = object
+
+    def _stub_pcc(a, b, mask=None):
+        if a.shape != b.shape:
+            raise ValueError(f"Inputs must have same shape, got {a.shape} and {b.shape}")
+        return float(np.corrcoef(a.numpy().ravel(), b.numpy().ravel())[0, 1])
+
+    cubic_metrics_module.pcc = _stub_pcc
+
+    def _stub_nrmse(y_true, y_pred, normalization=None, normalize=None, data_range=None, mask=None):
+        a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
+        b = y_pred.numpy() if hasattr(y_pred, "numpy") else np.asarray(y_pred)
+        a = (a - a.min()) / max(float(a.max() - a.min()), 1e-8)
+        b = (b - b.min()) / max(float(b.max() - b.min()), 1e-8)
+        return float(np.sqrt(np.mean((a - b) ** 2)))
+
+    def _stub_psnr(y_true, y_pred, data_range=None, normalize=None, mask=None):
+        a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
+        b = y_pred.numpy() if hasattr(y_pred, "numpy") else np.asarray(y_pred)
+        a = (a - a.min()) / max(float(a.max() - a.min()), 1e-8)
+        b = (b - b.min()) / max(float(b.max() - b.min()), 1e-8)
+        mse = np.mean((a - b) ** 2)
+        return float("inf") if mse < 1e-8 else float(20 * np.log10(1.0) - 10 * np.log10(mse))
+
+    cubic_metrics_module.nrmse = _stub_nrmse
+    cubic_metrics_module.psnr = _stub_psnr
+
+    def _stub_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
+        a = img1.numpy().squeeze()
+        b = img2.numpy().squeeze()
+        return float(structural_similarity(a, b, data_range=float(data_range or 1.0)))
+
+    cubic_metrics_module.ssim = _stub_ssim
 
     cubic_bandlimited_module = types.ModuleType("cubic.metrics.bandlimited")
     cubic_bandlimited_module.spectral_pcc = lambda *args, **kwargs: 0.0
@@ -31,7 +63,6 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_feature_voxel_module = types.ModuleType("cubic.feature.voxel")
     cubic_feature_voxel_module.regionprops_table = lambda *args, **kwargs: {}
 
-    monkeypatch.setitem(sys.modules, "microssim", microssim_module)
     monkeypatch.setitem(sys.modules, "cubic", cubic_module)
     monkeypatch.setitem(sys.modules, "cubic.cuda", cubic_cuda_module)
     monkeypatch.setitem(sys.modules, "cubic.metrics", cubic_metrics_module)
@@ -43,62 +74,63 @@ def _import_metrics_with_stubs(monkeypatch):
     return importlib.import_module("dynacell.evaluation.metrics")
 
 
-def test_gain_and_offset_errors_are_not_scale_invariant(monkeypatch) -> None:
-    """Shared-scale metrics should penalize intensity calibration errors."""
+def test_per_input_normalization_absorbs_gain_and_offset(monkeypatch) -> None:
+    """cubic normalize='min_max' normalizes each input independently.
+
+    Gain and offset errors disappear after per-input min-max normalization —
+    both target and prediction map to the same [0, 1] range.
+    """
     metrics = _import_metrics_with_stubs(monkeypatch)
 
-    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(16, 16)
-    prediction = target * 2.0 + 0.25
-    target_range = target.max() - target.min()
-    expected_rmse = torch.sqrt(torch.mean(((prediction - target) / target_range) ** 2))
-    expected_psnr = -10 * torch.log10(expected_rmse**2)
+    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
+    prediction = target * 2.0 + 0.25  # gain+offset — absorbed by per-input normalization
 
-    assert metrics.nrmse(target, prediction).item() == pytest.approx(expected_rmse.item())
-    assert metrics.psnr(target, prediction).item() == pytest.approx(expected_psnr.item())
-    assert metrics.ssim(target, prediction).item() < 0.99
+    assert metrics.nrmse(target, prediction) == pytest.approx(0.0, abs=1e-6)
+    assert metrics.psnr(target, prediction) == float("inf")
+    assert metrics.ssim(target, prediction) == pytest.approx(1.0, abs=5e-2)
 
 
 def test_identical_images_still_score_perfectly(monkeypatch) -> None:
-    """Shared-scale normalization should preserve perfect self-similarity."""
+    """Per-input normalization should preserve perfect self-similarity."""
     metrics = _import_metrics_with_stubs(monkeypatch)
 
-    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(16, 16)
+    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
 
-    assert metrics.nrmse(target, target).item() == pytest.approx(0.0)
-    assert metrics.psnr(target, target).item() == float("inf")
-    assert metrics.ssim(target, target).item() == pytest.approx(1.0)
-
-
-# --- corr_coef tests ---
+    assert metrics.nrmse(target, target) == pytest.approx(0.0)
+    assert metrics.psnr(target, target) == float("inf")
+    assert metrics.ssim(target, target) == pytest.approx(1.0)
 
 
-def test_corr_coef_perfect_correlation(monkeypatch) -> None:
+# --- pcc tests ---
+
+
+def test_pcc_perfect_correlation(monkeypatch) -> None:
     """Identical signals give PCC = 1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.linspace(0.0, 1.0, 100)
-    assert metrics.corr_coef(a, a).item() == pytest.approx(1.0)
+    assert metrics.pcc(a, a) == pytest.approx(1.0)
 
 
-def test_corr_coef_negative_correlation(monkeypatch) -> None:
+def test_pcc_negative_correlation(monkeypatch) -> None:
     """Perfectly inverted signal gives PCC = -1.0."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.linspace(0.0, 1.0, 100)
-    assert metrics.corr_coef(a, -a).item() == pytest.approx(-1.0)
+    assert metrics.pcc(a, -a) == pytest.approx(-1.0)
 
 
-def test_corr_coef_constant_input_returns_nan(monkeypatch) -> None:
+def test_pcc_constant_input_returns_nan(monkeypatch) -> None:
     """Zero-variance input (constant signal) returns NaN."""
     metrics = _import_metrics_with_stubs(monkeypatch)
     a = torch.ones(100)
     b = torch.linspace(0.0, 1.0, 100)
-    assert torch.isnan(metrics.corr_coef(a, b))
+    assert math.isnan(metrics.pcc(a, b))
 
 
-def test_corr_coef_shape_mismatch_raises(monkeypatch) -> None:
+def test_pcc_shape_mismatch_raises(monkeypatch) -> None:
     """Mismatched shapes raise ValueError."""
     metrics = _import_metrics_with_stubs(monkeypatch)
-    with pytest.raises(ValueError, match="same shape"):
-        metrics.corr_coef(torch.ones(10), torch.ones(20))
+    with pytest.raises(ValueError):
+        metrics.pcc(torch.ones(10), torch.ones(20))
 
 
 # --- evaluate_segmentations tests ---

@@ -137,9 +137,16 @@ base:
   - ../../../_internal/shared/model/targets/<target>.yml
   - ../../../_internal/shared/model/model_overlays/<model>_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
+
+Predict leaves use `hardware_predict_any_gpu.yml` (single GPU, no
+vendor constraint) — measured 6.6 GB / 100% SM on celldiff at FP32 on
+H200, so a40 / a6000 / l40s / l4 all run the workload and drain the
+queue faster than pinning Hopper. Train leaves stay on
+`hardware_h200_single.yml` (or `hardware_4gpu.yml` for DDP) because
+their memory + bandwidth profiles differ.
 
 **Eval leaf** (at `<org>/<model>/<train_set>/eval__<predict_set>.yaml`):
 

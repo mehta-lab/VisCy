@@ -1,0 +1,15 @@
+# SEC61B (ER) timing roster — ZIKV datasets with SEC61 imaging.
+# Add a dataset by appending one entry.
+
+datasets:
+  - name: 07_24_ZIKV
+    organelle_embedding_filename: 2025_07_24_A549_SEC61_ZIKV.zarr
+    registration_filename: 07_24_ZIKV_lc_registration.parquet
+    marker: SEC61B
+    organelle: ER
+
+  - name: 08_26_ZIKV
+    organelle_embedding_filename: 2025_08_26_A549_SEC61_ZIKV.zarr
+    registration_filename: 08_26_ZIKV_lc_registration.parquet
+    marker: SEC61B
+    organelle: ER

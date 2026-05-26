@@ -1,0 +1,55 @@
+name: alfi-eval
+description: "ALFI mitosis evaluation collection. All 3 cell lines (HeLa MI06, RPE1 MI07/MI08, U2OS MI01-MI05), DIC channel. Analysis done per cell line."
+datasets_root: /hpc/projects/organelle_phenotyping
+
+experiments:
+  - name: ALFI_HeLa_DMSO_MLN8237
+    data_path: ${datasets_root}/datasets/ALFI_HeLa_DMSO_MLN8237/ALFI_HeLa_DMSO_MLN8237.zarr
+    tracks_path: ${datasets_root}/datasets/ALFI_HeLa_DMSO_MLN8237/tracking.zarr
+    channels:
+      - name: DIC
+        marker: DIC
+    perturbation_wells:
+      DMSO:
+        - MI06/0
+    interval_minutes: 7.0
+    start_hpi: 0.0
+    marker: DIC
+    organelle: DIC
+    pixel_size_xy_um: 0.2631
+
+  - name: ALFI_RPE1_untreated
+    data_path: ${datasets_root}/datasets/ALFI_RPE1_untreated/ALFI_RPE1_untreated.zarr
+    tracks_path: ${datasets_root}/datasets/ALFI_RPE1_untreated/tracking.zarr
+    channels:
+      - name: DIC
+        marker: DIC
+    perturbation_wells:
+      untreated:
+        - MI07/0
+        - MI08/0
+    interval_minutes: 7.0
+    start_hpi: 0.0
+    marker: DIC
+    organelle: DIC
+    pixel_size_xy_um: 0.2631
+
+  - name: ALFI_U2OS_DMSO_MLN8237
+    data_path: ${datasets_root}/datasets/ALFI_U2OS_DMSO_MLN8237/ALFI_U2OS_DMSO_MLN8237.zarr
+    tracks_path: ${datasets_root}/datasets/ALFI_U2OS_DMSO_MLN8237/tracking.zarr
+    channels:
+      - name: DIC
+        marker: DIC
+    perturbation_wells:
+      DMSO:
+        - MI02/0
+      MLN8237:
+        - MI01/0
+        - MI03/0
+        - MI04/0
+        - MI05/0
+    interval_minutes: 7.0
+    start_hpi: 0.0
+    marker: DIC
+    organelle: DIC
+    pixel_size_xy_um: 0.1766

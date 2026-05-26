@@ -1,50 +1,68 @@
-r"""Submit dynacell predict leaves as one or more chunked sbatch jobs.
+r"""Submit dynacell predict leaves as one or more sbatch jobs.
 
-Composes each leaf via :func:`viscy_utils.compose.load_composed_config`,
-strips reserved keys, writes one resolved config per leaf to
-``{run_root}/resolved/`` with stable plate-scoped filenames, then renders
-sbatch script(s) (from ``sbatch_template_batch.sbatch``) that invoke
-``python -m dynacell predict --config <resolved>``.
+Three submission shapes are supported (pick one):
 
-Two layouts, selected by ``--parallel P`` (default 1):
-  * ``P=1``: one sbatch job runs all N leaves sequentially via ``srun``.
-  * ``P>1``: leaves are split into ``ceil(N/P)`` independent sbatch jobs,
-    each running up to P leaves concurrently as bare-background processes
-    on the shared GPU allocation (no per-process srun — that would try to
-    subdivide GRES). ``cpus_per_task`` scales with chunk size and
-    ``OMP_NUM_THREADS`` is pinned per process so threads don't
-    oversubscribe.
+* **Serial (default)** — Composes each leaf, writes one resolved config
+  per leaf to ``{run_root}/resolved/``, and renders ONE sbatch script
+  (from ``sbatch_template_batch.sbatch``) that invokes
+  ``python -m dynacell predict --config <resolved>`` for each leaf in
+  order. One GPU runs all leaves sequentially in one allocation.
+* **Array (``--array``)** — Renders ONE sbatch array (from
+  ``sbatch_template_array.sbatch``) with ``--array=0-(N-1)`` (optionally
+  capped via ``--max-array-concurrency K`` → ``%K``). Each array task
+  picks its resolved config from the bash ``CONFIGS=(...)`` block by
+  ``$SLURM_ARRAY_TASK_ID``. Up to K tasks run concurrently, each on its
+  own GPU allocation.
+* **Chunked (``--parallel P``, P > 1)** — Splits the N leaves into
+  ``ceil(N/P)`` independent sbatch jobs; each sbatch runs up to P leaves
+  concurrently as bare-background processes on the shared GPU allocation
+  (no per-process srun — that would try to subdivide GRES). cpus_per_task
+  scales with the chunk size and OMP/MKL_NUM_THREADS are pinned per
+  process so threads don't oversubscribe. Mutually exclusive with --array.
 
 Constraints (predict-only by design):
   * All leaves must share ``launcher.mode == 'predict'`` and the same
     ``launcher.run_root``. Mixing modes or run_roots raises.
-  * Leaves' SBATCH directives are merged from the FIRST leaf's
+  * Leaves' SBATCH directives are taken from the FIRST leaf's
     ``launcher.sbatch`` block; subsequent leaves' sbatch blocks must
-    match (same hardware profile). The composite job_name is taken
-    from ``--job-name`` if provided, else derived from the first
-    leaf with a ``_batch`` suffix; chunked jobs append ``_{i:02d}of{n:02d}``.
-  * Wall time defaults to ``--time`` if provided; else keeps the head
-    leaf's ``sbatch.time`` verbatim (a chunked job runs at most P leaves
-    concurrently, so per-leaf wall time is usually enough).
+    match (same hardware profile). ``--allow-mixed-directives``
+    (array mode only) relaxes this by grouping leaves into directive
+    buckets and submitting one array per bucket.
+  * Wall time defaults to ``--time`` if provided; else uses the first
+    leaf's ``sbatch.time``.
 
 Failure handling:
-  * For ``P>1``, the rendered bash captures each background PID and
-    propagates non-zero exit codes via ``wait $pid`` per child, so a
-    single crashed predict fails the whole sbatch (no silent partial
-    success masked by ``wait`` returning only the last child's status).
-  * The submit loop catches ``sbatch`` failures per chunk, reports which
-    chunks made it into the queue and which were skipped, and exits 1.
+  * For ``--parallel > 1``, the rendered bash captures each background
+    PID and propagates non-zero exit codes via ``wait $pid`` per child,
+    so a single crashed predict fails the whole sbatch (no silent
+    partial success masked by ``wait`` returning only the last child's
+    status).
+  * The submit loop catches ``sbatch`` failures per script, reports
+    which were queued vs skipped, and exits 1.
 
 Usage::
 
     LEAVES=applications/dynacell/configs/benchmarks/virtual_staining/er/fnet3d_paper/ipsc_confocal
+
+    # Serial: 4 plates back-to-back in one allocation.
     uv run python applications/dynacell/tools/submit_benchmark_batch.py \
-        $LEAVES/predict__a549_mantis_2024_11_07.yml \
-        $LEAVES/predict__a549_mantis_2024_10_31.yml \
-        $LEAVES/predict__a549_mantis_2025_07_24.yml \
-        $LEAVES/predict__a549_mantis_2025_08_26.yml \
+        $LEAVES/predict__a549_mantis_*.yml \
         --job-name FNet3DPaper_PRED_SEC61B_ON_A549_ALL \
+        --dry-run
+
+    # Array: 4 plates, each on its own GPU, capped at 2 concurrent.
+    uv run python applications/dynacell/tools/submit_benchmark_batch.py \
+        $LEAVES/predict__a549_mantis_*.yml \
+        --array --max-array-concurrency 2 \
+        --job-name FNet3DPaper_PRED_SEC61B_ON_A549_ALL \
+        --dry-run
+
+    # Chunked: 4 plates → 2 sbatches, each running 2 predicts concurrent
+    # on one GPU.
+    uv run python applications/dynacell/tools/submit_benchmark_batch.py \
+        $LEAVES/predict__a549_mantis_*.yml \
         --parallel 2 \
+        --job-name FNet3DPaper_PRED_SEC61B_ON_A549_ALL \
         --dry-run
 
 Re-running over plates whose output stores already contain the prediction
@@ -170,7 +188,27 @@ def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
         )
 
 
-def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str:
+def _render_sbatch_directives(
+    job_name: str,
+    run_root: str,
+    sbatch: dict,
+    array_spec: str | None = None,
+) -> str:
+    """Render ``#SBATCH`` lines.
+
+    Parameters
+    ----------
+    job_name
+        Value for ``--job-name``.
+    run_root
+        Path used for the default ``%j``/``%A_%a`` output/error logs.
+    sbatch
+        Hardware-profile dict (nodes, gpus, mem, ...).
+    array_spec
+        When set (e.g. ``"0-15"`` or ``"0-15%4"``), emit ``#SBATCH
+        --array=<spec>`` and route logs through ``%A_%a`` instead of
+        ``%j`` so each array task writes its own file.
+    """
     values = dict(sbatch)
     values["job_name"] = job_name
     lines = []
@@ -184,9 +222,39 @@ def _render_sbatch_directives(job_name: str, run_root: str, sbatch: dict) -> str
             continue
         rendered = f'"{raw}"' if flag == "--constraint" else str(raw)
         lines.append(f"#SBATCH {flag}={rendered}")
-    lines.append(f"#SBATCH --output={run_root}/slurm/%j.out")
-    lines.append(f"#SBATCH --error={run_root}/slurm/%j.err")
+    if array_spec is not None:
+        lines.append(f"#SBATCH --array={array_spec}")
+        lines.append(f"#SBATCH --output={run_root}/slurm/%A_%a.out")
+        lines.append(f"#SBATCH --error={run_root}/slurm/%A_%a.err")
+    else:
+        lines.append(f"#SBATCH --output={run_root}/slurm/%j.out")
+        lines.append(f"#SBATCH --error={run_root}/slurm/%j.err")
     return "\n".join(lines)
+
+
+# SBATCH directive fields whose equality across leaves is required so that a
+# single ``#SBATCH`` block can stand in for all of them. ``time`` is not
+# included because :func:`submit` recomputes the composite walltime; the
+# remaining keys (constraint, exclude) come along with hardware identity.
+_DIRECTIVE_BUCKET_KEYS: tuple[str, ...] = (
+    "nodes",
+    "ntasks_per_node",
+    "partition",
+    "cpus_per_task",
+    "gpus",
+    "mem",
+    "constraint",
+    "exclude",
+)
+
+
+def _directive_bucket_key(sbatch: dict) -> tuple:
+    """Stable, hashable identity for a leaf's hardware-profile directives.
+
+    Used by ``--allow-mixed-directives`` to group leaves with matching
+    SBATCH blocks into separate array submissions.
+    """
+    return tuple((k, sbatch.get(k)) for k in _DIRECTIVE_BUCKET_KEYS)
 
 
 def _render_env_block(env: dict | None) -> str:
@@ -230,21 +298,42 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "store already contains the prediction channel. Off by default.",
     )
     ap.add_argument(
+        "--array",
+        action="store_true",
+        help="emit ONE sbatch array (--array=0-(N-1)) instead of N serial "
+        "invocations within one sbatch. Each array task runs one leaf on its "
+        "own GPU allocation; up to --max-array-concurrency run concurrently.",
+    )
+    ap.add_argument(
+        "--max-array-concurrency",
+        type=int,
+        default=None,
+        metavar="N",
+        help="when --array is set, append ``%%N`` to the array spec to cap "
+        "concurrent tasks (e.g. --array --max-array-concurrency 4 emits "
+        "``--array=0-(N-1)%%4``). Default: no cap. Ignored without --array.",
+    )
+    ap.add_argument(
+        "--allow-mixed-directives",
+        action="store_true",
+        help="when --array is set, allow leaves with different SBATCH hardware "
+        "profiles. Leaves are grouped by directive identity and one array job "
+        "is submitted per group; a list of job IDs is returned. Without this "
+        "flag, --array requires every leaf to share identical SBATCH directives.",
+    )
+    ap.add_argument(
         "--parallel",
         type=_positive_int,
         default=1,
         metavar="P",
-        help="run P predict invocations concurrently per sbatch job, and split "
-        "the N leaves across ceil(N/P) sbatch jobs (default 1 = one sbatch, "
-        "N leaves sequential). With P>1 each chunk's sbatch runs its <=P leaves "
-        "as bare-background processes on the shared GPU allocation (no per-"
-        "process srun — that would subdivide GRES), each writing its own log "
-        "under run_root/slurm. cpus_per_task scales with the chunk size and "
-        "OMP_NUM_THREADS is pinned per process so threads don't oversubscribe. "
-        "Mem is left at the head leaf's value (predict at batch_size=1 has a "
-        "tiny footprint for the current dynacell configs; recipes with larger "
-        "models or num_workers>0 may need a head-leaf bump). 2-4 fit comfortably "
-        "on a single H200 or A40.",
+        help="(serial mode only) run P predict invocations concurrently per "
+        "sbatch job, and split the N leaves across ceil(N/P) sbatch jobs "
+        "(default 1 = one sbatch, N leaves sequential via srun). With P>1 each "
+        "chunk's sbatch runs its <=P leaves as bare-background processes on the "
+        "shared GPU allocation (no per-process srun — that would subdivide "
+        "GRES), each writing its own log under run_root/slurm. cpus_per_task "
+        "scales with the chunk size and OMP/MKL_NUM_THREADS are pinned per "
+        "process so threads don't oversubscribe. Mutually exclusive with --array.",
     )
     return ap.parse_args(argv)
 
@@ -262,32 +351,50 @@ def _stable_resolved_name(composed: dict) -> str:
     raise SystemExit("leaf is missing benchmark.experiment_id; cannot derive stable resolved filename")
 
 
-def submit(argv: list[str] | None = None) -> int:
-    """Compose, render, and submit a chained predict sbatch from N leaves."""
-    os.umask(0o002)
-    args = _parse_args(argv)
+def _compose_leaves(
+    leaf_paths: list[Path],
+    parsed_overrides: list[tuple[list[str], Any]],
+    overwrite: bool,
+) -> tuple[list[dict], list[dict], list[str]]:
+    """Compose every leaf and return (composed_configs, launchers, exp_ids).
 
-    if len(args.leaves) < 1:
-        raise SystemExit("at least one leaf is required")
-
-    parsed_overrides = [_parse_override(t) for t in args.override]
-
+    ``composed_configs[i]`` has the ``launcher`` and ``benchmark`` keys
+    stripped (LightningCLI rejects unknown roots). ``launchers[i]`` is
+    the popped launcher block. ``exp_ids[i]`` is the leaf's
+    ``benchmark.experiment_id`` (used to derive stable resolved-config
+    filenames).
+    """
     composed_list: list[dict] = []
     launcher_list: list[dict] = []
-    for leaf in args.leaves:
+    exp_ids: list[str] = []
+    for leaf in leaf_paths:
         composed = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
         for path, value in parsed_overrides:
             composed = _apply_override(composed, path, value)
-        if args.overwrite:
+        if overwrite:
             _apply_overwrite_alias(composed, leaf)
         if "launcher" not in composed:
             raise SystemExit(f"{leaf}: missing required 'launcher:' block")
         launcher = composed.pop("launcher")
-        composed.pop("benchmark", None)
+        bench = composed.pop("benchmark", None) or {}
+        exp_id = bench.get("experiment_id")
+        if not exp_id:
+            raise SystemExit(f"{leaf}: missing benchmark.experiment_id")
         composed_list.append(composed)
         launcher_list.append(launcher)
+        exp_ids.append(exp_id)
+    return composed_list, launcher_list, exp_ids
 
-    # All leaves must agree on mode + run_root.
+
+def _validate_uniform_sbatch(
+    leaf_paths: list[Path],
+    launcher_list: list[dict],
+) -> dict:
+    """Validate that every leaf shares mode + run_root + SBATCH hardware.
+
+    Returns the validated head ``sbatch`` dict. Used by both serial mode
+    and ``--array`` without ``--allow-mixed-directives``.
+    """
     modes = {ln.get("mode") for ln in launcher_list}
     if modes != {"predict"}:
         raise SystemExit(f"all leaves must be mode=predict (got {modes!r})")
@@ -297,232 +404,386 @@ def submit(argv: list[str] | None = None) -> int:
     run_root = next(iter(run_roots))
     if not run_root or not str(run_root).startswith("/"):
         raise SystemExit(f"launcher.run_root must be an absolute path (got {run_root!r})")
-
-    # All leaves must agree on sbatch hardware profile (we render one set of
-    # directives). Differences in `time` are tolerated because we override
-    # the composite wall.
     head_sbatch = dict(launcher_list[0].get("sbatch", {}))
     for i, ln in enumerate(launcher_list[1:], 1):
         sb = ln.get("sbatch", {})
         for key in ("nodes", "ntasks_per_node", "partition", "cpus_per_task", "gpus", "mem"):
             if sb.get(key) != head_sbatch.get(key):
                 raise SystemExit(
-                    f"leaf {args.leaves[i]}: sbatch.{key}={sb.get(key)!r} "
-                    f"differs from head sbatch.{key}={head_sbatch.get(key)!r}"
+                    f"leaf {leaf_paths[i]}: sbatch.{key}={sb.get(key)!r} "
+                    f"differs from head sbatch.{key}={head_sbatch.get(key)!r} "
+                    f"(use --array --allow-mixed-directives to bucket by hardware)"
                 )
-    head_env = launcher_list[0].get("env", {})
+    return head_sbatch
 
-    # Compose-time sanity: predict leaves must declare batch-relevant fields
-    # consistently. `trainer.devices` should equal sbatch.ntasks_per_node
-    # (predict typically runs single-GPU; if a leaf opts in to multi-GPU,
-    # the head's directive will apply).
+
+def _validate_devices(
+    leaf_paths: list[Path],
+    composed_list: list[dict],
+    ntasks_per_node: int | None,
+) -> None:
+    """Per-leaf topology check: trainer.devices must equal ntasks_per_node."""
     for i, c in enumerate(composed_list):
         devices = c.get("trainer", {}).get("devices")
-        if not isinstance(devices, int) or devices != head_sbatch.get("ntasks_per_node"):
+        if not isinstance(devices, int) or devices != ntasks_per_node:
             raise SystemExit(
-                f"leaf {args.leaves[i]}: trainer.devices={devices!r} must equal "
-                f"head sbatch.ntasks_per_node={head_sbatch.get('ntasks_per_node')!r}"
+                f"leaf {leaf_paths[i]}: trainer.devices={devices!r} must equal "
+                f"head sbatch.ntasks_per_node={ntasks_per_node!r}"
             )
 
-    # Composite walltime: --time overrides; else keep head's sbatch.time
-    # (existing hardware profiles set this to 4-00:00:00, which is plenty
-    # for sequential predict on a handful of plates).
-    if args.time:
-        head_sbatch["time"] = args.time
 
-    # Composite job name.
-    job_name = args.job_name or (launcher_list[0].get("job_name", "predict") + "_batch")
+def _write_resolved_configs(
+    composed_list: list[dict],
+    exp_ids: list[str],
+    resolved_dir: Path,
+    timestamp: str,
+) -> list[Path]:
+    """Write each composed config to ``{resolved_dir}/{exp_id}__{timestamp}.yml``."""
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for composed, exp_id in zip(composed_list, exp_ids):
+        p = resolved_dir / f"{exp_id}__{timestamp}.yml"
+        p.write_text(yaml.safe_dump(composed, default_flow_style=False))
+        paths.append(p)
+    return paths
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S_%f")
-    run_root_path = Path(run_root)
-    resolved_dir = run_root_path / "resolved"
-    slurm_dir = run_root_path / "slurm"
 
-    resolved_paths: list[Path] = []
-    for composed in composed_list:
-        # Reattach benchmark for the stable-name derivation, then drop again.
-        bench_stub = {"experiment_id": composed.get("_drop_marker")}  # placeholder
-        # We popped benchmark earlier; restore experiment_id by re-reading the
-        # source leaf's benchmark.experiment_id field. Read leaf YAML again
-        # without compose to extract the stable identifier.
-        del bench_stub  # unused
-        leaf_path = args.leaves[composed_list.index(composed)]
-        with leaf_path.open() as f:
-            raw_leaf = yaml.safe_load(f) or {}
-        exp_id = (raw_leaf.get("benchmark", {}) or {}).get("experiment_id")
-        if not exp_id:
-            raise SystemExit(f"{leaf_path}: missing benchmark.experiment_id")
-        resolved_paths.append(resolved_dir / f"{exp_id}__{timestamp}.yml")
-
-    # P=1 (default) keeps the original single-sbatch chained-srun layout:
-    # ALL leaves run sequentially inside one allocation. P>1 splits the N
-    # leaves into ceil(N/P) sbatches, each running up to P concurrent leaves
-    # as bare-background processes on the shared GPU (no per-process srun,
-    # which would try to subdivide the GRES). Each concurrent process writes
-    # its own log under run_root/slurm so output doesn't interleave.
-    if args.parallel > len(resolved_paths):
-        sys.stderr.write(
-            f"[submit] --parallel {args.parallel} capped to {len(resolved_paths)} "
-            f"(only {len(resolved_paths)} leaf(s))\n"
+def _render_serial_sbatch(
+    job_name: str,
+    run_root: str,
+    head_sbatch: dict,
+    head_env: dict,
+    resolved_paths: list[Path],
+) -> str:
+    """Render ``sbatch_template_batch.sbatch`` with N srun invocations in series."""
+    invocations = "\n\n".join(
+        (
+            f"echo '[batch] step {i + 1}/{len(resolved_paths)}: {p.name}'\n"
+            f"srun uv run python -m dynacell predict --config {p}"
         )
-    parallel = min(args.parallel, len(resolved_paths))
-    n_chunks = 1 if parallel == 1 else (len(resolved_paths) + parallel - 1) // parallel
+        for i, p in enumerate(resolved_paths)
+    )
+    template_text = (Path(__file__).parent / "sbatch_template_batch.sbatch").read_text()
+    return SbatchTemplate(template_text).substitute(
+        sbatch_directives=_render_sbatch_directives(job_name, run_root, head_sbatch),
+        run_root=run_root,
+        env_block=_render_env_block(head_env),
+        repo_root=str(_REPO_ROOT),
+        predict_invocations=invocations,
+    )
 
-    # Pre-write all resolved YAMLs once; chunks reference the same files.
-    if not args.print_script:
-        resolved_dir.mkdir(parents=True, exist_ok=True)
-        slurm_dir.mkdir(parents=True, exist_ok=True)
-        for composed, p in zip(composed_list, resolved_paths):
-            p.write_text(yaml.safe_dump(composed, default_flow_style=False))
+
+def _render_chunked_sbatch(
+    job_name: str,
+    run_root: str,
+    head_sbatch: dict,
+    head_env: dict,
+    chunk_paths: list[Path],
+    chunk_idx: int,
+    n_chunks: int,
+    parallel: int,
+    base_cpus: int,
+    slurm_dir: Path,
+) -> str:
+    """Render one chunk's sbatch with ``parallel`` concurrent bare-background predicts.
+
+    Used by ``--parallel P > 1`` mode (mutually exclusive with ``--array``).
+    Each chunk is its own sbatch; within a chunk, leaves run as backgrounded
+    processes on the shared GPU. PIDs are captured and waited individually so
+    a crashed child fails the chunk (bare ``wait`` would return only the LAST
+    child's status, masking earlier failures as SLURM COMPLETED).
+    """
+    # Scale cpus_per_task by chunk size so each concurrent predict gets the head
+    # leaf's per-process CPU budget. Mem is NOT scaled — predict at batch_size=1
+    # has a tiny memory footprint for the current dynacell configs.
+    chunk_sbatch = dict(head_sbatch)
+    scaled_cpus = base_cpus * len(chunk_paths)
+    chunk_sbatch["cpus_per_task"] = scaled_cpus
+    if scaled_cpus > _CPUS_SOFT_CAP:
+        sys.stderr.write(
+            f"[submit] WARNING: chunk {chunk_idx + 1}/{n_chunks} requests "
+            f"cpus_per_task={scaled_cpus} (> soft cap {_CPUS_SOFT_CAP}); "
+            f"may pend forever or be rejected. Lower --parallel or pick a "
+            f"head profile with a smaller cpus_per_task.\n"
+        )
+
+    # Pin OMP_NUM_THREADS per process so the P × base_cpus allocation isn't
+    # oversubscribed by every child reading SLURM_CPUS_PER_TASK. Build the log
+    # redirection by concatenating shell-quoted fragments with the unquoted
+    # ${SLURM_JOB_ID} so bash expands the job-id at runtime while keeping the
+    # directory and stem safe from metachars leaking from experiment_id.
+    slurm_dir_q = shlex.quote(str(slurm_dir))
+    lines = [
+        f"echo '[batch] chunk {chunk_idx + 1}/{n_chunks}: {len(chunk_paths)} concurrent'",
+        "pids=()",
+        "fail=0",
+    ]
+    for p in chunk_paths:
+        stem_q = shlex.quote(p.stem)
+        p_q = shlex.quote(str(p))
+        log = f"{slurm_dir_q}/${{SLURM_JOB_ID}}_{stem_q}.log"
+        lines.append(
+            f"OMP_NUM_THREADS={base_cpus} MKL_NUM_THREADS={base_cpus} "
+            f"uv run python -m dynacell predict --config {p_q} > {log} 2>&1 &"
+        )
+        lines.append("pids+=($!)")
+    lines.extend(
+        [
+            'for pid in "${pids[@]}"; do',
+            '  wait "$pid" || fail=$?',
+            "done",
+            'if [ "$fail" -ne 0 ]; then',
+            '  echo "[batch] one or more concurrent predicts failed (exit=$fail); see per-leaf logs" >&2',
+            '  exit "$fail"',
+            "fi",
+        ]
+    )
+    invocations = "\n".join(lines)
 
     template_text = (Path(__file__).parent / "sbatch_template_batch.sbatch").read_text()
-    base_cpus = int(head_sbatch.get("cpus_per_task", 1))
+    return SbatchTemplate(template_text).substitute(
+        sbatch_directives=_render_sbatch_directives(job_name, run_root, chunk_sbatch),
+        run_root=run_root,
+        env_block=_render_env_block(head_env),
+        repo_root=str(_REPO_ROOT),
+        predict_invocations=invocations,
+    )
 
-    def _render_chunk(chunk_idx: int, chunk_paths: list[Path]) -> tuple[Path, str, str]:
-        """Render the sbatch script for one chunk; return (script_path, name, body)."""
-        suffix = f"_{chunk_idx + 1:02d}of{n_chunks:02d}"
-        chunk_job_name = job_name if n_chunks == 1 else f"{job_name}{suffix}"
-        # Scale cpus_per_task by chunk size so each concurrent predict gets the
-        # head leaf's per-process CPU budget. Mem is NOT scaled — predict at
-        # batch_size=1 has a tiny footprint for the current dynacell configs
-        # (model ~128 MB, no backward activations, num_workers=0). Keep
-        # ntasks_per_node/gpus unchanged — concurrent leaves share the single GPU.
-        chunk_sbatch = dict(head_sbatch)
-        if parallel > 1:
-            scaled_cpus = base_cpus * len(chunk_paths)
-            chunk_sbatch["cpus_per_task"] = scaled_cpus
-            if scaled_cpus > _CPUS_SOFT_CAP:
-                sys.stderr.write(
-                    f"[submit] WARNING: chunk {chunk_idx + 1}/{n_chunks} requests "
-                    f"cpus_per_task={scaled_cpus} (> soft cap {_CPUS_SOFT_CAP}); "
-                    f"may pend forever or be rejected. Lower --parallel or pick a "
-                    f"head profile with a smaller cpus_per_task.\n"
-                )
 
-        if parallel == 1:
-            # P=1: srun-based sequential layout. srun handles signal propagation
-            # and exit codes natively; no PID gymnastics needed.
-            lines = []
-            for i, p in enumerate(chunk_paths):
-                p_q = shlex.quote(str(p))
-                lines.append(f"echo '[batch] step {i + 1}/{len(chunk_paths)}: {p.name}'")
-                lines.append(f"srun uv run python -m dynacell predict --config {p_q}")
-                lines.append("")
-            invocations = "\n".join(lines).rstrip()
-        else:
-            # P>1: bare-background processes share the GPU. Pin OMP_NUM_THREADS
-            # per process so the P × base_cpus allocation isn't oversubscribed
-            # by every child reading SLURM_CPUS_PER_TASK. Capture PIDs and
-            # propagate non-zero exit codes — bare `wait` (no args) returns only
-            # the LAST child's status, masking earlier crashes.
-            lines = [
-                f"echo '[batch] chunk {chunk_idx + 1}/{n_chunks}: {len(chunk_paths)} concurrent'",
-                "pids=()",
-                "fail=0",
-            ]
-            # Build the log redirection path by concatenating shell-quoted
-            # fragments with the unquoted ``${SLURM_JOB_ID}`` so bash expands the
-            # job-id at runtime while keeping the directory and stem safe from
-            # metachars leaking from ``experiment_id``.
-            slurm_dir_q = shlex.quote(str(slurm_dir))
-            for p in chunk_paths:
-                stem_q = shlex.quote(p.stem)
-                p_q = shlex.quote(str(p))
-                log = f"{slurm_dir_q}/${{SLURM_JOB_ID}}_{stem_q}.log"
-                lines.append(
-                    f"OMP_NUM_THREADS={base_cpus} MKL_NUM_THREADS={base_cpus} "
-                    f"uv run python -m dynacell predict --config {p_q} > {log} 2>&1 &"
-                )
-                lines.append("pids+=($!)")
-            lines.extend(
-                [
-                    'for pid in "${pids[@]}"; do',
-                    '  wait "$pid" || fail=$?',
-                    "done",
-                    'if [ "$fail" -ne 0 ]; then',
-                    '  echo "[batch] one or more concurrent predicts failed (exit=$fail); see per-leaf logs" >&2',
-                    '  exit "$fail"',
-                    "fi",
-                ]
-            )
-            invocations = "\n".join(lines)
+def _render_array_sbatch(
+    job_name: str,
+    run_root: str,
+    head_sbatch: dict,
+    head_env: dict,
+    resolved_paths: list[Path],
+    max_concurrency: int | None,
+) -> str:
+    """Render ``sbatch_template_array.sbatch`` with ``--array=0-(N-1)[%K]``."""
+    n = len(resolved_paths)
+    if n < 1:
+        raise SystemExit("array submission requires at least one leaf")
+    array_spec = f"0-{n - 1}"
+    if max_concurrency is not None:
+        if max_concurrency < 1:
+            raise SystemExit(f"--max-array-concurrency must be >=1 (got {max_concurrency!r})")
+        array_spec += f"%{max_concurrency}"
+    configs_list = "\n".join(f'  "{p}"' for p in resolved_paths)
+    template_text = (Path(__file__).parent / "sbatch_template_array.sbatch").read_text()
+    return SbatchTemplate(template_text).substitute(
+        sbatch_directives=_render_sbatch_directives(job_name, run_root, head_sbatch, array_spec=array_spec),
+        run_root=run_root,
+        env_block=_render_env_block(head_env),
+        repo_root=str(_REPO_ROOT),
+        configs_list=configs_list,
+    )
 
-        body = SbatchTemplate(template_text).substitute(
-            sbatch_directives=_render_sbatch_directives(chunk_job_name, str(run_root), chunk_sbatch),
-            run_root=str(run_root),
-            env_block=_render_env_block(head_env),
-            repo_root=str(_REPO_ROOT),
-            predict_invocations=invocations,
+
+def _sbatch_submit(
+    sbatch_path: Path,
+    parsable: bool,
+) -> str | None:
+    """Invoke ``sbatch`` on a rendered script. Returns parsable stdout when requested."""
+    sbatch_cmd = ["sbatch"]
+    if parsable:
+        sbatch_cmd.append("--parsable")
+    sbatch_cmd.append(str(sbatch_path))
+    if parsable:
+        result = subprocess.run(sbatch_cmd, check=True, stdout=subprocess.PIPE, text=True)
+        return result.stdout.strip()
+    subprocess.run(sbatch_cmd, check=True)
+    return None
+
+
+def submit(argv: list[str] | None = None) -> int:
+    """Compose, render, and submit a chained predict sbatch (serial or array)."""
+    os.umask(0o002)
+    args = _parse_args(argv)
+
+    if len(args.leaves) < 1:
+        raise SystemExit("at least one leaf is required")
+    if args.max_array_concurrency is not None and not args.array:
+        raise SystemExit("--max-array-concurrency requires --array")
+    if args.allow_mixed_directives and not args.array:
+        raise SystemExit("--allow-mixed-directives requires --array")
+    if args.parallel > 1 and args.array:
+        raise SystemExit(
+            "--parallel > 1 is incompatible with --array. --array gives "
+            "cross-sbatch task parallelism (one leaf per GPU); --parallel "
+            "gives within-sbatch concurrent processes (P leaves per GPU). "
+            "Pick one."
         )
-        script_path = slurm_dir / f"{timestamp}_{chunk_job_name}.sbatch"
-        return script_path, chunk_job_name, body
+    # Cap --parallel to leaf count so we don't ask for more concurrency than
+    # we have work for. Per-bucket capping happens inside the dispatch loop.
+    if args.parallel > len(args.leaves):
+        sys.stderr.write(
+            f"[submit] --parallel {args.parallel} capped to {len(args.leaves)} (only {len(args.leaves)} leaf(s))\n"
+        )
 
-    # P=1 packs ALL leaves into a single chunk (sequential sbatch). P>1 slices
-    # into chunks of P; the final chunk may be shorter when N is not divisible.
-    chunk_size = len(resolved_paths) if parallel == 1 else parallel
-    chunk_artifacts: list[tuple[Path, str, str, list[Path]]] = []
-    for chunk_idx in range(n_chunks):
-        start = chunk_idx * chunk_size
-        chunk_paths = resolved_paths[start : start + chunk_size]
-        script_path, chunk_name, body = _render_chunk(chunk_idx, chunk_paths)
-        chunk_artifacts.append((script_path, chunk_name, body, chunk_paths))
+    parsed_overrides = [_parse_override(t) for t in args.override]
+    composed_list, launcher_list, exp_ids = _compose_leaves(args.leaves, parsed_overrides, args.overwrite)
+
+    # mode invariant: every leaf must be predict mode.
+    modes = {ln.get("mode") for ln in launcher_list}
+    if modes != {"predict"}:
+        raise SystemExit(f"all leaves must be mode=predict (got {modes!r})")
+
+    # run_root invariant: uniform unless --allow-mixed-directives bumps it
+    # into bucket grouping. Validate each leaf's run_root is an absolute path.
+    for i, ln in enumerate(launcher_list):
+        rr = ln.get("run_root")
+        if not rr or not str(rr).startswith("/"):
+            raise SystemExit(f"leaf {args.leaves[i]}: launcher.run_root must be an absolute path (got {rr!r})")
+    run_roots = {ln.get("run_root") for ln in launcher_list}
+    if len(run_roots) != 1 and not (args.array and args.allow_mixed_directives):
+        raise SystemExit(
+            f"all leaves must share launcher.run_root (got {sorted(run_roots)!r}); "
+            f"use --array --allow-mixed-directives to bucket by run_root"
+        )
+    run_root = next(iter(run_roots)) if len(run_roots) == 1 else None
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S_%f")
+
+    # Group leaves by (SBATCH directive identity, run_root). In strict
+    # mode every leaf must share both; --allow-mixed-directives buckets
+    # them and submits one sbatch per bucket (each bucket writes its
+    # artifacts into its own run_root).
+    if args.array and args.allow_mixed_directives:
+        buckets: dict[tuple, list[int]] = {}
+        for i, ln in enumerate(launcher_list):
+            key = (_directive_bucket_key(ln.get("sbatch", {})), ln.get("run_root"))
+            buckets.setdefault(key, []).append(i)
+    else:
+        head_sbatch_validated = _validate_uniform_sbatch(args.leaves, launcher_list)
+        buckets = {(_directive_bucket_key(head_sbatch_validated), run_root): list(range(len(args.leaves)))}
+
+    rendered_outputs: list[tuple[Path, list[Path]]] = []  # (sbatch_path, resolved_paths)
+    for bucket_idx, (bucket_key, leaf_idxs) in enumerate(buckets.items()):
+        bucket_leaf_paths = [args.leaves[i] for i in leaf_idxs]
+        bucket_composed = [composed_list[i] for i in leaf_idxs]
+        bucket_launchers = [launcher_list[i] for i in leaf_idxs]
+        bucket_exp_ids = [exp_ids[i] for i in leaf_idxs]
+
+        # bucket_key = (directive_tuple, run_root); use the bucket's run_root
+        # so each bucket's artifacts go into the right tree under mixed mode.
+        _, bucket_run_root = bucket_key
+        bucket_run_root_path = Path(bucket_run_root)
+        bucket_resolved_dir = bucket_run_root_path / "resolved"
+        bucket_slurm_dir = bucket_run_root_path / "slurm"
+
+        head_sbatch = dict(bucket_launchers[0].get("sbatch", {}))
+        head_env = bucket_launchers[0].get("env", {})
+
+        _validate_devices(bucket_leaf_paths, bucket_composed, head_sbatch.get("ntasks_per_node"))
+
+        if args.time:
+            head_sbatch["time"] = args.time
+
+        # Suffix mixed-directive bucket index into job_name so multiple
+        # submissions in one invocation get distinguishable names + sbatch
+        # filenames.
+        base_job_name = args.job_name or (bucket_launchers[0].get("job_name", "predict") + "_batch")
+        job_name = f"{base_job_name}_g{bucket_idx}" if len(buckets) > 1 else base_job_name
+
+        resolved_paths = _write_resolved_configs(bucket_composed, bucket_exp_ids, bucket_resolved_dir, timestamp)
+        bucket_slurm_dir.mkdir(parents=True, exist_ok=True)
+
+        # --parallel P>1: split this bucket's leaves into ceil(N/P) chunks,
+        # each chunk gets its own sbatch with P concurrent backgrounded
+        # predicts. Job names get a zero-padded ``_NNofMM`` suffix so lexical
+        # sort matches numeric order at ≥10 chunks.
+        parallel = min(args.parallel, len(resolved_paths))
+        if parallel > 1:
+            n_chunks = (len(resolved_paths) + parallel - 1) // parallel
+            base_cpus = int(head_sbatch.get("cpus_per_task", 1))
+            for chunk_idx in range(n_chunks):
+                start = chunk_idx * parallel
+                chunk_paths = resolved_paths[start : start + parallel]
+                suffix = f"_{chunk_idx + 1:02d}of{n_chunks:02d}"
+                chunk_job_name = job_name if n_chunks == 1 else f"{job_name}{suffix}"
+                rendered = _render_chunked_sbatch(
+                    chunk_job_name,
+                    str(bucket_run_root),
+                    head_sbatch,
+                    head_env,
+                    chunk_paths,
+                    chunk_idx,
+                    n_chunks,
+                    parallel,
+                    base_cpus,
+                    bucket_slurm_dir,
+                )
+                sbatch_path = bucket_slurm_dir / f"{timestamp}_{chunk_job_name}.sbatch"
+                rendered_outputs.append((sbatch_path, chunk_paths))
+                if args.print_script:
+                    sys.stdout.write(rendered)
+                    continue
+                sbatch_path.write_text(rendered)
+            continue
+
+        if args.array:
+            rendered = _render_array_sbatch(
+                job_name,
+                str(bucket_run_root),
+                head_sbatch,
+                head_env,
+                resolved_paths,
+                args.max_array_concurrency,
+            )
+        else:
+            rendered = _render_serial_sbatch(
+                job_name,
+                str(bucket_run_root),
+                head_sbatch,
+                head_env,
+                resolved_paths,
+            )
+
+        sbatch_path = bucket_slurm_dir / f"{timestamp}_{job_name}.sbatch"
+        rendered_outputs.append((sbatch_path, resolved_paths))
+
+        if args.print_script:
+            sys.stdout.write(rendered)
+            continue
+
+        sbatch_path.write_text(rendered)
 
     if args.print_script:
-        # Single chunk → emit the body verbatim (pipeable to sbatch). Multi-chunk
-        # output is for inspection only; refuse to print since concatenated
-        # #!/bin/bash + #SBATCH blocks would not parse as one sbatch.
-        if n_chunks > 1:
-            raise SystemExit(
-                "--print-script is single-chunk only; with --parallel > 1 over "
-                f"{len(resolved_paths)} leaf(s), {n_chunks} sbatch scripts would be "
-                "rendered. Use --dry-run to write them all to disk and inspect."
-            )
-        sys.stdout.write(chunk_artifacts[0][2])
         return 0
-
-    for script_path, _name, body, _paths in chunk_artifacts:
-        script_path.write_text(body)
-
     if args.dry_run:
-        for script_path, _name, _body, paths in chunk_artifacts:
-            print(f"[dry-run] sbatch script: {script_path}")
-            for p in paths:
+        for sbatch_path, resolved_paths in rendered_outputs:
+            print(f"[dry-run] sbatch script: {sbatch_path}")
+            for p in resolved_paths:
                 print(f"[dry-run] resolved:    {p}")
         return 0
 
-    # Submit each chunk; on failure, report submitted-vs-skipped so the user
-    # can scancel orphans manually rather than chasing an opaque traceback.
+    # Submit each rendered sbatch; on failure, report submitted-vs-skipped so
+    # the user can scancel orphans manually rather than chasing an opaque
+    # traceback. Matters whenever rendered_outputs has >1 entry (--parallel>1
+    # or --array --allow-mixed-directives).
     job_ids: list[str] = []
-    failures: list[tuple[str, str]] = []
-    for script_path, name, _body, _paths in chunk_artifacts:
-        sbatch_cmd = ["sbatch"]
-        if args.parsable:
-            sbatch_cmd.append("--parsable")
-        sbatch_cmd.append(str(script_path))
+    failures: list[tuple[Path, str]] = []
+    for sbatch_path, _ in rendered_outputs:
         try:
-            if args.parsable:
-                result = subprocess.run(sbatch_cmd, check=True, stdout=subprocess.PIPE, text=True)
-                jid = result.stdout.strip()
-                job_ids.append(jid)
-                # One job ID per line on stdout (back-compat with single-chunk
-                # callers parsing $(... --parsable)); name annotation on stderr.
-                print(jid)
-                sys.stderr.write(f"[submit] {jid}\t{name}\n")
-            else:
-                subprocess.run(sbatch_cmd, check=True)
-                sys.stderr.write(f"[submit] queued {name}\n")
+            result = _sbatch_submit(sbatch_path, args.parsable)
         except subprocess.CalledProcessError as exc:
-            failures.append((name, str(exc)))
-            sys.stderr.write(f"[submit] FAILED to queue {name}: {exc}\n")
+            failures.append((sbatch_path, str(exc)))
+            sys.stderr.write(f"[submit] FAILED to queue {sbatch_path.name}: {exc}\n")
+            continue
+        if result is not None:
+            job_ids.append(result)
+            print(result)
+            sys.stderr.write(f"[submit] queued {sbatch_path.name} -> {result}\n")
+        else:
+            sys.stderr.write(f"[submit] queued {sbatch_path.name}\n")
 
     if failures:
         sys.stderr.write(
-            f"[submit] {len(failures)}/{len(chunk_artifacts)} chunk(s) failed to submit; "
+            f"[submit] {len(failures)}/{len(rendered_outputs)} sbatch(es) failed; "
             f"{len(job_ids)} already queued: {','.join(job_ids) if job_ids else '<none>'}\n"
-            f"[submit] scancel the queued chunk(s) above if you want to abort the whole batch.\n"
+            f"[submit] scancel the queued job(s) above if you want to abort the whole batch.\n"
         )
         return 1
-    if job_ids:
+    if args.parsable and job_ids:
         sys.stderr.write(f"[submit] queued {len(job_ids)} job(s): {','.join(job_ids)}\n")
     return 0
 

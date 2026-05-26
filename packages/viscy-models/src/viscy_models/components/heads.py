@@ -23,6 +23,7 @@ __all__ = [
     "BaseHead",
     "ClassificationHead",
     "CosineClassifier",
+    "CrossModalContrastiveHead",
     "MLP",
     "PixelToVoxelHead",
     "PixelToVoxelShuffleHead",
@@ -268,6 +269,152 @@ class ClassificationHead(BaseHead):
         log_fn(f"loss/aux/{self.head_name}/{stage}", out["loss"])
         log_fn(f"metrics/acc_top1/{self.head_name}/{stage}", top1)
         log_fn(f"metrics/acc_top{self.top_k}/{self.head_name}/{stage}", topk)
+
+
+class CrossModalContrastiveHead(BaseHead):
+    """Cross-modal InfoNCE head pulling image features toward a paired vector target.
+
+    Projects image features and a per-cell paired vector (e.g. transcriptomic
+    embedding) into a shared space, then minimises an InfoNCE loss across the
+    batch. Samples whose target contains NaN (e.g. unpaired cells) are masked
+    out so the head can run on partially-paired batches.
+
+    Parameters
+    ----------
+    head_name : str
+        Name used for logging.
+    batch_key : str
+        Key used to look up the target in the batch dict (e.g. ``"X_pls"``).
+    in_dims : int
+        Backbone feature dimensionality.
+    target_dims : int
+        Dimensionality of the paired target vector.
+    proj_dims : int
+        Dimensionality of the shared projection space. Default 128.
+    image_hidden : int | list[int]
+        Hidden width(s) of the image-side projector. Default 256.
+    target_hidden : int | list[int]
+        Hidden width(s) of the target-side projector. Default 128.
+    temperature : float
+        Softmax temperature for the InfoNCE loss. Default 0.1.
+    loss_weight : float
+        Final loss weight (see :class:`BaseHead`).
+    weight_schedule : {"cosine", "constant"}
+    weight_start : float
+    weight_warmup_epochs : int
+    """
+
+    def __init__(
+        self,
+        head_name: str,
+        batch_key: str,
+        in_dims: int,
+        target_dims: int,
+        proj_dims: int = 128,
+        image_hidden: int | list[int] = 256,
+        target_hidden: int | list[int] = 128,
+        temperature: float = 0.1,
+        loss_weight: float = 1.0,
+        weight_schedule: Literal["cosine", "constant"] = "constant",
+        weight_start: float = 0.0,
+        weight_warmup_epochs: int = 50,
+    ) -> None:
+        super().__init__(
+            head_name=head_name,
+            batch_key=batch_key,
+            loss_weight=loss_weight,
+            weight_schedule=weight_schedule,
+            weight_start=weight_start,
+            weight_warmup_epochs=weight_warmup_epochs,
+        )
+        self.image_proj = MLP(in_dims=in_dims, hidden_dims=image_hidden, out_dims=proj_dims, norm="ln")
+        self.target_proj = MLP(in_dims=target_dims, hidden_dims=target_hidden, out_dims=proj_dims, norm="ln")
+        self.temperature = temperature
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Project image features into the shared cross-modal space.
+
+        Parameters
+        ----------
+        x : Tensor
+            Backbone features, shape ``(B, in_dims)``.
+
+        Returns
+        -------
+        Tensor
+            L2-normalised image projections, shape ``(B, proj_dims)``.
+        """
+        return F.normalize(self.image_proj(x), dim=-1)
+
+    def project_target(self, target: Tensor) -> Tensor:
+        """Project the paired vector target into the shared space.
+
+        Parameters
+        ----------
+        target : Tensor
+            Paired target vectors, shape ``(B, target_dims)``.
+
+        Returns
+        -------
+        Tensor
+            L2-normalised target projections, shape ``(B, proj_dims)``.
+        """
+        return F.normalize(self.target_proj(target), dim=-1)
+
+    def compute_loss(self, y_hat: Tensor, y: Tensor) -> Tensor:
+        """Symmetric InfoNCE loss between projected image and target features.
+
+        Rows of ``y`` containing NaN are masked out (unpaired cells). If fewer
+        than two paired cells are present in the batch the loss is zero.
+
+        Parameters
+        ----------
+        y_hat : Tensor
+            Already-projected image features from :meth:`forward`, shape
+            ``(B, proj_dims)``.
+        y : Tensor
+            Paired target vectors, shape ``(B, target_dims)``. May contain NaN.
+
+        Returns
+        -------
+        Tensor
+            Scalar InfoNCE loss.
+        """
+        valid = ~torch.isnan(y).any(dim=-1)
+        if valid.sum() < 2:
+            return y_hat.new_zeros(())
+        z_img = y_hat[valid]
+        z_tgt = self.project_target(y[valid])
+        logits = z_img @ z_tgt.t() / self.temperature
+        labels = torch.arange(z_img.size(0), device=z_img.device)
+        return 0.5 * (F.cross_entropy(logits, labels) + F.cross_entropy(logits.t(), labels))
+
+    def log_metrics(self, out: dict, log_fn: callable, stage: str) -> None:
+        """Log loss, mean image-target cosine, and retrieval@1 for paired cells.
+
+        Parameters
+        ----------
+        out : dict
+            Must contain ``"loss"``, ``"logits"`` (projected image features), and
+            ``"y"`` (raw paired target).
+        log_fn : callable
+            Lightning's ``self.log``.
+        stage : str
+            ``"train"`` or ``"val"``.
+        """
+        y = out["y"]
+        valid = ~torch.isnan(y).any(dim=-1)
+        log_fn(f"loss/aux/{self.head_name}/{stage}", out["loss"])
+        log_fn(f"metrics/paired_frac/{self.head_name}/{stage}", valid.float().mean())
+        if valid.sum() < 2:
+            return
+        z_img = out["logits"][valid]
+        z_tgt = self.project_target(y[valid])
+        cos_diag = (z_img * z_tgt).sum(dim=-1).mean()
+        logits = z_img @ z_tgt.t() / self.temperature
+        retrieval = (logits.argmax(dim=1) == torch.arange(z_img.size(0), device=z_img.device)).float().mean()
+        log_fn(f"metrics/cos/{self.head_name}/{stage}", cos_diag)
+        log_fn(f"metrics/r@1/{self.head_name}/{stage}", retrieval)
 
 
 class CosineClassifier(nn.Module):

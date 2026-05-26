@@ -1,0 +1,42 @@
+# CellDiff r2 predict: membrane trained on A549 mantis, predicting against ipsc_confocal test (OOD).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: a549_mantis
+  predict_set: ipsc_confocal
+  model_name: celldiff
+  experiment_id: membrane__a549_mantis__celldiff__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/celldiff_r2/checkpoints/last.ckpt
+    predict_method: iterative
+    predict_overlap: [4, 256, 256]
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+    augmentations: []
+    z_window_size: 40
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_a549trained.zarr
+
+launcher:
+  job_name: CELLDiff_A549_PRED_MEMB_ON_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

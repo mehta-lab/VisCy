@@ -14,6 +14,7 @@ from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from dynaclr.engine import ContrastiveModule
+from viscy_data.cell_index import build_timelapse_cell_index
 from viscy_models.contrastive.loss import NTXentHCL
 
 # ---------------------------------------------------------------------------
@@ -52,11 +53,13 @@ def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_coll
         perturbation_wells={"control": ["B/1"]},
     )
     yaml_path = _write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(yaml_path, parquet_path, num_workers=1)
 
     from dynaclr.data.datamodule import MultiExperimentDataModule
 
     datamodule = MultiExperimentDataModule(
-        collection_path=str(yaml_path),
+        cell_index_path=str(parquet_path),
         z_window=1,
         yx_patch_size=(32, 32),
         final_yx_patch_size=(24, 24),
@@ -183,11 +186,13 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(
         start_hpi=0.0,
     )
     yaml_path = _write_collection_yaml(tmp_path, [exp_alpha, exp_beta])
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(yaml_path, parquet_path, num_workers=1)
 
     from dynaclr.data.datamodule import MultiExperimentDataModule
 
     datamodule = MultiExperimentDataModule(
-        collection_path=str(yaml_path),
+        cell_index_path=str(parquet_path),
         z_window=1,
         yx_patch_size=(32, 32),
         final_yx_patch_size=(24, 24),

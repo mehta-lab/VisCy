@@ -217,4 +217,7 @@ def _transform_channel_wise(
 ) -> list[Tensor]:
     scattered_channels = _scatter_channels(channel_names, patch, norm_meta, extra)
     transformed_channels = transform(scattered_channels)
-    return _gather_channels(transformed_channels)
+    extra_keys = ("norm_meta",)
+    if extra is not None:
+        extra_keys = ("norm_meta",) + tuple(extra.keys())
+    return _gather_channels(transformed_channels, extra_keys=extra_keys)

@@ -2,9 +2,9 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import hydra
 import numpy as np
@@ -15,6 +15,7 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.cache import FeatureKind
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
@@ -184,6 +185,53 @@ class _BackboneLists:
     gt_fovs: list[np.ndarray] = field(default_factory=list)
     pred_ts: list[np.ndarray] = field(default_factory=list)
     gt_ts: list[np.ndarray] = field(default_factory=list)
+
+
+# Single source of truth for backbone names is cache.FeatureKind.
+# Ordering matters: the post-loop CP block runs before the generic
+# deep-track loop, so "cp" must be first in FeatureKind.
+_BACKBONE_KEYS: tuple[FeatureKind, ...] = get_args(FeatureKind)
+_BB_FIELDS = fields(_BackboneLists)
+
+
+def _extend_backbone(
+    bb: _BackboneLists,
+    pred: np.ndarray | None,
+    gt: np.ndarray | None,
+    pos_name: str,
+    t: int,
+) -> None:
+    """Append one (pred, gt) feature pair for ``(pos_name, t)`` into ``bb``.
+
+    No-op when ``pred`` is None (CellDINO disabled) or zero rows (no cells).
+    All six lists in ``_BackboneLists`` (feats, fovs, ts for pred and gt) are
+    extended with arrays of length ``len(pred)`` to stay lockstep.
+
+    Raises
+    ------
+    ValueError
+        If ``pred`` has rows but ``gt`` is None, or if ``len(pred) != len(gt)``.
+        ``_BackboneLists.gt_feats`` is typed ``list[np.ndarray]`` and the
+        post-loop block calls ``np.concatenate`` over it — a stray ``None``
+        or row-count mismatch would surface as a confusing crash deep in
+        the metrics block; fail loudly at the append site instead.
+    """
+    if pred is None or pred.size == 0:
+        return
+    if gt is None:
+        raise ValueError(f"_extend_backbone: pred has {len(pred)} rows at ({pos_name!r}, t={t}) but gt is None")
+    if len(gt) != len(pred):
+        raise ValueError(
+            f"_extend_backbone: row count mismatch at ({pos_name!r}, t={t}): pred has {len(pred)}, gt has {len(gt)}"
+        )
+    bb.pred_feats.append(pred)
+    bb.gt_feats.append(gt)
+    fov_arr = np.full(len(pred), pos_name)
+    t_arr = np.full(len(pred), t, dtype=np.int32)
+    bb.pred_fovs.append(fov_arr)
+    bb.gt_fovs.append(fov_arr)
+    bb.pred_ts.append(t_arr)
+    bb.gt_ts.append(t_arr)
 
 
 @dataclass
@@ -363,50 +411,19 @@ def _process_one_fov(
                         compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
                     )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
-                if pred_cp.size > 0:
-                    cp.pred_feats.append(pred_cp)
-                    cp.gt_feats.append(gt_cp_t)
-                    fov_arr = np.full(len(pred_cp), pos_name_pred)
-                    t_arr = np.full(len(pred_cp), t, dtype=np.int32)
-                    cp.pred_fovs.append(fov_arr)
-                    cp.gt_fovs.append(fov_arr)
-                    cp.pred_ts.append(t_arr)
-                    cp.gt_ts.append(t_arr)
-                if pred_dinov3.size > 0:
-                    dinov3.pred_feats.append(pred_dinov3)
-                    dinov3.gt_feats.append(gt_dinov3_per_t[t])
-                    fov_arr = np.full(len(pred_dinov3), pos_name_pred)
-                    t_arr = np.full(len(pred_dinov3), t, dtype=np.int32)
-                    dinov3.pred_fovs.append(fov_arr)
-                    dinov3.gt_fovs.append(fov_arr)
-                    dinov3.pred_ts.append(t_arr)
-                    dinov3.gt_ts.append(t_arr)
-                if pred_dynaclr.size > 0:
-                    dynaclr.pred_feats.append(pred_dynaclr)
-                    dynaclr.gt_feats.append(gt_dynaclr_per_t[t])
-                    fov_arr = np.full(len(pred_dynaclr), pos_name_pred)
-                    t_arr = np.full(len(pred_dynaclr), t, dtype=np.int32)
-                    dynaclr.pred_fovs.append(fov_arr)
-                    dynaclr.gt_fovs.append(fov_arr)
-                    dynaclr.pred_ts.append(t_arr)
-                    dynaclr.gt_ts.append(t_arr)
-                if pred_celldino is not None and pred_celldino.size > 0:
-                    celldino.pred_feats.append(pred_celldino)
-                    celldino.gt_feats.append(gt_celldino_per_t[t])
-                    fov_arr = np.full(len(pred_celldino), pos_name_pred)
-                    t_arr = np.full(len(pred_celldino), t, dtype=np.int32)
-                    celldino.pred_fovs.append(fov_arr)
-                    celldino.gt_fovs.append(fov_arr)
-                    celldino.pred_ts.append(t_arr)
-                    celldino.gt_ts.append(t_arr)
+                _extend_backbone(cp, pred_cp, gt_cp_t, pos_name_pred, t)
+                _extend_backbone(dinov3, pred_dinov3, gt_dinov3_per_t[t], pos_name_pred, t)
+                _extend_backbone(dynaclr, pred_dynaclr, gt_dynaclr_per_t[t], pos_name_pred, t)
+                gt_celldino_t = gt_celldino_per_t[t] if pred_celldino is not None else None
+                _extend_backbone(celldino, pred_celldino, gt_celldino_t, pos_name_pred, t)
 
         maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
 
     seg_array = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
 
     if config.compute_microssim:
-        with region_timer("microssim", pos_name_pred):
-            microssim_scores = calculate_microssim(microssim_data)
+        with region_timer("microssim", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            microssim_scores = calculate_microssim(microssim_data, use_gpu=use_gpu)
             for i in range(T):
                 fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
@@ -434,37 +451,15 @@ def _aggregate_fov_result(
     all_pixel_metrics: list[dict],
     all_mask_metrics: list[dict],
     all_feature_metrics: list[dict],
-    pred_cp_feats: list[np.ndarray],
-    pred_cp_fovs: list[np.ndarray],
-    pred_cp_ts: list[np.ndarray],
-    gt_cp_feats: list[np.ndarray],
-    gt_cp_fovs: list[np.ndarray],
-    gt_cp_ts: list[np.ndarray],
-    pred_dinov3_feats: list[np.ndarray],
-    pred_dinov3_fovs: list[np.ndarray],
-    pred_dinov3_ts: list[np.ndarray],
-    gt_dinov3_feats: list[np.ndarray],
-    gt_dinov3_fovs: list[np.ndarray],
-    gt_dinov3_ts: list[np.ndarray],
-    pred_dynaclr_feats: list[np.ndarray],
-    pred_dynaclr_fovs: list[np.ndarray],
-    pred_dynaclr_ts: list[np.ndarray],
-    gt_dynaclr_feats: list[np.ndarray],
-    gt_dynaclr_fovs: list[np.ndarray],
-    gt_dynaclr_ts: list[np.ndarray],
-    pred_celldino_feats: list[np.ndarray],
-    pred_celldino_fovs: list[np.ndarray],
-    pred_celldino_ts: list[np.ndarray],
-    gt_celldino_feats: list[np.ndarray],
-    gt_celldino_fovs: list[np.ndarray],
-    gt_celldino_ts: list[np.ndarray],
+    parent_lists: dict[str, _BackboneLists],
     *,
     extend_worker_timings: bool,
 ) -> None:
     """Apply one FOV's contributions to the parent-side run state.
 
     Writes the segmentation array to the HCS plate, extends the per-T row
-    lists, and extends the 24 dataset-level accumulator lists.
+    lists, and extends each backbone's six lists in ``parent_lists`` from
+    the matching ``_BackboneLists`` slot on ``result``.
 
     ``extend_worker_timings`` toggles whether to append ``result.timings``
     to the parent's global ``_TIMINGS`` collector. Set ``False`` in serial
@@ -483,30 +478,13 @@ def _aggregate_fov_result(
     all_mask_metrics.extend(result.per_t_mask_rows)
     all_feature_metrics.extend(result.per_t_feature_rows)
 
-    pred_cp_feats.extend(result.cp.pred_feats)
-    pred_cp_fovs.extend(result.cp.pred_fovs)
-    pred_cp_ts.extend(result.cp.pred_ts)
-    gt_cp_feats.extend(result.cp.gt_feats)
-    gt_cp_fovs.extend(result.cp.gt_fovs)
-    gt_cp_ts.extend(result.cp.gt_ts)
-    pred_dinov3_feats.extend(result.dinov3.pred_feats)
-    pred_dinov3_fovs.extend(result.dinov3.pred_fovs)
-    pred_dinov3_ts.extend(result.dinov3.pred_ts)
-    gt_dinov3_feats.extend(result.dinov3.gt_feats)
-    gt_dinov3_fovs.extend(result.dinov3.gt_fovs)
-    gt_dinov3_ts.extend(result.dinov3.gt_ts)
-    pred_dynaclr_feats.extend(result.dynaclr.pred_feats)
-    pred_dynaclr_fovs.extend(result.dynaclr.pred_fovs)
-    pred_dynaclr_ts.extend(result.dynaclr.pred_ts)
-    gt_dynaclr_feats.extend(result.dynaclr.gt_feats)
-    gt_dynaclr_fovs.extend(result.dynaclr.gt_fovs)
-    gt_dynaclr_ts.extend(result.dynaclr.gt_ts)
-    pred_celldino_feats.extend(result.celldino.pred_feats)
-    pred_celldino_fovs.extend(result.celldino.pred_fovs)
-    pred_celldino_ts.extend(result.celldino.pred_ts)
-    gt_celldino_feats.extend(result.celldino.gt_feats)
-    gt_celldino_fovs.extend(result.celldino.gt_fovs)
-    gt_celldino_ts.extend(result.celldino.gt_ts)
+    # Canary: if a non-list field is added to _BackboneLists, the .extend(...)
+    # below will raise AttributeError on the new field.
+    for name in _BACKBONE_KEYS:
+        worker_bb = getattr(result, name)
+        parent_bb = parent_lists[name]
+        for bb_field in _BB_FIELDS:
+            getattr(parent_bb, bb_field.name).extend(getattr(worker_bb, bb_field.name))
 
 
 # Worker-side state for ``executor=process``. A spawn-context child Python
@@ -680,30 +658,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
-    pred_cp_feats: list[np.ndarray] = []
-    pred_cp_fovs: list[np.ndarray] = []
-    pred_cp_ts: list[np.ndarray] = []
-    gt_cp_feats: list[np.ndarray] = []
-    gt_cp_fovs: list[np.ndarray] = []
-    gt_cp_ts: list[np.ndarray] = []
-    pred_dinov3_feats: list[np.ndarray] = []
-    pred_dinov3_fovs: list[np.ndarray] = []
-    pred_dinov3_ts: list[np.ndarray] = []
-    gt_dinov3_feats: list[np.ndarray] = []
-    gt_dinov3_fovs: list[np.ndarray] = []
-    gt_dinov3_ts: list[np.ndarray] = []
-    pred_dynaclr_feats: list[np.ndarray] = []
-    pred_dynaclr_fovs: list[np.ndarray] = []
-    pred_dynaclr_ts: list[np.ndarray] = []
-    gt_dynaclr_feats: list[np.ndarray] = []
-    gt_dynaclr_fovs: list[np.ndarray] = []
-    gt_dynaclr_ts: list[np.ndarray] = []
-    pred_celldino_feats: list[np.ndarray] = []
-    pred_celldino_fovs: list[np.ndarray] = []
-    pred_celldino_ts: list[np.ndarray] = []
-    gt_celldino_feats: list[np.ndarray] = []
-    gt_celldino_fovs: list[np.ndarray] = []
-    gt_celldino_ts: list[np.ndarray] = []
+    parent_lists: dict[str, _BackboneLists] = {name: _BackboneLists() for name in _BACKBONE_KEYS}
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
@@ -852,30 +807,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     all_pixel_metrics,
                     all_mask_metrics,
                     all_feature_metrics,
-                    pred_cp_feats,
-                    pred_cp_fovs,
-                    pred_cp_ts,
-                    gt_cp_feats,
-                    gt_cp_fovs,
-                    gt_cp_ts,
-                    pred_dinov3_feats,
-                    pred_dinov3_fovs,
-                    pred_dinov3_ts,
-                    gt_dinov3_feats,
-                    gt_dinov3_fovs,
-                    gt_dinov3_ts,
-                    pred_dynaclr_feats,
-                    pred_dynaclr_fovs,
-                    pred_dynaclr_ts,
-                    gt_dynaclr_feats,
-                    gt_dynaclr_fovs,
-                    gt_dynaclr_ts,
-                    pred_celldino_feats,
-                    pred_celldino_fovs,
-                    pred_celldino_ts,
-                    gt_celldino_feats,
-                    gt_celldino_fovs,
-                    gt_celldino_ts,
+                    parent_lists,
                     extend_worker_timings=extend_worker_timings,
                 )
 
@@ -969,9 +901,10 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         # linear probe so MADScaler can normalize per-fold.
         prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
-        if pred_cp_feats:
-            pred_cp_raw = np.concatenate(pred_cp_feats, axis=0)
-            target_cp_raw = np.concatenate(gt_cp_feats, axis=0)
+        cp = parent_lists["cp"]
+        if cp.pred_feats:
+            pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+            target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
             target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
             mask_payload = {
                 "keep_mask": [bool(b) for b in cp_keep_mask],
@@ -995,32 +928,28 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     target_cp_z,
                     pred_cp_filtered,
                     target_cp_filtered,
-                    np.concatenate(pred_cp_fovs, axis=0),
-                    np.concatenate(gt_cp_fovs, axis=0),
+                    np.concatenate(cp.pred_fovs, axis=0),
+                    np.concatenate(cp.gt_fovs, axis=0),
                 )
             )
 
-        deep_tracks = [
-            ("DINOv3", pred_dinov3_feats, gt_dinov3_feats, pred_dinov3_fovs, gt_dinov3_fovs),
-            ("DynaCLR", pred_dynaclr_feats, gt_dynaclr_feats, pred_dynaclr_fovs, gt_dynaclr_fovs),
-        ]
+        deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
         if celldino_feature_extractor is not None:
-            deep_tracks.append(
-                ("CellDINO", pred_celldino_feats, gt_celldino_feats, pred_celldino_fovs, gt_celldino_fovs)
-            )
-        for name, pred_feats, gt_feats, pred_fovs, gt_fovs in deep_tracks:
-            if pred_feats:
-                pred_arr = np.concatenate(pred_feats, axis=0)
-                target_arr = np.concatenate(gt_feats, axis=0)
+            deep_tracks.append(("CellDINO", "celldino"))
+        for display_name, key in deep_tracks:
+            bb = parent_lists[key]
+            if bb.pred_feats:
+                pred_arr = np.concatenate(bb.pred_feats, axis=0)
+                target_arr = np.concatenate(bb.gt_feats, axis=0)
                 prefix_inputs.append(
                     (
-                        name,
+                        display_name,
                         pred_arr,
                         target_arr,
                         pred_arr,
                         target_arr,
-                        np.concatenate(pred_fovs, axis=0),
-                        np.concatenate(gt_fovs, axis=0),
+                        np.concatenate(bb.pred_fovs, axis=0),
+                        np.concatenate(bb.gt_fovs, axis=0),
                     )
                 )
 
@@ -1060,17 +989,13 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
         for row in all_feature_metrics:
             row.update(dataset_row)
-        embedding_groups = {
-            "pred_cp": (pred_cp_feats, pred_cp_fovs, pred_cp_ts),
-            "gt_cp": (gt_cp_feats, gt_cp_fovs, gt_cp_ts),
-            "pred_dinov3": (pred_dinov3_feats, pred_dinov3_fovs, pred_dinov3_ts),
-            "gt_dinov3": (gt_dinov3_feats, gt_dinov3_fovs, gt_dinov3_ts),
-            "pred_dynaclr": (pred_dynaclr_feats, pred_dynaclr_fovs, pred_dynaclr_ts),
-            "gt_dynaclr": (gt_dynaclr_feats, gt_dynaclr_fovs, gt_dynaclr_ts),
-        }
-        if celldino_feature_extractor is not None:
-            embedding_groups["pred_celldino"] = (pred_celldino_feats, pred_celldino_fovs, pred_celldino_ts)
-            embedding_groups["gt_celldino"] = (gt_celldino_feats, gt_celldino_fovs, gt_celldino_ts)
+        embedding_groups: dict[str, tuple] = {}
+        for key in _BACKBONE_KEYS:
+            if key == "celldino" and celldino_feature_extractor is None:
+                continue
+            bb = parent_lists[key]
+            embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
+            embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
         _save_embeddings(save_dir, embedding_groups)
 
     dump_timings_csv(save_dir)

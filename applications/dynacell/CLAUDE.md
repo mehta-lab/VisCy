@@ -48,6 +48,23 @@ Where `<org>` is `nucl` / `memb` / `sec61b` / `tomm20`, `<model>` is the **code 
 
 Caveat: Dihan's earlier ER + Mito iPSC-trained zarrs use a legacy `<gene>_<model>__<gene>_<cond>.zarr` shape (e.g. `sec61b_fcmae_vscyto3d_scratch__sec61b_mock.zarr`, double-underscore + redundant gene prefix). New leaves should follow the table above; do not propagate the legacy form.
 
+### CellDiff-R2 joint predictions: separate dir + no `_jointtrained` infix
+
+CellDiff-R2 joint predicts (model `celldiff_r2` trained on iPSC + A549 mantis) deviate from the convention above in **two** ways. Predict configs live at `applications/dynacell/configs/benchmarks/virtual_staining/<organelle>/celldiff/joint_ipsc_confocal_a549_mantis/predict__*.yml` — the directory name says `celldiff/` but the YAMLs hard-code `ckpt_path: .../celldiff_r2/checkpoints/last.ckpt`, so the model variant is selected by the checkpoint, not by the directory.
+
+The submitter that wires these up is `/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/VisCy/plot_related/run_celldiff_r2_pred_joint.slurm` (16-task array; submitted 2026-05-18, completed 2026-05-20 as job `33021852`).
+
+| Trained on | Test set | Output path |
+| --- | --- | --- |
+| Joint (iPSC + A549) | iPSC | `ipsc/joint_predictions/<org>_celldiff_r2.zarr` |
+| Joint (iPSC + A549) | A549 plate | `a549/joint_predictions/<org>_celldiff_r2_<cond>.zarr` |
+
+Note the differences vs. the joint rows in the main table:
+- Output dir is `joint_predictions/`, **not** `predictions/`. Sweeps that only walk `predictions/` will miss every joint zarr.
+- Filename has **no** `_jointtrained` infix. The model name `celldiff_r2` alone implies joint here. The same naming inconsistency does not apply to FCMAE / fnet3d joint zarrs, which correctly land at `predictions/<org>_<model>_jointtrained[_<cond>].zarr`.
+
+Counts: 4 iPSC zarrs (one per organelle, 100 positions each) + 12 A549 zarrs (4 organelles × 3 plates, 14 positions each). Coexisting joint predicts for FCMAE/fnet3d under the same `joint_predictions/` dir follow the `_jointtrained_<cond>` convention — only CellDiff-R2's are bare. When inspecting "joint training results for CellDiff-R2," check `joint_predictions/` first.
+
 ## Eval runtime / parallelism
 
 `dynacell.evaluation.runtime` (added 2026-05) provides three layered thread-cap entry points + optional FOV-level parallelism via spawn-context `ProcessPoolExecutor`. Defaults preserve sequential behavior; opt in via the `runtime:` block in `eval.yaml`.
@@ -117,10 +134,16 @@ conditions:
     save: { save_dir: /path/to/out/a549_zikv }
 ```
 
-Invoke:
+Invoke (leaves live under
+`applications/dynacell/configs/benchmarks/virtual_staining/_internal/leaf/grouped/`
+and are discovered via `_EXTERNAL_SEARCHPATHS` in `__main__.py`):
 ```sh
-uv run dynacell evaluate-grouped -c eval_grouped_a549_mantis_er
+uv run dynacell evaluate-grouped leaf=grouped/<bucket>/eval_grouped
 ```
+
+`-c` is Hydra's `--cfg` flag (accepts `job`, `hydra`, or `all` for config
+display only); it cannot select the leaf. Use the `leaf=` group override
+instead — that's how single-condition leaves discover their YAML too.
 
 Constraints (enforced at runtime by `_check_grouped_field_invariants`):
 - Per-condition overlays may freely override `io.*`, `save.*`, `runtime.*`, `limit_positions`, `force_recompute.*`, and carry a `name` label.
