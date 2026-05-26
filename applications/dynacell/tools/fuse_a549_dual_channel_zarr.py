@@ -71,13 +71,13 @@ def main() -> int:
         "--allclose-atol",
         type=float,
         default=1e-5,
-        help="Absolute tolerance for the per-position Phase3D byte-equality gate.",
+        help="Absolute tolerance for the per-position Phase3D np.allclose equality check.",
     )
     parser.add_argument(
         "--allclose-rtol",
         type=float,
         default=1e-5,
-        help="Relative tolerance for the per-position Phase3D byte-equality gate.",
+        help="Relative tolerance for the per-position Phase3D np.allclose equality check.",
     )
     args = parser.parse_args()
 
