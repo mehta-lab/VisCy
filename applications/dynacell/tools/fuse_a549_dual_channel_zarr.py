@@ -12,10 +12,10 @@ provenance), then writes a new OME-Zarr v3 store with channels
 fine-tuning (`vscyto3d_cytolandft` / `vscyto3d_infectionft_dynacellft` on
 a549_mantis).
 
-A Phase3D byte-equality gate (np.allclose) runs per position to catch any
-divergence from the source_position join — Phase3D *should* be identical
-between the two channel-extracted views, so any mismatch indicates the join
-is wrong and the run aborts.
+A Phase3D numerical-equality check (np.allclose, tolerance-based) runs per
+position to catch any divergence from the source_position join — Phase3D
+*should* be identical between the two channel-extracted views, so any
+mismatch indicates the join is wrong and the run aborts.
 
 Usage::
 
