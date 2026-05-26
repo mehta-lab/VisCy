@@ -65,6 +65,12 @@ optional-dependencies.eval = [
 optional-dependencies.eval_gpu = [
   "cucim-cu12",
   "cupy-cuda12x",
+  # cupy-cuda12x needs libcufft.so.11 (CUDA 12 cuFFT ABI). Torch 2.12 +cu130
+  # pulls in nvidia-cufft (12.0.0.61, libcufft.so.12) but not the cu12
+  # variant, so we pin nvidia-cufft-cu12 explicitly to bring back
+  # libcufft.so.11. Both sonames coexist; cupy picks .11 via cuda-pathfinder,
+  # torch picks .12 via its own dlopen tree.
+  "nvidia-cufft-cu12",
 ]
 optional-dependencies.preprocess = [
   "iohub",
