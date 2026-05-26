@@ -249,9 +249,21 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
         num_slices = len(img["target"])
         img_targets = targets[slice_idx : slice_idx + num_slices]
         img_predictions = predictions[slice_idx : slice_idx + num_slices]
-        slice_scores = [sim.score(img_targets[i], img_predictions[i]) for i in range(num_slices)]
+        slice_scores: list[float] = []
+        for i in range(num_slices):
+            try:
+                slice_scores.append(float(sim.score(img_targets[i], img_predictions[i])))
+            except (ValueError, RuntimeError):
+                # Degenerate slice (constant target or prediction → data_range=0
+                # in cubic's ms_ssim, or NaN from the fitted α path). The fov-mean
+                # below drops these via ``np.nanmean``; the whole row is NaN only
+                # when every slice in the FOV-T is degenerate.
+                slice_scores.append(float("nan"))
         slice_idx += num_slices
-        scores.append({"MicroMS3IM": float(np.mean(np.nan_to_num(slice_scores)))})
+        if np.all(np.isnan(slice_scores)):
+            scores.append({"MicroMS3IM": float("nan")})
+        else:
+            scores.append({"MicroMS3IM": float(np.nanmean(slice_scores))})
     return scores
 
 
