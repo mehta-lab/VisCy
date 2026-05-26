@@ -158,3 +158,29 @@ Process-mode caveat: under `runtime.executor=process`, the parent's shared `Eval
 For an A40 / single-GPU interactive node where you'd run serial anyway, this is the default win.
 
 Tests: `applications/dynacell/tests/test_evaluation_grouped.py` validates byte-equal parity against sequential per-condition runs on the same cache-only fixture used by `test_evaluation_pipeline_parallel_cpu.py`, plus rejection cases for empty `conditions` and forbidden model-loading-field overrides.
+
+## Predict submission modes
+
+`tools/submit_benchmark_batch.py` (and the `tools/predict_batch.sh` wrapper) covers three submission shapes. They are mutually exclusive — pick by parallelism shape, not by familiarity:
+
+| Mode | Flag | Squeue rows | Per-GPU concurrency | Cross-sbatch concurrency |
+|---|---|---|---|---|
+| Serial (default) | (none) | 1 | 1 | — |
+| Array | `--array [--max-array-concurrency K]` | 1 array (N tasks) | 1 per task | K |
+| Chunked | `--parallel P` (P > 1) | ceil(N/P) | P (bare-background `&`) | full queue |
+
+Selection guide:
+
+- **One small set, contiguous time, want minimal queue footprint** → serial. One srun per leaf in series; least queue overhead.
+- **Many leaves on different GPUs, want SLURM to throttle concurrent allocations** → `--array --max-array-concurrency K`. Each task gets its own allocation.
+- **Few leaves but predict is GPU-light** → `--parallel P`. One GPU runs P leaves in parallel (memory-confirmed 2-up on A40, 2–4 on H200/H100). Faster wall time per chunk than serial without using more total GPU-hours.
+- **Leaves span mixed hardware profiles (e.g., some H200, some A40)** → `--array --allow-mixed-directives`. Buckets leaves and submits one array per directive bucket. Only mode that handles this. **NOT compatible with `--parallel`.**
+
+Hardening to know about when you read the rendered sbatch:
+
+- `--parallel > 1` scales `cpus_per_task` by the chunk size and pins `OMP_NUM_THREADS`/`MKL_NUM_THREADS` per backgrounded process so concurrent children don't oversubscribe by all reading `SLURM_CPUS_PER_TASK`. Per-leaf logs land at `{run_root}/slurm/${SLURM_JOB_ID}_<exp_id>.log`; the sbatch's own `%j.out` only sees the driver banner and any chunk-level failure summary.
+- PIDs are captured and `wait $pid` is called per child. Bare `wait` (no args) returns only the LAST child's status and would silently mask earlier crashes as `COMPLETED` — the rendered bash propagates non-zero exit codes explicitly.
+- Submission loop catches `sbatch` failures per script and reports queued-vs-skipped (matters for `--parallel > 1` and `--array --allow-mixed-directives` since both produce multiple sbatches per invocation). Single-failure no longer hides an opaque traceback.
+- Soft warning at `cpus_per_task > 128`. Most cluster nodes top out around there; scaling `--parallel` past that often makes chunks pend forever.
+
+For local foreground execution (no sbatch), `tools/predict_local.sh --parallel N` has its own backgrounding implementation on the current host's GPU. Confirmed safe 2-up on A40 (`gpu-e-2` interactive). Don't confuse it with `--parallel` on the sbatch helper — different invocation paths.

@@ -37,6 +37,19 @@ uv run dynacell evaluate \
 
 Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N`.
 
+## Submission tooling
+
+| Tool | Use case |
+|---|---|
+| `dynacell evaluate ...` / `dynacell evaluate-grouped leaf=...` | Run a single eval (or grouped multi-condition eval) inline. Foreground, no sbatch. |
+| `tools/submit_evaluation_job.py <leaf>` | Submit a single eval leaf as one sbatch. Mirror of `submit_benchmark_job.py` for eval. |
+| `tools/submit_evaluation_batch.py <leaves...>` | Submit N eval leaves as one sbatch with `--parallel N` (chunked waves of N concurrent processes on the shared GPU). Used by `tools/evaluate_batch.sh`. |
+| `tools/run_eval_direct.slurm <leaf>` | Direct-launch slurm script for hand-authored eval leaves that bypass the submit helpers. |
+
+For multi-condition evals over `(model, organelle) × {mock, denv, zikv}`, prefer `evaluate-grouped` over N separate `evaluate` calls — it amortizes the ~30–90 s SuperModel + DINOv3 + DynaCLR + CELL-DINO load across conditions. See [`applications/dynacell/CLAUDE.md`](../../../CLAUDE.md#grouped-multi-condition-eval) "Grouped multi-condition eval" for the executor + cache-mode tradeoffs.
+
+For the predict-side submission tooling (`submit_benchmark_batch.py` + `predict_batch.sh`, with serial / `--array` / `--parallel P` modes), see [`applications/dynacell/CLAUDE.md`](../../../CLAUDE.md#predict-submission-modes) "Predict submission modes" and the [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md#multi-leaf-submission-with-submit_benchmark_batchpy).
+
 ## Configuration
 
 `dynacell evaluate` is a Hydra entrypoint — override any field with `key=value` (CLI overrides win over groups). Settings that travel with a (target, marker, dataset) combination live in named Hydra **config groups**:
