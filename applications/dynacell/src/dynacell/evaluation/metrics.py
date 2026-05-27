@@ -247,17 +247,29 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
     slice_idx = 0
     for img in microssim_data:
         num_slices = len(img["target"])
+        if num_slices == 0:
+            raise ValueError(
+                "score_microssim received a microssim_data entry with zero z-slices; "
+                "this signals a stacking bug or an empty FOV upstream."
+            )
         img_targets = targets[slice_idx : slice_idx + num_slices]
         img_predictions = predictions[slice_idx : slice_idx + num_slices]
         slice_scores: list[float] = []
         for i in range(num_slices):
             try:
-                slice_scores.append(float(sim.score(img_targets[i], img_predictions[i])))
-            except (ValueError, RuntimeError):
-                # Degenerate slice (constant target or prediction → data_range=0
-                # in cubic's ms_ssim, or NaN from the fitted α path). The fov-mean
-                # below drops these via ``np.nanmean``; the whole row is NaN only
-                # when every slice in the FOV-T is degenerate.
+                slice_scores.append(sim.score(img_targets[i], img_predictions[i]))
+            except ValueError as exc:
+                # cubic's ms_ssim raises ``ValueError("data_range must be finite
+                # and positive; got <x>")`` when target or prediction collapses
+                # to a constant slice (data_range = max - min = 0) or when a NaN
+                # α from the fitted path propagates into pred_norm (data_range =
+                # NaN - NaN = NaN). All other ValueErrors (un-fitted sim, shape
+                # mismatch, ndim != 2, kernel/spatial-min violations) are real
+                # bugs and must propagate. ``np.nanmean`` below drops the NaN
+                # entries; the whole FOV-T row is NaN only if every slice trips
+                # this guard.
+                if "data_range" not in str(exc):
+                    raise
                 slice_scores.append(float("nan"))
         slice_idx += num_slices
         if np.all(np.isnan(slice_scores)):
