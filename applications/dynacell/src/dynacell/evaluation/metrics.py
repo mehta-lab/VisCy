@@ -265,18 +265,18 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
                 # α from the fitted path propagates into pred_norm (data_range =
                 # NaN - NaN = NaN). All other ValueErrors (un-fitted sim, shape
                 # mismatch, ndim != 2, kernel/spatial-min violations) are real
-                # bugs and must propagate. ``np.nanmean`` below drops the NaN
-                # entries; the whole FOV-T row is NaN only if every slice trips
-                # this guard.
+                # bugs and must propagate. A degenerate slice is scored as 0
+                # rather than NaN so that the FOV-T mean is dragged toward the
+                # floor — a model that collapses on a subset of slices/FOVs
+                # deserves a penalty in leaf-level rankings, not silent removal
+                # from the average (a ``nanmean``-style aggregation would let
+                # collapsed predictions vanish, leaving a partially-collapsing
+                # model indistinguishable from one that scores well everywhere).
                 if "data_range" not in str(exc):
                     raise
-                slice_scores.append(float("nan"))
+                slice_scores.append(0.0)
         slice_idx += num_slices
-        slice_arr = np.asarray(slice_scores, dtype=float)
-        if np.isnan(slice_arr).all():
-            scores.append({"MicroMS3IM": float("nan")})
-        else:
-            scores.append({"MicroMS3IM": float(np.nanmean(slice_arr))})
+        scores.append({"MicroMS3IM": float(np.asarray(slice_scores, dtype=float).mean())})
     return scores
 
 

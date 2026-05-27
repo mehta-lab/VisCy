@@ -133,6 +133,121 @@ def test_pcc_shape_mismatch_raises(monkeypatch) -> None:
         metrics.pcc(torch.ones(10), torch.ones(20))
 
 
+# --- score_microssim tests ---
+
+
+class _ScriptedSim:
+    """Fake MicroMS3IM stub whose ``score`` method replays a scripted sequence.
+
+    Each element of ``behavior`` is either a numeric value (returned on the
+    next call) or an ``Exception`` instance (raised on the next call). This
+    lets each test inject the exact mix of degenerate / valid / raising
+    slices needed to exercise a single branch of ``score_microssim``.
+    """
+
+    def __init__(self, behavior):
+        self.behavior = list(behavior)
+        self.call_count = 0
+
+    def score(self, target, pred):  # noqa: ARG002
+        idx = self.call_count
+        self.call_count += 1
+        outcome = self.behavior[idx]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _three_slice_data():
+    """Single-FOV microssim_data with three z-slices of trivial (4, 4) shape."""
+    return [
+        {
+            "target": np.zeros((3, 4, 4), dtype=np.float32),
+            "predict": np.zeros((3, 4, 4), dtype=np.float32),
+        }
+    ]
+
+
+def test_score_microssim_degenerate_slice_scored_as_zero_penalizes_mean(monkeypatch) -> None:
+    """A data_range ValueError scores the slice as 0 — partial collapse drags the FOV-T mean toward 0.
+
+    This penalizes a model that collapses on a subset of slices, instead of
+    silently dropping the degenerate slice from the row average (which would
+    let a partially-collapsing model rank identically to one that scores well
+    everywhere).
+    """
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    sim = _ScriptedSim(
+        [
+            ValueError("data_range must be finite and positive; got 0.0"),
+            0.8,
+            0.6,
+        ]
+    )
+    out = metrics.score_microssim(_three_slice_data(), sim, use_gpu=False)
+    # (0.0 + 0.8 + 0.6) / 3 — the degenerate slice contributes 0, not "absent".
+    assert out[0]["MicroMS3IM"] == pytest.approx((0.0 + 0.8 + 0.6) / 3)
+
+
+def test_score_microssim_all_degenerate_yields_zero(monkeypatch) -> None:
+    """When every slice trips the data_range guard the FOV-T row is 0.0 — worst possible score."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    sim = _ScriptedSim([ValueError("data_range must be finite and positive; got 0.0")] * 3)
+    out = metrics.score_microssim(_three_slice_data(), sim, use_gpu=False)
+    assert out[0]["MicroMS3IM"] == pytest.approx(0.0)
+
+
+def test_score_microssim_non_data_range_value_error_propagates(monkeypatch) -> None:
+    """ValueErrors whose message does not mention data_range are real bugs — they propagate."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    sim = _ScriptedSim([ValueError("MicroSSIM was not initialized, call fit() first.")])
+    with pytest.raises(ValueError, match="not initialized"):
+        metrics.score_microssim(
+            [
+                {
+                    "target": np.zeros((1, 4, 4), dtype=np.float32),
+                    "predict": np.zeros((1, 4, 4), dtype=np.float32),
+                }
+            ],
+            sim,
+            use_gpu=False,
+        )
+
+
+def test_score_microssim_runtime_error_propagates(monkeypatch) -> None:
+    """RuntimeErrors (e.g., CUDA OOM) are no longer masked by the guard."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    sim = _ScriptedSim([RuntimeError("CUDA out of memory")])
+    with pytest.raises(RuntimeError, match="out of memory"):
+        metrics.score_microssim(
+            [
+                {
+                    "target": np.zeros((1, 4, 4), dtype=np.float32),
+                    "predict": np.zeros((1, 4, 4), dtype=np.float32),
+                }
+            ],
+            sim,
+            use_gpu=False,
+        )
+
+
+def test_score_microssim_empty_fov_raises(monkeypatch) -> None:
+    """An FOV with zero z-slices is an upstream stacking bug — raise rather than NaN."""
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    sim = _ScriptedSim([])
+    with pytest.raises(ValueError, match="zero z-slices"):
+        metrics.score_microssim(
+            [
+                {
+                    "target": np.zeros((0, 4, 4), dtype=np.float32),
+                    "predict": np.zeros((0, 4, 4), dtype=np.float32),
+                }
+            ],
+            sim,
+            use_gpu=False,
+        )
+
+
 # --- evaluate_segmentations tests ---
 
 
