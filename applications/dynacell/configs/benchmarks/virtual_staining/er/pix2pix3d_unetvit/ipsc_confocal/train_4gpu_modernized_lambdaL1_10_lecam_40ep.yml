@@ -1,0 +1,65 @@
+# pix2pix3d_unetvit MODERNIZED Run D-ext (lambda_L1=10 + LeCam, 40 epochs) on ER (SEC61B) — 4-GPU DDP.
+#
+# Resumes from Run D's epoch-19 `last.ckpt` and trains another 20 epochs.
+# All recipe knobs match Run D exactly (lambda_l1=10, lecam_gamma=0.3,
+# lecam_decay=0.9); only `max_epochs` is bumped 20 -> 40 and `ckpt_path`
+# points at the prior run's last checkpoint.
+#
+# LR schedule behavior at resume: the WarmupCosine scheduler is rebuilt at
+# fit-start with `t_total = trainer.estimated_stepping_batches` (=
+# ~54080 steps for max_epochs=40 vs ~27040 for the original 20-epoch run).
+# The scheduler state restores `last_epoch=27040` from the checkpoint, so
+# the optimizer wakes up at the midpoint of the stretched cosine (LR
+# factor ~0.65, i.e. ~1.3e-4) and decays to 0 over the next 20 epochs.
+# Adam moments, EMA, RNG, D-state, LeCam EMAs, global_step all restore
+# from the ckpt.
+#
+# New `save_dir` and W&B name keep the original Run D dashboard/ckpts
+# intact; the extension is logged as a fresh W&B run that starts at
+# epoch 20. See PR #428 discussion thread.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: er__ipsc_confocal__pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+
+# Lightning fit-resume: trainer.fit(model, datamodule, ckpt_path=...)
+ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam/checkpoints/last.ckpt
+
+model:
+  init_args:
+    lambda_l1: 10.0      # matches Run D
+    lecam_gamma: 0.3     # matches Run D
+    lecam_decay: 0.9     # matches Run D
+
+trainer:
+  max_epochs: 40         # was 20 in the overlay; extending the original Run D
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_SEC61B_4gpu_modernized_lambdaL1_10_lecam_40ep
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_SEC61B_4gpu_modernized_lambdaL1_10_lecam_40ep
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
