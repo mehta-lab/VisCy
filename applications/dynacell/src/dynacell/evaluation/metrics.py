@@ -247,19 +247,36 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
     slice_idx = 0
     for img in microssim_data:
         num_slices = len(img["target"])
+        if num_slices == 0:
+            raise ValueError(
+                "score_microssim received a microssim_data entry with zero z-slices; "
+                "this signals a stacking bug or an empty FOV upstream."
+            )
         img_targets = targets[slice_idx : slice_idx + num_slices]
         img_predictions = predictions[slice_idx : slice_idx + num_slices]
         slice_scores: list[float] = []
         for i in range(num_slices):
-            # Degenerate slices (constant target → data_range=0) raise inside
-            # cubic.ms_ssim. Treat them as NaN so np.nan_to_num penalizes the
-            # FOV instead of aborting the whole leaf.
             try:
-                slice_scores.append(float(sim.score(img_targets[i], img_predictions[i])))
-            except (ValueError, RuntimeError):
-                slice_scores.append(float("nan"))
+                slice_scores.append(sim.score(img_targets[i], img_predictions[i]))
+            except ValueError as exc:
+                # cubic's ms_ssim raises ``ValueError("data_range must be finite
+                # and positive; got <x>")`` when target or prediction collapses
+                # to a constant slice (data_range = max - min = 0) or when a NaN
+                # α from the fitted path propagates into pred_norm (data_range =
+                # NaN - NaN = NaN). All other ValueErrors (un-fitted sim, shape
+                # mismatch, ndim != 2, kernel/spatial-min violations) are real
+                # bugs and must propagate. A degenerate slice is scored as 0
+                # rather than NaN so that the FOV-T mean is dragged toward the
+                # floor — a model that collapses on a subset of slices/FOVs
+                # deserves a penalty in leaf-level rankings, not silent removal
+                # from the average (a ``nanmean``-style aggregation would let
+                # collapsed predictions vanish, leaving a partially-collapsing
+                # model indistinguishable from one that scores well everywhere).
+                if "data_range" not in str(exc):
+                    raise
+                slice_scores.append(0.0)
         slice_idx += num_slices
-        scores.append({"MicroMS3IM": float(np.mean(np.nan_to_num(slice_scores)))})
+        scores.append({"MicroMS3IM": float(np.asarray(slice_scores, dtype=float).mean())})
     return scores
 
 
