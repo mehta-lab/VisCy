@@ -272,10 +272,11 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
                     raise
                 slice_scores.append(float("nan"))
         slice_idx += num_slices
-        if np.all(np.isnan(slice_scores)):
+        slice_arr = np.asarray(slice_scores, dtype=float)
+        if np.isnan(slice_arr).all():
             scores.append({"MicroMS3IM": float("nan")})
         else:
-            scores.append({"MicroMS3IM": float(np.nanmean(slice_scores))})
+            scores.append({"MicroMS3IM": float(np.nanmean(slice_arr))})
     return scores
 
 
