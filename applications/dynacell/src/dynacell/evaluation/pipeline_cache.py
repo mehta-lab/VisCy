@@ -71,6 +71,7 @@ class _CacheContext:
     spacing: list[float]
     patch_size: int
     _: KW_ONLY
+    partial_walk: bool = False
     use_gpu: bool = True
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
@@ -175,6 +176,7 @@ def init_cache_context(
     spacing = list(config.pixel_metrics.spacing)
     patch_size = int(config.feature_metrics.patch_size)
     use_gpu = bool(getattr(config, "use_gpu", True))
+    partial_walk = OmegaConf.select(config, "limit_positions", default=None) is not None
 
     dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
@@ -188,6 +190,7 @@ def init_cache_context(
         target_name=config.target_name,
         spacing=spacing,
         patch_size=patch_size,
+        partial_walk=partial_walk,
         use_gpu=use_gpu,
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
@@ -268,6 +271,14 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
     to a hard :class:`StaleCacheError` — the user opted out of recompute,
     so a stale-version manifest is an unambiguous failure rather than a
     signal to rebuild.
+
+    Under ``limit_positions`` (smoke / iteration mode that walks only the
+    first ``N`` FOVs) the soft path is also escalated: rewriting the
+    manifest's per-extractor entry to the new version while only the
+    visited FOVs' on-disk features get recomputed would leave the
+    unvisited FOVs with stale-version data under a manifest that lies
+    about it. The operator must clear the cache and rerun, OR drop
+    ``limit_positions`` so every FOV is recomputed.
     """
     if not ctx.enabled:
         return
@@ -297,6 +308,13 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
                 f"(cached={cached_version!r}, current={current_version!r}) and "
                 f"io.require_complete_cache=true"
             )
+        if ctx.partial_walk:
+            raise StaleCacheError(
+                f"{section_key}[{sub_key}]: preprocess_version mismatch "
+                f"(cached={cached_version!r}, current={current_version!r}) and "
+                f"limit_positions is set (partial walk cannot safely auto-invalidate; "
+                f"clear the cache or drop limit_positions)"
+            )
         force_key = f"{ctx.side}_{kind}"
         ctx.force[force_key] = True
         warnings.warn(
@@ -323,6 +341,14 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
     a hard :class:`StaleCacheError` — the user opted out of recompute, so a
     stale-param manifest is an unambiguous failure rather than a signal to
     rebuild.
+
+    Under ``limit_positions`` (smoke / iteration mode that walks only the
+    first ``N`` FOVs) the soft path is also escalated: rewriting the
+    manifest's per-artifact entry to the new params while only the visited
+    FOVs' on-disk features get recomputed would leave the unvisited FOVs
+    with stale-param data under a manifest that lies about it. The
+    operator must clear the cache and rerun, OR drop ``limit_positions``
+    so every FOV is recomputed.
     """
     if not ctx.enabled:
         return
@@ -392,6 +418,11 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         if ctx.require_complete:
             raise StaleCacheError(
                 f"{artifact_label}: artifact param mismatch ({details}) and io.require_complete_cache=true"
+            )
+        if ctx.partial_walk:
+            raise StaleCacheError(
+                f"{artifact_label}: artifact param mismatch ({details}) and limit_positions is set "
+                f"(partial walk cannot safely auto-invalidate; clear the cache or drop limit_positions)"
             )
         force_key = f"{ctx.side}_{kind}"
         ctx.force[force_key] = True

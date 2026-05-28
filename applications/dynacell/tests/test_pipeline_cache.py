@@ -302,6 +302,36 @@ def test_init_cache_spacing_mismatch_raises_under_require_complete(tmp_path: Pat
         )
 
 
+def test_init_cache_spacing_mismatch_raises_under_limit_positions(tmp_path: Path) -> None:
+    """Stale spacing under ``limit_positions`` is fatal, not soft-recomputed.
+
+    Partial-walk runs (smoke / iteration with `limit_positions=N`) visit
+    only the first N FOVs. Soft-invalidate would rewrite the manifest's
+    flat `cp_features.spacing` to the new value while only those N FOVs
+    get their on-disk regionprops recomputed — leaving unvisited FOVs'
+    chunks tagged with the new spacing in the manifest but holding
+    old-spacing data on disk. The operator must clear the cache or drop
+    `limit_positions`.
+    """
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="cp_features.*spacing.*limit_positions"):
+        init_cache_context(
+            _make_config(**{"io.gt_cache_dir": str(tmp_path), "limit_positions": 4}),
+            side="gt",
+        )
+
+
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
     """First call computes masks via segment() and writes them to cache."""
     import dynacell.evaluation.segmentation as segmentation
