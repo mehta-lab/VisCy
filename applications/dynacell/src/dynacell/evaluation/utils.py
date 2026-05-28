@@ -131,10 +131,15 @@ class DinoV3FeatureExtractor:
     # Version tag for the input-side preprocessing recipe. Stored under
     # ``artifacts.dinov3_features.<slug>.preprocess_version`` in the cache
     # manifest. Current recipe is per-image min/max scale to ``[0, 1]``
-    # followed by ImageNet ``(mean, std)`` normalization, applied in
-    # :meth:`viscy_models.foundation.DINOv3Model.preprocess_2d`. Bump on
-    # any change to that recipe so cached features auto-invalidate.
-    PREPROCESS_VERSION = "imagenet_normalize_v1"
+    # (already done upstream by ``build_crops``) followed by ImageNet
+    # ``(mean, std)`` normalization via ``AutoImageProcessor`` with
+    # ``do_rescale=False`` — the processor's default ``rescale_factor``
+    # of ``1/255`` would otherwise divide our [0, 1] float crops a second
+    # time, leaving the model with essentially-black inputs and features
+    # cosine-uncorrelated with the intended representation. The v2 bump
+    # invalidates every v1 cache entry, which was extracted with the
+    # buggy double-rescale path.
+    PREPROCESS_VERSION = "imagenet_normalize_v2"
 
     def __init__(self, pretrained_model_name: str):
         """Load DINOv3 model from HuggingFace Hub.
@@ -167,7 +172,7 @@ class DinoV3FeatureExtractor:
         """
         # Replicate single channel to 3 channels expected by the ViT backbone
         image = np.stack([image] * 3, axis=0)
-        inputs = self.processor(images=image, return_tensors="pt").to(self.model.device)
+        inputs = self.processor(images=image, return_tensors="pt", do_rescale=False).to(self.model.device)
         with torch.inference_mode():
             outputs = self.model(**inputs)
         return outputs.pooler_output
@@ -181,7 +186,7 @@ class DinoV3FeatureExtractor:
         out_chunks: list[torch.Tensor] = []
         for i in range(0, len(images), batch_size):
             chunk = [np.stack([img] * 3, axis=0) for img in images[i : i + batch_size]]
-            inputs = self.processor(images=chunk, return_tensors="pt").to(self.model.device)
+            inputs = self.processor(images=chunk, return_tensors="pt", do_rescale=False).to(self.model.device)
             with torch.inference_mode():
                 outputs = self.model(**inputs)
             out_chunks.append(outputs.pooler_output)
