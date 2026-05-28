@@ -499,7 +499,7 @@ def _process_one_fov(
                 spacing=config.pixel_metrics.spacing,
                 fsc_kwargs=config.pixel_metrics.fsc,
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
-                use_gpu=config.use_gpu,
+                use_gpu=use_gpu,
             )
         if config.compute_microssim:
             microssim_data.append({"target": target[t], "predict": predict[t]})
