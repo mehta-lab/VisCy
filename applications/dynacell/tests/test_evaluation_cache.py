@@ -280,6 +280,38 @@ def test_diff_artifact_params_scalar_mismatch_lists_key() -> None:
     assert mismatches == [("patch_size", 256, 128)]
 
 
+def test_diff_artifact_params_numeric_length_mismatch_lists_key() -> None:
+    """A malformed numeric cached value (wrong length) surfaces as a mismatch.
+
+    np.allclose raises ValueError on incompatible broadcast shapes; the
+    helper must catch that so the caller can soft-invalidate rather than
+    crash inside init_cache_context.
+    """
+    entry = {"spacing": [0.29, 0.108]}
+    mismatches = diff_artifact_params(
+        entry,
+        {"spacing": [0.29, 0.108, 0.108]},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [("spacing", [0.29, 0.108], [0.29, 0.108, 0.108])]
+
+
+def test_diff_artifact_params_numeric_nonconvertible_lists_key() -> None:
+    """A numeric cached value that isn't array-castable surfaces as a mismatch.
+
+    np.asarray(..., dtype=float) raises TypeError on non-numeric input
+    (e.g. a hand-edited manifest with a string sentinel); the helper must
+    catch that so a malformed manifest does not bypass soft-invalidation.
+    """
+    entry = {"spacing": "unknown"}
+    mismatches = diff_artifact_params(
+        entry,
+        {"spacing": [0.29, 0.108, 0.108]},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [("spacing", "unknown", [0.29, 0.108, 0.108])]
+
+
 def test_write_and_read_mask_roundtrip(tmp_path: Path) -> None:
     """Masks written for one position are readable back as a bool array."""
     paths = cache_paths(tmp_path)

@@ -212,12 +212,19 @@ def diff_artifact_params(
     for key, value in current.items():
         cached_value = entry.get(key)
         if key in numeric_keys:
-            if cached_value is None or not np.allclose(
-                np.asarray(cached_value, dtype=float),
-                np.asarray(value, dtype=float),
-                rtol=1e-9,
-                atol=0.0,
-            ):
+            # A malformed cached value (None, wrong dtype, wrong length) must
+            # surface as a mismatch so the caller can soft-invalidate, not as
+            # a TypeError/ValueError that escapes through diff_artifact_params.
+            try:
+                close = cached_value is not None and np.allclose(
+                    np.asarray(cached_value, dtype=float),
+                    np.asarray(value, dtype=float),
+                    rtol=1e-9,
+                    atol=0.0,
+                )
+            except (TypeError, ValueError):
+                close = False
+            if not close:
                 mismatches.append((key, cached_value, value))
         elif cached_value != value:
             mismatches.append((key, cached_value, value))
