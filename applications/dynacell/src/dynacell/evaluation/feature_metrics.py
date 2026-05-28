@@ -149,10 +149,17 @@ def _bootstrap_prc(
 def _mind(pred: np.ndarray, target: np.ndarray, num_projections: int, rng_seed: int, use_gpu: bool = False) -> float:
     """Sliced 2-Wasserstein based MIND from torch-fidelity.
 
-    ``use_gpu=True`` routes the projection + Wasserstein sort through CUDA via
-    torch-fidelity's ``cuda`` kwarg; the resulting kernel computations are
-    cheap to overlap with the encoder forward pass that produced ``pred`` /
-    ``target``, so the upload tax is paid only once per dataset call.
+    ``use_gpu=True`` routes the projection + Wasserstein sort through CUDA
+    via torch-fidelity's ``cuda`` kwarg. ``False`` (default) keeps the
+    compute on CPU.
+
+    The default is False because the only production caller — the
+    dataset-level threadpool in ``evaluate_predictions`` — intentionally
+    leaves it unset: 4 parallel threads on a shared CUDA context would
+    serialize via the allocator and torch's CPU-vs-CUDA RNG produces
+    different streams for the same ``rng_seed``, breaking cross-leaf
+    comparability of the MIND column. The kwarg is plumbed through for
+    ad-hoc single-threaded callers (notebook / debugging) that want GPU.
     """
     if pred.shape[0] == 0 or target.shape[0] == 0:
         return float("nan")
