@@ -15,9 +15,9 @@ from dynacell.evaluation.cache import (  # noqa: E402
     CACHE_SCHEMA_VERSION,
     StaleCacheError,
     cache_paths,
-    check_artifact_params,
     check_cache_identity,
     ckpt_sha256_12,
+    diff_artifact_params,
     encoder_config_sha256_12,
     load_manifest,
     read_features,
@@ -244,43 +244,92 @@ def test_seed_cache_identity_preserves_existing() -> None:
     assert manifest["cell_segmentation"]["plate_path"] == "/orig_seg.zarr"
 
 
-def test_check_artifact_params_none_entry_is_noop() -> None:
-    """No manifest entry means no comparison to do; check returns silently."""
-    check_artifact_params(None, {"spacing": [1.0, 1.0, 1.0]}, artifact_label="cp_features")
+def test_diff_artifact_params_none_entry_returns_empty() -> None:
+    """No manifest entry means no comparison to do; diff returns empty list."""
+    assert diff_artifact_params(None, {"spacing": [1.0, 1.0, 1.0]}) == []
 
 
-def test_check_artifact_params_numeric_allclose_passes() -> None:
+def test_diff_artifact_params_numeric_allclose_returns_empty() -> None:
     """Near-identical floats pass the numeric comparison via np.allclose."""
     entry = {"spacing": [0.29, 0.108, 0.108]}
-    check_artifact_params(
-        entry,
-        {"spacing": [0.29, 0.10800000000001, 0.108]},
-        artifact_label="cp_features",
-        numeric_keys=("spacing",),
+    assert (
+        diff_artifact_params(
+            entry,
+            {"spacing": [0.29, 0.10800000000001, 0.108]},
+            numeric_keys=("spacing",),
+        )
+        == []
     )
 
 
-def test_check_artifact_params_numeric_mismatch_raises() -> None:
-    """Materially different spacing values raise StaleCacheError."""
+def test_diff_artifact_params_numeric_mismatch_lists_key() -> None:
+    """Materially different spacing values surface as a mismatch tuple."""
     entry = {"spacing": [0.29, 0.108, 0.108]}
-    with pytest.raises(StaleCacheError, match="spacing mismatch"):
-        check_artifact_params(
-            entry,
-            {"spacing": [0.3, 0.108, 0.108]},
-            artifact_label="cp_features",
-            numeric_keys=("spacing",),
-        )
+    mismatches = diff_artifact_params(
+        entry,
+        {"spacing": [0.3, 0.108, 0.108]},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [("spacing", [0.29, 0.108, 0.108], [0.3, 0.108, 0.108])]
 
 
-def test_check_artifact_params_scalar_mismatch_raises() -> None:
-    """Non-numeric scalar mismatches raise with the param name."""
+def test_diff_artifact_params_scalar_mismatch_lists_key() -> None:
+    """Non-numeric scalar mismatches surface with the param name."""
     entry = {"patch_size": 256, "model_name": "foo"}
-    with pytest.raises(StaleCacheError, match="patch_size mismatch"):
-        check_artifact_params(
-            entry,
-            {"patch_size": 128, "model_name": "foo"},
-            artifact_label="dinov3_features",
-        )
+    mismatches = diff_artifact_params(entry, {"patch_size": 128, "model_name": "foo"})
+    assert mismatches == [("patch_size", 256, 128)]
+
+
+def test_diff_artifact_params_numeric_length_mismatch_lists_key() -> None:
+    """A malformed numeric cached value (wrong length) surfaces as a mismatch.
+
+    np.allclose raises ValueError on incompatible broadcast shapes; the
+    helper must catch that so the caller can soft-invalidate rather than
+    crash inside init_cache_context.
+    """
+    entry = {"spacing": [0.29, 0.108]}
+    mismatches = diff_artifact_params(
+        entry,
+        {"spacing": [0.29, 0.108, 0.108]},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [("spacing", [0.29, 0.108], [0.29, 0.108, 0.108])]
+
+
+def test_diff_artifact_params_numeric_nonconvertible_lists_key() -> None:
+    """A numeric cached value that isn't array-castable surfaces as a mismatch.
+
+    np.asarray(..., dtype=float) raises TypeError on non-numeric input
+    (e.g. a hand-edited manifest with a string sentinel); the helper must
+    catch that so a malformed manifest does not bypass soft-invalidation.
+    """
+    entry = {"spacing": "unknown"}
+    mismatches = diff_artifact_params(
+        entry,
+        {"spacing": [0.29, 0.108, 0.108]},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [("spacing", "unknown", [0.29, 0.108, 0.108])]
+
+
+def test_diff_artifact_params_non_dict_entry_lists_all_keys() -> None:
+    """A non-mapping manifest entry surfaces every current key as a mismatch.
+
+    Hand-edited or partially-written manifest YAML can put a string,
+    list, or scalar where an artifact dict is expected; `entry.get(key)`
+    would raise AttributeError and crash init_cache_context. The helper
+    must treat the malformed entry as "no usable cached params" so the
+    caller can soft-invalidate.
+    """
+    mismatches = diff_artifact_params(
+        "corrupted-string-instead-of-dict",  # type: ignore[arg-type]
+        {"spacing": [0.29, 0.108, 0.108], "patch_size": 4},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [
+        ("spacing", "corrupted-string-instead-of-dict", [0.29, 0.108, 0.108]),
+        ("patch_size", "corrupted-string-instead-of-dict", 4),
+    ]
 
 
 def test_write_and_read_mask_roundtrip(tmp_path: Path) -> None:

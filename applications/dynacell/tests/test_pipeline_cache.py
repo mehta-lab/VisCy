@@ -244,8 +244,15 @@ def test_init_pred_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
         )
 
 
-def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
-    """An existing cp_features entry with a different spacing value raises."""
+def test_init_cache_spacing_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A cp_features entry with a stale spacing flips force_recompute, not raises.
+
+    Pre-existing manifest has ``spacing=[0.3, 0.108, 0.108]`` but the current
+    config advertises ``[0.29, 0.108, 0.108]``. The validator must warn and
+    set ``force["gt_cp"] = True`` so the regionprops cache is recomputed
+    with the current spacing, then the manifest entry is rewritten — letting
+    spacing bumps self-heal across runs.
+    """
     paths = cache_paths(tmp_path)
     from dynacell.evaluation.cache import save_manifest
 
@@ -258,8 +265,71 @@ def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
             "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
         },
     )
-    with pytest.raises(StaleCacheError, match="spacing mismatch"):
-        init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "spacing" in str(w.message) for w in caught), (
+        f"expected spacing mismatch warning; got {[str(w.message) for w in caught]}"
+    )
+
+
+def test_init_cache_spacing_mismatch_raises_under_require_complete(tmp_path: Path) -> None:
+    """Stale spacing under ``require_complete_cache=true`` is fatal, not soft-recomputed.
+
+    The fast-path mode promises no model loads and no opportunistic
+    rebuilds; auto-invalidation here would silently violate that contract
+    and trigger compute the operator explicitly opted out of.
+    """
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="cp_features.*spacing.*require_complete_cache=true"):
+        init_cache_context(
+            _make_config(**{"io.gt_cache_dir": str(tmp_path), "io.require_complete_cache": True}),
+            side="gt",
+        )
+
+
+def test_init_cache_spacing_mismatch_raises_under_limit_positions(tmp_path: Path) -> None:
+    """Stale spacing under ``limit_positions`` is fatal, not soft-recomputed.
+
+    Partial-walk runs (smoke / iteration with `limit_positions=N`) visit
+    only the first N FOVs. Soft-invalidate would rewrite the manifest's
+    flat `cp_features.spacing` to the new value while only those N FOVs
+    get their on-disk regionprops recomputed — leaving unvisited FOVs'
+    chunks tagged with the new spacing in the manifest but holding
+    old-spacing data on disk. The operator must clear the cache or drop
+    `limit_positions`.
+    """
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="cp_features.*spacing.*limit_positions"):
+        init_cache_context(
+            _make_config(**{"io.gt_cache_dir": str(tmp_path), "limit_positions": 4}),
+            side="gt",
+        )
 
 
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:

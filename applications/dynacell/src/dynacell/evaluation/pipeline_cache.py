@@ -26,9 +26,9 @@ from dynacell.evaluation.cache import (
     StaleCacheError,
     built_at_now,
     cache_paths,
-    check_artifact_params,
     check_cache_identity,
     ckpt_sha256_12,
+    diff_artifact_params,
     encoder_config_sha256_12,
     feature_slug,
     load_manifest,
@@ -71,6 +71,7 @@ class _CacheContext:
     spacing: list[float]
     patch_size: int
     _: KW_ONLY
+    partial_walk: bool = False
     use_gpu: bool = True
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
@@ -175,6 +176,7 @@ def init_cache_context(
     spacing = list(config.pixel_metrics.spacing)
     patch_size = int(config.feature_metrics.patch_size)
     use_gpu = bool(getattr(config, "use_gpu", True))
+    partial_walk = OmegaConf.select(config, "limit_positions", default=None) is not None
 
     dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
@@ -188,6 +190,7 @@ def init_cache_context(
         target_name=config.target_name,
         spacing=spacing,
         patch_size=patch_size,
+        partial_walk=partial_walk,
         use_gpu=use_gpu,
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
@@ -245,7 +248,7 @@ def init_cache_context(
         side=side,
         **base_kwargs,
     )
-    _validate_artifact_params(ctx)
+    _auto_invalidate_on_artifact_param_mismatch(ctx)
     _auto_invalidate_on_preprocess_version_mismatch(ctx)
     return ctx
 
@@ -263,6 +266,19 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
     isn't loaded for this run) are treated as "no constraint" — they do
     NOT trigger invalidation. Operators handle that bootstrap transition
     explicitly via ``force_recompute.<side>_<kind>``.
+
+    Under ``io.require_complete_cache=true`` a known mismatch is escalated
+    to a hard :class:`StaleCacheError` — the user opted out of recompute,
+    so a stale-version manifest is an unambiguous failure rather than a
+    signal to rebuild.
+
+    Under ``limit_positions`` (smoke / iteration mode that walks only the
+    first ``N`` FOVs) the soft path is also escalated: rewriting the
+    manifest's per-extractor entry to the new version while only the
+    visited FOVs' on-disk features get recomputed would leave the
+    unvisited FOVs with stale-version data under a manifest that lies
+    about it. The operator must clear the cache and rerun, OR drop
+    ``limit_positions`` so every FOV is recomputed.
     """
     if not ctx.enabled:
         return
@@ -286,6 +302,19 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         cached_version = entry.get("preprocess_version")
         if cached_version is None or cached_version == current_version:
             continue
+        if ctx.require_complete:
+            raise StaleCacheError(
+                f"{section_key}[{sub_key}]: preprocess_version mismatch "
+                f"(cached={cached_version!r}, current={current_version!r}) and "
+                f"io.require_complete_cache=true"
+            )
+        if ctx.partial_walk:
+            raise StaleCacheError(
+                f"{section_key}[{sub_key}]: preprocess_version mismatch "
+                f"(cached={cached_version!r}, current={current_version!r}) and "
+                f"limit_positions is set (partial walk cannot safely auto-invalidate; "
+                f"clear the cache or drop limit_positions)"
+            )
         force_key = f"{ctx.side}_{kind}"
         ctx.force[force_key] = True
         warnings.warn(
@@ -296,51 +325,110 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         )
 
 
-def _validate_artifact_params(ctx: _CacheContext) -> None:
-    """Raise if any existing per-artifact manifest entry disagrees with ctx params."""
+def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
+    """Soft-invalidate per-artifact cache when current params disagree with manifest.
+
+    Mirrors :func:`_auto_invalidate_on_preprocess_version_mismatch` but
+    keys off per-artifact identity params recorded in the manifest
+    (e.g. ``cp_features.spacing``, ``dinov3_features.patch_size``,
+    ``organelle_masks.target_name``). On any mismatch the corresponding
+    ``ctx.force[<side>_<kind>]`` flag is set so the artifact is recomputed
+    and the manifest entry is rewritten with the new values.
+
+    Missing entries are a no-op — there is nothing to invalidate yet.
+
+    Under ``io.require_complete_cache=true`` the soft path is escalated to
+    a hard :class:`StaleCacheError` — the user opted out of recompute, so a
+    stale-param manifest is an unambiguous failure rather than a signal to
+    rebuild.
+
+    Under ``limit_positions`` (smoke / iteration mode that walks only the
+    first ``N`` FOVs) the soft path is also escalated: rewriting the
+    manifest's per-artifact entry to the new params while only the visited
+    FOVs' on-disk features get recomputed would leave the unvisited FOVs
+    with stale-param data under a manifest that lies about it. The
+    operator must clear the cache and rerun, OR drop ``limit_positions``
+    so every FOV is recomputed.
+    """
+    if not ctx.enabled:
+        return
     artifacts = ctx.manifest.get("artifacts", {})
 
-    masks_section = artifacts.get("organelle_masks", {})
-    check_artifact_params(
-        masks_section.get(ctx.target_name),
-        {"target_name": ctx.target_name, **ctx.source_tag},
-        artifact_label=f"organelle_masks[{ctx.target_name}]",
-    )
-    check_artifact_params(
-        artifacts.get("cp_features"),
-        {"spacing": ctx.spacing, **ctx.source_tag},
-        artifact_label=f"{ctx.label_prefix}cp_features",
-        numeric_keys=("spacing",),
-    )
+    checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
+        (
+            "masks",
+            f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
+            artifacts.get("organelle_masks", {}).get(ctx.target_name),
+            {"target_name": ctx.target_name, **ctx.source_tag},
+            (),
+        ),
+        (
+            "cp",
+            f"{ctx.label_prefix}cp_features",
+            artifacts.get("cp_features"),
+            {"spacing": ctx.spacing, **ctx.source_tag},
+            ("spacing",),
+        ),
+    ]
     if ctx.dinov3_model_name is not None:
-        dinov3_section = artifacts.get("dinov3_features", {})
-        check_artifact_params(
-            dinov3_section.get(feature_slug(ctx.dinov3_model_name)),
-            {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
-            artifact_label=f"dinov3_features[{ctx.dinov3_model_name}]",
+        checks.append(
+            (
+                "dinov3",
+                f"{ctx.label_prefix}dinov3_features[{ctx.dinov3_model_name}]",
+                artifacts.get("dinov3_features", {}).get(feature_slug(ctx.dinov3_model_name)),
+                {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
+                (),
+            )
         )
     if ctx.dynaclr_ckpt_sha12 is not None:
-        dynaclr_section = artifacts.get("dynaclr_features", {})
-        check_artifact_params(
-            dynaclr_section.get(ctx.dynaclr_ckpt_sha12),
-            {
-                "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
-                "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
-                "patch_size": ctx.patch_size,
-                **ctx.source_tag,
-            },
-            artifact_label=f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
+        checks.append(
+            (
+                "dynaclr",
+                f"{ctx.label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
+                artifacts.get("dynaclr_features", {}).get(ctx.dynaclr_ckpt_sha12),
+                {
+                    "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
+                    "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
+                    "patch_size": ctx.patch_size,
+                    **ctx.source_tag,
+                },
+                (),
+            )
         )
     if ctx.celldino_weights_sha12 is not None:
-        celldino_section = artifacts.get("celldino_features", {})
-        check_artifact_params(
-            celldino_section.get(ctx.celldino_weights_sha12),
-            {
-                "weights_sha256_12": ctx.celldino_weights_sha12,
-                "patch_size": ctx.patch_size,
-                **ctx.source_tag,
-            },
-            artifact_label=f"celldino_features[{ctx.celldino_weights_sha12}]",
+        checks.append(
+            (
+                "celldino",
+                f"{ctx.label_prefix}celldino_features[{ctx.celldino_weights_sha12}]",
+                artifacts.get("celldino_features", {}).get(ctx.celldino_weights_sha12),
+                {
+                    "weights_sha256_12": ctx.celldino_weights_sha12,
+                    "patch_size": ctx.patch_size,
+                    **ctx.source_tag,
+                },
+                (),
+            )
+        )
+
+    for kind, artifact_label, entry, current, numeric_keys in checks:
+        mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
+        if not mismatches:
+            continue
+        details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
+        if ctx.require_complete:
+            raise StaleCacheError(
+                f"{artifact_label}: artifact param mismatch ({details}) and io.require_complete_cache=true"
+            )
+        if ctx.partial_walk:
+            raise StaleCacheError(
+                f"{artifact_label}: artifact param mismatch ({details}) and limit_positions is set "
+                f"(partial walk cannot safely auto-invalidate; clear the cache or drop limit_positions)"
+            )
+        force_key = f"{ctx.side}_{kind}"
+        ctx.force[force_key] = True
+        warnings.warn(
+            f"{artifact_label}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
+            stacklevel=2,
         )
 
 

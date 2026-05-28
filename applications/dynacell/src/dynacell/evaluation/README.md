@@ -129,7 +129,14 @@ GT caches are reusable across model checkpoints for the same `(gt_path, gt_chann
   features/celldino/{weights_sha12}.zarr # one plate per CELL-DINO weights
 ```
 
-Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Mismatch raises `StaleCacheError`. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
+Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
+
+Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
+
+Two strict-mode escape hatches keep the soft path from corrupting partially-walked or fast-path runs:
+
+- `io.require_complete_cache=true` (cache-only mode): a known mismatch raises instead of warning. The user opted out of recompute; a stale manifest is fatal.
+- `limit_positions=N` (smoke / iteration): a known mismatch raises instead of warning. Partial walks can't safely self-heal — the manifest entry would be rewritten globally while only the first N FOVs' on-disk chunks get recomputed, leaving the rest stale under a manifest that claims the new params. Clear the cache or drop `limit_positions` to recover.
 
 ### Priming with `precompute-gt`
 
@@ -161,6 +168,7 @@ With both caches warm, this flag puts `dynacell evaluate` in cache-only mode:
 
 - No model loads (~30-90 s cold-start skipped). The upfront `precompute_deep_features` pass is also skipped.
 - Cache misses raise `StaleCacheError` immediately — fail-loud instead of opportunistic rebuild.
+- Per-artifact param mismatches (e.g. stale `spacing` or `patch_size`) also raise instead of soft-invalidating; the soft path would silently trigger compute the user opted out of.
 - Pixel + mask metrics still run on the original image volumes; deep features served from disk.
 
 Use case: parallel sweeps, downstream metric iteration, crash recovery.
@@ -195,7 +203,13 @@ Without `io.gt_cache_dir` / `io.pred_cache_dir`, only `force_recompute.{final_me
 
 ### Invalidation
 
-We deliberately do **not** fingerprint zarr contents. If you modify them in place, either bump `cache_schema_version` in `cache.py`, set the right `force_recompute.*`, or delete the affected cache dir.
+Three paths invalidate cached artifacts:
+
+1. **Soft auto-invalidate (default)** — bumping a tracked per-artifact param (spacing, patch_size, preprocess_version, etc.) on a normal full-walk run. `init_cache_context` warns, sets the matching `force_recompute.<side>_<kind>`, and the next FOV pass recomputes and rewrites the manifest entry. Identity mismatches (plate_path, channel_name, cell_segmentation_path, cache_schema_version) still hard-raise.
+2. **Manual `force_recompute.<side>_<kind>`** — bypass cache for a specific family without touching the manifest's recorded params.
+3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place (no content fingerprinting).
+
+Bumping `cache_schema_version` in `cache.py` forces a wipe on every existing cache.
 
 ## Scaling
 
