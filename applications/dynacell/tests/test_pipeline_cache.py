@@ -503,8 +503,8 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
 def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """CP feature miss computes via cp_regionprops and writes per timepoint."""
 
-    def fake_cp(target, cell_seg, spacing):
-        del cell_seg, spacing
+    def fake_cp(target, cell_seg, spacing, use_gpu=True):
+        del cell_seg, spacing, use_gpu
         return np.full((2, 3), float(target.sum()), dtype=np.float32)
 
     # Patch the globals of fov_cp_features itself — robust against sys.modules
@@ -530,8 +530,8 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """Prediction CP feature miss computes via cp_regionprops (side-agnostic) and writes per timepoint."""
 
-    def fake_cp(prediction, cell_seg, spacing):
-        del cell_seg, spacing
+    def fake_cp(prediction, cell_seg, spacing, use_gpu=True):
+        del cell_seg, spacing, use_gpu
         return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)

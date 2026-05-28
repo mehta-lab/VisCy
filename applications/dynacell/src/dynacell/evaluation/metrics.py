@@ -290,19 +290,25 @@ PROPS_3D = (
 )
 
 
-def _cp_raw_regionprops(img, cell_segmentation, spacing):
+def _cp_raw_regionprops(img, cell_segmentation, spacing, use_gpu=True):
     """Compute raw per-cell regionprops and return a (n_cells, n_props) matrix.
 
     No normalization, no column-drop, no z-score — callers are responsible for
     supplying already-normalized ``img`` (via :func:`_minmax_norm`). Columns
     follow the order of :data:`PROPS_3D` as flattened by ``regionprops_table``.
+
+    When ``use_gpu=True`` and CUDA is available, inputs are uploaded via
+    ``ascupy`` so cubic's regionprops dispatches to cucim. ``use_gpu=False``
+    keeps everything on CPU for repro/debugging — matches the device gating
+    used elsewhere in :mod:`dynacell.evaluation.metrics`.
     """
-    if torch.cuda.is_available():
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    if use_cuda:
         img = ascupy(img)
         cell_segmentation = ascupy(cell_segmentation)
     feats = regionprops_table(cell_segmentation, img, spacing=spacing, properties=list(PROPS_3D))
     feats.pop("label", None)
-    if torch.cuda.is_available():
+    if use_cuda:
         return np.array([asnumpy(v) for v in feats.values()]).T
     return np.array(list(feats.values())).T
 
@@ -323,14 +329,14 @@ def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np
     return pred[valid], target[valid]
 
 
-def cp_regionprops(image, cell_segmentation, spacing):
+def cp_regionprops(image, cell_segmentation, spacing, use_gpu=True):
     """Raw CP regionprops for one image and its cell segmentation.
 
     Returns an array of shape ``(n_cells, n_props_raw)``. Same body for GT
     and prediction sides — *image* is min/max normalized before extraction.
     """
     _require_cubic()
-    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing)
+    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing, use_gpu=use_gpu)
 
 
 def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):

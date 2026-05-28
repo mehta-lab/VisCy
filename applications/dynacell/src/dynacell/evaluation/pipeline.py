@@ -143,8 +143,9 @@ def _fov_pred_features_per_t(
     dinov3: list[np.ndarray] = []
     dynaclr: list[np.ndarray] = []
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    use_gpu = bool(getattr(pred_cache_ctx, "use_gpu", True))
     for t in range(t_count):
-        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing))
+        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing, use_gpu=use_gpu))
         crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
         dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))

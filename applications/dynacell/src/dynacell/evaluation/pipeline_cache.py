@@ -70,6 +70,7 @@ class _CacheContext:
     target_name: str
     spacing: list[float]
     patch_size: int
+    use_gpu: bool = True
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
@@ -172,6 +173,7 @@ def init_cache_context(
     require_complete_requested = bool(io.require_complete_cache)
     spacing = list(config.pixel_metrics.spacing)
     patch_size = int(config.feature_metrics.patch_size)
+    use_gpu = bool(getattr(config, "use_gpu", True))
 
     dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
@@ -185,6 +187,7 @@ def init_cache_context(
         target_name=config.target_name,
         spacing=spacing,
         patch_size=patch_size,
+        use_gpu=use_gpu,
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
@@ -607,7 +610,7 @@ def fov_cp_features(
         force_key=f"{ctx.side}_cp",
         artifact_label=f"{ctx.label_prefix}cp_features",
         cache_kwargs={},
-        compute_fn=lambda t: cp_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing),
+        compute_fn=lambda t: cp_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing, use_gpu=ctx.use_gpu),
     )
 
     if ctx.enabled and manifest_updated:
