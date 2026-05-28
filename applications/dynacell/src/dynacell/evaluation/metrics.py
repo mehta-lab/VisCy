@@ -132,28 +132,30 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     Notes
     -----
-    Tensors are moved to the chosen device (GPU when ``use_gpu=True`` and
-    CUDA is available, CPU otherwise) and converted to cupy/numpy via
-    ``cubic.cuda.ascupy``/``asnumpy`` before all metric calls. cupy arrays
-    pass through cubic's ``@scale_invariant`` unchanged, enabling GPU-backed
-    computation (via cucim/cupy) for all metrics when CUDA is available.
-    Spectral metrics additionally benefit from zero-copy CUDA Array Interface
-    transfer.
+    Inputs (numpy, torch CPU/CUDA, or cupy) are coerced to a single
+    ``xp`` array module via ``cubic.cuda.ascupy``/``asnumpy`` — cupy
+    when ``use_gpu=True`` and CUDA is available, numpy otherwise. The
+    converters no-op when the input is already on the target module,
+    so a caller that pre-uploaded the full FOV via ``ascupy(predict)``
+    once pays zero per-call upload tax here. cubic metrics consume
+    ``xp`` directly; the SSIM wrapper consumes a torch view built
+    zero-copy from ``xp`` via ``torch.as_tensor`` (CUDA Array Interface
+    for cupy, ``from_numpy`` for numpy).
     """
     if pcc is None:
         raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
     _require_cubic()
-    prediction = torch.as_tensor(prediction)
-    target = torch.as_tensor(target)
-    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    prediction = prediction.to(device)
-    target = target.to(device)
-    to_xp = ascupy if device.type == "cuda" else asnumpy
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    to_xp = ascupy if use_cuda else asnumpy
     pred_xp, target_xp = to_xp(prediction), to_xp(target)
 
+    # ``.contiguous()`` recovers the contiguity guarantee the previous
+    # ``.to(device)`` step provided: when ``target_xp`` is a non-contiguous
+    # cupy view (e.g. a strided zarr slice), cubic_ssim → MONAI → conv3d's
+    # CUDA backend can fail or silently re-materialize on recent torch.
     metrics = {
         "PCC": pcc(target_xp, pred_xp),
-        "SSIM": ssim(target, prediction),
+        "SSIM": ssim(torch.as_tensor(target_xp).contiguous(), torch.as_tensor(pred_xp).contiguous()),
         "NRMSE": nrmse(target_xp, pred_xp, normalize="min_max"),
         "PSNR": psnr(target_xp, pred_xp, normalize="min_max"),
     }
@@ -290,19 +292,25 @@ PROPS_3D = (
 )
 
 
-def _cp_raw_regionprops(img, cell_segmentation, spacing):
+def _cp_raw_regionprops(img, cell_segmentation, spacing, use_gpu=True):
     """Compute raw per-cell regionprops and return a (n_cells, n_props) matrix.
 
     No normalization, no column-drop, no z-score — callers are responsible for
     supplying already-normalized ``img`` (via :func:`_minmax_norm`). Columns
     follow the order of :data:`PROPS_3D` as flattened by ``regionprops_table``.
+
+    When ``use_gpu=True`` and CUDA is available, inputs are uploaded via
+    ``ascupy`` so cubic's regionprops dispatches to cucim. ``use_gpu=False``
+    keeps everything on CPU for repro/debugging — matches the device gating
+    used elsewhere in :mod:`dynacell.evaluation.metrics`.
     """
-    if torch.cuda.is_available():
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    if use_cuda:
         img = ascupy(img)
         cell_segmentation = ascupy(cell_segmentation)
     feats = regionprops_table(cell_segmentation, img, spacing=spacing, properties=list(PROPS_3D))
     feats.pop("label", None)
-    if torch.cuda.is_available():
+    if use_cuda:
         return np.array([asnumpy(v) for v in feats.values()]).T
     return np.array(list(feats.values())).T
 
@@ -323,14 +331,14 @@ def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np
     return pred[valid], target[valid]
 
 
-def cp_regionprops(image, cell_segmentation, spacing):
+def cp_regionprops(image, cell_segmentation, spacing, use_gpu=True):
     """Raw CP regionprops for one image and its cell segmentation.
 
     Returns an array of shape ``(n_cells, n_props_raw)``. Same body for GT
     and prediction sides — *image* is min/max normalized before extraction.
     """
     _require_cubic()
-    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing)
+    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing, use_gpu=use_gpu)
 
 
 def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):

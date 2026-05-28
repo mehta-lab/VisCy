@@ -9,6 +9,7 @@ from typing import Any, get_args
 import hydra
 import numpy as np
 import pandas as pd
+import torch
 from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
@@ -28,6 +29,7 @@ from dynacell.evaluation.feature_select import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
+    ascupy,
     build_crops,
     compute_pixel_metrics,
     cp_regionprops,
@@ -143,8 +145,9 @@ def _fov_pred_features_per_t(
     dinov3: list[np.ndarray] = []
     dynaclr: list[np.ndarray] = []
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    use_gpu = pred_cache_ctx.use_gpu
     for t in range(t_count):
-        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing))
+        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing, use_gpu=use_gpu))
         crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
         dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
@@ -475,17 +478,31 @@ def _process_one_fov(
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
 
+    # Bulk-upload predict/target once per FOV so compute_pixel_metrics' per-T
+    # ascupy is a no-op via cupy-on-cupy. mask / feature / microssim paths
+    # still consume the numpy arrays in parallel — neither SuperModel nor
+    # build_crops nor the microssim aggregator accept cupy directly. The lock
+    # serializes the cupy allocation across workers under executor=process so
+    # N FOVs aren't all trying to allocate (T,D,H,W) fp32 at once.
+    if use_gpu and ascupy is not None and torch.cuda.is_available():
+        with gpu_serialization_lock(gate=use_gpu):
+            predict_xp = ascupy(predict)
+            target_xp = ascupy(target)
+    else:
+        predict_xp = predict
+        target_xp = target
+
     for t in tqdm(range(T), desc="Processing timepoints", leave=False, disable=suppress_inner_tqdm):
         data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
         with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
             pixel_metrics = compute_pixel_metrics(
-                predict[t],
-                target[t],
+                predict_xp[t],
+                target_xp[t],
                 spacing=config.pixel_metrics.spacing,
                 fsc_kwargs=config.pixel_metrics.fsc,
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
-                use_gpu=config.use_gpu,
+                use_gpu=use_gpu,
             )
         if config.compute_microssim:
             microssim_data.append({"target": target[t], "predict": predict[t]})
@@ -767,6 +784,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     OmegaConf.resolve(config)
     reset_timings()
 
+    use_gpu = bool(getattr(config, "use_gpu", True))
+
     all_pixel_metrics = []
     all_mask_metrics = []
     all_feature_metrics = []
@@ -877,7 +896,6 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             microssim_sim = None
             microssim_read_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
             if config.compute_microssim:
-                use_gpu = bool(getattr(config, "use_gpu", True))
                 max_pairs = int(OmegaConf.select(config, "microssim.calibration.max_pairs", default=12))
                 seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
                 cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
@@ -955,8 +973,6 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             if runtime.executor == "process" and seg_model is not None:
                 del seg_model
                 seg_model = None
-                import torch
-
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
@@ -1131,6 +1147,14 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         # Prefix with "Dataset_" so dataset-level FID/KID/cosine don't clobber
         # per-FOV columns of the same name when merged into per-FOV rows.
         def _compute_one(args):
+            # MIND stays on CPU here even when use_gpu=True: 4 parallel threads
+            # racing on the same CUDA context would either serialize via the
+            # allocator (no speedup) or contend for memory with mid-eval FOV
+            # work in process executors. CPU MIND in a 4-thread BLAS-capped
+            # pool is competitive with serialized GPU MIND and bit-stable
+            # across runs that toggle use_gpu (torch's CPU vs CUDA RNG
+            # produce different streams for the same seed, breaking cross-
+            # leaf comparability of the MIND column).
             name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
             raw = {
                 **compute_feature_similarity(p_metric, t_metric, name),

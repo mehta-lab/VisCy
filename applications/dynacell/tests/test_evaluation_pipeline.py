@@ -23,6 +23,7 @@ def _import_pipeline_with_stubs(monkeypatch):
     utils_module.plot_metrics = lambda *args, **kwargs: None
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
+    metrics_module.ascupy = None
     metrics_module.fit_microssim = lambda *args, **kwargs: None
     metrics_module.score_microssim = lambda *args, **kwargs: []
     metrics_module.compute_pixel_metrics = lambda *args, **kwargs: {}
