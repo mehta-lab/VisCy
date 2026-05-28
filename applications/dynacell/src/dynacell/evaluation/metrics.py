@@ -132,28 +132,26 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     Notes
     -----
-    Tensors are moved to the chosen device (GPU when ``use_gpu=True`` and
-    CUDA is available, CPU otherwise) and converted to cupy/numpy via
-    ``cubic.cuda.ascupy``/``asnumpy`` before all metric calls. cupy arrays
-    pass through cubic's ``@scale_invariant`` unchanged, enabling GPU-backed
-    computation (via cucim/cupy) for all metrics when CUDA is available.
-    Spectral metrics additionally benefit from zero-copy CUDA Array Interface
-    transfer.
+    Inputs (numpy, torch CPU/CUDA, or cupy) are coerced to a single
+    ``xp`` array module via ``cubic.cuda.ascupy``/``asnumpy`` — cupy
+    when ``use_gpu=True`` and CUDA is available, numpy otherwise. The
+    converters no-op when the input is already on the target module,
+    so a caller that pre-uploaded the full FOV via ``ascupy(predict)``
+    once pays zero per-call upload tax here. cubic metrics consume
+    ``xp`` directly; the SSIM wrapper consumes a torch view built
+    zero-copy from ``xp`` via ``torch.as_tensor`` (CUDA Array Interface
+    for cupy, ``from_numpy`` for numpy).
     """
     if pcc is None:
         raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
     _require_cubic()
-    prediction = torch.as_tensor(prediction)
-    target = torch.as_tensor(target)
-    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    prediction = prediction.to(device)
-    target = target.to(device)
-    to_xp = ascupy if device.type == "cuda" else asnumpy
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    to_xp = ascupy if use_cuda else asnumpy
     pred_xp, target_xp = to_xp(prediction), to_xp(target)
 
     metrics = {
         "PCC": pcc(target_xp, pred_xp),
-        "SSIM": ssim(target, prediction),
+        "SSIM": ssim(torch.as_tensor(target_xp), torch.as_tensor(pred_xp)),
         "NRMSE": nrmse(target_xp, pred_xp, normalize="min_max"),
         "PSNR": psnr(target_xp, pred_xp, normalize="min_max"),
     }
