@@ -13,7 +13,7 @@ import contextlib
 import fcntl
 import warnings
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -70,6 +70,7 @@ class _CacheContext:
     target_name: str
     spacing: list[float]
     patch_size: int
+    _: KW_ONLY
     use_gpu: bool = True
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
