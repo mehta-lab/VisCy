@@ -263,6 +263,11 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
     isn't loaded for this run) are treated as "no constraint" — they do
     NOT trigger invalidation. Operators handle that bootstrap transition
     explicitly via ``force_recompute.<side>_<kind>``.
+
+    Under ``io.require_complete_cache=true`` a known mismatch is escalated
+    to a hard :class:`StaleCacheError` — the user opted out of recompute,
+    so a stale-version manifest is an unambiguous failure rather than a
+    signal to rebuild.
     """
     if not ctx.enabled:
         return
@@ -286,6 +291,12 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         cached_version = entry.get("preprocess_version")
         if cached_version is None or cached_version == current_version:
             continue
+        if ctx.require_complete:
+            raise StaleCacheError(
+                f"{section_key}[{sub_key}]: preprocess_version mismatch "
+                f"(cached={cached_version!r}, current={current_version!r}) and "
+                f"io.require_complete_cache=true"
+            )
         force_key = f"{ctx.side}_{kind}"
         ctx.force[force_key] = True
         warnings.warn(
@@ -307,6 +318,11 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
     and the manifest entry is rewritten with the new values.
 
     Missing entries are a no-op — there is nothing to invalidate yet.
+
+    Under ``io.require_complete_cache=true`` the soft path is escalated to
+    a hard :class:`StaleCacheError` — the user opted out of recompute, so a
+    stale-param manifest is an unambiguous failure rather than a signal to
+    rebuild.
     """
     if not ctx.enabled:
         return
@@ -367,9 +383,13 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
         if not mismatches:
             continue
+        details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
+        if ctx.require_complete:
+            raise StaleCacheError(
+                f"{ctx.side}_{kind}: artifact param mismatch ({details}) and io.require_complete_cache=true"
+            )
         force_key = f"{ctx.side}_{kind}"
         ctx.force[force_key] = True
-        details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
         warnings.warn(
             f"{force_key}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
             stacklevel=2,

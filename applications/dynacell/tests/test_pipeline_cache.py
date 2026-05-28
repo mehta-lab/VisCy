@@ -276,6 +276,32 @@ def test_init_cache_spacing_mismatch_auto_invalidates(tmp_path: Path) -> None:
     )
 
 
+def test_init_cache_spacing_mismatch_raises_under_require_complete(tmp_path: Path) -> None:
+    """Stale spacing under ``require_complete_cache=true`` is fatal, not soft-recomputed.
+
+    The fast-path mode promises no model loads and no opportunistic
+    rebuilds; auto-invalidation here would silently violate that contract
+    and trigger compute the operator explicitly opted out of.
+    """
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="gt_cp.*spacing.*require_complete_cache=true"):
+        init_cache_context(
+            _make_config(**{"io.gt_cache_dir": str(tmp_path), "io.require_complete_cache": True}),
+            side="gt",
+        )
+
+
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
     """First call computes masks via segment() and writes them to cache."""
     import dynacell.evaluation.segmentation as segmentation
