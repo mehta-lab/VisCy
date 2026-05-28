@@ -149,9 +149,13 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     to_xp = ascupy if use_cuda else asnumpy
     pred_xp, target_xp = to_xp(prediction), to_xp(target)
 
+    # ``.contiguous()`` recovers the contiguity guarantee the previous
+    # ``.to(device)`` step provided: when ``target_xp`` is a non-contiguous
+    # cupy view (e.g. a strided zarr slice), cubic_ssim → MONAI → conv3d's
+    # CUDA backend can fail or silently re-materialize on recent torch.
     metrics = {
         "PCC": pcc(target_xp, pred_xp),
-        "SSIM": ssim(torch.as_tensor(target_xp), torch.as_tensor(pred_xp)),
+        "SSIM": ssim(torch.as_tensor(target_xp).contiguous(), torch.as_tensor(pred_xp).contiguous()),
         "NRMSE": nrmse(target_xp, pred_xp, normalize="min_max"),
         "PSNR": psnr(target_xp, pred_xp, normalize="min_max"),
     }
