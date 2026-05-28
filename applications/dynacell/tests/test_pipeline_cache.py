@@ -244,8 +244,15 @@ def test_init_pred_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
         )
 
 
-def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
-    """An existing cp_features entry with a different spacing value raises."""
+def test_init_cache_spacing_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A cp_features entry with a stale spacing flips force_recompute, not raises.
+
+    Pre-existing manifest has ``spacing=[0.3, 0.108, 0.108]`` but the current
+    config advertises ``[0.29, 0.108, 0.108]``. The validator must warn and
+    set ``force["gt_cp"] = True`` so the regionprops cache is recomputed
+    with the current spacing, then the manifest entry is rewritten — letting
+    spacing bumps self-heal across runs.
+    """
     paths = cache_paths(tmp_path)
     from dynacell.evaluation.cache import save_manifest
 
@@ -258,8 +265,15 @@ def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
             "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
         },
     )
-    with pytest.raises(StaleCacheError, match="spacing mismatch"):
-        init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "spacing" in str(w.message) for w in caught), (
+        f"expected spacing mismatch warning; got {[str(w.message) for w in caught]}"
+    )
 
 
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:

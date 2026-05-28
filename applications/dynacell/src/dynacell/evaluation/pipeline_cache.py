@@ -26,9 +26,9 @@ from dynacell.evaluation.cache import (
     StaleCacheError,
     built_at_now,
     cache_paths,
-    check_artifact_params,
     check_cache_identity,
     ckpt_sha256_12,
+    diff_artifact_params,
     encoder_config_sha256_12,
     feature_slug,
     load_manifest,
@@ -245,7 +245,7 @@ def init_cache_context(
         side=side,
         **base_kwargs,
     )
-    _validate_artifact_params(ctx)
+    _auto_invalidate_on_artifact_param_mismatch(ctx)
     _auto_invalidate_on_preprocess_version_mismatch(ctx)
     return ctx
 
@@ -296,51 +296,83 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         )
 
 
-def _validate_artifact_params(ctx: _CacheContext) -> None:
-    """Raise if any existing per-artifact manifest entry disagrees with ctx params."""
+def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
+    """Soft-invalidate per-artifact cache when current params disagree with manifest.
+
+    Mirrors :func:`_auto_invalidate_on_preprocess_version_mismatch` but
+    keys off per-artifact identity params recorded in the manifest
+    (e.g. ``cp_features.spacing``, ``dinov3_features.patch_size``,
+    ``organelle_masks.target_name``). On any mismatch the corresponding
+    ``ctx.force[<side>_<kind>]`` flag is set so the artifact is recomputed
+    and the manifest entry is rewritten with the new values.
+
+    Missing entries are a no-op — there is nothing to invalidate yet.
+    """
+    if not ctx.enabled:
+        return
     artifacts = ctx.manifest.get("artifacts", {})
 
-    masks_section = artifacts.get("organelle_masks", {})
-    check_artifact_params(
-        masks_section.get(ctx.target_name),
-        {"target_name": ctx.target_name, **ctx.source_tag},
-        artifact_label=f"organelle_masks[{ctx.target_name}]",
-    )
-    check_artifact_params(
-        artifacts.get("cp_features"),
-        {"spacing": ctx.spacing, **ctx.source_tag},
-        artifact_label=f"{ctx.label_prefix}cp_features",
-        numeric_keys=("spacing",),
-    )
+    checks: list[tuple[str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
+        (
+            "masks",
+            artifacts.get("organelle_masks", {}).get(ctx.target_name),
+            {"target_name": ctx.target_name, **ctx.source_tag},
+            (),
+        ),
+        (
+            "cp",
+            artifacts.get("cp_features"),
+            {"spacing": ctx.spacing, **ctx.source_tag},
+            ("spacing",),
+        ),
+    ]
     if ctx.dinov3_model_name is not None:
-        dinov3_section = artifacts.get("dinov3_features", {})
-        check_artifact_params(
-            dinov3_section.get(feature_slug(ctx.dinov3_model_name)),
-            {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
-            artifact_label=f"dinov3_features[{ctx.dinov3_model_name}]",
+        checks.append(
+            (
+                "dinov3",
+                artifacts.get("dinov3_features", {}).get(feature_slug(ctx.dinov3_model_name)),
+                {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
+                (),
+            )
         )
     if ctx.dynaclr_ckpt_sha12 is not None:
-        dynaclr_section = artifacts.get("dynaclr_features", {})
-        check_artifact_params(
-            dynaclr_section.get(ctx.dynaclr_ckpt_sha12),
-            {
-                "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
-                "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
-                "patch_size": ctx.patch_size,
-                **ctx.source_tag,
-            },
-            artifact_label=f"dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
+        checks.append(
+            (
+                "dynaclr",
+                artifacts.get("dynaclr_features", {}).get(ctx.dynaclr_ckpt_sha12),
+                {
+                    "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
+                    "encoder_config_sha256_12": ctx.dynaclr_encoder_sha12,
+                    "patch_size": ctx.patch_size,
+                    **ctx.source_tag,
+                },
+                (),
+            )
         )
     if ctx.celldino_weights_sha12 is not None:
-        celldino_section = artifacts.get("celldino_features", {})
-        check_artifact_params(
-            celldino_section.get(ctx.celldino_weights_sha12),
-            {
-                "weights_sha256_12": ctx.celldino_weights_sha12,
-                "patch_size": ctx.patch_size,
-                **ctx.source_tag,
-            },
-            artifact_label=f"celldino_features[{ctx.celldino_weights_sha12}]",
+        checks.append(
+            (
+                "celldino",
+                artifacts.get("celldino_features", {}).get(ctx.celldino_weights_sha12),
+                {
+                    "weights_sha256_12": ctx.celldino_weights_sha12,
+                    "patch_size": ctx.patch_size,
+                    **ctx.source_tag,
+                },
+                (),
+            )
+        )
+
+    for kind, entry, current, numeric_keys in checks:
+        mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
+        if not mismatches:
+            continue
+        force_key = f"{ctx.side}_{kind}"
+        ctx.force[force_key] = True
+        details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
+        warnings.warn(
+            f"{force_key}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
+            stacklevel=2,
         )
 
 

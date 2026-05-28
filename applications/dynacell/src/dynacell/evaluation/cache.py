@@ -180,31 +180,35 @@ def seed_cache_identity(
         manifest["cell_segmentation"] = {"plate_path": cell_segmentation_path}
 
 
-def check_artifact_params(
+def diff_artifact_params(
     entry: dict[str, Any] | None,
     current: dict[str, Any],
     *,
-    artifact_label: str,
     numeric_keys: tuple[str, ...] = (),
-) -> None:
-    """Raise if a per-artifact manifest entry disagrees with *current* params.
+) -> list[tuple[str, Any, Any]]:
+    """Return per-key mismatches between a manifest entry and current params.
 
     Parameters
     ----------
     entry
         Manifest entry for the artifact, or ``None`` if no entry exists yet
-        (in which case this function is a no-op — the caller decides whether
-        to treat absence as miss or miss+error).
+        (returns an empty list — the caller decides whether to treat
+        absence as miss).
     current
         Current-config values keyed by the same names as in *entry*.
-    artifact_label
-        Human-readable label for the error message (e.g. ``"cp_features"``).
     numeric_keys
         Keys in *current* whose values should be compared with
         :func:`numpy.allclose` instead of ``==``.
+
+    Returns
+    -------
+    list of tuple
+        ``(key, cached_value, current_value)`` for every disagreement;
+        empty when *entry* is ``None`` or every key matches.
     """
     if entry is None:
-        return
+        return []
+    mismatches: list[tuple[str, Any, Any]] = []
     for key, value in current.items():
         cached_value = entry.get(key)
         if key in numeric_keys:
@@ -214,9 +218,10 @@ def check_artifact_params(
                 rtol=1e-9,
                 atol=0.0,
             ):
-                raise StaleCacheError(f"{artifact_label}: {key} mismatch: cached={cached_value!r}, current={value!r}")
+                mismatches.append((key, cached_value, value))
         elif cached_value != value:
-            raise StaleCacheError(f"{artifact_label}: {key} mismatch: cached={cached_value!r}, current={value!r}")
+            mismatches.append((key, cached_value, value))
+    return mismatches
 
 
 def built_at_now() -> str:
