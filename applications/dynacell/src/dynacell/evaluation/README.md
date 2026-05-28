@@ -138,6 +138,17 @@ Two strict-mode escape hatches keep the soft path from corrupting partially-walk
 - `io.require_complete_cache=true` (cache-only mode): a known mismatch raises instead of warning. The user opted out of recompute; a stale manifest is fatal.
 - `limit_positions=N` (smoke / iteration): a known mismatch raises instead of warning. Partial walks can't safely self-heal — the manifest entry would be rewritten globally while only the first N FOVs' on-disk chunks get recomputed, leaving the rest stale under a manifest that claims the new params. Clear the cache or drop `limit_positions` to recover.
 
+#### DINOv3 `imagenet_normalize_v2` (May 2026)
+
+`DinoV3FeatureExtractor.PREPROCESS_VERSION` was bumped from `imagenet_normalize_v1` to `imagenet_normalize_v2` to fix a double-rescale bug: the HF `AutoImageProcessor` defaults to `do_rescale=True` with `rescale_factor=1/255`, but `build_crops` already hands the processor float `[0, 1]` crops. The model previously saw inputs in `~[-2.12, -1.79]` after ImageNet normalize (essentially black), producing features cosine-uncorrelated with the intended representation. The v2 path passes `do_rescale=False`.
+
+On the next eval against an existing cache:
+- **Normal (full-walk) runs**: a warning fires, `force_recompute.<side>_dinov3=True`, and DINOv3 features auto-rebuild. Mask / CP / DynaCLR / CELL-DINO entries are unaffected.
+- **`io.require_complete_cache=true` or `limit_positions=N`**: the mismatch hard-raises (see strict-mode escape hatches above). Either clear the cache and re-prime, or run a full walk once to refresh DINOv3.
+- **Caches written before `preprocess_version` tracking existed**: the missing tag is treated as "no constraint" by the auto-invalidate path, so v1-era features survive the bump silently. If you suspect a long-lived cache pre-dates tracking, set `force_recompute.<side>_dinov3=true` once to rebuild.
+
+All DINOv3-based metrics (FID / KID / Precision / Recall / F1) computed against v1 features are invalidated and need re-running.
+
 ### Priming with `precompute-gt`
 
 ```bash
