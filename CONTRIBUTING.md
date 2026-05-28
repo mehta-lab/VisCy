@@ -154,6 +154,48 @@ the [project settings](./pyproject.toml).
 Docstrings follow the [numpy style](https://numpydoc.readthedocs.io/en/latest/format.html)
 (`convention = "numpy"` in `[tool.ruff.lint.pydocstyle]`).
 
+### Releasing packages
+
+Versions come from git tags, not hardcoded. Each package reads
+[`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning); the tag
+**prefix** decides which package gets the version.
+
+| Package | Tag prefix | Example tag |
+|---|---|---|
+| `viscy-data` | `viscy-data-` | `viscy-data-v0.2.1` |
+| `viscy-models` | `viscy-models-` | `viscy-models-v0.4.0` |
+| `viscy-transforms` | `viscy-transforms-` | `viscy-transforms-v0.1.3` |
+| `viscy-utils` | `viscy-utils-` | `viscy-utils-v0.3.0` |
+| `viscy` (umbrella) | none | `v0.6.0` |
+
+Per-package, independent. Tag bumps only its own package. Umbrella reads bare tags.
+
+To cut a release:
+
+```sh
+# 1. clean main, latest tags
+git checkout main && git pull && git fetch --tags
+
+# 2. tag (one per package you ship)
+git tag viscy-data-v0.2.1
+
+# 3. build — version derived from the tag
+uv build --package viscy-data --out-dir dist/
+
+# 4. verify wheel name matches the tag before pushing
+ls dist/   # viscy_data-0.2.1-py3-none-any.whl
+
+# 5. push the tag (nothing public until this)
+git push origin viscy-data-v0.2.1
+```
+
+> **Note**: no version pins between workspace members. A built wheel's
+> `Requires-Dist` for a sibling package (e.g. `viscy-utils` → `viscy-data`) carries
+> **no** version constraint — `[tool.uv.sources]` workspace links resolve locally only,
+> not in published metadata ([astral-sh/uv#9811](https://github.com/astral-sh/uv/issues/9811)).
+> If you publish to PyPI, add an explicit pin (e.g. `"viscy-data>=0.1,<0.2"`) to the
+> dependent package's `dependencies`.
+
 ## Useful links
 
 ### uv documentation
