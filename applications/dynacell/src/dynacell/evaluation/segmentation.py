@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import torch
 
 try:
@@ -27,6 +28,27 @@ except ImportError:
     Workflow_sec61b = None  # type: ignore[assignment, misc]
     Workflow_tomm20 = None  # type: ignore[assignment, misc]
 
+from cubic.cuda import ascupy, asnumpy
+from cubic.skimage import filters as _cubic_filters
+
+NUCLEUS_GAUSSIAN_SIGMA = 1.0
+"""Isotropic Gaussian sigma (voxels) applied to the H2B input before
+``structure_H2B_100x_hipsc.apply_on_single_zstack``.
+
+The wrapper internally applies ``aicsmlsegment.simple_norm(1.5, 10)``,
+which fits a Gaussian via MLE to the full intensity distribution and
+stretches ``[m - 1.5σ, m + 10σ]`` to ``[0, 1]``. Bright chromatin tips and
+shot-noise outliers in noisy GT fluorescence inflate the fitted σ, the
+stretch range overshoots the actual signal range, and faint nuclei
+collapse into the low end of ``[0, 1]`` where the model's confidence is
+near zero. A σ=1 voxel Gaussian suppresses those outliers enough to bring
+``simple_norm``'s fit back into the actual signal range. Tested on iPSC
+GT and predictions where it roughly doubles the recovered nucleus mask
+area; A549 is unaffected (already clean intensity statistics). Membrane
++ ER + mitochondria are not smoothed because their backends either
+saturate (DL CAAX) or have their own internal preprocessing (classical
+aicssegmentation workflows)."""
+
 
 def _require_segmenter_model_zoo():
     if SuperModel is None:
@@ -42,6 +64,19 @@ def _require_aicssegmentation():
             "aicssegmentation is required for organelle segmentation workflows. "
             "Install it with: pip install aicssegmentation"
         )
+
+
+def _smooth_nucleus_input(img, sigma: float = NUCLEUS_GAUSSIAN_SIGMA):
+    """Apply isotropic Gaussian smoothing to dampen bright outliers in H2B input.
+
+    Runs on GPU via ``cubic`` when CUDA is available, on CPU otherwise. The
+    SuperModel inference downstream requires GPU regardless, so this is the
+    same constraint surface. See ``NUCLEUS_GAUSSIAN_SIGMA`` docstring for the
+    motivation.
+    """
+    img_dev = ascupy(img.astype(np.float32, copy=False))
+    smoothed = _cubic_filters.gaussian(img_dev, sigma=sigma, preserve_range=True)
+    return asnumpy(smoothed)
 
 
 def segment(img, target_name=None, seg_model: "SuperModel" = None):
@@ -66,6 +101,8 @@ def segment(img, target_name=None, seg_model: "SuperModel" = None):
         _require_segmenter_model_zoo()
         if seg_model is None:
             raise ValueError("seg_model (a loaded SuperModel) must be provided for nucleus and membrane segmentation.")
+        if target_name == "nucleus":
+            img = _smooth_nucleus_input(img)
         mask = seg_model.apply_on_single_zstack(img[None, ...])
 
     elif target_name == "nucleoli":
