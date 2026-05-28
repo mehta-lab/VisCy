@@ -169,7 +169,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_denoise.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_denoise/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_denoise/memb_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_celldiff_r2_denoise_membrane
 - name: celldiff_r2_iterative__ipsc_trained__ipsc
@@ -179,7 +179,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_iterative.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/memb_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_celldiff_r2_iterative_membrane
 - name: celldiff_r2_sliding_window__ipsc_trained__ipsc
@@ -189,7 +189,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_sliding_window.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_sliding_window/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_sliding_window/memb_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_celldiff_r2_sliding_window_membrane
 - name: vscyto3d__ipsc_trained__ipsc
