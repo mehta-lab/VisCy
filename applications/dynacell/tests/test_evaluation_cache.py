@@ -312,6 +312,26 @@ def test_diff_artifact_params_numeric_nonconvertible_lists_key() -> None:
     assert mismatches == [("spacing", "unknown", [0.29, 0.108, 0.108])]
 
 
+def test_diff_artifact_params_non_dict_entry_lists_all_keys() -> None:
+    """A non-mapping manifest entry surfaces every current key as a mismatch.
+
+    Hand-edited or partially-written manifest YAML can put a string,
+    list, or scalar where an artifact dict is expected; `entry.get(key)`
+    would raise AttributeError and crash init_cache_context. The helper
+    must treat the malformed entry as "no usable cached params" so the
+    caller can soft-invalidate.
+    """
+    mismatches = diff_artifact_params(
+        "corrupted-string-instead-of-dict",  # type: ignore[arg-type]
+        {"spacing": [0.29, 0.108, 0.108], "patch_size": 4},
+        numeric_keys=("spacing",),
+    )
+    assert mismatches == [
+        ("spacing", "corrupted-string-instead-of-dict", [0.29, 0.108, 0.108]),
+        ("patch_size", "corrupted-string-instead-of-dict", 4),
+    ]
+
+
 def test_write_and_read_mask_roundtrip(tmp_path: Path) -> None:
     """Masks written for one position are readable back as a bool array."""
     paths = cache_paths(tmp_path)

@@ -208,6 +208,12 @@ def diff_artifact_params(
     """
     if entry is None:
         return []
+    if not isinstance(entry, dict):
+        # A malformed manifest entry (string/list/scalar where a mapping is
+        # expected — hand-edit or partial-write corruption) must surface as
+        # mismatches so the caller can soft-invalidate, not as an
+        # AttributeError escaping through `entry.get(...)`.
+        return [(key, entry, value) for key, value in current.items()]
     mismatches: list[tuple[str, Any, Any]] = []
     for key, value in current.items():
         cached_value = entry.get(key)
