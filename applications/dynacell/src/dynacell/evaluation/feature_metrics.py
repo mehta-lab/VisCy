@@ -146,8 +146,14 @@ def _bootstrap_prc(
     )
 
 
-def _mind(pred: np.ndarray, target: np.ndarray, num_projections: int, rng_seed: int) -> float:
-    """Sliced 2-Wasserstein based MIND from torch-fidelity."""
+def _mind(pred: np.ndarray, target: np.ndarray, num_projections: int, rng_seed: int, use_gpu: bool = False) -> float:
+    """Sliced 2-Wasserstein based MIND from torch-fidelity.
+
+    ``use_gpu=True`` routes the projection + Wasserstein sort through CUDA via
+    torch-fidelity's ``cuda`` kwarg; the resulting kernel computations are
+    cheap to overlap with the encoder forward pass that produced ``pred`` /
+    ``target``, so the upload tax is paid only once per dataset call.
+    """
     if pred.shape[0] == 0 or target.shape[0] == 0:
         return float("nan")
     out = mind_features_to_metric(
@@ -155,7 +161,7 @@ def _mind(pred: np.ndarray, target: np.ndarray, num_projections: int, rng_seed: 
         _to_tensor(target),
         mind_num_projections=num_projections,
         rng_seed=rng_seed,
-        cuda=False,
+        cuda=bool(use_gpu and torch.cuda.is_available()),
         verbose=False,
     )
     return float(out["monge_inception_distance"])
@@ -172,6 +178,7 @@ def compute_feature_similarity(
     prc_bootstrap_size: int | None = None,
     mind_num_projections: int = 1000,
     rng_seed: int = 2020,
+    use_gpu: bool = False,
 ) -> dict[str, float]:
     """Compute dataset-level feature-similarity metrics for one prefix.
 
@@ -244,7 +251,7 @@ def compute_feature_similarity(
     p_mean, p_std, r_mean, r_std, f_mean, f_std = _bootstrap_prc(
         pred, target, prc_neighborhood, prc_bootstrap_subsets, bootstrap_size, rng_seed
     )
-    mind = _mind(pred, target, mind_num_projections, rng_seed)
+    mind = _mind(pred, target, mind_num_projections, rng_seed, use_gpu=use_gpu)
     cos = _median_cosine_similarity(pred, target)
 
     return {

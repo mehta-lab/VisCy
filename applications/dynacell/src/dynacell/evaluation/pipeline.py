@@ -1148,7 +1148,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         def _compute_one(args):
             name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
             raw = {
-                **compute_feature_similarity(p_metric, t_metric, name),
+                **compute_feature_similarity(p_metric, t_metric, name, use_gpu=use_gpu),
                 **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
             }
             return {f"Dataset_{k}": v for k, v in raw.items()}
@@ -1172,7 +1172,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         for name in expected_prefixes:
             if f"Dataset_{name}_FID" not in dataset_row:
                 raw = {
-                    **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
+                    **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name, use_gpu=use_gpu),
                     **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
                 }
                 dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
