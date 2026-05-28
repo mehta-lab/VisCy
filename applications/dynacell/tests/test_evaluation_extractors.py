@@ -77,6 +77,20 @@ def test_dinov3_extract_features_batch_passes_do_rescale_false(monkeypatch: pyte
         )
 
 
+def test_dinov3_extractor_pins_processor_do_rescale_false_at_init(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Constructing the extractor must flip ``processor.do_rescale`` to ``False``.
+
+    The per-call ``do_rescale=False`` override on every ``self.processor(...)``
+    invocation is the primary guard; pinning the instance attribute here is
+    defense-in-depth so a future helper that forgets the kwarg cannot
+    silently re-enable the buggy double-rescale path.
+    """
+    processor_mock, _ = _stub_processor_and_model(monkeypatch)
+    processor_mock.do_rescale = True  # simulate the HF default before init touches it
+    eval_utils.DinoV3FeatureExtractor("facebook/test-dinov3")
+    assert processor_mock.do_rescale is False
+
+
 def test_dinov3_preprocess_version_is_v2() -> None:
     """The recipe-version tag must read ``imagenet_normalize_v2``.
 

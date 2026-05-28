@@ -152,6 +152,14 @@ class DinoV3FeatureExtractor:
         """
         _require_transformers()
         self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
+        # Belt-and-suspenders: HF defaults `do_rescale=True` with
+        # `rescale_factor=1/255` (uint8 → [0, 1]) on the processor instance.
+        # Our crops are already float [0, 1] from `_minmax_norm`, so the
+        # rescale must not run. Per-call ``do_rescale=False`` below covers
+        # the current invocations; pinning the instance attribute here
+        # keeps any future helper that calls ``self.processor(...)`` without
+        # the kwarg from silently regressing to the double-rescaled path.
+        self.processor.do_rescale = False
         self.model = AutoModel.from_pretrained(
             pretrained_model_name,
             device_map="auto",
