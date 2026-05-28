@@ -328,15 +328,17 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         return
     artifacts = ctx.manifest.get("artifacts", {})
 
-    checks: list[tuple[str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
+    checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
         (
             "masks",
+            f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
             artifacts.get("organelle_masks", {}).get(ctx.target_name),
             {"target_name": ctx.target_name, **ctx.source_tag},
             (),
         ),
         (
             "cp",
+            f"{ctx.label_prefix}cp_features",
             artifacts.get("cp_features"),
             {"spacing": ctx.spacing, **ctx.source_tag},
             ("spacing",),
@@ -346,6 +348,7 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         checks.append(
             (
                 "dinov3",
+                f"{ctx.label_prefix}dinov3_features[{ctx.dinov3_model_name}]",
                 artifacts.get("dinov3_features", {}).get(feature_slug(ctx.dinov3_model_name)),
                 {"model_name": ctx.dinov3_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
                 (),
@@ -355,6 +358,7 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         checks.append(
             (
                 "dynaclr",
+                f"{ctx.label_prefix}dynaclr_features[{ctx.dynaclr_ckpt_sha12}]",
                 artifacts.get("dynaclr_features", {}).get(ctx.dynaclr_ckpt_sha12),
                 {
                     "checkpoint_sha256_12": ctx.dynaclr_ckpt_sha12,
@@ -369,6 +373,7 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
         checks.append(
             (
                 "celldino",
+                f"{ctx.label_prefix}celldino_features[{ctx.celldino_weights_sha12}]",
                 artifacts.get("celldino_features", {}).get(ctx.celldino_weights_sha12),
                 {
                     "weights_sha256_12": ctx.celldino_weights_sha12,
@@ -379,19 +384,19 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
             )
         )
 
-    for kind, entry, current, numeric_keys in checks:
+    for kind, artifact_label, entry, current, numeric_keys in checks:
         mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
         if not mismatches:
             continue
         details = ", ".join(f"{key}: cached={cached!r}, current={cur!r}" for key, cached, cur in mismatches)
         if ctx.require_complete:
             raise StaleCacheError(
-                f"{ctx.side}_{kind}: artifact param mismatch ({details}) and io.require_complete_cache=true"
+                f"{artifact_label}: artifact param mismatch ({details}) and io.require_complete_cache=true"
             )
         force_key = f"{ctx.side}_{kind}"
         ctx.force[force_key] = True
         warnings.warn(
-            f"{force_key}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
+            f"{artifact_label}: artifact param mismatch ({details}); auto-invalidating {force_key} cache for this run.",
             stacklevel=2,
         )
 

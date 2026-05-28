@@ -295,7 +295,7 @@ def test_init_cache_spacing_mismatch_raises_under_require_complete(tmp_path: Pat
             "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
         },
     )
-    with pytest.raises(StaleCacheError, match="gt_cp.*spacing.*require_complete_cache=true"):
+    with pytest.raises(StaleCacheError, match="cp_features.*spacing.*require_complete_cache=true"):
         init_cache_context(
             _make_config(**{"io.gt_cache_dir": str(tmp_path), "io.require_complete_cache": True}),
             side="gt",
