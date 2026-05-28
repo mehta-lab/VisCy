@@ -13,16 +13,13 @@ from viscy_utils.evaluation.clustering import (
 def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     """Extract embeddings and calculate cosine similarities for a specific cell"""
     filtered_data = embedding_dataset.where(
-        (embedding_dataset["fov_name"] == fov_name)
-        & (embedding_dataset["track_id"] == track_id),
+        (embedding_dataset["fov_name"] == fov_name) & (embedding_dataset["track_id"] == track_id),
         drop=True,
     )
     features = filtered_data["features"].values
     time_points = filtered_data["t"].values
     first_time_point_embedding = features[0].reshape(1, -1)
-    cosine_similarities = cosine_similarity(
-        first_time_point_embedding, features
-    ).flatten()
+    cosine_similarities = cosine_similarity(first_time_point_embedding, features).flatten()
     cosine_similarities = np.clip(cosine_similarities, -1.0, 1.0)
     return time_points, cosine_similarities.tolist()
 
@@ -49,19 +46,14 @@ def compute_track_displacement(
         Dictionary mapping time lag τ to list of squared displacements
     """
 
-    unique_tracks_df = (
-        embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
-    )
+    unique_tracks_df = embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
 
     displacement_per_tau = defaultdict(list)
 
-    for fov_name, track_id in zip(
-        unique_tracks_df["fov_name"], unique_tracks_df["track_id"]
-    ):
+    for fov_name, track_id in zip(unique_tracks_df["fov_name"], unique_tracks_df["track_id"]):
         # Filter data for this track
         track_data = embedding_dataset.where(
-            (embedding_dataset["fov_name"] == fov_name)
-            & (embedding_dataset["track_id"] == track_id),
+            (embedding_dataset["fov_name"] == fov_name) & (embedding_dataset["track_id"] == track_id),
             drop=True,
         )
 
@@ -71,9 +63,7 @@ def compute_track_displacement(
         track_embeddings = track_data["features"].values[time_order]
 
         # Compute pairwise distance matrix
-        distance_matrix = pairwise_distance_matrix(
-            track_embeddings, metric=distance_metric
-        )
+        distance_matrix = pairwise_distance_matrix(track_embeddings, metric=distance_metric)
 
         # Extract displacements using diagonal offsets
         n_timepoints = len(times)

@@ -1,4 +1,6 @@
 # %%
+"""Plot dimensionality reduction of cell embeddings."""
+
 from pathlib import Path
 
 import anndata as ad

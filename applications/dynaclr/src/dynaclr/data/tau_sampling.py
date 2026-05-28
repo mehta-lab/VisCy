@@ -1,3 +1,5 @@
+"""Temporal tau sampling for triplet selection."""
+
 import numpy as np
 
 
