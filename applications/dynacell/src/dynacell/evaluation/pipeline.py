@@ -481,10 +481,13 @@ def _process_one_fov(
     # Bulk-upload predict/target once per FOV so compute_pixel_metrics' per-T
     # ascupy is a no-op via cupy-on-cupy. mask / feature / microssim paths
     # still consume the numpy arrays in parallel — neither SuperModel nor
-    # build_crops nor the microssim aggregator accept cupy directly.
+    # build_crops nor the microssim aggregator accept cupy directly. The lock
+    # serializes the cupy allocation across workers under executor=process so
+    # N FOVs aren't all trying to allocate (T,D,H,W) fp32 at once.
     if use_gpu and ascupy is not None and torch.cuda.is_available():
-        predict_xp = ascupy(predict)
-        target_xp = ascupy(target)
+        with gpu_serialization_lock(gate=use_gpu):
+            predict_xp = ascupy(predict)
+            target_xp = ascupy(target)
     else:
         predict_xp = predict
         target_xp = target
