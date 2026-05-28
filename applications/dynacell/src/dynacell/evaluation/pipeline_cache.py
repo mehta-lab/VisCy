@@ -247,6 +247,7 @@ def init_cache_context(
     )
     _validate_artifact_params(ctx)
     _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    _auto_invalidate_on_cp_use_gpu_mismatch(ctx)
     return ctx
 
 
@@ -294,6 +295,42 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
             f"auto-invalidating {force_key} cache for this run.",
             stacklevel=2,
         )
+
+
+def _auto_invalidate_on_cp_use_gpu_mismatch(ctx: _CacheContext) -> None:
+    """Soft-invalidate cp_features when ``use_gpu`` differs from the cached run.
+
+    cucim (``use_gpu=True``) and skimage (``use_gpu=False``) implement the
+    regionprops moment / intensity reductions with different float-reduction
+    orders, so the resulting per-cell feature vectors differ in the ~1e-6
+    range. Mixing the two in a cache dir would silently contaminate
+    downstream feature similarity metrics (FID / PRC / cosine), since
+    nothing in the disk-read path knows the rows came from different
+    devices.
+
+    Missing tags (cached manifest pre-dates use_gpu tracking) are treated
+    as "no constraint" — they do NOT trigger invalidation. Operators
+    handle that bootstrap transition explicitly via
+    ``force_recompute.<side>_cp``.
+    """
+    if not ctx.enabled:
+        return
+    entry = ctx.manifest.get("artifacts", {}).get("cp_features")
+    if entry is None:
+        return
+    cached_use_gpu = entry.get("use_gpu")
+    if cached_use_gpu is None or cached_use_gpu == ctx.use_gpu:
+        return
+    force_key = f"{ctx.side}_cp"
+    ctx.force[force_key] = True
+    warnings.warn(
+        f"cp_features: use_gpu mismatch (cached={cached_use_gpu!r}, "
+        f"current={ctx.use_gpu!r}); auto-invalidating {force_key} cache "
+        f"for this run. cucim and skimage produce numerically different "
+        f"float reductions, so mixing devices would silently contaminate "
+        f"downstream feature-similarity metrics.",
+        stacklevel=2,
+    )
 
 
 def _validate_artifact_params(ctx: _CacheContext) -> None:
@@ -619,6 +656,7 @@ def fov_cp_features(
             "path": "features/cp.zarr",
             "spacing": ctx.spacing,
             "built_at": built_at_now(),
+            "use_gpu": ctx.use_gpu,
             **ctx.source_tag,
         }
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
