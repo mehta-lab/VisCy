@@ -1149,9 +1149,17 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         # Prefix with "Dataset_" so dataset-level FID/KID/cosine don't clobber
         # per-FOV columns of the same name when merged into per-FOV rows.
         def _compute_one(args):
+            # MIND stays on CPU here even when use_gpu=True: 4 parallel threads
+            # racing on the same CUDA context would either serialize via the
+            # allocator (no speedup) or contend for memory with mid-eval FOV
+            # work in process executors. CPU MIND in a 4-thread BLAS-capped
+            # pool is competitive with serialized GPU MIND and bit-stable
+            # across runs that toggle use_gpu (torch's CPU vs CUDA RNG
+            # produce different streams for the same seed, breaking cross-
+            # leaf comparability of the MIND column).
             name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
             raw = {
-                **compute_feature_similarity(p_metric, t_metric, name, use_gpu=use_gpu),
+                **compute_feature_similarity(p_metric, t_metric, name),
                 **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
             }
             return {f"Dataset_{k}": v for k, v in raw.items()}
@@ -1175,7 +1183,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         for name in expected_prefixes:
             if f"Dataset_{name}_FID" not in dataset_row:
                 raw = {
-                    **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name, use_gpu=use_gpu),
+                    **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
                     **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
                 }
                 dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
