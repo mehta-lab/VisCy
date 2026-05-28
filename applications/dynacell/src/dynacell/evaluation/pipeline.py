@@ -973,8 +973,6 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             if runtime.executor == "process" and seg_model is not None:
                 del seg_model
                 seg_model = None
-                import torch
-
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
