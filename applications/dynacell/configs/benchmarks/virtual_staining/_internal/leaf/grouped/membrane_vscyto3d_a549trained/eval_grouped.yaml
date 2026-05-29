@@ -1,0 +1,59 @@
+# @package _global_
+# Grouped leaf: membrane bucket, vscyto3d (fcmae_vscyto3d_pretrained) a549-trained.
+# Test sets: A549 mantis (mock/denv/zikv) + iPSC confocal. Predictions complete
+# (best-val ckpt epoch=154 from run 20260522-120713; local A40 predicts done).
+# Standalone leaf rather than folded into membrane_a549_trained because the
+# canonical generator (tools/generate_grouped_eval_configs.py) currently can't
+# parse the dual_* prediction zarrs on disk.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: vscyto3d__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_a549trained_denv.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/a549_trained/fcmae_vscyto3d_pretrained/caax_denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_a549trained_with_embeddings/eval_vscyto3d_a549trained_membrane_denv
+- name: vscyto3d__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_a549trained_mock.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/a549_trained/fcmae_vscyto3d_pretrained/caax_mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_a549trained_with_embeddings/eval_vscyto3d_a549trained_membrane_mock
+- name: vscyto3d__a549_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_a549trained_zikv.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/a549_trained/fcmae_vscyto3d_pretrained/caax_zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_a549trained_with_embeddings/eval_vscyto3d_a549trained_membrane_zikv
+- name: vscyto3d__a549_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_pretrained_a549trained.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fcmae_vscyto3d_pretrained/membrane_ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_vscyto3d_a549trained_membrane
