@@ -926,15 +926,11 @@ wheels = [
 
 [[package]]
 name = "cubic"
-version = "0.7.0a7"
-source = { registry = "https://pypi.org/simple" }
+version = "0.7.0a8"
+source = { git = "https://github.com/alxndrkalinin/cubic.git?branch=main#d46e345b96671a3559c6e4a094c39ebed3513358" }
 dependencies = [
     { name = "numpy" },
     { name = "scikit-image" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/64/25/ec0cfc3bcf95d805fd04f130e0eb8752da93e25ec5d886362e4cb6ac3a37/cubic-0.7.0a7.tar.gz", hash = "sha256:a024a93594a2cf4d62fef039fc3ba7802271f97755bbe23a758a94af5c496f1a", size = 138399, upload-time = "2026-05-26T21:11:14.692Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/e2/24c3e0777f94db6b043f556601a36e4fb69ac581d32aefb5d698546354ee/cubic-0.7.0a7-py3-none-any.whl", hash = "sha256:90e5479472156e4a2db154a15610f23b1bf5d083bd97d766a7478def32cb9de5", size = 167487, upload-time = "2026-05-26T21:11:13.054Z" },
 ]
 
 [[package]]
@@ -1345,7 +1341,7 @@ requires-dist = [
     { name = "aicsmlsegment", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git?branch=main" },
     { name = "aicssegmentation", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-segmentation.git?branch=main" },
     { name = "cellpose", marker = "extra == 'eval'" },
-    { name = "cubic", marker = "extra == 'eval'", specifier = "==0.7.0a7" },
+    { name = "cubic", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/cubic.git?branch=main" },
     { name = "cucim-cu12", marker = "extra == 'eval-gpu'" },
     { name = "cupy-cuda12x", marker = "extra == 'eval-gpu'" },
     { name = "dynaclr", marker = "extra == 'eval'", editable = "applications/dynaclr" },

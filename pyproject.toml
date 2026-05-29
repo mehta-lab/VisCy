@@ -58,6 +58,9 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
 dynacell = { workspace = true }
+# cubic 0.7.0a8 (FSC mean-center-before-Hamming-window fix) is not on PyPI yet;
+# pull it from main, which reports 0.7.0a8 and satisfies the ==0.7.0a8 pin.
+cubic = { git = "https://github.com/alxndrkalinin/cubic.git", branch = "main" }
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }

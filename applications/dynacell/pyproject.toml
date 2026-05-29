@@ -43,7 +43,7 @@ optional-dependencies.eval = [
   "aicsmlsegment",
   "aicssegmentation",
   "cellpose",
-  "cubic==0.7.0a7",
+  "cubic==0.7.0a8",
   "dynaclr",
   "hydra-core>=1.2",
   "iohub",
