@@ -129,6 +129,8 @@ GT caches are reusable across model checkpoints for the same `(gt_path, gt_chann
   features/celldino/{weights_sha12}.zarr # one plate per CELL-DINO weights
 ```
 
+`manifest.yaml` is **not source-controlled** — it lives in the shared cache root, is rewritten by the pipeline on every cache-mutating run (timestamps, FOV position lists, absolute HPC paths to the per-model feature zarrs it indexes), and is fully derivable from this code + the raw inputs. A deleted or corrupted manifest is a recompute cost (run `dynacell precompute-gt` or a normal eval), not a loss of source-of-truth state.
+
 Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
 
 Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
