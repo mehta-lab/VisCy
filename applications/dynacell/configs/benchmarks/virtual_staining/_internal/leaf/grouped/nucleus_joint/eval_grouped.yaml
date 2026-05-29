@@ -109,7 +109,7 @@ conditions:
       target: nucleus
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_celldiff_r2.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/celldiff_r2/nucl_ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/celldiff_r2/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_nucleus
 - name: unext2__joint__ipsc
@@ -119,7 +119,7 @@ conditions:
       target: nucleus
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_fcmae_vscyto3d_scratch_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fcmae_vscyto3d_scratch/nucl_ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fcmae_vscyto3d_scratch/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_unext2_jointtrained_nucleus
 - name: fnet3d__joint__ipsc
@@ -129,6 +129,6 @@ conditions:
       target: nucleus
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_fnet3d_paper_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fnet3d_paper/nucl_ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fnet3d_paper/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_fnet3d_jointtrained_nucleus

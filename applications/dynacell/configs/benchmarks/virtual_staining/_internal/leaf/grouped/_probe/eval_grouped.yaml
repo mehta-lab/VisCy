@@ -12,6 +12,16 @@ runtime:
 force_recompute:
   final_metrics: true
 conditions:
+- name: celldiff_r2__a549_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_r2_a549trained.zarr
+    pred_cache_dir: /tmp/reeval_probe/cache/celldiff_r2__a549_trained__ipsc
+  save:
+    save_dir: /tmp/reeval_probe/out/celldiff_r2__a549_trained__ipsc
 - name: celldiff_r2_denoise__ipsc_trained__ipsc
   benchmark:
     dataset_ref:
@@ -22,16 +32,6 @@ conditions:
     pred_cache_dir: /tmp/reeval_probe/cache/celldiff_r2_denoise__ipsc_trained__ipsc
   save:
     save_dir: /tmp/reeval_probe/out/celldiff_r2_denoise__ipsc_trained__ipsc
-- name: vscyto3d__a549_trained__ipsc
-  benchmark:
-    dataset_ref:
-      dataset: aics-hipsc
-      target: sec61b
-  io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fcmae_vscyto3d_pretrained_a549trained.zarr
-    pred_cache_dir: /tmp/reeval_probe/cache/vscyto3d__a549_trained__ipsc
-  save:
-    save_dir: /tmp/reeval_probe/out/vscyto3d__a549_trained__ipsc
 - name: vscyto3d__joint__ipsc
   benchmark:
     dataset_ref:
@@ -42,6 +42,16 @@ conditions:
     pred_cache_dir: /tmp/reeval_probe/cache/vscyto3d__joint__ipsc
   save:
     save_dir: /tmp/reeval_probe/out/vscyto3d__joint__ipsc
+- name: celldiff_r2__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_celldiff_r2_a549trained_denv.zarr
+    pred_cache_dir: /tmp/reeval_probe/cache/celldiff_r2__a549_trained__a549_denv
+  save:
+    save_dir: /tmp/reeval_probe/out/celldiff_r2__a549_trained__a549_denv
 - name: celldiff_r2_iterative__ipsc_trained__a549_denv
   benchmark:
     dataset_ref:
@@ -52,16 +62,6 @@ conditions:
     pred_cache_dir: /tmp/reeval_probe/cache/celldiff_r2_iterative__ipsc_trained__a549_denv
   save:
     save_dir: /tmp/reeval_probe/out/celldiff_r2_iterative__ipsc_trained__a549_denv
-- name: vscyto3d__a549_trained__a549_denv
-  benchmark:
-    dataset_ref:
-      dataset: a549-mantis-sec61b-denv
-      target: sec61b
-  io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_pretrained_a549trained_denv.zarr
-    pred_cache_dir: /tmp/reeval_probe/cache/vscyto3d__a549_trained__a549_denv
-  save:
-    save_dir: /tmp/reeval_probe/out/vscyto3d__a549_trained__a549_denv
 - name: vscyto3d__joint__a549_denv
   benchmark:
     dataset_ref:
