@@ -135,6 +135,8 @@ Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_pa
 
 Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
 
+**Not auto-invalidated**: the runtime environment (`uv.lock`, `pyproject.toml`, installed `cubic` / `transformers` / `torch` versions). A dep bump that silently alters numerics — e.g., a cubic FSC change — leaves the cache valid by the manifest's lights. The cover for this is per-extractor version tags like `DinoV3FeatureExtractor.PREPROCESS_VERSION`: the author of the bump bumps the tag in the same commit so existing caches soft-invalidate. If the tag isn't bumped, caches keep stale features silently.
+
 Two strict-mode escape hatches keep the soft path from corrupting partially-walked or fast-path runs:
 
 - `io.require_complete_cache=true` (cache-only mode): a known mismatch raises instead of warning. The user opted out of recompute; a stale manifest is fatal.
