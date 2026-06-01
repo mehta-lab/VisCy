@@ -952,12 +952,33 @@ def test_mmap_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
         break
 
 
+def _mmap_sharing_child(data_path, cache_dir, result_queue):
+    """Open the shared mmap buffer in a child process (module-level for spawn).
+
+    Defined at module scope so it is picklable under the ``spawn`` start
+    method (Windows/macOS default); a nested closure would fail with
+    ``AttributeError: Can't get local object``.
+    """
+    try:
+        from iohub import open_ome_zarr
+        from tensordict.memmap import MemoryMappedTensor
+
+        with open_ome_zarr(data_path, mode="r") as ds:
+            positions = [pos for _, pos in ds.positions()]
+        arr_shape = positions[0]["0"].shape
+        T, C = arr_shape[0], 2
+        shape = (len(positions) * T, C, *arr_shape[2:])
+        buf = MemoryMappedTensor.from_filename(cache_dir / "data.mmap", dtype=torch.float32, shape=shape)
+        result_queue.put(("ok", tuple(buf.shape)))
+    except Exception as e:
+        result_queue.put(("err", str(e)))
+
+
 def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
     import multiprocessing
 
     importorskip("tensordict")
-    from tensordict.memmap import MemoryMappedTensor
 
     dm = HCSDataModule(
         data_path=hcs_with_fg_mask,
@@ -974,21 +995,7 @@ def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
 
     result_queue = multiprocessing.Queue()
 
-    def _child(cache_dir, result_queue):
-        try:
-            from iohub import open_ome_zarr
-
-            with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
-                positions = [pos for _, pos in ds.positions()]
-            arr_shape = positions[0]["0"].shape
-            T, C = arr_shape[0], 2
-            shape = (len(positions) * T, C, *arr_shape[2:])
-            buf = MemoryMappedTensor.from_filename(cache_dir / "data.mmap", dtype=torch.float32, shape=shape)
-            result_queue.put(("ok", tuple(buf.shape)))
-        except Exception as e:
-            result_queue.put(("err", str(e)))
-
-    proc = multiprocessing.Process(target=_child, args=(cache_dir, result_queue))
+    proc = multiprocessing.Process(target=_mmap_sharing_child, args=(hcs_with_fg_mask, cache_dir, result_queue))
     proc.start()
     proc.join(timeout=30)
     status, value = result_queue.get_nowait()
