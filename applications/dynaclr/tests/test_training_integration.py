@@ -54,7 +54,7 @@ def test_contrastive_ntxent_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTri
 
 @pytest.mark.parametrize(
     "config_name,config_subdir",
-    [("fit.yml", "training"), ("predict.yml", "prediction")],
+    [("demo/demo_2d_fit.yml", "training"), ("predict.yml", "prediction")],
 )
 def test_config_class_paths_resolve(config_name, config_subdir, _extract_class_paths, _resolve_class_path):
     configs_dir = Path(__file__).parents[1] / "configs" / config_subdir

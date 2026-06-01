@@ -237,16 +237,16 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(
 
 
 def test_multi_experiment_config_class_paths_resolve(_extract_class_paths, _resolve_class_path):
-    """All class_paths in multi_experiment_fit.yml resolve to importable classes."""
+    """All class_paths in demo_bag_of_channels_v3_fit.yml resolve to importable classes."""
     configs_dir = Path(__file__).parents[1] / "configs" / "training"
-    config_path = configs_dir / "multi_experiment_fit.yml"
+    config_path = configs_dir / "demo" / "demo_bag_of_channels_v3_fit.yml"
     assert config_path.exists(), f"Config file not found: {config_path}"
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
     class_paths = _extract_class_paths(config)
-    assert len(class_paths) > 0, "No class_path entries found in multi_experiment_fit.yml"
+    assert len(class_paths) > 0, "No class_path entries found in demo_bag_of_channels_v3_fit.yml"
 
     for cp in class_paths:
         cls = _resolve_class_path(cp)
