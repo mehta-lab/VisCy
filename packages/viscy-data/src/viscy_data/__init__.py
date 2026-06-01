@@ -18,6 +18,11 @@ Version:
     Use ``importlib.metadata.version('viscy-data')`` to get version.
 """
 
+# Pin iohub's zarr-v3 codec pipeline to zarr-python's native backend before any
+# store is opened (avoids the broken ``zarrs`` Rust pipeline). Imported first so
+# the override is applied before any other import pulls in iohub. See _zarr_codec.py.
+import viscy_data._zarr_codec  # noqa: F401  (import for side effect)
+
 # Type definitions (from _typing.py)
 from viscy_data._typing import (
     CELL_INDEX_CORE_COLUMNS,
