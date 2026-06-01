@@ -42,6 +42,16 @@ PREDICT_LEAVES = [
     (organelle, model) for organelle in ("er", "mito", "nucleus", "membrane") for model in ("celldiff", "unetvit3d")
 ]
 
+# celldiff predict leaves are split per inference method; unetvit3d has a single file.
+PREDICT_LEAF_FILES = [
+    (organelle, "celldiff", f"predict__ipsc_confocal__{method}.yml")
+    for organelle in ("er", "mito", "nucleus", "membrane")
+    for method in ("denoise", "iterative", "sliding_window")
+] + [
+    (organelle, "unetvit3d", "predict__ipsc_confocal.yml")
+    for organelle in ("er", "mito", "nucleus", "membrane")
+]
+
 
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
 def test_train_leaf_composes(organelle: str, model: str) -> None:
@@ -56,11 +66,11 @@ def test_train_leaf_composes(organelle: str, model: str) -> None:
     assert "precision" in t
 
 
-@pytest.mark.parametrize("organelle,model", PREDICT_LEAVES)
-def test_predict_leaf_composes(organelle: str, model: str, monkeypatch) -> None:
+@pytest.mark.parametrize("organelle,model,predict_file", PREDICT_LEAF_FILES)
+def test_predict_leaf_composes(organelle: str, model: str, predict_file: str, monkeypatch) -> None:
     """Predict leaves compose and point at the test_cropped store."""
     monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
-    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / predict_file
     cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
