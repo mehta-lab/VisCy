@@ -47,10 +47,7 @@ PREDICT_LEAF_FILES = [
     (organelle, "celldiff", f"predict__ipsc_confocal__{method}.yml")
     for organelle in ("er", "mito", "nucleus", "membrane")
     for method in ("denoise", "iterative", "sliding_window")
-] + [
-    (organelle, "unetvit3d", "predict__ipsc_confocal.yml")
-    for organelle in ("er", "mito", "nucleus", "membrane")
-]
+] + [(organelle, "unetvit3d", "predict__ipsc_confocal.yml") for organelle in ("er", "mito", "nucleus", "membrane")]
 
 
 @pytest.mark.parametrize("organelle,model", TRAIN_LEAVES)
