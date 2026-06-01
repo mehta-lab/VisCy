@@ -543,12 +543,14 @@ def test_joint_train_smoke_leaf_composes() -> None:
     assert sbatch["time"] == "00:30:00"
 
 
-# Lock-in for the A100-exclude bake-in in hardware_4gpu.yml. After repeat
-# NCCL coordination hangs on this cluster's A100 partition (FCMAE jobs
-# 31474030 + 31474038, joint smoke 31480607), every 4-GPU train leaf
-# inherits this alternation by default. Future leaves needing A100 must
-# explicitly opt out via `--override launcher.sbatch.constraint=null`.
-_HARDWARE_4GPU_CONSTRAINT = "h100|h200|a40|a6000|l40s"
+# Lock-in for the H100/H200 restriction baked into hardware_4gpu.yml.
+# 4-GPU FCMAE/UNeXt2 leaves train at large spatial patches where a single
+# DDP rank needs 30-50 GB, so A40/A6000/L40S (48 GB) leave no headroom;
+# A100 is excluded separately due to repeat NCCL coordination hangs on this
+# cluster's A100 partition. Every 4-GPU train leaf inherits this constraint
+# by default. Leaves needing other cards must explicitly opt out via
+# `--override launcher.sbatch.constraint=null`.
+_HARDWARE_4GPU_CONSTRAINT = "h100|h200"
 
 
 def _all_train_leaves() -> list[Path]:
