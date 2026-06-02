@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Zensical documentation build output
+/site/
+
 # IDE/Editor
 .idea/
 .vscode/

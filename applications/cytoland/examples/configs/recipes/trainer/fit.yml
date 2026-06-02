@@ -20,3 +20,5 @@ trainer:
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false

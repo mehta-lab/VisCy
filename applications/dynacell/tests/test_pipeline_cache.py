@@ -17,6 +17,7 @@ from dynacell.evaluation.cache import (  # noqa: E402
     cache_paths,
     load_manifest,
     read_features,
+    read_instance_mask,
     read_mask,
     write_features,
     write_mask,
@@ -27,7 +28,10 @@ from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     fov_cp_features,
     fov_deep_features,
     fov_masks,
+    fov_nucleus_instances,
+    fov_whole_cell_instances,
     init_cache_context,
+    instance_cache_hit,
     precompute_deep_features,
 )
 
@@ -76,8 +80,8 @@ class _FakeSegModel:
 def _seg_fn_factory(value: int):
     """Return a stand-in for ``dynacell.evaluation.segmentation.segment`` returning a constant mask."""
 
-    def _segment(img, target_name, seg_model=None):
-        del target_name, seg_model
+    def _segment(img, target_name, seg_model=None, **kwargs):
+        del target_name, seg_model, kwargs
         return np.full(img.shape, value, dtype=np.uint8)
 
     return _segment
@@ -244,8 +248,15 @@ def test_init_pred_cache_channel_name_mismatch_raises(tmp_path: Path) -> None:
         )
 
 
-def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
-    """An existing cp_features entry with a different spacing value raises."""
+def test_init_cache_spacing_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A cp_features entry with a stale spacing flips force_recompute, not raises.
+
+    Pre-existing manifest has ``spacing=[0.3, 0.108, 0.108]`` but the current
+    config advertises ``[0.29, 0.108, 0.108]``. The validator must warn and
+    set ``force["gt_cp"] = True`` so the regionprops cache is recomputed
+    with the current spacing, then the manifest entry is rewritten — letting
+    spacing bumps self-heal across runs.
+    """
     paths = cache_paths(tmp_path)
     from dynacell.evaluation.cache import save_manifest
 
@@ -258,8 +269,71 @@ def test_init_cache_spacing_mismatch_raises(tmp_path: Path) -> None:
             "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
         },
     )
-    with pytest.raises(StaleCacheError, match="spacing mismatch"):
-        init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "spacing" in str(w.message) for w in caught), (
+        f"expected spacing mismatch warning; got {[str(w.message) for w in caught]}"
+    )
+
+
+def test_init_cache_spacing_mismatch_raises_under_require_complete(tmp_path: Path) -> None:
+    """Stale spacing under ``require_complete_cache=true`` is fatal, not soft-recomputed.
+
+    The fast-path mode promises no model loads and no opportunistic
+    rebuilds; auto-invalidation here would silently violate that contract
+    and trigger compute the operator explicitly opted out of.
+    """
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="cp_features.*spacing.*require_complete_cache=true"):
+        init_cache_context(
+            _make_config(**{"io.gt_cache_dir": str(tmp_path), "io.require_complete_cache": True}),
+            side="gt",
+        )
+
+
+def test_init_cache_spacing_mismatch_raises_under_limit_positions(tmp_path: Path) -> None:
+    """Stale spacing under ``limit_positions`` is fatal, not soft-recomputed.
+
+    Partial-walk runs (smoke / iteration with `limit_positions=N`) visit
+    only the first N FOVs. Soft-invalidate would rewrite the manifest's
+    flat `cp_features.spacing` to the new value while only those N FOVs
+    get their on-disk regionprops recomputed — leaving unvisited FOVs'
+    chunks tagged with the new spacing in the manifest but holding
+    old-spacing data on disk. The operator must clear the cache or drop
+    `limit_positions`.
+    """
+    paths = cache_paths(tmp_path)
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": {"spacing": [0.3, 0.108, 0.108]}},
+        },
+    )
+    with pytest.raises(StaleCacheError, match="cp_features.*spacing.*limit_positions"):
+        init_cache_context(
+            _make_config(**{"io.gt_cache_dir": str(tmp_path), "limit_positions": 4}),
+            side="gt",
+        )
 
 
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
@@ -438,6 +512,41 @@ def test_fov_pred_masks_writes_manifest_source(tmp_path: Path, monkeypatch) -> N
     assert "A/1/0" in er_entry["positions"]
 
 
+def test_fov_masks_non_default_backend_keys_manifest_by_stem(tmp_path: Path, monkeypatch) -> None:
+    """A non-supermodel backend keys its manifest entry by the backend-aware stem.
+
+    ``supermodel`` masks live under ``organelle_masks[nucleus]`` and a ``cellpose``
+    binary run under ``organelle_masks[nucleus__cellpose]`` — matching their
+    distinct cache plate paths — so two backends in one cache dir never clobber
+    each other's manifest ``path`` / ``positions``.
+    """
+    import dynacell.evaluation.segmentation as segmentation
+
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    img = np.zeros((1, 2, 3, 3), dtype=np.float32)
+
+    cfg_sm = _make_config(**{"target_name": "nucleus", "io.gt_cache_dir": str(tmp_path)})
+    ctx_sm = init_cache_context(cfg_sm, side="gt")
+    fov_masks(ctx_sm, "A/1/0", img, seg_model=_FakeSegModel())
+    flush_manifest(ctx_sm)
+
+    cfg_cp = _make_config(
+        **{"target_name": "nucleus", "segmentation.backend": "cellpose", "io.gt_cache_dir": str(tmp_path)}
+    )
+    ctx_cp = init_cache_context(cfg_cp, side="gt")
+    fov_masks(ctx_cp, "A/1/1", img, seg_model=_FakeSegModel())
+    flush_manifest(ctx_cp)
+
+    masks = load_manifest(cache_paths(tmp_path))["artifacts"]["organelle_masks"]
+    assert set(masks) == {"nucleus", "nucleus__cellpose"}
+    assert masks["nucleus"]["backend"] == "supermodel"
+    assert masks["nucleus"]["path"].endswith("organelle_masks/nucleus.zarr")
+    assert masks["nucleus"]["positions"] == ["A/1/0"]
+    assert masks["nucleus__cellpose"]["backend"] == "cellpose"
+    assert masks["nucleus__cellpose"]["path"].endswith("organelle_masks/nucleus__cellpose.zarr")
+    assert masks["nucleus__cellpose"]["positions"] == ["A/1/1"]
+
+
 def test_fov_gt_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
     """Pre-populated DINOv3 cache is returned without calling the extractor."""
     cfg = _make_config(
@@ -503,8 +612,8 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
 def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """CP feature miss computes via cp_regionprops and writes per timepoint."""
 
-    def fake_cp(target, cell_seg, spacing):
-        del cell_seg, spacing
+    def fake_cp(target, cell_seg, spacing, use_gpu=True):
+        del cell_seg, spacing, use_gpu
         return np.full((2, 3), float(target.sum()), dtype=np.float32)
 
     # Patch the globals of fov_cp_features itself — robust against sys.modules
@@ -530,8 +639,8 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """Prediction CP feature miss computes via cp_regionprops (side-agnostic) and writes per timepoint."""
 
-    def fake_cp(prediction, cell_seg, spacing):
-        del cell_seg, spacing
+    def fake_cp(prediction, cell_seg, spacing, use_gpu=True):
+        del cell_seg, spacing, use_gpu
         return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
@@ -773,3 +882,385 @@ def test_precompute_deep_features_skips_cached_slots(tmp_path: Path) -> None:
     finally:
         gt_plate.close()
         seg_plate.close()
+
+
+def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> None:
+    """A pre-version-tracking manifest entry must NOT auto-invalidate.
+
+    The bootstrap transition is the operator's responsibility (set the
+    matching ``force_recompute.<side>_<kind>`` flag explicitly). Missing
+    cached version is treated as 'no constraint'.
+    """
+    from dynacell.evaluation.cache import save_manifest
+
+    cache_dir = tmp_path
+    paths = cache_paths(cache_dir)
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {
+                "celldino_features": {
+                    "abc123def456": {
+                        "path": "features/celldino/abc123def456.zarr",
+                        "weights_sha256_12": "abc123def456",
+                        "patch_size": 4,
+                        "source": "prediction",
+                        # NOTE: no preprocess_version field — pre-tracking entry
+                    }
+                }
+            },
+        },
+    )
+
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_weights_path=None,
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    # Without celldino_weights_sha12 we can't even reach the entry; provide it.
+    # Re-init with the right sha so the entry lookup hits.
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_weights_path=None,
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    # Manually set the sha to simulate a loaded extractor with a matching sha
+    # (in production this comes from ckpt_sha256_12(weights_path)):
+    ctx.celldino_weights_sha12 = "abc123def456"
+    # Re-run the validator manually with the populated sha:
+    from dynacell.evaluation.pipeline_cache import (
+        _auto_invalidate_on_preprocess_version_mismatch,
+    )
+
+    _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    assert ctx.force["pred_celldino"] is False, "missing preprocess_version must not invalidate"
+
+
+def test_preprocess_version_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A known cached version different from current auto-sets force_recompute.
+
+    This is the auto-invalidation case: the cache stored
+    ``preprocess_version: self_normalize_v0`` (hypothetical prior), the
+    current run advertises ``self_normalize_v1``. The validator must set
+    ``force["pred_celldino"] = True`` and emit a warning.
+    """
+    from dynacell.evaluation.cache import save_manifest
+
+    cache_dir = tmp_path
+    paths = cache_paths(cache_dir)
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {
+                "celldino_features": {
+                    "abc123def456": {
+                        "path": "features/celldino/abc123def456.zarr",
+                        "weights_sha256_12": "abc123def456",
+                        "patch_size": 4,
+                        "source": "prediction",
+                        "preprocess_version": "self_normalize_v0",
+                    }
+                }
+            },
+        },
+    )
+
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    ctx.celldino_weights_sha12 = "abc123def456"
+    import warnings as _warnings
+
+    from dynacell.evaluation.pipeline_cache import (
+        _auto_invalidate_on_preprocess_version_mismatch,
+    )
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    assert ctx.force["pred_celldino"] is True
+    assert any("preprocess_version mismatch" in str(w.message) for w in caught), (
+        f"expected mismatch warning; got {[str(w.message) for w in caught]}"
+    )
+
+
+def test_preprocess_version_match_is_noop(tmp_path: Path) -> None:
+    """A cached version equal to current must NOT trigger invalidation."""
+    from dynacell.evaluation.cache import save_manifest
+
+    cache_dir = tmp_path
+    paths = cache_paths(cache_dir)
+    save_manifest(
+        paths,
+        {
+            "cache_schema_version": 1,
+            "gt": None,
+            "pred": {"plate_path": "/tmp/pred.zarr", "channel_name": "prediction"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {
+                "celldino_features": {
+                    "abc123def456": {
+                        "path": "features/celldino/abc123def456.zarr",
+                        "weights_sha256_12": "abc123def456",
+                        "patch_size": 4,
+                        "source": "prediction",
+                        "preprocess_version": "self_normalize_v1",
+                    }
+                }
+            },
+        },
+    )
+
+    ctx = init_cache_context(
+        _make_config(**{"io.pred_cache_dir": str(cache_dir)}),
+        side="pred",
+        celldino_preprocess_version="self_normalize_v1",
+    )
+    ctx.celldino_weights_sha12 = "abc123def456"
+    from dynacell.evaluation.pipeline_cache import (
+        _auto_invalidate_on_preprocess_version_mismatch,
+    )
+
+    _auto_invalidate_on_preprocess_version_mismatch(ctx)
+    assert ctx.force["pred_celldino"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Instance-label cache helpers (nucleus + whole-cell)
+# --------------------------------------------------------------------------- #
+_CELLPOSE_PARAMS = {
+    "target_voxel_um": 0.58,
+    "cellprob_threshold": 0.0,
+    "flow_threshold": 0.4,
+    "min_obj_size": 30,
+}
+_WATERSHED_PARAMS = {
+    "cell_voxel_um": 0.3,
+    "close_um": 2.5,
+    "wall_sigma_um": 0.35,
+    "wall_min_um": 1.0,
+    "hole_um": 3.0,
+    "min_cell_um": 15.0,
+    "memb_clahe": True,
+    "subtract_nuclei": True,
+}
+
+
+def _two_label_stack(stack):
+    """Stand-in instance segmenter: two fixed labels at opposite corners."""
+    lab = np.zeros(stack.shape, dtype=np.uint16)
+    lab[..., :2, :2] = 1
+    lab[..., -2:, -2:] = 2
+    return lab
+
+
+def _nucleus_instance_config(tmp_path: Path, **extra):
+    return _make_config(
+        **{
+            "io.gt_cache_dir": str(tmp_path / "gt"),
+            "target_name": "nucleus",
+            "compute_instance_ap": True,
+            "segmentation.backend": "cellpose",
+            "segmentation.dimension": "2d",
+            "segmentation.cellpose": dict(_CELLPOSE_PARAMS),
+            **extra,
+        }
+    )
+
+
+def test_fov_nucleus_instances_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
+    """Cache miss segments each timepoint, stores (T, 1, Y, X) uint16, records manifest."""
+    from dynacell.evaluation import segmentation_cellpose
+
+    calls = {"n": 0}
+
+    def fake(img, spacing, model, *, do_3d=False, **kw):
+        calls["n"] += 1
+        return _two_label_stack(img)
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", fake)
+    ctx = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    nuc_stack = np.zeros((2, 16, 16), dtype=np.float32)  # (T, Y, X) — sliced 2D
+
+    labels = fov_nucleus_instances(ctx, "A/1/0", nuc_stack, _FakeSegModel())
+    assert labels.dtype == np.uint16
+    assert labels.shape == (2, 1, 16, 16)  # singleton D for 2D
+    assert calls["n"] == 2  # one per timepoint
+
+    paths = cache_paths(tmp_path / "gt")
+    read = read_instance_mask(paths, "nucleus", "A/1/0", backend="cellpose")
+    assert read is not None and read.shape == (2, 1, 16, 16)
+    flush_manifest(ctx)
+    manifest = load_manifest(paths)
+    assert "nucleus__cellpose" in manifest["artifacts"].get("instance_masks", {})
+
+
+def test_fov_nucleus_instances_cache_hit_skips_compute(tmp_path: Path, monkeypatch) -> None:
+    """A second run reads the cache and never calls the segmenter."""
+    from dynacell.evaluation import segmentation_cellpose
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    ctx = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    nuc_stack = np.zeros((2, 16, 16), dtype=np.float32)
+    fov_nucleus_instances(ctx, "A/1/0", nuc_stack, _FakeSegModel())
+    flush_manifest(ctx)
+
+    def fail(*a, **k):
+        raise AssertionError("segment_nucleus_instances should not run on a cache hit")
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", fail)
+    ctx2 = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    labels = fov_nucleus_instances(ctx2, "A/1/0", nuc_stack, _FakeSegModel())
+    assert labels.shape == (2, 1, 16, 16)
+
+
+def test_instance_cache_hit_states(tmp_path: Path, monkeypatch) -> None:
+    """instance_cache_hit: False when disabled / missing / forced; True when present."""
+    from dynacell.evaluation import segmentation_cellpose
+
+    # Disabled cache (no gt_cache_dir) is always a miss.
+    disabled = init_cache_context(
+        _make_config(**{"target_name": "nucleus", "compute_instance_ap": True, "segmentation.backend": "cellpose"}),
+        side="gt",
+    )
+    assert instance_cache_hit(disabled, "A/1/0") is False
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    ctx = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    assert instance_cache_hit(ctx, "A/1/0") is False  # nothing written yet
+    fov_nucleus_instances(ctx, "A/1/0", np.zeros((2, 16, 16), np.float32), _FakeSegModel())
+    assert instance_cache_hit(ctx, "A/1/0") is True  # now present
+    ctx.force["gt_instances"] = True
+    assert instance_cache_hit(ctx, "A/1/0") is False  # forced recompute counts as a miss
+
+
+def test_fov_whole_cell_instances_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
+    """Whole-cell path segments per-t via segment_whole_cell and caches uint16 labels."""
+    from dynacell.evaluation import segmentation_whole_cell
+
+    def fake_wc(memb, nuc, seed, spacing, **kw):
+        return np.asarray(seed, dtype=np.uint16)  # echo the seed labels
+
+    monkeypatch.setattr(segmentation_whole_cell, "segment_whole_cell", fake_wc)
+    cfg = _make_config(
+        **{
+            "io.gt_cache_dir": str(tmp_path / "gt"),
+            "target_name": "membrane",
+            "compute_instance_ap": True,
+            "segmentation.backend": "cellpose_watershed",
+            "segmentation.dimension": "2d",
+            "segmentation.nuclei_channel_name": "Nuclei",
+            "segmentation.cellpose": dict(_CELLPOSE_PARAMS),
+            "segmentation.watershed": dict(_WATERSHED_PARAMS),
+        }
+    )
+    ctx = init_cache_context(cfg, side="gt")
+    memb = np.zeros((2, 16, 16), np.float32)
+    nuc = np.zeros((2, 16, 16), np.float32)
+    seed = np.zeros((2, 16, 16), np.uint16)
+    seed[:, :4, :4] = 1
+    seed[:, -4:, -4:] = 2
+    cells = fov_whole_cell_instances(ctx, "A/1/0", memb, nuc, seed)
+    assert cells.dtype == np.uint16 and cells.shape == (2, 1, 16, 16)
+    read = read_instance_mask(cache_paths(tmp_path / "gt"), "membrane", "A/1/0", backend="cellpose_watershed")
+    assert read is not None and int(read.max()) == 2
+
+
+def test_instance_cache_identity_invalidation(tmp_path: Path, monkeypatch) -> None:
+    """Changing a cellpose param flips the manifest identity → force recompute."""
+    from dynacell.evaluation import segmentation_cellpose
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    ctx = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    fov_nucleus_instances(ctx, "A/1/0", np.zeros((2, 16, 16), np.float32), _FakeSegModel())
+    flush_manifest(ctx)
+
+    changed = dict(_CELLPOSE_PARAMS, min_obj_size=99)
+    ctx2 = init_cache_context(_nucleus_instance_config(tmp_path, **{"segmentation.cellpose": changed}), side="gt")
+    assert ctx2.force["gt_instances"] is True
+
+
+def test_validate_instance_ap_config_rejects() -> None:
+    """The bidirectional guard rejects every invalid backend/target/toggle combo."""
+    from dynacell.evaluation.pipeline import _validate_instance_ap_config
+
+    bad = [
+        {
+            "target_name": "nucleus",
+            "compute_instance_ap": True,
+            "segmentation.backend": "cellpose_watershed",
+            "segmentation.nuclei_channel_name": "Nuclei",
+        },  # watershed needs membrane
+        {"target_name": "membrane", "compute_instance_ap": True, "segmentation.backend": "cellpose_watershed"},
+        # watershed needs nuclei_channel_name
+        {
+            "target_name": "membrane",
+            "compute_instance_ap": False,
+            "segmentation.backend": "cellpose_watershed",
+            "segmentation.nuclei_channel_name": "Nuclei",
+        },  # watershed needs compute_instance_ap
+        {"target_name": "membrane", "compute_instance_ap": True, "segmentation.backend": "supermodel"},
+        # AP needs an instance backend
+        {"target_name": "membrane", "compute_instance_ap": True, "segmentation.backend": "cellpose"},
+        # cellpose AP is nucleus-only
+    ]
+    for overrides in bad:
+        with pytest.raises(ValueError):
+            _validate_instance_ap_config(_make_config(**overrides))
+
+
+def test_validate_instance_ap_config_accepts() -> None:
+    """Valid instance combos and the default supermodel run pass the guard."""
+    from dynacell.evaluation.pipeline import _validate_instance_ap_config
+
+    _validate_instance_ap_config(_make_config())  # supermodel, no instance AP
+    _validate_instance_ap_config(
+        _make_config(**{"target_name": "nucleus", "compute_instance_ap": True, "segmentation.backend": "cellpose"})
+    )
+    _validate_instance_ap_config(
+        _make_config(
+            **{
+                "target_name": "membrane",
+                "compute_instance_ap": True,
+                "segmentation.backend": "cellpose_watershed",
+                "segmentation.nuclei_channel_name": "Nuclei",
+            }
+        )
+    )
+
+
+def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
+    """A cached AP-less mask npy must not satisfy a compute_instance_ap run."""
+    from dynacell.evaluation.pipeline import _final_metrics_cache_valid
+
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+    np.save(save_dir / "pixel_metrics.npy", np.array([{"FOV": "A/1/0", "Timepoint": 0}], dtype=object))
+    cfg = _make_config(
+        **{
+            "compute_instance_ap": True,
+            "compute_feature_metrics": False,
+            "save": {
+                "save_dir": str(save_dir),
+                "pixel_metrics_filename": "pixel_metrics.npy",
+                "mask_metrics_filename": "mask_metrics.npy",
+                "feature_metrics_filename": "feature_metrics.npy",
+            },
+        }
+    )
+    np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "DICE": 0.8}], dtype=object))
+    assert _final_metrics_cache_valid(cfg) is False  # no mAP column -> recompute
+    np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "DICE": 0.8, "mAP": 0.5}], dtype=object))
+    assert _final_metrics_cache_valid(cfg) is True  # AP columns present -> reuse

@@ -1,32 +1,26 @@
-"""Metric computation for evaluation: pixel metrics, mask metrics, MicroSSIM."""
+"""Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
 import numpy as np
 import torch
 
 try:
-    from microssim import MicroMS3IM
-except ImportError:
-    MicroMS3IM = None  # type: ignore[assignment, misc]
-
-try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature.voxel import regionprops_table
-    from cubic.metrics import fsc_resolution
+    from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
+    from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
+    cubic_ssim = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
+    nrmse = None  # type: ignore[assignment]
+    pcc = None  # type: ignore[assignment]
+    psnr = None  # type: ignore[assignment]
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
 
-from dynacell.evaluation.torch_ssim import ssim as torch_ssim
 from dynacell.evaluation.utils import _minmax_norm
-
-
-def _require_microssim():
-    if MicroMS3IM is None:
-        raise ImportError("microssim is required for MicroMS3IM computation. Install it with: pip install microssim")
 
 
 def _require_cubic():
@@ -46,26 +40,6 @@ def _require_cubic():
 
 
 @torch.inference_mode()
-def _normalize_to_target_scale(
-    y_true: torch.Tensor,
-    y_pred: torch.Tensor,
-    eps: float = 1e-8,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Map both tensors onto the target's intensity scale."""
-    if y_true.shape != y_pred.shape:
-        raise ValueError(f"Shape mismatch: y_true {y_true.shape} vs y_pred {y_pred.shape}")
-
-    y_true = y_true.float()
-    y_pred = y_pred.float()
-
-    target_min = y_true.min()
-    target_range = y_true.max() - target_min
-    denom = target_range.clamp_min(eps)
-
-    return (y_true - target_min) / denom, (y_pred - target_min) / denom
-
-
-@torch.inference_mode()
 def _min_max_normalize(
     x: torch.Tensor,
     eps: float = 1e-8,
@@ -79,88 +53,27 @@ def _min_max_normalize(
 
 
 @torch.inference_mode()
-def corr_coef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Calculate the Pearson correlation coefficient between two PyTorch tensors."""
-    if a.shape != b.shape:
-        raise ValueError(f"Inputs must be same shape, got {a.shape} and {b.shape}")
-    num = (a - a.mean()) * (b - b.mean())
-    denom = a.std(correction=0) * b.std(correction=0)
-    if denom <= 1e-12:
-        return torch.tensor(float("nan"), device=a.device)
-    return num.mean() / denom
-
-
-@torch.inference_mode()
-def nrmse(y_true: torch.Tensor, y_pred: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute normalized root mean squared error (NRMSE) for two PyTorch tensors.
-
-    Both tensors are mapped onto the ground-truth intensity scale before
-    computing RMSE, so gain and offset errors remain visible.
+def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> float:
+    """Compute mean structural similarity index (SSIM) for 3D volumetric inputs.
 
     Parameters
     ----------
-    y_true : torch.Tensor
-        Ground truth tensor.
-    y_pred : torch.Tensor
-        Predicted tensor, same shape as y_true.
+    img1, img2 : torch.Tensor
+        3-D tensors of shape ``(D, H, W)``.
     eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    torch.Tensor
-        A scalar tensor containing the NRMSE.
+        Small constant for min-max normalization stability.
     """
-    y_true_norm = _min_max_normalize(y_true, eps=eps)
-    y_pred_norm = _min_max_normalize(y_pred, eps=eps)
-    mse = torch.mean((y_true_norm - y_pred_norm) ** 2)
-    rmse = torch.sqrt(mse)
-
-    return rmse
-
-
-@torch.inference_mode()
-def psnr(image_true: torch.Tensor, image_test: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute peak signal-to-noise ratio (PSNR) for two PyTorch tensors.
-
-    Both tensors are mapped onto the ground-truth intensity scale before
-    computing PSNR, so gain and offset errors remain visible.
-
-    Parameters
-    ----------
-    image_true : torch.Tensor
-        Ground-truth tensor.
-    image_test : torch.Tensor
-        Predicted / reconstructed tensor, same shape as image_true.
-    eps : float
-        Small constant to avoid division by zero.
-
-    Returns
-    -------
-    torch.Tensor
-        A scalar tensor containing the PSNR value in dB.
-    """
-    image_true = _min_max_normalize(image_true, eps=eps)
-    image_test = _min_max_normalize(image_test, eps=eps)
-    mse = torch.mean((image_true - image_test) ** 2)
-
-    if mse <= eps:
-        return torch.tensor(float("inf"), device=image_true.device)
-
-    psnr_val = 20 * torch.log10(torch.tensor(1.0, device=image_true.device)) - 10 * torch.log10(mse)
-    return psnr_val
-
-
-@torch.inference_mode()
-def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Compute mean structural similarity index (SSIM)."""
+    if cubic_ssim is None:
+        raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
+    if img1.ndim != 3:
+        raise ValueError(f"ssim expects 3-D (D, H, W) input, got {img1.ndim}-D tensor of shape {tuple(img1.shape)}")
     img1 = _min_max_normalize(img1, eps=eps)
     img2 = _min_max_normalize(img2, eps=eps)
 
-    img1 = img1.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
-    img2 = img2.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
+    img1 = img1.unsqueeze(0).unsqueeze(0)  # (D,H,W) → (1,1,D,H,W) — cubic's 5D contract
+    img2 = img2.unsqueeze(0).unsqueeze(0)
 
-    return torch_ssim(img1, img2, data_range=1.0)
+    return cubic_ssim(img1, img2, spatial_dims=3, data_range=1.0, gaussian_weights=True)
 
 
 def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
@@ -219,75 +132,154 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
 
     Notes
     -----
-    Pre-refactor the function pulled both tensors back to host
-    (``.cpu().numpy()``) before calling cubic's spectral PCC and FSC,
-    which dominated wall time on long timelapses. cubic's metrics are
-    array-module-agnostic, so we keep the tensors on the chosen device
-    and hand them off via ``cubic.cuda.ascupy``/``asnumpy`` — zero-copy
-    on CUDA through the CUDA Array Interface.
+    Inputs (numpy, torch CPU/CUDA, or cupy) are coerced to a single
+    ``xp`` array module via ``cubic.cuda.ascupy``/``asnumpy`` — cupy
+    when ``use_gpu=True`` and CUDA is available, numpy otherwise. The
+    converters no-op when the input is already on the target module,
+    so a caller that pre-uploaded the full FOV via ``ascupy(predict)``
+    once pays zero per-call upload tax here. cubic metrics consume
+    ``xp`` directly; the SSIM wrapper consumes a torch view built
+    zero-copy from ``xp`` via ``torch.as_tensor`` (CUDA Array Interface
+    for cupy, ``from_numpy`` for numpy).
     """
-    prediction = torch.as_tensor(prediction)
-    target = torch.as_tensor(target)
-    device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    prediction = prediction.to(device)
-    target = target.to(device)
+    if pcc is None:
+        raise ImportError("cubic is required for pixel metrics. Install via the `eval` extra: `uv sync --extra eval`.")
+    _require_cubic()
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    to_xp = ascupy if use_cuda else asnumpy
+    pred_xp, target_xp = to_xp(prediction), to_xp(target)
 
+    # ``.contiguous()`` recovers the contiguity guarantee the previous
+    # ``.to(device)`` step provided: when ``target_xp`` is a non-contiguous
+    # cupy view (e.g. a strided zarr slice), cubic_ssim → MONAI → conv3d's
+    # CUDA backend can fail or silently re-materialize on recent torch.
     metrics = {
-        "PCC": corr_coef(target, prediction).item(),
-        "SSIM": ssim(target, prediction).item(),
-        "NRMSE": nrmse(target, prediction).item(),
-        "PSNR": psnr(target, prediction).item(),
+        "PCC": pcc(target_xp, pred_xp),
+        "SSIM": ssim(torch.as_tensor(target_xp).contiguous(), torch.as_tensor(pred_xp).contiguous()),
+        "NRMSE": nrmse(target_xp, pred_xp, normalize="min_max"),
+        "PSNR": psnr(target_xp, pred_xp, normalize="min_max"),
     }
 
     if spectral_pcc_kwargs is None and fsc_kwargs is None:
         return metrics
 
-    _require_cubic()
-    to_xp = ascupy if device.type == "cuda" else asnumpy
-    prediction, target = to_xp(prediction), to_xp(target)
-
     if spectral_pcc_kwargs is not None:
-        metrics["Spectral_PCC"] = spectral_pcc(prediction, target, spacing=spacing, **spectral_pcc_kwargs)
+        metrics["Spectral_PCC"] = spectral_pcc(pred_xp, target_xp, spacing=spacing, **spectral_pcc_kwargs)
     if fsc_kwargs is not None:
         # cubic.fsc_resolution mean-centers internally before every FFT,
         # so we pass the raw arrays.
-        resolutions = fsc_resolution(target, prediction, spacing=spacing, **fsc_kwargs)
+        resolutions = fsc_resolution(target_xp, pred_xp, spacing=spacing, **fsc_kwargs)
         metrics.update({f"{k.upper()}_FSC_Resolution": float(v) for k, v in resolutions.items()})
 
     return metrics
 
 
-def calculate_microssim(microssim_data):
-    """Calculate MicroMS3IM scores across a collection of images."""
-    _require_microssim()
-    _require_cubic()
+def _require_microms3im():
+    """Import MicroMS3IM, raising the same install hint both fit/score share."""
+    try:
+        from cubic.metrics import MicroMS3IM
+    except ImportError as e:
+        raise ImportError(
+            "cubic>=0.7.0a4 is required for MicroMS3IM. Install via the `eval` extra: `uv sync --extra eval`."
+        ) from e
+    return MicroMS3IM
+
+
+def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = True):
+    """Fit a single MicroMS3IM instance on a batch of (target, prediction) pairs.
+
+    Per the microSSIM paper (Ashesh & Jug, 2024, sec. 3.3):
+
+        "we learn a single scalar for the entire dataset. Had we optimized
+        for every (x, y) pair, we would get a higher measure value on
+        average, but this does not align well with the motivation for
+        this measure, which is to estimate an optimal linear
+        transformation between the space of predictions to their
+        corresponding high-SNR micrographs."
+
+    Callers therefore fit ONCE over all (gt, pred) slices in a leaf and
+    reuse the fitted ``sim`` for scoring every FOV/timepoint pair, instead
+    of refitting per FOV (which inflates scores and breaks cross-FOV
+    comparability).
+
+    Parameters
+    ----------
+    targets, predictions : np.ndarray
+        Arrays of shape ``(N, H, W)`` aligned along the leading axis — the
+        full pool of 2D slices used for fitting the relative-intensity
+        factor α.
+    use_gpu : bool
+        When ``True`` and cupy/cucim are available, dispatches to cubic's
+        GPU path via ``cubic.cuda.ascupy``.
+
+    Returns
+    -------
+    MicroMS3IM
+        Fitted instance — ``sim.score(target_slice, pred_slice)`` may
+        then be called without further fitting.
+    """
+    MicroMS3IM = _require_microms3im()
+    # Convert to cupy when GPU is requested — cubic.skimage dispatches to
+    # cucim (GPU Gaussian filters) when inputs carry a .device attribute.
+    to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
+    targets = to_xp(targets)
+    predictions = to_xp(predictions)
+    sim = MicroMS3IM()
+    sim.fit(targets, predictions)
+    return sim
+
+
+def score_microssim(microssim_data, sim, use_gpu: bool = True):
+    """Score MicroMS3IM per FOV-T using a pre-fitted ``sim`` (no refit).
+
+    Each entry of ``microssim_data`` contributes one row to the returned
+    list, averaging ``sim.score(target_slice, pred_slice)`` over that
+    entry's z-slices. ``sim`` must have been fitted via :func:`fit_microssim`
+    on the leaf-level pool of pairs — refitting inside this function
+    would re-introduce the per-call α drift the leaf-level calibration
+    pass is here to prevent.
+    """
     targets = np.concatenate([img["target"] for img in microssim_data], axis=0)
     predictions = np.concatenate([img["predict"] for img in microssim_data], axis=0)
+    to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
+    targets = to_xp(targets)
+    predictions = to_xp(predictions)
 
-    def microssim_with_condition(condition):
-        masked_targets = asnumpy(np.where(condition, targets, 0))
-        masked_predictions = asnumpy(np.where(condition, predictions, 0))
-
-        sim = MicroMS3IM()
-        sim.fit(masked_targets, masked_predictions)
-
-        scores = []
-        slice_idx = 0
-        for img in microssim_data:
-            num_slices = len(img["target"])
-            img_masked_targets = masked_targets[slice_idx : slice_idx + num_slices]
-            img_masked_predictions = masked_predictions[slice_idx : slice_idx + num_slices]
-
-            slice_scores = []
-            for i in range(num_slices):
-                slice_scores.append(sim.score(img_masked_targets[i], img_masked_predictions[i]))
-
-            slice_idx += num_slices
-            scores.append({"MicroMS3IM": np.mean(np.nan_to_num(slice_scores))})
-
-        return scores
-
-    return microssim_with_condition(np.ones_like(targets, dtype=bool))
+    scores: list[dict[str, float]] = []
+    slice_idx = 0
+    for img in microssim_data:
+        num_slices = len(img["target"])
+        if num_slices == 0:
+            raise ValueError(
+                "score_microssim received a microssim_data entry with zero z-slices; "
+                "this signals a stacking bug or an empty FOV upstream."
+            )
+        img_targets = targets[slice_idx : slice_idx + num_slices]
+        img_predictions = predictions[slice_idx : slice_idx + num_slices]
+        slice_scores: list[float] = []
+        for i in range(num_slices):
+            try:
+                slice_scores.append(sim.score(img_targets[i], img_predictions[i]))
+            except ValueError as exc:
+                # cubic's ms_ssim raises ``ValueError("data_range must be finite
+                # and positive; got <x>")`` when target or prediction collapses
+                # to a constant slice (data_range = max - min = 0) or when a NaN
+                # α from the fitted path propagates into pred_norm (data_range =
+                # NaN - NaN = NaN). All other ValueErrors (un-fitted sim, shape
+                # mismatch, ndim != 2, kernel/spatial-min violations) are real
+                # bugs and must propagate. A degenerate slice is scored as 0
+                # rather than NaN so that the FOV-T mean is dragged toward the
+                # floor — a model that collapses on a subset of slices/FOVs
+                # deserves a penalty in leaf-level rankings, not silent removal
+                # from the average (a ``nanmean``-style aggregation would let
+                # collapsed predictions vanish, leaving a partially-collapsing
+                # model indistinguishable from one that scores well everywhere).
+                if "data_range" not in str(exc):
+                    raise
+                slice_scores.append(0.0)
+        slice_idx += num_slices
+        scores.append({"MicroMS3IM": float(np.asarray(slice_scores, dtype=float).mean())})
+    return scores
 
 
 PROPS_3D = (
@@ -300,19 +292,25 @@ PROPS_3D = (
 )
 
 
-def _cp_raw_regionprops(img, cell_segmentation, spacing):
+def _cp_raw_regionprops(img, cell_segmentation, spacing, use_gpu=True):
     """Compute raw per-cell regionprops and return a (n_cells, n_props) matrix.
 
     No normalization, no column-drop, no z-score — callers are responsible for
     supplying already-normalized ``img`` (via :func:`_minmax_norm`). Columns
     follow the order of :data:`PROPS_3D` as flattened by ``regionprops_table``.
+
+    When ``use_gpu=True`` and CUDA is available, inputs are uploaded via
+    ``ascupy`` so cubic's regionprops dispatches to cucim. ``use_gpu=False``
+    keeps everything on CPU for repro/debugging — matches the device gating
+    used elsewhere in :mod:`dynacell.evaluation.metrics`.
     """
-    if torch.cuda.is_available():
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    if use_cuda:
         img = ascupy(img)
         cell_segmentation = ascupy(cell_segmentation)
     feats = regionprops_table(cell_segmentation, img, spacing=spacing, properties=list(PROPS_3D))
     feats.pop("label", None)
-    if torch.cuda.is_available():
+    if use_cuda:
         return np.array([asnumpy(v) for v in feats.values()]).T
     return np.array(list(feats.values())).T
 
@@ -333,14 +331,14 @@ def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np
     return pred[valid], target[valid]
 
 
-def cp_regionprops(image, cell_segmentation, spacing):
+def cp_regionprops(image, cell_segmentation, spacing, use_gpu=True):
     """Raw CP regionprops for one image and its cell segmentation.
 
     Returns an array of shape ``(n_cells, n_props_raw)``. Same body for GT
     and prediction sides — *image* is min/max normalized before extraction.
     """
     _require_cubic()
-    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing)
+    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing, use_gpu=use_gpu)
 
 
 def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):

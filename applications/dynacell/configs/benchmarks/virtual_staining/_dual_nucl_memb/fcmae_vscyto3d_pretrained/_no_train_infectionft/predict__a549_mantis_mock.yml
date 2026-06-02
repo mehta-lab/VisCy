@@ -1,0 +1,42 @@
+# VSCyto3D-InfectionFT predict: dual nucleus+membrane (no FT), A549 mock plate.
+# 2-channel output zarr; per-channel eval reads `Nuclei_prediction` / `Membrane_prediction`.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_dual_mock.yml
+  - ../../../_internal/shared/model/targets/dual_nucl_memb.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_2chan_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: dual_nucl_memb
+  trained_on: infectionft
+  predict_set: a549_mantis_dual_mock
+  model_name: fcmae_vscyto3d_pretrained_infectionft
+  experiment_id: dual_nucl_memb__infectionft__fcmae_vscyto3d_pretrained__a549_mantis_mock
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/organelle_phenotyping/models/VSCyto3D-A549-infection-finetune/4gpu_bf16_bs16_to_ep7/checkpoints/epoch=7-step=832.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_infectionft_mock.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_InfectionFT_PRED_DUAL_ON_A549_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

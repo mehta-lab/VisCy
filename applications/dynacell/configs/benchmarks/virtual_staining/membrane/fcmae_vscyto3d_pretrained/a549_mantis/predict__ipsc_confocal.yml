@@ -1,0 +1,45 @@
+# FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: membrane trained on a549_mantis (caax),
+# predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from run 20260522-120713 (epoch 154, loss/validate=0.26533).
+# Training reached max_epochs=200; epoch 154 is the global-best val loss (epochs
+# 155-199 plateaued higher), so save_top_k kept it as the newest checkpoint.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: membrane__a549_mantis__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=154-step=33635.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_pretrained_a549trained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_MEMB_A549TR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

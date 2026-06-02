@@ -1,0 +1,47 @@
+# Target: dual nucleus + membrane (paired Nuclei and Membrane channels in
+# one zarr, both predicted from Phase3D). Used by Track B (cytoland /
+# infection-FT no-FT predicts) and Track C (cytoland / infection-FT +
+# dynacell FT) — both expect 2-channel `DynacellUNet` outputs in one zarr.
+#
+# Deliberately NO `dataset_ref.target` — the manifest schema has one
+# `target_channel` per entry, and there is no single-target manifest row
+# that declares both Nuclei + Membrane. Leaves composing this fragment
+# inline `data.init_args.data_path` + `source_channel` + `target_channel`
+# in the predict_set / train_set fragment (see predict_sets/ipsc_confocal_dual.yml
+# and train_sets/{ipsc_confocal_dual,a549_mantis_dual}.yml).
+#
+# Normalization parameters copied verbatim from targets/nucleus.yml and
+# targets/membrane.yml (Phase3D fov mean/std; Nuclei + Membrane fov median/iqr).
+# `RandWeightedCropd.w_key: Nuclei` is a sampling-bias choice for Track C
+# dual fine-tuning (revisit if validation loss for Membrane channel diverges).
+benchmark:
+  target: dual_nucl_memb
+  target_id: dual_nucl_memb
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Membrane]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei, Membrane]
+          w_key: Nuclei
+          spatial_size: [15, 600, 600]
+          num_samples: 2
