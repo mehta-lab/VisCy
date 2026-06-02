@@ -58,13 +58,6 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
 dynacell = { workspace = true }
-# Pin torch to a CUDA-12 build so the whole venv is CUDA-12-consistent: cupy
-# (cupy-cuda12x, CUDA 12.x only) resolves its CUDA libs through cuda-pathfinder,
-# which with a mixed stack would pick torch's CUDA-13 libcublas.so.13 and break
-# cupy (it needs libcublas.so.12). The PyPI torch 2.12 is CUDA-13-only; cu128 is
-# the newest CUDA-12 build (currently torch 2.11).
-torch = [ { index = "pytorch-cu128" } ]
-torchvision = [ { index = "pytorch-cu128" } ]
 # cubic 0.7.0a9 (GPU-resident Cellpose-SAM eval API + FSC/FRC NaN fix) is not on
 # PyPI yet; pin the exact commit (reports 0.7.0a9, satisfies the ==0.7.0a9 pin).
 cubic = { git = "https://github.com/alxndrkalinin/cubic.git", rev = "b84db9a" }
@@ -72,10 +65,13 @@ waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
 aicsmlsegment = { git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git", branch = "main" }
+# RAPIDS publishes cucim's CUDA-13 wheels only to the NVIDIA index (the PyPI
+# cucim-cu13 entry is an sdist stub with no binary wheel); pull it from there.
+cucim-cu13 = { index = "nvidia" }
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "nvidia"
+url = "https://pypi.nvidia.com"
 explicit = true
 
 [tool.ruff]

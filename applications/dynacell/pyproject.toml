@@ -63,15 +63,13 @@ optional-dependencies.eval = [
   "transformers",
 ]
 optional-dependencies.eval_gpu = [
-  "cucim-cu12",
-  "cupy-cuda12x",
-  # cupy-cuda12x is CUDA-12 only and finds its CUDA libs through
-  # cuda-pathfinder. torch is pinned to a CUDA-12 build (see the root
-  # pyproject's pytorch-cu128 index) so the whole venv is CUDA-12-consistent
-  # and pathfinder resolves cupy's cublas/cufft to the cu12 wheels; nvidia-
-  # cufft-cu12 is declared explicitly so cupy's cuFFT is present regardless of
-  # torch's cuda-toolkit extras.
-  "nvidia-cufft-cu12",
+  # CUDA-13 builds so cupy/cucim match torch's CUDA-13 stack (PyPI torch 2.12 is
+  # cu13, and the HPC GPU driver is CUDA 13). cupy/cucim find their CUDA libs via
+  # cuda-pathfinder, which resolves to the cu13 nvidia wheels torch already pulls
+  # -- a consistent single-CUDA-major venv, so cupy works with no LD_LIBRARY_PATH.
+  # (cupy-cuda12x on a cu13 torch breaks: pathfinder hands it libcublas.so.13.)
+  "cucim-cu13",
+  "cupy-cuda13x",
 ]
 optional-dependencies.preprocess = [
   "iohub",
