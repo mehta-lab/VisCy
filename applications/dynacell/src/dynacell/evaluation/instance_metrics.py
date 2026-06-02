@@ -8,6 +8,7 @@ per-(FOV, t) mask-metric rows, so every per-threshold AP becomes its own
 """
 
 import numpy as np
+from cubic.metrics import average_precision
 
 DEFAULT_IOU_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95)
 """IoU thresholds for the AP sweep (Cellpose / StarDist standard 0.50..0.95)."""
@@ -69,12 +70,6 @@ def instance_average_precision(
         ap_vals = [0.0] * len(thresholds)
         tp, fp, fn = 0.0, float(n_pred), float(n_gt)
     else:
-        # Imported lazily (not at module top) so importing this module for
-        # DEFAULT_IOU_THRESHOLDS / _relabel_sequential — e.g. pipeline_cache pulling
-        # the threshold constant — does not require the GPU-only cubic stack. The
-        # actual AP computation still hard-requires cubic and fails loudly here.
-        from cubic.metrics import average_precision
-
         ap, tp_arr, fp_arr, fn_arr = average_precision(gt, pred, thresholds)
         ap_vals = [float(a) for a in np.atleast_1d(ap)]
         idx = thresholds.index(_PRIMARY_THRESHOLD) if _PRIMARY_THRESHOLD in thresholds else 0
