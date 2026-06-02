@@ -43,7 +43,7 @@ optional-dependencies.eval = [
   "aicsmlsegment",
   "aicssegmentation",
   "cellpose",
-  "cubic==0.7.0a8",
+  "cubic==0.7.0a9",
   "dynaclr",
   "hydra-core>=1.2",
   "iohub",
@@ -63,14 +63,13 @@ optional-dependencies.eval = [
   "transformers",
 ]
 optional-dependencies.eval_gpu = [
-  "cucim-cu12",
-  "cupy-cuda12x",
-  # cupy-cuda12x needs libcufft.so.11 (CUDA 12 cuFFT ABI). Torch 2.12 +cu130
-  # pulls in nvidia-cufft (12.0.0.61, libcufft.so.12) but not the cu12
-  # variant, so we pin nvidia-cufft-cu12 explicitly to bring back
-  # libcufft.so.11. Both sonames coexist; cupy picks .11 via cuda-pathfinder,
-  # torch picks .12 via its own dlopen tree.
-  "nvidia-cufft-cu12",
+  # CUDA-13 builds so cupy/cucim match torch's CUDA-13 stack (PyPI torch 2.12 is
+  # cu13, and the HPC GPU driver is CUDA 13). cupy/cucim find their CUDA libs via
+  # cuda-pathfinder, which resolves to the cu13 nvidia wheels torch already pulls
+  # -- a consistent single-CUDA-major venv, so cupy works with no LD_LIBRARY_PATH.
+  # (cupy-cuda12x on a cu13 torch breaks: pathfinder hands it libcublas.so.13.)
+  "cucim-cu13",
+  "cupy-cuda13x",
 ]
 optional-dependencies.preprocess = [
   "iohub",

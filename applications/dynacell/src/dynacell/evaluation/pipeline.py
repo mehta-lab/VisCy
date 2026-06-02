@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.cache import FeatureKind
+from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
@@ -45,6 +46,9 @@ from dynacell.evaluation.pipeline_cache import (
     fov_cp_features,
     fov_deep_features,
     fov_masks,
+    fov_nucleus_instances,
+    fov_whole_cell_instances,
+    instance_cache_hit,
     precompute_deep_features,
 )
 from dynacell.evaluation.runtime import (
@@ -369,6 +373,46 @@ def _calibrate_microssim(
     return sim, read_cache
 
 
+def _validate_instance_ap_config(config: DictConfig) -> None:
+    """Validate the instance-AP backend / target / toggle combination.
+
+    Bidirectional guard (raises ``ValueError`` on any invalid pairing):
+
+    - ``backend='cellpose_watershed'`` requires ``target_name='membrane'``, a
+      non-null ``segmentation.nuclei_channel_name`` (the GT watershed seeds), and
+      ``compute_instance_ap=true`` (whole-cell AP is the backend's sole purpose).
+    - ``compute_instance_ap=true`` requires an instance-producing pair:
+      ``(cellpose_watershed, membrane)`` or ``(cellpose, nucleus)``.
+    """
+    backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
+    compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
+    target_name = config.target_name
+    nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+
+    if backend == "cellpose_watershed":
+        if target_name != "membrane":
+            raise ValueError("segmentation.backend='cellpose_watershed' requires target_name='membrane'")
+        if nuclei_channel is None:
+            raise ValueError(
+                "segmentation.backend='cellpose_watershed' requires segmentation.nuclei_channel_name "
+                "(the GT-plate channel for the watershed seeds)"
+            )
+        if not compute_instance_ap:
+            raise ValueError("segmentation.backend='cellpose_watershed' requires compute_instance_ap=true")
+
+    if compute_instance_ap:
+        valid = (backend == "cellpose_watershed" and target_name == "membrane") or (
+            backend == "cellpose" and target_name == "nucleus"
+        )
+        if not valid:
+            raise ValueError(
+                "compute_instance_ap=true requires an instance-producing backend/target: "
+                "(backend='cellpose_watershed', target_name='membrane') or "
+                "(backend='cellpose', target_name='nucleus'); "
+                f"got backend={backend!r}, target_name={target_name!r}"
+            )
+
+
 def _process_one_fov(
     config: DictConfig,
     cuda_empty_cache_every_n_timepoints: int,
@@ -394,7 +438,10 @@ def _process_one_fov(
     ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
     paths in ``evaluate_predictions``.
     """
+    from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
+    from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
+    from dynacell.evaluation.segmentation_whole_cell import slice_index
 
     timings_start = len(get_timings())
     # Inner per-T tqdm is noise when N workers each emit it to the shared
@@ -421,13 +468,67 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
-    with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-        gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
-    if pred_cache_ctx.enabled:
-        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+    # Mask path: when compute_instance_ap is set, the binary fov_masks path is
+    # replaced by an instance-label path (nucleus or whole-cell). gt_cells /
+    # pred_cells are (T, D, H, W) uint16 instance labels; the binary mask metrics
+    # are derived from labels>0 in the per-T loop. Otherwise the legacy binary
+    # path runs byte-identically.
+    instance_mode = bool(getattr(config, "compute_instance_ap", False))
+    backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
+    gt_cells = pred_cells = None
+    gt_mask_stack = pred_mask_stack = None
+    if instance_mode:
+        is3d = OmegaConf.select(config, "segmentation.dimension", default="2d") == "3d"
+        # Separate working arrays — never rebind predict/target (the 3D pixel
+        # metrics + MicroMS3IM below keep using the full native arrays).
+        if is3d:
+            target_cells, predict_cells = target, predict
+        else:
+            sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+            frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
+            z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
+            target_cells = np.stack([target[t, z_idx[t]] for t in range(T)])  # (T, Y, X)
+            predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
+        if backend == "cellpose_watershed":
+            nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+            nuclei = np.asarray(pos_gt.data[:, pos_gt.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
+            nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
+            # Seed preflight: compute GT-nuclei watershed seeds only when at least
+            # one side will actually run segment_whole_cell (a disabled cache or a
+            # manifest-invalidated/forced slot counts as a miss).
+            gt_will_compute = not cache_ctx.enabled or not instance_cache_hit(cache_ctx, pos_name_pred)
+            pred_will_compute = not pred_cache_ctx.enabled or not instance_cache_hit(pred_cache_ctx, pos_name_pred)
+            seed_stack = None
+            if gt_will_compute or pred_will_compute:
+                seg_spacing = tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
+                with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    seed_stack = np.stack(
+                        [
+                            segment_nucleus_instances(
+                                nuclei_cells[t], seg_spacing, seg_model, do_3d=is3d, **cache_ctx.cellpose_params
+                            )
+                            for t in range(T)
+                        ]
+                    )
+            with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_cells = fov_whole_cell_instances(cache_ctx, pos_name_pred, target_cells, nuclei_cells, seed_stack)
+            with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                pred_cells = fov_whole_cell_instances(
+                    pred_cache_ctx, pos_name_pred, predict_cells, nuclei_cells, seed_stack
+                )
+        else:  # backend == "cellpose": independent per-side nucleus instances
+            with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
+            with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                pred_cells = fov_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
     else:
-        pred_mask_stack = None
+        with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
+        if pred_cache_ctx.enabled:
+            with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+        else:
+            pred_mask_stack = None
 
     gt_cp_per_t = None
     gt_dinov3_per_t = None
@@ -509,15 +610,32 @@ def _process_one_fov(
         fov_pixel_metrics.append({**data_info, **pixel_metrics})
 
         with region_timer("mask_metrics", pos_name_pred, t):
-            segmented_target = gt_mask_stack[t]
-            if pred_mask_stack is not None:
-                segmented_predict = pred_mask_stack[t]
+            if instance_mode:
+                gt_lab = gt_cells[t]
+                pred_lab = pred_cells[t]
+                segmented_target = gt_lab > 0
+                segmented_predict = pred_lab > 0
+                with region_timer("instance_ap", pos_name_pred, t):
+                    ap_metrics = instance_average_precision(pred_lab, gt_lab, cache_ctx.iou_thresholds)
+                fov_mask_metrics.append(
+                    {**data_info, **evaluate_segmentations(segmented_predict, segmented_target), **ap_metrics}
+                )
             else:
-                with gpu_serialization_lock(gate=use_gpu):
-                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
-                        bool
-                    )
-            fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
+                segmented_target = gt_mask_stack[t]
+                if pred_mask_stack is not None:
+                    segmented_predict = pred_mask_stack[t]
+                else:
+                    with gpu_serialization_lock(gate=use_gpu):
+                        segmented_predict = np.asarray(
+                            segment(
+                                predict[t],
+                                config.target_name,
+                                seg_model=seg_model,
+                                backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
+                                spacing_zyx=tuple(config.pixel_metrics.spacing),
+                            )
+                        ).astype(bool)
+                fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
             segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
         if config.compute_feature_metrics:
@@ -783,6 +901,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     # so this is safe under feature-metrics-disabled runs.
     OmegaConf.resolve(config)
     reset_timings()
+    _validate_instance_ap_config(config)
 
     use_gpu = bool(getattr(config, "use_gpu", True))
 
@@ -1230,8 +1349,15 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         return False
     save_dir = Path(config.save.save_dir)
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
-    mask_ok = (save_dir / config.save.mask_metrics_filename).exists()
+    mask_path = save_dir / config.save.mask_metrics_filename
+    mask_ok = mask_path.exists()
     feature_ok = (save_dir / config.save.feature_metrics_filename).exists() if config.compute_feature_metrics else True
+    # A prior AP-less run's mask cache must not suppress newly-requested instance
+    # AP: require the AP columns to be present in the cached rows.
+    if mask_ok and bool(getattr(config, "compute_instance_ap", False)):
+        rows = np.load(mask_path, allow_pickle=True).tolist()
+        if not rows or "mAP" not in rows[0]:
+            return False
     return pixel_ok and mask_ok and feature_ok
 
 
@@ -1252,12 +1378,29 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
     "feature_extractor",
     "compute_feature_metrics",
     "use_gpu",
+    # segmentation.backend selects SuperModel vs Cellpose-SAM in
+    # ``prepare_segmentation_model`` and the mask cache path — a per-condition
+    # override would load the wrong segmenter for the shared bundle and mix
+    # backends across the grouped run's mask caches.
+    "segmentation.backend",
     # require_complete_cache flips ``prepare_segmentation_model`` between
     # "load real SuperModel" and "return None" — letting a condition
     # override it would mean the shared seg_model bundle is wrong for that
     # condition (None when cache-miss expects a real model, or loaded but
     # never used). Treat as a grouped invariant.
     "io.require_complete_cache",
+    # The instance-AP toggles gate the segmentation behavior and the shared
+    # instance-label cache identity. A per-condition override would change the
+    # seg backend, the sliced plane, the seed params, or the AP thresholds for
+    # one condition while sharing the bundle + caches with the others.
+    "compute_instance_ap",
+    "segmentation.dimension",
+    "segmentation.slice_selection",
+    "segmentation.slice_fraction",
+    "segmentation.nuclei_channel_name",
+    "segmentation.cellpose",
+    "segmentation.watershed",
+    "instance_metrics.iou_thresholds",
 )
 
 
@@ -1456,6 +1599,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         return models
 
     results: list[tuple[str, tuple]] = []
+    condition_save_dirs: list[Path] = []
     for idx, cond in enumerate(conditions):
         name = (
             cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
@@ -1477,6 +1621,30 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 feature_metrics=feature_metrics,
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
+        condition_save_dirs.append(Path(merged.save.save_dir))
+
+    # Cross-condition infection probe: once every condition in the group has
+    # its single-cell embeddings on disk, classify each infected condition vs
+    # mock (FOV-stratified logistic probe, per feature space, GT and pred).
+    # Default-on whenever feature metrics were computed (the probe consumes the
+    # embeddings those produce) and a mock + >=1 infected condition are present.
+    # Gated by ``cross_condition_probe.enabled``; never fails the eval.
+    probe_enabled = bool(
+        OmegaConf.select(
+            config,
+            "cross_condition_probe.enabled",
+            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
+        )
+    )
+    if probe_enabled:
+        n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
+        rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
+        try:
+            written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
+            if written:
+                print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
+        except Exception as e:  # noqa: BLE001 -- diagnostic add-on must not fail the eval
+            print(f"[grouped] cross-condition probe skipped: {type(e).__name__}: {e}")
 
     return results
 

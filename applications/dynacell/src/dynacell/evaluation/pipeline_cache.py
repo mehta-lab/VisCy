@@ -34,12 +34,15 @@ from dynacell.evaluation.cache import (
     load_manifest,
     open_features_group,
     read_features_from_group,
+    read_instance_mask,
     read_mask,
     save_manifest,
     seed_cache_identity,
     write_features_to_group,
+    write_instance_mask,
     write_mask,
 )
+from dynacell.evaluation.instance_metrics import DEFAULT_IOU_THRESHOLDS
 from dynacell.evaluation.metrics import (
     build_crops,
     cp_regionprops,
@@ -73,6 +76,16 @@ class _CacheContext:
     _: KW_ONLY
     partial_walk: bool = False
     use_gpu: bool = True
+    backend: str = "supermodel"
+    compute_instance_ap: bool = False
+    dimension: str = "2d"
+    slice_selection: str = "frac"
+    slice_fraction: float = 0.30
+    nuclei_channel_name: str | None = None
+    nuclei_plate_path: str | None = None
+    iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
+    cellpose_params: dict[str, Any] = field(default_factory=dict)
+    watershed_params: dict[str, Any] = field(default_factory=dict)
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
@@ -96,6 +109,19 @@ class _CacheContext:
     def source_tag(self) -> dict[str, str]:
         """Manifest-entry tag distinguishing prediction artifacts; empty for GT."""
         return {"source": "prediction"} if self.side == "pred" else {}
+
+    @property
+    def mask_stem(self) -> str:
+        """Filename/manifest stem for this run's binary organelle masks.
+
+        Mirrors :meth:`CachePaths.mask_plate`: the default ``supermodel`` backend
+        keeps the bare ``{target_name}`` stem (pre-existing caches unaffected),
+        while other backends get a ``{target_name}__{backend}`` infix. The
+        manifest entry must be keyed by this stem (not by ``target_name`` alone)
+        so masks from different backends don't clobber each other's manifest
+        ``path`` / ``positions`` in a shared cache dir.
+        """
+        return self.target_name if self.backend == "supermodel" else f"{self.target_name}__{self.backend}"
 
     def mark_manifest_dirty(self) -> None:
         """Record that the manifest has unsaved changes (next flush will persist them)."""
@@ -123,6 +149,8 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "pred_dinov3": all_flag or bool(force.pred_dinov3),
         "pred_dynaclr": all_flag or bool(force.pred_dynaclr),
         "pred_celldino": all_flag or bool(force.pred_celldino),
+        "gt_instances": all_flag or bool(OmegaConf.select(force, "gt_instances", default=False)),
+        "pred_instances": all_flag or bool(OmegaConf.select(force, "pred_instances", default=False)),
         "final_metrics": all_flag or bool(force.final_metrics),
     }
 
@@ -185,6 +213,10 @@ def init_cache_context(
     cache_dir_key, plate_key, channel_key = _SIDE_IO_KEYS[side]
     cache_dir = OmegaConf.select(config, f"io.{cache_dir_key}", default=None)
 
+    cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
+    watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
+    nuclei_plate_path = OmegaConf.select(config, "io.gt_path", default=None)
+
     base_kwargs: dict[str, Any] = dict(
         force=force,
         target_name=config.target_name,
@@ -192,6 +224,18 @@ def init_cache_context(
         patch_size=patch_size,
         partial_walk=partial_walk,
         use_gpu=use_gpu,
+        backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
+        compute_instance_ap=bool(OmegaConf.select(config, "compute_instance_ap", default=False)),
+        dimension=OmegaConf.select(config, "segmentation.dimension", default="2d"),
+        slice_selection=OmegaConf.select(config, "segmentation.slice_selection", default="frac"),
+        slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
+        nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
+        nuclei_plate_path=str(nuclei_plate_path) if nuclei_plate_path is not None else None,
+        iou_thresholds=list(
+            OmegaConf.select(config, "instance_metrics.iou_thresholds", default=DEFAULT_IOU_THRESHOLDS)
+        ),
+        cellpose_params=(OmegaConf.to_container(cellpose_cfg, resolve=True) if cellpose_cfg is not None else {}),
+        watershed_params=(OmegaConf.to_container(watershed_cfg, resolve=True) if watershed_cfg is not None else {}),
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
@@ -356,9 +400,18 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
 
     checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
         (
+            # Key by ``mask_stem`` (= ``{target}__{backend}`` for non-default
+            # backends), the same stem as the cache plate path, so masks from
+            # different backends get separate manifest entries instead of
+            # clobbering one ``organelle_masks[target_name]`` slot. ``backend`` is
+            # encoded in the stem itself, so it is intentionally NOT a param in
+            # the identity dict below (a backend switch lands on a different
+            # entry/plate — there is nothing stale to invalidate, and adding it
+            # would spuriously invalidate pre-existing caches that predate the
+            # field).
             "masks",
-            f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
-            artifacts.get("organelle_masks", {}).get(ctx.target_name),
+            f"{ctx.label_prefix}organelle_masks[{ctx.mask_stem}]",
+            artifacts.get("organelle_masks", {}).get(ctx.mask_stem),
             {"target_name": ctx.target_name, **ctx.source_tag},
             (),
         ),
@@ -370,6 +423,17 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
             ("spacing",),
         ),
     ]
+    if ctx.compute_instance_ap:
+        stem = f"{ctx.target_name}__{ctx.backend}"
+        checks.append(
+            (
+                "instances",
+                f"{ctx.label_prefix}instance_masks[{stem}]",
+                artifacts.get("instance_masks", {}).get(stem),
+                _instance_identity(ctx),
+                (),
+            )
+        )
     if ctx.dinov3_model_name is not None:
         checks.append(
             (
@@ -510,9 +574,11 @@ def fov_masks(
     from it. When caching is disabled (``ctx.enabled == False``), the masks
     are computed fresh from *image_arr* without any cache interaction.
     """
+    mask_stem = ctx.mask_stem
     manifest_entry: dict[str, Any] = {
-        "path": f"organelle_masks/{ctx.target_name}.zarr",
+        "path": f"organelle_masks/{mask_stem}.zarr",
         "target_name": ctx.target_name,
+        "backend": ctx.backend,
         "built_at": built_at_now(),
         **ctx.source_tag,
     }
@@ -522,7 +588,8 @@ def fov_masks(
         image_arr=image_arr,
         seg_model=seg_model,
         force_key=f"{ctx.side}_masks",
-        artifact_label=f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
+        manifest_key=mask_stem,
+        artifact_label=f"{ctx.label_prefix}organelle_masks[{mask_stem}]",
         manifest_entry=manifest_entry,
     )
 
@@ -534,6 +601,7 @@ def _fov_masks(
     image_arr: np.ndarray,
     seg_model,
     force_key: str,
+    manifest_key: str,
     artifact_label: str,
     manifest_entry: dict[str, Any],
 ) -> np.ndarray:
@@ -546,7 +614,15 @@ def _fov_masks(
     def _compute_masks() -> np.ndarray:
         return np.stack(
             [
-                np.asarray(segment(image_arr[t], ctx.target_name, seg_model=seg_model)).astype(bool)
+                np.asarray(
+                    segment(
+                        image_arr[t],
+                        ctx.target_name,
+                        seg_model=seg_model,
+                        backend=ctx.backend,
+                        spacing_zyx=tuple(ctx.spacing),
+                    )
+                ).astype(bool)
                 for t in range(t_count)
             ]
         )
@@ -561,14 +637,14 @@ def _fov_masks(
     def _record_write() -> None:
         _update_manifest_entry(
             ctx.manifest,
-            ["organelle_masks", ctx.target_name],
+            ["organelle_masks", manifest_key],
             manifest_entry,
         )
-        _add_position(ctx.manifest, ["organelle_masks", ctx.target_name], pos_name)
+        _add_position(ctx.manifest, ["organelle_masks", manifest_key], pos_name)
         ctx.mark_manifest_dirty()
 
     def _write_masks(masks: np.ndarray) -> None:
-        write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name)
+        write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name, backend=ctx.backend)
 
     # Cache disabled — compute fresh, no locking, no caching.
     if not ctx.enabled:
@@ -584,7 +660,7 @@ def _fov_masks(
         return masks
 
     # Fast-path: cache hit without taking a lock.
-    cached = read_mask(ctx.paths, ctx.target_name, pos_name)
+    cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
     if cached is not None:
         return _validate_cached_shape(cached)
 
@@ -592,7 +668,7 @@ def _fov_masks(
     # may have populated the slot between our fast-path read and the lock
     # acquisition; if so, the re-read returns a hit and we skip recomputation.
     with _pos_write_lock(ctx, f"{ctx.side}_masks_{ctx.target_name}", pos_name):
-        cached = read_mask(ctx.paths, ctx.target_name, pos_name)
+        cached = read_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
@@ -600,6 +676,177 @@ def _fov_masks(
         _write_masks(masks)
         _record_write()
     return masks
+
+
+def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
+    """Return the cache-identity dict for a side's instance-label artifact."""
+    identity: dict[str, Any] = {
+        **ctx.cellpose_params,
+        "dimension": ctx.dimension,
+        "slice_selection": ctx.slice_selection,
+        "slice_fraction": ctx.slice_fraction,
+        **ctx.source_tag,
+    }
+    if ctx.backend == "cellpose_watershed":
+        # Whole-cell labels also depend on the watershed params and the GT nuclei
+        # seeds; record the GT nuclei (path, channel) so a pred-side identity
+        # captures that cross-side dependency (source_tag alone does not).
+        identity = {
+            **identity,
+            **ctx.watershed_params,
+            "nuclei_channel": ctx.nuclei_channel_name,
+            "nuclei_path": ctx.nuclei_plate_path,
+        }
+    return identity
+
+
+def _fov_instances(
+    ctx: _CacheContext,
+    *,
+    pos_name: str,
+    ref_stack: np.ndarray,
+    compute_t,
+) -> np.ndarray:
+    """Shared load-or-compute for one side's instance labels (position stack).
+
+    Mirrors :func:`_fov_masks` but reads/writes the whole ``(T, D, H, W)``
+    position once (the instance cache API is whole-stack) and preserves uint16
+    labels. ``compute_t(t)`` returns native labels for timepoint *t*: ``(Y, X)``
+    in 2-D or ``(Z, Y, X)`` in 3-D. A 2-D run is stored with a singleton ``D=1``.
+    The manifest entry/identity is derived from ``ctx`` (target + backend).
+    """
+    t_count = ref_stack.shape[0]
+    force_key = f"{ctx.side}_instances"
+    stem = f"{ctx.target_name}__{ctx.backend}"
+    manifest_keys = ["instance_masks", stem]
+    artifact_label = f"{ctx.label_prefix}instance_masks[{stem}]"
+    manifest_entry = {
+        "path": f"instance_masks/{stem}.zarr",
+        "target_name": ctx.target_name,
+        "backend": ctx.backend,
+        "built_at": built_at_now(),
+        **_instance_identity(ctx),
+    }
+
+    def _compute() -> np.ndarray:
+        stacked = np.stack([np.asarray(compute_t(t)) for t in range(t_count)])
+        if stacked.ndim == 3:  # 2D (T, Y, X) -> (T, 1, Y, X)
+            stacked = stacked[:, None]
+        return stacked.astype(np.uint16)
+
+    def _validate_cached_shape(arr: np.ndarray) -> np.ndarray:
+        if arr.shape[0] != t_count:
+            raise StaleCacheError(
+                f"Cached instance timepoint count mismatch for {pos_name}: cached={arr.shape[0]} vs current={t_count}"
+            )
+        ref_spatial = ref_stack.shape[1:]
+        expected = (1, *ref_spatial) if len(ref_spatial) == 2 else ref_spatial
+        if tuple(arr.shape[1:]) != tuple(expected):
+            raise StaleCacheError(
+                f"Cached instance spatial shape mismatch for {pos_name}: "
+                f"cached={tuple(arr.shape[1:])} vs current={tuple(expected)}"
+            )
+        return arr
+
+    def _write(labels: np.ndarray) -> None:
+        write_instance_mask(ctx.paths, ctx.target_name, pos_name, labels, backend=ctx.backend)
+
+    def _record_write() -> None:
+        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry)
+        _add_position(ctx.manifest, manifest_keys, pos_name)
+        ctx.mark_manifest_dirty()
+
+    if not ctx.enabled:
+        return _compute()
+
+    lock_tag = f"{ctx.side}_instances_{ctx.target_name}"
+    if ctx.force[force_key]:
+        with _pos_write_lock(ctx, lock_tag, pos_name):
+            labels = _compute()
+            _write(labels)
+            _record_write()
+        return labels
+
+    cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
+    if cached is not None:
+        return _validate_cached_shape(cached)
+
+    with _pos_write_lock(ctx, lock_tag, pos_name):
+        cached = read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend)
+        if cached is not None:
+            return _validate_cached_shape(cached)
+        _raise_if_require_complete(ctx, artifact_label, pos_name)
+        labels = _compute()
+        _write(labels)
+        _record_write()
+    return labels
+
+
+def instance_cache_hit(ctx: _CacheContext, pos_name: str) -> bool:
+    """Whether *pos_name*'s instance labels are present and valid (no compute needed).
+
+    A disabled cache (``not ctx.enabled``) or a set ``{side}_instances`` force
+    flag (manifest identity mismatch at init, or an explicit force) counts as a
+    miss. Used by the whole-cell seed preflight to skip seed computation only
+    when both sides already hit.
+    """
+    if not ctx.enabled or ctx.force[f"{ctx.side}_instances"]:
+        return False
+    return read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) is not None
+
+
+def _seg_spacing(ctx: _CacheContext) -> tuple[float, ...]:
+    """Spacing tuple for the segmentation call: ``(z, y, x)`` in 3-D, ``(y, x)`` in 2-D."""
+    return tuple(ctx.spacing) if ctx.dimension == "3d" else tuple(ctx.spacing[-2:])
+
+
+def fov_nucleus_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    nuc_stack: np.ndarray,
+    model,
+) -> np.ndarray:
+    """Return cached/computed nucleus instance labels for one FOV (``backend=cellpose``).
+
+    *nuc_stack* is the per-side nucleus stack — ``(T, Y, X)`` in 2-D (already
+    sliced) or ``(T, Z, Y, X)`` in 3-D. Each timepoint is segmented independently
+    with :func:`segment_nucleus_instances`. Returns ``(T, D, H, W)`` uint16.
+    """
+    from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
+
+    is3d = ctx.dimension == "3d"
+    spacing = _seg_spacing(ctx)
+
+    def compute_t(t: int) -> np.ndarray:
+        return segment_nucleus_instances(nuc_stack[t], spacing, model, do_3d=is3d, **ctx.cellpose_params)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=nuc_stack, compute_t=compute_t)
+
+
+def fov_whole_cell_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    memb_stack: np.ndarray,
+    nuc_stack: np.ndarray,
+    seed_stack: np.ndarray,
+) -> np.ndarray:
+    """Return cached/computed whole-cell instance labels (``backend=cellpose_watershed``).
+
+    *memb_stack* / *nuc_stack* are the membrane / GT-nuclei fluorescence stacks
+    and *seed_stack* the GT-nuclei instance labels (watershed markers) — all
+    ``(T, Y, X)`` in 2-D or ``(T, Z, Y, X)`` in 3-D. Each timepoint runs
+    :func:`segment_whole_cell` (cytoplasm-only labels). Returns ``(T, D, H, W)``
+    uint16. *seed_stack* is only read on the compute path; pass ``None`` only
+    when the cache is guaranteed to hit (see :func:`instance_cache_hit`).
+    """
+    from dynacell.evaluation.segmentation_whole_cell import segment_whole_cell
+
+    spacing = _seg_spacing(ctx)
+
+    def compute_t(t: int) -> np.ndarray:
+        return segment_whole_cell(memb_stack[t], nuc_stack[t], seed_stack[t], spacing, **ctx.watershed_params)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
 
 
 def _kind_cache_kwargs(ctx: _CacheContext, kind: FeatureKind) -> dict[str, Any]:
