@@ -34,6 +34,11 @@ urls.Repository = "https://github.com/mehta-lab/VisCy"
 dev = [ { include-group = "jupyter" }, { include-group = "test" } ]
 test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
 jupyter = [ "ipykernel>=7.1", "jupyterlab>=4.5.3" ]
+doc = [
+  "mike @ git+https://github.com/squidfunk/mike.git",
+  "mkdocstrings-python",
+  "zensical",
+]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
