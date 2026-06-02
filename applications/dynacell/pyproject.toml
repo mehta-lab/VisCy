@@ -31,6 +31,7 @@ dynamic = [ "version" ]
 dependencies = [
   "lightning>=2.3",
   "monai",
+  "nvidia-cublas-cu12>=12.9.2.10",
   "omegaconf",
   "pydantic>=2",
   "viscy-data[mmap]",
@@ -43,7 +44,7 @@ optional-dependencies.eval = [
   "aicsmlsegment",
   "aicssegmentation",
   "cellpose",
-  "cubic==0.7.0a8",
+  "cubic==0.7.0a9",
   "dynaclr",
   "hydra-core>=1.2",
   "iohub",

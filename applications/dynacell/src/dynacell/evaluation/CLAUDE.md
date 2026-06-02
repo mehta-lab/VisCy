@@ -5,8 +5,15 @@ computing) for any GPU-accelerated numerical work — image preprocessing
 before / after model inference, metric calculations, cropping/resizing,
 percentile clips, Gaussian filters, etc. Cubic is a hard runtime
 dependency of the eval extras (`applications/dynacell/pyproject.toml`
-pins `cubic==0.7.0a6`). Do not gate cubic imports behind `try/except`
+pins `cubic==0.7.0a9`). Do not gate cubic imports behind `try/except`
 or fall back to scipy/skimage paths.
+
+The GPU-resident Cellpose-SAM entry point is
+`cubic.segmentation.segment_cpsam` (single host→device upload, masks
+returned to host; GPU-only by contract). The marker-controlled watershed
+helper `segment_watershed` is **not** re-exported from
+`cubic.segmentation` — import it from
+`cubic.segmentation.segment_utils`.
 
 Below is the same guidance the upstream cubic repository ships in its
 `AGENTS.md`, condensed and adapted for this module. **Read it before
