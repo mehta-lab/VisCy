@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from torch_fidelity.metric_fid import fid_features_to_statistics, fid_statistics_to_metric
+from torch_fidelity.metric_kid import kid_features_to_metric
+from torch_fidelity.metric_mind import mind_features_to_metric
+from torch_fidelity.metric_prc import prc_features_to_metric
 
 from dynacell.evaluation.metrics import drop_paired_nonfinite_rows
 
@@ -56,8 +60,6 @@ def _fid(pred: np.ndarray, target: np.ndarray) -> float:
     """
     if pred.shape[0] < 2 or target.shape[0] < 2:
         return float("nan")
-    from torch_fidelity.metric_fid import fid_features_to_statistics, fid_statistics_to_metric
-
     stats_pred = fid_features_to_statistics(_to_tensor(pred))
     stats_target = fid_features_to_statistics(_to_tensor(target))
     out = fid_statistics_to_metric(stats_pred, stats_target, verbose=False)
@@ -84,8 +86,6 @@ def _kid(
     effective_size = min(kid_subset_size, n_pred, n_target)
     if effective_size < _KID_MIN_SUBSET_SIZE:
         return float("nan"), float("nan")
-    from torch_fidelity.metric_kid import kid_features_to_metric
-
     out = kid_features_to_metric(
         _to_tensor(pred),
         _to_tensor(target),
@@ -116,8 +116,6 @@ def _bootstrap_prc(
     those resamples, and calls ``prc_features_to_metric`` (PRC
     convention: ``features_1=generated, features_2=real``).
     """
-    from torch_fidelity.metric_prc import prc_features_to_metric
-
     rng = np.random.default_rng(rng_seed)
     precisions = np.empty(prc_bootstrap_subsets, dtype=np.float64)
     recalls = np.empty(prc_bootstrap_subsets, dtype=np.float64)
@@ -165,8 +163,6 @@ def _mind(pred: np.ndarray, target: np.ndarray, num_projections: int, rng_seed: 
     """
     if pred.shape[0] == 0 or target.shape[0] == 0:
         return float("nan")
-    from torch_fidelity.metric_mind import mind_features_to_metric
-
     out = mind_features_to_metric(
         _to_tensor(pred),
         _to_tensor(target),
