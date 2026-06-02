@@ -6,10 +6,10 @@ import pytest
 import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_metric_learning.losses import NTXentLoss
 from torch import nn
 
 from dynaclr.engine import ContrastiveModule
+from viscy_models.contrastive.loss import NTXentLoss
 
 
 def test_contrastive_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
