@@ -196,7 +196,9 @@ def run_for_group(
     eval_dirs : list[Path]
         Per-condition eval dirs of one (model, pool, organelle) group. The
         condition is inferred from each dir's trailing ``_{mock,denv,zikv}``;
-        dirs without a recognized token are ignored.
+        dirs without a recognized token are ignored. Two dirs mapping to the
+        same condition raise ``ValueError`` (an ambiguous group) rather than
+        silently picking one.
     n_splits, rng_seed : int
         Forwarded to :func:`fov_stratified_auroc`.
     """
@@ -206,6 +208,8 @@ def run_for_group(
             cond = _detect_condition(d)
         except ValueError:
             continue
+        if cond in by_condition:
+            raise ValueError(f"duplicate condition {cond!r}: {by_condition[cond]} and {d}")
         by_condition[cond] = d
     if "mock" not in by_condition:
         return []
