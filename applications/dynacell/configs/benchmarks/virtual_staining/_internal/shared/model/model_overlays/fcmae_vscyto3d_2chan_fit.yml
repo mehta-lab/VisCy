@@ -1,0 +1,39 @@
+# 2-channel FCMAE fit overlay for Track C (dual nucleus+membrane) fine-tuning.
+# Mirrors fcmae_vscyto3d_fit.yml exactly but with out_channels=2 so the
+# decoder matches the cytoland public / infection-FT source ckpts at full-
+# weight load (no encoder_only). Used by both Track C1 (vscyto3d_cytolandft)
+# and Track C2 (vscyto3d_infectionft_dynacellft) train leaves; ckpt_path is
+# set per-leaf.
+base:
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/ddp_4gpu.yml
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0004
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+trainer:
+  # FullyConvolutionalMAE(pretraining=False) has decoder/head params that only
+  # receive gradients on some forward paths; default ddp errors at step 1.
+  strategy: ddp_find_unused_parameters_true
+  precision: 16-mixed
+  max_epochs: 200

@@ -347,6 +347,29 @@ _SKIP_MODELS: frozenset[str] = frozenset(
     }
 )
 
+# Prediction families owned by the separate vscyto3d-ablations eval track, not
+# this grouped campaign. They have their own single-condition eval__*.yaml
+# leaves under leaf/<org>/fcmae_vscyto3d_pretrained_{randinit,cytoland,
+# infectionft}/, leaf/<org>/vscyto3d_{cytolandft,infectionft_dynacellft}/, and
+# the dual nucleus+membrane predicts under _dual_nucl_memb/ — all driven by
+# tools/run_eval_direct.slurm. Skip them during the walk rather than crash on
+# grammar this parser does not model (the ``dual_`` prefix and ablation infixes).
+# Substring match is sufficient: ``_cytoland`` also covers ``_cytolandft`` and
+# ``_infectionft`` also covers ``_infectionft_dynacellft``.
+_ABLATION_NAME_TOKENS: tuple[str, ...] = ("_randinit", "_cytoland", "_infectionft")
+
+
+def _is_ablation_track_zarr(name: str) -> bool:
+    """Return True if ``name`` is a vscyto3d-ablations / dual prediction zarr.
+
+    These belong to the standalone ablation eval leaves, not the grouped
+    re-eval campaign, so :func:`walk_predictions` skips them instead of
+    passing them to :func:`parse_zarr_name` (which would raise).
+    """
+    if name.startswith("dual_"):
+        return True
+    return any(token in name for token in _ABLATION_NAME_TOKENS)
+
 
 def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
     """Walk ``{ipsc,a549}/{predictions,joint_predictions}/`` and parse all zarrs.
@@ -370,6 +393,8 @@ def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
                 if not entry.name.endswith(".zarr"):
                     continue
                 if entry.name in _SKIP_FILENAMES:
+                    continue
+                if _is_ablation_track_zarr(entry.name):
                     continue
                 if not entry.is_dir():
                     continue

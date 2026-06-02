@@ -16,7 +16,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 | `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, `CellDinoFeatureExtractor`, plot helpers. |
 | `_configs/*.yaml` | Hydra schemas: `eval.yaml`, `precompute.yaml`, `eval_grouped.yaml`. |
 
-Other files (`io.py`, `torch_ssim.py`, `formatting.py`, `spectral_pcc/`) house readers, GPU SSIM, and bead/PSF diagnostics.
+Other files (`io.py`, `formatting.py`, `spectral_pcc/`) house readers and bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are now backed by `cubic.metrics`.
 
 ## Inputs
 
@@ -36,6 +36,19 @@ uv run dynacell evaluate \
 ```
 
 Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N`.
+
+## Submission tooling
+
+| Tool | Use case |
+|---|---|
+| `dynacell evaluate ...` / `dynacell evaluate-grouped leaf=...` | Run a single eval (or grouped multi-condition eval) inline. Foreground, no sbatch. |
+| `tools/submit_evaluation_job.py <leaf>` | Submit a single eval leaf as one sbatch. Mirror of `submit_benchmark_job.py` for eval. |
+| `tools/submit_evaluation_batch.py <leaves...>` | Submit N eval leaves as one sbatch with `--parallel N` (chunked waves of N concurrent processes on the shared GPU). Used by `tools/evaluate_batch.sh`. |
+| `tools/run_eval_direct.slurm <leaf>` | Direct-launch slurm script for hand-authored eval leaves that bypass the submit helpers. |
+
+For multi-condition evals over `(model, organelle) × {mock, denv, zikv}`, prefer `evaluate-grouped` over N separate `evaluate` calls — it amortizes the ~30–90 s SuperModel + DINOv3 + DynaCLR + CELL-DINO load across conditions. See [`applications/dynacell/CLAUDE.md`](../../../CLAUDE.md#grouped-multi-condition-eval) "Grouped multi-condition eval" for the executor + cache-mode tradeoffs.
+
+For the predict-side submission tooling (`submit_benchmark_batch.py` + `predict_batch.sh`, with serial / `--array` / `--parallel P` modes), see [`applications/dynacell/CLAUDE.md`](../../../CLAUDE.md#predict-submission-modes) "Predict submission modes" and the [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md#multi-leaf-submission-with-submit_benchmark_batchpy).
 
 ## Configuration
 
@@ -116,7 +129,29 @@ GT caches are reusable across model checkpoints for the same `(gt_path, gt_chann
   features/celldino/{weights_sha12}.zarr # one plate per CELL-DINO weights
 ```
 
-Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Mismatch raises `StaleCacheError`. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
+`manifest.yaml` is **not source-controlled** — it lives in the shared cache root, is rewritten by the pipeline on every cache-mutating run (timestamps, FOV position lists, absolute HPC paths to the per-model feature zarrs it indexes), and is fully derivable from this code + the raw inputs. A deleted or corrupted manifest is a recompute cost (run `dynacell precompute-gt` or a normal eval), not a loss of source-of-truth state.
+
+Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
+
+Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
+
+**Not auto-invalidated**: the runtime environment (`uv.lock`, `pyproject.toml`, installed `cubic` / `transformers` / `torch` versions). A dep bump that silently alters numerics — e.g., a cubic FSC change — leaves the cache valid by the manifest's lights. The cover for this is per-extractor version tags like `DinoV3FeatureExtractor.PREPROCESS_VERSION`: the author of the bump bumps the tag in the same commit so existing caches soft-invalidate. If the tag isn't bumped, caches keep stale features silently.
+
+Two strict-mode escape hatches keep the soft path from corrupting partially-walked or fast-path runs:
+
+- `io.require_complete_cache=true` (cache-only mode): a known mismatch raises instead of warning. The user opted out of recompute; a stale manifest is fatal.
+- `limit_positions=N` (smoke / iteration): a known mismatch raises instead of warning. Partial walks can't safely self-heal — the manifest entry would be rewritten globally while only the first N FOVs' on-disk chunks get recomputed, leaving the rest stale under a manifest that claims the new params. Clear the cache or drop `limit_positions` to recover.
+
+#### DINOv3 `imagenet_normalize_v2` (May 2026)
+
+`DinoV3FeatureExtractor.PREPROCESS_VERSION` was bumped from `imagenet_normalize_v1` to `imagenet_normalize_v2` to fix a double-rescale bug: the HF `AutoImageProcessor` defaults to `do_rescale=True` with `rescale_factor=1/255`, but `build_crops` already hands the processor float `[0, 1]` crops. The model previously saw inputs in `~[-2.12, -1.79]` after ImageNet normalize (essentially black), producing features cosine-uncorrelated with the intended representation. The v2 path passes `do_rescale=False`.
+
+On the next eval against an existing cache:
+- **Normal (full-walk) runs**: a warning fires, `force_recompute.<side>_dinov3=True`, and DINOv3 features auto-rebuild. Mask / CP / DynaCLR / CELL-DINO entries are unaffected.
+- **`io.require_complete_cache=true` or `limit_positions=N`**: the mismatch hard-raises (see strict-mode escape hatches above). Either clear the cache and re-prime, or run a full walk once to refresh DINOv3.
+- **Caches written before `preprocess_version` tracking existed**: the missing tag is treated as "no constraint" by the auto-invalidate path, so v1-era features survive the bump silently. If you suspect a long-lived cache pre-dates tracking, set `force_recompute.<side>_dinov3=true` once to rebuild.
+
+All DINOv3-based metrics (FID / KID / Precision / Recall / F1) computed against v1 features are invalidated and need re-running.
 
 ### Priming with `precompute-gt`
 
@@ -148,6 +183,7 @@ With both caches warm, this flag puts `dynacell evaluate` in cache-only mode:
 
 - No model loads (~30-90 s cold-start skipped). The upfront `precompute_deep_features` pass is also skipped.
 - Cache misses raise `StaleCacheError` immediately — fail-loud instead of opportunistic rebuild.
+- Per-artifact param mismatches (e.g. stale `spacing` or `patch_size`) also raise instead of soft-invalidating; the soft path would silently trigger compute the user opted out of.
 - Pixel + mask metrics still run on the original image volumes; deep features served from disk.
 
 Use case: parallel sweeps, downstream metric iteration, crash recovery.
@@ -182,7 +218,13 @@ Without `io.gt_cache_dir` / `io.pred_cache_dir`, only `force_recompute.{final_me
 
 ### Invalidation
 
-We deliberately do **not** fingerprint zarr contents. If you modify them in place, either bump `cache_schema_version` in `cache.py`, set the right `force_recompute.*`, or delete the affected cache dir.
+Three paths invalidate cached artifacts:
+
+1. **Soft auto-invalidate (default)** — bumping a tracked per-artifact param (spacing, patch_size, preprocess_version, etc.) on a normal full-walk run. `init_cache_context` warns, sets the matching `force_recompute.<side>_<kind>`, and the next FOV pass recomputes and rewrites the manifest entry. Identity mismatches (plate_path, channel_name, cell_segmentation_path, cache_schema_version) still hard-raise.
+2. **Manual `force_recompute.<side>_<kind>`** — bypass cache for a specific family without touching the manifest's recorded params.
+3. **Cache-dir wipe** — required when running with `limit_positions=N` or `io.require_complete_cache=true` and you need to change a tracked param, OR when zarr contents have been modified in place (no content fingerprinting).
+
+Bumping `cache_schema_version` in `cache.py` forces a wipe on every existing cache.
 
 ## Scaling
 
@@ -250,7 +292,7 @@ eval_timing.csv                 # region timer log (always on)
 
 ## Installation
 
-Heavy optional deps (`aicssegmentation`, `segmenter-model-zoo`, `cubic`, `microssim`, `transformers`, `dynaclr`):
+Heavy optional deps (`aicssegmentation`, `segmenter-model-zoo`, `cubic`, `transformers`, `dynaclr`):
 
 ```bash
 uv pip install -e "applications/dynacell[eval]"

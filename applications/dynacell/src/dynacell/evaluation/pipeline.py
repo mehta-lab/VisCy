@@ -2,19 +2,22 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import hydra
 import numpy as np
 import pandas as pd
+import torch
 from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.cache import FeatureKind
+from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
@@ -27,13 +30,15 @@ from dynacell.evaluation.feature_select import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
+    ascupy,
     build_crops,
-    calculate_microssim,
     compute_pixel_metrics,
     cp_regionprops,
     drop_paired_nonfinite_rows,
     evaluate_segmentations,
     features_from_crops,
+    fit_microssim,
+    score_microssim,
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
@@ -41,6 +46,9 @@ from dynacell.evaluation.pipeline_cache import (
     fov_cp_features,
     fov_deep_features,
     fov_masks,
+    fov_nucleus_instances,
+    fov_whole_cell_instances,
+    instance_cache_hit,
     precompute_deep_features,
 )
 from dynacell.evaluation.runtime import (
@@ -141,8 +149,9 @@ def _fov_pred_features_per_t(
     dinov3: list[np.ndarray] = []
     dynaclr: list[np.ndarray] = []
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    use_gpu = pred_cache_ctx.use_gpu
     for t in range(t_count):
-        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing))
+        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing, use_gpu=use_gpu))
         crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
         dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
@@ -186,6 +195,53 @@ class _BackboneLists:
     gt_ts: list[np.ndarray] = field(default_factory=list)
 
 
+# Single source of truth for backbone names is cache.FeatureKind.
+# Ordering matters: the post-loop CP block runs before the generic
+# deep-track loop, so "cp" must be first in FeatureKind.
+_BACKBONE_KEYS: tuple[FeatureKind, ...] = get_args(FeatureKind)
+_BB_FIELDS = fields(_BackboneLists)
+
+
+def _extend_backbone(
+    bb: _BackboneLists,
+    pred: np.ndarray | None,
+    gt: np.ndarray | None,
+    pos_name: str,
+    t: int,
+) -> None:
+    """Append one (pred, gt) feature pair for ``(pos_name, t)`` into ``bb``.
+
+    No-op when ``pred`` is None (CellDINO disabled) or zero rows (no cells).
+    All six lists in ``_BackboneLists`` (feats, fovs, ts for pred and gt) are
+    extended with arrays of length ``len(pred)`` to stay lockstep.
+
+    Raises
+    ------
+    ValueError
+        If ``pred`` has rows but ``gt`` is None, or if ``len(pred) != len(gt)``.
+        ``_BackboneLists.gt_feats`` is typed ``list[np.ndarray]`` and the
+        post-loop block calls ``np.concatenate`` over it — a stray ``None``
+        or row-count mismatch would surface as a confusing crash deep in
+        the metrics block; fail loudly at the append site instead.
+    """
+    if pred is None or pred.size == 0:
+        return
+    if gt is None:
+        raise ValueError(f"_extend_backbone: pred has {len(pred)} rows at ({pos_name!r}, t={t}) but gt is None")
+    if len(gt) != len(pred):
+        raise ValueError(
+            f"_extend_backbone: row count mismatch at ({pos_name!r}, t={t}): pred has {len(pred)}, gt has {len(gt)}"
+        )
+    bb.pred_feats.append(pred)
+    bb.gt_feats.append(gt)
+    fov_arr = np.full(len(pred), pos_name)
+    t_arr = np.full(len(pred), t, dtype=np.int32)
+    bb.pred_fovs.append(fov_arr)
+    bb.gt_fovs.append(fov_arr)
+    bb.pred_ts.append(t_arr)
+    bb.gt_ts.append(t_arr)
+
+
 @dataclass
 class FovResult:
     """Output of ``_process_one_fov``: everything one FOV contributes to the run.
@@ -214,6 +270,149 @@ class FovResult:
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
+def _calibrate_microssim(
+    pred_positions,
+    gt_positions,
+    io_config,
+    *,
+    use_gpu: bool,
+    max_pairs: int,
+    seed: int,
+    cache_reads: bool,
+) -> tuple[Any, dict[str, tuple[np.ndarray, np.ndarray]]]:
+    """Fit MicroMS3IM once per leaf on a random subsample of (FOV, t) volumes.
+
+    The microSSIM paper (Ashesh & Jug, 2024) is explicit that α is a
+    single scalar fit over the whole dataset, not refit per image pair.
+    Per-pair fitting inflates scores and prevents cross-FOV / cross-leaf
+    comparison. α is a population statistic, so a representative
+    subsample is sufficient — fitting on the full pool was OOMing on
+    80 GB GPUs (~78 GB allocated for 100 FOVs × D=40 × 512² × 2 sides
+    plus cubic's SSIM working buffers).
+
+    Strategy: build the joint pool of `(pos_idx, t_idx)` pairs across all
+    positions and their actual T, draw ``max_pairs`` of them with a
+    seeded RNG, then load the full ``(D, H, W)`` volume for each sampled
+    pair. Concatenating along the D-axis gives a `(sum_D, H, W)` stack
+    that's fed to :func:`fit_microssim` exactly once.
+
+    Volumes stay whole — only the (FOV, t) axis is sampled. The in-focus
+    z-plane shifts across FOVs/timepoints in live-cell data, so taking
+    full z-stacks preserves whatever axial distribution biology has.
+
+    Parameters
+    ----------
+    max_pairs : int
+        Cap on the number of (FOV, t) volumes used for fitting. Default
+        from the caller is 12 (small enough to keep ~960 MB headroom on
+        GPU even with feature extractors + segmenter resident).
+    seed : int
+        RNG seed; deterministic across re-runs.
+    cache_reads : bool
+        When ``True``, the returned ``read_cache`` dict maps each sampled
+        position's name to ``(predict_TDHW, target_TDHW)`` arrays so the
+        serial per-FOV loop can skip re-reading those positions from zarr.
+        Worth ~1 GB host RAM per 12 cached FOVs. Process-mode workers
+        can't see the parent's cache and silently re-read; pass
+        ``cache_reads=True`` only when ``runtime.executor=serial``.
+
+    Returns
+    -------
+    (sim, read_cache)
+        ``sim`` is the fitted MicroMS3IM (or raises on degenerate input).
+        ``read_cache`` is the per-position array dict; empty when
+        ``cache_reads=False``.
+
+    Raises
+    ------
+    ValueError, RuntimeError
+        Propagated from ``fit_microssim``; the caller wraps this call in
+        ``try/except`` so a degenerate leaf falls back to MicroMS3IM=NaN
+        instead of aborting the rest of the eval.
+    """
+    n_positions = len(pred_positions)
+    if n_positions == 0:
+        return None, {}
+
+    pairs: list[tuple[int, int]] = []
+    for pos_idx, (_, pos_pred) in enumerate(pred_positions):
+        T_pos = int(pos_pred.data.shape[0])
+        pairs.extend((pos_idx, t) for t in range(T_pos))
+
+    if not pairs:
+        return None, {}
+
+    n_sample = min(max_pairs, len(pairs))
+    rng = np.random.default_rng(seed)
+    sample_idx = rng.choice(len(pairs), size=n_sample, replace=False)
+    sampled_by_pos: dict[int, list[int]] = {}
+    for s in sample_idx:
+        pos_idx, t_idx = pairs[int(s)]
+        sampled_by_pos.setdefault(pos_idx, []).append(t_idx)
+
+    all_targets: list[np.ndarray] = []
+    all_predictions: list[np.ndarray] = []
+    read_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    for pos_idx, t_indices in sampled_by_pos.items():
+        pos_name, pos_pred = pred_positions[pos_idx]
+        _, pos_gt = gt_positions[pos_idx]
+        pred_ci = pos_pred.get_channel_index(io_config.pred_channel_name)
+        gt_ci = pos_gt.get_channel_index(io_config.gt_channel_name)
+        predict = np.asarray(pos_pred.data[:, pred_ci])  # (T, D, H, W)
+        target = np.asarray(pos_gt.data[:, gt_ci])
+        for t_idx in t_indices:
+            all_predictions.append(predict[t_idx])  # (D, H, W)
+            all_targets.append(target[t_idx])
+        if cache_reads:
+            read_cache[pos_name] = (predict, target)
+
+    targets = np.concatenate(all_targets, axis=0)
+    predictions = np.concatenate(all_predictions, axis=0)
+    sim = fit_microssim(targets, predictions, use_gpu=use_gpu)
+    return sim, read_cache
+
+
+def _validate_instance_ap_config(config: DictConfig) -> None:
+    """Validate the instance-AP backend / target / toggle combination.
+
+    Bidirectional guard (raises ``ValueError`` on any invalid pairing):
+
+    - ``backend='cellpose_watershed'`` requires ``target_name='membrane'``, a
+      non-null ``segmentation.nuclei_channel_name`` (the GT watershed seeds), and
+      ``compute_instance_ap=true`` (whole-cell AP is the backend's sole purpose).
+    - ``compute_instance_ap=true`` requires an instance-producing pair:
+      ``(cellpose_watershed, membrane)`` or ``(cellpose, nucleus)``.
+    """
+    backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
+    compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
+    target_name = config.target_name
+    nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+
+    if backend == "cellpose_watershed":
+        if target_name != "membrane":
+            raise ValueError("segmentation.backend='cellpose_watershed' requires target_name='membrane'")
+        if nuclei_channel is None:
+            raise ValueError(
+                "segmentation.backend='cellpose_watershed' requires segmentation.nuclei_channel_name "
+                "(the GT-plate channel for the watershed seeds)"
+            )
+        if not compute_instance_ap:
+            raise ValueError("segmentation.backend='cellpose_watershed' requires compute_instance_ap=true")
+
+    if compute_instance_ap:
+        valid = (backend == "cellpose_watershed" and target_name == "membrane") or (
+            backend == "cellpose" and target_name == "nucleus"
+        )
+        if not valid:
+            raise ValueError(
+                "compute_instance_ap=true requires an instance-producing backend/target: "
+                "(backend='cellpose_watershed', target_name='membrane') or "
+                "(backend='cellpose', target_name='nucleus'); "
+                f"got backend={backend!r}, target_name={target_name!r}"
+            )
+
+
 def _process_one_fov(
     config: DictConfig,
     cuda_empty_cache_every_n_timepoints: int,
@@ -228,6 +427,9 @@ def _process_one_fov(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    microssim_sim,
+    predict_cached=None,
+    target_cached=None,
 ) -> FovResult:
     """Compute everything one FOV contributes to the eval and return a FovResult.
 
@@ -236,7 +438,10 @@ def _process_one_fov(
     ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
     paths in ``evaluate_predictions``.
     """
+    from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
+    from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
+    from dynacell.evaluation.segmentation_whole_cell import slice_index
 
     timings_start = len(get_timings())
     # Inner per-T tqdm is noise when N workers each emit it to the shared
@@ -248,22 +453,82 @@ def _process_one_fov(
     # latency for nothing.
     use_gpu = bool(getattr(config, "use_gpu", True))
 
-    pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
-    gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
-
-    predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
-    target = np.asarray(pos_gt.data[:, gt_channel_index])
+    if predict_cached is not None and target_cached is not None:
+        # Reuse arrays already read by _calibrate_microssim (serial mode opt-in
+        # via microssim.calibration.cache=true). Avoids the double zarr read
+        # for the small subset of FOVs that contributed to the leaf-level fit.
+        predict = predict_cached
+        target = target_cached
+    else:
+        pred_channel_index = pos_pred.get_channel_index(io_config.pred_channel_name)
+        gt_channel_index = pos_gt.get_channel_index(io_config.gt_channel_name)
+        predict = np.asarray(pos_pred.data[:, pred_channel_index])  # shape: (T, D, H, W)
+        target = np.asarray(pos_gt.data[:, gt_channel_index])
     cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
 
     T = predict.shape[0]
 
-    with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-        gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
-    if pred_cache_ctx.enabled:
-        with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
-            pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+    # Mask path: when compute_instance_ap is set, the binary fov_masks path is
+    # replaced by an instance-label path (nucleus or whole-cell). gt_cells /
+    # pred_cells are (T, D, H, W) uint16 instance labels; the binary mask metrics
+    # are derived from labels>0 in the per-T loop. Otherwise the legacy binary
+    # path runs byte-identically.
+    instance_mode = bool(getattr(config, "compute_instance_ap", False))
+    backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
+    gt_cells = pred_cells = None
+    gt_mask_stack = pred_mask_stack = None
+    if instance_mode:
+        is3d = OmegaConf.select(config, "segmentation.dimension", default="2d") == "3d"
+        # Separate working arrays — never rebind predict/target (the 3D pixel
+        # metrics + MicroMS3IM below keep using the full native arrays).
+        if is3d:
+            target_cells, predict_cells = target, predict
+        else:
+            sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+            frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
+            z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
+            target_cells = np.stack([target[t, z_idx[t]] for t in range(T)])  # (T, Y, X)
+            predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
+        if backend == "cellpose_watershed":
+            nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+            nuclei = np.asarray(pos_gt.data[:, pos_gt.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
+            nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
+            # Seed preflight: compute GT-nuclei watershed seeds only when at least
+            # one side will actually run segment_whole_cell (a disabled cache or a
+            # manifest-invalidated/forced slot counts as a miss).
+            gt_will_compute = not cache_ctx.enabled or not instance_cache_hit(cache_ctx, pos_name_pred)
+            pred_will_compute = not pred_cache_ctx.enabled or not instance_cache_hit(pred_cache_ctx, pos_name_pred)
+            seed_stack = None
+            if gt_will_compute or pred_will_compute:
+                seg_spacing = tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
+                with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    seed_stack = np.stack(
+                        [
+                            segment_nucleus_instances(
+                                nuclei_cells[t], seg_spacing, seg_model, do_3d=is3d, **cache_ctx.cellpose_params
+                            )
+                            for t in range(T)
+                        ]
+                    )
+            with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_cells = fov_whole_cell_instances(cache_ctx, pos_name_pred, target_cells, nuclei_cells, seed_stack)
+            with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                pred_cells = fov_whole_cell_instances(
+                    pred_cache_ctx, pos_name_pred, predict_cells, nuclei_cells, seed_stack
+                )
+        else:  # backend == "cellpose": independent per-side nucleus instances
+            with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
+            with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                pred_cells = fov_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
     else:
-        pred_mask_stack = None
+        with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+            gt_mask_stack = fov_masks(cache_ctx, pos_name_pred, target, seg_model)
+        if pred_cache_ctx.enabled:
+            with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                pred_mask_stack = fov_masks(pred_cache_ctx, pos_name_pred, predict, seg_model)
+        else:
+            pred_mask_stack = None
 
     gt_cp_per_t = None
     gt_dinov3_per_t = None
@@ -314,32 +579,63 @@ def _process_one_fov(
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
 
+    # Bulk-upload predict/target once per FOV so compute_pixel_metrics' per-T
+    # ascupy is a no-op via cupy-on-cupy. mask / feature / microssim paths
+    # still consume the numpy arrays in parallel — neither SuperModel nor
+    # build_crops nor the microssim aggregator accept cupy directly. The lock
+    # serializes the cupy allocation across workers under executor=process so
+    # N FOVs aren't all trying to allocate (T,D,H,W) fp32 at once.
+    if use_gpu and ascupy is not None and torch.cuda.is_available():
+        with gpu_serialization_lock(gate=use_gpu):
+            predict_xp = ascupy(predict)
+            target_xp = ascupy(target)
+    else:
+        predict_xp = predict
+        target_xp = target
+
     for t in tqdm(range(T), desc="Processing timepoints", leave=False, disable=suppress_inner_tqdm):
         data_info = {"FOV": pos_name_pred, "Timepoint": t}
 
         with region_timer("pixel_metrics", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
             pixel_metrics = compute_pixel_metrics(
-                predict[t],
-                target[t],
+                predict_xp[t],
+                target_xp[t],
                 spacing=config.pixel_metrics.spacing,
                 fsc_kwargs=config.pixel_metrics.fsc,
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
-                use_gpu=config.use_gpu,
+                use_gpu=use_gpu,
             )
         if config.compute_microssim:
             microssim_data.append({"target": target[t], "predict": predict[t]})
         fov_pixel_metrics.append({**data_info, **pixel_metrics})
 
         with region_timer("mask_metrics", pos_name_pred, t):
-            segmented_target = gt_mask_stack[t]
-            if pred_mask_stack is not None:
-                segmented_predict = pred_mask_stack[t]
+            if instance_mode:
+                gt_lab = gt_cells[t]
+                pred_lab = pred_cells[t]
+                segmented_target = gt_lab > 0
+                segmented_predict = pred_lab > 0
+                with region_timer("instance_ap", pos_name_pred, t):
+                    ap_metrics = instance_average_precision(pred_lab, gt_lab, cache_ctx.iou_thresholds)
+                fov_mask_metrics.append(
+                    {**data_info, **evaluate_segmentations(segmented_predict, segmented_target), **ap_metrics}
+                )
             else:
-                with gpu_serialization_lock(gate=use_gpu):
-                    segmented_predict = np.asarray(segment(predict[t], config.target_name, seg_model=seg_model)).astype(
-                        bool
-                    )
-            fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
+                segmented_target = gt_mask_stack[t]
+                if pred_mask_stack is not None:
+                    segmented_predict = pred_mask_stack[t]
+                else:
+                    with gpu_serialization_lock(gate=use_gpu):
+                        segmented_predict = np.asarray(
+                            segment(
+                                predict[t],
+                                config.target_name,
+                                seg_model=seg_model,
+                                backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
+                                spacing_zyx=tuple(config.pixel_metrics.spacing),
+                            )
+                        ).astype(bool)
+                fov_mask_metrics.append({**data_info, **evaluate_segmentations(segmented_predict, segmented_target)})
             segmentations.append(np.stack([segmented_predict, segmented_target], axis=0))
 
         if config.compute_feature_metrics:
@@ -363,52 +659,29 @@ def _process_one_fov(
                         compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
                     )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
-                if pred_cp.size > 0:
-                    cp.pred_feats.append(pred_cp)
-                    cp.gt_feats.append(gt_cp_t)
-                    fov_arr = np.full(len(pred_cp), pos_name_pred)
-                    t_arr = np.full(len(pred_cp), t, dtype=np.int32)
-                    cp.pred_fovs.append(fov_arr)
-                    cp.gt_fovs.append(fov_arr)
-                    cp.pred_ts.append(t_arr)
-                    cp.gt_ts.append(t_arr)
-                if pred_dinov3.size > 0:
-                    dinov3.pred_feats.append(pred_dinov3)
-                    dinov3.gt_feats.append(gt_dinov3_per_t[t])
-                    fov_arr = np.full(len(pred_dinov3), pos_name_pred)
-                    t_arr = np.full(len(pred_dinov3), t, dtype=np.int32)
-                    dinov3.pred_fovs.append(fov_arr)
-                    dinov3.gt_fovs.append(fov_arr)
-                    dinov3.pred_ts.append(t_arr)
-                    dinov3.gt_ts.append(t_arr)
-                if pred_dynaclr.size > 0:
-                    dynaclr.pred_feats.append(pred_dynaclr)
-                    dynaclr.gt_feats.append(gt_dynaclr_per_t[t])
-                    fov_arr = np.full(len(pred_dynaclr), pos_name_pred)
-                    t_arr = np.full(len(pred_dynaclr), t, dtype=np.int32)
-                    dynaclr.pred_fovs.append(fov_arr)
-                    dynaclr.gt_fovs.append(fov_arr)
-                    dynaclr.pred_ts.append(t_arr)
-                    dynaclr.gt_ts.append(t_arr)
-                if pred_celldino is not None and pred_celldino.size > 0:
-                    celldino.pred_feats.append(pred_celldino)
-                    celldino.gt_feats.append(gt_celldino_per_t[t])
-                    fov_arr = np.full(len(pred_celldino), pos_name_pred)
-                    t_arr = np.full(len(pred_celldino), t, dtype=np.int32)
-                    celldino.pred_fovs.append(fov_arr)
-                    celldino.gt_fovs.append(fov_arr)
-                    celldino.pred_ts.append(t_arr)
-                    celldino.gt_ts.append(t_arr)
+                _extend_backbone(cp, pred_cp, gt_cp_t, pos_name_pred, t)
+                _extend_backbone(dinov3, pred_dinov3, gt_dinov3_per_t[t], pos_name_pred, t)
+                _extend_backbone(dynaclr, pred_dynaclr, gt_dynaclr_per_t[t], pos_name_pred, t)
+                gt_celldino_t = gt_celldino_per_t[t] if pred_celldino is not None else None
+                _extend_backbone(celldino, pred_celldino, gt_celldino_t, pos_name_pred, t)
 
         maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
 
     seg_array = np.stack(segmentations, axis=0)  # shape: (T, 2, D, H, W)
 
     if config.compute_microssim:
-        with region_timer("microssim", pos_name_pred):
-            microssim_scores = calculate_microssim(microssim_data)
+        if microssim_sim is None:
+            # Leaf-level calibration failed (degenerate slice / OOM / cubic
+            # bracket failure) — the parent already logged the cause. Emit
+            # NaN per timepoint so the column exists and the rest of the
+            # pixel / mask / feature metrics still get computed.
             for i in range(T):
-                fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
+                fov_pixel_metrics[i]["MicroMS3IM"] = float("nan")
+        else:
+            with region_timer("microssim", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                microssim_scores = score_microssim(microssim_data, microssim_sim, use_gpu=use_gpu)
+                for i in range(T):
+                    fov_pixel_metrics[i]["MicroMS3IM"] = float(microssim_scores[i]["MicroMS3IM"])
 
     row, col, fov = pos_name_pred.split("/")
     return FovResult(
@@ -434,37 +707,15 @@ def _aggregate_fov_result(
     all_pixel_metrics: list[dict],
     all_mask_metrics: list[dict],
     all_feature_metrics: list[dict],
-    pred_cp_feats: list[np.ndarray],
-    pred_cp_fovs: list[np.ndarray],
-    pred_cp_ts: list[np.ndarray],
-    gt_cp_feats: list[np.ndarray],
-    gt_cp_fovs: list[np.ndarray],
-    gt_cp_ts: list[np.ndarray],
-    pred_dinov3_feats: list[np.ndarray],
-    pred_dinov3_fovs: list[np.ndarray],
-    pred_dinov3_ts: list[np.ndarray],
-    gt_dinov3_feats: list[np.ndarray],
-    gt_dinov3_fovs: list[np.ndarray],
-    gt_dinov3_ts: list[np.ndarray],
-    pred_dynaclr_feats: list[np.ndarray],
-    pred_dynaclr_fovs: list[np.ndarray],
-    pred_dynaclr_ts: list[np.ndarray],
-    gt_dynaclr_feats: list[np.ndarray],
-    gt_dynaclr_fovs: list[np.ndarray],
-    gt_dynaclr_ts: list[np.ndarray],
-    pred_celldino_feats: list[np.ndarray],
-    pred_celldino_fovs: list[np.ndarray],
-    pred_celldino_ts: list[np.ndarray],
-    gt_celldino_feats: list[np.ndarray],
-    gt_celldino_fovs: list[np.ndarray],
-    gt_celldino_ts: list[np.ndarray],
+    parent_lists: dict[str, _BackboneLists],
     *,
     extend_worker_timings: bool,
 ) -> None:
     """Apply one FOV's contributions to the parent-side run state.
 
     Writes the segmentation array to the HCS plate, extends the per-T row
-    lists, and extends the 24 dataset-level accumulator lists.
+    lists, and extends each backbone's six lists in ``parent_lists`` from
+    the matching ``_BackboneLists`` slot on ``result``.
 
     ``extend_worker_timings`` toggles whether to append ``result.timings``
     to the parent's global ``_TIMINGS`` collector. Set ``False`` in serial
@@ -483,30 +734,13 @@ def _aggregate_fov_result(
     all_mask_metrics.extend(result.per_t_mask_rows)
     all_feature_metrics.extend(result.per_t_feature_rows)
 
-    pred_cp_feats.extend(result.cp.pred_feats)
-    pred_cp_fovs.extend(result.cp.pred_fovs)
-    pred_cp_ts.extend(result.cp.pred_ts)
-    gt_cp_feats.extend(result.cp.gt_feats)
-    gt_cp_fovs.extend(result.cp.gt_fovs)
-    gt_cp_ts.extend(result.cp.gt_ts)
-    pred_dinov3_feats.extend(result.dinov3.pred_feats)
-    pred_dinov3_fovs.extend(result.dinov3.pred_fovs)
-    pred_dinov3_ts.extend(result.dinov3.pred_ts)
-    gt_dinov3_feats.extend(result.dinov3.gt_feats)
-    gt_dinov3_fovs.extend(result.dinov3.gt_fovs)
-    gt_dinov3_ts.extend(result.dinov3.gt_ts)
-    pred_dynaclr_feats.extend(result.dynaclr.pred_feats)
-    pred_dynaclr_fovs.extend(result.dynaclr.pred_fovs)
-    pred_dynaclr_ts.extend(result.dynaclr.pred_ts)
-    gt_dynaclr_feats.extend(result.dynaclr.gt_feats)
-    gt_dynaclr_fovs.extend(result.dynaclr.gt_fovs)
-    gt_dynaclr_ts.extend(result.dynaclr.gt_ts)
-    pred_celldino_feats.extend(result.celldino.pred_feats)
-    pred_celldino_fovs.extend(result.celldino.pred_fovs)
-    pred_celldino_ts.extend(result.celldino.pred_ts)
-    gt_celldino_feats.extend(result.celldino.gt_feats)
-    gt_celldino_fovs.extend(result.celldino.gt_fovs)
-    gt_celldino_ts.extend(result.celldino.gt_ts)
+    # Canary: if a non-list field is added to _BackboneLists, the .extend(...)
+    # below will raise AttributeError on the new field.
+    for name in _BACKBONE_KEYS:
+        worker_bb = getattr(result, name)
+        parent_bb = parent_lists[name]
+        for bb_field in _BB_FIELDS:
+            getattr(parent_bb, bb_field.name).extend(getattr(worker_bb, bb_field.name))
 
 
 # Worker-side state for ``executor=process``. A spawn-context child Python
@@ -564,13 +798,23 @@ def _find_position(plate, pos_name: str):
     raise KeyError(f"position {pos_name!r} not found in plate")
 
 
-def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) -> FovResult:
+def _worker_run_fov(
+    config: DictConfig,
+    pos_name: str,
+    cuda_empty_every_n: int,
+    microssim_sim,
+) -> FovResult:
     """Worker entry point: process one FOV by name and return FovResult.
 
     Submitted via ``pool.submit`` in ``executor=process`` mode. Plates
     are opened with a context manager scoped to this single call — iohub
     file descriptors close before the worker accepts its next FOV. Models
     + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
+
+    ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
+    ``compute_microssim=false``); shipped per submission rather than via
+    worker state because the parent fits it after the position list is
+    finalized and before any worker pool spawns.
     """
     _worker_setup(config)
     state = _WORKER_STATE
@@ -600,6 +844,7 @@ def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) 
                     state["dinov3"],
                     state["dynaclr"],
                     state["celldino"],
+                    microssim_sim,
                 )
         else:
             result = _process_one_fov(
@@ -616,6 +861,7 @@ def _worker_run_fov(config: DictConfig, pos_name: str, cuda_empty_every_n: int) 
                 state["dinov3"],
                 state["dynaclr"],
                 state["celldino"],
+                microssim_sim,
             )
 
     # Worker-side manifest flush so interrupted runs preserve progress even
@@ -655,6 +901,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     # so this is safe under feature-metrics-disabled runs.
     OmegaConf.resolve(config)
     reset_timings()
+    _validate_instance_ap_config(config)
+
+    use_gpu = bool(getattr(config, "use_gpu", True))
 
     all_pixel_metrics = []
     all_mask_metrics = []
@@ -680,30 +929,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
-    pred_cp_feats: list[np.ndarray] = []
-    pred_cp_fovs: list[np.ndarray] = []
-    pred_cp_ts: list[np.ndarray] = []
-    gt_cp_feats: list[np.ndarray] = []
-    gt_cp_fovs: list[np.ndarray] = []
-    gt_cp_ts: list[np.ndarray] = []
-    pred_dinov3_feats: list[np.ndarray] = []
-    pred_dinov3_fovs: list[np.ndarray] = []
-    pred_dinov3_ts: list[np.ndarray] = []
-    gt_dinov3_feats: list[np.ndarray] = []
-    gt_dinov3_fovs: list[np.ndarray] = []
-    gt_dinov3_ts: list[np.ndarray] = []
-    pred_dynaclr_feats: list[np.ndarray] = []
-    pred_dynaclr_fovs: list[np.ndarray] = []
-    pred_dynaclr_ts: list[np.ndarray] = []
-    gt_dynaclr_feats: list[np.ndarray] = []
-    gt_dynaclr_fovs: list[np.ndarray] = []
-    gt_dynaclr_ts: list[np.ndarray] = []
-    pred_celldino_feats: list[np.ndarray] = []
-    pred_celldino_fovs: list[np.ndarray] = []
-    pred_celldino_ts: list[np.ndarray] = []
-    gt_celldino_feats: list[np.ndarray] = []
-    gt_celldino_fovs: list[np.ndarray] = []
-    gt_celldino_ts: list[np.ndarray] = []
+    parent_lists: dict[str, _BackboneLists] = {name: _BackboneLists() for name in _BACKBONE_KEYS}
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
@@ -719,24 +945,53 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     ):
         pred_positions = list(pred_plate.positions())
         gt_positions = list(gt_plate.positions())
-        if len(pred_positions) != len(gt_positions):
-            raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, gt={len(gt_positions)}")
         if seg_path is not None:
             seg_plate = open_ome_zarr(seg_path, mode="r")
             seg_positions = list(seg_plate.positions())
-            if len(seg_positions) != len(pred_positions):
-                seg_plate.close()
-                raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, seg={len(seg_positions)}")
         else:
             seg_plate = None
             seg_positions = [(name, None) for name, _ in pred_positions]
 
-        limit = getattr(config, "limit_positions", None)
-        if limit is not None:
-            pred_positions = pred_positions[:limit]
-            gt_positions = gt_positions[:limit]
-            seg_positions = seg_positions[:limit]
         try:
+            # Position-count alignment.
+            #
+            # When ``limit_positions`` is unset (production), require strict
+            # equality so partial pred zarrs cannot silently eval against the
+            # wrong gt — historical behavior.
+            #
+            # When ``limit_positions=N`` is set (smoke / iteration), allow pred
+            # to be a strict subset of gt by name: reorder gt + seg to align
+            # with pred, then truncate. Catches the ``--fast_dev_run`` predict
+            # → ``limit_positions=N`` eval case where pred has only the first
+            # N FOVs but gt has all of them.
+            limit = getattr(config, "limit_positions", None)
+            if limit is None:
+                if len(pred_positions) != len(gt_positions):
+                    raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, gt={len(gt_positions)}")
+                if seg_plate is not None and len(seg_positions) != len(pred_positions):
+                    raise ValueError(f"Position count mismatch: pred={len(pred_positions)}, seg={len(seg_positions)}")
+            else:
+                pred_name_set = {name for name, _ in pred_positions}
+                extra_in_pred = pred_name_set - {name for name, _ in gt_positions}
+                if extra_in_pred:
+                    raise ValueError(
+                        "limit_positions: pred contains positions not present in gt: "
+                        f"{sorted(extra_in_pred)!r}. The relaxed alignment only works "
+                        "when pred is a subset of gt by position name."
+                    )
+                gt_by_name = dict(gt_positions)
+                gt_positions = [(name, gt_by_name[name]) for name, _ in pred_positions]
+                if seg_plate is not None:
+                    seg_by_name = dict(seg_positions)
+                    missing_seg = pred_name_set - set(seg_by_name)
+                    if missing_seg:
+                        raise ValueError(
+                            f"limit_positions: pred contains positions not present in seg: {sorted(missing_seg)!r}."
+                        )
+                    seg_positions = [(name, seg_by_name[name]) for name, _ in pred_positions]
+                pred_positions = pred_positions[:limit]
+                gt_positions = gt_positions[:limit]
+                seg_positions = seg_positions[:limit]
             # Hoist paired-name validation so precompute (which runs before
             # the per-FOV loop) cannot write to mismatched cache slots.
             for (pos_name_pred, _), (pos_name_gt, _), (pos_name_seg, _) in zip(
@@ -746,6 +1001,41 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, gt={pos_name_gt!r}")
                 if seg_plate is not None and pos_name_seg != pos_name_pred:
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
+
+            # Leaf-level MicroMS3IM calibration: fit α once on a random
+            # subsample of (FOV, t) volumes and reuse the fitted sim for
+            # scoring every FOV. Per the microSSIM paper (Ashesh & Jug, 2024
+            # §3.3) α is a single scalar fit over the dataset — per-pair
+            # fitting inflates the metric and breaks cross-FOV comparability.
+            # Default ``max_pairs=12`` keeps the GPU fit pool ~960 MB even
+            # with extractors + segmenter resident; the full pool (100+ FOVs)
+            # was OOMing at ~78 GB during the 2026-05-26 CellDINO regen.
+            # Cache is opt-in (serial-only, ~1 GB host RAM held longer to
+            # skip re-reading the subsampled FOVs in the per-FOV pass).
+            microssim_sim = None
+            microssim_read_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+            if config.compute_microssim:
+                max_pairs = int(OmegaConf.select(config, "microssim.calibration.max_pairs", default=12))
+                seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
+                cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
+                try:
+                    with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
+                        microssim_sim, microssim_read_cache = _calibrate_microssim(
+                            pred_positions,
+                            gt_positions,
+                            io_config,
+                            use_gpu=use_gpu,
+                            max_pairs=max_pairs,
+                            seed=seed,
+                            cache_reads=cache_reads,
+                        )
+                except (ValueError, RuntimeError, MemoryError) as exc:
+                    print(
+                        f"[microssim] leaf-level calibration failed "
+                        f"({type(exc).__name__}: {exc}); MicroMS3IM will be NaN for all FOVs."
+                    )
+                    microssim_sim = None
+                    microssim_read_cache = {}
 
             if config.compute_feature_metrics:
                 deep_extractors = {
@@ -802,8 +1092,6 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             if runtime.executor == "process" and seg_model is not None:
                 del seg_model
                 seg_model = None
-                import torch
-
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
@@ -821,30 +1109,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     all_pixel_metrics,
                     all_mask_metrics,
                     all_feature_metrics,
-                    pred_cp_feats,
-                    pred_cp_fovs,
-                    pred_cp_ts,
-                    gt_cp_feats,
-                    gt_cp_fovs,
-                    gt_cp_ts,
-                    pred_dinov3_feats,
-                    pred_dinov3_fovs,
-                    pred_dinov3_ts,
-                    gt_dinov3_feats,
-                    gt_dinov3_fovs,
-                    gt_dinov3_ts,
-                    pred_dynaclr_feats,
-                    pred_dynaclr_fovs,
-                    pred_dynaclr_ts,
-                    gt_dynaclr_feats,
-                    gt_dynaclr_fovs,
-                    gt_dynaclr_ts,
-                    pred_celldino_feats,
-                    pred_celldino_fovs,
-                    pred_celldino_ts,
-                    gt_celldino_feats,
-                    gt_celldino_fovs,
-                    gt_celldino_ts,
+                    parent_lists,
                     extend_worker_timings=extend_worker_timings,
                 )
 
@@ -860,6 +1125,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     _, pos_gt = p2
                     _, pos_seg = p3
 
+                    cached_pair = microssim_read_cache.get(pos_name_pred, (None, None))
                     result = _process_one_fov(
                         config,
                         runtime.cuda_empty_cache_every_n_timepoints,
@@ -874,6 +1140,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dinov3_feature_extractor,
                         dynaclr_feature_extractor,
                         celldino_feature_extractor,
+                        microssim_sim,
+                        predict_cached=cached_pair[0],
+                        target_cached=cached_pair[1],
                     )
                     _aggregate(result)
 
@@ -905,7 +1174,11 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         raise RuntimeError("make_fov_executor returned None for executor='process'")
                     futures = {
                         pool.submit(
-                            _worker_run_fov, config, pos_name, runtime.cuda_empty_cache_every_n_timepoints
+                            _worker_run_fov,
+                            config,
+                            pos_name,
+                            runtime.cuda_empty_cache_every_n_timepoints,
+                            microssim_sim,
                         ): pos_name
                         for pos_name in pos_names_in_order
                     }
@@ -938,9 +1211,10 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         # linear probe so MADScaler can normalize per-fold.
         prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
-        if pred_cp_feats:
-            pred_cp_raw = np.concatenate(pred_cp_feats, axis=0)
-            target_cp_raw = np.concatenate(gt_cp_feats, axis=0)
+        cp = parent_lists["cp"]
+        if cp.pred_feats:
+            pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+            target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
             target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
             mask_payload = {
                 "keep_mask": [bool(b) for b in cp_keep_mask],
@@ -964,38 +1238,42 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     target_cp_z,
                     pred_cp_filtered,
                     target_cp_filtered,
-                    np.concatenate(pred_cp_fovs, axis=0),
-                    np.concatenate(gt_cp_fovs, axis=0),
+                    np.concatenate(cp.pred_fovs, axis=0),
+                    np.concatenate(cp.gt_fovs, axis=0),
                 )
             )
 
-        deep_tracks = [
-            ("DINOv3", pred_dinov3_feats, gt_dinov3_feats, pred_dinov3_fovs, gt_dinov3_fovs),
-            ("DynaCLR", pred_dynaclr_feats, gt_dynaclr_feats, pred_dynaclr_fovs, gt_dynaclr_fovs),
-        ]
+        deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
         if celldino_feature_extractor is not None:
-            deep_tracks.append(
-                ("CellDINO", pred_celldino_feats, gt_celldino_feats, pred_celldino_fovs, gt_celldino_fovs)
-            )
-        for name, pred_feats, gt_feats, pred_fovs, gt_fovs in deep_tracks:
-            if pred_feats:
-                pred_arr = np.concatenate(pred_feats, axis=0)
-                target_arr = np.concatenate(gt_feats, axis=0)
+            deep_tracks.append(("CellDINO", "celldino"))
+        for display_name, key in deep_tracks:
+            bb = parent_lists[key]
+            if bb.pred_feats:
+                pred_arr = np.concatenate(bb.pred_feats, axis=0)
+                target_arr = np.concatenate(bb.gt_feats, axis=0)
                 prefix_inputs.append(
                     (
-                        name,
+                        display_name,
                         pred_arr,
                         target_arr,
                         pred_arr,
                         target_arr,
-                        np.concatenate(pred_fovs, axis=0),
-                        np.concatenate(gt_fovs, axis=0),
+                        np.concatenate(bb.pred_fovs, axis=0),
+                        np.concatenate(bb.gt_fovs, axis=0),
                     )
                 )
 
         # Prefix with "Dataset_" so dataset-level FID/KID/cosine don't clobber
         # per-FOV columns of the same name when merged into per-FOV rows.
         def _compute_one(args):
+            # MIND stays on CPU here even when use_gpu=True: 4 parallel threads
+            # racing on the same CUDA context would either serialize via the
+            # allocator (no speedup) or contend for memory with mid-eval FOV
+            # work in process executors. CPU MIND in a 4-thread BLAS-capped
+            # pool is competitive with serialized GPU MIND and bit-stable
+            # across runs that toggle use_gpu (torch's CPU vs CUDA RNG
+            # produce different streams for the same seed, breaking cross-
+            # leaf comparability of the MIND column).
             name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
             raw = {
                 **compute_feature_similarity(p_metric, t_metric, name),
@@ -1029,17 +1307,13 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
         for row in all_feature_metrics:
             row.update(dataset_row)
-        embedding_groups = {
-            "pred_cp": (pred_cp_feats, pred_cp_fovs, pred_cp_ts),
-            "gt_cp": (gt_cp_feats, gt_cp_fovs, gt_cp_ts),
-            "pred_dinov3": (pred_dinov3_feats, pred_dinov3_fovs, pred_dinov3_ts),
-            "gt_dinov3": (gt_dinov3_feats, gt_dinov3_fovs, gt_dinov3_ts),
-            "pred_dynaclr": (pred_dynaclr_feats, pred_dynaclr_fovs, pred_dynaclr_ts),
-            "gt_dynaclr": (gt_dynaclr_feats, gt_dynaclr_fovs, gt_dynaclr_ts),
-        }
-        if celldino_feature_extractor is not None:
-            embedding_groups["pred_celldino"] = (pred_celldino_feats, pred_celldino_fovs, pred_celldino_ts)
-            embedding_groups["gt_celldino"] = (gt_celldino_feats, gt_celldino_fovs, gt_celldino_ts)
+        embedding_groups: dict[str, tuple] = {}
+        for key in _BACKBONE_KEYS:
+            if key == "celldino" and celldino_feature_extractor is None:
+                continue
+            bb = parent_lists[key]
+            embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
+            embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
         _save_embeddings(save_dir, embedding_groups)
 
     dump_timings_csv(save_dir)
@@ -1075,8 +1349,15 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         return False
     save_dir = Path(config.save.save_dir)
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
-    mask_ok = (save_dir / config.save.mask_metrics_filename).exists()
+    mask_path = save_dir / config.save.mask_metrics_filename
+    mask_ok = mask_path.exists()
     feature_ok = (save_dir / config.save.feature_metrics_filename).exists() if config.compute_feature_metrics else True
+    # A prior AP-less run's mask cache must not suppress newly-requested instance
+    # AP: require the AP columns to be present in the cached rows.
+    if mask_ok and bool(getattr(config, "compute_instance_ap", False)):
+        rows = np.load(mask_path, allow_pickle=True).tolist()
+        if not rows or "mAP" not in rows[0]:
+            return False
     return pixel_ok and mask_ok and feature_ok
 
 
@@ -1097,12 +1378,29 @@ _MODEL_LOADING_FIELDS: tuple[str, ...] = (
     "feature_extractor",
     "compute_feature_metrics",
     "use_gpu",
+    # segmentation.backend selects SuperModel vs Cellpose-SAM in
+    # ``prepare_segmentation_model`` and the mask cache path — a per-condition
+    # override would load the wrong segmenter for the shared bundle and mix
+    # backends across the grouped run's mask caches.
+    "segmentation.backend",
     # require_complete_cache flips ``prepare_segmentation_model`` between
     # "load real SuperModel" and "return None" — letting a condition
     # override it would mean the shared seg_model bundle is wrong for that
     # condition (None when cache-miss expects a real model, or loaded but
     # never used). Treat as a grouped invariant.
     "io.require_complete_cache",
+    # The instance-AP toggles gate the segmentation behavior and the shared
+    # instance-label cache identity. A per-condition override would change the
+    # seg backend, the sliced plane, the seed params, or the AP thresholds for
+    # one condition while sharing the bundle + caches with the others.
+    "compute_instance_ap",
+    "segmentation.dimension",
+    "segmentation.slice_selection",
+    "segmentation.slice_fraction",
+    "segmentation.nuclei_channel_name",
+    "segmentation.cellpose",
+    "segmentation.watershed",
+    "instance_metrics.iou_thresholds",
 )
 
 
@@ -1301,6 +1599,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
         return models
 
     results: list[tuple[str, tuple]] = []
+    condition_save_dirs: list[Path] = []
     for idx, cond in enumerate(conditions):
         name = (
             cond.get("name", str(idx)) if isinstance(cond, dict) else OmegaConf.select(cond, "name", default=str(idx))
@@ -1322,6 +1621,30 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 feature_metrics=feature_metrics,
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
+        condition_save_dirs.append(Path(merged.save.save_dir))
+
+    # Cross-condition infection probe: once every condition in the group has
+    # its single-cell embeddings on disk, classify each infected condition vs
+    # mock (FOV-stratified logistic probe, per feature space, GT and pred).
+    # Default-on whenever feature metrics were computed (the probe consumes the
+    # embeddings those produce) and a mock + >=1 infected condition are present.
+    # Gated by ``cross_condition_probe.enabled``; never fails the eval.
+    probe_enabled = bool(
+        OmegaConf.select(
+            config,
+            "cross_condition_probe.enabled",
+            default=bool(OmegaConf.select(config, "compute_feature_metrics", default=True)),
+        )
+    )
+    if probe_enabled:
+        n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
+        rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
+        try:
+            written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
+            if written:
+                print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
+        except Exception as e:  # noqa: BLE001 -- diagnostic add-on must not fail the eval
+            print(f"[grouped] cross-condition probe skipped: {type(e).__name__}: {e}")
 
     return results
 

@@ -1,0 +1,47 @@
+# FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: mito trained on a549_mantis (tomm20),
+# predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint epoch=139-step=22120 (loss/validate=0.71857), from the
+# ws8500 training run (save dir suffix _ws8500; model_name stays
+# fcmae_vscyto3d_pretrained). Last epoch was 150 but ep139 is best-val.
+# Both iPSC and a549 manifests use `tomm20`; targets/mito_tomm20.yml handles
+# both natively, no dataset_ref override needed.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: mito__a549_mantis__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints/epoch=139-step=22120.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_fcmae_vscyto3d_pretrained_a549trained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_TOMM20_A549TR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

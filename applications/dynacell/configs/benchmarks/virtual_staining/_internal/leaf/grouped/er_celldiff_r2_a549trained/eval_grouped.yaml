@@ -1,0 +1,56 @@
+# @package _global_
+# Grouped leaf: er bucket, celldiff_r2 a549-trained model (4 conditions).
+# Covers iPSC test + A549 mantis (denv/mock/zikv).
+# Predictions: sec61b_celldiff_r2_a549trained.zarr / sec61b_celldiff_r2_a549trained_{cond}.zarr
+target_name: er
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: celldiff_r2_a549trained__a549_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_r2_a549trained.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/celldiff_r2_a549trained/sec61b_ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_celldiff_r2_a549trained_er
+- name: celldiff_r2_a549trained__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_celldiff_r2_a549trained_denv.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/a549_trained/celldiff_r2_a549trained/sec61b_denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_a549trained_with_embeddings/eval_celldiff_r2_a549trained_er_denv
+- name: celldiff_r2_a549trained__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-mock
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_celldiff_r2_a549trained_mock.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/a549_trained/celldiff_r2_a549trained/sec61b_mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_a549trained_with_embeddings/eval_celldiff_r2_a549trained_er_mock
+- name: celldiff_r2_a549trained__a549_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-zikv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_celldiff_r2_a549trained_zikv.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/a549_trained/celldiff_r2_a549trained/sec61b_zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_a549trained_with_embeddings/eval_celldiff_r2_a549trained_er_zikv

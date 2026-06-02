@@ -27,6 +27,15 @@ PAPER_KEY: dict[str, str] = {
     "celldiff_iterative": "celldiff_iterative",
     "celldiff_sliding_window": "celldiff_iterative",
     "celldiff_denoise": "celldiff_iterative",
+    # VSCyto3D ablations: random-init, external-ckpt (no-FT), and dynacell-FT
+    # from cytoland / infection-FT sources. Launched outside the standard
+    # submitter; eval YAMLs hand-authored. Paper-side aggregation script
+    # must learn these keys lockstep.
+    "fcmae_vscyto3d_pretrained_randinit": "vscyto3d_randinit",
+    "fcmae_vscyto3d_pretrained_cytoland": "vscyto3d_cytoland",
+    "fcmae_vscyto3d_pretrained_infectionft": "vscyto3d_infectionft",
+    "vscyto3d_cytolandft": "vscyto3d_cytolandft",
+    "vscyto3d_infectionft_dynacellft": "vscyto3d_infectionft_dynacellft",
 }
 
 # Organelle-name translation: code config dir → paper-script organelle key.

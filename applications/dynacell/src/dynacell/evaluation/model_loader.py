@@ -48,6 +48,9 @@ class EvalModels:
     dynaclr_ckpt_path: str | None
     dynaclr_encoder_cfg: dict[str, Any] | None
     celldino_weights_path: str | None
+    dinov3_preprocess_version: str | None = None
+    dynaclr_preprocess_version: str | None = None
+    celldino_preprocess_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +160,9 @@ def load_eval_models(config: DictConfig, *, flags: LoadFlags | None = None) -> E
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,
         celldino_weights_path=celldino_weights_path,
+        dinov3_preprocess_version=DinoV3FeatureExtractor.PREPROCESS_VERSION if dinov3 is not None else None,
+        dynaclr_preprocess_version=DynaCLRFeatureExtractor.PREPROCESS_VERSION if dynaclr is not None else None,
+        celldino_preprocess_version=CellDinoFeatureExtractor.PREPROCESS_VERSION if celldino is not None else None,
     )
 
 
@@ -167,6 +173,9 @@ def _identity_kwargs(models: EvalModels) -> dict[str, Any]:
         "dynaclr_ckpt_path": models.dynaclr_ckpt_path,
         "dynaclr_encoder_cfg": models.dynaclr_encoder_cfg,
         "celldino_weights_path": models.celldino_weights_path,
+        "dinov3_preprocess_version": models.dinov3_preprocess_version,
+        "dynaclr_preprocess_version": models.dynaclr_preprocess_version,
+        "celldino_preprocess_version": models.celldino_preprocess_version,
     }
 
 
