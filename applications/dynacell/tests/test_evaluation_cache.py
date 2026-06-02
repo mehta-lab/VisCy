@@ -21,10 +21,12 @@ from dynacell.evaluation.cache import (  # noqa: E402
     encoder_config_sha256_12,
     load_manifest,
     read_features,
+    read_instance_mask,
     read_mask,
     save_manifest,
     seed_cache_identity,
     write_features,
+    write_instance_mask,
     write_mask,
 )
 
@@ -344,6 +346,47 @@ def test_write_and_read_mask_roundtrip(tmp_path: Path) -> None:
     assert loaded.dtype == bool
     assert loaded.shape == masks.shape
     np.testing.assert_array_equal(loaded, masks)
+
+
+def test_cache_paths_instance_masks_dir(tmp_path: Path) -> None:
+    """CachePaths exposes the instance-mask plate layout."""
+    paths = cache_paths(tmp_path)
+    assert paths.instance_masks_dir == tmp_path / "instance_masks"
+    assert paths.instance_mask_plate("nucleus", "cellpose") == tmp_path / "instance_masks" / "nucleus__cellpose.zarr"
+
+
+def test_write_and_read_instance_mask_roundtrip(tmp_path: Path) -> None:
+    """uint16 instance labels round-trip without bool coercion."""
+    paths = cache_paths(tmp_path)
+    rng = np.random.default_rng(0)
+    labels = rng.integers(0, 7, size=(3, 4, 8, 8), dtype=np.uint16)  # (T, D, H, W)
+    write_instance_mask(paths, "nucleus", "A/1/0", labels, backend="cellpose")
+
+    loaded = read_instance_mask(paths, "nucleus", "A/1/0", backend="cellpose")
+    assert loaded is not None
+    assert loaded.dtype == np.uint16
+    assert loaded.shape == labels.shape
+    np.testing.assert_array_equal(loaded, labels)
+
+
+def test_instance_mask_2d_stored_with_singleton_d(tmp_path: Path) -> None:
+    """A 2-D run is stored with D=1 and reads back identically."""
+    paths = cache_paths(tmp_path)
+    labels = np.zeros((2, 1, 8, 8), dtype=np.uint16)  # (T, D=1, H, W)
+    labels[:, 0, 1:3, 1:3] = 4
+    write_instance_mask(paths, "membrane", "A/1/0", labels, backend="cellpose_watershed")
+    loaded = read_instance_mask(paths, "membrane", "A/1/0", backend="cellpose_watershed")
+    assert loaded.shape == (2, 1, 8, 8)
+    np.testing.assert_array_equal(loaded, labels)
+
+
+def test_read_instance_mask_missing_returns_none(tmp_path: Path) -> None:
+    """Missing plate or position returns None (not an error)."""
+    paths = cache_paths(tmp_path)
+    assert read_instance_mask(paths, "nucleus", "A/1/0", backend="cellpose") is None
+    labels = np.zeros((2, 3, 4, 4), dtype=np.uint16)
+    write_instance_mask(paths, "nucleus", "A/1/0", labels, backend="cellpose")
+    assert read_instance_mask(paths, "nucleus", "A/2/0", backend="cellpose") is None
 
 
 def test_read_mask_missing_plate_returns_none(tmp_path: Path) -> None:
