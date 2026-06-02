@@ -93,6 +93,28 @@ def test_segment_cellpose_membrane_not_implemented():
         segmentation.segment(img, "membrane", seg_model=object(), backend="cellpose", spacing_zyx=_SPACING)
 
 
+def test_prepare_segmentation_model_cellpose_requires_cuda():
+    """Cellpose backends fail fast (clear error) when run without CUDA.
+
+    ``segment_cpsam`` is GPU-only; building a CPU CellposeModel would only crash
+    deeper in the per-FOV loop. ``use_gpu=False`` trips the guard regardless of
+    whether the test host has a GPU.
+    """
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.create(
+        {
+            "target_name": "nucleus",
+            "use_gpu": False,
+            "compute_instance_ap": True,
+            "segmentation": {"backend": "cellpose"},
+            "io": {"require_complete_cache": False},
+        }
+    )
+    with pytest.raises(RuntimeError, match="requires CUDA"):
+        segmentation.prepare_segmentation_model(cfg)
+
+
 def test_segment_nucleus_return_labels(cellpose_model):
     """return_labels=True yields native-shape uint16 instances relabeled 1..K."""
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus

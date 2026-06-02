@@ -184,7 +184,20 @@ def prepare_segmentation_model(config):
                 raise NotImplementedError("segmentation.backend='cellpose' supports nucleus only")
             if backend == "cellpose_watershed" and config.target_name != "membrane":
                 raise NotImplementedError("segmentation.backend='cellpose_watershed' supports membrane only")
-            return load_cellpose_model(use_gpu=getattr(config, "use_gpu", True))
+            use_gpu = bool(getattr(config, "use_gpu", True))
+            if not (use_gpu and torch.cuda.is_available()):
+                # The cellpose backends run inference through
+                # ``cubic.segmentation.segment_cpsam``, which is GPU-only by
+                # contract (raises in its CUDA precondition). Fail here with a
+                # clear message instead of building a CPU CellposeModel that
+                # would die deeper in the per-FOV segmentation loop.
+                raise RuntimeError(
+                    f"segmentation.backend={backend!r} requires CUDA (cubic.segment_cpsam "
+                    f"is GPU-only), but use_gpu={use_gpu} and "
+                    f"torch.cuda.is_available()={torch.cuda.is_available()}. "
+                    "Run on a CUDA device with use_gpu=true."
+                )
+            return load_cellpose_model(use_gpu=use_gpu)
         _require_segmenter_model_zoo()
         if config.target_name == "nucleus":
             checkpoint_name = "structure_H2B_100x_hipsc"
