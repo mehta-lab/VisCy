@@ -153,7 +153,7 @@ def _write_rows(out_path: Path, rows: list[dict]) -> None:
     """Write probe rows as a CSV with the canonical field order."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(_FIELDNAMES))
+        writer = csv.DictWriter(f, fieldnames=_FIELDNAMES)
         writer.writeheader()
         writer.writerows(rows)
 
@@ -162,16 +162,16 @@ def run_for_group(
     eval_dirs: list[Path],
     n_splits: int = 5,
     rng_seed: int = 2020,
-    filename: str = GROUP_PROBE_FILENAME,
 ) -> list[Path]:
     """Probe each infected condition against mock and write a per-condition CSV.
 
     Unlike :func:`run` (long-form CSV over all pairs at one ``out_path``),
-    this writes one ``{filename}`` into *each infected condition's* eval dir,
-    holding only that condition's ``mock_vs_<cond>`` rows (every feature ×
-    {pred, gt}). This colocates the probe with the eval dir the reporting
-    layer already resolves per (model, pool, organelle, condition), so the
-    table generator can read it without knowing about sibling conditions.
+    this writes one :data:`GROUP_PROBE_FILENAME` into *each infected
+    condition's* eval dir, holding only that condition's ``mock_vs_<cond>``
+    rows (every feature × {pred, gt}). This colocates the probe with the eval
+    dir the reporting layer already resolves per (model, pool, organelle,
+    condition), so the table generator can read it without knowing about
+    sibling conditions.
 
     Requires a ``mock`` reference dir plus at least one infected dir; returns
     the list of CSV paths written (empty when the group has no mock or no
@@ -185,8 +185,6 @@ def run_for_group(
         dirs without a recognized token are ignored.
     n_splits, rng_seed : int
         Forwarded to :func:`fov_stratified_auroc`.
-    filename : str
-        Output filename written inside each infected condition's dir.
     """
     by_condition: dict[str, Path] = {}
     for d in eval_dirs:
@@ -199,15 +197,15 @@ def run_for_group(
         return []
 
     written: list[Path] = []
-    for cond in ("denv", "zikv"):
+    for ref, cond in _DEFAULT_PAIRS:  # ref == "mock" for every default pair
         if cond not in by_condition:
             continue
         rows = [
-            _probe_pair(by_condition, ("mock", cond), feature, source, n_splits, rng_seed)
+            _probe_pair(by_condition, (ref, cond), feature, source, n_splits, rng_seed)
             for feature in _FEATURE_TYPES
             for source in _SOURCES
         ]
-        out_path = by_condition[cond] / filename
+        out_path = by_condition[cond] / GROUP_PROBE_FILENAME
         _write_rows(out_path, rows)
         written.append(out_path)
     return written
