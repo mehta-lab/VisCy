@@ -102,7 +102,16 @@ def _robust_clahe(img: np.ndarray, use_clahe: bool = True):
     """
     img_dev = ascupy(img.astype(np.float32, copy=False))
     lo, hi = np.percentile(img_dev, (ROBUST_PERCENTILE, 100.0 - ROBUST_PERCENTILE))
-    img_dev = np.clip((img_dev - lo) / (hi - lo), 0.0, 1.0)
+    if float(hi - lo) <= 0.0:
+        # Constant (or near-constant) input: no contrast to stretch. Map to an
+        # all-zero image rather than dividing by zero, which would yield NaNs
+        # that propagate through CLAHE into Cellpose inference. Empty / flat-field
+        # FOVs are legitimate inputs the pipeline handles downstream (the
+        # segmenters return all-zero labels on them), so this is the correct
+        # normalization of a constant image, not error-hiding.
+        img_dev = np.zeros_like(img_dev)
+    else:
+        img_dev = np.clip((img_dev - lo) / (hi - lo), 0.0, 1.0)
     if use_clahe:
         divisor = CLAHE_KERNEL_DIVISOR if img_dev.ndim == 3 else CLAHE_KERNEL_DIVISOR_2D
         kernel = tuple(int(s // d) for s, d in zip(img_dev.shape, divisor))
