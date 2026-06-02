@@ -18,10 +18,16 @@ from viscy_data.cell_index import build_timelapse_cell_index
 from viscy_models.contrastive.loss import NTXentHCL
 
 # ---------------------------------------------------------------------------
-# Constants — encoder input matches final_yx_patch_size=(24,24) with 2 channels
+# Constants — encoder input matches final_yx_patch_size=(24,24).
+#
+# These experiments have *different* channel sets, so the supported mode is
+# bag-of-channels (``channels_per_sample=1``): each sample carries a single
+# channel keyed ``channel_0``. All-channels mode is not defined for
+# heterogeneous experiments — its channel union (``source_channel_labels``)
+# cannot align positionally with any one experiment's patch.
 # ---------------------------------------------------------------------------
 
-_C = 2
+_C = 1
 _Z = 1
 _Y = 24
 _X = 24
@@ -67,10 +73,11 @@ def test_multi_experiment_fast_dev_run(tmp_path, _create_experiment, _write_coll
         tau_range=(0.5, 2.0),
         batch_size=4,
         num_workers=1,
+        channels_per_sample=1,
         batch_group_by="experiment",
         stratify_by=None,
         temporal_enrichment=False,
-        channel_dropout_channels=[1],
+        channel_dropout_channels=[0],
         channel_dropout_prob=0.5,
     )
 
@@ -133,10 +140,11 @@ def test_multi_experiment_fast_dev_run_with_parquet(
         tau_range=(0.5, 2.0),
         batch_size=4,
         num_workers=1,
+        channels_per_sample=1,
         batch_group_by="experiment",
         stratify_by=None,
         temporal_enrichment=False,
-        channel_dropout_channels=[1],
+        channel_dropout_channels=[0],
         channel_dropout_prob=0.5,
     )
 
@@ -199,13 +207,14 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(
         tau_range=(0.5, 2.0),
         batch_size=4,
         num_workers=1,
+        channels_per_sample=1,
         # All sampling axes enabled
         batch_group_by="experiment",
         stratify_by="perturbation",
         temporal_enrichment=True,
         temporal_window_hours=2.0,
         temporal_global_fraction=0.3,
-        channel_dropout_channels=[1],
+        channel_dropout_channels=[0],
         channel_dropout_prob=0.5,
     )
 
