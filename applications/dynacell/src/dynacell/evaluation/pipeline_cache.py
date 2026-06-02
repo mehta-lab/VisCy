@@ -110,6 +110,19 @@ class _CacheContext:
         """Manifest-entry tag distinguishing prediction artifacts; empty for GT."""
         return {"source": "prediction"} if self.side == "pred" else {}
 
+    @property
+    def mask_stem(self) -> str:
+        """Filename/manifest stem for this run's binary organelle masks.
+
+        Mirrors :meth:`CachePaths.mask_plate`: the default ``supermodel`` backend
+        keeps the bare ``{target_name}`` stem (pre-existing caches unaffected),
+        while other backends get a ``{target_name}__{backend}`` infix. The
+        manifest entry must be keyed by this stem (not by ``target_name`` alone)
+        so masks from different backends don't clobber each other's manifest
+        ``path`` / ``positions`` in a shared cache dir.
+        """
+        return self.target_name if self.backend == "supermodel" else f"{self.target_name}__{self.backend}"
+
     def mark_manifest_dirty(self) -> None:
         """Record that the manifest has unsaved changes (next flush will persist them)."""
         self._manifest_dirty = True
@@ -387,9 +400,18 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
 
     checks: list[tuple[str, str, dict[str, Any] | None, dict[str, Any], tuple[str, ...]]] = [
         (
+            # Key by ``mask_stem`` (= ``{target}__{backend}`` for non-default
+            # backends), the same stem as the cache plate path, so masks from
+            # different backends get separate manifest entries instead of
+            # clobbering one ``organelle_masks[target_name]`` slot. ``backend`` is
+            # encoded in the stem itself, so it is intentionally NOT a param in
+            # the identity dict below (a backend switch lands on a different
+            # entry/plate — there is nothing stale to invalidate, and adding it
+            # would spuriously invalidate pre-existing caches that predate the
+            # field).
             "masks",
-            f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
-            artifacts.get("organelle_masks", {}).get(ctx.target_name),
+            f"{ctx.label_prefix}organelle_masks[{ctx.mask_stem}]",
+            artifacts.get("organelle_masks", {}).get(ctx.mask_stem),
             {"target_name": ctx.target_name, **ctx.source_tag},
             (),
         ),
@@ -552,7 +574,7 @@ def fov_masks(
     from it. When caching is disabled (``ctx.enabled == False``), the masks
     are computed fresh from *image_arr* without any cache interaction.
     """
-    mask_stem = ctx.target_name if ctx.backend == "supermodel" else f"{ctx.target_name}__{ctx.backend}"
+    mask_stem = ctx.mask_stem
     manifest_entry: dict[str, Any] = {
         "path": f"organelle_masks/{mask_stem}.zarr",
         "target_name": ctx.target_name,
@@ -566,7 +588,8 @@ def fov_masks(
         image_arr=image_arr,
         seg_model=seg_model,
         force_key=f"{ctx.side}_masks",
-        artifact_label=f"{ctx.label_prefix}organelle_masks[{ctx.target_name}]",
+        manifest_key=mask_stem,
+        artifact_label=f"{ctx.label_prefix}organelle_masks[{mask_stem}]",
         manifest_entry=manifest_entry,
     )
 
@@ -578,6 +601,7 @@ def _fov_masks(
     image_arr: np.ndarray,
     seg_model,
     force_key: str,
+    manifest_key: str,
     artifact_label: str,
     manifest_entry: dict[str, Any],
 ) -> np.ndarray:
@@ -613,10 +637,10 @@ def _fov_masks(
     def _record_write() -> None:
         _update_manifest_entry(
             ctx.manifest,
-            ["organelle_masks", ctx.target_name],
+            ["organelle_masks", manifest_key],
             manifest_entry,
         )
-        _add_position(ctx.manifest, ["organelle_masks", ctx.target_name], pos_name)
+        _add_position(ctx.manifest, ["organelle_masks", manifest_key], pos_name)
         ctx.mark_manifest_dirty()
 
     def _write_masks(masks: np.ndarray) -> None:

@@ -512,6 +512,41 @@ def test_fov_pred_masks_writes_manifest_source(tmp_path: Path, monkeypatch) -> N
     assert "A/1/0" in er_entry["positions"]
 
 
+def test_fov_masks_non_default_backend_keys_manifest_by_stem(tmp_path: Path, monkeypatch) -> None:
+    """A non-supermodel backend keys its manifest entry by the backend-aware stem.
+
+    ``supermodel`` masks live under ``organelle_masks[nucleus]`` and a ``cellpose``
+    binary run under ``organelle_masks[nucleus__cellpose]`` — matching their
+    distinct cache plate paths — so two backends in one cache dir never clobber
+    each other's manifest ``path`` / ``positions``.
+    """
+    import dynacell.evaluation.segmentation as segmentation
+
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    img = np.zeros((1, 2, 3, 3), dtype=np.float32)
+
+    cfg_sm = _make_config(**{"target_name": "nucleus", "io.gt_cache_dir": str(tmp_path)})
+    ctx_sm = init_cache_context(cfg_sm, side="gt")
+    fov_masks(ctx_sm, "A/1/0", img, seg_model=_FakeSegModel())
+    flush_manifest(ctx_sm)
+
+    cfg_cp = _make_config(
+        **{"target_name": "nucleus", "segmentation.backend": "cellpose", "io.gt_cache_dir": str(tmp_path)}
+    )
+    ctx_cp = init_cache_context(cfg_cp, side="gt")
+    fov_masks(ctx_cp, "A/1/1", img, seg_model=_FakeSegModel())
+    flush_manifest(ctx_cp)
+
+    masks = load_manifest(cache_paths(tmp_path))["artifacts"]["organelle_masks"]
+    assert set(masks) == {"nucleus", "nucleus__cellpose"}
+    assert masks["nucleus"]["backend"] == "supermodel"
+    assert masks["nucleus"]["path"].endswith("organelle_masks/nucleus.zarr")
+    assert masks["nucleus"]["positions"] == ["A/1/0"]
+    assert masks["nucleus__cellpose"]["backend"] == "cellpose"
+    assert masks["nucleus__cellpose"]["path"].endswith("organelle_masks/nucleus__cellpose.zarr")
+    assert masks["nucleus__cellpose"]["positions"] == ["A/1/1"]
+
+
 def test_fov_gt_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
     """Pre-populated DINOv3 cache is returned without calling the extractor."""
     cfg = _make_config(
