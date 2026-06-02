@@ -7,7 +7,7 @@ from imageio import imwrite
 from iohub import open_ome_zarr
 from lightning.pytorch.trainer.states import TrainerFn
 from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandFlipd, RandSpatialCropSamplesd
-from pytest import TempPathFactory, fixture, importorskip, mark, raises
+from pytest import TempPathFactory, fixture, importorskip, mark, raises, skip
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
@@ -976,9 +976,17 @@ def _mmap_sharing_child(data_path, cache_dir, result_queue):
 
 def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
-    import multiprocessing
+    import multiprocessing as mp
 
     importorskip("tensordict")
+
+    # ``fork`` context because pytest imports tests under
+    # ``--import-mode=importlib``, whose path can't be re-resolved in a spawn
+    # child (``ModuleNotFoundError: 'packages'``). fork is unavailable on
+    # Windows, so skip there — same pattern as test_combined_ddp.py.
+    if "fork" not in mp.get_all_start_methods():
+        skip("fork start_method not available (Windows)")
+    ctx = mp.get_context("fork")
 
     dm = HCSDataModule(
         data_path=hcs_with_fg_mask,
@@ -993,9 +1001,9 @@ def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     dm.prepare_data()
     cache_dir = dm._mmap_cache_dir
 
-    result_queue = multiprocessing.Queue()
+    result_queue = ctx.Queue()
 
-    proc = multiprocessing.Process(target=_mmap_sharing_child, args=(hcs_with_fg_mask, cache_dir, result_queue))
+    proc = ctx.Process(target=_mmap_sharing_child, args=(hcs_with_fg_mask, cache_dir, result_queue))
     proc.start()
     proc.join(timeout=30)
     status, value = result_queue.get_nowait()
