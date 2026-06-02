@@ -125,7 +125,7 @@ def test_multi_experiment_fast_dev_run_with_parquet(
     build_timelapse_cell_index(yaml_path, parquet_path)
 
     datamodule = MultiExperimentDataModule(
-        collection_path=str(yaml_path),
+        cell_index_path=str(parquet_path),
         z_window=1,
         yx_patch_size=(32, 32),
         final_yx_patch_size=(24, 24),
@@ -138,7 +138,6 @@ def test_multi_experiment_fast_dev_run_with_parquet(
         temporal_enrichment=False,
         channel_dropout_channels=[1],
         channel_dropout_prob=0.5,
-        cell_index_path=str(parquet_path),
     )
 
     encoder = _SimpleEncoder(in_dim=_FLAT_DIM)
