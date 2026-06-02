@@ -40,6 +40,20 @@ _FEATURE_TYPES: tuple[str, ...] = get_args(FeatureKind)
 _SOURCES = ("pred", "gt")
 _CONDITION_TOKENS = ("mock", "denv", "zikv")
 _DEFAULT_PAIRS = (("mock", "denv"), ("mock", "zikv"))
+_FIELDNAMES = (
+    "feature_type",
+    "pair",
+    "source",
+    "n_cells_c0",
+    "n_cells_c1",
+    "n_fovs",
+    "n_folds",
+    "auroc_mean",
+    "auroc_std",
+    "skipped_reason",
+)
+#: Filename written into each infected condition's eval dir by :func:`run_for_group`.
+GROUP_PROBE_FILENAME = "cross_condition_probe.csv"
 
 
 def _detect_condition(eval_dir: Path) -> str:
@@ -135,6 +149,70 @@ def _probe_pair(
     return row
 
 
+def _write_rows(out_path: Path, rows: list[dict]) -> None:
+    """Write probe rows as a CSV with the canonical field order."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(_FIELDNAMES))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def run_for_group(
+    eval_dirs: list[Path],
+    n_splits: int = 5,
+    rng_seed: int = 2020,
+    filename: str = GROUP_PROBE_FILENAME,
+) -> list[Path]:
+    """Probe each infected condition against mock and write a per-condition CSV.
+
+    Unlike :func:`run` (long-form CSV over all pairs at one ``out_path``),
+    this writes one ``{filename}`` into *each infected condition's* eval dir,
+    holding only that condition's ``mock_vs_<cond>`` rows (every feature ×
+    {pred, gt}). This colocates the probe with the eval dir the reporting
+    layer already resolves per (model, pool, organelle, condition), so the
+    table generator can read it without knowing about sibling conditions.
+
+    Requires a ``mock`` reference dir plus at least one infected dir; returns
+    the list of CSV paths written (empty when the group has no mock or no
+    infected condition, e.g. the in-distribution iPSC eval).
+
+    Parameters
+    ----------
+    eval_dirs : list[Path]
+        Per-condition eval dirs of one (model, pool, organelle) group. The
+        condition is inferred from each dir's trailing ``_{mock,denv,zikv}``;
+        dirs without a recognized token are ignored.
+    n_splits, rng_seed : int
+        Forwarded to :func:`fov_stratified_auroc`.
+    filename : str
+        Output filename written inside each infected condition's dir.
+    """
+    by_condition: dict[str, Path] = {}
+    for d in eval_dirs:
+        try:
+            cond = _detect_condition(d)
+        except ValueError:
+            continue
+        by_condition[cond] = d
+    if "mock" not in by_condition:
+        return []
+
+    written: list[Path] = []
+    for cond in ("denv", "zikv"):
+        if cond not in by_condition:
+            continue
+        rows = [
+            _probe_pair(by_condition, ("mock", cond), feature, source, n_splits, rng_seed)
+            for feature in _FEATURE_TYPES
+            for source in _SOURCES
+        ]
+        out_path = by_condition[cond] / filename
+        _write_rows(out_path, rows)
+        written.append(out_path)
+    return written
+
+
 def run(
     eval_dirs: list[Path],
     out_path: Path,
@@ -169,23 +247,7 @@ def run(
             for source in _SOURCES:
                 rows.append(_probe_pair(eval_dirs_by_condition, pair, feature, source, n_splits, rng_seed))
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "feature_type",
-        "pair",
-        "source",
-        "n_cells_c0",
-        "n_cells_c1",
-        "n_fovs",
-        "n_folds",
-        "auroc_mean",
-        "auroc_std",
-        "skipped_reason",
-    ]
-    with out_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    _write_rows(out_path, rows)
     return out_path
 
 
