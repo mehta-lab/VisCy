@@ -347,8 +347,10 @@ def test_a549_predict_leaf_composes(
     assert bench["dataset_ref"]["target"] == gene_slug
     assert bench["experiment_id"] == f"{organelle}__ipsc_confocal__{model}__a549_mantis_{gene_slug}_{condition}"
 
-    # Single-GPU predict topology, any GPU (no vendor constraint pinned).
-    assert cfg["launcher"]["sbatch"].get("constraint") is None
+    # Single-GPU predict topology, any GPU: the any-GPU profile composes an
+    # explicit constraint=null. Subscript (not .get) so a dropped hardware
+    # profile surfaces as a failure instead of silently passing.
+    assert cfg["launcher"]["sbatch"]["constraint"] is None
 
 
 def test_manifest_spacing_propagates(monkeypatch) -> None:
