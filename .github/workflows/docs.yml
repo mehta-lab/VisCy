@@ -1,0 +1,55 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write # mike pushes the built site to the gh-pages branch
+
+jobs:
+  # On pull requests, only verify that the documentation builds cleanly.
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --all-packages --group doc
+      - run: uv run python docs/_gen_versions.py
+      - run: uv run zensical build --clean
+
+  # On pushes, deploy with mike: main -> dev, vX.Y.Z tag -> that version + stable.
+  deploy:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history so mike can update the gh-pages branch
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --all-packages --group doc
+      - run: uv run python docs/_gen_versions.py
+      - run: git config user.name "github-actions[bot]"
+      - run: git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy dev docs
+        if: github.ref == 'refs/heads/main'
+        run: uv run mike deploy --push dev
+
+      - name: Deploy release docs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run mike deploy --push --update-aliases "${GITHUB_REF_NAME#v}" stable
+
+      - name: Set default to stable
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run mike set-default --push stable
