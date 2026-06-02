@@ -31,7 +31,6 @@ dynamic = [ "version" ]
 dependencies = [
   "lightning>=2.3",
   "monai",
-  "nvidia-cublas-cu12>=12.9.2.10",
   "omegaconf",
   "pydantic>=2",
   "viscy-data[mmap]",
@@ -66,11 +65,12 @@ optional-dependencies.eval = [
 optional-dependencies.eval_gpu = [
   "cucim-cu12",
   "cupy-cuda12x",
-  # cupy-cuda12x needs libcufft.so.11 (CUDA 12 cuFFT ABI). Torch 2.12 +cu130
-  # pulls in nvidia-cufft (12.0.0.61, libcufft.so.12) but not the cu12
-  # variant, so we pin nvidia-cufft-cu12 explicitly to bring back
-  # libcufft.so.11. Both sonames coexist; cupy picks .11 via cuda-pathfinder,
-  # torch picks .12 via its own dlopen tree.
+  # cupy-cuda12x is CUDA-12 only and finds its CUDA libs through
+  # cuda-pathfinder. torch is pinned to a CUDA-12 build (see the root
+  # pyproject's pytorch-cu128 index) so the whole venv is CUDA-12-consistent
+  # and pathfinder resolves cupy's cublas/cufft to the cu12 wheels; nvidia-
+  # cufft-cu12 is declared explicitly so cupy's cuFFT is present regardless of
+  # torch's cuda-toolkit extras.
   "nvidia-cufft-cu12",
 ]
 optional-dependencies.preprocess = [
