@@ -76,9 +76,13 @@ def _load_embeddings(
     ``np.load`` raises ``FileNotFoundError`` when the NPZ is missing. When
     *cache* is given, the result is memoized on the resolved NPZ path so the
     shared reference (``mock``) side is read from disk once per group instead
-    of once per pair (see :func:`run` / :func:`run_for_group`).
+    of once per pair (see :func:`run` / :func:`run_for_group`). The key is
+    resolved so the same file reached via different relative paths/symlinks
+    still hits the cache.
     """
-    npz_path = eval_dir / "embeddings" / f"{source}_{feature}_single_cell_embeddings.npz"
+    # ``.resolve()`` (strict=False) canonicalizes the key without requiring the
+    # file to exist — np.load still raises FileNotFoundError below if it's missing.
+    npz_path = (eval_dir / "embeddings" / f"{source}_{feature}_single_cell_embeddings.npz").resolve()
     if cache is not None and npz_path in cache:
         return cache[npz_path]
     with np.load(npz_path) as data:
