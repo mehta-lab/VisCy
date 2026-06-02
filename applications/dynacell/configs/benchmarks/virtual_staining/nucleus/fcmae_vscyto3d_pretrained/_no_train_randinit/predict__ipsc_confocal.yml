@@ -1,0 +1,44 @@
+# VSCyto3D random-init predict: nucleus (frozen randinit ckpt), iPSC test set.
+# Control ablation — measures untrained model output for paper.
+# References the frozen randinit.ckpt persisted by save_random_init_vscyto3d_ckpts.py
+# so all 4 datasets (iPSC + 3 A549 plates) for this organelle reuse the same weights.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: randinit
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained_randinit
+  experiment_id: nucleus__randinit__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/randinit/nucl/fcmae_vscyto3d_pretrained/checkpoints/randinit.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_pretrained_randinit.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_RandInit_PRED_NUCL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

@@ -55,6 +55,28 @@ Invariant: `#SBATCH --ntasks-per-node=N` must equal `trainer.devices` in the YAM
 
 The dynacell launcher (`applications/dynacell/tools/submit_benchmark_job.py`) already emits `--ntasks-per-node` correctly; this note is for hand-written scripts (e.g., `applications/cytoland/examples/configs/*/run_*.slurm`).
 
+### Job monitoring and inspection
+
+**Process state ≠ training completeness.** Wandb's `state: finished` only means `wandb.finish()` was called — Lightning calls it on clean SIGTERM teardown via `SLURMEnvironment`, so a `scancel`'d run shows `finished` identically to one that hit `max_epochs`. Always cross-check.
+
+**Liveness check (is the job alive *right now*?):** `wandb.Api().run(...).heartbeatAt` is authoritative. Do not infer liveness from `last.ckpt` mtime, internal step counter, or a single `nvidia-smi` snapshot.
+
+**Completeness check (did the job finish its goal?):** combine three sources, all required:
+1. `sacct -j <job_id> --format=JobID,State,ExitCode,Elapsed,TimeLimit` — `CANCELLED+` with `ExitCode 0:0` is the signature of a user `scancel`; `TIMEOUT` is wall-time hit; `COMPLETED` with ExitCode 0:0 is the only unambiguous success.
+2. The resolved fit YAML at `/hpc/projects/comp.micro/virtual_staining/models/dynacell/.../resolved/fit_*_<timestamp>.yml` — read `trainer.max_epochs` / `trainer.max_steps`. The wandb `r.config` dict only stores model init args, **not trainer args**.
+3. Wandb run summary — compare final `epoch` to `trainer.max_epochs`. Final epoch of e.g. `135/200` is killed mid-training, not done; `200/200` is the only credible success indicator.
+
+The `output.log` / `wandb-output.log` for the run will contain `Received SIGTERM: 15` if Lightning's signal handler caught a scancel — a useful confirmation when sacct is ambiguous.
+
+**Before cancelling jobs:** the job name in `squeue` is not a complete description. `FCMAE_VSCyto3D_Pretrained_A549_Membrane` could be a fit run OR a predict run — they share the trained-model directory naming. Verify the actual purpose via:
+- The `Comment` field (`squeue -j <id> -o "%k"`) if the launcher set one
+- The resolved YAML path (fit vs predict subdirectory)
+- The wandb run config for that job ID
+
+When the user says "cancel all jobs," scope it to **batch jobs only**, never the interactive nomachine session. Read job names carefully — a job that has been alive for >24 h on a multi-GPU allocation is almost certainly training, not a predict run that should be ~hours.
+
+**Subagent prompts for job status:** ask for completeness vs config, not just liveness. A prompt like "check the liveness of wandb run X" returns `state: finished` for a SIGTERM'd run and reads as success. Phrase it as "is run X complete relative to its configured `max_epochs`, and what was the exit reason (clean finish, scancel, OOM, timeout, exception)?"
+
 ### Joint vs single-set training batch semantics
 
 `HCSDataModule` and `BatchedConcatDataModule` produce the same number of GPU samples per training step — but the YAML `batch_size` value that gets there is **different by a factor of `num_samples`**. Easy to misread either by skimming.

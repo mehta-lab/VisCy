@@ -35,6 +35,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
     ParsedZarr,
+    _is_ablation_track_zarr,
     benchmark_dataset_ref,
     parse_zarr_name,
     pred_cache_dir_for,
@@ -160,6 +161,32 @@ def test_parse_zarr_name_unknown_celldiff_variant_raises() -> None:
         parse_zarr_name(fake_root / "ipsc/predictions/sec61b_celldiff_fakevariant.zarr", dynacell_root=fake_root)
 
 
+@pytest.mark.parametrize(
+    "name, expect",
+    [
+        # dual nucleus+membrane predicts (own track; ``dual_`` prefix).
+        ("dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_mock.zarr", True),
+        ("dual_nucl_memb_fcmae_vscyto3d_pretrained_infectionft.zarr", True),
+        # no-FT ablations (Track A/B infixes).
+        ("memb_fcmae_vscyto3d_pretrained_randinit_zikv.zarr", True),
+        ("tomm20_fcmae_vscyto3d_pretrained_randinit.zarr", True),
+        ("sec61b_fcmae_vscyto3d_pretrained_cytoland_denv.zarr", True),
+        ("nucl_fcmae_vscyto3d_pretrained_infectionft_mock.zarr", True),
+        # FT-combined ablations covered via substring (cytolandft / infectionft_dynacellft).
+        ("memb_vscyto3d_cytolandft_a549trained_mock.zarr", True),
+        ("memb_vscyto3d_infectionft_dynacellft_a549trained_mock.zarr", True),
+        # in-scope campaign zarrs must NOT be flagged.
+        ("memb_fcmae_vscyto3d_pretrained_a549trained_mock.zarr", False),
+        ("tomm20_fcmae_vscyto3d_pretrained_a549trained.zarr", False),
+        ("sec61b_celldiff_r2_iterative__sec61b_mock.zarr", False),
+        ("nucl_fnet3d_paper_jointtrained_denv.zarr", False),
+    ],
+)
+def test_is_ablation_track_zarr(name: str, expect: bool) -> None:
+    """Ablation / dual prediction families are recognized; campaign zarrs are not."""
+    assert _is_ablation_track_zarr(name) is expect
+
+
 # ---------------------------------------------------------------------------
 # 2. Save_dir + dataset_ref derivation
 # ---------------------------------------------------------------------------
@@ -254,6 +281,22 @@ def test_all_pred_paths_exist_after_dedupe() -> None:
     pool = walk_predictions(_DYNACELL_ROOT)
     missing = [str(p.pred_path) for p in pool if not p.pred_path.is_dir()]
     assert not missing, f"missing pred_paths: {missing[:5]}"
+
+
+@pytest.mark.requires_data
+@pytest.mark.skipif(
+    not _DYNACELL_ROOT.exists(),
+    reason=f"dynacell training root absent: {_DYNACELL_ROOT}",
+)
+def test_walk_predictions_excludes_ablation_track() -> None:
+    """walk_predictions must skip dual/ablation zarrs instead of crashing on them.
+
+    These families coexist on disk with campaign zarrs; the walk used to raise
+    ``unknown prediction zarr grammar`` on the first ``dual_`` entry.
+    """
+    pool = walk_predictions(_DYNACELL_ROOT)
+    leaked = [str(p.pred_path) for p in pool if _is_ablation_track_zarr(p.pred_path.name)]
+    assert not leaked, f"ablation-track zarrs leaked into the pool: {leaked[:5]}"
 
 
 # ---------------------------------------------------------------------------

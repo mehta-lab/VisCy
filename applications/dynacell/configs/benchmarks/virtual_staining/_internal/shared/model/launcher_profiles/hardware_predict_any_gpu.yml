@@ -1,0 +1,23 @@
+# Hardware profile: single GPU, no vendor constraint, for predict mode.
+# Pair with recipes/topology/single_gpu.yml.
+#
+# Predict at FP32 fits in ~7 GB GPU memory and is compute-bound at 100% SM
+# utilization (verified 2026-05 on celldiff_r2 a549trained membrane mock,
+# H200: 6.6 GB / 143 GB HBM, 15-20% memory bandwidth). Bandwidth headroom
+# means Hopper-only acceleration (HBM3e, FP8/Transformer Engine) is not
+# used — A40 / A6000 / L40S / L4 all work and drain the queue faster than
+# pinning Hopper.
+#
+# Hardware-shape constants (gpus, cpus_per_task, mem) match hardware_h200_single
+# so resource accounting is identical; only the GPU vendor constraint is
+# relaxed.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 32
+    gpus: 1
+    mem: "256G"
+    constraint: null
+    time: "4-00:00:00"

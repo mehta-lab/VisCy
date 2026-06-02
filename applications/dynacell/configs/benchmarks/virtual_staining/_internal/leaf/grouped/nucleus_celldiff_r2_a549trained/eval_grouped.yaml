@@ -1,0 +1,25 @@
+# @package _global_
+# Grouped leaf: nucleus bucket, celldiff_r2 a549-trained model (1 condition available now).
+# Only iPSC test. A549 nucleus celldiff_r2_a549trained predictions still in-flight — handled by nucleus_celldiff_r2_a549trained_later.
+target_name: nucleus
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: celldiff_r2_a549trained__a549_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_celldiff_r2_a549trained.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/celldiff_r2_a549trained/nucl_ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_celldiff_r2_a549trained_nucleus
