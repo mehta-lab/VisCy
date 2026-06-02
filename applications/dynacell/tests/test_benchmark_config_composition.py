@@ -327,8 +327,8 @@ def test_a549_predict_leaf_composes(
     - dataset_ref.{dataset,target} carry through composition (proves the
       gene-keyed predict_set + targets overlays took effect).
     - experiment_id reflects the cross-eval pairing (per condition).
-    - sbatch.constraint inherits "h200" from hardware_h200_single (these
-      are single-GPU predict leaves).
+    - sbatch.constraint is unset (None): predict leaves use
+      hardware_predict_any_gpu (any GPU), not the H200 pin.
     """
     monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
     leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / f"predict__a549_mantis_{condition}.yml"
@@ -347,8 +347,8 @@ def test_a549_predict_leaf_composes(
     assert bench["dataset_ref"]["target"] == gene_slug
     assert bench["experiment_id"] == f"{organelle}__ipsc_confocal__{model}__a549_mantis_{gene_slug}_{condition}"
 
-    # Single-GPU predict topology: h200 only, not the 4-GPU alternation.
-    assert cfg["launcher"]["sbatch"].get("constraint") == "h200"
+    # Single-GPU predict topology, any GPU (no vendor constraint pinned).
+    assert cfg["launcher"]["sbatch"].get("constraint") is None
 
 
 def test_manifest_spacing_propagates(monkeypatch) -> None:
