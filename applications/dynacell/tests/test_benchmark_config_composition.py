@@ -244,11 +244,21 @@ def test_migrated_target_train_resolves_to_manifest_paths(organelle: str, model:
     assert ia["target_channel"] == target_channel
 
 
+# celldiff predict leaves are split per inference method; unetvit3d has a single
+# file. The test store + channel resolution is identical across the three
+# celldiff method variants (they differ only in model/predict-method fields),
+# so we pick sliding_window as the representative for celldiff.
+_MIGRATED_PREDICT_FILES = {
+    "celldiff": "predict__ipsc_confocal__sliding_window.yml",
+    "unetvit3d": "predict__ipsc_confocal.yml",
+}
+
+
 @pytest.mark.parametrize("organelle,model", _MIGRATED_PREDICT_LEAVES)
 def test_migrated_target_predict_resolves_to_test_store(organelle: str, model: str, monkeypatch) -> None:
     """Full dataset_ref on a migrated predict leaf splices the test store + channels."""
     monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
-    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__ipsc_confocal.yml"
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / _MIGRATED_PREDICT_FILES[model]
     cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
     _, test_store, target_channel = _MIGRATED_TARGET_INFO[organelle]
     ia = cfg["data"]["init_args"]
@@ -259,90 +269,52 @@ def test_migrated_target_predict_resolves_to_test_store(organelle: str, model: s
 
 # -- Stage 6: A549 cross-eval predict leaves ------------------------------
 
-# Each cross-eval cell → (plate_date, target_slug, target_channel,
-# gt_test_substring). Plate is per-organelle because the a549 plates are
-# split: 2024_11_07 has SEC61B, 2024_11_21 has TOMM20, 2026_03_26 has both
-# h2b (nucleus) + caax (membrane). Target_slug is the manifest's
-# target key — same as iPSC for er/mito but gene-keyed for a549's
-# nucleus + membrane.
+# The a549_mantis predict leaf was split per treatment condition into
+# predict__a549_mantis_{mock,denv,zikv}.yml. Each condition points at the
+# condition-pooled test store in mantis_v1/test/. Per-organelle the gene
+# slug differs: er → SEC61B, mito → TOMM20, nucleus → H2B, membrane → CAAX.
+# The condition flag in the store filename is mock → "_mock", denv →
+# "_DENV", zikv → "_ZIKV".
+#
+# Each cross-eval cell → (organelle, model, condition, gene_slug,
+# target_channel, store_filename). dataset_ref.dataset is
+# f"a549-mantis-{gene_slug}-{condition}", dataset_ref.target is gene_slug,
+# and experiment_id is
+# f"{organelle}__ipsc_confocal__{model}__a549_mantis_{gene_slug}_{condition}".
+_A549_GENE_INFO = {
+    "er": ("sec61b", "SEC61B", "Structure"),
+    "mito": ("tomm20", "TOMM20", "Structure"),
+    "nucleus": ("h2b", "H2B", "Nuclei"),
+    "membrane": ("caax", "CAAX", "Membrane"),
+}
+# Condition → suffix in the test store filename.
+_A549_CONDITION_SUFFIX = {"mock": "_mock", "denv": "_DENV", "zikv": "_ZIKV"}
+
 _A549_PREDICT_EXPECTATIONS = [
     (
-        "er",
-        "celldiff",
-        "2024_11_07",
-        "sec61b",
-        "Structure",
-        "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr",
-    ),
-    (
-        "er",
-        "unetvit3d",
-        "2024_11_07",
-        "sec61b",
-        "Structure",
-        "2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr",
-    ),
-    (
-        "mito",
-        "celldiff",
-        "2024_11_21",
-        "tomm20",
-        "Structure",
-        "2024_11_21_A549_TOMM20_DENV/test/TOMM20.zarr",
-    ),
-    (
-        "mito",
-        "unetvit3d",
-        "2024_11_21",
-        "tomm20",
-        "Structure",
-        "2024_11_21_A549_TOMM20_DENV/test/TOMM20.zarr",
-    ),
-    (
-        "nucleus",
-        "celldiff",
-        "2026_03_26",
-        "h2b",
-        "Nuclei",
-        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr",
-    ),
-    (
-        "nucleus",
-        "unetvit3d",
-        "2026_03_26",
-        "h2b",
-        "Nuclei",
-        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/H2B.zarr",
-    ),
-    (
-        "membrane",
-        "celldiff",
-        "2026_03_26",
-        "caax",
-        "Membrane",
-        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr",
-    ),
-    (
-        "membrane",
-        "unetvit3d",
-        "2026_03_26",
-        "caax",
-        "Membrane",
-        "2026_03_26_A549_CAAX_H2B_DENV_ZIKV/test/CAAX.zarr",
-    ),
+        organelle,
+        model,
+        condition,
+        gene_slug,
+        target_channel,
+        f"mantis_v1/test/{gene_upper}{_A549_CONDITION_SUFFIX[condition]}.ozx",
+    )
+    for organelle, (gene_slug, gene_upper, target_channel) in _A549_GENE_INFO.items()
+    for model in ("celldiff", "unetvit3d")
+    for condition in ("mock", "denv", "zikv")
 ]
 
 
 @pytest.mark.parametrize(
-    "organelle,model,plate_date,target_slug,target_channel,gt_test_substring",
+    "organelle,model,condition,gene_slug,target_channel,gt_test_substring",
     _A549_PREDICT_EXPECTATIONS,
     ids=lambda v: v if isinstance(v, str) else None,
 )
 def test_a549_predict_leaf_composes(
     organelle: str,
     model: str,
-    plate_date: str,
-    target_slug: str,
+    condition: str,
+    gene_slug: str,
     target_channel: str,
     gt_test_substring: str,
     monkeypatch,
@@ -350,30 +322,30 @@ def test_a549_predict_leaf_composes(
     """Stage 6 cross-eval predict leaves compose against a549 manifests.
 
     Verifies for each cell:
-    - data.init_args.data_path resolves to the right plate's test store.
+    - data.init_args.data_path resolves to the condition's test store.
     - target_channel is a bare string (not a list) per _compose_hook.py.
     - dataset_ref.{dataset,target} carry through composition (proves the
-      nucleus → h2b and membrane → caax leaf-level overrides took effect).
-    - experiment_id reflects the cross-eval pairing.
+      gene-keyed predict_set + targets overlays took effect).
+    - experiment_id reflects the cross-eval pairing (per condition).
     - sbatch.constraint inherits "h200" from hardware_h200_single (these
       are single-GPU predict leaves).
     """
     monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
-    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / "predict__a549_mantis.yml"
+    leaf = BENCHMARKS / organelle / model / "ipsc_confocal" / f"predict__a549_mantis_{condition}.yml"
     assert leaf.is_file(), f"missing predict leaf: {leaf}"
     cfg = load_composed_config(leaf, resolver=_dynacell_ref_resolver)
 
     ia = cfg["data"]["init_args"]
     assert ia["data_path"].endswith(gt_test_substring), (
-        f"{organelle}/{model}: data_path={ia['data_path']!r} does not end with {gt_test_substring!r}"
+        f"{organelle}/{model}/{condition}: data_path={ia['data_path']!r} does not end with {gt_test_substring!r}"
     )
     assert ia["source_channel"] == "Phase3D"
     assert ia["target_channel"] == target_channel  # bare string, not [list]
 
     bench = cfg["benchmark"]
-    assert bench["dataset_ref"]["dataset"] == f"a549-mantis-{plate_date}"
-    assert bench["dataset_ref"]["target"] == target_slug
-    assert bench["experiment_id"] == f"{organelle}__ipsc_confocal__{model}__a549_mantis"
+    assert bench["dataset_ref"]["dataset"] == f"a549-mantis-{gene_slug}-{condition}"
+    assert bench["dataset_ref"]["target"] == gene_slug
+    assert bench["experiment_id"] == f"{organelle}__ipsc_confocal__{model}__a549_mantis_{gene_slug}_{condition}"
 
     # Single-GPU predict topology: h200 only, not the 4-GPU alternation.
     assert cfg["launcher"]["sbatch"].get("constraint") == "h200"
@@ -423,12 +395,12 @@ def test_synthetic_target_only_partial_ref_is_noop(tmp_path) -> None:
 
 def test_joint_train_leaf_composes() -> None:
     """First joint train leaf — BatchedConcatDataModule wrapping two
-    HCSDataModule children (ipsc SEC61B + a549_mantis_2024_11_07 SEC61B).
+    HCSDataModule children (ipsc SEC61B + a549_mantis pooled SEC61B).
 
     Joint leaves bypass the single-dataset resolver: no benchmark.dataset_ref.
     The data block is authored inline; the base chain composes only model
-    + launcher overlays. Topology is overridden to 4-GPU DDP because the
-    BatchedConcatDataModule sharded-sampler path is the whole point.
+    + launcher overlays. Topology is single H200 single-GPU — the leaf keeps
+    the paper baseline pattern so iPSC-only and joint runs are apples-to-apples.
     """
     leaf = BENCHMARKS / "er" / "celldiff" / "joint_ipsc_confocal_a549_mantis" / "train.yml"
     assert leaf.is_file(), f"joint leaf missing: {leaf}"
@@ -440,11 +412,11 @@ def test_joint_train_leaf_composes() -> None:
     leaked = [k for k in cfg if k.startswith("_")]
     assert not leaked, f"private anchor keys leaked into composed config: {leaked}"
 
-    # Topology: DDP 4-GPU overrides the single_gpu.yml pulled in by model_overlays.
+    # Topology: single GPU on H200 (hardware_h200_single.yml), no DDP override.
     t = cfg["trainer"]
     assert t["accelerator"] == "gpu"
-    assert t["strategy"] == "ddp"
-    assert t["devices"] == 4
+    assert t.get("strategy", "auto") != "ddp"
+    assert t["devices"] == 1
     assert t["num_nodes"] == 1
     assert t["precision"] == "bf16-mixed"
 
@@ -459,11 +431,14 @@ def test_joint_train_leaf_composes() -> None:
     for child in children:
         assert child["class_path"] == "viscy_data.hcs.HCSDataModule"
         ia = child["init_args"]
-        # Anchor-shared hparams reach each child.
-        assert ia["source_channel"] == ["Phase3D"]
-        assert ia["target_channel"] == ["Structure"]
+        # Anchor-shared hparams reach each child (bare-string channels).
+        assert ia["source_channel"] == "Phase3D"
+        assert ia["target_channel"] == "Structure"
         assert ia["z_window_size"] == 13
-        assert ia["batch_size"] == 4
+        # batch_size=2 (not the celldiff_fit.yml default of 4): BatchedConcatDataModule
+        # does NOT divide by num_samples (see CLAUDE.md), so the product is the
+        # effective per-step sample count.
+        assert ia["batch_size"] == 2
         assert ia["yx_patch_size"] == [512, 512]
         assert ia["gpu_augmentations"], "gpu_augmentations missing"
         assert ia["normalizations"], "normalizations missing"
@@ -471,9 +446,9 @@ def test_joint_train_leaf_composes() -> None:
 
     # Child ordering + paths.
     assert children[0]["init_args"]["data_path"].endswith("ipsc/dataset_v4/train/SEC61B.zarr")
-    assert children[1]["init_args"]["data_path"].endswith("2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr")
+    assert children[1]["init_args"]["data_path"].endswith("a549/mantis_v1/train/SEC61B_all.zarr")
 
-    # Launcher: 4 GPUs matches topology, SLURM invariant holds.
+    # Launcher: single GPU matches topology, SLURM invariant holds.
     assert cfg["launcher"]["mode"] == "fit"
     sbatch = cfg["launcher"]["sbatch"]
     nodes = sbatch.get("nodes", 1)
@@ -527,10 +502,10 @@ def test_joint_train_smoke_leaf_composes() -> None:
         assert ia["batch_size"] == 1
         assert ia["gpu_augmentations"], "gpu_augmentations missing"
 
-    # iPSC child: test48 zarr (smoke-sized). a549 child: 2024_11_07 SEC61B
-    # (already 4 FOVs, no smoke variant needed).
+    # iPSC child: test48 zarr (smoke-sized). a549 child: pooled SEC61B
+    # all-conditions train store (mantis_v1/train/SEC61B_all.zarr).
     assert children[0]["init_args"]["data_path"].endswith("SEC61B_test48.zarr")
-    assert children[1]["init_args"]["data_path"].endswith("2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr")
+    assert children[1]["init_args"]["data_path"].endswith("a549/mantis_v1/train/SEC61B_all.zarr")
 
     # Launcher: single GPU on H200, smoke-sized wall, SLURM invariant holds.
     assert cfg["launcher"]["mode"] == "fit"
