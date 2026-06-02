@@ -210,8 +210,12 @@ def segment_nucleus(
     """
     native_shape = img.shape
     down = _preprocess_gpu(img, spacing, target_voxel_um, use_clahe=use_clahe)
-    # channel-first 3 identical channels: (3, Zd, Yd, Xd) for 3D, (3, Yd, Xd) for 2D
-    down_3ch = np.repeat(asnumpy(down)[np.newaxis], 3, axis=0)
+    # channel-first 3 identical channels, built on-device: (3, Zd, Yd, Xd) for 3D,
+    # (3, Yd, Xd) for 2D. segment_cpsam uploads its input to the GPU exactly once,
+    # so handing it a device array makes that upload a no-op and avoids a
+    # GPU->host->GPU round-trip of the downscaled volume.
+    xp = get_array_module(down)
+    down_3ch = xp.repeat(down[xp.newaxis], 3, axis=0)
 
     masks, _, _ = segment_cpsam(
         model,
