@@ -175,6 +175,28 @@ def test_grouped_rejects_condition0_model_field_override(tmp_path: Path):
         pipeline.evaluate_predictions_grouped(grouped_cfg)
 
 
+def test_grouped_rejects_instance_ap_field_override(tmp_path: Path):
+    """The instance-AP toggles are grouped invariants — a per-condition override raises.
+
+    ``compute_instance_ap`` (and the ``segmentation.*`` / ``instance_metrics.*``
+    instance fields) gate the seg backend and the shared instance-label cache
+    identity, so a condition that flips one would diverge from the bundle.
+    """
+    cond_a_root = tmp_path / "fixture_a"
+    cond_b_root = tmp_path / "fixture_b"
+    cond_a_root.mkdir()
+    cond_b_root.mkdir()
+    save_root = tmp_path / "saves"
+    save_root.mkdir()
+
+    grouped_cfg = _build_grouped_config(cond_a_root, cond_b_root, save_root)
+    grouped_cfg["conditions"][1]["compute_instance_ap"] = True
+
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="model-loading field"):
+        pipeline.evaluate_predictions_grouped(grouped_cfg)
+
+
 def test_grouped_warns_loudly_on_process_plus_cache_miss(tmp_path: Path, capsys):
     """``executor=process`` + multiple conditions + cache-miss prints a loud WARNING.
 

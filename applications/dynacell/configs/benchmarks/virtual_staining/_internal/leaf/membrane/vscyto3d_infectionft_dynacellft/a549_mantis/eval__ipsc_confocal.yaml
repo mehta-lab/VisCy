@@ -1,0 +1,14 @@
+# @package _global_
+# Track C (vscyto3d_infectionft_dynacellft trained on a549_mantis) eval for membrane channel
+# of the dual predict zarr on iPSC.
+defaults:
+  - override /target: membrane
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_membrane

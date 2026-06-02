@@ -31,6 +31,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from ._eval_fixtures import (
     N_POSITIONS,
@@ -38,6 +39,8 @@ from ._eval_fixtures import (
     build_eval_config,
     build_fixture,
     live_pipeline_module,
+    make_hcs_plate,
+    make_mask_cache,
     read_position_arrays,
 )
 
@@ -98,6 +101,106 @@ def test_serial_vs_process_evaluate_predictions_parity(tmp_path: Path):
         arr_b = arrs_process[pos_name]
         assert arr_a.shape == arr_b.shape, f"{pos_name} shape mismatch"
         np.testing.assert_array_equal(arr_a, arr_b)
+
+
+def _build_partial_pred_fixture(root: Path, n_pred: int):
+    """Build a fixture where pred has only the first ``n_pred`` positions of GT.
+
+    Returns ``(pred_path, gt_path, gt_cache_dir, pred_cache_dir)``. GT has
+    the full ``N_POSITIONS`` positions + cache; pred has ``n_pred``
+    positions + a matching pred cache. Mirrors the ``--fast_dev_run``
+    predict scenario where the predict writer only flushed the first N
+    FOVs before exiting.
+    """
+    pred_path = root / "pred.zarr"
+    gt_path = root / "gt.zarr"
+    gt_cache_dir = root / "gt_cache"
+    pred_cache_dir = root / "pred_cache"
+    make_hcs_plate(pred_path, "prediction", seed=42, n_positions=n_pred)
+    make_hcs_plate(gt_path, "target", seed=7, n_positions=N_POSITIONS)
+    make_mask_cache(gt_cache_dir, gt_path, "target", side="gt", n_positions=N_POSITIONS)
+    make_mask_cache(pred_cache_dir, pred_path, "prediction", side="pred", n_positions=n_pred)
+    return pred_path, gt_path, gt_cache_dir, pred_cache_dir
+
+
+def test_limit_positions_with_partial_pred_zarr(tmp_path: Path):
+    """``limit_positions=N`` should accept a pred zarr with only N positions.
+
+    The eval loop computes metrics over the pred positions paired against
+    the matching-by-name positions in GT (which has more). Without the
+    subset-alignment fix in evaluate_predictions, the unconditional
+    ``pred=N != gt=M`` count check would raise before limit_positions had
+    a chance to truncate.
+    """
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir()
+    pred_path, gt_path, gt_cache_dir, pred_cache_dir = _build_partial_pred_fixture(fixture_root, n_pred=1)
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+
+    cfg = build_eval_config(
+        pred_path,
+        gt_path,
+        gt_cache_dir,
+        pred_cache_dir,
+        save_dir,
+        executor="serial",
+        fov_workers=1,
+    )
+    cfg.limit_positions = 1
+    pipeline = live_pipeline_module()
+    pixel_rows, mask_rows, _ = pipeline.evaluate_predictions(cfg)
+    assert len(pixel_rows) == 1 * T
+    assert len(mask_rows) == 1 * T
+
+
+def test_limit_positions_rejects_pred_with_unknown_position(tmp_path: Path):
+    """``limit_positions`` only relaxes count strict equality when pred ⊂ gt.
+
+    If pred carries a position name absent from gt, the relaxed pairing
+    would silently drop it; raise loudly instead so a misaligned smoke
+    cannot fail open.
+    """
+    import numpy as np
+    from iohub.ngff import open_ome_zarr
+
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir()
+
+    # Build a pred plate with one in-GT position (A/1/0) plus an orphan
+    # position (A/1/999) that doesn't exist on the GT plate, then a GT
+    # plate with the standard N_POSITIONS positions. Mask caches are built
+    # against the orphan-containing pred and the standard GT so cache
+    # manifest plate_paths match.
+    pred_path = fixture_root / "pred.zarr"
+    gt_path = fixture_root / "gt.zarr"
+    gt_cache_dir = fixture_root / "gt_cache"
+    pred_cache_dir = fixture_root / "pred_cache"
+
+    make_hcs_plate(pred_path, "prediction", seed=42, n_positions=1)
+    with open_ome_zarr(pred_path, mode="r+") as plate:
+        pos = plate.create_position("A", "1", "999")
+        pos.create_image("0", np.zeros((T, 1, 4, 32, 32), dtype=np.float32))
+    make_hcs_plate(gt_path, "target", seed=7, n_positions=N_POSITIONS)
+    make_mask_cache(gt_cache_dir, gt_path, "target", side="gt", n_positions=N_POSITIONS)
+    # Pred cache covers only the in-GT position (orphan never gets to per-FOV).
+    make_mask_cache(pred_cache_dir, pred_path, "prediction", side="pred", n_positions=1)
+
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+    cfg = build_eval_config(
+        pred_path,
+        gt_path,
+        gt_cache_dir,
+        pred_cache_dir,
+        save_dir,
+        executor="serial",
+        fov_workers=1,
+    )
+    cfg.limit_positions = 2
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="pred contains positions not present in gt"):
+        pipeline.evaluate_predictions(cfg)
 
 
 def test_serial_path_runs_without_segmenter_loaded(tmp_path: Path):

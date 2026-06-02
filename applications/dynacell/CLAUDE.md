@@ -13,6 +13,21 @@ Code names (used in YAML config keys, prediction zarr filenames, eval pipeline k
 | `unetvit3d` | UNetViT3D |
 | `fnet3d_paper` | FNet3D |
 | `celldiff` | CELL-Diff (variants: `iterative`, `sliding_window`, `denoise`/Mean Predictor) |
+| `fcmae_vscyto3d_pretrained_randinit` | **VSCyto3D-RandInit** (untrained ablation; one frozen ckpt per organelle persisted by `save_random_init_vscyto3d_ckpts.py`) |
+| `fcmae_vscyto3d_pretrained_cytoland` | **VSCyto3D-Cytoland** (cytoland public ckpt evaluated without dynacell FT) |
+| `fcmae_vscyto3d_pretrained_infectionft` | **VSCyto3D-InfectionFT** (cytoland → A549-infection-FT ckpt evaluated without further FT) |
+| `vscyto3d_cytolandft` | **VSCyto3D-CytolandFT** (cytoland ckpt + dynacell FT; dual nucleus+membrane, 2-channel) |
+| `vscyto3d_infectionft_dynacellft` | **VSCyto3D-InfectionFT-DynacellFT** (cytoland → A549-infection-FT → dynacell FT; dual nucleus+membrane) |
+
+**Training-set infixes for the no-FT ablations** (Track A/B in `vscyto3d-ablations`):
+
+| Infix in zarr filename | Meaning |
+| --- | --- |
+| `_randinit` | random init, no training (Track A) |
+| `_cytoland` | cytoland public ckpt, no FT (Track B1) |
+| `_infectionft` | VSCyto3D-A549-infection-finetune ckpt, no FT (Track B2) |
+| `_cytolandft` | cytoland init + dynacell FT (Track C1) — combines with `_a549trained` for A549-trained variants |
+| `_infectionft_dynacellft` | infection-FT init + dynacell FT (Track C2) — combines with `_a549trained` similarly |
 
 Eval-pipeline directory naming (`/hpc/projects/virtual_staining/training/dynacell/{ipsc,a549}/evaluations/eval_<model>_<organelle>[_<plate>]`) uses the **paper key** (`unext2`, `vscyto3d`, `fnet3d`, `unetvit3d`, `celldiff_*`), not the config key. So `eval_unext2_membrane` maps to the `fcmae_vscyto3d_scratch` predictions, `eval_vscyto3d_membrane` maps to `fcmae_vscyto3d_pretrained`.
 
@@ -32,6 +47,23 @@ Set by `trainer.callbacks[…HCSPredictionWriter].init_args.output_store` in eac
 Where `<org>` is `nucl` / `memb` / `sec61b` / `tomm20`, `<model>` is the **code name** from the table above (e.g. `fcmae_vscyto3d_scratch`, `fnet3d_paper`), and `<cond>` is `mock` / `denv` / `zikv`. The (no-infix) iPSC-trained naming is historical baggage from before joint/A549 training existed; don't add a `_ipsctrained` infix retroactively. Output dirs: iPSC test predictions land under `ipsc/predictions/`, A549 plate predictions under `a549/predictions/`, regardless of training set.
 
 Caveat: Dihan's earlier ER + Mito iPSC-trained zarrs use a legacy `<gene>_<model>__<gene>_<cond>.zarr` shape (e.g. `sec61b_fcmae_vscyto3d_scratch__sec61b_mock.zarr`, double-underscore + redundant gene prefix). New leaves should follow the table above; do not propagate the legacy form.
+
+### CellDiff-R2 joint predictions: separate dir + no `_jointtrained` infix
+
+CellDiff-R2 joint predicts (model `celldiff_r2` trained on iPSC + A549 mantis) deviate from the convention above in **two** ways. Predict configs live at `applications/dynacell/configs/benchmarks/virtual_staining/<organelle>/celldiff/joint_ipsc_confocal_a549_mantis/predict__*.yml` — the directory name says `celldiff/` but the YAMLs hard-code `ckpt_path: .../celldiff_r2/checkpoints/last.ckpt`, so the model variant is selected by the checkpoint, not by the directory.
+
+The submitter that wires these up is `/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/VisCy/plot_related/run_celldiff_r2_pred_joint.slurm` (16-task array; submitted 2026-05-18, completed 2026-05-20 as job `33021852`).
+
+| Trained on | Test set | Output path |
+| --- | --- | --- |
+| Joint (iPSC + A549) | iPSC | `ipsc/joint_predictions/<org>_celldiff_r2.zarr` |
+| Joint (iPSC + A549) | A549 plate | `a549/joint_predictions/<org>_celldiff_r2_<cond>.zarr` |
+
+Note the differences vs. the joint rows in the main table:
+- Output dir is `joint_predictions/`, **not** `predictions/`. Sweeps that only walk `predictions/` will miss every joint zarr.
+- Filename has **no** `_jointtrained` infix. The model name `celldiff_r2` alone implies joint here. The same naming inconsistency does not apply to FCMAE / fnet3d joint zarrs, which correctly land at `predictions/<org>_<model>_jointtrained[_<cond>].zarr`.
+
+Counts: 4 iPSC zarrs (one per organelle, 100 positions each) + 12 A549 zarrs (4 organelles × 3 plates, 14 positions each). Coexisting joint predicts for FCMAE/fnet3d under the same `joint_predictions/` dir follow the `_jointtrained_<cond>` convention — only CellDiff-R2's are bare. When inspecting "joint training results for CellDiff-R2," check `joint_predictions/` first.
 
 ## Eval runtime / parallelism
 
@@ -126,3 +158,29 @@ Process-mode caveat: under `runtime.executor=process`, the parent's shared `Eval
 For an A40 / single-GPU interactive node where you'd run serial anyway, this is the default win.
 
 Tests: `applications/dynacell/tests/test_evaluation_grouped.py` validates byte-equal parity against sequential per-condition runs on the same cache-only fixture used by `test_evaluation_pipeline_parallel_cpu.py`, plus rejection cases for empty `conditions` and forbidden model-loading-field overrides.
+
+## Predict submission modes
+
+`tools/submit_benchmark_batch.py` (and the `tools/predict_batch.sh` wrapper) covers three submission shapes. They are mutually exclusive — pick by parallelism shape, not by familiarity:
+
+| Mode | Flag | Squeue rows | Per-GPU concurrency | Cross-sbatch concurrency |
+|---|---|---|---|---|
+| Serial (default) | (none) | 1 | 1 | — |
+| Array | `--array [--max-array-concurrency K]` | 1 array (N tasks) | 1 per task | K |
+| Chunked | `--parallel P` (P > 1) | ceil(N/P) | P (bare-background `&`) | full queue |
+
+Selection guide:
+
+- **One small set, contiguous time, want minimal queue footprint** → serial. One srun per leaf in series; least queue overhead.
+- **Many leaves on different GPUs, want SLURM to throttle concurrent allocations** → `--array --max-array-concurrency K`. Each task gets its own allocation.
+- **Few leaves but predict is GPU-light** → `--parallel P`. One GPU runs P leaves in parallel (memory-confirmed 2-up on A40, 2–4 on H200/H100). Faster wall time per chunk than serial without using more total GPU-hours.
+- **Leaves span mixed hardware profiles (e.g., some H200, some A40)** → `--array --allow-mixed-directives`. Buckets leaves and submits one array per directive bucket. Only mode that handles this. **NOT compatible with `--parallel`.**
+
+Hardening to know about when you read the rendered sbatch:
+
+- `--parallel > 1` scales `cpus_per_task` by the chunk size and pins `OMP_NUM_THREADS`/`MKL_NUM_THREADS`/`OPENBLAS_NUM_THREADS` per backgrounded process so concurrent children don't oversubscribe by all reading `SLURM_CPUS_PER_TASK`. Per-leaf logs land at `{run_root}/slurm/${SLURM_JOB_ID}_<exp_id>.log`; the sbatch's own `%j.out` only sees the driver banner and any chunk-level failure summary.
+- PIDs are captured and `wait $pid` is called per child. Bare `wait` (no args) returns only the LAST child's status and would silently mask earlier crashes as `COMPLETED` — the rendered bash propagates non-zero exit codes explicitly.
+- Submission loop catches `sbatch` failures per script and reports queued-vs-skipped (matters for `--parallel > 1` and `--array --allow-mixed-directives` since both produce multiple sbatches per invocation). Single-failure no longer hides an opaque traceback.
+- Soft warning at `cpus_per_task > 128`. Most cluster nodes top out around there; scaling `--parallel` past that often makes chunks pend forever.
+
+For local foreground execution (no sbatch), `tools/predict_local.sh --parallel N` has its own backgrounding implementation on the current host's GPU. Confirmed safe 2-up on A40 (`gpu-e-2` interactive). Don't confuse it with `--parallel` on the sbatch helper — different invocation paths.

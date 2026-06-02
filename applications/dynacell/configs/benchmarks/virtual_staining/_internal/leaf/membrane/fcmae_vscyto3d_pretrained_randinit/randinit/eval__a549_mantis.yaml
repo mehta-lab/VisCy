@@ -1,0 +1,41 @@
+# @package _global_
+# Track A (random init, no training) grouped eval for membrane on A549.
+# One process covers mock + denv + zikv via the conditions list, amortizing the
+# DINOv3 + DynaCLR + CELL-DINO load. Reads the matching frozen-randinit zarrs.
+defaults:
+  - override /target: membrane
+  - override /predict_set: a549_mantis_caax_mock
+
+# Base anchors to the {gene}-{first_cond} manifest; each condition overlay below
+# swaps dataset, pred_path, and save_dir for mock / denv / zikv in one process.
+benchmark:
+  dataset_ref:
+    target: caax
+
+compute_feature_metrics: true
+
+conditions:
+  - name: a549_mock
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-caax-mock
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_randinit_mock.zarr
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_randinit/eval_vscyto3d_randinit_membrane_mock
+  - name: a549_denv
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-caax-denv
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_randinit_denv.zarr
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_randinit/eval_vscyto3d_randinit_membrane_denv
+  - name: a549_zikv
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-caax-zikv
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_randinit_zikv.zarr
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_randinit/eval_vscyto3d_randinit_membrane_zikv

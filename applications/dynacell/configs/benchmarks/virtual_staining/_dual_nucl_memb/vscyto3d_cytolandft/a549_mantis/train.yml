@@ -1,0 +1,58 @@
+# VSCyto3D dual nucleus+membrane FT: cytoland-init -> dynacell FT on A549.
+# Full-weight load (no encoder_only) — source ckpt is 2-channel and matches
+# the fcmae_vscyto3d_2chan_fit arch exactly. Sampling bias is Nuclei-foreground
+# weighted (w_key=Nuclei in targets/dual_nucl_memb.yml + bumped num_samples
+# here); revisit if validation loss for Membrane channel diverges from the
+# fcmae_vscyto3d_pretrained membrane baseline.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis_dual.yml
+  - ../../../_internal/shared/model/targets/dual_nucl_memb.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_2chan_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: dual_nucl_memb
+  train_set: a549_mantis
+  model_name: vscyto3d_cytolandft
+  experiment_id: dual_nucl_memb__a549_mantis__vscyto3d_cytolandft
+
+# Bump num_samples from the dual_nucl_memb default (2) to 4 to match the
+# single-organelle FCMAE recipe at the same crop size.
+data:
+  init_args:
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei, Membrane]
+          w_key: Nuclei
+          spatial_size: [15, 600, 600]
+          num_samples: 4
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSCyto3D/epoch=83-step=14532-loss=0.492.ckpt
+
+trainer:
+  logger:
+    init_args:
+      name: VSCyto3D_Cytoland_A549_Dual
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/dual_nucl_memb/vscyto3d_cytolandft
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/dual_nucl_memb/vscyto3d_cytolandft/checkpoints
+
+launcher:
+  job_name: VSCyto3D_Cytoland_A549_Dual
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/dual_nucl_memb/vscyto3d_cytolandft

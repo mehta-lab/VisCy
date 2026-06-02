@@ -18,6 +18,44 @@ defaults:
 benchmark: null
 
 target_name: ???
+
+# Nucleus/membrane organelle-mask segmenter. `supermodel` = segmenter-model-zoo
+# SuperModel (default, unchanged behavior). `cellpose` = GPU Cellpose-SAM + fnet
+# pre/post (nucleus only). `cellpose_watershed` = whole-cell (membrane only):
+# GPU Cellpose-SAM nuclei seeds + membrane EDT watershed. The cellpose /
+# cellpose_watershed backends with compute_instance_ap=true add instance mAP
+# (cubic average_precision) to mask_metrics; labels cache under
+# instance_masks/<target>__<backend>.zarr.
+segmentation:
+  backend: supermodel  # supermodel | cellpose (nucleus) | cellpose_watershed (whole-cell)
+  dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
+  slice_selection: frac    # frac | sharpest — picks the 2d plane (dimension=2d)
+  slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
+  nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
+  # Nucleus Cellpose-SAM params (the cellpose path + the cellpose_watershed seeds).
+  cellpose:
+    target_voxel_um: 0.58  # isotropic grid the nuclei are segmented on (always)
+    cellprob_threshold: 0.0
+    flow_threshold: 0.4
+    min_obj_size: 30       # drop nuclei < N px/vox at target_voxel_um; 2D default — raise (~500) for dimension=3d
+  # Whole-cell watershed stage (cellpose_watershed only). Physical-um params,
+  # converted to working-grid pixels per cell_voxel_um (so they are grid-independent).
+  watershed:
+    cell_voxel_um: 0.3     # isotropic cell-stage grid (null = native resolution)
+    close_um: 2.5          # grayscale-closing disk radius
+    wall_sigma_um: 0.35    # gaussian sigma before wall thresholding
+    wall_min_um: 1.0       # drop membrane-wall specks (um^ndim)
+    hole_um: 3.0           # fill cell-mask holes (um^ndim)
+    min_cell_um: 15.0      # drop cells below this (2D um^2 default; set ~50 um^3 for dimension=3d)
+    memb_clahe: true       # CLAHE the membrane channel
+    subtract_nuclei: true  # carve nuclei out -> cytoplasmic-shape-only metrics
+
+# Whole-cell / nucleus instance average-precision. Requires an instance backend:
+# (cellpose_watershed, membrane) or (cellpose, nucleus).
+compute_instance_ap: false
+instance_metrics:
+  iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+
 io:
   pred_path: ???
   gt_path: ???
@@ -110,6 +148,8 @@ force_recompute:
   pred_dinov3: false
   pred_dynaclr: false
   pred_celldino: false
+  gt_instances: false
+  pred_instances: false
   final_metrics: false
 
 save:
