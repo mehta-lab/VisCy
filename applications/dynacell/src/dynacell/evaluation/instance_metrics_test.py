@@ -6,6 +6,7 @@ from dynacell.evaluation.instance_metrics import (
     DEFAULT_IOU_THRESHOLDS,
     _relabel_sequential,
     instance_average_precision,
+    mean_instance_dice,
 )
 
 
@@ -28,6 +29,7 @@ def test_identical_labels_map_one():
     assert result["instance_TP@0.50"] == 2.0
     assert result["instance_FP@0.50"] == 0.0
     assert result["instance_FN@0.50"] == 0.0
+    assert result["instance_dice"] == 1.0
 
 
 def test_disjoint_labels_map_zero():
@@ -37,6 +39,7 @@ def test_disjoint_labels_map_zero():
     pred[2:6, 10:14] = 1  # overlaps neither GT square
     result = instance_average_precision(pred, gt)
     assert result["mAP"] == 0.0
+    assert result["instance_dice"] == 0.0
 
 
 def test_one_side_empty_is_zero():
@@ -47,10 +50,12 @@ def test_one_side_empty_is_zero():
     assert miss["mAP"] == 0.0
     assert miss["instance_FN@0.50"] == 2.0
     assert miss["instance_FP@0.50"] == 0.0
+    assert miss["instance_dice"] == 0.0
     extra = instance_average_precision(gt.copy(), empty)
     assert extra["mAP"] == 0.0
     assert extra["instance_FP@0.50"] == 2.0
     assert extra["instance_FN@0.50"] == 0.0
+    assert extra["instance_dice"] == 0.0
 
 
 def test_both_empty_is_nan():
@@ -58,9 +63,30 @@ def test_both_empty_is_nan():
     empty = np.zeros((16, 16), dtype=np.uint16)
     result = instance_average_precision(empty, empty)
     assert np.isnan(result["mAP"])
+    assert np.isnan(result["instance_dice"])
     assert result["n_gt"] == 0 and result["n_pred"] == 0
     for th in DEFAULT_IOU_THRESHOLDS:
         assert np.isnan(result[f"AP_{th:.2f}"])
+
+
+def test_instance_dice_partial_overlap():
+    """A single half-overlapping object pair scores instance Dice 0.5 (IoU 1/3)."""
+    gt = np.zeros((16, 16), dtype=np.uint16)
+    gt[2:6, 2:6] = 1  # 16 px
+    pred = np.zeros_like(gt)
+    pred[2:6, 4:8] = 1  # overlaps 8 px -> IoU 8/24, Dice 2*8/32 = 0.5
+    result = instance_average_precision(pred, gt)
+    assert abs(result["instance_dice"] - 0.5) < 1e-9
+
+
+def test_instance_dice_disjoint_pieces_one_object():
+    """A label split into two disjoint blobs (e.g. carved cytoplasm) stays one
+    object: instance Dice vs itself is 1.0, not penalized by the gap."""
+    lab = np.zeros((16, 16), dtype=np.uint16)
+    lab[2:5, 2:5] = 1
+    lab[2:5, 11:14] = 1  # same id, disjoint
+    assert mean_instance_dice(lab, lab, 1, 1) == 1.0
+    assert instance_average_precision(lab.copy(), lab)["instance_dice"] == 1.0
 
 
 def test_arg_swap_moves_fp_fn_not_map():

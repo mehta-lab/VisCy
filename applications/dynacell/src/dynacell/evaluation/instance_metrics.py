@@ -34,6 +34,42 @@ def _relabel_sequential(labels: np.ndarray) -> np.ndarray:
     return inv if uniq[0] == 0 else inv + 1
 
 
+def _iou_matrix(gt: np.ndarray, pred: np.ndarray, n_gt: int, n_pred: int) -> np.ndarray:
+    """Object-wise IoU matrix ``(n_gt, n_pred)`` from two sequential label images.
+
+    Value-based (a label's IoU pools all of its pixels, connected or not), so it
+    matches the "disjoint pieces that share an id stay one object" convention of
+    :func:`_relabel_sequential` and ``cubic.average_precision``.
+    """
+    overlap = np.zeros((n_gt + 1, n_pred + 1), dtype=np.int64)
+    np.add.at(overlap, (gt.ravel(), pred.ravel()), 1)
+    gt_area = overlap.sum(axis=1)
+    pred_area = overlap.sum(axis=0)
+    inter = overlap[1:, 1:].astype(np.float64)  # drop background row/col
+    union = gt_area[1:, None] + pred_area[None, 1:] - inter
+    return np.divide(inter, union, out=np.zeros_like(inter), where=union > 0)
+
+
+def mean_instance_dice(gt: np.ndarray, pred: np.ndarray, n_gt: int, n_pred: int) -> float:
+    """Symmetric best Dice (SBD) between two sequential instance-label images.
+
+    For every GT object take its best-overlapping pred (and vice versa), convert
+    that IoU ``u`` to Dice ``2u / (1 + u)``, and average over both directions.
+    Missed GT objects and spurious pred objects contribute Dice 0, so the score
+    penalizes under- and over-segmentation symmetrically. Both sides empty → NaN;
+    exactly one side empty → 0.0. Connectivity-agnostic (per-object, not per
+    connected component), so a cytoplasm shell split by the carved nucleus is
+    still scored as one object.
+    """
+    if n_gt == 0 and n_pred == 0:
+        return float("nan")
+    if n_gt == 0 or n_pred == 0:
+        return 0.0
+    iou = _iou_matrix(gt, pred, n_gt, n_pred)
+    best = np.concatenate([iou.max(axis=1), iou.max(axis=0)])  # GT->pred and pred->GT
+    return float(np.mean(2.0 * best / (1.0 + best)))
+
+
 def instance_average_precision(
     labels_pred: np.ndarray,
     labels_gt: np.ndarray,
@@ -51,9 +87,11 @@ def instance_average_precision(
     Returns
     -------
     dict
-        ``AP_<th>`` (one per threshold), ``mAP`` (their mean), ``n_gt``,
-        ``n_pred``, and ``instance_{TP,FP,FN}@0.50``. Both sides empty → all-NaN
-        AP/mAP; exactly one side empty → AP/mAP 0.0.
+        ``AP_<th>`` (one per threshold), ``mAP`` (their mean), ``instance_dice``
+        (symmetric best Dice; nucleus instances for the cellpose backend,
+        carved-cytoplasm instances for cellpose_watershed), ``n_gt``, ``n_pred``,
+        and ``instance_{TP,FP,FN}@0.50``. Both sides empty → all-NaN AP/mAP/Dice;
+        exactly one side empty → AP/mAP 0.0, Dice 0.0.
     """
     thresholds = [float(t) for t in iou_thresholds]
     pred = _relabel_sequential(labels_pred)
@@ -81,6 +119,7 @@ def instance_average_precision(
     for th, a in zip(thresholds, ap_vals):
         result[f"AP_{th:.2f}"] = a
     result["mAP"] = float(np.mean(ap_vals))
+    result["instance_dice"] = mean_instance_dice(gt, pred, n_gt, n_pred)
     result[f"instance_TP@{_PRIMARY_THRESHOLD:.2f}"] = tp
     result[f"instance_FP@{_PRIMARY_THRESHOLD:.2f}"] = fp
     result[f"instance_FN@{_PRIMARY_THRESHOLD:.2f}"] = fn
