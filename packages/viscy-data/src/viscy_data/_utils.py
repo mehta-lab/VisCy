@@ -2,7 +2,7 @@
 
 This module centralizes helper functions that are used by multiple data modules:
 - From ``hcs.py``: ``_ensure_channel_list``, ``_search_int_in_str``,
-  ``_collate_samples``, ``_read_norm_meta``
+  ``_collate_samples``, ``read_norm_meta``
 - From ``triplet.py``: ``_scatter_channels``, ``_gather_channels``,
   ``_transform_channel_wise``
 """
@@ -24,7 +24,7 @@ __all__ = [
     "_collate_samples",
     "_ensure_channel_list",
     "_gather_channels",
-    "_read_norm_meta",
+    "read_norm_meta",
     "_scatter_channels",
     "_search_int_in_str",
     "_transform_channel_wise",
@@ -136,7 +136,7 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
     return collated
 
 
-def _read_norm_meta(fov: Position) -> NormMeta | None:
+def read_norm_meta(fov: Position) -> NormMeta | None:
     """Read normalization metadata from the FOV.
 
     Convert to float32 tensors to avoid automatic casting to float64.

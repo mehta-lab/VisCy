@@ -19,7 +19,7 @@ from torch.multiprocessing import Manager
 from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import DictTransform, NormMeta
-from viscy_data._utils import _ensure_channel_list, _read_norm_meta
+from viscy_data._utils import _ensure_channel_list, read_norm_meta
 from viscy_data.distributed import ShardedDistributedSampler
 from viscy_data.select import SelectWell
 
@@ -163,7 +163,7 @@ class CachedOmeZarrDataset(Dataset):
         self._metadata_map: dict[int, _CacheMetadata] = {}
         for position in positions:
             img = position[array_key]
-            norm_meta = _read_norm_meta(position)
+            norm_meta = read_norm_meta(position)
             for time_idx in range(img.frames):
                 cache_map[key] = None
                 self._metadata_map[key] = (position, time_idx, norm_meta)
