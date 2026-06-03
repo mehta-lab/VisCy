@@ -233,7 +233,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click" },
-    { name = "iohub" },
+    { name = "iohub", specifier = ">=0.3.6" },
     { name = "pandas" },
     { name = "pyairtable" },
     { name = "pydantic" },
@@ -1379,8 +1379,8 @@ requires-dist = [
     { name = "hydra-core", specifier = ">=1.2" },
     { name = "hydra-core", marker = "extra == 'eval'", specifier = ">=1.2" },
     { name = "hydra-core", marker = "extra == 'report'", specifier = ">=1.2" },
-    { name = "iohub", marker = "extra == 'eval'" },
-    { name = "iohub", marker = "extra == 'preprocess'" },
+    { name = "iohub", marker = "extra == 'eval'", specifier = ">=0.3.6" },
+    { name = "iohub", marker = "extra == 'preprocess'", specifier = ">=0.3.6" },
     { name = "itk", marker = "extra == 'eval'" },
     { name = "lightning", specifier = ">=2.3" },
     { name = "matplotlib", marker = "extra == 'eval'" },
@@ -1484,7 +1484,7 @@ requires-dist = [
     { name = "dtaidistance", marker = "extra == 'eval'" },
     { name = "gurobipy", marker = "extra == 'tracking'", specifier = ">=12.0.1,<13" },
     { name = "imageio-ffmpeg", marker = "extra == 'viz'" },
-    { name = "iohub", specifier = ">=0.3.5" },
+    { name = "iohub", specifier = ">=0.3.6" },
     { name = "matplotlib", marker = "extra == 'viz'" },
     { name = "natsort", marker = "extra == 'eval'" },
     { name = "onnxruntime-gpu", marker = "extra == 'tracking'" },
@@ -2305,7 +2305,7 @@ wheels = [
 
 [[package]]
 name = "iohub"
-version = "0.3.5"
+version = "0.3.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blosc2" },
@@ -2323,9 +2323,9 @@ dependencies = [
     { name = "zarr" },
     { name = "zarrs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/fb/a3696f9b4574255dd8a8060f64873cd9b83eceed29be2a27df8eac745a4d/iohub-0.3.5.tar.gz", hash = "sha256:83417d7cb71736b130c8560807ebf585dd02ec28655b2f62f7e33278c3901604", size = 306693, upload-time = "2026-05-21T18:14:38.684Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/b0/ee0df72c79fb7416a6f32cb434d20240c9ccddea64d37076d38cb9b1e445/iohub-0.3.6.tar.gz", hash = "sha256:7fb2bad10cc4875488ad3d57d446cd9b2553e2f2aa265bf9483281c672a2cdd0", size = 310173, upload-time = "2026-06-03T00:37:58.573Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/a6/c558aaae2010f4f1059da93c150587c40d28abfc7c35aad6183614b83528/iohub-0.3.5-py3-none-any.whl", hash = "sha256:f1cb96fce7c6fca51f3dffb9f50b0367095899384547d11eb27f6a2d819424ca", size = 94480, upload-time = "2026-05-21T18:14:37.169Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/3c/990289ac3e1ff82565c6d2f3600e7251bd51f4ed61cd4daba4e89a73ba47/iohub-0.3.6-py3-none-any.whl", hash = "sha256:8ccb5f94555dda66f982158a2015f5487930b8622993fff93ddc9f28738e2140", size = 95419, upload-time = "2026-06-03T00:37:57.315Z" },
 ]
 
 [[package]]
@@ -6739,7 +6739,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "imageio" },
-    { name = "iohub", specifier = ">=0.3.5" },
+    { name = "iohub", specifier = ">=0.3.6" },
     { name = "lightning", specifier = ">=2.3" },
     { name = "monai", specifier = ">=1.5.2" },
     { name = "numpy", specifier = ">=2.4.1" },
@@ -6959,7 +6959,7 @@ requires-dist = [
     { name = "anndata", marker = "extra == 'anndata'", specifier = "<0.12.9" },
     { name = "copairs", marker = "extra == 'all'" },
     { name = "copairs", marker = "extra == 'eval'" },
-    { name = "iohub", specifier = ">=0.3.5" },
+    { name = "iohub", specifier = ">=0.3.6" },
     { name = "jsonargparse", extras = ["signatures"], specifier = ">=4.26" },
     { name = "lightning", specifier = ">=2.3" },
     { name = "matplotlib", specifier = ">=3.10" },

@@ -31,7 +31,7 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "click",
-  "iohub>=0.3.5",
+  "iohub>=0.3.6",
   "pytorch-metric-learning",
   "pyyaml",
   # seaborn and tabulate are required by core eval pipeline code that runs
