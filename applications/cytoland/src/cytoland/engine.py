@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from monai.transforms import DivisiblePad, Rotate90
+from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 from torchmetrics.functional import (
     accuracy,
@@ -226,7 +226,6 @@ class VSUNet(LightningModule):
         self.test_time_augmentations = test_time_augmentations
         self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
-        self._original_shape_yx = None
         if ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
 
@@ -476,17 +475,16 @@ class VSUNet(LightningModule):
         Tensor
             Aggregated prediction.
         """
-        # Save the yx coords to crop post rotations
-        self._original_shape_yx = source.shape[-2:]
+        # Rotate, predict, un-rotate. ``_pad_forward_crop`` crops the prediction
+        # back to the augmented (rotated) shape, and the inverse transform then
+        # restores the original orientation -- so 90/270-degree rotations work
+        # for non-square FOVs without any square padding.
+        forward_transforms, inverse_transforms = rotation_tta_transforms()
         predictions = []
-        for i in range(4):
-            augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
-            de_augmented_prediction = self._pad_forward_crop(augmented)
-            de_augmented_prediction = self._rotate_volume(de_augmented_prediction, k=4 - i, spatial_axes=(1, 2))
-            de_augmented_prediction = self._crop_to_original(de_augmented_prediction)
-
-            # Undo rotation and padding
-            predictions.append(de_augmented_prediction)
+        for fwd_t, inv_t in zip(forward_transforms, inverse_transforms):
+            augmented = fwd_t(source)
+            prediction = self._pad_forward_crop(augmented)
+            predictions.append(inv_t(prediction))
 
         if self.tta_type == "mean":
             prediction = torch.stack(predictions).mean(dim=0)
@@ -558,33 +556,6 @@ class VSUNet(LightningModule):
         if not self.trainer.is_global_zero or self.logger is None:
             return
         log_image_grid(self.logger, key, imgs, self.current_epoch)
-
-    def _rotate_volume(self, tensor: Tensor, k: int, spatial_axes: tuple) -> Tensor:
-        """Rotate a volume tensor by k*90 degrees."""
-        # Padding to ensure square shape
-        max_dim = max(tensor.shape[-2], tensor.shape[-1])
-        pad_transform = DivisiblePad((0, 0, max_dim, max_dim))
-        padded_tensor = pad_transform(tensor)
-
-        # Rotation
-        rotated_tensor = []
-        rotate = Rotate90(k=k, spatial_axes=spatial_axes)
-        for b in range(padded_tensor.shape[0]):  # iterate over batch
-            rotated_tensor.append(rotate(padded_tensor[b]))
-
-        # Stack the list of tensors back into a single tensor
-        rotated_tensor = torch.stack(rotated_tensor)
-        del padded_tensor
-        # # Cropping to original shape
-        return rotated_tensor
-
-    def _crop_to_original(self, tensor: Tensor) -> Tensor:
-        """Crop tensor back to original YX shape after rotation padding."""
-        original_y, original_x = self._original_shape_yx
-        pad_y = (tensor.shape[-2] - original_y) // 2
-        pad_x = (tensor.shape[-1] - original_x) // 2
-        cropped_tensor = tensor[..., pad_y : pad_y + original_y, pad_x : pad_x + original_x]
-        return cropped_tensor
 
 
 class AugmentedPredictionVSUNet(LightningModule):
