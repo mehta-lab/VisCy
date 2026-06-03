@@ -1,0 +1,32 @@
+# @package _global_
+# Whole-cell instance-AP eval — iPSC test, UNeXt2 (fcmae_vscyto3d_scratch), iPSC-trained
+# (in-distribution). GT-nuclei-seeded 2D Cellpose-SAM + membrane EDT watershed ->
+# cytoplasm-only whole-cell instances on prediction vs GT membrane (shared GT-nuclei
+# seeds isolate membrane-prediction quality). Reports AP@IoU 0.50..0.95, mAP, and
+# instance_dice (symmetric best-Dice on the carved cytoplasm) into mask_metrics.csv.
+target_name: membrane
+
+segmentation:
+  backend: cellpose_watershed
+  dimension: 2d
+  slice_fraction: 0.5   # mid-slice: iPSC cells focus mid-stack (A549-imaged data uses 0.3)
+  nuclei_channel_name: Nuclei   # GT cell.zarr nuclei channel -> watershed seeds (both sides)
+
+compute_instance_ap: true
+compute_feature_metrics: false
+compute_microssim: false
+use_gpu: true
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_scratch.zarr
+  gt_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+  pred_channel_name: Membrane_prediction
+  gt_channel_name: Membrane
+  gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/whole_cell_ipsc_unext2_ipsctrained/gt_cache
+  pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/whole_cell_ipsc_unext2_ipsctrained/pred_cache
+
+pixel_metrics:
+  spacing: [0.290, 0.108, 0.108]
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/whole_cell_ipsc_unext2_ipsctrained
