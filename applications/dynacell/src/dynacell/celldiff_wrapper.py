@@ -120,6 +120,31 @@ class CELLDiff3DVS(nn.Module):
 
         return target
 
+    def generate_trajectory(self, phase: Tensor, num_steps: int = 100) -> Tensor:
+        """Generate virtual staining and return the full ODE trajectory.
+
+        Parameters
+        ----------
+        phase : Tensor
+            Phase contrast input of shape ``(B, 1, D, H, W)``.
+        num_steps : int
+            Number of ODE integration steps.
+
+        Returns
+        -------
+        Tensor
+            All intermediate ODE states of shape ``(num_steps, B, in_channels, D, H, W)``.
+            Index 0 is pure Gaussian noise; index ``-1`` is the final prediction.
+        """
+        target = self._noise_like_target(phase)
+        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+
+        def fn(xt: Tensor, t: Tensor) -> Tensor:
+            return self.net(xt, phase, t)
+
+        with torch.no_grad():
+            return sample_fn(target, fn)  # (num_steps, B, C, D, H, W)
+
     def generate_sliding_window(self, phase: Tensor, num_steps: int = 100) -> Tensor:
         """Generate virtual staining via tiled sliding window (stride == patch size).
 
