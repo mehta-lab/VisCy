@@ -31,7 +31,7 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "click",
-  "iohub>=0.3.5",
+  "iohub>=0.3.6",
   "pytorch-metric-learning",
   "pyyaml",
   # seaborn and tabulate are required by core eval pipeline code that runs
@@ -95,6 +95,9 @@ source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
 packages = [ "src/dynaclr" ]
+
+[tool.pytest.ini_options]
+testpaths = [ "tests" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

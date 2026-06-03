@@ -29,18 +29,14 @@ def _require_skimage():
 
 
 def _require_cubic():
+    # cubic only: callers fall back to the numpy/CPU path when no GPU is
+    # present, so do not hard-require the eval_gpu (cupy/cucim) stack here — that
+    # would block CPU-only use. ``ascupy`` raises a clear error if a GPU upload
+    # is attempted without cupy.
     if ascupy is None:
         raise ImportError(
             "cubic is required for GPU array operations. Install via the `eval` extra: `uv sync --extra eval`."
         )
-    try:
-        import cucim  # noqa: F401
-        import cupy  # noqa: F401
-    except ImportError as e:
-        raise ImportError(
-            f"{e.name} is required for GPU-backed I/O. Install cupy-cuda12x "
-            "and cucim-cu12 via the `eval_gpu` extra: `uv sync --extra eval_gpu`."
-        ) from e
 
 
 def _is_zarr_path(path: Path) -> bool:

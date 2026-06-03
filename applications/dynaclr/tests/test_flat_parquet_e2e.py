@@ -89,7 +89,7 @@ def flat_parquet_setup(tmp_path, _create_experiment, _write_collection_yaml):
     parquet_path = tmp_path / "flat.parquet"
     df = build_timelapse_cell_index(yaml_path, parquet_path, num_workers=1)
 
-    registry = ExperimentRegistry.from_cell_index(
+    registry, _ = ExperimentRegistry.from_cell_index(
         parquet_path,
         reference_pixel_size_xy_um=0.108,
         reference_pixel_size_z_um=0.3,

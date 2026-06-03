@@ -16,7 +16,7 @@ Pipeline:
 
 Usage::
 
-    uv run python applications/dynaclr/scripts/dataloader_inspection/test_2d_mip_augmentation.py
+    uv run python applications/dynaclr/scripts/dataloader_inspection/demo_2d_mip_augmentation.py
 """
 
 # ruff: noqa: E402, D103

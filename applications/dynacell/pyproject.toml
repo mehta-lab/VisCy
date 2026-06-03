@@ -29,6 +29,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  "hydra-core>=1.2",
   "lightning>=2.3",
   "monai",
   "omegaconf",
@@ -46,7 +47,7 @@ optional-dependencies.eval = [
   "cubic==0.7.0a9",
   "dynaclr",
   "hydra-core>=1.2",
-  "iohub",
+  "iohub>=0.3.6",
   "itk",
   "matplotlib",
   "pandas",
@@ -72,7 +73,7 @@ optional-dependencies.eval_gpu = [
   "cupy-cuda13x",
 ]
 optional-dependencies.preprocess = [
-  "iohub",
+  "iohub>=0.3.6",
   "tqdm",
 ]
 optional-dependencies.report = [

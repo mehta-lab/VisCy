@@ -1,6 +1,6 @@
-# %%
-"""Plot dimensionality reduction of cell embeddings."""
+"""Dimensionality-reduction plotting helpers for DynaCLR embeddings."""
 
+# %%
 from pathlib import Path
 
 import anndata as ad

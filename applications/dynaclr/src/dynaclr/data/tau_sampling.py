@@ -1,4 +1,4 @@
-"""Temporal tau sampling for triplet selection."""
+"""Temporal-offset (tau) sampling for triplet construction."""
 
 import numpy as np
 

@@ -2,9 +2,9 @@ name: Lint
 
 on:
   push:
-    branches: [main]
+    branches: [main, modular-viscy-staging]
   pull_request:
-    branches: [main]
+    branches: [main, modular-viscy-staging]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
