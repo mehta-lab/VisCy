@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/get-started/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/packages/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/packages/viscy-data/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/packages/viscy-models/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/packages/viscy-transforms/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/packages/viscy-utils/</loc>
+      </url>
+      <url>
+        <loc>https://mehta-lab.github.io/VisCy/dev/contributing/</loc>
+      </url>
+</urlset>
