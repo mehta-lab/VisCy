@@ -445,9 +445,19 @@ def save_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Pa
 
 
 def pred_cache_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Return canonical pred_cache_dir (see plan "Pred cache layout")."""
+    """Return canonical pred_cache_dir (see plan "Pred cache layout").
+
+    The trailing segment is organelle-namespaced. A given
+    ``(train_set, model_variant)`` is evaluated once per organelle, and the four
+    organelles' prediction zarrs differ, so they must not share a cache dir.
+    A549 namespaces via the gene marker (``sec61b``/``tomm20``/``h2b``/``caax``)
+    plus the plate condition. iPSC has no plate condition, so it namespaces by
+    the logical organelle. A bare ``ipsc`` segment collapses all four organelles
+    onto one dir: the first to run wins the manifest's ``pred.plate_path`` and
+    every other organelle then raises StaleCacheError.
+    """
     if parsed.test_set == "ipsc":
-        cond_seg = "ipsc"
+        cond_seg = f"{parsed.organelle}_ipsc"
     else:
         gene = _A549_GENE[parsed.organelle]
         cond_seg = f"{gene}_{parsed.condition}"

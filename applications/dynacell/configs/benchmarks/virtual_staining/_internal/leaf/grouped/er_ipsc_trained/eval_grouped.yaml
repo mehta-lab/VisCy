@@ -169,7 +169,7 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_r2_denoise.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_denoise/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_denoise/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_celldiff_r2_denoise_er
 - name: celldiff_r2_iterative__ipsc_trained__ipsc
@@ -179,7 +179,7 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_r2_iterative.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_celldiff_r2_iterative_er
 - name: celldiff_r2_sliding_window__ipsc_trained__ipsc
@@ -189,7 +189,7 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_celldiff_r2_sliding_window.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_sliding_window/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/celldiff_r2_sliding_window/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_celldiff_r2_sliding_window_er
 - name: vscyto3d__ipsc_trained__ipsc
@@ -199,7 +199,7 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fcmae_vscyto3d_pretrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_pretrained/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_pretrained/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_er
 - name: unext2__ipsc_trained__ipsc
@@ -209,7 +209,7 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fcmae_vscyto3d_scratch.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_scratch/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_scratch/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_unext2_er
 - name: fnet3d__ipsc_trained__ipsc
@@ -219,7 +219,7 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fnet3d_paper.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_fnet3d_er
 - name: unetvit3d__ipsc_trained__ipsc
@@ -229,6 +229,6 @@ conditions:
       target: sec61b
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_unetvit3d.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/unetvit3d/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/ipsc_trained/unetvit3d/er_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_unetvit3d_er
