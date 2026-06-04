@@ -794,6 +794,19 @@ def _worker_setup(config: DictConfig) -> None:
     )
 
 
+def _separate_nuclei_path(config) -> str | None:
+    """GT-nuclei store path when it is a *separate* store from the GT membrane plate.
+
+    Returns ``io.nuclei_gt_path`` when set and distinct from ``io.gt_path`` (the A549
+    cross-store case — membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
+    ``None`` (iPSC single-store ``cell.zarr`` — nuclei read from the GT plate).
+    """
+    nuclei_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
+    if nuclei_path is None or str(nuclei_path) == str(config.io.gt_path):
+        return None
+    return str(nuclei_path)
+
+
 def _find_position(plate, pos_name: str):
     """Return the iohub Position with name ``pos_name`` from ``plate``.
 
@@ -828,9 +841,8 @@ def _worker_run_fov(
     state = _WORKER_STATE
 
     seg_path = config.io.cell_segmentation_path
-    # GT nuclei may live in a separate store (cellpose_watershed cross-store seeds);
-    # open it only when set and distinct from the GT membrane plate.
-    nuclei_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
+    # GT nuclei may live in a separate store (cellpose_watershed cross-store seeds).
+    nuclei_path = _separate_nuclei_path(config)
     # ExitStack so the two optional auxiliary stores (cell_segmentation, nuclei)
     # don't nest combinatorially; iohub fds close before the next FOV.
     with ExitStack() as stack:
@@ -845,7 +857,7 @@ def _worker_run_fov(
             pos_seg = _find_position(seg_plate, pos_name)
 
         pos_nuclei = None
-        if nuclei_path is not None and str(nuclei_path) != str(config.io.gt_path):
+        if nuclei_path is not None:
             nuclei_plate = stack.enter_context(open_ome_zarr(Path(nuclei_path), mode="r"))
             pos_nuclei = _find_position(nuclei_plate, pos_name)
 
@@ -958,8 +970,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         # Optional separate GT-nuclei store (cellpose_watershed cross-store seeds).
         # Positions are matched to pred/gt by name (verified 1:1 for A549 caax/h2b),
         # so a name→position dict suffices; workers (process mode) reopen by name.
-        nuclei_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
-        if nuclei_path is not None and str(nuclei_path) != str(gt_path):
+        nuclei_path = _separate_nuclei_path(config)
+        if nuclei_path is not None:
             nuclei_plate = open_ome_zarr(Path(nuclei_path), mode="r")
             nuclei_by_name = dict(nuclei_plate.positions())
         else:
