@@ -63,9 +63,6 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
 dynacell = { workspace = true }
-# cubic resolves from PyPI now (0.7.0a11: GPU-resident Cellpose-SAM eval API +
-# average_precision return_iou). No source override — the ==0.7.0a11 pin in
-# applications/dynacell/pyproject.toml selects it from the default index.
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
