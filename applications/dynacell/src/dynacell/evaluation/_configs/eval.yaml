@@ -64,6 +64,11 @@ io:
   pred_cache_dir: null  # optional prediction-side artifact cache for masks/features
   pred_channel_name: ???  # e.g. Structure_prediction
   gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
+  nuclei_gt_path: null  # cellpose_watershed only: store holding the GT nuclei seed channel
+                        # (segmentation.nuclei_channel_name). null = read from gt_path (iPSC
+                        # cell.zarr). Set to a separate store when GT nuclei live apart from the
+                        # GT membrane (A549: membrane in CAAX_*.ozx, nuclei in H2B_*.ozx);
+                        # positions are matched by name, so the stores must share FOV names.
   require_complete_cache: false  # if true, eval raises on configured cache misses instead of filling
 
 pixel_metrics:

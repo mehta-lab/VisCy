@@ -215,7 +215,13 @@ def init_cache_context(
 
     cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
-    nuclei_plate_path = OmegaConf.select(config, "io.gt_path", default=None)
+    # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
+    # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
+    # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
+    # identity so a nuclei-store change invalidates whole-cell labels.
+    nuclei_plate_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None) or OmegaConf.select(
+        config, "io.gt_path", default=None
+    )
 
     base_kwargs: dict[str, Any] = dict(
         force=force,

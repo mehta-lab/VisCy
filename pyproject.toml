@@ -63,9 +63,9 @@ cytoland = { workspace = true }
 airtable-utils = { workspace = true }
 qc = { workspace = true }
 dynacell = { workspace = true }
-# cubic 0.7.0a9 (GPU-resident Cellpose-SAM eval API + FSC/FRC NaN fix) is not on
-# PyPI yet; pin the exact commit (reports 0.7.0a9, satisfies the ==0.7.0a9 pin).
-cubic = { git = "https://github.com/alxndrkalinin/cubic.git", rev = "b84db9a" }
+# cubic resolves from PyPI now (0.7.0a11: GPU-resident Cellpose-SAM eval API +
+# average_precision return_iou). No source override — the ==0.7.0a11 pin in
+# applications/dynacell/pyproject.toml selects it from the default index.
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }

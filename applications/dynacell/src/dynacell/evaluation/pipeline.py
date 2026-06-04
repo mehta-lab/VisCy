@@ -2,6 +2,7 @@
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, get_args
@@ -420,6 +421,7 @@ def _process_one_fov(
     pos_pred,
     pos_gt,
     pos_seg,
+    pos_nuclei,
     io_config,
     cache_ctx,
     pred_cache_ctx,
@@ -491,7 +493,13 @@ def _process_one_fov(
             predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
         if backend == "cellpose_watershed":
             nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
-            nuclei = np.asarray(pos_gt.data[:, pos_gt.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
+            # GT nuclei seeds come from a separate store (pos_nuclei) when the GT
+            # nuclei live apart from the GT membrane (A549: membrane in CAAX_*.ozx,
+            # nuclei in H2B_*.ozx); pos_nuclei is the same-named position from that
+            # store. When None (iPSC cell.zarr), read nuclei from the GT membrane
+            # plate, byte-identical to the single-store path.
+            nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
+            nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
             nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
             # Seed preflight: compute GT-nuclei watershed seeds only when at least
             # one side will actually run segment_whole_cell (a disabled cache or a
@@ -786,6 +794,19 @@ def _worker_setup(config: DictConfig) -> None:
     )
 
 
+def _separate_nuclei_path(config) -> str | None:
+    """GT-nuclei store path when it is a *separate* store from the GT membrane plate.
+
+    Returns ``io.nuclei_gt_path`` when set and distinct from ``io.gt_path`` (the A549
+    cross-store case — membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
+    ``None`` (iPSC single-store ``cell.zarr`` — nuclei read from the GT plate).
+    """
+    nuclei_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
+    if nuclei_path is None or str(nuclei_path) == str(config.io.gt_path):
+        return None
+    return str(nuclei_path)
+
+
 def _find_position(plate, pos_name: str):
     """Return the iohub Position with name ``pos_name`` from ``plate``.
 
@@ -820,49 +841,43 @@ def _worker_run_fov(
     state = _WORKER_STATE
 
     seg_path = config.io.cell_segmentation_path
-    with (
-        open_ome_zarr(Path(config.io.pred_path), mode="r") as pred_plate,
-        open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate,
-    ):
+    # GT nuclei may live in a separate store (cellpose_watershed cross-store seeds).
+    nuclei_path = _separate_nuclei_path(config)
+    # ExitStack so the two optional auxiliary stores (cell_segmentation, nuclei)
+    # don't nest combinatorially; iohub fds close before the next FOV.
+    with ExitStack() as stack:
+        pred_plate = stack.enter_context(open_ome_zarr(Path(config.io.pred_path), mode="r"))
+        gt_plate = stack.enter_context(open_ome_zarr(Path(config.io.gt_path), mode="r"))
         pos_pred = _find_position(pred_plate, pos_name)
         pos_gt = _find_position(gt_plate, pos_name)
 
+        pos_seg = None
         if seg_path is not None:
-            with open_ome_zarr(Path(seg_path), mode="r") as seg_plate:
-                pos_seg = _find_position(seg_plate, pos_name)
-                result = _process_one_fov(
-                    config,
-                    cuda_empty_every_n,
-                    pos_name,
-                    pos_pred,
-                    pos_gt,
-                    pos_seg,
-                    config.io,
-                    state["cache_ctx"],
-                    state["pred_cache_ctx"],
-                    state["seg_model"],
-                    state["dinov3"],
-                    state["dynaclr"],
-                    state["celldino"],
-                    microssim_sim,
-                )
-        else:
-            result = _process_one_fov(
-                config,
-                cuda_empty_every_n,
-                pos_name,
-                pos_pred,
-                pos_gt,
-                None,
-                config.io,
-                state["cache_ctx"],
-                state["pred_cache_ctx"],
-                state["seg_model"],
-                state["dinov3"],
-                state["dynaclr"],
-                state["celldino"],
-                microssim_sim,
-            )
+            seg_plate = stack.enter_context(open_ome_zarr(Path(seg_path), mode="r"))
+            pos_seg = _find_position(seg_plate, pos_name)
+
+        pos_nuclei = None
+        if nuclei_path is not None:
+            nuclei_plate = stack.enter_context(open_ome_zarr(Path(nuclei_path), mode="r"))
+            pos_nuclei = _find_position(nuclei_plate, pos_name)
+
+        result = _process_one_fov(
+            config,
+            cuda_empty_every_n,
+            pos_name,
+            pos_pred,
+            pos_gt,
+            pos_seg,
+            pos_nuclei,
+            config.io,
+            state["cache_ctx"],
+            state["pred_cache_ctx"],
+            state["seg_model"],
+            state["dinov3"],
+            state["dynaclr"],
+            state["celldino"],
+            microssim_sim,
+        )
 
     # Worker-side manifest flush so interrupted runs preserve progress even
     # when the parent dies. The global manifest lock at
@@ -952,6 +967,17 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             seg_plate = None
             seg_positions = [(name, None) for name, _ in pred_positions]
 
+        # Optional separate GT-nuclei store (cellpose_watershed cross-store seeds).
+        # Positions are matched to pred/gt by name (verified 1:1 for A549 caax/h2b),
+        # so a name→position dict suffices; workers (process mode) reopen by name.
+        nuclei_path = _separate_nuclei_path(config)
+        if nuclei_path is not None:
+            nuclei_plate = open_ome_zarr(Path(nuclei_path), mode="r")
+            nuclei_by_name = dict(nuclei_plate.positions())
+        else:
+            nuclei_plate = None
+            nuclei_by_name = None
+
         try:
             # Position-count alignment.
             #
@@ -1001,6 +1027,13 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, gt={pos_name_gt!r}")
                 if seg_plate is not None and pos_name_seg != pos_name_pred:
                     raise ValueError(f"Position name mismatch: pred={pos_name_pred!r}, seg={pos_name_seg!r}")
+            if nuclei_by_name is not None:
+                missing_nuclei = {n for n, _ in pred_positions} - set(nuclei_by_name)
+                if missing_nuclei:
+                    raise ValueError(
+                        f"nuclei_gt_path store is missing positions {sorted(missing_nuclei)!r} "
+                        "(cellpose_watershed reads GT-nuclei seeds there, matched by position name)"
+                    )
 
             # Leaf-level MicroMS3IM calibration: fit α once on a random
             # subsample of (FOV, t) volumes and reuse the fitted sim for
@@ -1124,6 +1157,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     pos_name_pred, pos_pred = p1
                     _, pos_gt = p2
                     _, pos_seg = p3
+                    pos_nuclei = nuclei_by_name[pos_name_pred] if nuclei_by_name is not None else None
 
                     cached_pair = microssim_read_cache.get(pos_name_pred, (None, None))
                     result = _process_one_fov(
@@ -1133,6 +1167,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         pos_pred,
                         pos_gt,
                         pos_seg,
+                        pos_nuclei,
                         io_config,
                         cache_ctx,
                         pred_cache_ctx,
@@ -1201,6 +1236,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         finally:
             if seg_plate is not None:
                 seg_plate.close()
+            if nuclei_plate is not None:
+                nuclei_plate.close()
 
     if config.compute_feature_metrics and all_feature_metrics:
         dataset_row: dict[str, float] = {}
