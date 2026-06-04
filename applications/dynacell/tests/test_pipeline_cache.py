@@ -1192,6 +1192,46 @@ def test_instance_cache_identity_invalidation(tmp_path: Path, monkeypatch) -> No
     assert ctx2.force["gt_instances"] is True
 
 
+def test_whole_cell_cache_invalidates_on_nuclei_gt_path(tmp_path: Path, monkeypatch) -> None:
+    """The whole-cell identity tracks the GT-nuclei store (io.nuclei_gt_path).
+
+    Same store → cache hit; a different nuclei store flips the identity → recompute.
+    Covers the A549 cross-store seeds (membrane in CAAX_*.ozx, nuclei in H2B_*.ozx).
+    """
+    from dynacell.evaluation import segmentation_whole_cell
+
+    monkeypatch.setattr(
+        segmentation_whole_cell, "segment_whole_cell", lambda memb, nuc, seed, sp, **kw: np.asarray(seed, np.uint16)
+    )
+
+    def wc_cfg(**extra):
+        return _make_config(
+            **{
+                "io.gt_cache_dir": str(tmp_path / "gt"),
+                "io.gt_path": "/tmp/memb_gt.zarr",
+                "target_name": "membrane",
+                "compute_instance_ap": True,
+                "segmentation.backend": "cellpose_watershed",
+                "segmentation.dimension": "2d",
+                "segmentation.nuclei_channel_name": "Nuclei",
+                "segmentation.cellpose": dict(_CELLPOSE_PARAMS),
+                "segmentation.watershed": dict(_WATERSHED_PARAMS),
+                **extra,
+            }
+        )
+
+    seed = np.zeros((1, 16, 16), np.uint16)
+    seed[:, :4, :4] = 1
+    ctx = init_cache_context(wc_cfg(**{"io.nuclei_gt_path": "/tmp/nuclei_A.zarr"}), side="gt")
+    fov_whole_cell_instances(ctx, "A/1/0", np.zeros((1, 16, 16), np.float32), np.zeros((1, 16, 16), np.float32), seed)
+    flush_manifest(ctx)
+
+    same = init_cache_context(wc_cfg(**{"io.nuclei_gt_path": "/tmp/nuclei_A.zarr"}), side="gt")
+    assert same.force["gt_instances"] is False
+    diff = init_cache_context(wc_cfg(**{"io.nuclei_gt_path": "/tmp/nuclei_B.zarr"}), side="gt")
+    assert diff.force["gt_instances"] is True
+
+
 def test_validate_instance_ap_config_rejects() -> None:
     """The bidirectional guard rejects every invalid backend/target/toggle combo."""
     from dynacell.evaluation.pipeline import _validate_instance_ap_config
