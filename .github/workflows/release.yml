@@ -1,0 +1,112 @@
+name: Release
+
+# Publishes one VisCy package to PyPI when a maintainer publishes a GitHub Release.
+# The tag on the Release selects the package. Each package is versioned independently
+# The prefix isolates its tag history, so versions need not match across packages:
+#   v2.1.0                    -> viscy            (umbrella)
+#   viscy-data-v0.5.3         -> viscy-data
+#   viscy-models-v1.4.0       -> viscy-models
+#   viscy-transforms-v0.9.1   -> viscy-transforms
+#   viscy-utils-v0.2.7        -> viscy-utils
+# Setup (PyPI trusted publishers + GitHub environments): see .github/RELEASE_SETUP.md
+# Design rationale: see .github/RELEASE_CI_PLAN.md
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  # Route the Release tag -> {package, version}. Separate job because `environment.name`
+  # on the publish job is resolved at the job level and can only read `needs.*` outputs.
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      package: ${{ steps.route.outputs.package }}
+      version: ${{ steps.route.outputs.version }}
+    steps:
+      - name: Route tag to package
+        id: route
+        env:
+          TAG: ${{ github.event.release.tag_name }}   # untrusted input via env, never inline in run:
+        run: |
+          set -euo pipefail
+          # Every arm is anchored on a digit after `v`. A greedy `v*` would swallow
+          # `viscy-…` and a subpackage tag missing its `v` (e.g. viscy-data-0.5.0)
+          # into the umbrella with a garbage version. Specific arms first.
+          case "$TAG" in
+            viscy-data-v[0-9]*)       package=viscy-data;       version=${TAG#viscy-data-v} ;;
+            viscy-models-v[0-9]*)     package=viscy-models;     version=${TAG#viscy-models-v} ;;
+            viscy-transforms-v[0-9]*) package=viscy-transforms; version=${TAG#viscy-transforms-v} ;;
+            viscy-utils-v[0-9]*)      package=viscy-utils;      version=${TAG#viscy-utils-v} ;;
+            v[0-9]*)                  package=viscy;            version=${TAG#v} ;;
+            *) echo "::error::Unrecognized release tag '$TAG' (expected '<pkg>-vX.Y.Z' or 'vX.Y.Z')"; exit 1 ;;
+          esac
+          echo "Routed $TAG -> package=$package version=$version"
+          {
+            echo "package=$package"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+
+  release:
+    needs: parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi-${{ needs.parse.outputs.package }}   # per-package OIDC isolation (see RELEASE_SETUP.md)
+      url: https://pypi.org/project/${{ needs.parse.outputs.package }}/${{ needs.parse.outputs.version }}/
+    permissions:
+      id-token: write   # OIDC trusted publishing
+      contents: write   # attach built dists to the GitHub Release (post-publish)
+    env:
+      PACKAGE: ${{ needs.parse.outputs.package }}
+      VERSION: ${{ needs.parse.outputs.version }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0      # full history …
+          fetch-tags: true    # … and tags so uv-dynamic-versioning can resolve the version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+
+      # Build BOTH from source. Plain `uv build` chains sdist -> wheel-from-sdist, and the
+      # unpacked sdist has no .git, so uv-dynamic-versioning would fall back to 0.0.0 for the
+      # wheel. `--sdist --wheel` builds each directly from the checkout. `--no-sources` drops
+      # workspace path rewrites so deps resolve as normal PyPI packages (matches `pypa/build`).
+      - name: Build sdist and wheel
+        run: uv build --package "$PACKAGE" --sdist --wheel --no-sources --out-dir dist
+
+      - name: Check distribution metadata
+        run: uvx twine check dist/*
+
+      # Cross-check the built version against the tag. The sdist is always named
+      # `<name>-<version>.tar.gz`, so an exact suffix match catches both the
+      # uv-dynamic-versioning 0.0.0 fallback and any tag/build drift — with no
+      # substring false positives (e.g. version 10.0.0 vs the 0.0.0 fallback).
+      - name: Verify built version matches the tag
+        run: |
+          set -euo pipefail
+          ls -1 dist/
+          if ! compgen -G "dist/*-${VERSION}.tar.gz" >/dev/null; then
+            echo "::error::no sdist matches tag version '${VERSION}' — version derivation likely failed"
+            exit 1
+          fi
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # attestations: true is the default on >=1.11 -> PEP 740 provenance, no extra config
+
+      - name: Attach distributions to the GitHub Release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
