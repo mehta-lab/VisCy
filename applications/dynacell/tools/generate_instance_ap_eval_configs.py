@@ -95,9 +95,23 @@ def save_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
 
 
 def pred_cache_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Dedicated pred-side instance cache (kept apart from the mask/feature caches)."""
+    """Dedicated pred-side instance cache (kept apart from the mask/feature caches).
+
+    Namespaced by organelle: the cache manifest records a single ``pred.plate_path``
+    per dir, so nucleus (``nucl_*.zarr``) and membrane (``memb_*.zarr``) for the same
+    (train_set, model, condition) must not share a dir — otherwise the two grouped
+    jobs race over the manifest and the loser dies with ``StaleCacheError``.
+    """
     cond_seg = "ipsc" if p.test_set == "ipsc" else str(p.condition)
-    return dynacell_root / p.test_set / "eval_cache_pred_instance_ap" / p.train_set / p.model_variant / cond_seg
+    return (
+        dynacell_root
+        / p.test_set
+        / "eval_cache_pred_instance_ap"
+        / p.organelle
+        / p.train_set
+        / p.model_variant
+        / cond_seg
+    )
 
 
 def build_leaf(organelle: str, test_set: str, conditions: list[ParsedZarr]) -> dict:

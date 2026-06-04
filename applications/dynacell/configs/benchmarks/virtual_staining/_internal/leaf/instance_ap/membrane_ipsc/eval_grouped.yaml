@@ -25,7 +25,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/a549_trained/celldiff_r2/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/a549_trained/celldiff_r2/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_celldiff_r2_a549trained_membrane
 - name: celldiff_r2__joint__ipsc
@@ -35,7 +35,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/memb_celldiff_r2.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/joint/celldiff_r2/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/joint/celldiff_r2/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_celldiff_r2_jointtrained_membrane
 - name: celldiff_r2_denoise__ipsc_trained__ipsc
@@ -45,7 +45,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_denoise.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/celldiff_r2_denoise/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/celldiff_r2_denoise/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_celldiff_r2_denoise_membrane
 - name: celldiff_r2_iterative__ipsc_trained__ipsc
@@ -55,7 +55,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_iterative.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/celldiff_r2_iterative/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/celldiff_r2_iterative/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_celldiff_r2_iterative_membrane
 - name: celldiff_r2_sliding_window__ipsc_trained__ipsc
@@ -65,7 +65,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_celldiff_r2_sliding_window.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/celldiff_r2_sliding_window/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/celldiff_r2_sliding_window/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_celldiff_r2_sliding_window_membrane
 - name: fnet3d__a549_trained__ipsc
@@ -75,7 +75,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fnet3d_paper_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/a549_trained/fnet3d_paper/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/a549_trained/fnet3d_paper/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_fnet3d_a549trained_membrane
 - name: fnet3d__ipsc_trained__ipsc
@@ -85,7 +85,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fnet3d_paper.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/fnet3d_paper/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/fnet3d_paper/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_fnet3d_membrane
 - name: fnet3d__joint__ipsc
@@ -95,7 +95,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/memb_fnet3d_paper_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/joint/fnet3d_paper/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/joint/fnet3d_paper/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_fnet3d_jointtrained_membrane
 - name: unetvit3d__ipsc_trained__ipsc
@@ -105,7 +105,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_unetvit3d.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/unetvit3d/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/unetvit3d/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_unetvit3d_membrane
 - name: unext2__a549_trained__ipsc
@@ -115,7 +115,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_scratch_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/a549_trained/fcmae_vscyto3d_scratch/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/a549_trained/fcmae_vscyto3d_scratch/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_unext2_a549trained_membrane
 - name: unext2__ipsc_trained__ipsc
@@ -125,7 +125,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_scratch.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/fcmae_vscyto3d_scratch/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/fcmae_vscyto3d_scratch/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_unext2_membrane
 - name: unext2__joint__ipsc
@@ -135,7 +135,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/memb_fcmae_vscyto3d_scratch_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/joint/fcmae_vscyto3d_scratch/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/joint/fcmae_vscyto3d_scratch/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_unext2_jointtrained_membrane
 - name: vscyto3d__a549_trained__ipsc
@@ -145,7 +145,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_pretrained_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/a549_trained/fcmae_vscyto3d_pretrained/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/a549_trained/fcmae_vscyto3d_pretrained/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_vscyto3d_a549trained_membrane
 - name: vscyto3d__ipsc_trained__ipsc
@@ -155,7 +155,7 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_fcmae_vscyto3d_pretrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/ipsc_trained/fcmae_vscyto3d_pretrained/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/ipsc_trained/fcmae_vscyto3d_pretrained/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_vscyto3d_membrane
 - name: vscyto3d__joint__ipsc
@@ -165,6 +165,6 @@ conditions:
       target: membrane
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/memb_fcmae_vscyto3d_pretrained_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/joint/fcmae_vscyto3d_pretrained/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred_instance_ap/membrane/joint/fcmae_vscyto3d_pretrained/ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_instance_ap/eval_vscyto3d_jointtrained_membrane
