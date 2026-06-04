@@ -969,25 +969,28 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     ):
         pred_positions = list(pred_plate.positions())
         gt_positions = list(gt_plate.positions())
-        if seg_path is not None:
-            seg_plate = open_ome_zarr(seg_path, mode="r")
-            seg_positions = list(seg_plate.positions())
-        else:
-            seg_plate = None
-            seg_positions = [(name, None) for name, _ in pred_positions]
-
-        # Optional separate GT-nuclei store (cellpose_watershed cross-store seeds).
-        # Positions are matched to pred/gt by name (verified 1:1 for A549 caax/h2b),
-        # so a name→position dict suffices; workers (process mode) reopen by name.
-        nuclei_path = _separate_nuclei_path(config)
-        if nuclei_path is not None:
-            nuclei_plate = open_ome_zarr(Path(nuclei_path), mode="r")
-            nuclei_by_name = dict(nuclei_plate.positions())
-        else:
-            nuclei_plate = None
-            nuclei_by_name = None
-
+        # Auxiliary stores (cell_segmentation + a separate GT-nuclei store for the
+        # cross-store cellpose_watershed seeds) are opened under an ExitStack
+        # *inside* the try, so a raise mid-open can never leak an already-opened
+        # plate; the finally closes whatever was entered (matches _worker_run_fov).
+        aux_stack = ExitStack()
+        seg_plate = None
+        nuclei_plate = None
+        nuclei_by_name = None
         try:
+            if seg_path is not None:
+                seg_plate = aux_stack.enter_context(open_ome_zarr(seg_path, mode="r"))
+                seg_positions = list(seg_plate.positions())
+            else:
+                seg_positions = [(name, None) for name, _ in pred_positions]
+
+            # Optional separate GT-nuclei store (cellpose_watershed cross-store seeds).
+            # Positions are matched to pred/gt by name (verified 1:1 for A549 caax/h2b),
+            # so a name→position dict suffices; workers (process mode) reopen by name.
+            nuclei_path = _separate_nuclei_path(config)
+            if nuclei_path is not None:
+                nuclei_plate = aux_stack.enter_context(open_ome_zarr(Path(nuclei_path), mode="r"))
+                nuclei_by_name = dict(nuclei_plate.positions())
             # Position-count alignment.
             #
             # When ``limit_positions`` is unset (production), require strict
@@ -1243,10 +1246,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                                 maybe_gc_collect(next_idx, runtime.gc_collect_every_n_fovs)
                                 next_idx += 1
         finally:
-            if seg_plate is not None:
-                seg_plate.close()
-            if nuclei_plate is not None:
-                nuclei_plate.close()
+            aux_stack.close()
 
     if config.compute_feature_metrics and all_feature_metrics:
         dataset_row: dict[str, float] = {}
