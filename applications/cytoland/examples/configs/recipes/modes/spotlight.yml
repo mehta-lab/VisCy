@@ -1,0 +1,29 @@
+# Mode recipe: Spotlight foreground-aware loss (Kalinin et al. 2025).
+# Cross-cutting: sets loss, fg_mask_key, nonzero filtering, AND
+# Otsu-centered normalization.  fg_threshold: 0.0 is valid ONLY
+# because normalizations use subtrahend: otsu_threshold.
+#
+# Requires: viscy preprocess --compute_otsu --compute_fg_masks
+#
+# Base ordering: this mode must come AFTER the data recipe in the
+# base: list so that its normalizations replace the data default.
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.SpotlightLoss
+      init_args:
+        lambda_mse: 0.5
+        sigmoid_k: -0.95
+        fg_threshold: 0.0
+data:
+  init_args:
+    fg_mask_key: fg_mask
+    min_nonzero_fraction: 0.001
+    nonzero_threshold: 0.0
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D, Nuclei, Membrane]
+          level: fov_statistics
+          subtrahend: otsu_threshold
+          divisor: std

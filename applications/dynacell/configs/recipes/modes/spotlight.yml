@@ -1,0 +1,21 @@
+# Mode recipe: Spotlight foreground-aware loss (Kalinin et al. 2025).
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.SpotlightLoss
+      init_args:
+        lambda_mse: 0.5
+        sigmoid_k: -0.95
+        fg_threshold: 0.0
+data:
+  init_args:
+    fg_mask_key: fg_mask
+    min_nonzero_fraction: 0.001
+    nonzero_threshold: 0.0
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D, Fluorescence]
+          level: fov_statistics
+          subtrahend: otsu_threshold
+          divisor: std

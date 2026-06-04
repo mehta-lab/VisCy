@@ -1,0 +1,66 @@
+name: aics-hipsc
+version: "4"
+description: "WTC-11 hiPSC confocal dataset from Allen Institute for Cell Science"
+cell_type: WTC-11 hiPSC
+imaging_modality: confocal
+
+spacing:
+  z: 0.290
+  y: 0.108
+  x: 0.108
+
+channels:
+  source: Phase3D
+  auxiliary:
+    - Brightfield
+    - Nuclei
+    - Membrane
+
+targets:
+  sec61b:
+    gene: SEC61B
+    organelle: er
+    display_name: "ER (Sec61b)"
+    target_channel: Structure
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B_segmented_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/SEC61B
+    splits: splits/sec61b_train_val_test.yaml
+
+  tomm20:
+    gene: TOMM20
+    organelle: mitochondria
+    display_name: "Mitochondria (TOMM20)"
+    target_channel: Structure
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/TOMM20_segmented_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/TOMM20
+    splits: splits/tomm20_train_val_test.yaml
+
+  nucleus:
+    gene: Nuclei
+    organelle: nucleus
+    display_name: "Nucleus"
+    target_channel: Nuclei
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/nucleus
+    splits: splits/nucleus_train_val_test.yaml
+
+  membrane:
+    gene: Membrane
+    organelle: membrane
+    display_name: "Membrane"
+    target_channel: Membrane
+    stores:
+      train: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/cell_segmented_cleaned.zarr
+      gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache/membrane
+    splits: splits/membrane_train_val_test.yaml

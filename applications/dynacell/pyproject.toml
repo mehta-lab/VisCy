@@ -1,0 +1,124 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "dynacell"
+description = "Benchmark virtual staining with UNetViT3D and FNet3D architectures"
+readme = "README.md"
+keywords = [
+  "benchmarking",
+  "deep learning",
+  "microscopy",
+  "virtual staining",
+]
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.12"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "hydra-core>=1.2",
+  "lightning>=2.3",
+  "monai",
+  "omegaconf",
+  "pydantic>=2",
+  "viscy-data[mmap]",
+  "viscy-models[celldiff]",
+  "viscy-transforms",
+  "viscy-utils",
+]
+optional-dependencies.eval = [
+  "accelerate>=1.13",
+  "aicsmlsegment",
+  "aicssegmentation",
+  "cellpose",
+  "cubic==0.7.0a9",
+  "dynaclr",
+  "hydra-core>=1.2",
+  "iohub>=0.3.6",
+  "itk",
+  "matplotlib",
+  "pandas",
+  "scikit-image",
+  "scikit-learn>=1.4",
+  "scipy",
+  "segmenter-model-zoo",
+  # Pinned to a commit on toshas/torch-fidelity master that includes MIND
+  # (commit a51aa64 "add Monge Inception Distance") on top of v0.4.0.
+  # Upgrade path: drop the `@5e211a9` suffix and pin a tagged release once
+  # upstream cuts one that includes MIND (target: `torch-fidelity>=0.5.0`).
+  "torch-fidelity @ git+https://github.com/toshas/torch-fidelity.git@5e211a9",
+  "tqdm",
+  "transformers",
+]
+optional-dependencies.eval_gpu = [
+  # CUDA-13 builds so cupy/cucim match torch's CUDA-13 stack (PyPI torch 2.12 is
+  # cu13, and the HPC GPU driver is CUDA 13). cupy/cucim find their CUDA libs via
+  # cuda-pathfinder, which resolves to the cu13 nvidia wheels torch already pulls
+  # -- a consistent single-CUDA-major venv, so cupy works with no LD_LIBRARY_PATH.
+  # (cupy-cuda12x on a cu13 torch breaks: pathfinder hands it libcublas.so.13.)
+  "cucim-cu13",
+  "cupy-cuda13x",
+]
+optional-dependencies.preprocess = [
+  "iohub>=0.3.6",
+  "tqdm",
+]
+optional-dependencies.report = [
+  "hydra-core>=1.2",
+  "matplotlib",
+  "pandas",
+]
+# Default fit/predict trainer logger in configs/recipes/trainer/fit.yml is
+# WandbLogger. Install with `pip install dynacell[wandb]` to satisfy that
+# default, or override `trainer.logger=null` (or supply your own logger
+# block) in the leaf / via `--override` to opt out of W&B entirely.
+optional-dependencies.wandb = [
+  "wandb",
+]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
+
+scripts.dynacell = "dynacell.__main__:main_cli"
+
+# Default manifest registry. Auto-discovered by
+# ``dynacell.data.resolver.discover_manifest_roots`` so the resolver
+# works without ``DYNACELL_MANIFEST_ROOTS`` on a fresh clone. Override
+# the env var (or pass cli_roots) to point at a different registry.
+entry-points."dynacell.manifest_roots".dynacell_default = "dynacell._manifests"
+
+[dependency-groups]
+dev = [ { include-group = "test" } ]
+test = [
+  "pytest>=9.0.2",
+  "pytest-cov>=7",
+  "tensorboard",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/dynacell" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "dynacell-"
+fallback-version = "0.0.0"

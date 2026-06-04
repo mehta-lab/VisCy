@@ -1,0 +1,44 @@
+# FNet3D paper-baseline predict: nucleus trained on joint iPSC+A549,
+# predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from job 31962520 (epoch 126, val 0.9709).
+# Job completed at 2026-05-05T15:23:37 (elapsed 1d 21h 12m).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fnet3d_paper
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__fnet3d_paper__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fnet3d_paper/checkpoints/epoch=126-step=196342.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fnet3d_paper_jointtrained.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_NUCL_JOINTTR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

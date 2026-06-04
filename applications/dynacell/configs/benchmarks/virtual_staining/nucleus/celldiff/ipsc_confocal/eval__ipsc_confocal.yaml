@@ -1,0 +1,13 @@
+# @package _global_
+# Benchmark eval leaf: Nucleus predicted by CellDiff on iPSC confocal.
+defaults:
+  - override /target: nucleus
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_celldiff_denoise.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/eval_nucl_celldiff_denoise

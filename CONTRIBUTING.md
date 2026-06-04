@@ -1,39 +1,245 @@
-# Contributing to viscy
+# Contributing guide
 
-## Development installation
+Thanks for your interest in contributing to VisCy!
 
-Clone or fork the repository,
-then make an editable installation with all the development dependencies:
+Please see the following steps for our workflow.
+
+## Getting started
+
+Please read the [README](./README.md) for an overview of the project
+and how you can install and use the package.
+
+## Issues
+
+We use [issues](https://github.com/mehta-lab/VisCy/issues) to track
+bug reports, feature requests, and provide user support.
+
+Before opening a new issue, please first search existing issues (including closed ones)
+to see if there is an existing discussion about it.
+
+## Making changes
+
+Any change made to the `main` branch needs to be proposed in a
+[pull request](https://github.com/mehta-lab/VisCy/pulls) (PR).
+
+If there is an issue that can be addressed by the PR, please reference it.
+If there is not a relevant issue, please either open an issue first,
+or describe the bug fixed or feature implemented in the PR.
+
+### Setting up development environment
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management
+and is organized as a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) monorepo.
+
+#### Install uv
+
+> [!NOTE]
+> If you are an HPC system, we suggest making a symlink elsewhere first for the `uv` cache as your home directory will quickly get filled up.
+> `mkdir -p /hpc/mydata/firstname.lastname/.cache/uv && ln -s /hpc/mydata/firstname.lastname/.cache/uv ~/.cache/uv`
+
+See [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/).
+
+#### Clone the repository
+
+If you have push permission to the repository:
 
 ```sh
-# in project root directory (parent folder of pyproject.toml)
-pip install -e ".[dev]"
+git clone https://github.com/mehta-lab/VisCy.git
 ```
 
-Install pre-commit hooks to automatically check and format code before commits:
+Otherwise, you can follow [these instructions](https://docs.github.com/en/get-started/quickstart/fork-a-repo)
+to [fork](https://github.com/mehta-lab/VisCy/fork) the repository.
+
+#### Install dependencies
+
+First, create a virtual environment with a supported Python version (3.11-3.13):
 
 ```sh
-pre-commit install
+cd VisCy/
+uv venv -p 3.13  # or 3.11 or 3.12
 ```
 
-To run pre-commit checks manually:
+This makes a virtual environment in `.venv/` where the dependencies will be installed.
+
+Then sync dependencies:
 
 ```sh
-# Run on staged files only
-pre-commit run
+uv sync
 ```
 
-## CI requirements
+> **Note**: `uv sync` installs the [`dev` group by default](https://docs.astral.sh/uv/concepts/projects/sync/#syncing-development-dependencies),
+> which includes all development dependencies. See [dependency groups](https://docs.astral.sh/uv/concepts/projects/dependencies/#dependency-groups) for more details.
 
-Lint and format with Ruff:
+#### Repository structure
+
+VisCy is organized as a workspace monorepo:
+
+```shell
+viscy/
+├── pyproject.toml          # Root workspace configuration
+├── packages/
+│   └── viscy-transforms/   # Image transforms subpackage
+│       ├── pyproject.toml
+│       └── src/
+│           └── viscy_transforms/
+└── src/
+    └── viscy/              # Umbrella package (re-exports from subpackages)
+```
+
+Each package in `packages/` is an independent Python package that can be:
+
+- Developed in isolation
+- Published to PyPI separately
+- Installed independently by users
+
+```python
+# Import directly from subpackages
+from viscy_transforms import NormalizeSampled
+```
+
+Then make the changes and [track them with Git](https://docs.github.com/en/get-started/using-git/about-git#example-contribute-to-an-existing-repository).
+
+### Testing
+
+If you made code changes, make sure that there are also tests for them!
+Local test runs and coverage check can be invoked by:
 
 ```sh
-ruff check viscy
-ruff format viscy tests
+# Run all tests
+uv run pytest
+
+# Run tests for a specific package
+uv run pytest packages/viscy-transforms/
+
+# Run with coverage
+uv run pytest --cov=viscy_transforms
 ```
 
-Run tests with `pytest`:
+### Code style
+
+We use [prek](https://github.com/j178/prek) (a faster [pre-commit](https://pre-commit.com/) runner)
+to automatically format and lint code prior to each commit.
+To minimize test errors when submitting pull requests, install the hooks:
+
+```bash
+uvx prek install
+```
+
+> `uvx` runs tools in isolated, cached environments—no binaries added to your PATH
+> and no dependencies installed in your project venv.
+
+To run manually:
+
+```bash
+uvx prek run              # run on staged files only
+uvx prek run --all-files  # run on all files
+```
+
+We use [ruff](https://docs.astral.sh/ruff/) for linting and formatting:
+
+```bash
+uvx ruff check .          # lint
+uvx ruff check --fix .    # lint and auto-fix
+uvx ruff format .         # format
+```
+
+When executed within the project root directory, ruff automatically uses
+the [project settings](./pyproject.toml).
+
+> **Important**: All ruff configuration lives in the **root** `pyproject.toml` only.
+> Sub-packages must not define their own `[tool.ruff.*]` sections — ruff does not
+> inherit config, so any `[tool.ruff.*]` in a sub-package silently overrides the
+> entire root config (including `lint.select`, `per-file-ignores`, etc.).
+
+Docstrings follow the [numpy style](https://numpydoc.readthedocs.io/en/latest/format.html)
+(`convention = "numpy"` in `[tool.ruff.lint.pydocstyle]`).
+
+### Documentation
+
+[Zensical](https://zensical.org/) builds one site for the whole monorepo, from
+`zensical.toml` and `docs/` at the repo root. Doc tools live in the root `doc`
+dependency group; subpackages carry none.
+
+Preview with live reload:
 
 ```sh
-pytest -v
+uv sync --all-packages --group doc    # --all-packages: mkdocstrings imports the packages
+uv run python docs/_gen_versions.py   # refresh the package version table
+uv run zensical serve                 # http://localhost:8000
 ```
+
+Static build lands in `site/` (git-ignored):
+
+```sh
+uv run zensical build --clean
+```
+
+Authoring notes:
+
+- Markdown lives in `docs/`; `nav` in `zensical.toml` sets the order.
+- `::: viscy_data` renders a package's API. A template override
+  (`docs/_templates/python/material/module.html.jinja`) hides each package's
+  top-level docstring — write overview prose in the Markdown page instead.
+- `docs/_gen_versions.py` rewrites the version table in `docs/packages/index.md`.
+
+CI (`.github/workflows/docs.yml`) deploys via [`mike`](https://github.com/squidfunk/mike):
+`main` updates `dev`, a `vX.Y.Z` tag publishes that version and moves `stable`.
+
+### Releasing packages
+
+We use git tags for versioning, and each package has it's own tag. Each package reads
+[`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning); the tag
+**prefix** decides which package gets the version.
+
+| Package | Tag prefix | Example tag |
+|---|---|---|
+| `viscy-data` | `viscy-data-` | `viscy-data-v0.2.1` |
+| `viscy-models` | `viscy-models-` | `viscy-models-v0.4.0` |
+| `viscy-transforms` | `viscy-transforms-` | `viscy-transforms-v0.1.3` |
+| `viscy-utils` | `viscy-utils-` | `viscy-utils-v0.3.0` |
+| `viscy` (umbrella) | none | `v0.6.0` |
+
+Per-package, independent. Tag bumps only its own package. Umbrella reads bare tags.
+
+To cut a release:
+
+```sh
+# 1. clean main, latest tags
+git checkout main && git pull && git fetch --tags
+
+# 2. tag (one per package you ship)
+git tag viscy-data-v0.2.1
+
+# 3. build — version derived from the tag
+uv build --package viscy-data --out-dir dist/
+
+# 4. verify wheel name matches the tag before pushing
+ls dist/   # viscy_data-0.2.1-py3-none-any.whl
+
+# 5. push the tag (nothing public until this)
+git push origin viscy-data-v0.2.1
+```
+
+> **Note**: no version pins between workspace members. A built wheel's
+> `Requires-Dist` for a sibling package (e.g. `viscy-utils` → `viscy-data`) carries
+> **no** version constraint — `[tool.uv.sources]` workspace links resolve locally only,
+> not in published metadata ([astral-sh/uv#9811](https://github.com/astral-sh/uv/issues/9811)).
+> If you publish to PyPI, add an explicit pin (e.g. `"viscy-data>=0.1,<0.2"`) to the
+> dependent package's `dependencies`.
+
+## Useful links
+
+### uv documentation
+
+- [uv Overview](https://docs.astral.sh/uv/)
+- [uv sync](https://docs.astral.sh/uv/concepts/projects/sync/) - Sync dependencies and packages
+- [uv Workspaces](https://docs.astral.sh/uv/concepts/workspaces/) - Monorepo management
+- [uv add](https://docs.astral.sh/uv/concepts/projects/dependencies/) - Adding dependencies
+- [uv run](https://docs.astral.sh/uv/concepts/projects/run/) - Running commands in the environment
+- [Dependency groups](https://docs.astral.sh/uv/concepts/projects/dependencies/#dependency-groups)
+
+### Related tools
+
+- [ruff](https://docs.astral.sh/ruff/) - Fast Python linter and formatter
+- [pytest](https://docs.pytest.org/) - Testing framework
+- [prek](https://github.com/j178/prek) - Fast pre-commit runner

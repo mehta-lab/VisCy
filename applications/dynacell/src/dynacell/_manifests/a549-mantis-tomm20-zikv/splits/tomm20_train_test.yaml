@@ -1,0 +1,37 @@
+split_version: '1.0'
+random_seed: 0
+selection_criteria:
+  source: a549-mantis condition-pooled assembly
+  target: tomm20
+  condition: ZIKV
+  pool_naming: 0/0/fov<NNNN> sequential across contributing plates
+train:
+  count: 12
+  fovs:
+  - 0/0/fov0000
+  - 0/0/fov0001
+  - 0/0/fov0002
+  - 0/0/fov0003
+  - 0/0/fov0004
+  - 0/0/fov0005
+  - 0/0/fov0006
+  - 0/0/fov0007
+  - 0/0/fov0008
+  - 0/0/fov0009
+  - 0/0/fov0010
+  - 0/0/fov0011
+test:
+  count: 12
+  fovs:
+  - 0/0/fov0000
+  - 0/0/fov0001
+  - 0/0/fov0002
+  - 0/0/fov0003
+  - 0/0/fov0004
+  - 0/0/fov0005
+  - 0/0/fov0006
+  - 0/0/fov0007
+  - 0/0/fov0008
+  - 0/0/fov0009
+  - 0/0/fov0010
+  - 0/0/fov0011

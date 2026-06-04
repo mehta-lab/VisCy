@@ -1,0 +1,98 @@
+# OPS 1000-gene × ALL-markers DynaCLR — Stage 1: Bag-of-Channels SimCLR pretraining
+# =====================================================================================
+# Goal: Learn organelle-aware features from mixed-marker batches via SimCLR
+# (self-augmented positives). Serves as warm-start for Stage 2 single-marker SupCon
+# run in OPS-1000genes-allmarkers.yml.
+#
+# Strategy:
+# - Mixed-marker batches (batch_group_by=null) with stratify_by=marker → uniform
+#   marker coverage per batch, all 40 markers contribute as negatives to each anchor.
+# - positive_cell_source=self (SimCLR) → guaranteed positive per anchor via augmentation;
+#   no dependence on in-batch same-gene co-occurrence, avoids collapse from thin positives.
+# - Marker-classification probe via OnlineEvalCallback measures encoder quality.
+#
+# Batch size 1024/GPU (effective 4096 global across 4 ranks) uses ~60% H100 VRAM.
+# Switch to Stage 2 when marker probe accuracy plateaus.
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/OPS/OPS-1000genes-multimarker-BoC.sh
+
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
+  - ../recipes/data/ops_gene_reporter.yml
+  - ../recipes/augmentations/ops_2d_mild.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 300
+  limit_train_batches: 800
+  limit_val_batches: 200
+  val_check_interval: 1.0
+  log_every_n_steps: 5
+  logger:
+    init_args:
+      project: OPS-1000genes-multimarker-BoC
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+    - class_path: viscy_utils.callbacks.OnlineEvalCallback
+      init_args:
+        every_n_epochs: 5
+        label_key: marker
+        k: 20
+
+model:
+  init_args:
+    encoder:
+      init_args:
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        projection_dim: 256
+        drop_path_rate: 0.0
+    loss_function:
+      init_args:
+        temperature: 0.5
+    lr: 0.0002
+    pca_color_keys: [marker, experiment]
+    log_batches_per_epoch: 8
+    log_samples_per_batch: 1
+    example_input_array_shape: [1, 1, 1, 128, 128]
+
+data:
+  init_args:
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/ops_1000genes_allmarkers.parquet
+    num_workers: 1
+    prefetch_factor: 2
+    buffer_size: 2
+    cache_pool_bytes: 0
+    # SimCLR: self-augmented positives. Guarantees one positive per anchor via
+    # the augmentation pipeline. Removes dependence on in-batch same-(gene, marker)
+    # co-occurrence that drove collapse in the single-marker run.
+    positive_cell_source: self
+    # Mixed-marker batches. stratify_by=marker enforces uniform marker representation
+    # per batch so every anchor sees ~25 cells from each of 40 markers as negatives.
+    batch_group_by: null
+    stratify_by: marker
+    batch_size: 512
+    # Marker label for OnlineEvalCallback probe (40-way).
+    label_columns:
+      marker_label: marker
+    normalizations:
+      - class_path: viscy_transforms.BatchedScaleIntensityRangePercentilesd
+        init_args:
+          keys: [channel_0]
+          lower: 1
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+          clip: true

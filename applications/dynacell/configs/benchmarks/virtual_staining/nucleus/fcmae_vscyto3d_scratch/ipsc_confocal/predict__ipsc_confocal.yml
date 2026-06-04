@@ -1,0 +1,52 @@
+# FCMAE_VSCyto3D_Scratch predict: nucleus (H2B) against ipsc_confocal test_cropped.
+#
+# TODO: replace ckpt_path with best-val ckpt once iPSC FCMAE scratch
+# nucleus training (J31710710, resumed from J31475096) completes. Expected dir:
+#   /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_scratch/checkpoints/
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: nucleus__ipsc_confocal__fcmae_vscyto3d_scratch__ipsc_confocal
+
+model:
+  init_args:
+    # Best checkpoint from J31710710 (FCMAE_VSCyto3D_Scratch_iPSC_Nucleus):
+    # ep 80 / val_loss 0.39342 (49-epoch plateau, scancelled at 1d 8h elapsed).
+    # Note: pretrained variant (J31475094, ep 89 = 0.39215) edges scratch on the
+    # same data; downstream eval should prefer the pretrained predict configs
+    # unless explicitly ablating against the scratch baseline.
+    # Hardlink alias at run_root; underlying epoch=80-step=25272.ckpt also
+    # preserved in checkpoints_frozen_ep80_<ts>/.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucl/fcmae_vscyto3d_scratch/best_ep80_val0.39342.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_scratch.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_NUCL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

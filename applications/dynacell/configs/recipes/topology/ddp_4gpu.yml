@@ -1,0 +1,6 @@
+# Topology recipe: 4-GPU DDP training on a single node.
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1

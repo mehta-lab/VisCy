@@ -1,0 +1,43 @@
+# FCMAE-class (FullyConvolutionalMAE, pretraining=False) predict overlay.
+# Mirrors the model block of fcmae_vscyto3d_fit.yml so Lightning's
+# load_from_checkpoint instantiates the matching architecture, then layers
+# predict-time hparams. Unlike celldiff_predict / unetvit3d_predict /
+# fnet3d_paper_predict, FCMAE has no `recipes/models/<arch>.yml` — the
+# model block is defined inline in the fit overlay. Duplicating here
+# keeps both overlays standalone; consolidate via a shared recipe if
+# fcmae cells need joint leaves too.
+# Used by both fcmae_vscyto3d_pretrained and fcmae_vscyto3d_scratch
+# predict leaves — predict loads the full trained checkpoint, so the
+# pretrained-encoder warm-start path (encoder_only + ckpt_path) from the
+# fit leaf does NOT belong here.
+base:
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    predict_method: full_image
+    predict_overlap: [4, 256, 256]
+data:
+  init_args:
+    z_window_size: 15
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]

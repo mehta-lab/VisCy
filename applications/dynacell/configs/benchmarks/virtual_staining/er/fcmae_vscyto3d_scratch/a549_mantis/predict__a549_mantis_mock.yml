@@ -1,0 +1,46 @@
+# FCMAE_VSCyto3D_Scratch (UNeXt2) predict: ER trained on a549_mantis (sec61b),
+# predicting against a549-mantis-sec61b-mock test.
+# Best val-loss checkpoint from job 31910346 (epoch 137, val 0.6219). See
+# predict__ipsc_confocal.yml in this dir for the wandb collision caveat.
+# Both iPSC and a549 manifests use `sec61b`; targets/er_sec61b.yml handles
+# both natively, no dataset_ref override needed.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_mock.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: a549_mantis
+  predict_set: a549_mantis_sec61b_mock
+  model_name: fcmae_vscyto3d_scratch
+  experiment_id: er__a549_mantis__fcmae_vscyto3d_scratch__a549_mantis_sec61b_mock
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/sec61b/fcmae_vscyto3d_scratch/checkpoints/epoch=137-step=23736.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_scratch_a549trained_mock.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Scratch_PRED_SEC61B_A549TR_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

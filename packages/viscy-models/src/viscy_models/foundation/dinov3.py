@@ -1,0 +1,148 @@
+"""DINOv3 foundation model wrapper for frozen feature extraction."""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch import Tensor
+
+
+class DINOv3Model(nn.Module):
+    """Wrap a HuggingFace DINOv3 vision model for microscopy images.
+
+    The model accepts raw dataloader tensors ``(B, C, D, H, W)`` directly in
+    :meth:`forward` — preprocessing is applied inline.  Alternatively, call
+    :meth:`preprocess_2d` manually before passing ``(B, C, H, W)`` input.
+
+    Z-slice selection is **not** handled here — configure ``z_range`` on the
+    dataloader so it delivers the correct focal plane (see
+    ``get_z_range()`` in the evaluation utilities).
+
+    Parameters
+    ----------
+    model_name : str
+        HuggingFace model identifier, e.g.
+        ``"facebook/dinov3-small-imagenet1k-1-layer"``.
+    freeze : bool
+        If ``True`` (default), all backbone parameters are frozen and the
+        model is kept in eval mode.
+    projection : nn.Module or None
+        Optional trainable projection head applied to backbone features.
+        When provided, :meth:`forward` returns ``(features, projection(features))``.
+        When ``None`` (default), returns ``(features, features)``.
+        The projection is always trainable regardless of ``freeze``.
+    """
+
+    def __init__(self, model_name: str, freeze: bool = True, projection: nn.Module | None = None) -> None:
+        super().__init__()
+        self.projection = projection
+
+        from transformers import AutoImageProcessor, AutoModel
+
+        self.model = AutoModel.from_pretrained(model_name)
+        processor = AutoImageProcessor.from_pretrained(model_name)
+
+        image_mean = torch.tensor(processor.image_mean, dtype=torch.float32)
+        image_std = torch.tensor(processor.image_std, dtype=torch.float32)
+        self.register_buffer("image_mean", image_mean.view(1, 3, 1, 1))
+        self.register_buffer("image_std", image_std.view(1, 3, 1, 1))
+
+        size_cfg = processor.size
+        self.target_size = (
+            (size_cfg["height"], size_cfg["width"])
+            if "height" in size_cfg
+            else (size_cfg["shortest_edge"], size_cfg["shortest_edge"])
+        )
+
+        self.freeze = freeze
+        if freeze:
+            self.model.requires_grad_(False)
+            self.model.eval()
+
+    def train(self, mode: bool = True) -> "DINOv3Model":
+        """Override train to keep backbone in eval when frozen."""
+        super().train(mode)
+        if self.freeze:
+            self.model.eval()
+        return self
+
+    def preprocess_2d(self, x: Tensor, normalize: bool = False) -> Tensor:
+        """Convert a raw dataloader tensor to a normalised RGB image.
+
+        Handles squeezing a singleton Z dim, repeating/trimming channels
+        to 3, resizing to the model's expected spatial size, and
+        applying ImageNet mean/std.
+
+        ``normalize`` defaults to ``False`` because the production path
+        feeds dataloader-normalized input (e.g. ``NormalizeSampled``
+        per-FOV stats); per-image min-max on top of that reintroduces
+        saturation from outlier patches.  In that case the input is
+        treated as already z-scored and clipped to ``±3σ`` →
+        ``[0, 1]`` deterministically before the ImageNet step.
+
+        Set ``normalize=True`` only when feeding raw zarr values without
+        any upstream normalization — this reverts to per-image min-max.
+
+        Parameters
+        ----------
+        x : Tensor
+            ``(B, C, D, H, W)`` or ``(B, C, H, W)``.
+        normalize : bool
+            Apply per-image min-max scale to ``[0, 1]`` before the
+            ImageNet step.  Default ``False`` (dataloader is expected
+            to z-score upstream).
+
+        Returns
+        -------
+        Tensor
+            ``(B, 3, H_target, W_target)`` ready for :meth:`forward`.
+        """
+        if x.ndim == 5:
+            if x.shape[2] == 1:
+                x = x[:, :, 0]
+            else:
+                x = x[:, :, x.shape[2] // 2]
+
+        if x.shape[1] == 1:
+            x = x.expand(-1, 3, -1, -1)
+        elif x.shape[1] == 2:
+            x = torch.cat([x, x[:, :1]], dim=1)
+        elif x.shape[1] > 3:
+            x = x[:, :3]
+
+        x = F.interpolate(x, size=self.target_size, mode="bilinear", align_corners=False)
+
+        if normalize:
+            x_min = x.flatten(1).min(dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            x_max = x.flatten(1).max(dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            scale = (x_max - x_min).clamp(min=1e-8)
+            x = (x - x_min) / scale
+        else:
+            x = (x.clamp(-3.0, 3.0) + 3.0) / 6.0
+
+        x = (x - self.image_mean) / self.image_std
+        return x
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        """Run the DINOv3 backbone on an image batch.
+
+        Preprocessing is applied inline, so raw dataloader tensors
+        ``(B, C, D, H, W)`` or ``(B, C, H, W)`` can be passed directly.
+
+        Parameters
+        ----------
+        x : Tensor
+            ``(B, C, D, H, W)`` or ``(B, C, H, W)`` — raw or preprocessed input.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            ``(features, projections)`` where features are the backbone pooler
+            output ``(B, hidden_dim)``.  If ``projection`` was provided at init,
+            projections are ``self.projection(features)``; otherwise both
+            elements are the same features tensor.
+        """
+        x = self.preprocess_2d(x)
+        features = self.model(pixel_values=x).pooler_output
+        if self.projection is not None:
+            return (features, self.projection(features))
+        return (features, features)

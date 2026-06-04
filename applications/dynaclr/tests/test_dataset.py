@@ -1,0 +1,618 @@
+"""Tests for MultiExperimentTripletDataset: batched getitems, lineage-aware
+positive sampling, channel remapping, and predict-mode index output."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+from dynaclr.data.experiment import ExperimentRegistry
+from dynaclr.data.index import MultiExperimentIndex
+from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
+
+_CHANNEL_NAMES_A = ["Phase", "GFP"]
+_CHANNEL_NAMES_B = ["Phase", "Mito"]
+_YX_PATCH = (32, 32)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _create_zarr_and_tracks(
+    tmp_path: Path,
+    name: str,
+    channel_names: list[str],
+    wells: list[tuple[str, str]],
+    hcs_dims: dict,
+    fovs_per_well: int = 1,
+    parent_map: dict[int, int] | None = None,
+    n_tracks: int | None = None,
+    n_t: int | None = None,
+    start_t: int = 0,
+    _make_tracks_csv=None,
+) -> tuple[Path, Path]:
+    """Create a mini HCS OME-Zarr store and matching tracking CSVs."""
+    from iohub.ngff import open_ome_zarr
+
+    if n_tracks is None:
+        n_tracks = hcs_dims["n_tracks"]
+    if n_t is None:
+        n_t = hcs_dims["n_t"]
+
+    zarr_path = tmp_path / f"{name}.zarr"
+    tracks_root = tmp_path / f"tracks_{name}"
+    n_ch = len(channel_names)
+
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
+        for row, col in wells:
+            for fov_idx in range(fovs_per_well):
+                pos = plate.create_position(row, col, str(fov_idx))
+                # Fill with random data so patches are nonzero
+                arr = pos.create_zeros(
+                    "0",
+                    shape=(n_t + start_t, n_ch, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
+                    dtype=np.float32,
+                )
+                rng = np.random.default_rng(42)
+                arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
+                fov_name = f"{row}/{col}/{fov_idx}"
+                csv_path = tracks_root / fov_name / "tracks.csv"
+                _make_tracks_csv(
+                    csv_path,
+                    n_tracks=n_tracks,
+                    n_t=n_t,
+                    parent_map=parent_map,
+                    start_t=start_t,
+                )
+
+    return zarr_path, tracks_root
+
+
+def _build_index(
+    tmp_path: Path,
+    *,
+    parent_map: dict[int, int] | None = None,
+    n_tracks: int | None = None,
+    two_experiments: bool = False,
+    _make_tracks_csv=None,
+    hcs_dims: dict,
+) -> MultiExperimentIndex:
+    """Build a MultiExperimentIndex from synthetic data."""
+    zarr_a, tracks_a = _create_zarr_and_tracks(
+        tmp_path,
+        name="exp_a",
+        channel_names=_CHANNEL_NAMES_A,
+        wells=[("A", "1")],
+        hcs_dims=hcs_dims,
+        parent_map=parent_map,
+        n_tracks=n_tracks,
+        _make_tracks_csv=_make_tracks_csv,
+    )
+    exp_a = ExperimentEntry(
+        name="exp_a",
+        data_path=str(zarr_a),
+        tracks_path=str(tracks_a),
+        channels=[
+            ChannelEntry(name="Phase", marker="Phase"),
+            ChannelEntry(name="GFP", marker="GFP"),
+        ],
+        channel_names=_CHANNEL_NAMES_A,
+        perturbation_wells={"control": ["A/1"]},
+        interval_minutes=30.0,
+    )
+    experiments = [exp_a]
+
+    if two_experiments:
+        zarr_b, tracks_b = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_b",
+            channel_names=_CHANNEL_NAMES_B,
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            n_tracks=n_tracks,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        exp_b = ExperimentEntry(
+            name="exp_b",
+            data_path=str(zarr_b),
+            tracks_path=str(tracks_b),
+            channels=[
+                ChannelEntry(name="Phase", marker="Phase"),
+                ChannelEntry(name="Mito", marker="Mito"),
+            ],
+            channel_names=_CHANNEL_NAMES_B,
+            perturbation_wells={"treated": ["A/1"]},
+            interval_minutes=15.0,
+        )
+        experiments.append(exp_b)
+
+    collection = Collection(
+        name="test",
+        experiments=experiments,
+    )
+    registry = ExperimentRegistry(collection=collection, z_window=1)
+    return MultiExperimentIndex(
+        registry=registry,
+        yx_patch_size=_YX_PATCH,
+        tau_range_hours=(0.5, 2.0),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def single_experiment_index(tmp_path, _make_tracks_csv, hcs_dims):
+    """Single experiment index with 5 tracks, 10 timepoints."""
+    return _build_index(tmp_path, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
+
+
+@pytest.fixture()
+def two_experiment_index(tmp_path, _make_tracks_csv, hcs_dims):
+    """Two experiments (different channel orderings) with 5 tracks each."""
+    return _build_index(tmp_path, two_experiments=True, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims)
+
+
+@pytest.fixture()
+def lineage_index(tmp_path, _make_tracks_csv, hcs_dims):
+    """Index with division events: track 0 is parent, track 1 and 2 are daughters."""
+    parent_map = {1: 0, 2: 0}
+    return _build_index(
+        tmp_path, parent_map=parent_map, n_tracks=3, _make_tracks_csv=_make_tracks_csv, hcs_dims=hcs_dims
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetitemsReturnFormat:
+    """Test that __getitems__ returns correctly shaped anchor/positive dicts."""
+
+    def test_getitems_returns_anchor_positive_keys(self, single_experiment_index):
+        """__getitems__ returns dict with 'anchor' and 'positive' Tensor keys."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+        )
+        assert len(ds) > 0, "Dataset should have valid anchors"
+        batch = ds.__getitems__([0, 1])
+        assert "anchor" in batch, "Batch must contain 'anchor'"
+        assert "positive" in batch, "Batch must contain 'positive'"
+        assert isinstance(batch["anchor"], torch.Tensor)
+        assert isinstance(batch["positive"], torch.Tensor)
+        # Shape: (B=2, C=2, Z=1, Y=32, X=32)
+        expected_shape = (2, 2, 1, 32, 32)
+        assert batch["anchor"].shape == expected_shape, f"Anchor shape {batch['anchor'].shape} != {expected_shape}"
+        assert batch["positive"].shape == expected_shape, (
+            f"Positive shape {batch['positive'].shape} != {expected_shape}"
+        )
+
+    def test_getitems_returns_norm_meta(self, single_experiment_index):
+        """__getitems__ returns 'anchor_norm_meta' key."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+        )
+        batch = ds.__getitems__([0])
+        assert "anchor_norm_meta" in batch, "Batch must have anchor_norm_meta"
+        # norm_meta is a list (one entry per sample in batch)
+        assert isinstance(batch["anchor_norm_meta"], list)
+        assert len(batch["anchor_norm_meta"]) == 1
+
+
+class TestChannelRemapping:
+    """Test that per-experiment channel indices are used correctly."""
+
+    def test_channel_remapping(self, two_experiment_index):
+        """Two experiments with different channels produce correctly shaped patches."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=two_experiment_index,
+            fit=True,
+        )
+
+        # Verify both experiments have channels defined
+        exp_a_entry = ds.index.registry.get_experiment("exp_a")
+        exp_b_entry = ds.index.registry.get_experiment("exp_b")
+        assert len(exp_a_entry.channels) == 2
+        assert len(exp_b_entry.channels) == 2
+
+        # Get anchors from each experiment
+        exp_a_anchors = ds.index.valid_anchors[ds.index.valid_anchors["experiment"] == "exp_a"]
+        exp_b_anchors = ds.index.valid_anchors[ds.index.valid_anchors["experiment"] == "exp_b"]
+        assert len(exp_a_anchors) > 0, "exp_a should have anchors"
+        assert len(exp_b_anchors) > 0, "exp_b should have anchors"
+
+        # Extract patches for both experiments in one batch
+        idx_a = exp_a_anchors.index[0]
+        idx_b = exp_b_anchors.index[0]
+        batch = ds.__getitems__([idx_a, idx_b])
+
+        # Both should have the same number of channels
+        assert batch["anchor"].shape[1] == 2, "Should have 2 channels"
+        assert batch["anchor"].shape == (2, 2, 1, 32, 32)
+
+
+class TestPredictMode:
+    """Test predict/inference mode returns index metadata."""
+
+    def test_predict_mode_returns_index(self, single_experiment_index):
+        """With fit=False, result contains 'index' key with tracking info."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=False,
+        )
+        batch = ds.__getitems__([0, 1])
+        assert "anchor" in batch, "Predict mode must still return anchor"
+        assert "positive" not in batch, "Predict mode should not return positive"
+        assert "index" in batch, "Predict mode must return index"
+        assert isinstance(batch["index"], list)
+        assert len(batch["index"]) == 2
+        # Each index entry should have fov_name and id keys
+        for idx_entry in batch["index"]:
+            assert "fov_name" in idx_entry
+            assert "id" in idx_entry
+
+
+class TestChannelSelection:
+    """Test channels_per_sample controls how many channels are read."""
+
+    def test_single_random_channel_shape(self, single_experiment_index):
+        """channels_per_sample=1 produces (B, 1, Z, Y, X) output."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=1,
+        )
+        batch = ds.__getitems__([0, 1])
+        expected_shape = (2, 1, 1, 32, 32)
+        assert batch["anchor"].shape == expected_shape, f"Anchor shape {batch['anchor'].shape} != {expected_shape}"
+        assert batch["positive"].shape == expected_shape, (
+            f"Positive shape {batch['positive'].shape} != {expected_shape}"
+        )
+
+    def test_from_index_channel_deterministic(self, single_experiment_index):
+        """channels_per_sample=1 reads the row's channel_name (from_index mode)."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=1,
+        )
+        assert ds._channel_mode == "from_index"
+        batch = ds.__getitems__([0])
+        assert batch["anchor"].shape[1] == 1, "from_index mode should read exactly 1 channel"
+
+    def test_all_channels_default(self, single_experiment_index):
+        """channels_per_sample=None (default) reads all source channels."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=None,
+        )
+        batch = ds.__getitems__([0])
+        assert batch["anchor"].shape[1] == 2, "Default should read all 2 source channels"
+
+    def test_fixed_channels_by_name(self, single_experiment_index):
+        """channels_per_sample=['Phase'] reads only that zarr channel."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=["Phase"],
+        )
+        batch = ds.__getitems__([0, 1])
+        assert batch["anchor"].shape[1] == 1, f"Expected 1 channel, got {batch['anchor'].shape[1]}"
+
+    def test_invalid_channel_name_raises_at_read(self, single_experiment_index):
+        """channels_per_sample with invalid zarr name raises ValueError at read time."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            channels_per_sample=["nonexistent_channel"],
+        )
+        with pytest.raises(ValueError, match="is not in list"):
+            ds.__getitems__([0])
+
+    def test_int_gt1_raises(self, single_experiment_index):
+        """channels_per_sample > 1 as int raises ValueError."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        with pytest.raises(ValueError, match="must be 1"):
+            MultiExperimentTripletDataset(
+                index=single_experiment_index,
+                fit=True,
+                channels_per_sample=2,
+            )
+
+
+class TestMixedChannelCountErrors:
+    """``channels_per_sample=None`` on a parquet whose experiments have different
+    channel counts must raise a clear error instead of a cryptic torch.stack
+    failure deep in a dataloader thread."""
+
+    def test_raises_when_experiments_have_different_channel_counts(self, tmp_path, _make_tracks_csv, hcs_dims):
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.experiment import ExperimentRegistry
+        from dynaclr.data.index import MultiExperimentIndex
+        from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
+
+        # exp_a: 2 channels; exp_b: 1 channel.
+        zarr_a, tracks_a = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_a",
+            channel_names=["Phase", "GFP"],
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        zarr_b, tracks_b = _create_zarr_and_tracks(
+            tmp_path,
+            name="exp_b",
+            channel_names=["Phase"],
+            wells=[("A", "1")],
+            hcs_dims=hcs_dims,
+            _make_tracks_csv=_make_tracks_csv,
+        )
+        registry = ExperimentRegistry(
+            collection=Collection(
+                name="test",
+                experiments=[
+                    ExperimentEntry(
+                        name="exp_a",
+                        data_path=str(zarr_a),
+                        tracks_path=str(tracks_a),
+                        channels=[ChannelEntry(name="Phase", marker="Phase"), ChannelEntry(name="GFP", marker="GFP")],
+                        channel_names=["Phase", "GFP"],
+                        perturbation_wells={"c": ["A/1"]},
+                        interval_minutes=30.0,
+                    ),
+                    ExperimentEntry(
+                        name="exp_b",
+                        data_path=str(zarr_b),
+                        tracks_path=str(tracks_b),
+                        channels=[ChannelEntry(name="Phase", marker="Phase")],
+                        channel_names=["Phase"],
+                        perturbation_wells={"c": ["A/1"]},
+                        interval_minutes=30.0,
+                    ),
+                ],
+            ),
+            z_window=1,
+        )
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH, tau_range_hours=(0.5, 2.0))
+        ds = MultiExperimentTripletDataset(index=index, fit=True, channels_per_sample=None)
+
+        va = index.valid_anchors
+        idx_a = int(va.index[va["experiment"] == "exp_a"][0])
+        idx_b = int(va.index[va["experiment"] == "exp_b"][0])
+        with pytest.raises(RuntimeError, match="different channel counts"):
+            ds.__getitems__([idx_a, idx_b])
+
+
+class TestDatasetLength:
+    """Test dataset length matches valid_anchors."""
+
+    def test_len_matches_valid_anchors(self, single_experiment_index):
+        """len(dataset) == len(index.valid_anchors)."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+        )
+        assert len(ds) == len(single_experiment_index.valid_anchors)
+
+
+class TestRescalePatch:
+    """Unit tests for _rescale_patch."""
+
+    def test_rescale_identity(self):
+        """scale=1.0 returns the same tensor (no-op)."""
+        from dynaclr.data.dataset import _rescale_patch
+
+        patch = torch.randn(2, 10, 32, 32)
+        result = _rescale_patch(patch, (1.0, 1.0, 1.0), (10, 32, 32))
+        assert result.shape == patch.shape
+        assert torch.allclose(result, patch)
+
+    def test_rescale_down_then_up(self):
+        """scale=2.0 reads half the pixels; after rescale result is target shape."""
+        from dynaclr.data.dataset import _rescale_patch
+
+        # Simulate reading with scale=2.0: read half-size patch
+        small_patch = torch.randn(1, 5, 16, 16)
+        # Rescale back to target (10, 32, 32)
+        result = _rescale_patch(small_patch, (2.0, 2.0, 2.0), (10, 32, 32))
+        assert result.shape == (1, 10, 32, 32)
+
+    def test_rescale_non_unity_changes_shape(self):
+        """Non-unity scale factor changes the spatial dimensions."""
+        from dynaclr.data.dataset import _rescale_patch
+
+        patch = torch.randn(1, 8, 24, 24)
+        result = _rescale_patch(patch, (2.0, 2.0, 2.0), (16, 48, 48))
+        assert result.shape == (1, 16, 48, 48)
+
+
+class TestSelfPositive:
+    """Tests for positive_cell_source='self' (SimCLR-style)."""
+
+    def test_self_positive_same_values(self, single_experiment_index):
+        """positive_cell_source='self': positive rows are same as anchor rows."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            positive_cell_source="self",
+        )
+        assert len(ds) > 0
+        batch = ds.__getitems__([0, 1])
+        assert "anchor" in batch
+        assert "positive" in batch
+        # For self-positive, anchor and positive should have identical pixel values
+        # (augmentation happens later in on_after_batch_transfer)
+        assert batch["anchor"].shape == batch["positive"].shape
+
+    def test_self_positive_all_tracks_are_valid_anchors(self, tmp_path, hcs_dims, _make_tracks_csv):
+        """positive_cell_source='self': when index built with self mode, all tracks are valid."""
+        from iohub.ngff import open_ome_zarr
+
+        from dynaclr.data.experiment import ExperimentRegistry
+        from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
+
+        zarr_path = tmp_path / "self_test.zarr"
+        tracks_root = tmp_path / "tracks_self"
+        with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=["Phase"]) as plate:
+            pos = plate.create_position("A", "1", "0")
+            arr = pos.create_zeros(
+                "0",
+                shape=(hcs_dims["n_t"], 1, hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
+                dtype=np.float32,
+            )
+            arr[:] = np.random.default_rng(0).standard_normal(arr.shape).astype(np.float32)
+            _make_tracks_csv(tracks_root / "A/1/0" / "tracks.csv", n_tracks=hcs_dims["n_tracks"], n_t=hcs_dims["n_t"])
+
+        exp = ExperimentEntry(
+            name="self_exp",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channels=[ChannelEntry(name="Phase", marker="Phase")],
+            channel_names=["Phase"],
+            perturbation_wells={"control": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        collection = Collection(
+            name="self_test",
+            experiments=[exp],
+        )
+        registry = ExperimentRegistry(collection=collection, z_window=1)
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 2.0),
+            positive_cell_source="self",
+        )
+        n_tracks = len(index.tracks)
+        n_anchors = len(index.valid_anchors)
+        assert n_anchors == n_tracks, (
+            f"positive_cell_source='self': all {n_tracks} tracks should be valid anchors, got {n_anchors}"
+        )
+
+    def test_self_positive_pixel_values_identical(self, single_experiment_index):
+        """positive_cell_source='self': anchor and positive tensors are equal."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            positive_cell_source="self",
+        )
+        batch = ds.__getitems__([0])
+        assert torch.equal(batch["anchor"], batch["positive"]), (
+            "Self-positive: anchor and positive tensors must be identical before augmentation"
+        )
+
+
+class TestTimepointStatisticsResolution:
+    """Verify that timepoint_statistics norm_meta resolves the correct timepoint."""
+
+    def test_norm_meta_matches_sample_timepoint(self, tmp_path, hcs_dims, _make_tracks_csv):
+        """Each sample's norm_meta must carry the stats for its own timepoint t, not another."""
+        from iohub.ngff import open_ome_zarr
+
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        n_t = 5
+        channel_names = ["Phase", "GFP"]
+        zarr_path = tmp_path / "tp_stats.zarr"
+        tracks_root = tmp_path / "tracks_tp"
+
+        with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
+            pos = plate.create_position("A", "1", "0")
+            arr = pos.create_zeros(
+                "0",
+                shape=(n_t, len(channel_names), hcs_dims["n_z"], hcs_dims["img_h"], hcs_dims["img_w"]),
+                dtype=np.float32,
+            )
+            arr[:] = np.random.default_rng(0).standard_normal(arr.shape).astype(np.float32)
+
+            # Write timepoint_statistics with distinct mean per timepoint.
+            # mean(t) = t * 100 so they're easy to distinguish.
+            norm = {}
+            for ch in channel_names:
+                norm[ch] = {
+                    "fov_statistics": {"mean": 0.0, "std": 1.0},
+                    "timepoint_statistics": {str(t): {"mean": float(t * 100), "std": 1.0} for t in range(n_t)},
+                }
+            pos.zattrs["normalization"] = norm
+
+        _make_tracks_csv(tracks_root / "A/1/0" / "tracks.csv", n_tracks=2, n_t=n_t)
+
+        exp = ExperimentEntry(
+            name="tp_test",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channels=[
+                ChannelEntry(name="Phase", marker="Phase"),
+                ChannelEntry(name="GFP", marker="GFP"),
+            ],
+            perturbation_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        collection = Collection(name="tp_test", experiments=[exp])
+        registry = ExperimentRegistry(collection=collection, z_window=1)
+        index = MultiExperimentIndex(
+            registry=registry,
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 4.0),
+            positive_cell_source="self",
+        )
+        ds = MultiExperimentTripletDataset(
+            index=index,
+            fit=True,
+            positive_cell_source="self",
+            channels_per_sample=1,
+        )
+
+        # Sample from different timepoints and verify norm_meta
+        for t_expected in [0, 2, 4]:
+            rows_at_t = ds.index.valid_anchors[ds.index.valid_anchors["t"] == t_expected]
+            if rows_at_t.empty:
+                continue
+            idx = rows_at_t.index[0]
+            batch = ds.__getitems__([idx])
+            norm = batch["anchor_norm_meta"]
+            assert norm is not None, f"norm_meta should not be None at t={t_expected}"
+
+            # In bag-of-channels mode, the key is "channel_0"
+            tp_stats = norm[0]["channel_0"]["timepoint_statistics"]
+            assert tp_stats is not None, f"timepoint_statistics should be pre-resolved for t={t_expected}, got None"
+            resolved_mean = tp_stats["mean"].item()
+            expected_mean = float(t_expected * 100)
+            assert resolved_mean == expected_mean, f"t={t_expected}: expected mean={expected_mean}, got {resolved_mean}"

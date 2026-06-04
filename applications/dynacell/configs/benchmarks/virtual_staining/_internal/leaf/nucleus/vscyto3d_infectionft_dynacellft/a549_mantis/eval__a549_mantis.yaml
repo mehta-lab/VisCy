@@ -1,0 +1,40 @@
+# @package _global_
+# Track C (vscyto3d_infectionft_dynacellft trained on a549_mantis) grouped eval for nucleus
+# channel of the dual predict zarr on A549 (mock + denv + zikv in one process).
+defaults:
+  - override /target: nucleus
+  - override /predict_set: a549_mantis_h2b_mock
+
+# Base anchors to the {gene}-{first_cond} manifest; each condition overlay below
+# swaps dataset, pred_path, and save_dir for mock / denv / zikv in one process.
+benchmark:
+  dataset_ref:
+    target: h2b
+
+compute_feature_metrics: true
+
+conditions:
+  - name: a549_mock
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-h2b-mock
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained_mock.zarr
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_nucleus_mock
+  - name: a549_denv
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-h2b-denv
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained_denv.zarr
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_nucleus_denv
+  - name: a549_zikv
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-h2b-zikv
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained_zikv.zarr
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_nucleus_zikv

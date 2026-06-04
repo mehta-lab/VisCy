@@ -1,0 +1,43 @@
+# FNet3D paper-baseline predict: nucleus trained on a549_mantis (h2b),
+# predicting against ipsc_confocal test_cropped.
+# Best val-loss checkpoint from job 31858491 (epoch 293, loss/validate=0.2088).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fnet3d_paper
+  experiment_id: nucleus__a549_mantis__fnet3d_paper__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fnet3d_paper/checkpoints/epoch=293-step=199920.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fnet3d_paper_a549trained.zarr
+
+launcher:
+  job_name: FNet3DPaper_PRED_NUCL_A549TR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

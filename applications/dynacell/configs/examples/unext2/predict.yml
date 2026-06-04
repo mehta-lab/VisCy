@@ -1,0 +1,18 @@
+# UNeXt2 (VSCyto3D): predict from checkpoint.
+# Usage: cd applications/dynacell/configs/examples && uv run dynacell predict -c unext2/predict.yml
+base:
+  - ../../recipes/trainer/predict.yml
+  - ../../recipes/topology/single_gpu.yml
+  - ../../recipes/data/hcs_phase_fluor_3d.yml
+  - ../../recipes/models/unext2_3d.yml
+
+model:
+  init_args:
+    ckpt_path: #TODO checkpoint path
+
+data:
+  init_args:
+    data_path: #TODO HCS OME-Zarr test data
+    z_window_size: 15
+    batch_size: 1
+    yx_patch_size: [256, 256]

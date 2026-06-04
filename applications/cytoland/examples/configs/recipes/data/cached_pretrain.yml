@@ -1,0 +1,73 @@
+# Data recipe: CachedOmeZarrDataModule for FCMAE self-supervised pretraining.
+# Wraps in CombinedDataModule as required by FcmaeUNet.
+# Uses source channel only (no target for reconstruction objective).
+data:
+  class_path: viscy_data.combined.CombinedDataModule
+  init_args:
+    data_modules:
+      - class_path: viscy_data.gpu_aug.CachedOmeZarrDataModule
+        init_args:
+          data_path: #TODO
+          channels: Phase3D
+          batch_size: 4
+          num_workers: 6
+          split_ratio: 0.8
+          train_cpu_transforms:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: fov_statistics
+                subtrahend: mean
+                divisor: std
+                remove_meta: true
+          val_cpu_transforms:
+            - class_path: viscy_transforms.NormalizeSampled
+              init_args:
+                keys: [Phase3D]
+                level: fov_statistics
+                subtrahend: mean
+                divisor: std
+                remove_meta: true
+          train_gpu_transforms:
+            - class_path: viscy_transforms.BatchedRandAffined
+              init_args:
+                keys: [Phase3D]
+                prob: 0.8
+                rotate_range: [3.14159, 0, 0]
+                scale_range: [[0.8, 1.2], [0.7, 1.3], [0.7, 1.3]]
+            - class_path: viscy_transforms.BatchedRandInvertIntensityd
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+            - class_path: viscy_transforms.BatchedRandAdjustContrastd
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                gamma: [0.8, 1.2]
+            - class_path: viscy_transforms.BatchedRandScaleIntensityd
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                factors: 0.5
+            - class_path: viscy_transforms.BatchedRandGaussianNoised
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                mean: 0.0
+                std: 0.3
+            - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+              init_args:
+                keys: [Phase3D]
+                prob: 0.5
+                sigma_x: [0.25, 0.75]
+                sigma_y: [0.25, 0.75]
+                sigma_z: [0.25, 0.75]
+            - class_path: viscy_transforms.BatchedStackChannelsd
+              init_args:
+                channel_map:
+                  source: [Phase3D]
+          val_gpu_transforms:
+            - class_path: viscy_transforms.BatchedStackChannelsd
+              init_args:
+                channel_map:
+                  source: [Phase3D]

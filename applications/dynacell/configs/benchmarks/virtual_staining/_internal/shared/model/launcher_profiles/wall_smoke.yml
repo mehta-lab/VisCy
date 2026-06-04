@@ -1,0 +1,7 @@
+# Smoke wall override. Stack AFTER any hardware profile in `base:` to cap
+# launcher.sbatch.time at 30 min so a smoke job cannot sit on a multi-day
+# allocation. Pair with `--override trainer.fast_dev_run=true` or
+# `--override trainer.max_steps=N` so the run actually exits inside the wall.
+launcher:
+  sbatch:
+    time: "00:30:00"

@@ -1,0 +1,28 @@
+# Evaluation config: DINOv3-frozen × infectomics-annotated (Wave 1, baseline).
+#
+# DINOv3-frozen uses the raw HuggingFace DINOv3 convnext-tiny weights with no
+# contrastive fine-tuning and no trainable projection. Tests whether
+# DynaCLR's contrastive training adds anything beyond pre-trained DINOv3
+# features alone.
+#
+# `ckpt_path: null` — DINOv3 weights are loaded from HuggingFace inside
+# `DINOv3Model.__init__`. The eval orchestrator omits `ckpt_path` from the
+# generated predict YAML so Lightning skips checkpoint restoration.
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/DINOv3-frozen/run_infectomics_annotated.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/evaluation/DINOv3-frozen/training_config_dinov3_frozen.yaml
+ckpt_path: null
+output_dir: /hpc/projects/organelle_phenotyping/models/DINOv3-frozen/evaluations/infectomics-annotated/
+
+# Publish to its own sub-registry so the LC bundle is identifiable.
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/DINOv3-frozen/infectomics/

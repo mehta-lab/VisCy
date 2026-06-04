@@ -1,0 +1,127 @@
+# FNet3D paper-baseline fit on nucleus (NUCL) — joint
+# ipsc_confocal + a549_mantis pooled. Mirrors
+# nucleus/fnet3d_paper/ipsc_confocal/train.yml on the joint
+# train_set.
+#
+# Joint leaf per Stage 7 of A549_EXPANSION_ROADMAP.md.
+# BatchedConcatDataModule + two explicit HCSDataModule children;
+# only model_overlays/fnet3d_paper_fit.yml is composed; data block
+# inline. Norms + 8-crops-per-FOV diverge from the CellDiff/UNetViT
+# conventions: target channel uses mean/std (not median/iqr) and
+# val augmentations are CPU CenterSpatialCropd on the raw keys (the
+# baseline's training pipeline doesn't go through GPU val transforms).
+#
+# Topology: single GPU, any model, long wall — same as
+# fnet3d_paper/ipsc_confocal/train.yml. The paper baseline is single-GPU
+# and we keep that here so iPSC-only and joint runs are apples-to-apples.
+base:
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  gene: Nuclei
+  target: nucleus
+  target_id: nucleus
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: fnet3d_paper
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__fnet3d_paper
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_JOINT_NUCL_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fnet3d_paper/checkpoints
+
+_hcs_init_args: &hcs_init_args
+  source_channel: Phase3D
+  target_channel: Nuclei
+  z_window_size: 32
+  # batch_size in joint mode is NOT divided by RandWeightedCropd
+  # num_samples (BatchedConcatDataModule.train_dataloader uses
+  # batch_size as-is, unlike HCSDataModule.train_dataloader which
+  # divides by train_patches_per_stack). To match single-set's
+  # effective on-GPU batch of 48 (single-set's batch_size 48 / 8),
+  # use 6 here so 6 indices * 8 num_samples = 48 GPU samples.
+  batch_size: 6
+  num_workers: 8
+  yx_patch_size: [64, 64]
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Nuclei]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Nuclei]
+        w_key: Nuclei
+        spatial_size: [32, 64, 64]
+        num_samples: 8
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandFlipd
+      init_args:
+        keys: [source, target]
+        spatial_axes: [1]
+        prob: 0.5
+    - class_path: viscy_transforms.BatchedRandFlipd
+      init_args:
+        keys: [source, target]
+        spatial_axes: [2]
+        prob: 0.5
+  val_augmentations:
+    - class_path: viscy_transforms.CenterSpatialCropd
+      init_args:
+        keys: [Phase3D, Nuclei]
+        roi_size: [32, 64, 64]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc multi-marker cell.zarr (Nuclei channel)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell.zarr
+      # a549_mantis — pooled H2B all-conditions train store (Nuclei channel)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_all.zarr
+
+launcher:
+  job_name: FNet3DPaper_JOINT_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fnet3d_paper
+  # 512G to match the shared headroom convention across the fnet3d
+  # leaves on a549/joint workloads. mmap_preload after the BasicIndexer
+  # fix peaks at ~185 GB for joint cell.zarr + H2B_all; 512G gives
+  # generous headroom for worker buffers and validation transients.
+  sbatch:
+    mem: "512G"

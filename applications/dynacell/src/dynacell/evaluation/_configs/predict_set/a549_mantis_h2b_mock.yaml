@@ -1,0 +1,5 @@
+# @package _global_
+# Predict set group: A549 mantis H2B on mock.
+benchmark:
+  dataset_ref:
+    dataset: a549-mantis-h2b-mock

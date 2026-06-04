@@ -1,0 +1,37 @@
+models:
+  - path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/onnx/last.onnx
+    label: DynaCLR-2D-MIP
+    pixel_size_um: 0.149  # training pixel size (Mantis-v1 )
+  - path: null
+    label: baseline-iou
+
+# 2D datasets only — 3D datasets excluded (model is 2D-only)
+# pixel_size_um is auto-detected from TIFF XResolution metadata
+datasets:
+  - path: /hpc/reference/group.royer/CTC/training/BF-C2DL-HSC
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/BF-C2DL-MuSC
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/DIC-C2DH-HeLa
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/Fluo-C2DL-MSC
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/Fluo-N2DH-GOWT1
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/Fluo-N2DH-SIM+
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/Fluo-N2DL-HeLa
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/PhC-C2DH-U373
+    sequences: ["01", "02"]
+  - path: /hpc/reference/group.royer/CTC/training/PhC-C2DL-PSC
+    sequences: ["01", "02"]
+
+ctc_metadata_path: /hpc/reference/group.royer/CTC/metadata.yaml
+model_input_shape: [160, 160]
+distance_threshold: 325.0
+n_neighbors: 10
+delta_t: 5
+batch_size: 128
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/evaluations/ctc_tracking_all/
+show_napari: false

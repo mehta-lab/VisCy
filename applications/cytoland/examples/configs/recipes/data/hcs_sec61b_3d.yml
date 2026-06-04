@@ -1,0 +1,66 @@
+# Legacy transitional config; new benchmark launches should use Dynacell.
+# See: applications/dynacell/examples/configs/sec61b/
+# Data recipe: HCSDataModule for Phase3D -> Structure (SEC61B), 3D (z=8).
+# Uses mean/std (source) and median/iqr (target) normalization with GPU-side Batched* augmentations.
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
+    source_channel: Phase3D
+    target_channel: Structure
+    z_window_size: 8
+    num_workers: 8
+    yx_patch_size: [512, 512]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: median
+          divisor: iqr
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandWeightedCropd
+        init_args:
+          keys: [source, target]
+          w_key: target
+          spatial_size: [8, 384, 384]
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.5
+          rotate_range: [3.14, 0, 0]
+          shear_range: [0.0, 3.0, 3.0]
+          scale_range: [[0.8, 1.2], [0.7, 1.3], [0.7, 1.3]]
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [8, 256, 256]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.3
+          gamma: [0.75, 1.5]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          factors: 0.5
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 1.0
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 1.5]
+          sigma_y: [0.25, 1.5]
+          sigma_z: [0.25, 1.5]

@@ -1,0 +1,2 @@
+# DINOv3 ConvNext-Base pretrained on LVD-1689M (canonical default).
+pretrained_model_name: facebook/dinov3-convnext-base-pretrain-lvd1689m

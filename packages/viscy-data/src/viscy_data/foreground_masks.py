@@ -1,0 +1,227 @@
+"""Foreground mask support for SlidingWindowDataset.
+
+Encapsulates all fg_mask/Spotlight logic as an optional collaborator
+that SlidingWindowDataset delegates to when ``fg_mask_key`` is set.
+"""
+
+from collections.abc import Callable
+
+from iohub.ngff import ImageArray, Position
+from torch import Tensor
+
+
+def _is_spatial(t) -> bool:
+    """Check if a transform modifies spatial positions.
+
+    Uses the ``is_spatial`` class attribute when available (all viscy-transforms
+    classes). Falls back to checking the MRO for MONAI spatial/croppad module
+    paths, which catches raw MONAI transforms and viscy-transforms wrappers
+    that inherit from them.
+    """
+    if hasattr(t, "is_spatial"):
+        return t.is_spatial
+    for base in type(t).__mro__:
+        module = getattr(base, "__module__", "")
+        if "spatial" in module or "croppad" in module:
+            return True
+    return False
+
+
+class ForegroundMaskSupport:
+    """Optional collaborator that adds fg_mask loading and spatial co-alignment.
+
+    Instantiated by ``SlidingWindowDataset`` when ``fg_mask_key`` is set.
+    Owns all mask-related state (array references, temp key names) so the
+    dataset itself stays mask-agnostic.
+
+    Parameters
+    ----------
+    fg_mask_key : str
+        Zarr array key for precomputed foreground masks.
+    target_channels : list[str]
+        Target channel names (used for per-channel temp key naming).
+    """
+
+    def __init__(self, fg_mask_key: str, target_channels: list[str]) -> None:
+        self.fg_mask_key = fg_mask_key
+        self.target_channels = target_channels
+        self._mask_keys = self.mask_temp_keys(target_channels)
+        self._mask_arrays: list[ImageArray] = []
+        self._mask_ch_indices: list[list[int]] = []
+        self._preloaded_masks: list[Tensor] | None = None
+
+    @staticmethod
+    def mask_temp_keys(target_channels: list[str]) -> tuple[str, ...]:
+        """Return ``("__fg_mask_{ch}", ...)`` for the given channel names.
+
+        Single source of truth for temp-key naming.  Used by
+        ``ForegroundMaskSupport.__init__`` and ``HCSDataModule._fit_transform``.
+        """
+        return tuple(f"__fg_mask_{ch}" for ch in target_channels)
+
+    @property
+    def mask_keys(self) -> tuple[str, ...]:
+        """Return precomputed ``("__fg_mask_{ch}", ...)`` tuple."""
+        return self._mask_keys
+
+    @staticmethod
+    def resolve_mask_ch_indices(
+        n_mask_ch: int,
+        n_image_ch: int,
+        n_target: int,
+        target_ch_idx: list[int],
+        mask_key: str = "fg_mask",
+    ) -> list[int]:
+        """Determine which channel indices to read from a mask array.
+
+        Two layouts are supported:
+
+        - **Full-channel** mask (same channels as image): use ``target_ch_idx``
+          to read the target channels from the mask, matching the image layout.
+        - **Target-only** mask (channel count equals ``n_target``):
+          channels are 0-indexed, so indices ``[0, 1, ...]`` are used.
+
+        Parameters
+        ----------
+        n_mask_ch : int
+            Number of channels in the mask array.
+        n_image_ch : int
+            Number of channels in the image array.
+        n_target : int
+            Number of target channels.
+        target_ch_idx : list[int]
+            Channel indices for target channels in the image array.
+        mask_key : str
+            Mask array key name (used in error messages).
+
+        Returns
+        -------
+        list[int]
+            Channel indices to read from the mask array.
+        """
+        if n_mask_ch == n_image_ch:
+            return list(target_ch_idx)
+        if n_mask_ch == n_target:
+            return list(range(n_target))
+        raise ValueError(
+            f"Mask array '{mask_key}' has {n_mask_ch} channels, "
+            f"expected {n_image_ch} (all image channels) or "
+            f"{n_target} (target channels only)."
+        )
+
+    def validate_and_store(
+        self,
+        fov: Position,
+        img_arr: ImageArray,
+        target_ch_idx: list[int],
+    ) -> None:
+        """Validate mask array exists in *fov* and store a reference.
+
+        Parameters
+        ----------
+        fov : Position
+            NGFF position to validate.
+        img_arr : ImageArray
+            The image array for this position (used to compare channel counts).
+        target_ch_idx : list[int]
+            Channel indices for target channels in the image array.
+        """
+        if self.fg_mask_key not in fov:
+            raise FileNotFoundError(
+                f"Mask array '{self.fg_mask_key}' not found in position. "
+                "Run preprocessing with --compute_fg_masks first."
+            )
+        mask_arr = fov[self.fg_mask_key]
+        self._mask_ch_indices.append(
+            self.resolve_mask_ch_indices(
+                mask_arr.channels, img_arr.channels, len(self.target_channels), target_ch_idx, self.fg_mask_key
+            )
+        )
+        self._mask_arrays.append(mask_arr)
+
+    def read_window(
+        self,
+        arr_idx: int,
+        tz: int,
+        read_fn: Callable[..., tuple[list[Tensor], object]],
+    ) -> list[Tensor]:
+        """Read a mask window using the dataset's image reader.
+
+        Parameters
+        ----------
+        arr_idx : int
+            Index into the stored mask arrays (matches ``window_arrays`` order).
+        tz : int
+            Window index within the FOV (counted Z-first).
+        read_fn : Callable
+            The dataset's ``_read_img_window`` method.
+
+        Returns
+        -------
+        list[Tensor]
+            Per-channel mask tensors with shape ``(1, Z, Y, X)``.
+        """
+        kwargs = {}
+        if self._preloaded_masks is not None:
+            kwargs = {"arr_idx": arr_idx, "_preloaded": self._preloaded_masks}
+        mask_images, _ = read_fn(
+            self._mask_arrays[arr_idx],
+            self._mask_ch_indices[arr_idx],
+            tz,
+            **kwargs,
+        )
+        return mask_images
+
+    def inject_into_sample(
+        self,
+        sample_images: dict[str, Tensor],
+        mask_images: list[Tensor],
+    ) -> None:
+        """Inject per-channel mask tensors as temporary keys for spatial co-alignment.
+
+        Must be called **before** the transform pipeline so that MONAI spatial
+        transforms (e.g. ``CenterSpatialCropd``) co-transform the masks.
+
+        Parameters
+        ----------
+        sample_images : dict[str, Tensor]
+            Mutable sample dict to inject into.
+        mask_images : list[Tensor]
+            Per-channel mask tensors from ``read_window``.
+        """
+        for key, mask_tensor in zip(self._mask_keys, mask_images):
+            sample_images[key] = mask_tensor
+
+    @staticmethod
+    def patch_spatial_transforms(
+        transforms: list,
+        target_keys: tuple[str, ...],
+        mask_keys: tuple[str, ...],
+    ) -> None:
+        """Append mask keys to spatial transforms that operate on target keys.
+
+        Only modifies transforms with ``is_spatial = True`` or from
+        MONAI spatial/croppad modules.  Intensity transforms are never
+        modified.  Idempotent — skips transforms that already contain
+        the mask keys.
+
+        Parameters
+        ----------
+        transforms : list
+            Mutable list of transform instances to patch in place.
+        target_keys : tuple[str, ...]
+            Keys that identify target channels (e.g. channel names or
+            ``"target"``).
+        mask_keys : tuple[str, ...]
+            Keys to append (e.g. ``("__fg_mask_Nuclei",)`` or
+            ``("fg_mask",)``).
+        """
+        for t in transforms:
+            if (
+                _is_spatial(t)
+                and hasattr(t, "keys")
+                and any(k in t.keys for k in target_keys)
+                and not any(k in t.keys for k in mask_keys)
+            ):
+                t.keys = t.keys + mask_keys
+                t.allow_missing_keys = True

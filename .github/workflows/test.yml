@@ -1,0 +1,175 @@
+name: Test
+
+on:
+  push:
+    branches: [main, modular-viscy-staging]
+  pull_request:
+    branches: [main, modular-viscy-staging]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  test:
+    name: Test (${{ matrix.package }}, Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+        package: [viscy-transforms, viscy-models]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: ${{ matrix.os }}-${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/${{ matrix.package }}
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov=src/ --cov-report=term-missing
+        working-directory: packages/${{ matrix.package }}
+
+  test-data:
+    name: Test Data (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: ${{ matrix.os }}-${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/viscy-data
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
+        working-directory: packages/viscy-data
+
+  test-data-extras:
+    name: Test Data Extras (Python 3.13, ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python 3.13
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ubuntu-latest-3.13
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/viscy-data
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
+        working-directory: packages/viscy-data
+
+  test-applications:
+    name: Test (${{ matrix.application }}, Python 3.13, ubuntu-latest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        application: [dynaclr, cytoland, airtable, qc]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python 3.13
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ubuntu-latest-3.13
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: applications/${{ matrix.application }}
+
+      - name: Run tests
+        run: uv run --frozen pytest
+        working-directory: applications/${{ matrix.application }}
+
+  test-dynacell-configs:
+    name: Test dynacell benchmark configs (Python 3.13, ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python 3.13
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ubuntu-latest-3.13
+
+      - name: Install dynacell with eval deps + test group (CPU)
+        # The eval-pipeline tests import dynacell.evaluation.pipeline, a hard
+        # consumer of the eval stack (cubic, cellpose, …). cubic is CPU-capable
+        # (falls back to numpy/scikit-image without CUDA), so the eval extra
+        # installs and runs on a GPU-less runner. eval_gpu (cupy/cucim) is NOT
+        # installed — those are the only CUDA-only deps.
+        run: uv sync --frozen --extra eval --group test
+        working-directory: applications/dynacell
+
+      - name: Run benchmark-schema + submit-tool + eval-runtime tests
+        # test_benchmark_config_composition + test_submit_benchmark_job cover
+        # config composition + the launcher. test_runtime + the two
+        # test_evaluation_pipeline_parallel* suites cover the runtime module,
+        # the FovResult pickle contract, and evaluate_predictions end-to-end
+        # (serial vs spawn-process) on a tiny iohub fixture + prebuilt mask
+        # cache (target_name=er + require_complete_cache=true short-circuit the
+        # segmenter + feature-extractor model loads — but pipeline import still
+        # needs the eval stack). test_evaluation_grouped drives the
+        # multi-condition driver against the same cache-only fixture.
+        run: |
+          uv run --frozen pytest \
+            tests/test_benchmark_config_composition.py \
+            tests/test_submit_benchmark_job.py \
+            tests/test_runtime.py \
+            tests/test_evaluation_pipeline_parallel.py \
+            tests/test_evaluation_pipeline_parallel_cpu.py \
+            tests/test_evaluation_grouped.py \
+            -v
+        working-directory: applications/dynacell
+
+  check:
+    name: All tests pass
+    if: always()
+    needs: [test, test-data, test-data-extras, test-applications, test-dynacell-configs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all test jobs succeeded
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
