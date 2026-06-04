@@ -1398,11 +1398,12 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     mask_path = save_dir / config.save.mask_metrics_filename
     mask_ok = mask_path.exists()
     feature_ok = (save_dir / config.save.feature_metrics_filename).exists() if config.compute_feature_metrics else True
-    # A prior AP-less run's mask cache must not suppress newly-requested instance
-    # AP: require the AP columns to be present in the cached rows.
+    # A prior instance-AP-less (or pre-Dice) run's mask cache must not suppress
+    # newly-requested instance metrics: require both the AP and instance-Dice
+    # columns to be present in the cached rows, else recompute.
     if mask_ok and bool(getattr(config, "compute_instance_ap", False)):
         rows = np.load(mask_path, allow_pickle=True).tolist()
-        if not rows or "mAP" not in rows[0]:
+        if not rows or "mAP" not in rows[0] or "instance_dice" not in rows[0]:
             return False
     return pixel_ok and mask_ok and feature_ok
 

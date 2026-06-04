@@ -1303,4 +1303,9 @@ def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
     np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "DICE": 0.8}], dtype=object))
     assert _final_metrics_cache_valid(cfg) is False  # no mAP column -> recompute
     np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "DICE": 0.8, "mAP": 0.5}], dtype=object))
-    assert _final_metrics_cache_valid(cfg) is True  # AP columns present -> reuse
+    assert _final_metrics_cache_valid(cfg) is False  # mAP but no instance_dice -> recompute
+    np.save(
+        save_dir / "mask_metrics.npy",
+        np.array([{"FOV": "A/1/0", "DICE": 0.8, "mAP": 0.5, "instance_dice": 0.7}], dtype=object),
+    )
+    assert _final_metrics_cache_valid(cfg) is True  # AP + instance_dice present -> reuse
