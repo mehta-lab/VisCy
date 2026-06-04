@@ -53,3 +53,7 @@ data:
 launcher:
   job_name: pix2pix3d_unetvit_A549_NUCL_4gpu_modernized_lambdaL1_10_lecam_40ep
   run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+  # pix2pix3d GAN (UNetViT3D G + multiscale-patch D, large 3D crops) OOMs on
+  # 80 GB h100; needs h200 (141 GB). Narrow the hardware_4gpu h100|h200 default.
+  sbatch:
+    constraint: h200
