@@ -14,10 +14,17 @@ benchmark:
   predict_set: a549_mantis_h2b_mock
   model_name: pix2pix3d_unetvit
   experiment_id: nucleus__ipsc_confocal__pix2pix3d_unetvit__a549_mantis_h2b_mock
+  # A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
+  # `nucleus` target from targets/nucleus.yml so the resolver finds h2b.
+  dataset_ref:
+    target: h2b
 
 model:
   init_args:
-    ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH
+    # Best loss/validate_ema checkpoint, modernized Run-D 40ep run (job
+    # 33501549, converged early at epoch 15). predict_step uses generator_ema
+    # (use_ema_at_predict=True default).
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=15-step=51200.ckpt
 
 data:
   init_args:
