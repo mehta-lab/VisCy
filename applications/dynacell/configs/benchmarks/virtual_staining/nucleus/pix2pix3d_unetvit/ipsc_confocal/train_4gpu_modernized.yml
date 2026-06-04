@@ -1,0 +1,49 @@
+# pix2pix3d_unetvit MODERNIZED fit on nucleus (Nuclei channel of cell.zarr) — AICS iPSC confocal, 4-GPU DDP.
+#
+# Finalized "Run D" recipe: modernized overlay (nonsat + R1 + G-EMA, equal LR)
+# + lambda_l1=10 + LeCam gamma=0.3 + 40 epochs. Those three deltas were the CLI
+# overrides that produced the COMPLETED run at
+# cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+# (wandb best loss/validate_ema=0.585). Baked here so submission needs NO overrides.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: nucleus__ipsc_confocal__pix2pix3d_unetvit_modernized
+
+model:
+  init_args:
+    lambda_l1: 10.0
+    lecam_gamma: 0.3
+
+trainer:
+  max_epochs: 40
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_iPSC_NUCL_4gpu_modernized_lambdaL1_10_lecam_40ep
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints
+
+launcher:
+  job_name: pix2pix3d_unetvit_iPSC_NUCL_4gpu_modernized_lambdaL1_10_lecam_40ep
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
