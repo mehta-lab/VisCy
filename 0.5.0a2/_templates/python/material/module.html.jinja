@@ -1,0 +1,17 @@
+{#
+  Override of mkdocstrings-python's module template.
+
+  Suppresses the docstring of the *root* module only — i.e. when a page does
+  `::: viscy_data`, the package's own top-level docstring is not rendered, but
+  the docstrings of its members (classes, functions) and of any submodules are
+  left untouched. This keeps the per-package overview prose on the Markdown page
+  (the "What's here" admonition) without duplicating the `__init__.py` docstring.
+
+  `root` is the context flag mkdocstrings sets for the object the `:::`
+  identifier points at.
+#}
+{% extends "_base/module.html.jinja" %}
+
+{% block docstring scoped %}
+  {% if not root %}{{ super() }}{% endif %}
+{% endblock docstring %}
