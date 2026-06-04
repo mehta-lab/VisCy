@@ -942,14 +942,15 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     if config.compute_feature_metrics and io_config.cell_segmentation_path is None:
         raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
 
-    if models is None:
-        models = load_eval_models(config)
-    seg_model = models.seg_model
-    dinov3_feature_extractor = models.dinov3
-    dynaclr_feature_extractor = models.dynaclr
-    celldino_feature_extractor = models.celldino
+    with region_timer("parent_load_models", "<parent>"):
+        if models is None:
+            models = load_eval_models(config)
+        seg_model = models.seg_model
+        dinov3_feature_extractor = models.dinov3
+        dynaclr_feature_extractor = models.dynaclr
+        celldino_feature_extractor = models.celldino
 
-    cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
+        cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
@@ -1106,16 +1107,17 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     side_positions["pred"] = pred_positions
                     side_channels["pred"] = io_config.pred_channel_name
                 if sides_for_precompute:
-                    precompute_deep_features(
-                        sides_for_precompute,
-                        side_positions,
-                        side_channels,
-                        seg_positions,
-                        deep_extractors,
-                        flush_threshold=flush_threshold,
-                    )
-                    for ctx in sides_for_precompute.values():
-                        flush_manifest(ctx)
+                    with region_timer("precompute_all", "<parent>"):
+                        precompute_deep_features(
+                            sides_for_precompute,
+                            side_positions,
+                            side_channels,
+                            seg_positions,
+                            deep_extractors,
+                            flush_threshold=flush_threshold,
+                        )
+                        for ctx in sides_for_precompute.values():
+                            flush_manifest(ctx)
 
             # Phase 2 runtime resolution: clamp fov_workers to n_positions
             # now that we know it. threads_per_worker is frozen at Phase 1
@@ -1249,118 +1251,119 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             aux_stack.close()
 
     if config.compute_feature_metrics and all_feature_metrics:
-        dataset_row: dict[str, float] = {}
+        with region_timer("dataset_metrics", "<parent>"):
+            dataset_row: dict[str, float] = {}
 
-        # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
-        # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
-        # CP gets pruning + z-score; the pre-prune CP arrays feed the
-        # linear probe so MADScaler can normalize per-fold.
-        prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
+            # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
+            # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
+            # CP gets pruning + z-score; the pre-prune CP arrays feed the
+            # linear probe so MADScaler can normalize per-fold.
+            prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
-        cp = parent_lists["cp"]
-        if cp.pred_feats:
-            pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
-            target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
-            target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
-            mask_payload = {
-                "keep_mask": [bool(b) for b in cp_keep_mask],
-                "n_kept": int(cp_keep_mask.sum()),
-                "n_total": int(cp_keep_mask.size),
-                "criteria": {
-                    "freq_cut": DEFAULT_FREQ_CUT,
-                    "unique_cut": DEFAULT_UNIQUE_CUT,
-                    "corr_threshold": DEFAULT_CORR_THRESHOLD,
-                },
-            }
-            (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
-            if pred_cp_filtered.size and target_cp_filtered.size:
-                pred_cp_z, target_cp_z = _zscore_per_side(pred_cp_filtered, target_cp_filtered)
-            else:
-                pred_cp_z, target_cp_z = pred_cp_filtered, target_cp_filtered
-            prefix_inputs.append(
-                (
-                    "CP",
-                    pred_cp_z,
-                    target_cp_z,
-                    pred_cp_filtered,
-                    target_cp_filtered,
-                    np.concatenate(cp.pred_fovs, axis=0),
-                    np.concatenate(cp.gt_fovs, axis=0),
-                )
-            )
-
-        deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
-        if celldino_feature_extractor is not None:
-            deep_tracks.append(("CellDINO", "celldino"))
-        for display_name, key in deep_tracks:
-            bb = parent_lists[key]
-            if bb.pred_feats:
-                pred_arr = np.concatenate(bb.pred_feats, axis=0)
-                target_arr = np.concatenate(bb.gt_feats, axis=0)
+            cp = parent_lists["cp"]
+            if cp.pred_feats:
+                pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+                target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
+                target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
+                mask_payload = {
+                    "keep_mask": [bool(b) for b in cp_keep_mask],
+                    "n_kept": int(cp_keep_mask.sum()),
+                    "n_total": int(cp_keep_mask.size),
+                    "criteria": {
+                        "freq_cut": DEFAULT_FREQ_CUT,
+                        "unique_cut": DEFAULT_UNIQUE_CUT,
+                        "corr_threshold": DEFAULT_CORR_THRESHOLD,
+                    },
+                }
+                (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
+                if pred_cp_filtered.size and target_cp_filtered.size:
+                    pred_cp_z, target_cp_z = _zscore_per_side(pred_cp_filtered, target_cp_filtered)
+                else:
+                    pred_cp_z, target_cp_z = pred_cp_filtered, target_cp_filtered
                 prefix_inputs.append(
                     (
-                        display_name,
-                        pred_arr,
-                        target_arr,
-                        pred_arr,
-                        target_arr,
-                        np.concatenate(bb.pred_fovs, axis=0),
-                        np.concatenate(bb.gt_fovs, axis=0),
+                        "CP",
+                        pred_cp_z,
+                        target_cp_z,
+                        pred_cp_filtered,
+                        target_cp_filtered,
+                        np.concatenate(cp.pred_fovs, axis=0),
+                        np.concatenate(cp.gt_fovs, axis=0),
                     )
                 )
 
-        # Prefix with "Dataset_" so dataset-level FID/KID/cosine don't clobber
-        # per-FOV columns of the same name when merged into per-FOV rows.
-        def _compute_one(args):
-            # MIND stays on CPU here even when use_gpu=True: 4 parallel threads
-            # racing on the same CUDA context would either serialize via the
-            # allocator (no speedup) or contend for memory with mid-eval FOV
-            # work in process executors. CPU MIND in a 4-thread BLAS-capped
-            # pool is competitive with serialized GPU MIND and bit-stable
-            # across runs that toggle use_gpu (torch's CPU vs CUDA RNG
-            # produce different streams for the same seed, breaking cross-
-            # leaf comparability of the MIND column).
-            name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
-            raw = {
-                **compute_feature_similarity(p_metric, t_metric, name),
-                **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
-            }
-            return {f"Dataset_{k}": v for k, v in raw.items()}
+            deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
+            if celldino_feature_extractor is not None:
+                deep_tracks.append(("CellDINO", "celldino"))
+            for display_name, key in deep_tracks:
+                bb = parent_lists[key]
+                if bb.pred_feats:
+                    pred_arr = np.concatenate(bb.pred_feats, axis=0)
+                    target_arr = np.concatenate(bb.gt_feats, axis=0)
+                    prefix_inputs.append(
+                        (
+                            display_name,
+                            pred_arr,
+                            target_arr,
+                            pred_arr,
+                            target_arr,
+                            np.concatenate(bb.pred_fovs, axis=0),
+                            np.concatenate(bb.gt_fovs, axis=0),
+                        )
+                    )
 
-        if prefix_inputs:
-            # Threads suffice: torch-fidelity, sklearn LBFGS, and numpy BLAS
-            # all release the GIL inside their hot loops. Cap inner BLAS to
-            # 1 thread so the outer threads don't oversubscribe cores.
-            with (
-                threadpool_limits(limits=1),
-                ThreadPoolExecutor(max_workers=min(4, len(prefix_inputs))) as pool,
-            ):
-                for result in pool.map(_compute_one, prefix_inputs):
-                    dataset_row.update(result)
-
-        # NaN-fill any prefix that had no cells (parallel pool would
-        # otherwise skip it). Cheap; runs on empty arrays.
-        expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
-        if celldino_feature_extractor is not None:
-            expected_prefixes.append("CellDINO")
-        for name in expected_prefixes:
-            if f"Dataset_{name}_FID" not in dataset_row:
+            # Prefix with "Dataset_" so dataset-level FID/KID/cosine don't clobber
+            # per-FOV columns of the same name when merged into per-FOV rows.
+            def _compute_one(args):
+                # MIND stays on CPU here even when use_gpu=True: 4 parallel threads
+                # racing on the same CUDA context would either serialize via the
+                # allocator (no speedup) or contend for memory with mid-eval FOV
+                # work in process executors. CPU MIND in a 4-thread BLAS-capped
+                # pool is competitive with serialized GPU MIND and bit-stable
+                # across runs that toggle use_gpu (torch's CPU vs CUDA RNG
+                # produce different streams for the same seed, breaking cross-
+                # leaf comparability of the MIND column).
+                name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
                 raw = {
-                    **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
-                    **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
+                    **compute_feature_similarity(p_metric, t_metric, name),
+                    **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
                 }
-                dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
+                return {f"Dataset_{k}": v for k, v in raw.items()}
 
-        for row in all_feature_metrics:
-            row.update(dataset_row)
-        embedding_groups: dict[str, tuple] = {}
-        for key in _BACKBONE_KEYS:
-            if key == "celldino" and celldino_feature_extractor is None:
-                continue
-            bb = parent_lists[key]
-            embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
-            embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
-        _save_embeddings(save_dir, embedding_groups)
+            if prefix_inputs:
+                # Threads suffice: torch-fidelity, sklearn LBFGS, and numpy BLAS
+                # all release the GIL inside their hot loops. Cap inner BLAS to
+                # 1 thread so the outer threads don't oversubscribe cores.
+                with (
+                    threadpool_limits(limits=1),
+                    ThreadPoolExecutor(max_workers=min(4, len(prefix_inputs))) as pool,
+                ):
+                    for result in pool.map(_compute_one, prefix_inputs):
+                        dataset_row.update(result)
+
+            # NaN-fill any prefix that had no cells (parallel pool would
+            # otherwise skip it). Cheap; runs on empty arrays.
+            expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
+            if celldino_feature_extractor is not None:
+                expected_prefixes.append("CellDINO")
+            for name in expected_prefixes:
+                if f"Dataset_{name}_FID" not in dataset_row:
+                    raw = {
+                        **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
+                        **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
+                    }
+                    dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
+
+            for row in all_feature_metrics:
+                row.update(dataset_row)
+            embedding_groups: dict[str, tuple] = {}
+            for key in _BACKBONE_KEYS:
+                if key == "celldino" and celldino_feature_extractor is None:
+                    continue
+                bb = parent_lists[key]
+                embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
+                embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
+            _save_embeddings(save_dir, embedding_groups)
 
     dump_timings_csv(save_dir)
 
@@ -1705,12 +1708,17 @@ def evaluate_model(config: DictConfig):
         pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(config)
     else:
         pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config)
-        save_metrics(
-            config,
-            pixel_metrics=pixel_metrics,
-            mask_metrics=mask_metrics,
-            feature_metrics=feature_metrics,
-        )
+        with region_timer("save_metrics_csvs", "<parent>"):
+            save_metrics(
+                config,
+                pixel_metrics=pixel_metrics,
+                mask_metrics=mask_metrics,
+                feature_metrics=feature_metrics,
+            )
+        # Re-dump so save_metrics_csvs lands in eval_timing.csv. evaluate_predictions
+        # dumps once before save_metrics runs; this second dump overwrites with the
+        # full set (FOV-loop regions + save_metrics_csvs).
+        dump_timings_csv(Path(config.save.save_dir))
     return pixel_metrics, mask_metrics, feature_metrics
 
 

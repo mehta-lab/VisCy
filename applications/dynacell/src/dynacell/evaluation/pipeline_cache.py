@@ -49,6 +49,7 @@ from dynacell.evaluation.metrics import (
     deep_features,
     features_from_crops,
 )
+from dynacell.evaluation.runtime import region_timer
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
 
@@ -1263,7 +1264,8 @@ def _flush_kind(
     flat: list[np.ndarray] = [c for _, _, crops in items for c in crops]
     counts = [len(crops) for _, _, crops in items]
 
-    feats = features_from_crops(flat, extractor)
+    with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
+        feats = features_from_crops(flat, extractor)
 
     cache_kwargs = _kind_cache_kwargs(ctx, kind)
     lock_tag = _kind_lock_tag(kind, cache_kwargs)
