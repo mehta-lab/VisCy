@@ -21,7 +21,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, AnnotationColumns
-from viscy_data._utils import read_norm_meta
+from viscy_data._utils import _read_norm_meta
 
 
 class ClassificationDataset(Dataset):
@@ -100,7 +100,7 @@ class ClassificationDataset(Dataset):
                 slice(x - x_half, x + x_half),
             ]
         ).float()[None]
-        norm_meta = read_norm_meta(fov)
+        norm_meta = _read_norm_meta(fov)
         if norm_meta is None:
             raise ValueError(f"Normalization metadata not found for FOV '{fov_name}'.")
         norm_meta = norm_meta[self.channel_name]["fov_statistics"]

@@ -12,7 +12,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy_data._typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
-from viscy_data._utils import _ensure_channel_list, _search_int_in_str, read_norm_meta
+from viscy_data._utils import _ensure_channel_list, _read_norm_meta, _search_int_in_str
 from viscy_data.foreground_masks import ForegroundMaskSupport
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -134,7 +134,7 @@ class SlidingWindowDataset(Dataset):
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
-            self.window_norm_meta.append(read_norm_meta(fov))
+            self.window_norm_meta.append(_read_norm_meta(fov))
             if self.fg_mask_support is not None:
                 self.fg_mask_support.validate_and_store(fov, img_arr, self.target_ch_idx)
         self._max_window = w

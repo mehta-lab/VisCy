@@ -36,7 +36,7 @@ from iohub.ngff import open_ome_zarr
 from dynaclr.data.index import MultiExperimentIndex
 from dynaclr.data.tau_sampling import sample_tau
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta, SampleMeta
-from viscy_data._utils import read_norm_meta
+from viscy_data._utils import _read_norm_meta
 
 
 def _pick_temporal_candidate(
@@ -742,7 +742,7 @@ class MultiExperimentTripletDataset(Dataset):
         cache_key = (store_path, fov_name)
         if cache_key not in self._norm_meta_cache:
             position = self._get_position(store_path, fov_name)
-            self._norm_meta_cache[cache_key] = read_norm_meta(position)
+            self._norm_meta_cache[cache_key] = _read_norm_meta(position)
         cached = self._norm_meta_cache[cache_key]
         if cached is None:
             return None

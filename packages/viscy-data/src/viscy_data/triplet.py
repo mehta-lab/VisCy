@@ -31,8 +31,8 @@ from torch.utils.data import Dataset
 
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
 from viscy_data._utils import (
+    _read_norm_meta,
     _transform_channel_wise,
-    read_norm_meta,
 )
 from viscy_data.hcs import HCSDataModule
 from viscy_data.select import _filter_fovs, _filter_wells
@@ -239,7 +239,7 @@ class TripletDataset(Dataset):
             slice(y_center - y_half, y_center + y_half),
             slice(x_center - x_half, x_center + x_half),
         ]
-        return patch, read_norm_meta(position)
+        return patch, _read_norm_meta(position)
 
     def _slice_patches(self, track_rows: "pd.DataFrame"):
         """Slice and stack patches for multiple track rows."""

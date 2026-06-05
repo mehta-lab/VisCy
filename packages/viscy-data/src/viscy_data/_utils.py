@@ -165,6 +165,10 @@ def read_norm_meta(fov: Position) -> NormMeta | None:
     return norm_meta
 
 
+# Backwards-compatible private alias: existing callers import ``_read_norm_meta``.
+_read_norm_meta = read_norm_meta
+
+
 def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
     """Stack per-sample norm_meta dicts into batched tensors.
 
