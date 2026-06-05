@@ -31,6 +31,7 @@ from dynacell.evaluation.feature_select import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
+    active_cp_feature_names,
     ascupy,
     build_crops,
     compute_pixel_metrics,
@@ -152,7 +153,16 @@ def _fov_pred_features_per_t(
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
     use_gpu = pred_cache_ctx.use_gpu
     for t in range(t_count):
-        cp.append(cp_regionprops(predict[t], cell_segmentation[t], spacing, use_gpu=use_gpu))
+        cp.append(
+            cp_regionprops(
+                predict[t],
+                cell_segmentation[t],
+                spacing,
+                norm=pred_cache_ctx.cp_norm,
+                glcm_cfg=pred_cache_ctx.cp_glcm,
+                use_gpu=use_gpu,
+            )
+        )
         crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
         dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
@@ -1265,7 +1275,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
                 target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
                 target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
+                cp_glcm_enabled = bool(OmegaConf.select(config, "feature_metrics.cp.glcm.enabled", default=False))
                 mask_payload = {
+                    "feature_names": list(active_cp_feature_names(cp_glcm_enabled)),
                     "keep_mask": [bool(b) for b in cp_keep_mask],
                     "n_kept": int(cp_keep_mask.sum()),
                     "n_total": int(cp_keep_mask.size),

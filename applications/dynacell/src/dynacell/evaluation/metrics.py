@@ -1,5 +1,7 @@
 """Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
+from typing import Any
+
 import numpy as np
 import torch
 
@@ -9,6 +11,7 @@ try:
     from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
+    from cubic.skimage import filters as _cubic_filters
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
@@ -19,6 +22,15 @@ except ImportError:
     psnr = None  # type: ignore[assignment]
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
+    _cubic_filters = None  # type: ignore[assignment]
+
+# GLCM is an opt-in CP feature requiring cubic>=0.7.0a12 (cubic.feature.glcm_features).
+# Guarded separately so an older cubic (without it) does not break the critical
+# imports above; the GLCM CP path raises a clear ImportError if requested without it.
+try:
+    from cubic.feature import glcm_features
+except ImportError:
+    glcm_features = None  # type: ignore[assignment]
 
 from dynacell.evaluation.utils import _minmax_norm
 
@@ -280,37 +292,138 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
     return scores
 
 
-PROPS_3D = (
-    "intensity_max",
+def _robust_norm(x, p_lo: float = 1.0, p_hi: float = 99.0, eps: float = 1e-8):
+    """Percentile-clip ``x`` to ``[p_lo, p_hi]`` then min-max to ``[0, 1]``.
+
+    Replaces the fragile raw min-max (:func:`_minmax_norm`, outlier-dominated)
+    for the CP feature track. Device-agnostic — ``np.percentile``/``np.clip``
+    dispatch on numpy or cupy. The clipped numerator is bounded by the span, so
+    the ``+ eps`` denominator keeps a constant/near-constant image finite
+    (output → 0) instead of NaN/inf (mirrors :func:`_minmax_norm`'s eps guard).
+    """
+    lo = np.percentile(x, p_lo)
+    hi = np.percentile(x, p_hi)
+    x = np.clip(x, lo, hi)
+    return (x - lo) / ((hi - lo) + eps)
+
+
+# --- CP per-cell distribution-shape extra_properties --------------------------
+# skimage/cucim invoke an extra_property as ``func(regionmask, intensity_image)``
+# where ``intensity_image`` is the full bounding-box rectangle (background
+# included) and ``regionmask`` is the boolean footprint, so each callable must
+# reduce over the foreground ``intensity[regionmask]`` only. All ops are ``np.``
+# so they run unchanged on numpy (CPU) or cupy (cuCIM GPU); the output column
+# name is the function ``__name__``.
+def _make_percentile(q: int, name: str):
+    """Build a foreground-percentile extra_property named ``name``."""
+
+    def _prop(regionmask, intensity):
+        return np.percentile(intensity[regionmask], q)
+
+    _prop.__name__ = name
+    return _prop
+
+
+_p10 = _make_percentile(10, "p10")
+_p25 = _make_percentile(25, "p25")
+_p50 = _make_percentile(50, "p50")
+_p75 = _make_percentile(75, "p75")
+_p90 = _make_percentile(90, "p90")
+
+
+def _skewness(regionmask, intensity):
+    """Population skewness of the foreground intensities (NaN if std == 0)."""
+    vals = intensity[regionmask]
+    if vals.size < 2:
+        return np.nan
+    mean = vals.mean()
+    std = vals.std()
+    if float(std) == 0.0:
+        return np.nan
+    return ((vals - mean) ** 3).mean() / (std**3)
+
+
+def _kurtosis(regionmask, intensity):
+    """Excess (Fisher) kurtosis of the foreground intensities (NaN if std == 0)."""
+    vals = intensity[regionmask]
+    if vals.size < 2:
+        return np.nan
+    mean = vals.mean()
+    std = vals.std()
+    if float(std) == 0.0:
+        return np.nan
+    return ((vals - mean) ** 4).mean() / (std**4) - 3.0
+
+
+def _laplacian_var(regionmask, intensity):
+    """Variance of the Laplacian response inside the region (focus proxy)."""
+    return np.var(intensity[regionmask])
+
+
+# ``regionprops_table`` names each extra_property column after ``func.__name__``;
+# override the private def names so the emitted columns are the bare feature
+# names the assembly indexes (``base["skewness"]`` etc.), matching the
+# factory-built percentile props above.
+_skewness.__name__ = "skewness"
+_kurtosis.__name__ = "kurtosis"
+_laplacian_var.__name__ = "laplacian_var"
+
+_DISTRIBUTION_PROPS = (_p10, _p25, _p50, _p75, _p90, _skewness, _kurtosis)
+
+# CP column schema. ``iqr`` is derived from p25/p75 at assembly (no extra
+# regionprops pass). Gradient/Laplacian stats come from SEPARATE
+# regionprops_table calls whose dict keys (``intensity_mean``/``intensity_std``)
+# collide with the base intensity keys, so they are aliased on assembly to
+# ``gradient_mean``/``gradient_std``/``laplacian_var``.
+_CP_BASE_FEATURE_NAMES: tuple[str, ...] = (
     "intensity_mean",
-    "intensity_min",
     "intensity_std",
-    "moments_weighted",
-    "moments_weighted_central",
+    "intensity_min",
+    "intensity_max",
+    "p10",
+    "p25",
+    "p50",
+    "p75",
+    "p90",
+    "iqr",
+    "skewness",
+    "kurtosis",
+    "gradient_mean",
+    "gradient_std",
+    "laplacian_var",
 )
 
+# GLCM Haralick props (opt-in). ``_GLCM_PROP_KEYS`` are the keys returned by
+# ``cubic.feature.glcm_features``; the CP columns prefix them with ``glcm_``.
+_GLCM_PROP_KEYS: tuple[str, ...] = (
+    "contrast",
+    "dissimilarity",
+    "homogeneity",
+    "ASM",
+    "energy",
+    "correlation",
+    "entropy",
+)
+_CP_GLCM_FEATURE_NAMES: tuple[str, ...] = tuple(f"glcm_{key}" for key in _GLCM_PROP_KEYS)
 
-def _cp_raw_regionprops(img, cell_segmentation, spacing, use_gpu=True):
-    """Compute raw per-cell regionprops and return a (n_cells, n_props) matrix.
+# Version tag for the CP feature recipe. Recorded in the cache manifest's
+# ``cp_features`` identity dict; a bump (or a cp.glcm / cp.norm config change)
+# auto-invalidates stale CP caches via
+# :func:`pipeline_cache._auto_invalidate_on_artifact_param_mismatch`.
+CP_FEATURE_VERSION = "v2_dist_texture"
 
-    No normalization, no column-drop, no z-score — callers are responsible for
-    supplying already-normalized ``img`` (via :func:`_minmax_norm`). Columns
-    follow the order of :data:`PROPS_3D` as flattened by ``regionprops_table``.
 
-    When ``use_gpu=True`` and CUDA is available, inputs are uploaded via
-    ``ascupy`` so cubic's regionprops dispatches to cucim. ``use_gpu=False``
-    keeps everything on CPU for repro/debugging — matches the device gating
-    used elsewhere in :mod:`dynacell.evaluation.metrics`.
+def active_cp_feature_names(glcm_enabled: bool) -> tuple[str, ...]:
+    """Return the ordered CP column names for the active config.
+
+    The schema is GLCM-dependent: the base distribution/texture columns are
+    always emitted; the seven ``glcm_*`` columns are appended only when GLCM is
+    enabled. Used by both the matrix assembly and the
+    ``cp_selected_feature_mask.json`` sidecar so they never drift.
     """
-    use_cuda = bool(use_gpu and torch.cuda.is_available())
-    if use_cuda:
-        img = ascupy(img)
-        cell_segmentation = ascupy(cell_segmentation)
-    feats = regionprops_table(cell_segmentation, img, spacing=spacing, properties=list(PROPS_3D))
-    feats.pop("label", None)
-    if use_cuda:
-        return np.array([asnumpy(v) for v in feats.values()]).T
-    return np.array(list(feats.values())).T
+    if glcm_enabled:
+        return _CP_BASE_FEATURE_NAMES + _CP_GLCM_FEATURE_NAMES
+    return _CP_BASE_FEATURE_NAMES
 
 
 def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -329,14 +442,138 @@ def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np
     return pred[valid], target[valid]
 
 
-def cp_regionprops(image, cell_segmentation, spacing, use_gpu=True):
-    """Raw CP regionprops for one image and its cell segmentation.
+def _region_bbox_slices(labels, lab: int) -> tuple[slice, ...]:
+    """Return the bounding-box slice tuple for label ``lab`` in ``labels``."""
+    coords = asnumpy(np.argwhere(labels == lab))
+    mins = coords.min(axis=0)
+    maxs = coords.max(axis=0) + 1
+    return tuple(slice(int(a), int(b)) for a, b in zip(mins, maxs))
 
-    Returns an array of shape ``(n_cells, n_props_raw)``. Same body for GT
-    and prediction sides — *image* is min/max normalized before extraction.
+
+def _per_cell_glcm(img, cell_segmentation, glcm_cfg: dict) -> dict[str, np.ndarray]:
+    """Per-cell GLCM Haralick props on the robust-normalized image.
+
+    Each cell's native bbox crop is quantized over the SHARED image-wide range
+    ``(0.0, 1.0)`` — ``img`` is already robust-normalized to ``[0, 1]``, so a
+    fixed range makes texture comparable across cells and across GT/pred
+    (the per-image quantization contract). Returns one ``glcm_<prop>`` array
+    per :data:`_CP_GLCM_FEATURE_NAMES`, ordered by ascending label.
+    """
+    if glcm_features is None:
+        raise ImportError(
+            "cubic.feature.glcm_features is required for GLCM CP features; "
+            "install cubic>=0.7.0a12 (`uv sync --extra eval`)."
+        )
+    levels = int(glcm_cfg.get("levels", 32))
+    distances = tuple(glcm_cfg.get("distances", (1,)))
+    # A 2-D eval stores its plane as a singleton-Z volume ``(1, H, W)``. Squeeze
+    # that axis so GLCM runs in true 2-D (its correct dimensionality), instead
+    # of as a degenerate 3-D volume whose z-direction co-occurrence pairs are
+    # empty — empty pairs are tolerated by numpy ``bincount`` but raise on cupy.
+    squeeze_z = img.ndim == 3 and img.shape[0] == 1
+    cols: dict[str, list[float]] = {name: [] for name in _CP_GLCM_FEATURE_NAMES}
+    for lab in asnumpy(np.unique(cell_segmentation)):
+        if lab == 0:
+            continue
+        slices = _region_bbox_slices(cell_segmentation, int(lab))
+        crop = img[slices]
+        mask = cell_segmentation[slices] == int(lab)
+        if squeeze_z:
+            crop = crop[0]
+            mask = mask[0]
+        props = glcm_features(crop, mask=mask, levels=levels, distances=distances, value_range=(0.0, 1.0))
+        for key, name in zip(_GLCM_PROP_KEYS, _CP_GLCM_FEATURE_NAMES):
+            cols[name].append(float(props[key]))
+    return {name: np.asarray(cols[name], dtype=float) for name in _CP_GLCM_FEATURE_NAMES}
+
+
+def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+    """Per-cell conventional ("CP") image features for one image + segmentation.
+
+    Returns ``(n_cells, n_features)`` with columns ordered by
+    :func:`active_cp_feature_names`. Same body for GT and prediction. The image
+    is robust-normalized per image (percentile-clip + min-max) so intensity and
+    texture features stay comparable across the GT/pred intensity-range
+    mismatch. Weighted moments are dropped in favor of distribution-shape
+    descriptors + gradient/Laplacian texture, plus optional GLCM Haralick.
+
+    Parameters
+    ----------
+    image, cell_segmentation : np.ndarray
+        Single-timepoint intensity volume and its integer label image.
+    spacing : list[float]
+        Physical voxel spacing forwarded to ``regionprops_table``.
+    norm : dict, optional
+        ``{"p_lo", "p_hi"}`` percentile-clip bounds; defaults to ``(1, 99)``.
+    glcm_cfg : dict, optional
+        ``{"enabled", "levels", "distances"}``; GLCM columns are emitted only
+        when ``enabled`` is true.
+    use_gpu : bool
+        Upload inputs via ``ascupy`` (cuCIM dispatch) when CUDA is available.
     """
     _require_cubic()
-    return _cp_raw_regionprops(_minmax_norm(image), cell_segmentation, spacing, use_gpu=use_gpu)
+    norm = dict(norm) if norm is not None else {}
+    glcm_cfg = dict(glcm_cfg) if glcm_cfg is not None else {}
+    glcm_enabled = bool(glcm_cfg.get("enabled", False))
+    img = _robust_norm(image, norm.get("p_lo", 1.0), norm.get("p_hi", 99.0))
+
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    if use_cuda:
+        img = ascupy(img)
+        cell_segmentation = ascupy(cell_segmentation)
+
+    base = regionprops_table(
+        cell_segmentation,
+        img,
+        spacing=spacing,
+        properties=["intensity_mean", "intensity_std", "intensity_min", "intensity_max"],
+        extra_properties=_DISTRIBUTION_PROPS,
+    )
+    grad = regionprops_table(
+        cell_segmentation,
+        _cubic_filters.sobel(img),
+        spacing=spacing,
+        properties=["intensity_mean", "intensity_std"],
+    )
+    # An explicit base property is required: with empty ``properties`` cucim's
+    # regionprops_table does not surface the extra_property column (skimage does),
+    # so request ``label`` to keep the GPU and CPU paths consistent.
+    lapt = regionprops_table(
+        cell_segmentation,
+        _cubic_filters.laplace(img),
+        spacing=spacing,
+        properties=["label"],
+        extra_properties=(_laplacian_var,),
+    )
+
+    # Assemble by explicit name (never dict.values()): gradient/Laplacian keys
+    # collide with the base intensity keys, so alias them here.
+    columns: dict[str, Any] = {
+        "intensity_mean": base["intensity_mean"],
+        "intensity_std": base["intensity_std"],
+        "intensity_min": base["intensity_min"],
+        "intensity_max": base["intensity_max"],
+        "p10": base["p10"],
+        "p25": base["p25"],
+        "p50": base["p50"],
+        "p75": base["p75"],
+        "p90": base["p90"],
+        "iqr": base["p75"] - base["p25"],
+        "skewness": base["skewness"],
+        "kurtosis": base["kurtosis"],
+        "gradient_mean": grad["intensity_mean"],
+        "gradient_std": grad["intensity_std"],
+        "laplacian_var": lapt["laplacian_var"],
+    }
+    if use_cuda:
+        columns = {name: asnumpy(value) for name, value in columns.items()}
+    if glcm_enabled:
+        columns.update(_per_cell_glcm(img, cell_segmentation, glcm_cfg))
+
+    names = active_cp_feature_names(glcm_enabled)
+    if columns["intensity_mean"].shape[0] == 0:
+        return np.empty((0, len(names)), dtype=float)
+    return np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1)
 
 
 def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):
