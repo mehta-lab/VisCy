@@ -160,11 +160,14 @@ def run_trajectory(
     data_path: str,
     timepoint: int = 0,
     num_steps: int = 50,
+    z_slice: int | None = None,
     progress=None,
-) -> tuple[str, str]:
-    """Run CELL-Diff ODE denoising trajectory.
+) -> str:
+    """Run CELL-Diff ODE denoising trajectory; return gif_path saved in /tmp.
 
-    Returns (gif_path, grid_png_path) saved in /tmp.
+    z_slice is an absolute Z index into the full volume. It is mapped into the
+    model's cropped patch window; values outside the window are clamped.
+    Defaults to mid-Z of the patch when None.
     """
     import numpy as np
     import torch
@@ -191,7 +194,6 @@ def run_trajectory(
         _, pos = next(plate.positions())
         phase_ch  = pos.get_channel_index("Phase3D")
         phase_raw = np.array(pos.data[timepoint, phase_ch])   # (Z, Y, X)
-        fluor_raw = np.array(pos.data[timepoint, FLUOR_CH])   # (Z, Y, X)
         norm_meta = _read_norm_meta(pos)
 
     # MinMaxSampled(data_range='p1_p99'): clamp → 2*(x-p1)/(p99-p1+1e-8) - 1
@@ -205,7 +207,12 @@ def run_trajectory(
     z_total = phase_norm.shape[0]
     z_start = (z_total - patch_d) // 2
     phase_crop = phase_norm[z_start:z_start + patch_d, :patch_h, :patch_w]
-    fluor_crop = fluor_raw[z_start:z_start + patch_d, :patch_h, :patch_w]
+
+    # Resolve z_slice into patch-local index
+    if z_slice is None:
+        z_patch = patch_d // 2
+    else:
+        z_patch = max(0, min(z_slice - z_start, patch_d - 1))
 
     if progress is not None:
         progress(0.35, desc=f"Generating {num_steps}-step ODE trajectory...")
@@ -220,10 +227,7 @@ def run_trajectory(
     traj_np = trajectory[:, 0].cpu().numpy().astype(np.float32)
 
     if progress is not None:
-        progress(0.80, desc="Rendering outputs...")
-
-    def mid_z(vol: np.ndarray) -> np.ndarray:
-        return vol[vol.shape[0] // 2]
+        progress(0.80, desc="Rendering GIF...")
 
     def pnorm(img: np.ndarray) -> np.ndarray:
         lo_p, hi_p = np.percentile(img, [0.5, 99.5])
@@ -231,38 +235,26 @@ def run_trajectory(
             return np.zeros_like(img, dtype=np.float32)
         return np.clip((img - lo_p) / (hi_p - lo_p), 0, 1).astype(np.float32)
 
-    # Static key-frame grid: Phase | Exp | 6 evenly-spaced ODE steps
-    step_idx = np.linspace(0, num_steps - 1, 6, dtype=int)
-    panels = (
-        [("Phase", mid_z(phase_crop)), ("Exp", mid_z(fluor_crop))]
-        + [(f"Step {s}", mid_z(traj_np[s, 0])) for s in step_idx]
-    )
-    fig, axes = plt.subplots(1, len(panels), figsize=(2.8 * len(panels), 3.2))
-    for ax, (lbl, img) in zip(axes, panels):
-        ax.imshow(pnorm(img), cmap="gray", interpolation="nearest")
-        ax.set_title(lbl, fontsize=9)
-        ax.axis("off")
-    fig.suptitle(
-        f"CellDiff ODE trajectory — {ORGANELLE_LABELS[organelle]}  t={timepoint}  "
-        f"(T=0: noise → T={num_steps - 1}: prediction)",
-        fontsize=10, y=1.02,
-    )
-    fig.tight_layout()
-    grid_path = str(Path(tempfile.gettempdir()) / f"traj_grid_{uuid.uuid4().hex[:8]}.png")
-    fig.savefig(grid_path, dpi=120, bbox_inches="tight")
-    plt.close(fig)
-
-    # Animated GIF (≤50 subsampled frames)
+    # Animated GIF (≤50 subsampled frames) at the selected Z slice
     frame_idx = np.linspace(0, num_steps - 1, min(50, num_steps), dtype=int)
     fig_a, ax_a = plt.subplots(figsize=(4, 4))
     ax_a.axis("off")
-    im = ax_a.imshow(pnorm(mid_z(traj_np[0, 0])), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
-    ttl = ax_a.set_title("Step 0", fontsize=10)
+    im = ax_a.imshow(
+        pnorm(traj_np[0, 0, z_patch]), cmap="gray", vmin=0, vmax=1, interpolation="nearest"
+    )
+    ttl = ax_a.set_title(
+        f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_slice if z_slice is not None else z_start + z_patch}"
+        f"\nStep 0  (noise → prediction)",
+        fontsize=9,
+    )
 
     def update(frame: int):
         s = frame_idx[frame]
-        im.set_data(pnorm(mid_z(traj_np[s, 0])))
-        ttl.set_text(f"Step {s}")
+        im.set_data(pnorm(traj_np[s, 0, z_patch]))
+        ttl.set_text(
+            f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_slice if z_slice is not None else z_start + z_patch}"
+            f"\nStep {s}  (noise → prediction)"
+        )
         return im, ttl
 
     anim = FuncAnimation(fig_a, update, frames=len(frame_idx), interval=80, blit=True)
@@ -273,4 +265,4 @@ def run_trajectory(
     if progress is not None:
         progress(1.0, desc="Done.")
 
-    return gif_path, grid_path
+    return gif_path

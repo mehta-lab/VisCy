@@ -3,8 +3,8 @@
 Upload a zipped OME-Zarr HCS store once; then:
   Tab 1 — run CELL-Diff / FNet3D / VSCyto3D predictions on a selected timepoint,
            view a chosen Z slice, and see Spectral PCC metrics.
-  Tab 2 — visualize the CELL-Diff ODE denoising trajectory as an animated GIF
-           and a static key-frame grid.
+  Tab 2 — visualize the CELL-Diff ODE denoising trajectory as an animated GIF,
+           with a Phase | Exp reference panel at the selected timepoint and Z slice.
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ PHASE_CH = 0
 FLUOR_CH = 2
 _DEMO_REPO = "dihan-zheng/dynacell-demo-data"
 
-# Voxel spacing [Z, Y, X] in µm from OME-Zarr coordinate transforms
 SPACING = [0.174, 0.1494, 0.1494]
 SPECTRAL_KWARGS = dict(bin_delta=1.0, tail_fraction=0.2, apodization="tukey", nbins_low=3)
 
@@ -46,7 +45,6 @@ def extract_zarr_zip(zip_path: str) -> str:
     tmpdir = Path(tempfile.mkdtemp())
     with zipfile.ZipFile(zip_path, "r") as z:
         z.extractall(tmpdir)
-    # Find the HCS plate root: a directory whose .zattrs contains "plate"
     for candidate in sorted(tmpdir.rglob(".zattrs")):
         root = candidate.parent
         try:
@@ -55,7 +53,6 @@ def extract_zarr_zip(zip_path: str) -> str:
                 return str(root)
         except Exception:
             pass
-    # Fallback: first top-level directory
     for d in sorted(tmpdir.iterdir()):
         if d.is_dir():
             return str(d)
@@ -89,54 +86,88 @@ def compute_spectral_pcc(pred_zarr_path: str, gt_fluor_vol: np.ndarray) -> float
 
 
 # ---------------------------------------------------------------------------
-# Demo data loader
+# Data loaders
 # ---------------------------------------------------------------------------
 
+def _make_slider_updates(data_path: str, organelle: str) -> tuple:
+    """Read data shape and return slider updates + Phase|Exp figure."""
+    n_tp, n_z = get_data_shape(data_path)
+    z_mid = n_z // 2
+    fig = render_phase_exp(data_path, 0, z_mid, organelle)
+    return (
+        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),   # timepoint_slider
+        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid), # z_slice_slider
+        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),   # traj_timepoint
+        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid), # traj_z_slice
+        fig,                                                          # traj_static
+        n_tp, n_z,
+    )
+
+
 def load_demo_data(organelle: str, progress=gr.Progress()) -> tuple:
-    """Download the demo zarr from HF datasets, extract it, return updated UI state."""
+    """Download the demo zarr, extract it, and return updated UI state."""
     from huggingface_hub import hf_hub_download
     filename = f"{organelle}_mock.zarr.zip"
     progress(0.1, desc=f"Downloading {organelle} demo data...")
-    zip_path = hf_hub_download(
-        repo_id=_DEMO_REPO,
-        filename=filename,
-        repo_type="dataset",
-    )
+    zip_path = hf_hub_download(repo_id=_DEMO_REPO, filename=filename, repo_type="dataset")
     progress(0.8, desc="Extracting zarr...")
     data_path = extract_zarr_zip(zip_path)
-    n_tp, n_z = get_data_shape(data_path)
-    z_mid = n_z // 2
+    tp_sl, z_sl, traj_tp, traj_z, fig, n_tp, n_z = _make_slider_updates(data_path, organelle)
     progress(1.0, desc="Ready.")
     status = f"**Loaded:** {filename} (A549 cells, {n_tp} timepoints, {n_z} Z slices)"
-    return (
-        data_path,                                                          # zarr_state
-        status,                                                             # data_status
-        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),           # timepoint_slider
-        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid),        # z_slice_slider
-        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),           # traj_timepoint
-    )
+    return data_path, status, tp_sl, z_sl, traj_tp, traj_z, fig
 
 
-def on_upload(file) -> tuple:
-    """Handle zarr zip upload: extract, read shape, update sliders."""
+def on_upload(file, organelle: str) -> tuple:
+    """Handle zarr zip upload: extract, read shape, update UI state."""
     if file is None:
         raise gr.Error("No file uploaded.")
     zip_path = file if isinstance(file, str) else file.name
     data_path = extract_zarr_zip(zip_path)
-    n_tp, n_z = get_data_shape(data_path)
-    z_mid = n_z // 2
+    tp_sl, z_sl, traj_tp, traj_z, fig, n_tp, n_z = _make_slider_updates(data_path, organelle)
     status = f"**Uploaded:** {Path(zip_path).name} ({n_tp} timepoints, {n_z} Z slices)"
-    return (
-        data_path,
-        status,
-        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),
-        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid),
-        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),
-    )
+    return data_path, status, tp_sl, z_sl, traj_tp, traj_z, fig
 
 
 # ---------------------------------------------------------------------------
-# Tab 1: Virtual Staining — rendering
+# Tab 2: Phase | Exp reference panel
+# ---------------------------------------------------------------------------
+
+def render_phase_exp(
+    zarr_state: str | None,
+    timepoint: int,
+    z_slice: int,
+    organelle: str,
+) -> plt.Figure | None:
+    """Render Phase and Experimental fluorescence side by side at (timepoint, z_slice)."""
+    if zarr_state is None:
+        return None
+    with open_ome_zarr(zarr_state, mode="r") as plate:
+        _, pos = next(plate.positions())
+        n_tp = pos.data.shape[0]
+        n_z  = pos.data.shape[2]
+        tp = min(timepoint, n_tp - 1)
+        z  = min(z_slice,   n_z  - 1)
+        phase_img = np.array(pos.data[tp, PHASE_CH, z])
+        fluor_img = np.array(pos.data[tp, FLUOR_CH, z])
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.4, 3.2))
+    ax1.imshow(percentile_norm(phase_img), cmap="gray")
+    ax1.set_title("Phase", fontsize=10)
+    ax1.axis("off")
+    ax2.imshow(percentile_norm(fluor_img), cmap="gray")
+    ax2.set_title(f"Exp ({TARGET_CHANNELS[organelle]})", fontsize=10)
+    ax2.axis("off")
+    fig.suptitle(
+        f"{ORGANELLE_LABELS[organelle]}  |  t={tp}  |  z={z}",
+        fontsize=11, y=1.01,
+    )
+    fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Tab 1: Virtual Staining
 # ---------------------------------------------------------------------------
 
 def render_from_z(
@@ -144,7 +175,7 @@ def render_from_z(
     z_slice: int,
     zarr_state: str | None,
 ) -> plt.Figure | None:
-    """Re-render the comparison figure at a different Z slice without re-running prediction."""
+    """Re-render the prediction comparison at a different Z slice."""
     if pred_info is None or zarr_state is None:
         return None
 
@@ -202,10 +233,6 @@ def render_from_z(
     return fig
 
 
-# ---------------------------------------------------------------------------
-# Tab 1: Virtual Staining — prediction + initial render
-# ---------------------------------------------------------------------------
-
 def run_demo(
     zarr_zip,
     organelle: str,
@@ -251,24 +278,19 @@ def run_demo(
             print(f"Prediction failed for {model_key}: {e}")
 
     pred_info = {
-        "timepoint":       tp,
-        "organelle":       organelle,
+        "timepoint": tp, "organelle": organelle,
         "selected_models": selected_models,
-        "paths":           pred_paths,
-        "pccs":            pred_pccs,
-        "n_z":             n_z,
+        "paths": pred_paths, "pccs": pred_pccs, "n_z": n_z,
     }
 
     progress(0.80, desc="Rendering figure...")
     fig = render_from_z(pred_info, min(z_slice, n_z - 1), data_path)
 
-    metrics_rows: list[list] = []
-    for model_key in selected_models:
-        pcc = pred_pccs.get(model_key)
-        if pred_paths.get(model_key) is None:
-            metrics_rows.append([MODEL_LABELS[model_key], "failed"])
-        else:
-            metrics_rows.append([MODEL_LABELS[model_key], f"{pcc:.4f}" if pcc is not None else "N/A"])
+    metrics_rows = [
+        [MODEL_LABELS[m], "failed" if pred_paths.get(m) is None
+         else (f"{pred_pccs[m]:.4f}" if pred_pccs.get(m) is not None else "N/A")]
+        for m in selected_models
+    ]
 
     progress(1.0, desc="Done.")
     return fig, metrics_rows, data_path, pred_info
@@ -283,9 +305,10 @@ def run_trajectory_demo(
     organelle: str,
     timepoint: int,
     num_steps: int,
+    z_slice: int,
     zarr_state: str | None,
     progress=gr.Progress(),
-) -> tuple[str, str, str]:
+) -> tuple[str, str]:
     if zarr_zip is None and not zarr_state:
         raise gr.Error("Please load demo data or upload a zarr zip file.")
 
@@ -299,10 +322,8 @@ def run_trajectory_demo(
     progress(0.08, desc="Computing normalization statistics...")
     preprocess_zarr(data_path)
 
-    gif_path, grid_path = run_trajectory(
-        organelle, data_path, timepoint, num_steps, progress
-    )
-    return gif_path, grid_path, data_path
+    gif_path = run_trajectory(organelle, data_path, timepoint, num_steps, z_slice, progress)
+    return gif_path, data_path
 
 
 # ---------------------------------------------------------------------------
@@ -336,8 +357,9 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
 
     data_status = gr.Markdown("")
 
-    # ---- Tab 1: Virtual Staining -----------------------------------------
+    # ---- Tabs ------------------------------------------------------------
     with gr.Tabs():
+
         with gr.Tab("Virtual Staining"):
             with gr.Row():
                 model_selector = gr.CheckboxGroup(
@@ -349,12 +371,12 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
                 timepoint_slider = gr.Slider(
                     minimum=0, maximum=4, step=1, value=0,
                     label="Timepoint",
-                    info="Select after loading data — range updates to match your zarr.",
+                    info="Range updates after loading data.",
                 )
                 z_slice_slider = gr.Slider(
                     minimum=0, maximum=99, step=1, value=15,
                     label="Z slice",
-                    info="Select after loading data — range updates to match your zarr.",
+                    info="Range updates after loading data.",
                 )
             run_btn = gr.Button("Run Predictions", variant="primary")
             output_plot = gr.Plot(label="Predictions")
@@ -363,41 +385,50 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
                 label="Spectral PCC (volumetric, vs experimental fluorescence)",
             )
 
-        # ---- Tab 2: CellDiff Trajectory ----------------------------------
         with gr.Tab("CELL-Diff Trajectory"):
             gr.Markdown(
                 "Generate the CELL-Diff ODE denoising trajectory. "
-                "T=0 is pure Gaussian noise; T=N is the final predicted fluorescence."
+                "T=0 is pure Gaussian noise; T=N is the final predicted fluorescence. "
+                "The Phase | Exp panel updates live as you change the sliders."
             )
             with gr.Row():
                 traj_timepoint = gr.Slider(
                     minimum=0, maximum=4, step=1, value=0,
                     label="Timepoint",
-                    info="Select after loading data — range updates to match your zarr.",
+                    info="Range updates after loading data.",
+                )
+                traj_z_slice = gr.Slider(
+                    minimum=0, maximum=99, step=1, value=15,
+                    label="Z slice",
+                    info="Range updates after loading data.",
                 )
                 traj_num_steps = gr.Slider(
                     minimum=10, maximum=100, step=10, value=50,
                     label="ODE steps",
                 )
-            traj_btn  = gr.Button("Generate Trajectory", variant="primary")
-            with gr.Row():
-                traj_gif  = gr.Image(label="Animated trajectory (GIF)", type="filepath")
-                traj_grid = gr.Image(label="Key frames (Phase | Exp | 6 steps)", type="filepath")
+            traj_static = gr.Plot(label="Phase | Exp (reference)")
+            traj_btn    = gr.Button("Generate Trajectory", variant="primary")
+            traj_gif    = gr.Image(label="Animated trajectory (GIF)", type="filepath")
 
-    # ---- Event wiring (after all components are defined) -----------------
+    # ---- Event wiring ----------------------------------------------------
 
-    _slider_outputs = [zarr_state, data_status, timepoint_slider, z_slice_slider, traj_timepoint]
+    _data_outputs = [
+        zarr_state, data_status,
+        timepoint_slider, z_slice_slider,
+        traj_timepoint, traj_z_slice,
+        traj_static,
+    ]
 
     load_demo_btn.click(
         fn=load_demo_data,
         inputs=[organelle],
-        outputs=_slider_outputs,
+        outputs=_data_outputs,
     )
 
     zarr_upload.upload(
         fn=on_upload,
-        inputs=[zarr_upload],
-        outputs=_slider_outputs,
+        inputs=[zarr_upload, organelle],
+        outputs=_data_outputs,
     )
 
     run_btn.click(
@@ -412,10 +443,18 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
         outputs=[output_plot],
     )
 
+    # Phase | Exp panel updates on any slider or organelle change
+    for _trigger in (traj_timepoint, traj_z_slice, organelle):
+        _trigger.change(
+            fn=render_phase_exp,
+            inputs=[zarr_state, traj_timepoint, traj_z_slice, organelle],
+            outputs=[traj_static],
+        )
+
     traj_btn.click(
         fn=run_trajectory_demo,
-        inputs=[zarr_upload, organelle, traj_timepoint, traj_num_steps, zarr_state],
-        outputs=[traj_gif, traj_grid, zarr_state],
+        inputs=[zarr_upload, organelle, traj_timepoint, traj_num_steps, traj_z_slice, zarr_state],
+        outputs=[traj_gif, zarr_state],
     )
 
 if __name__ == "__main__":
