@@ -31,6 +31,8 @@ PHASE_CH = 0
 FLUOR_CH = 2
 _DEMO_REPO = "dihan-zheng/dynacell-demo-data"
 
+PATCH_D = 8  # fixed Z window used by all trajectory models
+
 SPACING = [0.174, 0.1494, 0.1494]
 SPECTRAL_KWARGS = dict(bin_delta=1.0, tail_fraction=0.2, apodization="tukey", nbins_low=3)
 
@@ -93,13 +95,12 @@ def _make_slider_updates(data_path: str, organelle: str) -> tuple:
     """Read data shape and return slider updates + Phase|Exp figure."""
     n_tp, n_z = get_data_shape(data_path)
     z_mid = n_z // 2
-    fig = render_phase_exp(data_path, 0, z_mid, organelle)
+    fig = render_phase_exp_traj(data_path, 0, PATCH_D // 2, organelle)
     return (
-        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),   # timepoint_slider
+        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),    # timepoint_slider
         gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid), # z_slice_slider
-        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),   # traj_timepoint
-        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid), # traj_z_slice
-        fig,                                                          # traj_static
+        gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0),    # traj_timepoint
+        fig,                                                           # traj_static
         n_tp, n_z,
     )
 
@@ -112,10 +113,10 @@ def load_demo_data(organelle: str, progress=gr.Progress()) -> tuple:
     zip_path = hf_hub_download(repo_id=_DEMO_REPO, filename=filename, repo_type="dataset")
     progress(0.8, desc="Extracting zarr...")
     data_path = extract_zarr_zip(zip_path)
-    tp_sl, z_sl, traj_tp, traj_z, fig, n_tp, n_z = _make_slider_updates(data_path, organelle)
+    tp_sl, z_sl, traj_tp, fig, n_tp, n_z = _make_slider_updates(data_path, organelle)
     progress(1.0, desc="Ready.")
     status = f"**Loaded:** {filename} (A549 cells, {n_tp} timepoints, {n_z} Z slices)"
-    return data_path, status, tp_sl, z_sl, traj_tp, traj_z, fig
+    return data_path, status, tp_sl, z_sl, traj_tp, fig
 
 
 def on_upload(file, organelle: str) -> tuple:
@@ -124,9 +125,9 @@ def on_upload(file, organelle: str) -> tuple:
         raise gr.Error("No file uploaded.")
     zip_path = file if isinstance(file, str) else file.name
     data_path = extract_zarr_zip(zip_path)
-    tp_sl, z_sl, traj_tp, traj_z, fig, n_tp, n_z = _make_slider_updates(data_path, organelle)
+    tp_sl, z_sl, traj_tp, fig, n_tp, n_z = _make_slider_updates(data_path, organelle)
     status = f"**Uploaded:** {Path(zip_path).name} ({n_tp} timepoints, {n_z} Z slices)"
-    return data_path, status, tp_sl, z_sl, traj_tp, traj_z, fig
+    return data_path, status, tp_sl, z_sl, traj_tp, fig
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +161,44 @@ def render_phase_exp(
     ax2.axis("off")
     fig.suptitle(
         f"{ORGANELLE_LABELS[organelle]}  |  t={tp}  |  z={z}",
+        fontsize=11, y=1.01,
+    )
+    fig.tight_layout()
+    return fig
+
+
+def render_phase_exp_traj(
+    zarr_state: str | None,
+    timepoint: int,
+    z_patch: int,
+    organelle: str,
+) -> plt.Figure | None:
+    """Phase | Exp panel for the trajectory tab.
+
+    z_patch is a patch-relative index (0 … PATCH_D-1); converted to the
+    absolute Z using z_start = (n_z - PATCH_D) // 2.
+    """
+    if zarr_state is None:
+        return None
+    with open_ome_zarr(zarr_state, mode="r") as plate:
+        _, pos = next(plate.positions())
+        n_tp = pos.data.shape[0]
+        n_z  = pos.data.shape[2]
+        tp      = min(timepoint, n_tp - 1)
+        z_start = (n_z - PATCH_D) // 2
+        z_abs   = z_start + max(0, min(z_patch, PATCH_D - 1))
+        phase_img = np.array(pos.data[tp, PHASE_CH, z_abs])
+        fluor_img = np.array(pos.data[tp, FLUOR_CH, z_abs])
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.4, 3.2))
+    ax1.imshow(percentile_norm(phase_img), cmap="gray")
+    ax1.set_title("Phase", fontsize=10)
+    ax1.axis("off")
+    ax2.imshow(percentile_norm(fluor_img), cmap="gray")
+    ax2.set_title(f"Exp ({TARGET_CHANNELS[organelle]})", fontsize=10)
+    ax2.axis("off")
+    fig.suptitle(
+        f"{ORGANELLE_LABELS[organelle]}  |  t={tp}  |  z={z_abs} (patch slice {z_patch})",
         fontsize=11, y=1.01,
     )
     fig.tight_layout()
@@ -398,9 +437,8 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
                     info="Range updates after loading data.",
                 )
                 traj_z_slice = gr.Slider(
-                    minimum=0, maximum=99, step=1, value=15,
-                    label="Z slice",
-                    info="Range updates after loading data.",
+                    minimum=0, maximum=PATCH_D - 1, step=1, value=PATCH_D // 2,
+                    label=f"Z slice (0–{PATCH_D - 1}, middle {PATCH_D} of full volume)",
                 )
                 traj_num_steps = gr.Slider(
                     minimum=10, maximum=100, step=10, value=50,
@@ -415,7 +453,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
     _data_outputs = [
         zarr_state, data_status,
         timepoint_slider, z_slice_slider,
-        traj_timepoint, traj_z_slice,
+        traj_timepoint,
         traj_static,
     ]
 
@@ -446,7 +484,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
     # Phase | Exp panel updates on any slider or organelle change
     for _trigger in (traj_timepoint, traj_z_slice, organelle):
         _trigger.change(
-            fn=render_phase_exp,
+            fn=render_phase_exp_traj,
             inputs=[zarr_state, traj_timepoint, traj_z_slice, organelle],
             outputs=[traj_static],
         )
