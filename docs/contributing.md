@@ -147,17 +147,23 @@ Authoring notes:
 ## Release a package
 
 Publishing a GitHub Release ships that package to PyPI — no tokens, no manual upload,
-no version bump in code. Versions come from the tag via
+no version bump in code. Both the workspace libraries and the applications release this
+way. Versions come from the tag via
 [`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning); the tag
 **prefix** picks the package, and each package versions independently.
 
 | Package | Tag prefix | Example |
 |---|---|---|
+| `viscy` (umbrella) | none | `v0.6.0` |
 | `viscy-data` | `viscy-data-` | `viscy-data-v0.2.1` |
 | `viscy-models` | `viscy-models-` | `viscy-models-v0.4.0` |
 | `viscy-transforms` | `viscy-transforms-` | `viscy-transforms-v0.1.3` |
 | `viscy-utils` | `viscy-utils-` | `viscy-utils-v0.3.0` |
-| `viscy` (umbrella) | none | `v0.6.0` |
+| `airtable-utils` | `airtable-utils-` | `airtable-utils-v0.1.0` |
+| `cytoland` | `cytoland-` | `cytoland-v0.3.0` |
+| `dynacell` | `dynacell-` | `dynacell-v0.2.0` |
+| `dynaclr` | `dynaclr-` | `dynaclr-v0.1.0` |
+| `viscy-qc` | `viscy-qc-` | `viscy-qc-v0.1.0` |
 
 Create the Release on the tag:
 

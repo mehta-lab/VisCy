@@ -3,7 +3,7 @@ build-backend = "hatchling.build"
 requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
-name = "qc"
+name = "viscy-qc"
 description = "Quality control metrics for OME-Zarr microscopy datasets"
 readme = "README.md"
 keywords = [ "microscopy", "quality control", "zarr" ]
@@ -54,5 +54,5 @@ waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main
 [tool.uv-dynamic-versioning]
 vcs = "git"
 style = "pep440"
-pattern-prefix = "qc-"
+pattern-prefix = "viscy-qc-"
 fallback-version = "0.0.0"

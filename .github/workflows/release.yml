@@ -4,10 +4,15 @@ name: Release
 # The tag on the Release selects the package. Each package is versioned independently
 # The prefix isolates its tag history, so versions need not match across packages:
 #   v2.1.0                    -> viscy            (umbrella)
-#   viscy-data-v0.5.3         -> viscy-data
+#   viscy-data-v0.5.3         -> viscy-data       (library)
 #   viscy-models-v1.4.0       -> viscy-models
 #   viscy-transforms-v0.9.1   -> viscy-transforms
 #   viscy-utils-v0.2.7        -> viscy-utils
+#   airtable-utils-v0.1.0     -> airtable-utils   (application)
+#   cytoland-v0.3.0           -> cytoland
+#   dynacell-v0.2.0           -> dynacell
+#   dynaclr-v0.1.0            -> dynaclr
+#   viscy-qc-v0.1.0           -> viscy-qc
 # Setup (PyPI trusted publishers + GitHub environments): see .github/RELEASE_SETUP.md
 # Design rationale: see .github/RELEASE_CI_PLAN.md
 
@@ -31,28 +36,13 @@ jobs:
       package: ${{ steps.route.outputs.package }}
       version: ${{ steps.route.outputs.version }}
     steps:
+      - name: Check out (for the routing script)
+        uses: actions/checkout@v6
       - name: Route tag to package
         id: route
         env:
           TAG: ${{ github.event.release.tag_name }}   # untrusted input via env, never inline in run:
-        run: |
-          set -euo pipefail
-          # Every arm is anchored on a digit after `v`. A greedy `v*` would swallow
-          # `viscy-…` and a subpackage tag missing its `v` (e.g. viscy-data-0.5.0)
-          # into the umbrella with a garbage version. Specific arms first.
-          case "$TAG" in
-            viscy-data-v[0-9]*)       package=viscy-data;       version=${TAG#viscy-data-v} ;;
-            viscy-models-v[0-9]*)     package=viscy-models;     version=${TAG#viscy-models-v} ;;
-            viscy-transforms-v[0-9]*) package=viscy-transforms; version=${TAG#viscy-transforms-v} ;;
-            viscy-utils-v[0-9]*)      package=viscy-utils;      version=${TAG#viscy-utils-v} ;;
-            v[0-9]*)                  package=viscy;            version=${TAG#v} ;;
-            *) echo "::error::Unrecognized release tag '$TAG' (expected '<pkg>-vX.Y.Z' or 'vX.Y.Z')"; exit 1 ;;
-          esac
-          echo "Routed $TAG -> package=$package version=$version"
-          {
-            echo "package=$package"
-            echo "version=$version"
-          } >>"$GITHUB_OUTPUT"
+        run: bash .github/scripts/route-tag.sh "$TAG" >> "$GITHUB_OUTPUT"
 
   release:
     needs: parse
