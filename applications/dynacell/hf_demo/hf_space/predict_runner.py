@@ -208,11 +208,8 @@ def run_trajectory(
     z_start = (z_total - patch_d) // 2
     phase_crop = phase_norm[z_start:z_start + patch_d, :patch_h, :patch_w]
 
-    # Resolve z_slice into patch-local index
-    if z_slice is None:
-        z_patch = patch_d // 2
-    else:
-        z_patch = max(0, min(z_slice - z_start, patch_d - 1))
+    # z_slice is already a patch-relative index (0 … patch_d-1)
+    z_patch = patch_d // 2 if z_slice is None else max(0, min(z_slice, patch_d - 1))
 
     if progress is not None:
         progress(0.35, desc=f"Generating {num_steps}-step ODE trajectory...")
@@ -239,12 +236,12 @@ def run_trajectory(
     frame_idx = np.linspace(0, num_steps - 1, min(50, num_steps), dtype=int)
     fig_a, ax_a = plt.subplots(figsize=(4, 4))
     ax_a.axis("off")
+    z_abs = z_start + z_patch  # absolute Z index in the full volume
     im = ax_a.imshow(
         pnorm(traj_np[0, 0, z_patch]), cmap="gray", vmin=0, vmax=1, interpolation="nearest"
     )
     ttl = ax_a.set_title(
-        f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_slice if z_slice is not None else z_start + z_patch}"
-        f"\nStep 0  (noise → prediction)",
+        f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_abs}\nStep 0  (noise → prediction)",
         fontsize=9,
     )
 
@@ -252,8 +249,7 @@ def run_trajectory(
         s = frame_idx[frame]
         im.set_data(pnorm(traj_np[s, 0, z_patch]))
         ttl.set_text(
-            f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_slice if z_slice is not None else z_start + z_patch}"
-            f"\nStep {s}  (noise → prediction)"
+            f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_abs}\nStep {s}  (noise → prediction)"
         )
         return im, ttl
 
