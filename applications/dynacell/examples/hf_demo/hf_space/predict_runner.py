@@ -155,24 +155,20 @@ def run_prediction(model: str, organelle: str, data_path: str, timepoint: int) -
     return output_store
 
 
-def run_trajectory(
+def compute_trajectory(
     organelle: str,
     data_path: str,
     timepoint: int = 0,
     num_steps: int = 50,
-    z_slice: int | None = None,
     progress=None,
-) -> str:
-    """Run CELL-Diff ODE denoising trajectory; return gif_path saved in /tmp.
+) -> dict:
+    """Run the CELL-Diff ODE; save trajectory to /tmp as .npy; return metadata dict.
 
-    z_slice is an absolute Z index into the full volume. It is mapped into the
-    model's cropped patch window; values outside the window are clamped.
-    Defaults to mid-Z of the patch when None.
+    The returned dict contains everything needed to call render_trajectory_gif
+    without re-running the ODE.
     """
     import numpy as np
     import torch
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, PillowWriter
     from iohub.ngff import open_ome_zarr
     from dynacell.engine import DynacellFlowMatching
     from viscy_data._utils import _read_norm_meta
@@ -193,38 +189,66 @@ def run_trajectory(
     with open_ome_zarr(data_path, mode="r") as plate:
         _, pos = next(plate.positions())
         phase_ch  = pos.get_channel_index("Phase3D")
-        phase_raw = np.array(pos.data[timepoint, phase_ch])   # (Z, Y, X)
+        phase_raw = np.array(pos.data[timepoint, phase_ch])
         norm_meta = _read_norm_meta(pos)
 
-    # MinMaxSampled(data_range='p1_p99'): clamp → 2*(x-p1)/(p99-p1+1e-8) - 1
     tp_stats = norm_meta["Phase3D"]["timepoint_statistics"][str(timepoint)]
     lo = tp_stats["p1"].item()
     hi = tp_stats["p99"].item()
     phase_norm = np.clip(phase_raw.astype(np.float32), lo, hi)
     phase_norm = 2.0 * (phase_norm - lo) / (hi - lo + 1e-8) - 1.0
 
-    # Center-crop depth dimension
     z_total = phase_norm.shape[0]
     z_start = (z_total - patch_d) // 2
     phase_crop = phase_norm[z_start:z_start + patch_d, :patch_h, :patch_w]
-
-    # z_slice is already a patch-relative index (0 … patch_d-1)
-    z_patch = patch_d // 2 if z_slice is None else max(0, min(z_slice, patch_d - 1))
 
     if progress is not None:
         progress(0.35, desc=f"Generating {num_steps}-step ODE trajectory...")
     phase_tensor = (
         torch.from_numpy(phase_crop).float()
-        .unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
+        .unsqueeze(0).unsqueeze(0)
         .to(device)
     )
     with torch.no_grad():
         trajectory = model.model.generate_trajectory(phase_tensor, num_steps=num_steps)
-    # (num_steps, B=1, C, D, H, W) → (num_steps, C, D, H, W)
-    traj_np = trajectory[:, 0].cpu().numpy().astype(np.float32)
+    traj_np = trajectory[:, 0].cpu().numpy().astype(np.float32)  # (num_steps, 1, D, H, W)
 
     if progress is not None:
-        progress(0.80, desc="Rendering GIF...")
+        progress(0.90, desc="Saving trajectory to disk...")
+    traj_path = str(Path(tempfile.gettempdir()) / f"traj_np_{uuid.uuid4().hex[:8]}.npy")
+    np.save(traj_path, traj_np)
+
+    if progress is not None:
+        progress(1.0, desc="Done.")
+
+    return {
+        "traj_path": traj_path,
+        "z_start": z_start,
+        "patch_d": patch_d,
+        "organelle": organelle,
+        "timepoint": timepoint,
+        "num_steps": num_steps,
+    }
+
+
+def render_trajectory_gif(traj_info: dict, z_patch: int) -> str:
+    """Render a GIF from a cached trajectory at the given patch-relative Z slice.
+
+    Fast — only loads the saved .npy and runs matplotlib; does not re-run the ODE.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation, PillowWriter
+
+    traj_np   = np.load(traj_info["traj_path"])
+    z_start   = traj_info["z_start"]
+    patch_d   = traj_info["patch_d"]
+    organelle = traj_info["organelle"]
+    timepoint = traj_info["timepoint"]
+    num_steps = traj_info["num_steps"]
+
+    z_patch = max(0, min(z_patch, patch_d - 1))
+    z_abs   = z_start + z_patch
 
     def pnorm(img: np.ndarray) -> np.ndarray:
         lo_p, hi_p = np.percentile(img, [0.5, 99.5])
@@ -232,11 +256,9 @@ def run_trajectory(
             return np.zeros_like(img, dtype=np.float32)
         return np.clip((img - lo_p) / (hi_p - lo_p), 0, 1).astype(np.float32)
 
-    # Animated GIF (≤50 subsampled frames) at the selected Z slice
     frame_idx = np.linspace(0, num_steps - 1, min(50, num_steps), dtype=int)
     fig_a, ax_a = plt.subplots(figsize=(4, 4))
     ax_a.axis("off")
-    z_abs = z_start + z_patch  # absolute Z index in the full volume
     im = ax_a.imshow(
         pnorm(traj_np[0, 0, z_patch]), cmap="gray", vmin=0, vmax=1, interpolation="nearest"
     )
@@ -257,8 +279,4 @@ def run_trajectory(
     gif_path = str(Path(tempfile.gettempdir()) / f"traj_{uuid.uuid4().hex[:8]}.gif")
     anim.save(gif_path, writer=PillowWriter(fps=12))
     plt.close(fig_a)
-
-    if progress is not None:
-        progress(1.0, desc="Done.")
-
     return gif_path

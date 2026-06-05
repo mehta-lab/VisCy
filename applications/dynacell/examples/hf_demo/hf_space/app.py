@@ -5,6 +5,7 @@ Upload a zipped OME-Zarr HCS store once; then:
            view a chosen Z slice, and see Spectral PCC metrics.
   Tab 2 — visualize the CELL-Diff ODE denoising trajectory as an animated GIF,
            with a Phase | Exp reference panel at the selected timepoint and Z slice.
+           Changing the Z-slice slider re-renders the GIF instantly from cached data.
 """
 
 from __future__ import annotations
@@ -20,7 +21,11 @@ import numpy as np
 from iohub.ngff import open_ome_zarr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from predict_runner import ORGANELLE_LABELS, TARGET_CHANNELS, preprocess_zarr, run_prediction, run_trajectory
+from predict_runner import (
+    ORGANELLE_LABELS, TARGET_CHANNELS,
+    preprocess_zarr, run_prediction,
+    compute_trajectory, render_trajectory_gif,
+)
 
 from cubic.metrics.bandlimited import spectral_pcc
 
@@ -347,7 +352,8 @@ def run_trajectory_demo(
     z_slice: int,
     zarr_state: str | None,
     progress=gr.Progress(),
-) -> tuple[str, str]:
+) -> tuple[str, str, dict]:
+    """Run ODE trajectory, render GIF, cache trajectory data for Z-slice re-renders."""
     if zarr_zip is None and not zarr_state:
         raise gr.Error("Please load demo data or upload a zarr zip file.")
 
@@ -361,8 +367,16 @@ def run_trajectory_demo(
     progress(0.08, desc="Computing normalization statistics...")
     preprocess_zarr(data_path)
 
-    gif_path = run_trajectory(organelle, data_path, timepoint, num_steps, z_slice, progress)
-    return gif_path, data_path
+    traj_info = compute_trajectory(organelle, data_path, timepoint, num_steps, progress)
+    gif_path  = render_trajectory_gif(traj_info, z_slice)
+    return gif_path, data_path, traj_info
+
+
+def rerender_gif(traj_info: dict | None, z_slice: int) -> str | None:
+    """Re-render the trajectory GIF at a new Z slice without re-running the ODE."""
+    if traj_info is None:
+        return None
+    return render_trajectory_gif(traj_info, z_slice)
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +393,7 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
 
     zarr_state      = gr.State(value=None)
     pred_info_state = gr.State(value=None)
+    traj_info_state = gr.State(value=None)
 
     # ---- Data source row -------------------------------------------------
     with gr.Row():
@@ -428,7 +443,8 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
             gr.Markdown(
                 "Generate the CELL-Diff ODE denoising trajectory. "
                 "T=0 is pure Gaussian noise; T=N is the final predicted fluorescence. "
-                "The Phase | Exp panel updates live as you change the sliders."
+                "After generating, change **Z slice** to instantly re-render the GIF "
+                "at a different slice without re-running the ODE."
             )
             with gr.Row():
                 traj_timepoint = gr.Slider(
@@ -492,7 +508,14 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
     traj_btn.click(
         fn=run_trajectory_demo,
         inputs=[zarr_upload, organelle, traj_timepoint, traj_num_steps, traj_z_slice, zarr_state],
-        outputs=[traj_gif, zarr_state],
+        outputs=[traj_gif, zarr_state, traj_info_state],
+    )
+
+    # Re-render GIF from cached trajectory when Z slice changes (no ODE re-run)
+    traj_z_slice.change(
+        fn=rerender_gif,
+        inputs=[traj_info_state, traj_z_slice],
+        outputs=[traj_gif],
     )
 
 if __name__ == "__main__":
