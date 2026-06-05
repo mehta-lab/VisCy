@@ -794,7 +794,7 @@ def _worker_setup(config: DictConfig) -> None:
     )
 
 
-def _separate_nuclei_path(config) -> str | None:
+def _separate_nuclei_path(config: DictConfig) -> str | None:
     """GT-nuclei store path when it is a *separate* store from the GT membrane plate.
 
     Returns ``io.nuclei_gt_path`` when set and distinct from ``io.gt_path`` (the A549
