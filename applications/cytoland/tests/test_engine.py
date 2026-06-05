@@ -252,7 +252,7 @@ def test_predict_sliding_windows_rotation_tta_nonsquare(yx):
 
 
 @pytest.mark.parametrize("yx", [(64, 64), (64, 48), (48, 64)])
-@pytest.mark.parametrize("tta_type", ["mean", "median"])
+@pytest.mark.parametrize("tta_type", ["mean", "median", "product"])
 def test_vsunet_perform_test_time_augmentations_nonsquare(yx, tta_type):
     """Verify VSUNet rotation TTA (the ``viscy predict`` path) handles non-square FOVs.
 
