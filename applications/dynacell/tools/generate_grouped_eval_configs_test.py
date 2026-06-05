@@ -191,6 +191,48 @@ def test_parse_zarr_name_legacy_gene_mismatch_raises() -> None:
         parse_zarr_name(fake_root / "a549/predictions/nucl_fnet3d_paper__caax_mock.zarr", dynacell_root=fake_root)
 
 
+# ---------------------------------------------------------------------------
+# Registry drift guard (this module's _CODE_TO_PAPER vs the runtime resolver)
+# ---------------------------------------------------------------------------
+
+
+def test_paper_key_maps_agree_on_overlap() -> None:
+    """The campaign map and the runtime resolver must never assign DIFFERENT paper keys.
+
+    ``save_paths.PAPER_KEY`` (single-condition submitter + paper aggregation) and
+    this module's ``_CODE_TO_PAPER`` (grouped campaign) are separate maps with
+    intentionally different *membership* — but where they overlap they must agree,
+    or eval outputs land in mismatched dirs. Only documented differences are waived.
+    """
+    from generate_grouped_eval_configs import _CODE_TO_PAPER
+
+    from dynacell.evaluation.save_paths import PAPER_KEY
+
+    # Documented intentional difference: the grouped campaign keeps `celldiff`
+    # literal; the runtime resolver collapses it to `celldiff_iterative`.
+    waivers = {"celldiff"}
+    disagreements = {
+        m: (PAPER_KEY[m], _CODE_TO_PAPER[m])
+        for m in set(PAPER_KEY) & set(_CODE_TO_PAPER)
+        if m not in waivers and PAPER_KEY[m] != _CODE_TO_PAPER[m]
+    }
+    assert not disagreements, f"paper-key drift between save_paths.PAPER_KEY and _CODE_TO_PAPER: {disagreements}"
+
+
+def test_deterministic_models_known_to_runtime_resolver() -> None:
+    """Every deterministic campaign model must also be registered in the runtime resolver.
+
+    Catches "added a model to the generator parser but forgot ``save_paths.PAPER_KEY``"
+    — the asymmetry that let pix2pix3d slip the instance-AP track.
+    """
+    from generate_grouped_eval_configs import _DETERMINISTIC_MODELS
+
+    from dynacell.evaluation.save_paths import PAPER_KEY
+
+    missing = [m for m in _DETERMINISTIC_MODELS if m not in PAPER_KEY]
+    assert not missing, f"deterministic campaign models absent from save_paths.PAPER_KEY: {missing}"
+
+
 @pytest.mark.parametrize(
     "name, expect",
     [
