@@ -314,10 +314,15 @@ def test_pred_cache_dir_a549() -> None:
 
 
 def test_pred_cache_dir_ipsc() -> None:
-    """For iPSC, pred_cache_dir condition segment is literal ``ipsc`` (one test set)."""
+    """For iPSC, the pred_cache_dir condition segment is ``<organelle>_ipsc``.
+
+    iPSC has no plate condition, so the segment is namespaced by the logical
+    organelle (a bare ``ipsc`` would collapse all four organelles onto one dir
+    and race the manifest's ``pred.plate_path``).
+    """
     parsed = _make("ipsc/predictions/tomm20_fnet3d_paper.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/ipsc")
+    assert pc == Path("/X/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/mitochondria_ipsc")
 
 
 # ---------------------------------------------------------------------------
