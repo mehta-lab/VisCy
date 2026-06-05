@@ -26,6 +26,7 @@ from dynacell.evaluation.metrics import (
     _skewness,
     active_cp_feature_names,
     cp_regionprops,
+    per_cell_similarity,
 )
 
 # Skip the cubic-wrapper integration when the installed cubic predates the
@@ -131,6 +132,40 @@ def test_active_cp_feature_names_schema() -> None:
     assert len(set(full)) == len(full)
     assert {"gradient_mean", "gradient_std", "laplacian_var"} <= set(base)
     assert all(name.startswith("glcm_") for name in _CP_GLCM_FEATURE_NAMES)
+
+
+# --- per-cell similarity ------------------------------------------------------
+def test_per_cell_similarity_pcc_affine_invariant() -> None:
+    """PCC is ~1 for an affine-rescaled prediction; reduced over cells."""
+    labels = np.zeros((1, 8, 8), dtype=np.int32)
+    labels[0, 1:4, 1:4] = 1
+    labels[0, 4:7, 4:7] = 2
+    target = np.zeros((1, 8, 8), dtype=np.float32)
+    grad = np.arange(9.0).reshape(3, 3)
+    target[0, 1:4, 1:4] = grad
+    target[0, 4:7, 4:7] = grad.T
+    predict = 2.5 * target + 3.0  # affine: PCC must stay ~1
+    out = per_cell_similarity(target[None][0], predict[None][0], labels, metrics=("pcc",), use_gpu=False)
+    assert out["PerCell_PCC_mean"] == pytest.approx(1.0, abs=1e-5)
+    assert out["PerCell_PCC_median"] == pytest.approx(1.0, abs=1e-5)
+
+
+def test_per_cell_similarity_nan_safe_and_empty() -> None:
+    """Constant cells (NaN PCC) are skipped in the reduction; empty → NaN."""
+    labels = np.zeros((1, 6, 6), dtype=np.int32)
+    labels[0, 1:3, 1:3] = 1  # constant cell → PCC NaN
+    labels[0, 3:5, 3:5] = 2
+    target = np.zeros((1, 6, 6), dtype=np.float32)
+    target[0, 3:5, 3:5] = np.array([[1.0, 2.0], [3.0, 4.0]])
+    predict = target.copy()
+    out = per_cell_similarity(target, predict, labels, metrics=("pcc",), use_gpu=False)
+    # cell 2 is a perfect match → ~1; cell 1 is NaN and dropped by the reduce
+    assert out["PerCell_PCC_mean"] == pytest.approx(1.0, abs=1e-5)
+
+    empty = np.zeros((1, 4, 4), dtype=np.int32)
+    out_empty = per_cell_similarity(target, predict, empty, metrics=("pcc",), use_gpu=False)
+    assert np.isnan(out_empty["PerCell_PCC_mean"])
+    assert np.isnan(out_empty["PerCell_PCC_median"])
 
 
 # --- GLCM gating --------------------------------------------------------------

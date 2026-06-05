@@ -40,6 +40,7 @@ from dynacell.evaluation.metrics import (
     evaluate_segmentations,
     features_from_crops,
     fit_microssim,
+    per_cell_similarity,
     score_microssim,
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
@@ -464,6 +465,9 @@ def _process_one_fov(
     # run CPU-only, so cross-worker fcntl serialization would just add
     # latency for nothing.
     use_gpu = bool(getattr(config, "use_gpu", True))
+    compute_cell_similarity = bool(OmegaConf.select(config, "compute_cell_similarity", default=False))
+    cell_sim_metrics = tuple(OmegaConf.select(config, "cell_similarity.metrics", default=["pcc"]))
+    cell_sim_reduce = tuple(OmegaConf.select(config, "cell_similarity.reduce", default=["mean", "median"]))
 
     if predict_cached is not None and target_cached is not None:
         # Reuse arrays already read by _calibrate_microssim (serial mode opt-in
@@ -623,9 +627,22 @@ def _process_one_fov(
                 spectral_pcc_kwargs=config.pixel_metrics.spectral_pcc,
                 use_gpu=use_gpu,
             )
+        pixel_row = {**data_info, **pixel_metrics}
+        if compute_cell_similarity and cell_segmentation is not None:
+            with region_timer("cell_similarity", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
+                pixel_row.update(
+                    per_cell_similarity(
+                        predict[t],
+                        target[t],
+                        cell_segmentation[t],
+                        metrics=cell_sim_metrics,
+                        reduce=cell_sim_reduce,
+                        use_gpu=use_gpu,
+                    )
+                )
         if config.compute_microssim:
             microssim_data.append({"target": target[t], "predict": predict[t]})
-        fov_pixel_metrics.append({**data_info, **pixel_metrics})
+        fov_pixel_metrics.append(pixel_row)
 
         with region_timer("mask_metrics", pos_name_pred, t):
             if instance_mode:
@@ -949,8 +966,13 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.compute_feature_metrics and io_config.cell_segmentation_path is None:
-        raise ValueError("io.cell_segmentation_path is required when compute_feature_metrics=true")
+    needs_segmentation = config.compute_feature_metrics or bool(
+        OmegaConf.select(config, "compute_cell_similarity", default=False)
+    )
+    if needs_segmentation and io_config.cell_segmentation_path is None:
+        raise ValueError(
+            "io.cell_segmentation_path is required when compute_feature_metrics=true or compute_cell_similarity=true"
+        )
 
     with region_timer("parent_load_models", "<parent>"):
         if models is None:
@@ -1419,6 +1441,12 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     if mask_ok and bool(getattr(config, "compute_instance_ap", False)):
         rows = np.load(mask_path, allow_pickle=True).tolist()
         if not rows or "mAP" not in rows[0] or "instance_dice" not in rows[0]:
+            return False
+    # Same guard for per-cell similarity: a prior run without it must not let
+    # its PerCell-less pixel cache suppress the newly-requested columns.
+    if pixel_ok and bool(OmegaConf.select(config, "compute_cell_similarity", default=False)):
+        pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
+        if not pixel_rows or not any(str(k).startswith("PerCell_") for k in pixel_rows[0]):
             return False
     return pixel_ok and mask_ok and feature_ok
 

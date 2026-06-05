@@ -576,6 +576,78 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     return np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1)
 
 
+def _cell_ssim(gt_crop, pred_crop, mask, *, min_size: int = 7) -> float:
+    """2-D scale-invariant masked SSIM for one cell crop (NaN if too small).
+
+    3-D crops are max-projected to 2-D first; cells smaller than the SSIM
+    window in either spatial dim score NaN rather than raising.
+    """
+    if gt_crop.ndim == 3:
+        gt2d = np.max(gt_crop, axis=0)
+        pred2d = np.max(pred_crop, axis=0)
+        mask2d = np.any(mask, axis=0)
+    else:
+        gt2d, pred2d, mask2d = gt_crop, pred_crop, mask
+    if min(gt2d.shape[-2:]) < min_size:
+        return float("nan")
+    return float(cubic_ssim(gt2d, pred2d, win_size=min_size, mask=mask2d, scale_invariant=True))
+
+
+def per_cell_similarity(
+    predict_t,
+    target_t,
+    cell_segmentation_t,
+    *,
+    metrics: tuple[str, ...] = ("pcc",),
+    reduce: tuple[str, ...] = ("mean", "median"),
+    use_gpu: bool = True,
+) -> dict[str, float]:
+    """Per-cell paired GT-vs-pred image similarity, reduced over cells.
+
+    Crops each cell's native bbox from GT and prediction, scores a paired,
+    scale-invariant similarity inside the mask (``pcc`` is affine-invariant and
+    mask-aware; optional ``ssim`` is 2-D scale-invariant with a size guard), and
+    NaN-reduces over cells. Returns ``{f"PerCell_{METRIC}_{reduce}": value}``.
+    Unlike the CP feature vector this is a *paired* metric (one scalar per
+    cell), aggregated like the pixel metrics — it cannot feed FID/KID.
+    """
+    _require_cubic()
+    use_cuda = bool(use_gpu and torch.cuda.is_available())
+    to_xp = ascupy if use_cuda else asnumpy
+    pred = to_xp(predict_t)
+    tgt = to_xp(target_t)
+    lab = to_xp(cell_segmentation_t)
+
+    per_metric: dict[str, list[float]] = {m: [] for m in metrics}
+    for lab_id in asnumpy(np.unique(lab)):
+        if lab_id == 0:
+            continue
+        slices = _region_bbox_slices(lab, int(lab_id))
+        mask = lab[slices] == int(lab_id)
+        gt_crop = tgt[slices]
+        pred_crop = pred[slices]
+        if "pcc" in metrics:
+            per_metric["pcc"].append(float(pcc(gt_crop, pred_crop, mask=mask)))
+        if "ssim" in metrics:
+            per_metric["ssim"].append(_cell_ssim(gt_crop, pred_crop, mask))
+
+    out: dict[str, float] = {}
+    for m in metrics:
+        vals = np.asarray(per_metric[m], dtype=float)
+        finite = vals[np.isfinite(vals)]
+        for r in reduce:
+            key = f"PerCell_{m.upper()}_{r}"
+            if finite.size == 0:
+                out[key] = float("nan")
+            elif r == "mean":
+                out[key] = float(finite.mean())
+            elif r == "median":
+                out[key] = float(np.median(finite))
+            else:
+                raise ValueError(f"unknown reduce {r!r}; use 'mean' or 'median'")
+    return out
+
+
 def _build_per_cell_crops_2d(img_2d, cell_segmentation_3d, patch_size):
     """Build per-cell masked 2-D crops shared across deep-feature extractors.
 
