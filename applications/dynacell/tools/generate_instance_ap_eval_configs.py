@@ -21,10 +21,14 @@ as the GT membrane; on A549 they live in the **separate** ``H2B_<cond>.ozx`` sto
 (membrane GT is ``CAAX_<cond>.ozx``), positions matched 1:1 by name. The A549
 membrane conditions therefore set ``io.nuclei_gt_path`` to the H2B test store.
 
-Model scope: F-net, UNeXt2 (scratch), VSCyto3D (FCMAE-pretrained), UNet3DViT,
-Pix2Pix3D (unetvit generator), CellDiff_r2. CellDiff_r2
-``sliding_window``/``denoise`` variants are kept only on the iPSC test set (the
-only place they exist on disk).
+Model scope is **opt-out**: every model the campaign can parse (i.e. registered
+in the grouped generator's ``_CODE_TO_PAPER``) gets instance metrics for the two
+instance organelles, minus the campaign-wide ``_SKIP_MODELS`` and a (currently
+empty) ``_INSTANCE_DENYLIST``. So registering a new model once — in
+``_CODE_TO_PAPER`` — is enough; instance metrics follow automatically and a
+forgotten model is over-included or loudly rejected, never silently skipped.
+CellDiff_r2 ``sliding_window``/``denoise`` variants are kept only on the iPSC
+test set (the only place they exist on disk).
 
 Inherits the Cellpose/watershed params + IoU sweep from ``_configs/eval.yaml``;
 each leaf overrides only what differs.
@@ -47,27 +51,28 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 from generate_grouped_eval_configs import (  # noqa: E402
+    _CODE_TO_PAPER,
     _DIR_INFIX,
     _DYNACELL_ROOT,
+    _IGNORE_NAMES,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
+    _SKIP_FILENAMES,
+    _SKIP_MODELS,
     ParsedZarr,
+    _is_ablation_track_zarr,
     benchmark_dataset_ref,
     condition_name,
+    parse_zarr_name,
     walk_predictions,
 )
 
 _INSTANCE_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane")
-_INSTANCE_MODELS: frozenset[str] = frozenset(
-    {
-        "fnet3d_paper",
-        "fcmae_vscyto3d_scratch",
-        "fcmae_vscyto3d_pretrained",
-        "unetvit3d",
-        "pix2pix3d_unetvit",
-        "celldiff_r2",
-    }
-)
+# Opt-out model gate (see module docstring): models that genuinely have no
+# instance interpretation go here. Empty today — nucleus/membrane instance AP
+# is well-defined for every current model. The campaign-wide _SKIP_MODELS
+# (e.g. pre-r2 ``celldiff``) is excluded separately by _instance_eligible.
+_INSTANCE_DENYLIST: frozenset[str] = frozenset()
 # CellDiff_r2 variants kept off the iPSC test set (iterative-only elsewhere).
 _IPSC_ONLY_VARIANTS: frozenset[str] = frozenset({"sliding_window", "denoise"})
 _SLICE_FRACTION: dict[str, float] = {"ipsc": 0.5, "a549": 0.3}
@@ -77,9 +82,23 @@ _HYDRA_HEADER = "# @package _global_\n"
 _OUT_ROOT = _LEAF_OUT_ROOT.parent / "instance_ap"
 
 
+def _instance_eligible(model: str) -> bool:
+    """Opt-out model gate: any campaign-registered model that isn't skipped.
+
+    ``model in _CODE_TO_PAPER`` is the campaign's model registry; ``_SKIP_MODELS``
+    (e.g. pre-r2 ``celldiff``) and ``_INSTANCE_DENYLIST`` carve out exceptions.
+    Deriving eligibility this way means registering a new model once — in
+    ``_CODE_TO_PAPER`` — is enough; instance metrics follow automatically,
+    closing the gap that silently shipped pix2pix3d without instance metrics.
+    """
+    return model in _CODE_TO_PAPER and model not in _SKIP_MODELS and model not in _INSTANCE_DENYLIST
+
+
 def in_scope(p: ParsedZarr) -> bool:
     """Whether a parsed prediction belongs in the instance-AP campaign."""
-    if p.organelle not in _INSTANCE_ORGANELLES or p.model not in _INSTANCE_MODELS:
+    if p.organelle not in _INSTANCE_ORGANELLES:
+        return False
+    if not _instance_eligible(p.model):
         return False
     if p.variant in _IPSC_ONLY_VARIANTS and p.test_set != "ipsc":
         return False
@@ -170,6 +189,45 @@ def bucket_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> dict[tuple[str, 
     return buckets
 
 
+def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]:
+    """Loud coverage guard: actionable errors for predictions the campaign can't fold in.
+
+    A newly trained model whose prediction zarrs sit on disk but whose code-name
+    is not registered would otherwise crash :func:`walk_predictions` on the first
+    bad name (and, before the opt-out gate, be silently dropped by ``in_scope``).
+    This walks the prediction dirs with a tolerant per-zarr parse — applying the
+    same skip filters as :func:`walk_predictions` — and returns one message per
+    unregistered/unparseable zarr, so :func:`main` can fail with the *complete*
+    list pointing at the registry instead of dying on the first one.
+
+    An empty list means every on-disk prediction is registered and will be
+    bucketed by the relevant campaign. Returns messages (does not raise) so the
+    caller controls exit behavior; pure-string output keeps it unit-testable.
+    """
+    errors: list[str] = []
+    for dataset in ("ipsc", "a549"):
+        for subdir in ("predictions", "joint_predictions"):
+            root = dynacell_root / dataset / subdir
+            if not root.is_dir():
+                continue
+            for entry in sorted(root.iterdir()):
+                name = entry.name
+                if name in _IGNORE_NAMES or name.startswith(("_", ".")):
+                    continue
+                if not name.endswith(".zarr") or name in _SKIP_FILENAMES:
+                    continue
+                if _is_ablation_track_zarr(name) or not entry.is_dir():
+                    continue
+                try:
+                    parse_zarr_name(entry, dynacell_root=dynacell_root)
+                except ValueError as exc:
+                    errors.append(
+                        f"unregistered/unparseable prediction {entry} -> {exc}; register its "
+                        f"model in generate_grouped_eval_configs (_DETERMINISTIC_MODELS + _CODE_TO_PAPER)"
+                    )
+    return errors
+
+
 def emit_leaf(out_path: Path, organelle: str, test_set: str, body: dict) -> None:
     """Write one grouped instance-AP leaf YAML with the Hydra header + comment."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +247,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-root", type=Path, default=_OUT_ROOT)
     ap.add_argument("--dry-run", action="store_true", help="print bucket summary; write nothing")
     args = ap.parse_args(argv)
+
+    coverage_errors = audit_prediction_coverage(args.dynacell_root)
+    if coverage_errors:
+        print("[instance-ap] COVERAGE CHECK FAILED — unregistered model predictions on disk:", file=sys.stderr)
+        for err in coverage_errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 1
 
     buckets = bucket_predictions(args.dynacell_root)
     total = 0
