@@ -22,8 +22,9 @@ as the GT membrane; on A549 they live in the **separate** ``H2B_<cond>.ozx`` sto
 membrane conditions therefore set ``io.nuclei_gt_path`` to the H2B test store.
 
 Model scope: F-net, UNeXt2 (scratch), VSCyto3D (FCMAE-pretrained), UNet3DViT,
-CellDiff_r2. CellDiff_r2 ``sliding_window``/``denoise`` variants are kept only on
-the iPSC test set (the only place they exist on disk).
+Pix2Pix3D (unetvit generator), CellDiff_r2. CellDiff_r2
+``sliding_window``/``denoise`` variants are kept only on the iPSC test set (the
+only place they exist on disk).
 
 Inherits the Cellpose/watershed params + IoU sweep from ``_configs/eval.yaml``;
 each leaf overrides only what differs.
@@ -58,7 +59,14 @@ from generate_grouped_eval_configs import (  # noqa: E402
 
 _INSTANCE_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane")
 _INSTANCE_MODELS: frozenset[str] = frozenset(
-    {"fnet3d_paper", "fcmae_vscyto3d_scratch", "fcmae_vscyto3d_pretrained", "unetvit3d", "celldiff_r2"}
+    {
+        "fnet3d_paper",
+        "fcmae_vscyto3d_scratch",
+        "fcmae_vscyto3d_pretrained",
+        "unetvit3d",
+        "pix2pix3d_unetvit",
+        "celldiff_r2",
+    }
 )
 # CellDiff_r2 variants kept off the iPSC test set (iterative-only elsewhere).
 _IPSC_ONLY_VARIANTS: frozenset[str] = frozenset({"sliding_window", "denoise"})

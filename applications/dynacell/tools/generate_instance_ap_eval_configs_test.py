@@ -44,6 +44,10 @@ def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> 
         (_pz("nucleus", "fnet3d_paper", "ipsc_trained", "ipsc"), True),
         (_pz("membrane", "fcmae_vscyto3d_pretrained", "joint", "ipsc"), True),
         (_pz("nucleus", "unetvit3d", "ipsc_trained", "a549", "mock"), True),
+        # pix2pix3d_unetvit: in scope for both instance organelles, all train sets
+        (_pz("nucleus", "pix2pix3d_unetvit", "joint", "ipsc"), True),
+        (_pz("nucleus", "pix2pix3d_unetvit", "a549_trained", "a549", "zikv"), True),
+        (_pz("membrane", "pix2pix3d_unetvit", "ipsc_trained", "a549", "denv"), True),
         # out-of-scope organelles
         (_pz("er", "fnet3d_paper", "ipsc_trained", "ipsc"), False),
         (_pz("mitochondria", "fcmae_vscyto3d_scratch", "a549_trained", "a549", "denv"), False),

@@ -123,6 +123,29 @@ from generate_grouped_eval_configs import (  # noqa: E402
                 False,
             ),
         ),
+        # pix2pix3d_unetvit: iPSC test (model code-name registration).
+        (
+            "ipsc/predictions/nucl_pix2pix3d_unetvit.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "ipsc_trained", "ipsc", None, False),
+        ),
+        (
+            "ipsc/predictions/nucl_pix2pix3d_unetvit_a549trained.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "ipsc", None, False),
+        ),
+        # pix2pix3d_unetvit A549: hybrid legacy `__<gene>_<cond>` where the gene
+        # marker differs from the organelle prefix (nucleus->h2b, membrane->caax).
+        (
+            "a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_mock.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "joint", "a549", "mock", True),
+        ),
+        (
+            "a549/predictions/nucl_pix2pix3d_unetvit_a549trained__h2b_zikv.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "a549", "zikv", True),
+        ),
+        (
+            "a549/predictions/memb_pix2pix3d_unetvit__caax_denv.zarr",
+            ("membrane", "pix2pix3d_unetvit", None, "ipsc_trained", "a549", "denv", True),
+        ),
     ],
 )
 def test_parse_zarr_name(rel: str, expect: tuple) -> None:
@@ -159,6 +182,13 @@ def test_parse_zarr_name_unknown_celldiff_variant_raises() -> None:
     fake_root = Path("/fake/root")
     with pytest.raises(ValueError, match="unknown CellDiff variant"):
         parse_zarr_name(fake_root / "ipsc/predictions/sec61b_celldiff_fakevariant.zarr", dynacell_root=fake_root)
+
+
+def test_parse_zarr_name_legacy_gene_mismatch_raises() -> None:
+    """Legacy `__<gene>` must match the organelle's marker (nucleus->h2b), not just parse."""
+    fake_root = Path("/fake/root")
+    with pytest.raises(ValueError, match="gene mismatch"):
+        parse_zarr_name(fake_root / "a549/predictions/nucl_fnet3d_paper__caax_mock.zarr", dynacell_root=fake_root)
 
 
 @pytest.mark.parametrize(
