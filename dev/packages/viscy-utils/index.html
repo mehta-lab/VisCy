@@ -1137,8 +1137,11 @@ other three are leaf dependencies. See the <a href="../#dependency-layering">dep
 
         <p>Extract middle-Z slices from a batch for image grid logging.</p>
 <p>Layout: one row per sample, columns ordered as
-<code>anchor_ch0, anchor_ch1, ..., positive_ch0, positive_ch1, ..., negative_ch0, ...</code>
-Channels expand horizontally within each view, which suits landscape monitors.</p>
+<code>view0_ch0, view0_ch1, ..., view1_ch0, view1_ch1, ...</code>.
+Each view contributes all of its own channels, so views with
+different channel counts (e.g. a 1-channel <code>source</code> with a
+2-channel <code>target</code>/<code>pred</code>) are all logged in full. Channels
+expand horizontally within each view, which suits landscape monitors.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -1161,7 +1164,10 @@ Channels expand horizontally within each view, which suits landscape monitors.</
             </td>
             <td>
               <div class="doc-md-description">
-                <p>One <code>(B, C, Z, Y, X)</code> tensor per view (anchor, positive, negative).</p>
+                <p>One <code>(B, C, Z, Y, X)</code> tensor per view. Examples: <code>(anchor,
+positive, negative)</code> for contrastive learning, or <code>(source,
+target, pred)</code> for virtual staining. Views may have different
+channel counts.</p>
               </div>
             </td>
             <td>
