@@ -9,10 +9,11 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import spaces
 import zarr
 from huggingface_hub import hf_hub_download
 
-CHECKPOINT_REPO = "dihan-zheng/dynacell-checkpoints"
+CHECKPOINT_REPO = "biohub/dynacell-checkpoints"
 TEMPLATE_DIR = Path(__file__).parent / "config_templates"
 
 # (model, organelle) → filename in the HF checkpoint repo
@@ -125,11 +126,13 @@ def create_single_timepoint_zarr(source_path: str, timepoint: int) -> str:
     return str(out_path)
 
 
+@spaces.GPU(duration=120)
 def run_prediction(model: str, organelle: str, data_path: str, timepoint: int) -> str:
     """Run prediction for a single timepoint; return the output zarr path.
 
     Creates a single-timepoint subset of the source zarr, runs prediction on it,
-    and returns the path to the output zarr (which has T=1).
+    and returns the path to the output zarr (which has T=1). The `dynacell predict`
+    subprocess inherits the ZeroGPU allocation from this decorated frame.
     """
     subset_path = create_single_timepoint_zarr(data_path, timepoint)
 
@@ -155,6 +158,7 @@ def run_prediction(model: str, organelle: str, data_path: str, timepoint: int) -
     return output_store
 
 
+@spaces.GPU(duration=120)
 def compute_trajectory(
     organelle: str,
     data_path: str,
