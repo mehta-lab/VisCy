@@ -1,17 +1,25 @@
 # DynaCell HuggingFace Demo
 
-Gradio Space that predicts fluorescence (membrane, nuclei, ER, mitochondria)
-from label-free phase-contrast 3-D microscopy of live A549 cells, using three
-models — **CELL-Diff** (flow-matching), **FNet3D** (3-D U-Net), and **VSCyto3D**
-(FCMAE-pretrained U-Net). Tab 1 runs prediction + Spectral PCC; Tab 2 animates
-the CELL-Diff ODE denoising trajectory.
+Single-page Gradio Space that predicts fluorescence (membrane, nuclei, ER,
+mitochondria) from label-free phase-contrast 3-D microscopy of live A549 cells.
+Three stacked sections, each with its own Timepoint + Z-slice sliders:
+
+1. **Data** — pick a demo organelle dataset and browse Phase | experimental
+   fluorescence by timepoint and Z.
+2. **Regression** — deterministic models **FNet3D** and **VSCyto3D**: predict +
+   Spectral PCC.
+3. **Generative** — **CELL-Diff** ODE trajectory: an ODE-step slider scrubs
+   noise → prediction, with that step's Spectral PCC.
+
+Inference runs on the single selected timepoint only. Data comes from the demo
+dataset repo (no user upload).
 
 ## Layout
 
 ```
 hf_demo/
   hf_space/                 # the deployed Space
-    app.py                  # Gradio UI + tab callbacks
+    app.py                  # Gradio UI + section callbacks + renderers
     predict_runner.py       # checkpoint download, prediction, ODE trajectory
     requirements.txt
     README.md               # Space card
