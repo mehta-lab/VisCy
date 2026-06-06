@@ -41,7 +41,7 @@ Decision (2026-06): checkpoints and demo data stay **private** even when the
 Space is public. The Space downloads them server-side via an `HF_TOKEN`
 **secret** (Space → Settings → Variables and secrets) — a **fine-grained,
 read-only** token scoped to exactly those two repos. Public visitors get only
-outputs (plots, PCC, GIFs); raw artifacts stay gated. If the token is revoked or
+outputs (plots, PCC); raw artifacts stay gated. If the token is revoked or
 loses RG read access, runtime downloads break (rotate via "Replace").
 
 ## ZeroGPU configuration (validated 2026-06)
@@ -54,9 +54,9 @@ loses RG read access, runtime downloads break (rotate via "Replace").
   Python 3.12.12 / 3.10.13, PyTorch 2.8→latest, Gradio SDK only.
 - `requirements.txt` includes `spaces`; `@spaces.GPU(duration=120)` decorates
   `run_prediction` and `compute_trajectory` (`predict_runner.py`).
-- A subprocess inside `@spaces.GPU` inherits the GPU, so Tab 1's `dynacell
-  predict` subprocess works on ZeroGPU. `gr.Progress` args work under the
-  decorator. Keep `import torch` lazy (no CUDA at import).
+- A subprocess inside `@spaces.GPU` inherits the GPU, so the regression
+  `dynacell predict` subprocess works on ZeroGPU. `gr.Progress` args work under
+  the decorator. Keep `import torch` lazy (no CUDA at import).
 - Tuning: CELL-Diff at 50–100 ODE steps can approach the 120 s ceiling on a cold
   call; raise `duration` or use a dynamic-duration callable if timeouts appear.
 
@@ -79,14 +79,21 @@ and run it where `/hpc/projects/...` is mounted.
 
 ## Smoke test
 
-Private Space needs a token: `Client("biohub/dynacell", token=get_token())`,
-then `view_api()` and `predict(..., api_name="/run_demo")`. Last validated:
-`/load_demo_data` OK; `/run_demo` (vscyto3d) → PCC 0.95 in 35 s;
-`/run_trajectory_demo` (celldiff, 10 steps) → GIF in 74 s.
+Drive endpoints with `gradio_client` (`Client("biohub/dynacell", token=get_token())`;
+token optional now the Space is public). `/load_demo_data` renders the data view.
+The run endpoints `/run_regression` and `/run_generative` read data from `gr.State`,
+which the client resets per call — they can't be driven headlessly, so exercise
+them in the live UI. Last validated GPU compute: regression VSCyto3D → Spectral
+PCC ~0.95 (~35 s); CELL-Diff trajectory (10 steps) ~74 s.
+
+## State
+
+- Space `biohub/dynacell` is **public** (set 2026-06); checkpoints + dataset
+  repos stay **private**, so the `HF_TOKEN` secret must remain.
 
 ## Launch checklist
 
-- Optionally flip the two artifact repos + Space public; if public, remove the
-  `HF_TOKEN` secret.
 - Fill citation/DOI TODOs in `cards/*.md` and the uploaded READMEs.
 - Re-pin `requirements.txt` VisCy refs off `@dynacell-models` once merged/renamed.
+- Only if the artifact repos are ever made public: the `HF_TOKEN` secret can then
+  be removed.
