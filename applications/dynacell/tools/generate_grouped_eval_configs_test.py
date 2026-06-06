@@ -385,12 +385,20 @@ def test_walk_predictions_excludes_ablation_track() -> None:
 def base_eval_grouped_config():
     """Compose the eval_grouped primary config the same way Hydra does."""
     from hydra import compose, initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
 
     repo_root = Path(__file__).resolve().parents[3]
     base_dir = repo_root / "applications/dynacell/src/dynacell/evaluation/_configs"
     feature_extractor_overlay_dir = (
         repo_root / "applications/dynacell/configs/benchmarks/virtual_staining/_internal/shared/eval"
     )
+    # Defensive clear: this file lives under tools/, outside the tests/conftest.py
+    # that provides the `clear_global_hydra` fixture, so a Hydra-initializing test
+    # elsewhere in the run can leave the global singleton dirty. initialize_config_dir
+    # raises "GlobalHydra is already initialized" on a dirty singleton — an
+    # intermittent failure here. Clear before init; the with-block clears again on
+    # exit, so this fixture never leaks the singleton onward.
+    GlobalHydra.instance().clear()
     with initialize_config_dir(version_base="1.2", config_dir=str(base_dir)):
         # Bring in the external feature_extractor groups via searchpath override.
         cfg = compose(
