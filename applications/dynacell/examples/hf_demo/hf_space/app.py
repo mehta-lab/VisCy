@@ -34,7 +34,7 @@ MODEL_KEYS   = ["celldiff", "fnet3d", "vscyto3d"]
 MODEL_LABELS = {"celldiff": "CELL-Diff", "fnet3d": "FNet3D", "vscyto3d": "VSCyto3D"}
 PHASE_CH = 0
 FLUOR_CH = 2
-_DEMO_REPO = "dihan-zheng/dynacell-demo-data"
+_DEMO_REPO = "biohub/dynacell-demo-data"
 
 PATCH_D = 8  # fixed Z window used by all trajectory models
 

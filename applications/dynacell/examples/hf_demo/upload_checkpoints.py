@@ -1,16 +1,19 @@
-"""Upload all 12 dynacell checkpoints to mehta-lab/dynacell-checkpoints on HF Hub.
+"""Upload all 12 dynacell checkpoints to biohub/dynacell-checkpoints on HF Hub.
 
-Run this once from the HPC where checkpoints are stored:
+The repo is private and lives in the biohub "Dynacell" resource group (see
+AGENT.md). Run this from the HPC where checkpoints are stored:
 
     pip install huggingface_hub
-    huggingface-cli login        # or set HF_TOKEN env var
+    hf auth login                # or set HF_TOKEN env var
     python upload_checkpoints.py
 """
 
 from pathlib import Path
 from huggingface_hub import HfApi, create_repo
 
-REPO_ID = "dihan-zheng/dynacell-checkpoints"
+REPO_ID = "biohub/dynacell-checkpoints"
+# biohub "Dynacell" resource group (see AGENT.md).
+RESOURCE_GROUP_ID = "6a234bb4507cbbbb04456767"
 
 # (hf_filename, local_path)
 CHECKPOINTS: list[tuple[str, str]] = [
@@ -58,8 +61,15 @@ def main() -> None:
     token = os.environ.get("HF_TOKEN")
     api = HfApi(token=token)
 
-    # Create repo if it doesn't exist yet
-    create_repo(REPO_ID, repo_type="model", exist_ok=True, token=token)
+    # Create repo if it doesn't exist yet (private, in the Dynacell resource group)
+    create_repo(
+        REPO_ID,
+        repo_type="model",
+        private=True,
+        resource_group_id=RESOURCE_GROUP_ID,
+        exist_ok=True,
+        token=token,
+    )
     print(f"Repo: https://huggingface.co/{REPO_ID}")
 
     for hf_name, local_path in CHECKPOINTS:

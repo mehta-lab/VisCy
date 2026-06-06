@@ -7,9 +7,12 @@ sdk: gradio
 sdk_version: "5.29.0"
 app_file: app.py
 pinned: false
-hardware: a10g-small
+python_version: "3.12"
+suggested_hardware: zero-a10g
 models:
-  - dihan-zheng/dynacell-checkpoints
+  - biohub/dynacell-checkpoints
+datasets:
+  - biohub/dynacell-demo-data
 ---
 
 # DynaCell Virtual Staining Demo
