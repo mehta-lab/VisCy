@@ -48,6 +48,10 @@ ORGANELLE_LABELS: dict[str, str] = {
 
 FLUOR_CH = 2  # channel index for fluorescence in the input zarr
 
+# Spectral PCC settings (volumetric; shared with app.py).
+SPACING = [0.174, 0.1494, 0.1494]
+SPECTRAL_KWARGS = dict(bin_delta=1.0, tail_fraction=0.2, apodization="tukey", nbins_low=3)
+
 # Cache downloaded checkpoints in /tmp so the Space doesn't re-download each run
 _ckpt_cache: dict[str, str] = {}
 
@@ -174,6 +178,7 @@ def compute_trajectory(
     import numpy as np
     import torch
     from iohub.ngff import open_ome_zarr
+
     from dynacell.engine import DynacellFlowMatching
     from viscy_data._utils import _read_norm_meta
 
@@ -194,6 +199,7 @@ def compute_trajectory(
         _, pos = next(plate.positions())
         phase_ch  = pos.get_channel_index("Phase3D")
         phase_raw = np.array(pos.data[timepoint, phase_ch])
+        fluor_raw = np.array(pos.data[timepoint, FLUOR_CH])
         norm_meta = _read_norm_meta(pos)
 
     tp_stats = norm_meta["Phase3D"]["timepoint_statistics"][str(timepoint)]
@@ -205,6 +211,10 @@ def compute_trajectory(
     z_total = phase_norm.shape[0]
     z_start = (z_total - patch_d) // 2
     phase_crop = phase_norm[z_start:z_start + patch_d, :patch_h, :patch_w]
+    # Raw phase + experimental fluorescence over the same window, for the
+    # display panels and the per-step Spectral PCC.
+    phase_disp = phase_raw[z_start:z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
+    gt_crop = fluor_raw[z_start:z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
 
     if progress is not None:
         progress(0.35, desc=f"Generating {num_steps}-step ODE trajectory...")
@@ -219,8 +229,8 @@ def compute_trajectory(
 
     if progress is not None:
         progress(0.90, desc="Saving trajectory to disk...")
-    traj_path = str(Path(tempfile.gettempdir()) / f"traj_np_{uuid.uuid4().hex[:8]}.npy")
-    np.save(traj_path, traj_np)
+    traj_path = str(Path(tempfile.gettempdir()) / f"traj_{uuid.uuid4().hex[:8]}.npz")
+    np.savez(traj_path, traj=traj_np, phase=phase_disp, gt=gt_crop)
 
     if progress is not None:
         progress(1.0, desc="Done.")
@@ -233,54 +243,3 @@ def compute_trajectory(
         "timepoint": timepoint,
         "num_steps": num_steps,
     }
-
-
-def render_trajectory_gif(traj_info: dict, z_patch: int) -> str:
-    """Render a GIF from a cached trajectory at the given patch-relative Z slice.
-
-    Fast — only loads the saved .npy and runs matplotlib; does not re-run the ODE.
-    """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, PillowWriter
-
-    traj_np   = np.load(traj_info["traj_path"])
-    z_start   = traj_info["z_start"]
-    patch_d   = traj_info["patch_d"]
-    organelle = traj_info["organelle"]
-    timepoint = traj_info["timepoint"]
-    num_steps = traj_info["num_steps"]
-
-    z_patch = max(0, min(z_patch, patch_d - 1))
-    z_abs   = z_start + z_patch
-
-    def pnorm(img: np.ndarray) -> np.ndarray:
-        lo_p, hi_p = np.percentile(img, [0.5, 99.5])
-        if hi_p == lo_p:
-            return np.zeros_like(img, dtype=np.float32)
-        return np.clip((img - lo_p) / (hi_p - lo_p), 0, 1).astype(np.float32)
-
-    frame_idx = np.linspace(0, num_steps - 1, min(50, num_steps), dtype=int)
-    fig_a, ax_a = plt.subplots(figsize=(4, 4))
-    ax_a.axis("off")
-    im = ax_a.imshow(
-        pnorm(traj_np[0, 0, z_patch]), cmap="gray", vmin=0, vmax=1, interpolation="nearest"
-    )
-    ttl = ax_a.set_title(
-        f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_abs}\nStep 0  (noise → prediction)",
-        fontsize=9,
-    )
-
-    def update(frame: int):
-        s = frame_idx[frame]
-        im.set_data(pnorm(traj_np[s, 0, z_patch]))
-        ttl.set_text(
-            f"{ORGANELLE_LABELS[organelle]}  t={timepoint}  z={z_abs}\nStep {s}  (noise → prediction)"
-        )
-        return im, ttl
-
-    anim = FuncAnimation(fig_a, update, frames=len(frame_idx), interval=80, blit=True)
-    gif_path = str(Path(tempfile.gettempdir()) / f"traj_{uuid.uuid4().hex[:8]}.gif")
-    anim.save(gif_path, writer=PillowWriter(fps=12))
-    plt.close(fig_a)
-    return gif_path
