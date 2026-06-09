@@ -724,19 +724,28 @@ def _cp_identity(ctx: _CacheContext) -> dict[str, Any]:
     change auto-invalidates the cached feature matrix (a pre-existing cache
     lacks these keys → mismatch → recompute). ``cp_*`` keys are flat scalars so
     they round-trip cleanly through the YAML manifest and ``diff_artifact_params``.
+
+    The GLCM quantization params (``levels``/``distances``) are recorded only
+    when GLCM is enabled — when it is off they do not affect the matrix, so
+    including them would needlessly invalidate an identical cache on a toggle.
+    ``diff_artifact_params`` compares the current identity's keys, so dropping
+    them is sufficient (any stale stored value is simply ignored).
     """
     glcm = ctx.cp_glcm or {}
     norm = ctx.cp_norm or {}
-    return {
+    glcm_enabled = bool(glcm.get("enabled", False))
+    identity: dict[str, Any] = {
         "spacing": ctx.spacing,
         "cp_feature_version": ctx.cp_feature_version,
-        "cp_glcm_enabled": bool(glcm.get("enabled", False)),
-        "cp_glcm_levels": int(glcm.get("levels", 32)),
-        "cp_glcm_distances": list(glcm.get("distances", [1])),
+        "cp_glcm_enabled": glcm_enabled,
         "cp_norm_p_lo": float(norm.get("p_lo", 1.0)),
         "cp_norm_p_hi": float(norm.get("p_hi", 99.0)),
         **ctx.source_tag,
     }
+    if glcm_enabled:
+        identity["cp_glcm_levels"] = int(glcm.get("levels", 32))
+        identity["cp_glcm_distances"] = list(glcm.get("distances", [1]))
+    return identity
 
 
 def _fov_instances(
