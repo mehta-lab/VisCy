@@ -580,8 +580,17 @@ def per_cell_similarity(
     NaN-reduces over cells. Returns ``{f"PerCell_{METRIC}_{reduce}": value}``.
     Unlike the CP feature vector this is a *paired* metric (one scalar per
     cell), aggregated like the pixel metrics — it cannot feed FID/KID.
+
+    Raises ``ValueError`` for an empty or unknown ``metrics``/``reduce`` rather
+    than silently emitting all-NaN (or no) ``PerCell_*`` columns — a silent
+    miss would hide a config typo and confuse the final-metrics cache gate,
+    which keys off the expected ``PerCell_*`` columns.
     """
     _require_cubic()
+    if not metrics or set(metrics) - {"pcc", "ssim"}:
+        raise ValueError(f"cell_similarity.metrics must be a non-empty subset of {{'pcc', 'ssim'}}; got {metrics!r}")
+    if not reduce or set(reduce) - {"mean", "median"}:
+        raise ValueError(f"cell_similarity.reduce must be a non-empty subset of {{'mean', 'median'}}; got {reduce!r}")
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     to_xp = ascupy if use_cuda else asnumpy
     pred = to_xp(predict_t)
@@ -613,10 +622,8 @@ def per_cell_similarity(
                 out[key] = float("nan")
             elif r == "mean":
                 out[key] = float(finite.mean())
-            elif r == "median":
+            else:  # "median" — the only remaining option after up-front validation
                 out[key] = float(np.median(finite))
-            else:
-                raise ValueError(f"unknown reduce {r!r}; use 'mean' or 'median'")
     return out
 
 
