@@ -17,7 +17,6 @@ from dynacell.evaluation.metrics import (
     _CP_GLCM_FEATURE_NAMES,
     _DISTRIBUTION_PROPS,
     _kurtosis,
-    _laplacian_var,
     _p10,
     _p50,
     _p90,
@@ -94,12 +93,6 @@ def test_skewness_degenerate_region_is_nan() -> None:
     one = np.array([[5.0], [0.0]])
     m1 = np.array([[True], [False]])
     assert np.isnan(_skewness(m1, one))
-
-
-def test_laplacian_var_is_foreground_variance() -> None:
-    intensity = np.array([[1.0, 4.0, 9.0], [0.0, 0.0, 0.0]])
-    mask = np.array([[True, True, True], [False, False, False]])
-    assert _laplacian_var(mask, intensity) == pytest.approx(np.var(intensity[mask]))
 
 
 def test_callables_integrate_via_skimage_regionprops() -> None:

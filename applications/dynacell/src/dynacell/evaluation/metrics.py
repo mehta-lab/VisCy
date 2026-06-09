@@ -11,6 +11,7 @@ try:
     from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
+    from cubic.scipy import ndimage as _cubic_ndimage
     from cubic.skimage import filters as _cubic_filters
 except ImportError:
     ascupy = None  # type: ignore[assignment]
@@ -23,6 +24,7 @@ except ImportError:
     regionprops_table = None  # type: ignore[assignment]
     spectral_pcc = None  # type: ignore[assignment]
     _cubic_filters = None  # type: ignore[assignment]
+    _cubic_ndimage = None  # type: ignore[assignment]
 
 # GLCM is an opt-in CP feature requiring cubic>=0.7.0a12 (cubic.feature.glcm_features).
 # Guarded separately so an older cubic (without it) does not break the critical
@@ -301,8 +303,7 @@ def _robust_norm(x, p_lo: float = 1.0, p_hi: float = 99.0, eps: float = 1e-8):
     the ``+ eps`` denominator keeps a constant/near-constant image finite
     (output → 0) instead of NaN/inf (mirrors :func:`_minmax_norm`'s eps guard).
     """
-    lo = np.percentile(x, p_lo)
-    hi = np.percentile(x, p_hi)
+    lo, hi = np.percentile(x, (p_lo, p_hi))
     x = np.clip(x, lo, hi)
     return (x - lo) / ((hi - lo) + eps)
 
@@ -331,42 +332,30 @@ _p75 = _make_percentile(75, "p75")
 _p90 = _make_percentile(90, "p90")
 
 
-def _skewness(regionmask, intensity):
-    """Population skewness of the foreground intensities (NaN if std == 0)."""
-    vals = intensity[regionmask]
-    if vals.size < 2:
-        return np.nan
-    mean = vals.mean()
-    std = vals.std()
-    if float(std) == 0.0:
-        return np.nan
-    return ((vals - mean) ** 3).mean() / (std**3)
+def _make_standardized_moment(order: int, name: str, *, excess: float = 0.0):
+    """Build a foreground standardized-moment extra_property named ``name``.
+
+    Reduces over ``intensity[regionmask]``; returns NaN for degenerate regions
+    (<2 voxels or zero std). ``excess`` subtracts the Gaussian baseline (3.0 for
+    Fisher/excess kurtosis).
+    """
+
+    def _prop(regionmask, intensity):
+        vals = intensity[regionmask]
+        if vals.size < 2:
+            return np.nan
+        mean = vals.mean()
+        std = vals.std()
+        if float(std) == 0.0:
+            return np.nan
+        return ((vals - mean) ** order).mean() / std**order - excess
+
+    _prop.__name__ = name
+    return _prop
 
 
-def _kurtosis(regionmask, intensity):
-    """Excess (Fisher) kurtosis of the foreground intensities (NaN if std == 0)."""
-    vals = intensity[regionmask]
-    if vals.size < 2:
-        return np.nan
-    mean = vals.mean()
-    std = vals.std()
-    if float(std) == 0.0:
-        return np.nan
-    return ((vals - mean) ** 4).mean() / (std**4) - 3.0
-
-
-def _laplacian_var(regionmask, intensity):
-    """Variance of the Laplacian response inside the region (focus proxy)."""
-    return np.var(intensity[regionmask])
-
-
-# ``regionprops_table`` names each extra_property column after ``func.__name__``;
-# override the private def names so the emitted columns are the bare feature
-# names the assembly indexes (``base["skewness"]`` etc.), matching the
-# factory-built percentile props above.
-_skewness.__name__ = "skewness"
-_kurtosis.__name__ = "kurtosis"
-_laplacian_var.__name__ = "laplacian_var"
+_skewness = _make_standardized_moment(3, "skewness")
+_kurtosis = _make_standardized_moment(4, "kurtosis", excess=3.0)
 
 _DISTRIBUTION_PROPS = (_p10, _p25, _p50, _p75, _p90, _skewness, _kurtosis)
 
@@ -442,12 +431,14 @@ def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np
     return pred[valid], target[valid]
 
 
-def _region_bbox_slices(labels, lab: int) -> tuple[slice, ...]:
-    """Return the bounding-box slice tuple for label ``lab`` in ``labels``."""
-    coords = asnumpy(np.argwhere(labels == lab))
-    mins = coords.min(axis=0)
-    maxs = coords.max(axis=0) + 1
-    return tuple(slice(int(a), int(b)) for a, b in zip(mins, maxs))
+def _region_slices(labels_host: np.ndarray) -> list:
+    """Per-label bounding-box slice tuples for a host label array, in one pass.
+
+    ``find_objects(labels)[lab - 1]`` is the slice tuple for label ``lab``
+    (``None`` for absent labels) — one O(volume) sweep, versus a per-label
+    ``argwhere`` scan of the whole volume.
+    """
+    return _cubic_ndimage.find_objects(labels_host)
 
 
 def _per_cell_glcm(img, cell_segmentation, glcm_cfg: dict) -> dict[str, np.ndarray]:
@@ -471,11 +462,13 @@ def _per_cell_glcm(img, cell_segmentation, glcm_cfg: dict) -> dict[str, np.ndarr
     # of as a degenerate 3-D volume whose z-direction co-occurrence pairs are
     # empty — empty pairs are tolerated by numpy ``bincount`` but raise on cupy.
     squeeze_z = img.ndim == 3 and img.shape[0] == 1
+    labels_host = asnumpy(cell_segmentation)
+    objects = _region_slices(labels_host)
     cols: dict[str, list[float]] = {name: [] for name in _CP_GLCM_FEATURE_NAMES}
-    for lab in asnumpy(np.unique(cell_segmentation)):
+    for lab in np.unique(labels_host):
         if lab == 0:
             continue
-        slices = _region_bbox_slices(cell_segmentation, int(lab))
+        slices = objects[int(lab) - 1]
         crop = img[slices]
         mask = cell_segmentation[slices] == int(lab)
         if squeeze_z:
@@ -535,36 +528,24 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
         spacing=spacing,
         properties=["intensity_mean", "intensity_std"],
     )
-    # An explicit base property is required: with empty ``properties`` cucim's
-    # regionprops_table does not surface the extra_property column (skimage does),
-    # so request ``label`` to keep the GPU and CPU paths consistent.
     lapt = regionprops_table(
         cell_segmentation,
         _cubic_filters.laplace(img),
         spacing=spacing,
-        properties=["label"],
-        extra_properties=(_laplacian_var,),
+        properties=["intensity_std"],
     )
 
-    # Assemble by explicit name (never dict.values()): gradient/Laplacian keys
-    # collide with the base intensity keys, so alias them here.
-    columns: dict[str, Any] = {
-        "intensity_mean": base["intensity_mean"],
-        "intensity_std": base["intensity_std"],
-        "intensity_min": base["intensity_min"],
-        "intensity_max": base["intensity_max"],
-        "p10": base["p10"],
-        "p25": base["p25"],
-        "p50": base["p50"],
-        "p75": base["p75"],
-        "p90": base["p90"],
-        "iqr": base["p75"] - base["p25"],
-        "skewness": base["skewness"],
-        "kurtosis": base["kurtosis"],
-        "gradient_mean": grad["intensity_mean"],
-        "gradient_std": grad["intensity_std"],
-        "laplacian_var": lapt["laplacian_var"],
-    }
+    # Start from the base regionprops dict — its extra_property columns are
+    # already named to match the schema (p10..kurtosis); the extra ``label``
+    # column is ignored by ``active_cp_feature_names``. Add the derived/aliased
+    # keys: ``iqr`` from p25/p75, and gradient/Laplacian (whose ``intensity_*``
+    # keys would collide with the base intensities). Laplacian variance is the
+    # built-in ``intensity_std`` squared (var = std**2).
+    columns: dict[str, Any] = dict(base)
+    columns["iqr"] = base["p75"] - base["p25"]
+    columns["gradient_mean"] = grad["intensity_mean"]
+    columns["gradient_std"] = grad["intensity_std"]
+    columns["laplacian_var"] = lapt["intensity_std"] ** 2
     if use_cuda:
         columns = {name: asnumpy(value) for name, value in columns.items()}
     if glcm_enabled:
@@ -617,12 +598,14 @@ def per_cell_similarity(
     pred = to_xp(predict_t)
     tgt = to_xp(target_t)
     lab = to_xp(cell_segmentation_t)
+    lab_host = asnumpy(lab)
+    objects = _region_slices(lab_host)
 
     per_metric: dict[str, list[float]] = {m: [] for m in metrics}
-    for lab_id in asnumpy(np.unique(lab)):
+    for lab_id in np.unique(lab_host):
         if lab_id == 0:
             continue
-        slices = _region_bbox_slices(lab, int(lab_id))
+        slices = objects[int(lab_id) - 1]
         mask = lab[slices] == int(lab_id)
         gt_crop = tgt[slices]
         pred_crop = pred[slices]
