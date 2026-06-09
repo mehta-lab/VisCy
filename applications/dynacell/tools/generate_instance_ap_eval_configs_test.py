@@ -15,9 +15,12 @@ _TOOLS_DIR = Path(__file__).resolve().parent
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
-from generate_grouped_eval_configs import ParsedZarr  # noqa: E402
+from generate_grouped_eval_configs import _CODE_TO_PAPER, _SKIP_MODELS, ParsedZarr  # noqa: E402
 from generate_instance_ap_eval_configs import (  # noqa: E402
+    _INSTANCE_DENYLIST,
+    _instance_eligible,
     a549_nuclei_store,
+    audit_prediction_coverage,
     build_leaf,
     in_scope,
     save_dir_for,
@@ -44,6 +47,10 @@ def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> 
         (_pz("nucleus", "fnet3d_paper", "ipsc_trained", "ipsc"), True),
         (_pz("membrane", "fcmae_vscyto3d_pretrained", "joint", "ipsc"), True),
         (_pz("nucleus", "unetvit3d", "ipsc_trained", "a549", "mock"), True),
+        # pix2pix3d_unetvit: in scope for both instance organelles, all train sets
+        (_pz("nucleus", "pix2pix3d_unetvit", "joint", "ipsc"), True),
+        (_pz("nucleus", "pix2pix3d_unetvit", "a549_trained", "a549", "zikv"), True),
+        (_pz("membrane", "pix2pix3d_unetvit", "ipsc_trained", "a549", "denv"), True),
         # out-of-scope organelles
         (_pz("er", "fnet3d_paper", "ipsc_trained", "ipsc"), False),
         (_pz("mitochondria", "fcmae_vscyto3d_scratch", "a549_trained", "a549", "denv"), False),
@@ -58,6 +65,36 @@ def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> 
 def test_in_scope(p: ParsedZarr, expected: bool) -> None:
     """Scope filter keeps nucleus/membrane in-scope models, drops the rest."""
     assert in_scope(p) is expected
+
+
+def test_instance_eligibility_is_opt_out() -> None:
+    """Eligibility is derived from the campaign registry, not a local allowlist.
+
+    Every registered, non-skipped model is eligible (so a model added to
+    ``_CODE_TO_PAPER`` gets instance metrics with no second edit here), and an
+    unregistered model is not — until it is registered.
+    """
+    for model in _CODE_TO_PAPER:
+        expected = model not in _SKIP_MODELS and model not in _INSTANCE_DENYLIST
+        assert _instance_eligible(model) is expected
+    assert _instance_eligible("brand_new_model_not_yet_registered") is False
+
+
+def test_audit_clean_when_all_predictions_registered(tmp_path) -> None:
+    """A registered prediction zarr produces no coverage error."""
+    (tmp_path / "ipsc" / "predictions" / "nucl_fnet3d_paper.zarr").mkdir(parents=True)
+    (tmp_path / "a549" / "joint_predictions" / "memb_celldiff_r2_denv.zarr").mkdir(parents=True)
+    assert audit_prediction_coverage(tmp_path) == []
+
+
+def test_audit_flags_unregistered_prediction(tmp_path) -> None:
+    """An unregistered model's prediction surfaces as an actionable error, not a crash."""
+    (tmp_path / "ipsc" / "predictions" / "nucl_fnet3d_paper.zarr").mkdir(parents=True)
+    (tmp_path / "ipsc" / "predictions" / "nucl_brandnewmodel.zarr").mkdir(parents=True)
+    errors = audit_prediction_coverage(tmp_path)
+    assert len(errors) == 1
+    assert "nucl_brandnewmodel.zarr" in errors[0]
+    assert "register" in errors[0].lower()
 
 
 def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:

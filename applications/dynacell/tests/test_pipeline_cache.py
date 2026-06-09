@@ -336,6 +336,150 @@ def test_init_cache_spacing_mismatch_raises_under_limit_positions(tmp_path: Path
         )
 
 
+def _seed_cp_manifest(tmp_path: Path, cp_entry: dict[str, Any]) -> None:
+    """Write a manifest whose only artifact is a ``cp_features`` entry.
+
+    Mirrors the scaffold the spacing-mismatch tests use; the gt plate /
+    segmentation / channel match :func:`_make_config` so the only mismatch
+    surfaced is the one the caller seeds into *cp_entry*.
+    """
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        cache_paths(tmp_path),
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": cp_entry},
+        },
+    )
+
+
+def test_init_cache_cp_version_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A bumped ``CP_FEATURE_VERSION`` flips ``force["gt_cp"]``, not raises.
+
+    A cache written under an older recipe version must auto-invalidate so the
+    feature matrix is recomputed with the current recipe — the headline reason
+    the CP cache is versioned.
+    """
+    import warnings as _warnings
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": "v0_legacy",
+            "cp_glcm_enabled": False,
+            "cp_norm_p_lo": 1.0,
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "cp_feature_version" in str(w.message) for w in caught)
+
+
+def test_init_cache_cp_norm_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """Changing ``feature_metrics.cp.norm`` invalidates the CP cache.
+
+    ``cp_norm_p_lo`` is a numeric identity key (tolerance-compared); a stored
+    bound that differs from the config's (default ``p_lo=1.0``) recomputes.
+    """
+    import warnings as _warnings
+
+    from dynacell.evaluation.metrics import CP_FEATURE_VERSION
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": CP_FEATURE_VERSION,
+            "cp_glcm_enabled": False,
+            "cp_norm_p_lo": 5.0,  # config default is 1.0
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "cp_norm_p_lo" in str(w.message) for w in caught)
+
+
+def test_init_cache_cp_glcm_toggle_auto_invalidates(tmp_path: Path) -> None:
+    """Toggling ``feature_metrics.cp.glcm.enabled`` invalidates the CP cache.
+
+    GLCM on/off changes the matrix width, so a stored ``cp_glcm_enabled`` that
+    disagrees with the config must recompute. Config turns GLCM on; the cache
+    was written with it off.
+    """
+    import warnings as _warnings
+
+    from dynacell.evaluation.metrics import CP_FEATURE_VERSION
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": CP_FEATURE_VERSION,
+            "cp_glcm_enabled": False,
+            "cp_norm_p_lo": 1.0,
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    cfg = _make_config(
+        **{
+            "io.gt_cache_dir": str(tmp_path),
+            "feature_metrics.cp.glcm": {"enabled": True, "levels": 32, "distances": [1]},
+        }
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(cfg, side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "cp_glcm_enabled" in str(w.message) for w in caught)
+
+
+def test_init_cache_cp_glcm_levels_ignored_when_glcm_disabled(tmp_path: Path) -> None:
+    """With GLCM off, changing ``levels``/``distances`` must NOT invalidate.
+
+    ``_cp_identity`` records the quantization params only when GLCM is enabled,
+    so stale stored ``cp_glcm_levels``/``cp_glcm_distances`` are ignored while
+    GLCM is off (``diff_artifact_params`` compares only the current identity's
+    keys) — toggling them recomputes nothing.
+    """
+    import warnings as _warnings
+
+    from dynacell.evaluation.metrics import CP_FEATURE_VERSION
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": CP_FEATURE_VERSION,
+            "cp_glcm_enabled": False,
+            "cp_glcm_levels": 99,  # stale; must be ignored while GLCM is off
+            "cp_glcm_distances": [9],
+            "cp_norm_p_lo": 1.0,
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    cfg = _make_config(
+        **{
+            "io.gt_cache_dir": str(tmp_path),
+            "feature_metrics.cp.glcm": {"enabled": False, "levels": 16, "distances": [1]},
+        }
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(cfg, side="gt")
+    assert ctx.force["gt_cp"] is False
+    assert not any("artifact param mismatch" in str(w.message) and "cp_features" in str(w.message) for w in caught)
+
+
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
     """First call computes masks via segment() and writes them to cache."""
     import dynacell.evaluation.segmentation as segmentation
@@ -612,8 +756,8 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
 def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """CP feature miss computes via cp_regionprops and writes per timepoint."""
 
-    def fake_cp(target, cell_seg, spacing, use_gpu=True):
-        del cell_seg, spacing, use_gpu
+    def fake_cp(target, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
         return np.full((2, 3), float(target.sum()), dtype=np.float32)
 
     # Patch the globals of fov_cp_features itself — robust against sys.modules
@@ -639,8 +783,8 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """Prediction CP feature miss computes via cp_regionprops (side-agnostic) and writes per timepoint."""
 
-    def fake_cp(prediction, cell_seg, spacing, use_gpu=True):
-        del cell_seg, spacing, use_gpu
+    def fake_cp(prediction, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
         return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)

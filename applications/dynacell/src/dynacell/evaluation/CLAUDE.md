@@ -5,7 +5,7 @@ computing) for any GPU-accelerated numerical work — image preprocessing
 before / after model inference, metric calculations, cropping/resizing,
 percentile clips, Gaussian filters, etc. Cubic is a hard runtime
 dependency of the eval extras (`applications/dynacell/pyproject.toml`
-pins `cubic==0.7.0a11`, resolved from PyPI). Do not gate cubic imports behind `try/except`
+pins `cubic==0.7.0a12`, resolved from PyPI). Do not gate cubic imports behind `try/except`
 or fall back to scipy/skimage paths.
 
 The GPU-resident Cellpose-SAM entry point is

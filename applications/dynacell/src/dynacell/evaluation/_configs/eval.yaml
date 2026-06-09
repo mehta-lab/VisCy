@@ -84,6 +84,13 @@ pixel_metrics:
 feature_metrics:
   patch_size: 256
   deep_feature_batch_threshold: 256
+  # Conventional ("CP") per-cell feature track (regionprops-based).
+  cp:
+    norm: {p_lo: 1.0, p_hi: 99.0}   # robust percentile-clip before extraction
+    glcm:                           # opt-in Haralick texture; needs cubic.feature.glcm_features
+      enabled: false
+      levels: 32
+      distances: [1]
 
 # Feature extractor configuration — required only when compute_feature_metrics=true
 # (or when the corresponding precompute-gt build.* flag is set). Fields stay ???
@@ -118,6 +125,12 @@ feature_extractor:
 use_gpu: true
 compute_microssim: true
 compute_feature_metrics: true
+# Per-cell paired GT-vs-pred image similarity (separate from the CP feature
+# vector). Appended to the pixel-metrics rows. Requires io.cell_segmentation_path.
+compute_cell_similarity: false
+cell_similarity:
+  metrics: [pcc]            # pcc | ssim (ssim is 2D max-proj + size-guarded)
+  reduce: [mean, median]
 limit_positions: null  # process first N positions; null means all
 
 # Eval runtime / parallelism. Default is bit-for-bit-current sequential behavior.

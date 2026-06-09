@@ -43,6 +43,7 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
     "unetvit3d": "unetvit3d",
+    "pix2pix3d_unetvit": "pix2pix3d",
     "celldiff": "celldiff",
     "celldiff_r2": "celldiff_r2",
 }
@@ -90,6 +91,7 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_pretrained",
     "fnet3d_paper",
     "unetvit3d",
+    "pix2pix3d_unetvit",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff")  # r2 first so longest match wins
 _TRAIN_SETS: tuple[str, ...] = ("ipsc_trained", "joint", "a549_trained")
@@ -264,11 +266,21 @@ def parse_zarr_name(zarr_path: Path, dynacell_root: Path = _DYNACELL_ROOT) -> Pa
             gene_token, cond_token = right.split("_", 1)
             if cond_token not in _A549_CONDITIONS:
                 raise ValueError(f"unknown A549 condition {cond_token!r} in {name}")
-            if gene_token != organelle_prefix:
+            # The `__<gene>` suffix carries the A549 marker for the organelle, which
+            # may differ from the left-hand organelle prefix: ER/mito coincide
+            # (sec61b/tomm20), but nucleus uses `h2b` and membrane uses `caax`
+            # (e.g. nucl_pix2pix3d_unetvit__h2b_mock). Validate against the canonical
+            # organelle->gene map rather than the prefix.
+            if gene_token != _A549_GENE[organelle]:
                 raise ValueError(
-                    f"legacy `__` form gene mismatch: prefix={organelle_prefix!r}, suffix gene={gene_token!r} in {name}"
+                    f"legacy `__` form gene mismatch: organelle={organelle!r} expects "
+                    f"gene={_A549_GENE[organelle]!r}, got {gene_token!r} in {name}"
                 )
-            body = left
+            # The train_set infix (if any) sits on the left of `__`, before the
+            # gene/condition suffix: nucl_<model>_a549trained__h2b_<cond>. Dihan's
+            # original ER/mito legacy zarrs were iPSC-trained (no infix), so this
+            # strip is a no-op there.
+            body, train_set_filename = _strip_known_suffix(left, ("jointtrained", "a549trained"))
             condition = cond_token
             is_legacy_form = True
         else:

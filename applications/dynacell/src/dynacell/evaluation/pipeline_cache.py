@@ -44,6 +44,7 @@ from dynacell.evaluation.cache import (
 )
 from dynacell.evaluation.instance_metrics import DEFAULT_IOU_THRESHOLDS
 from dynacell.evaluation.metrics import (
+    CP_FEATURE_VERSION,
     build_crops,
     cp_regionprops,
     deep_features,
@@ -87,6 +88,9 @@ class _CacheContext:
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
     cellpose_params: dict[str, Any] = field(default_factory=dict)
     watershed_params: dict[str, Any] = field(default_factory=dict)
+    cp_feature_version: str | None = None
+    cp_norm: dict[str, Any] = field(default_factory=dict)
+    cp_glcm: dict[str, Any] = field(default_factory=dict)
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
@@ -216,6 +220,8 @@ def init_cache_context(
 
     cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
+    cp_norm_cfg = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
+    cp_glcm_cfg = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
     # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
     # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
     # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
@@ -243,6 +249,9 @@ def init_cache_context(
         ),
         cellpose_params=(OmegaConf.to_container(cellpose_cfg, resolve=True) if cellpose_cfg is not None else {}),
         watershed_params=(OmegaConf.to_container(watershed_cfg, resolve=True) if watershed_cfg is not None else {}),
+        cp_feature_version=CP_FEATURE_VERSION,
+        cp_norm=(OmegaConf.to_container(cp_norm_cfg, resolve=True) if cp_norm_cfg is not None else {}),
+        cp_glcm=(OmegaConf.to_container(cp_glcm_cfg, resolve=True) if cp_glcm_cfg is not None else {}),
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
@@ -426,8 +435,8 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
             "cp",
             f"{ctx.label_prefix}cp_features",
             artifacts.get("cp_features"),
-            {"spacing": ctx.spacing, **ctx.source_tag},
-            ("spacing",),
+            _cp_identity(ctx),
+            ("spacing", "cp_norm_p_lo", "cp_norm_p_hi"),
         ),
     ]
     if ctx.compute_instance_ap:
@@ -707,6 +716,38 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     return identity
 
 
+def _cp_identity(ctx: _CacheContext) -> dict[str, Any]:
+    """Return the cache-identity dict for a side's CP feature artifact.
+
+    Beyond ``spacing`` it records the CP recipe version and the
+    normalization / GLCM config so a recipe bump or a ``feature_metrics.cp.*``
+    change auto-invalidates the cached feature matrix (a pre-existing cache
+    lacks these keys → mismatch → recompute). ``cp_*`` keys are flat scalars so
+    they round-trip cleanly through the YAML manifest and ``diff_artifact_params``.
+
+    The GLCM quantization params (``levels``/``distances``) are recorded only
+    when GLCM is enabled — when it is off they do not affect the matrix, so
+    including them would needlessly invalidate an identical cache on a toggle.
+    ``diff_artifact_params`` compares the current identity's keys, so dropping
+    them is sufficient (any stale stored value is simply ignored).
+    """
+    glcm = ctx.cp_glcm or {}
+    norm = ctx.cp_norm or {}
+    glcm_enabled = bool(glcm.get("enabled", False))
+    identity: dict[str, Any] = {
+        "spacing": ctx.spacing,
+        "cp_feature_version": ctx.cp_feature_version,
+        "cp_glcm_enabled": glcm_enabled,
+        "cp_norm_p_lo": float(norm.get("p_lo", 1.0)),
+        "cp_norm_p_hi": float(norm.get("p_hi", 99.0)),
+        **ctx.source_tag,
+    }
+    if glcm_enabled:
+        identity["cp_glcm_levels"] = int(glcm.get("levels", 32))
+        identity["cp_glcm_distances"] = list(glcm.get("distances", [1]))
+    return identity
+
+
 def _fov_instances(
     ctx: _CacheContext,
     *,
@@ -943,7 +984,7 @@ def fov_cp_features(
     """Return CP regionprops per timepoint for one FOV, loading from cache or computing+writing.
 
     The cache side is taken from ``ctx.side``. Result is a list of ``T``
-    arrays, each shape ``(n_cells_t, n_props_raw)``.
+    arrays, each shape ``(n_cells_t, n_features)``.
     """
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
@@ -953,15 +994,24 @@ def fov_cp_features(
         force_key=f"{ctx.side}_cp",
         artifact_label=f"{ctx.label_prefix}cp_features",
         cache_kwargs={},
-        compute_fn=lambda t: cp_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing, use_gpu=ctx.use_gpu),
+        compute_fn=lambda t: cp_regionprops(
+            image_arr[t],
+            cell_segmentation_arr[t],
+            ctx.spacing,
+            norm=ctx.cp_norm,
+            glcm_cfg=ctx.cp_glcm,
+            use_gpu=ctx.use_gpu,
+        ),
     )
 
     if ctx.enabled and manifest_updated:
+        # Identity params (version/norm/glcm) come from _cp_identity so the
+        # written entry matches the read-time check in
+        # _auto_invalidate_on_artifact_param_mismatch (no spurious mismatch).
         entry: dict[str, Any] = {
             "path": "features/cp.zarr",
-            "spacing": ctx.spacing,
             "built_at": built_at_now(),
-            **ctx.source_tag,
+            **_cp_identity(ctx),
         }
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
         _add_position(ctx.manifest, ["cp_features"], pos_name)
