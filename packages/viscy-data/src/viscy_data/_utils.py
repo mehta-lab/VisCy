@@ -136,7 +136,7 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
     return collated
 
 
-def read_norm_meta(fov: Position) -> NormMeta | None:
+def _read_norm_meta(fov: Position) -> NormMeta | None:
     """Read normalization metadata from the FOV.
 
     Convert to float32 tensors to avoid automatic casting to float64.
@@ -165,8 +165,10 @@ def read_norm_meta(fov: Position) -> NormMeta | None:
     return norm_meta
 
 
-# Backwards-compatible private alias: existing callers import ``_read_norm_meta``.
-_read_norm_meta = read_norm_meta
+# Public alias re-exported as ``viscy_data.read_norm_meta``; the canonical
+# definition keeps its private name since this is a private ``_utils`` module
+# and all internal callers import ``_read_norm_meta``.
+read_norm_meta = _read_norm_meta
 
 
 def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
