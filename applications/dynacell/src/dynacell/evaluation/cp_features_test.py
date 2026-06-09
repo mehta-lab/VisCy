@@ -137,7 +137,7 @@ def test_per_cell_similarity_pcc_affine_invariant() -> None:
     target[0, 1:4, 1:4] = grad
     target[0, 4:7, 4:7] = grad.T
     predict = 2.5 * target + 3.0  # affine: PCC must stay ~1
-    out = per_cell_similarity(target[None][0], predict[None][0], labels, metrics=("pcc",), use_gpu=False)
+    out = per_cell_similarity(predict, target, labels, metrics=("pcc",), use_gpu=False)
     assert out["PerCell_PCC_mean"] == pytest.approx(1.0, abs=1e-5)
     assert out["PerCell_PCC_median"] == pytest.approx(1.0, abs=1e-5)
 
