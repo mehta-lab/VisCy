@@ -1442,11 +1442,16 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         rows = np.load(mask_path, allow_pickle=True).tolist()
         if not rows or "mAP" not in rows[0] or "instance_dice" not in rows[0]:
             return False
-    # Same guard for per-cell similarity: a prior run without it must not let
-    # its PerCell-less pixel cache suppress the newly-requested columns.
+    # Same guard for per-cell similarity, keyed to the exact requested columns:
+    # a prior run with a different metrics/reduce set (e.g. PCC-only) must not
+    # let its partial PerCell_ pixel cache suppress newly-requested columns
+    # (e.g. an added ssim). Require every expected PerCell_{METRIC}_{REDUCE}.
     if pixel_ok and bool(OmegaConf.select(config, "compute_cell_similarity", default=False)):
+        metrics = OmegaConf.select(config, "cell_similarity.metrics", default=["pcc"])
+        reduce = OmegaConf.select(config, "cell_similarity.reduce", default=["mean", "median"])
+        expected = {f"PerCell_{str(m).upper()}_{r}" for m in metrics for r in reduce}
         pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
-        if not pixel_rows or not any(str(k).startswith("PerCell_") for k in pixel_rows[0]):
+        if not pixel_rows or not expected.issubset(pixel_rows[0]):
             return False
     return pixel_ok and mask_ok and feature_ok
 
