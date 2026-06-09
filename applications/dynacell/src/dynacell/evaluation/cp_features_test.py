@@ -160,6 +160,34 @@ def test_per_cell_similarity_nan_safe_and_empty() -> None:
     assert np.isnan(out_empty["PerCell_PCC_median"])
 
 
+def test_per_cell_similarity_ssim_size_guard() -> None:
+    """SSIM scores cells >= the window and NaN-drops smaller ones; scale-free.
+
+    A cell whose bbox is smaller than the SSIM window in either spatial dim
+    must score NaN (the ``_cell_ssim`` size guard) and be dropped by the
+    reduction, while a large cell with an affine-rescaled prediction scores
+    ~1 under the scale-invariant SSIM. With every cell too small, both
+    reductions are NaN.
+    """
+    rng = np.random.default_rng(7)
+    labels = np.zeros((1, 16, 16), dtype=np.int32)
+    labels[0, 1:12, 1:12] = 1  # 11x11 >= win_size (7): scored
+    labels[0, 13:15, 13:15] = 2  # 2x2 < win_size: NaN, dropped
+    target = np.zeros((1, 16, 16), dtype=np.float32)
+    target[0, 1:12, 1:12] = rng.random((11, 11)).astype(np.float32)
+    target[0, 13:15, 13:15] = rng.random((2, 2)).astype(np.float32)
+    predict = 2.0 * target + 1.0  # affine: scale-invariant SSIM must stay ~1
+    out = per_cell_similarity(predict, target, labels, metrics=("ssim",), use_gpu=False)
+    assert out["PerCell_SSIM_mean"] == pytest.approx(1.0, abs=1e-3)
+    assert out["PerCell_SSIM_median"] == pytest.approx(1.0, abs=1e-3)
+
+    tiny_only = np.zeros((1, 16, 16), dtype=np.int32)
+    tiny_only[0, 13:15, 13:15] = 1  # only a sub-window cell → all NaN
+    out_tiny = per_cell_similarity(predict, target, tiny_only, metrics=("ssim",), use_gpu=False)
+    assert np.isnan(out_tiny["PerCell_SSIM_mean"])
+    assert np.isnan(out_tiny["PerCell_SSIM_median"])
+
+
 # --- end-to-end (needs cubic>=0.7.0a12) ---------------------------------------
 @pytest.mark.skipif(not _HAS_EXTRA_PROPS, reason="needs cubic>=0.7.0a12 extra_properties passthrough")
 def test_cp_regionprops_columns_glcm_off() -> None:
