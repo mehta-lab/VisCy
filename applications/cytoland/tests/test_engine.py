@@ -249,3 +249,37 @@ def test_predict_sliding_windows_rotation_tta_nonsquare(yx):
         output = vs.predict_sliding_windows(x, out_channel=out_channels, step=1)
     assert output.shape == (1, out_channels, depth, height, width)
     assert torch.isfinite(output).all()
+
+
+@pytest.mark.parametrize("yx", [(64, 64), (64, 48), (48, 64)])
+@pytest.mark.parametrize("tta_type", ["mean", "median", "product"])
+def test_vsunet_perform_test_time_augmentations_nonsquare(yx, tta_type):
+    """Verify VSUNet rotation TTA (the ``viscy predict`` path) handles non-square FOVs.
+
+    After unifying on ``rotation_tta_transforms`` and dropping the square-padding
+    workaround, ``perform_test_time_augmentations`` must preserve the input YX
+    shape for any aspect ratio.
+    """
+    z_window = 5
+    height, width = yx
+    model = VSUNet(
+        architecture="fcmae",
+        model_config={
+            "in_channels": 1,
+            "out_channels": 2,
+            "encoder_blocks": [2, 2, 2, 2],
+            "dims": [4, 8, 16, 32],
+            "decoder_conv_blocks": 1,
+            "stem_kernel_size": [z_window, 4, 4],
+            "in_stack_depth": z_window,
+            "pretraining": False,
+        },
+        test_time_augmentations=True,
+        tta_type=tta_type,
+    ).eval()
+    model.on_predict_start()  # set up the divisible-pad used by _pad_forward_crop
+    x = torch.randn(1, 1, z_window, height, width)
+    with torch.inference_mode():
+        output = model.perform_test_time_augmentations(x)
+    assert output.shape[-2:] == (height, width)
+    assert torch.isfinite(output).all()
