@@ -7,6 +7,7 @@ import torch
 
 try:
     from cubic.cuda import ascupy, asnumpy
+    from cubic.feature import glcm_features
     from cubic.feature.voxel import regionprops_table
     from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
@@ -18,6 +19,7 @@ except ImportError:
     asnumpy = None  # type: ignore[assignment]
     cubic_ssim = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
+    glcm_features = None  # type: ignore[assignment]
     nrmse = None  # type: ignore[assignment]
     pcc = None  # type: ignore[assignment]
     psnr = None  # type: ignore[assignment]
@@ -25,14 +27,6 @@ except ImportError:
     spectral_pcc = None  # type: ignore[assignment]
     _cubic_filters = None  # type: ignore[assignment]
     _cubic_ndimage = None  # type: ignore[assignment]
-
-# GLCM is an opt-in CP feature requiring cubic>=0.7.0a12 (cubic.feature.glcm_features).
-# Guarded separately so an older cubic (without it) does not break the critical
-# imports above; the GLCM CP path raises a clear ImportError if requested without it.
-try:
-    from cubic.feature import glcm_features
-except ImportError:
-    glcm_features = None  # type: ignore[assignment]
 
 from dynacell.evaluation.utils import _minmax_norm
 
@@ -450,11 +444,6 @@ def _per_cell_glcm(img, cell_segmentation, glcm_cfg: dict) -> dict[str, np.ndarr
     (the per-image quantization contract). Returns one ``glcm_<prop>`` array
     per :data:`_CP_GLCM_FEATURE_NAMES`, ordered by ascending label.
     """
-    if glcm_features is None:
-        raise ImportError(
-            "cubic.feature.glcm_features is required for GLCM CP features; "
-            "install cubic>=0.7.0a12 (`uv sync --extra eval`)."
-        )
     levels = int(glcm_cfg.get("levels", 32))
     distances = tuple(glcm_cfg.get("distances", (1,)))
     # A 2-D eval stores its plane as a singleton-Z volume ``(1, H, W)``. Squeeze

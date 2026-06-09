@@ -20,7 +20,6 @@ from dynacell.evaluation.metrics import (
     _p10,
     _p50,
     _p90,
-    _per_cell_glcm,
     _robust_norm,
     _skewness,
     active_cp_feature_names,
@@ -159,18 +158,6 @@ def test_per_cell_similarity_nan_safe_and_empty() -> None:
     out_empty = per_cell_similarity(target, predict, empty, metrics=("pcc",), use_gpu=False)
     assert np.isnan(out_empty["PerCell_PCC_mean"])
     assert np.isnan(out_empty["PerCell_PCC_median"])
-
-
-# --- GLCM gating --------------------------------------------------------------
-def test_per_cell_glcm_requires_cubic_a12(monkeypatch) -> None:
-    """The GLCM CP path raises a clear error when glcm_features is unavailable."""
-    import dynacell.evaluation.metrics as m
-
-    monkeypatch.setattr(m, "glcm_features", None)
-    labels = np.ones((1, 4, 4), dtype=np.int32)
-    img = np.random.default_rng(2).random((1, 4, 4))
-    with pytest.raises(ImportError, match="glcm_features"):
-        _per_cell_glcm(img, labels, {"enabled": True, "levels": 16, "distances": (1,)})
 
 
 # --- end-to-end (needs cubic>=0.7.0a12) ---------------------------------------
