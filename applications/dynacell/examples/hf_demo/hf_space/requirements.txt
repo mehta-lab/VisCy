@@ -5,8 +5,8 @@ numpy>=1.24
 matplotlib>=3.7
 torch>=2.1
 huggingface_hub>=0.20
-iohub>=0.1
-cubic>=0.7.0a2
+iohub>=0.3.6
+cubic==0.7.0a12
 git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-data
 git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-models
 git+https://github.com/mehta-lab/VisCy.git@dynacell-models#subdirectory=packages/viscy-transforms
