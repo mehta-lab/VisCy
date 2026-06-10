@@ -5,7 +5,6 @@ from cytoland.engine import (
     FcmaeUNet,
     MaskedMSELoss,
     VSUNet,
-    rotation_tta_transforms,
 )
 from cytoland.evaluation import SegmentationMetrics2D
 
@@ -15,5 +14,4 @@ __all__ = [
     "MaskedMSELoss",
     "SegmentationMetrics2D",
     "VSUNet",
-    "rotation_tta_transforms",
 ]
