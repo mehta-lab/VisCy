@@ -632,8 +632,8 @@ def _process_one_fov(
             with region_timer("cell_similarity", pos_name_pred, t), gpu_serialization_lock(gate=use_gpu):
                 pixel_row.update(
                     per_cell_similarity(
-                        predict[t],
-                        target[t],
+                        predict_xp[t],
+                        target_xp[t],
                         cell_segmentation[t],
                         metrics=cell_sim_metrics,
                         reduce=cell_sim_reduce,
