@@ -18,30 +18,30 @@ TEMPLATE_DIR = Path(__file__).parent / "config_templates"
 
 # (model, organelle) → filename in the HF checkpoint repo
 CHECKPOINT_FILES: dict[tuple[str, str], str] = {
-    ("celldiff",  "CAAX"):   "celldiff_caax.ckpt",
-    ("celldiff",  "H2B"):    "celldiff_h2b.ckpt",
-    ("celldiff",  "SEC61B"): "celldiff_sec61b.ckpt",
-    ("celldiff",  "TOMM20"): "celldiff_tomm20.ckpt",
-    ("fnet3d",    "CAAX"):   "fnet3d_caax.ckpt",
-    ("fnet3d",    "H2B"):    "fnet3d_h2b.ckpt",
-    ("fnet3d",    "SEC61B"): "fnet3d_sec61b.ckpt",
-    ("fnet3d",    "TOMM20"): "fnet3d_tomm20.ckpt",
-    ("vscyto3d",  "CAAX"):   "vscyto3d_caax.ckpt",
-    ("vscyto3d",  "H2B"):    "vscyto3d_h2b.ckpt",
-    ("vscyto3d",  "SEC61B"): "vscyto3d_sec61b.ckpt",
-    ("vscyto3d",  "TOMM20"): "vscyto3d_tomm20.ckpt",
+    ("celldiff", "CAAX"): "celldiff_caax.ckpt",
+    ("celldiff", "H2B"): "celldiff_h2b.ckpt",
+    ("celldiff", "SEC61B"): "celldiff_sec61b.ckpt",
+    ("celldiff", "TOMM20"): "celldiff_tomm20.ckpt",
+    ("fnet3d", "CAAX"): "fnet3d_caax.ckpt",
+    ("fnet3d", "H2B"): "fnet3d_h2b.ckpt",
+    ("fnet3d", "SEC61B"): "fnet3d_sec61b.ckpt",
+    ("fnet3d", "TOMM20"): "fnet3d_tomm20.ckpt",
+    ("vscyto3d", "CAAX"): "vscyto3d_caax.ckpt",
+    ("vscyto3d", "H2B"): "vscyto3d_h2b.ckpt",
+    ("vscyto3d", "SEC61B"): "vscyto3d_sec61b.ckpt",
+    ("vscyto3d", "TOMM20"): "vscyto3d_tomm20.ckpt",
 }
 
 TARGET_CHANNELS: dict[str, str] = {
-    "CAAX":   "Membrane",
-    "H2B":    "Nuclei",
+    "CAAX": "Membrane",
+    "H2B": "Nuclei",
     "SEC61B": "Structure",
     "TOMM20": "Structure",
 }
 
 ORGANELLE_LABELS: dict[str, str] = {
-    "CAAX":   "Membrane (CAAX)",
-    "H2B":    "Chromatin (H2B)",
+    "CAAX": "Membrane (CAAX)",
+    "H2B": "Chromatin (H2B)",
     "SEC61B": "ER (SEC61B)",
     "TOMM20": "Mitochondria (TOMM20)",
 }
@@ -197,7 +197,7 @@ def compute_trajectory(
         progress(0.25, desc="Reading phase data...")
     with open_ome_zarr(data_path, mode="r") as plate:
         _, pos = next(plate.positions())
-        phase_ch  = pos.get_channel_index("Phase3D")
+        phase_ch = pos.get_channel_index("Phase3D")
         phase_raw = np.array(pos.data[timepoint, phase_ch])
         fluor_raw = np.array(pos.data[timepoint, FLUOR_CH])
         norm_meta = _read_norm_meta(pos)
@@ -210,19 +210,15 @@ def compute_trajectory(
 
     z_total = phase_norm.shape[0]
     z_start = (z_total - patch_d) // 2
-    phase_crop = phase_norm[z_start:z_start + patch_d, :patch_h, :patch_w]
+    phase_crop = phase_norm[z_start : z_start + patch_d, :patch_h, :patch_w]
     # Raw phase + experimental fluorescence over the same window, for the
     # display panels and the per-step Spectral PCC.
-    phase_disp = phase_raw[z_start:z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
-    gt_crop = fluor_raw[z_start:z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
+    phase_disp = phase_raw[z_start : z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
+    gt_crop = fluor_raw[z_start : z_start + patch_d, :patch_h, :patch_w].astype(np.float32)
 
     if progress is not None:
         progress(0.35, desc=f"Generating {num_steps}-step ODE trajectory...")
-    phase_tensor = (
-        torch.from_numpy(phase_crop).float()
-        .unsqueeze(0).unsqueeze(0)
-        .to(device)
-    )
+    phase_tensor = torch.from_numpy(phase_crop).float().unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
         trajectory = model.model.generate_trajectory(phase_tensor, num_steps=num_steps)
     traj_np = trajectory[:, 0].cpu().numpy().astype(np.float32)  # (num_steps, 1, D, H, W)
