@@ -172,7 +172,7 @@ def compute_trajectory(
 ) -> dict:
     """Run the CELL-Diff ODE; save trajectory to /tmp as .npy; return metadata dict.
 
-    The returned dict contains everything needed to call render_trajectory_gif
+    The returned dict contains everything needed to call render_trajectory_frame
     without re-running the ODE.
     """
     import numpy as np
