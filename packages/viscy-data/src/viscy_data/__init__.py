@@ -72,6 +72,9 @@ try:
 except ImportError:
     pass
 
+# Normalization metadata reader (from _utils.py)
+from viscy_data._utils import read_norm_meta
+
 # Channel dropout augmentation (from channel_dropout.py)
 from viscy_data.channel_dropout import ChannelDropout
 
@@ -150,6 +153,7 @@ __all__ = [
     "ChannelDropout",
     # Utilities
     "FlexibleBatchSampler",
+    "read_norm_meta",
     "SelectWell",
     "ShardedDistributedSampler",
     # Core

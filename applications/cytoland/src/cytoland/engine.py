@@ -3,6 +3,7 @@
 import inspect
 import logging
 import os
+from functools import partial
 from typing import Callable, Literal, Sequence
 
 import numpy as np
@@ -68,6 +69,36 @@ def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Ten
         start = (current - size) // 2
         slices[dim] = slice(start, start + size)
     return tensor[tuple(slices)]
+
+
+def rotation_tta_transforms(
+    n: int = 4,
+) -> tuple[list[Callable[[Tensor], Tensor]], list[Callable[[Tensor], Tensor]]]:
+    """Build forward/inverse 90-degree rotation transforms for test-time augmentation.
+
+    Returns ``(forward_transforms, inverse_transforms)`` suitable for
+    :class:`AugmentedPredictionVSUNet`. Each forward transform rotates the YX
+    plane by ``k * 90`` degrees (``k = 0 .. n-1``) and the matching inverse
+    rotates back. Combined with ``reduction="median"`` this reproduces the
+    rotation TTA used by :meth:`VSUNet.perform_test_time_augmentations`, and
+    (unlike passing rotations through other code paths) works for non-square
+    fields of view.
+
+    Parameters
+    ----------
+    n : int, optional
+        Number of 90-degree rotations, by default 4 (0, 90, 180, 270 degrees).
+
+    Returns
+    -------
+    tuple[list[Callable], list[Callable]]
+        The forward and inverse transform lists.
+    """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    forward = [partial(torch.rot90, k=k, dims=(-2, -1)) for k in range(n)]
+    inverse = [partial(torch.rot90, k=-k, dims=(-2, -1)) for k in range(n)]
+    return forward, inverse
 
 
 class MaskedMSELoss(nn.Module):
@@ -603,6 +634,40 @@ class AugmentedPredictionVSUNet(LightningModule):
         self._inverse_transforms = inverse_transforms or [_identity]
         self._reduction = reduction
 
+    @classmethod
+    def with_rotation_tta(
+        cls,
+        model: nn.Module,
+        n_rotations: int = 4,
+        reduction: Literal["mean", "median"] = "median",
+    ) -> "AugmentedPredictionVSUNet":
+        """Build a predictor that applies 90-degree rotation test-time augmentation.
+
+        Convenience constructor that wires :func:`rotation_tta_transforms` into
+        the forward/inverse transform lists, so callers do not have to build
+        them by hand. Works for non-square fields of view.
+
+        Parameters
+        ----------
+        model : nn.Module
+            The model to wrap.
+        n_rotations : int, optional
+            Number of 90-degree rotations, by default 4.
+        reduction : {"mean", "median"}, optional
+            How to aggregate the rotated predictions, by default "median".
+
+        Returns
+        -------
+        AugmentedPredictionVSUNet
+        """
+        forward_transforms, inverse_transforms = rotation_tta_transforms(n_rotations)
+        return cls(
+            model=model,
+            forward_transforms=forward_transforms,
+            inverse_transforms=inverse_transforms,
+            reduction=reduction,
+        )
+
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
 
@@ -659,9 +724,15 @@ class AugmentedPredictionVSUNet(LightningModule):
         preds = []
         for fwd_t, inv_t in zip(self._forward_transforms, self._inverse_transforms):
             aug_source = fwd_t(source)
+            # Crop back to the augmented (post-forward-transform) spatial shape,
+            # not the original one: a shape-changing transform such as a 90/270
+            # degree rotation swaps Y and X, so the prediction lives in the
+            # augmented frame until ``inv_t`` undoes the transform. Cropping to
+            # ``source.shape[2:]`` here would be wrong for non-square inputs.
+            aug_shape = aug_source.shape[2:]
             aug_source = self._predict_pad(aug_source)
             pred = self.forward(aug_source)
-            pred = _center_crop_to_shape(pred, source.shape[2:])
+            pred = _center_crop_to_shape(pred, aug_shape)
             preds.append(inv_t(pred))
         if len(preds) == 1:
             return preds[0]
