@@ -84,20 +84,21 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     # artifact cache, and needs none of the models below — so do it first. The
     # phase channel must exist in io.gt_path; packed .ozx stores are read-only
     # (run against the unpacked OME-Zarr and repackage).
-    if build.focus:
-        pixel_size = config.focus.pixel_size
+    if OmegaConf.select(config, "build.focus", default=False):
+        focus_channel = str(OmegaConf.select(config, "focus.channel_name", default="Phase3D"))
+        pixel_size = OmegaConf.select(config, "focus.pixel_size", default=None)
         if pixel_size is None:
             pixel_size = float(config.pixel_metrics.spacing[-1])
-        print(f"Writing focus_slice to {config.io.gt_path} (channel={config.focus.channel_name})")
+        print(f"Writing focus_slice to {config.io.gt_path} (channel={focus_channel})")
         stats = write_focus_slice_metadata(
             str(config.io.gt_path),
-            channel_name=str(config.focus.channel_name),
-            na_det=float(config.focus.na_det),
-            lambda_ill=float(config.focus.lambda_ill),
+            channel_name=focus_channel,
+            na_det=float(OmegaConf.select(config, "focus.na_det", default=1.35)),
+            lambda_ill=float(OmegaConf.select(config, "focus.lambda_ill", default=0.450)),
             pixel_size=float(pixel_size),
-            device=str(config.focus.device),
+            device=str(OmegaConf.select(config, "focus.device", default="cpu")),
         )
-        print(f"  focus_slice[{config.focus.channel_name}].dataset_statistics = {stats}")
+        print(f"  focus_slice[{focus_channel}].dataset_statistics = {stats}")
 
     models = load_eval_models(
         config,
