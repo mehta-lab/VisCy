@@ -32,13 +32,16 @@ LEAF="${LEAVES[${SLURM_ARRAY_TASK_ID}]}"
 echo "[celldiff-r2-a549tr-eval-def] task ${SLURM_ARRAY_TASK_ID}: leaf=${LEAF}"
 echo "[celldiff-r2-a549tr-eval-def] node=$(hostname) gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits | head -1)"
 
-export DYNACELL_THREADS_PER_WORKER=32
+# Derive the thread cap from the allocation (never hardcode — matches the #429 fix).
+export DYNACELL_THREADS_PER_WORKER=${SLURM_CPUS_PER_TASK:-32}
 
 cd /hpc/mydata/alex.kalinin/VisCy
-# GLCM + focus_slab (see run_reeval_campaign.slurm for rationale + the focus_slice
-# PREREQUISITE: write it with precompute-gt build.focus / repackage A549 .ozx first).
+# GLCM + focus (compute-at-eval-time; no .ozx repackaging needed — see
+# run_celldiff_r2_a549trained_evals.slurm). slice_selection=focus = 2D instance
+# seg on the in-focus plane. NOTE: superseded by tools/run_focus_campaign.slurm.
 exec uv run dynacell evaluate-grouped "leaf=${LEAF}" \
   feature_metrics.cp.glcm.enabled=true \
   feature_metrics.focus_slab.enabled=true \
   feature_metrics.focus_slab.halfwidth=2 \
+  segmentation.slice_selection=focus \
   force_recompute.final_metrics=true
