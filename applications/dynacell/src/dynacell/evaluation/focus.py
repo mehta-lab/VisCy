@@ -18,6 +18,7 @@ the dependency graph ``applications/ → packages/`` only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -98,6 +99,24 @@ class FocusComputeConfig:
     lambda_ill: float
     pixel_size: float
     device: str
+
+    @property
+    def estimator_params(self) -> dict[str, float]:
+        """Physical params that change the estimated focus plane.
+
+        These belong in any cache identity that turns on focus: a change to
+        ``na_det`` / ``lambda_ill`` / ``pixel_size`` moves the in-focus plane, so a
+        cache keyed without them would silently reuse stale planes/slabs. The
+        ``channel_name`` is recorded separately by each identity, and ``device`` only
+        selects the torch backend for a deterministic arg-max — neither belongs here.
+        """
+        return {"na_det": self.na_det, "lambda_ill": self.lambda_ill, "pixel_size": self.pixel_size}
+
+    @property
+    def estimator_sig(self) -> str:
+        """Short, stable signature of :attr:`estimator_params` for string cache tags."""
+        raw = "_".join(f"{k}={v:g}" for k, v in self.estimator_params.items())
+        return hashlib.sha256(raw.encode()).hexdigest()[:8]
 
 
 def read_focus_compute_config(config: DictConfig, *, channel_name: str | None = None) -> FocusComputeConfig:

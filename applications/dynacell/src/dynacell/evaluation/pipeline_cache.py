@@ -85,6 +85,7 @@ class _CacheContext:
     slice_fraction: float = 0.30
     focus_channel_name: str | None = None
     focus_slab_enabled: bool = False
+    focus_estimator_params: dict[str, float] = field(default_factory=dict)
     nuclei_channel_name: str | None = None
     nuclei_plate_path: str | None = None
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
@@ -230,14 +231,29 @@ def init_cache_context(
     # preprocess_version — a toggle then auto-invalidates the deep caches via
     # _auto_invalidate_on_preprocess_version_mismatch. CP stays 3D, so its
     # identity is intentionally NOT tagged.
-    from dynacell.evaluation.focus import read_focus_slab_config
+    #
+    # The slab (and the slice_selection=focus instance plane) sit on the focus plane
+    # estimated from focus.{na_det,lambda_ill,pixel_size}; changing those params moves
+    # the plane, so fold the estimator signature into the deep tag and the resolved
+    # params onto the context (consumed by _instance_identity). Both are channel-
+    # independent, so one resolve covers both paths.
+    from dynacell.evaluation.focus import read_focus_compute_config, read_focus_slab_config
 
     slab_cfg = read_focus_slab_config(config)
-    if slab_cfg is not None:
-        focus_tag = f"+focusslab_h{slab_cfg.halfwidth}_{slab_cfg.channel_name}"
-        dinov3_preprocess_version = (dinov3_preprocess_version + focus_tag) if dinov3_preprocess_version else None
-        dynaclr_preprocess_version = (dynaclr_preprocess_version + focus_tag) if dynaclr_preprocess_version else None
-        celldino_preprocess_version = (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
+    slice_selection = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+    focus_estimator_params: dict[str, float] = {}
+    if slab_cfg is not None or slice_selection == "focus":
+        fc = read_focus_compute_config(config)
+        focus_estimator_params = fc.estimator_params
+        if slab_cfg is not None:
+            focus_tag = f"+focusslab_h{slab_cfg.halfwidth}_{slab_cfg.channel_name}_{fc.estimator_sig}"
+            dinov3_preprocess_version = (dinov3_preprocess_version + focus_tag) if dinov3_preprocess_version else None
+            dynaclr_preprocess_version = (
+                (dynaclr_preprocess_version + focus_tag) if dynaclr_preprocess_version else None
+            )
+            celldino_preprocess_version = (
+                (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
+            )
     # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
     # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
     # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
@@ -256,10 +272,11 @@ def init_cache_context(
         backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
         compute_instance_ap=bool(OmegaConf.select(config, "compute_instance_ap", default=False)),
         dimension=OmegaConf.select(config, "segmentation.dimension", default="2d"),
-        slice_selection=OmegaConf.select(config, "segmentation.slice_selection", default="frac"),
+        slice_selection=slice_selection,
         slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
         focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
         focus_slab_enabled=slab_cfg is not None,
+        focus_estimator_params=focus_estimator_params,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
         nuclei_plate_path=str(nuclei_plate_path) if nuclei_plate_path is not None else None,
         iou_thresholds=list(
@@ -732,9 +749,12 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     }
     # slice_selection='focus' picks the 2D plane from this channel's focus estimate,
     # so it must be part of the identity (only when active, to leave frac/sharpest
-    # identities byte-stable). Analog of the backend fix in #445.
+    # identities byte-stable). Analog of the backend fix in #445. The plane also
+    # depends on the focus-compute params (na_det/lambda_ill/pixel_size), so record
+    # them too — otherwise a focus-param change reuses a stale in-focus plane.
     if ctx.slice_selection == "focus":
         identity["focus_channel_name"] = ctx.focus_channel_name
+        identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
     if ctx.backend == "cellpose_watershed":
         # Whole-cell labels also depend on the watershed params and the GT nuclei
         # seeds; record the GT nuclei (path, channel) so a pred-side identity

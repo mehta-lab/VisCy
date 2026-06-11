@@ -168,8 +168,11 @@ default-off (default behavior unchanged):
 - `feature_metrics.focus_slab.{enabled,halfwidth,channel_name}` — deep-feature crops
   (`build_crops`) + `per_cell_similarity` max-project over a `2*halfwidth+1` slab
   centered on the in-focus plane (h=2 → ±2 → 5 planes). CP regionprops stay 3D
-  (untagged). Enabling it folds `+focusslab_h{h}_{ch}` into each deep-feature
-  `preprocess_version` so embedding caches auto-invalidate.
+  (untagged). Enabling it folds `+focusslab_h{h}_{ch}_{sig}` into each deep-feature
+  `preprocess_version` so embedding caches auto-invalidate — `{sig}` is a short hash of
+  the focus-compute params (`focus.{na_det,lambda_ill,pixel_size}`), so a focus-param
+  change also invalidates (the same params are recorded in the `slice_selection=focus`
+  instance-mask cache identity).
 - `segmentation.slice_selection=focus` — 2D instance seg picks the in-focus plane
   (single slice, no slab) vs the old `frac=0.30`.
 - `precompute-gt build.focus=true` — writes `focus_slice` zattrs (DynaCLR/qc schema)

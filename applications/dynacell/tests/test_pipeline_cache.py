@@ -23,6 +23,7 @@ from dynacell.evaluation.cache import (  # noqa: E402
     write_mask,
 )
 from dynacell.evaluation.pipeline_cache import (  # noqa: E402
+    _instance_identity,
     _resolve_force,
     flush_manifest,
     fov_cp_features,
@@ -478,6 +479,54 @@ def test_init_cache_cp_glcm_levels_ignored_when_glcm_disabled(tmp_path: Path) ->
         ctx = init_cache_context(cfg, side="gt")
     assert ctx.force["gt_cp"] is False
     assert not any("artifact param mismatch" in str(w.message) and "cp_features" in str(w.message) for w in caught)
+
+
+def _focus_config(**focus_overrides: Any):
+    """A ``_make_config`` with focus_slab + slice_selection=focus turned on."""
+    focus = {"na_det": 1.35, "lambda_ill": 0.450, "pixel_size": 0.1494, "device": "cpu"}
+    focus.update(focus_overrides)
+    return _make_config(
+        **{
+            "feature_metrics.focus_slab": {"enabled": True, "halfwidth": 2, "channel_name": "Phase3D"},
+            "segmentation": {"slice_selection": "focus", "focus_channel_name": "Phase3D"},
+            "focus": focus,
+        }
+    )
+
+
+def test_focus_params_fold_into_deep_tag_and_instance_identity() -> None:
+    """Focus-compute params gate the in-focus plane, so they must sit in the cache keys.
+
+    The deep-feature ``preprocess_version`` gets a ``+focusslab_h{h}_{ch}_{sig}`` tag and
+    the ``slice_selection=focus`` instance identity records the params; a ``pixel_size``
+    change then alters both, forcing a recompute instead of silently reusing stale planes.
+    """
+    ctx = init_cache_context(
+        _focus_config(), side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1"
+    )
+    assert ctx.dinov3_preprocess_version.startswith("v1+focusslab_h2_Phase3D_")
+    ident = _instance_identity(ctx)
+    assert ident["focus_channel_name"] == "Phase3D"
+    assert ident["focus_na_det"] == 1.35
+    assert ident["focus_pixel_size"] == 0.1494
+
+    # A pixel_size override moves the plane -> the deep tag and instance identity both change.
+    ctx2 = init_cache_context(
+        _focus_config(pixel_size=0.250), side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1"
+    )
+    assert ctx2.dinov3_preprocess_version != ctx.dinov3_preprocess_version
+    assert _instance_identity(ctx2)["focus_pixel_size"] == 0.250
+
+
+def test_focus_off_leaves_tag_and_identity_untagged() -> None:
+    """With focus disabled (the default), no focus tag or focus keys appear anywhere."""
+    ctx = init_cache_context(
+        _make_config(), side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1"
+    )
+    assert ctx.dinov3_preprocess_version == "v1"
+    ident = _instance_identity(ctx)
+    assert "focus_channel_name" not in ident
+    assert not any(k.startswith("focus_") for k in ident)
 
 
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
