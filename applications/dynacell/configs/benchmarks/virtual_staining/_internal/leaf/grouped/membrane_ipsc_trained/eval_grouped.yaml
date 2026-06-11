@@ -11,6 +11,10 @@ runtime:
   threads_per_worker: auto
 force_recompute:
   final_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose_watershed
+  nuclei_channel_name: Nuclei
 conditions:
 - name: celldiff_r2_iterative__ipsc_trained__a549_denv
   benchmark:
@@ -20,6 +24,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_r2_iterative_denv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/caax_denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_celldiff_r2_iterative_membrane_denv
 - name: vscyto3d__ipsc_trained__a549_denv
@@ -30,6 +35,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_denv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_pretrained/caax_denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_membrane_denv
 - name: unext2__ipsc_trained__a549_denv
@@ -40,6 +46,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_scratch_denv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_scratch/caax_denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_unext2_membrane_denv
 - name: fnet3d__ipsc_trained__a549_denv
@@ -50,6 +57,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fnet3d_paper_denv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fnet3d_paper/caax_denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_fnet3d_membrane_denv
 - name: unetvit3d__ipsc_trained__a549_denv
@@ -60,6 +68,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_unetvit3d_denv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/unetvit3d/caax_denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_unetvit3d_membrane_denv
 - name: celldiff_r2_iterative__ipsc_trained__a549_mock
@@ -70,6 +79,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_r2_iterative_mock.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/caax_mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_celldiff_r2_iterative_membrane_mock
 - name: vscyto3d__ipsc_trained__a549_mock
@@ -80,6 +90,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_mock.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_pretrained/caax_mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_membrane_mock
 - name: unext2__ipsc_trained__a549_mock
@@ -90,6 +101,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_scratch_mock.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_scratch/caax_mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_unext2_membrane_mock
 - name: fnet3d__ipsc_trained__a549_mock
@@ -100,6 +112,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fnet3d_paper_mock.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fnet3d_paper/caax_mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_fnet3d_membrane_mock
 - name: unetvit3d__ipsc_trained__a549_mock
@@ -110,6 +123,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_unetvit3d_mock.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/unetvit3d/caax_mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_unetvit3d_membrane_mock
 - name: celldiff_r2_iterative__ipsc_trained__a549_zikv
@@ -120,6 +134,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_celldiff_r2_iterative_zikv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/celldiff_r2_iterative/caax_zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_celldiff_r2_iterative_membrane_zikv
 - name: vscyto3d__ipsc_trained__a549_zikv
@@ -130,6 +145,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_pretrained_zikv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_pretrained/caax_zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_membrane_zikv
 - name: unext2__ipsc_trained__a549_zikv
@@ -140,6 +156,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fcmae_vscyto3d_scratch_zikv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fcmae_vscyto3d_scratch/caax_zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_unext2_membrane_zikv
 - name: fnet3d__ipsc_trained__a549_zikv
@@ -150,6 +167,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_fnet3d_paper_zikv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/fnet3d_paper/caax_zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_fnet3d_membrane_zikv
 - name: unetvit3d__ipsc_trained__a549_zikv
@@ -160,6 +178,7 @@ conditions:
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_unetvit3d_zikv.zarr
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/ipsc_trained/unetvit3d/caax_zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_unetvit3d_membrane_zikv
 - name: celldiff_r2_denoise__ipsc_trained__ipsc
