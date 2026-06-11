@@ -26,6 +26,11 @@
 #   feature_metrics.focus_slab.halfwidth=2       — max-proj over the in-focus ±2 slab
 #   segmentation.slice_selection=focus           — 2D instance seg on the in-focus
 #                                                  plane (was frac=0.30)
+#   force_recompute.{gt_cp,pred_cp}=true         — recompute CP fresh: some iPSC
+#                                                  caches hold a stale wider CP
+#                                                  schema (58 vs current 22 cols)
+#                                                  that isn't auto-invalidated and
+#                                                  fails the cross-FOV concat
 #   force_recompute.final_metrics=true           — re-aggregate the CSV/NPY
 # The focus plane is read from focus_slice zattrs when present (iPSC) else computed
 # from Phase3D and cached in io.gt_cache_dir (A549 published .ozx stay byte-identical).
@@ -110,4 +115,6 @@ exec uv run dynacell evaluate-grouped "leaf=${LEAF}" \
   feature_metrics.focus_slab.enabled=true \
   feature_metrics.focus_slab.halfwidth=2 \
   segmentation.slice_selection=focus \
+  force_recompute.gt_cp=true \
+  force_recompute.pred_cp=true \
   force_recompute.final_metrics=true
