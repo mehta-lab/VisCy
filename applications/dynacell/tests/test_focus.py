@@ -130,5 +130,23 @@ def test_read_focus_slab_config_rejects_negative_halfwidth():
     assert read_focus_slab_config(ok).halfwidth == 0
 
 
+def test_per_cell_similarity_z_slab_restricts_and_changes_outcome():
+    """z_slab slices predict/target/seg consistently, raising per-cell PCC toward the in-focus band."""
+    from dynacell.evaluation.metrics import per_cell_similarity
+
+    rng = np.random.default_rng(0)
+    z, y, x = 12, 48, 48
+    target = rng.normal(size=(z, y, x)).astype(np.float32)
+    predict = rng.normal(size=(z, y, x)).astype(np.float32)  # uncorrelated everywhere ...
+    predict[4:8] = target[4:8]  # ... except the in-focus band, where pred == target (PCC ≈ 1)
+    seg = np.zeros((z, y, x), dtype=np.int32)
+    seg[:, 10:38, 10:38] = 1  # one cell spanning all z
+    kw = dict(metrics=("pcc",), reduce=("mean",), use_gpu=False)
+    full = per_cell_similarity(predict, target, seg, **kw)
+    slab = per_cell_similarity(predict, target, seg, z_slab=slice(4, 8), **kw)
+    assert slab["PerCell_PCC_mean"] > full["PerCell_PCC_mean"]
+    assert slab["PerCell_PCC_mean"] > 0.9
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
