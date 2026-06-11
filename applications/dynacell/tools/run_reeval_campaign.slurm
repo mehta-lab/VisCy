@@ -51,4 +51,21 @@ echo "[reeval] node=$(hostname) gpu=$(nvidia-smi --query-gpu=name --format=csv,n
 export DYNACELL_THREADS_PER_WORKER=32
 
 cd /hpc/mydata/alex.kalinin/VisCy
-exec uv run dynacell evaluate-grouped "leaf=${LEAF}"
+# GLCM Haralick texture recompute: glcm.enabled flips the cp_features cache
+# identity (cp_glcm_enabled false->true) so only the CP artifact auto-invalidates
+# and recomputes on GPU; deep-feature / mask / instance caches are untouched.
+# force_recompute.final_metrics re-aggregates the saved CSV/NPY from the enriched
+# CP cache (it is reused on file-existence alone otherwise). final_metrics=true is
+# also baked into the leaves' _BASE_OVERLAY; repeated here so the recompute intent
+# is explicit at the launch site.
+# focus_slab restricts the 2D deep-feature / per-cell projection to an in-focus
+# slab centered on the GT phase focus plane (h=2 -> 5 planes), keeping the MIP off
+# the out-of-focus caps. PREREQUISITE: focus_slice zattrs must already exist in
+# every GT store this campaign touches -- write them with `dynacell precompute-gt
+# build.focus=true` (writable .zarr) and repackage the A549 .ozx with the metadata.
+# Without it the eval fails loud (no silent full-stack fallback).
+exec uv run dynacell evaluate-grouped "leaf=${LEAF}" \
+  feature_metrics.cp.glcm.enabled=true \
+  feature_metrics.focus_slab.enabled=true \
+  feature_metrics.focus_slab.halfwidth=2 \
+  force_recompute.final_metrics=true
