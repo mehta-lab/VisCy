@@ -67,6 +67,11 @@ case "$PHASE" in
     )
     ;;
   eval)
+    # joint + a549_trained buckets only. The dedicated *_celldiff_r2_a549trained{,_later}
+    # and *_celldiff_r2_iterative_a549_rerun buckets are DROPPED: they duplicate the
+    # celldiff_r2 conditions already covered by these a549_trained buckets (and by the
+    # phase-1 ipsc_trained buckets for the iterative variant), and writing the same
+    # per-condition save_dir concurrently raised zarr ContainsGroupError.
     LEAVES=(
       grouped/er_joint/eval_grouped
       grouped/mitochondria_joint/eval_grouped
@@ -76,14 +81,6 @@ case "$PHASE" in
       grouped/membrane_joint/eval_grouped
       grouped/nucleus_a549_trained/eval_grouped
       grouped/membrane_a549_trained/eval_grouped
-      grouped/er_celldiff_r2_a549trained/eval_grouped
-      grouped/mitochondria_celldiff_r2_a549trained/eval_grouped
-      grouped/nucleus_celldiff_r2_a549trained/eval_grouped
-      grouped/membrane_celldiff_r2_a549trained/eval_grouped
-      grouped/nucleus_celldiff_r2_iterative_a549_rerun/eval_grouped
-      grouped/mitochondria_celldiff_r2_a549trained_later/eval_grouped
-      grouped/nucleus_celldiff_r2_a549trained_later/eval_grouped
-      grouped/membrane_celldiff_r2_a549trained_later/eval_grouped
     )
     ;;
   *)
