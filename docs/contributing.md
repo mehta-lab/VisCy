@@ -146,30 +146,59 @@ Authoring notes:
 
 ## Release a package
 
-Versions come from git tags via
-[`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning); the
-tag **prefix** picks the package.
+Publishing a GitHub Release ships that package to PyPI — no tokens, no manual upload,
+no version bump in code. Both the workspace libraries and the applications release this
+way. Versions come from the tag via
+[`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning); the tag
+**prefix** picks the package, and each package versions independently.
 
 | Package | Tag prefix | Example |
 |---|---|---|
+| `viscy` (umbrella) | none | `v0.6.0` |
 | `viscy-data` | `viscy-data-` | `viscy-data-v0.2.1` |
 | `viscy-models` | `viscy-models-` | `viscy-models-v0.4.0` |
 | `viscy-transforms` | `viscy-transforms-` | `viscy-transforms-v0.1.3` |
 | `viscy-utils` | `viscy-utils-` | `viscy-utils-v0.3.0` |
-| `viscy` (umbrella) | none | `v0.6.0` |
+| `airtable-utils` | `airtable-utils-` | `airtable-utils-v0.1.0` |
+| `cytoland` | `cytoland-` | `cytoland-v0.3.0` |
+| `dynacell` | `dynacell-` | `dynacell-v0.2.0` |
+| `dynaclr` | `dynaclr-` | `dynaclr-v0.1.0` |
+| `viscy-qc` | `viscy-qc-` | `viscy-qc-v0.1.0` |
 
-```sh
-git checkout main && git pull && git fetch --tags
-git tag viscy-data-v0.2.1                          # (1)!
-uv build --package viscy-data --out-dir dist/      # (2)!
-ls dist/                                           # viscy_data-0.2.1-...whl  (3)!
-git push origin viscy-data-v0.2.1                  # (4)!
-```
+Create the Release on the tag:
 
-1. One tag per package you ship.
-2. Version is derived from the tag.
-3. Verify the wheel name matches the tag before pushing.
-4. Nothing is public until you push the tag.
+=== ":material-console: gh CLI"
+
+    ```sh
+    # standard release
+    gh release create viscy-data-v0.2.1 --generate-notes --title "viscy-data v0.2.1"
+
+    # pre-release (rc / alpha / beta)
+    gh release create viscy-data-v0.2.1rc1 --prerelease --generate-notes
+    ```
+
+=== ":material-web: Web"
+
+    1. **Releases → Draft a new release.**
+    2. Choose or create the tag, e.g. `viscy-data-v0.2.1`.
+    3. Tick **Set as a pre-release** for an `rc` / `a` / `b` tag.
+    4. **Publish release.**
+
+Spell versions the PEP 440 way: `v0.2.1`, `v0.2.1rc1`. A
+misspelled or unprefixed tag fails the run before anything builds.
+
+!!! note "What CI does"
+
+    Publishing the Release runs `.github/workflows/release.yml`: parse the tag, build
+    the sdist and wheel, verify the version matches the tag, publish to PyPI over OIDC
+    (PEP 740 attestations, no stored secrets), and attach the artifacts to the Release.
+
+!!! note "How publishing is authorized"
+
+    Each package publishes through PyPI
+    [trusted publishing](https://docs.pypi.org/trusted-publishers/) (OIDC): GitHub mints
+    a short-lived credential per run, scoped to `release.yml` and that package's
+    environment (`pypi-viscy`, `pypi-viscy-data`, …).
 
 !!! note "Docs deploy automatically"
 
@@ -177,7 +206,7 @@ git push origin viscy-data-v0.2.1                  # (4)!
     to `main` updates the `dev` build; a `vX.Y.Z` umbrella tag publishes a release
     and moves `stable`.
 
-## Before you open a PR
+## Before you open a PR check that:
 
 - [ ] Tests cover the change and `uv run pytest` passes
 - [ ] `uvx prek run --all-files` is clean

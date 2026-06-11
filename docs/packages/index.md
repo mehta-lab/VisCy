@@ -18,10 +18,10 @@ The table below is regenerated at build time from the installed distributions
 
 | Package | Version | Install |
 |---------|---------|---------|
-| [`viscy-data`](viscy-data.md) | `0.0.0.post233.dev0+0f63d97b` | `pip install viscy-data` |
-| [`viscy-models`](viscy-models.md) | `0.0.0.post233.dev0+0f63d97b` | `pip install viscy-models` |
-| [`viscy-transforms`](viscy-transforms.md) | `0.0.0.post233.dev0+0f63d97b` | `pip install viscy-transforms` |
-| [`viscy-utils`](viscy-utils.md) | `0.0.0.post233.dev0+0f63d97b` | `pip install viscy-utils` |
+| [`viscy-data`](viscy-data.md) | `0.0.0.post209.dev0+4edfaf8b` | `pip install viscy-data` |
+| [`viscy-models`](viscy-models.md) | `0.0.0.post209.dev0+4edfaf8b` | `pip install viscy-models` |
+| [`viscy-transforms`](viscy-transforms.md) | `0.0.0.post209.dev0+4edfaf8b` | `pip install viscy-transforms` |
+| [`viscy-utils`](viscy-utils.md) | `0.0.0.post209.dev0+4edfaf8b` | `pip install viscy-utils` |
 
 <!-- versions:end -->
 

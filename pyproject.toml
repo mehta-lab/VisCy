@@ -61,7 +61,7 @@ viscy-utils = { workspace = true }
 dynaclr = { workspace = true }
 cytoland = { workspace = true }
 airtable-utils = { workspace = true }
-qc = { workspace = true }
+viscy-qc = { workspace = true }
 dynacell = { workspace = true }
 # cubic 0.7.0a9 (GPU-resident Cellpose-SAM eval API + FSC/FRC NaN fix) is not on
 # PyPI yet; pin the exact commit (reports 0.7.0a9, satisfies the ==0.7.0a9 pin).
