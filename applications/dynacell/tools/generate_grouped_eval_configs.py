@@ -97,6 +97,16 @@ _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff")  # r2 first so l
 _TRAIN_SETS: tuple[str, ...] = ("ipsc_trained", "joint", "a549_trained")
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 
+# Instance average-precision (AP_0.50..0.95 / mAP / instance_dice) is defined only
+# for the two organelles with a cell-instance interpretation, and it is computed in
+# the SAME pass as the pixel/feature/semantic metrics — the instance masks feed both
+# the instance-AP columns and the semantic Dice/IoU rows. nucleus -> per-side
+# Cellpose nucleus instances; membrane -> GT-nuclei-seeded watershed whole-cell
+# instances. ER/mito have no cell instances, so they keep the semantic (supermodel)
+# mask path with no instance metrics.
+_INSTANCE_ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane"})
+_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
+
 # Known stale or duplicate-named zarrs to skip entirely.
 _SKIP_FILENAMES: frozenset[str] = frozenset(
     {
@@ -486,6 +496,20 @@ def benchmark_dataset_ref(parsed: ParsedZarr) -> dict[str, str]:
     }
 
 
+def a549_nuclei_store(condition: str) -> str:
+    """Test-store path of the A549 H2B (nuclei) manifest for ``condition``.
+
+    Whole-cell (membrane) instance segmentation seeds its watershed from the GT
+    nuclei, which on A549 live in a SEPARATE ``H2B_<cond>.ozx`` store (the membrane
+    GT is ``CAAX_<cond>.ozx``), positions matched 1:1 by name. iPSC nuclei live in
+    the same ``cell.zarr`` as the membrane GT, so no separate path is needed there.
+    """
+    manifest = _MANIFEST_ROOT / f"a549-mantis-h2b-{condition}" / "manifest.yaml"
+    with manifest.open() as f:
+        data = yaml.safe_load(f)
+    return data["targets"]["h2b"]["stores"]["test"]
+
+
 def condition_name(parsed: ParsedZarr) -> str:
     """Stable per-condition label."""
     if parsed.test_set == "ipsc":
@@ -568,15 +592,32 @@ def build_leaf_yaml(
         "target_name": organelle,
         **{k: v for k, v in _BASE_OVERLAY.items()},
     }
+    # nucleus & membrane compute instance AP in the same pass as pixel/feature/
+    # semantic metrics. The instance masks (Cellpose nucleus / GT-nuclei-seeded
+    # watershed whole-cell) feed both the AP_*/mAP/instance_dice columns AND the
+    # semantic Dice/IoU rows, so the semantic seg is instance-derived (matching how
+    # the paper tables are built) rather than the supermodel binary path. ER/mito
+    # have no cell instances and keep the default semantic path.
+    if organelle in _INSTANCE_ORGANELLES:
+        body["compute_instance_ap"] = True
+        seg: dict = {"backend": _INSTANCE_BACKEND[organelle]}
+        if organelle == "membrane":
+            seg["nuclei_channel_name"] = "Nuclei"
+        body["segmentation"] = seg
     condition_blocks: list[dict] = []
     for parsed in conditions:
+        io_block: dict = {
+            "pred_path": str(parsed.pred_path),
+            "pred_cache_dir": str(pred_cache_dir_for(parsed, dynacell_root)),
+        }
+        # Whole-cell watershed on A549 seeds from the separate H2B nuclei store
+        # (per-condition io override; iPSC reads nuclei from the membrane gt_path).
+        if organelle == "membrane" and parsed.test_set == "a549":
+            io_block["nuclei_gt_path"] = a549_nuclei_store(parsed.condition)
         block = {
             "name": condition_name(parsed),
             "benchmark": {"dataset_ref": benchmark_dataset_ref(parsed)},
-            "io": {
-                "pred_path": str(parsed.pred_path),
-                "pred_cache_dir": str(pred_cache_dir_for(parsed, dynacell_root)),
-            },
+            "io": io_block,
             "save": {"save_dir": str(save_dir_for(parsed, dynacell_root))},
         }
         condition_blocks.append(block)

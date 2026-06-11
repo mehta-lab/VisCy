@@ -37,6 +37,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     _is_ablation_track_zarr,
     benchmark_dataset_ref,
+    build_leaf_yaml,
     parse_zarr_name,
     pred_cache_dir_for,
     save_dir_for,
@@ -464,3 +465,59 @@ def test_each_leaf_composes_and_resolves(base_eval_grouped_config) -> None:
                 merged,
                 cond.get("name", str(idx)),
             )
+
+
+# ---------------------------------------------------------------------------
+# 5. Instance-AP wiring in the unified grouped pass (nucleus & membrane only)
+# ---------------------------------------------------------------------------
+
+
+def test_nucleus_grouped_leaf_enables_cellpose_instance_ap() -> None:
+    """Nucleus bucket computes instance AP in the SAME pass as features.
+
+    backend=cellpose, no nuclei seeds, and compute_feature_metrics stays on — the
+    instance masks feed both the AP_*/mAP/instance_dice columns and the semantic
+    Dice/IoU rows, not a separate track.
+    """
+    leaf = build_leaf_yaml("nucleus", "joint", [_make("ipsc/predictions/nucl_fnet3d_paper_jointtrained.zarr")])
+    assert leaf["compute_instance_ap"] is True
+    assert leaf["compute_feature_metrics"] is True
+    assert leaf["segmentation"]["backend"] == "cellpose"
+    assert "nuclei_channel_name" not in leaf["segmentation"]
+    assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
+
+
+def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
+    """Membrane × a549 → watershed backend + per-condition H2B nuclei_gt_path."""
+    conds = [
+        _make("a549/predictions/memb_fnet3d_paper_a549trained_mock.zarr"),
+        _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr"),
+    ]
+    leaf = build_leaf_yaml("membrane", "a549_trained", conds)
+    assert leaf["compute_instance_ap"] is True
+    assert leaf["compute_feature_metrics"] is True
+    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
+    for block in leaf["conditions"]:
+        nuclei_gt = block["io"]["nuclei_gt_path"]
+        assert "H2B" in nuclei_gt and nuclei_gt.endswith(".ozx")
+
+
+def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:
+    """Membrane × iPSC reads nuclei from the same cell.zarr → no separate nuclei_gt_path."""
+    leaf = build_leaf_yaml("membrane", "ipsc_trained", [_make("ipsc/predictions/memb_fnet3d_paper.zarr")])
+    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
+    assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
+
+
+def test_er_and_mito_grouped_leaves_have_no_instance_ap() -> None:
+    """ER/mito have no cell instances → no instance AP, no segmentation backend override."""
+    for rel, organelle, train_set in (
+        ("ipsc/predictions/sec61b_fnet3d_paper_jointtrained.zarr", "er", "joint"),
+        ("ipsc/predictions/tomm20_fnet3d_paper_jointtrained.zarr", "mitochondria", "joint"),
+    ):
+        leaf = build_leaf_yaml(organelle, train_set, [_make(rel)])
+        assert "compute_instance_ap" not in leaf
+        assert "segmentation" not in leaf
+        assert leaf["compute_feature_metrics"] is True
