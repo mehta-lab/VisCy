@@ -77,14 +77,16 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
     Used to feed the batched deep-feature warm pass the same GT-derived slabs the
     per-FOV path uses (so the warm cache is not poisoned with full-stack MIPs).
     """
-    from dynacell.evaluation.focus import build_focus_slabs, read_focus_slab_config
+    from dynacell.evaluation.focus import build_focus_slabs, read_focus_compute_config, read_focus_slab_config
 
     slab_cfg = read_focus_slab_config(config)
     if slab_cfg is None:
         return None
+    fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
+    cache_dir = OmegaConf.select(config, "io.gt_cache_dir", default=None)
     return {
         name: build_focus_slabs(
-            pos, channel_name=slab_cfg.channel_name, halfwidth=slab_cfg.halfwidth, t_count=pos.data.shape[0]
+            pos, halfwidth=slab_cfg.halfwidth, t_count=pos.data.shape[0], compute=fc, cache_dir=cache_dir, pos_name=name
         )
         for name, pos in gt_positions
     }
@@ -493,7 +495,12 @@ def _process_one_fov(
     ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
     paths in ``evaluate_predictions``.
     """
-    from dynacell.evaluation.focus import build_focus_slabs, read_focus_plane, read_focus_slab_config
+    from dynacell.evaluation.focus import (
+        build_focus_slabs,
+        read_focus_compute_config,
+        read_focus_slab_config,
+        resolve_focus_planes,
+    )
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
@@ -533,8 +540,14 @@ def _process_one_fov(
     # (slice-by-slice); None per t means full-stack projection. Does not touch CP.
     slab_cfg = read_focus_slab_config(config)
     if slab_cfg is not None:
+        fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
         z_slabs: list[slice | None] = build_focus_slabs(
-            pos_gt, channel_name=slab_cfg.channel_name, halfwidth=slab_cfg.halfwidth, t_count=T
+            pos_gt,
+            halfwidth=slab_cfg.halfwidth,
+            t_count=T,
+            compute=fc,
+            cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
+            pos_name=pos_name_pred,
         )
     else:
         z_slabs = [None] * T
@@ -557,16 +570,19 @@ def _process_one_fov(
         else:
             sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
             if sel == "focus":
-                # Single in-focus plane from the GT phase focus_slice metadata
-                # (write via precompute-gt build.focus). Same z applied to GT,
-                # prediction, and nuclei seeds — still 2D, no slab.
+                # Single in-focus plane per FOV (still 2D, no slab). Same z applied to
+                # GT, prediction, and nuclei seeds. From precomputed focus_slice zattrs
+                # when present, else computed from the phase channel and cached in
+                # io.gt_cache_dir — so it works on read-only published .ozx.
                 focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
-                z_idx = [read_focus_plane(pos_gt, focus_ch, t) for t in range(T)]
-                if any(z is None for z in z_idx):
-                    raise ValueError(
-                        f"segmentation.slice_selection='focus' needs focus_slice[{focus_ch!r}] metadata in the GT "
-                        "store; run `dynacell precompute-gt build.focus=true` first."
-                    )
+                fc = read_focus_compute_config(config, channel_name=focus_ch)
+                z_idx = resolve_focus_planes(
+                    pos_gt,
+                    t_count=T,
+                    compute=fc,
+                    cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
+                    pos_name=pos_name_pred,
+                )
             else:
                 frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
                 z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
@@ -1514,7 +1530,15 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
 
 
 def _final_metrics_cache_valid(config: DictConfig) -> bool:
-    """Return True when the saved CSV/NPY caches can be reused."""
+    """Return True when the saved CSV/NPY caches can be reused.
+
+    Note: this check validates column *presence*, not the projection that produced
+    the values. ``feature_metrics.focus_slab`` changes PerCell/feature values without
+    changing columns, so toggling it on a save_dir that already holds full-stack
+    metrics requires ``force_recompute.final_metrics=true`` to refresh (every focus
+    campaign launcher passes it). Encoding a focus signature into the saved rows would
+    let this auto-detect — a follow-up.
+    """
     force = config.force_recompute
     if force.all or force.final_metrics:
         return False

@@ -31,8 +31,10 @@ segmentation:
   dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
   slice_selection: frac    # frac | sharpest | focus — picks the 2d plane (dimension=2d)
   slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
-  # slice_selection=focus reads the in-focus plane per FOV from the GT
-  # focus_slice zattrs (write via precompute-gt build.focus); single slice, no slab.
+  # slice_selection=focus picks the in-focus plane per FOV (single slice, no slab).
+  # The plane comes from precomputed focus_slice zattrs when present, else it is
+  # computed on the fly from the phase channel and cached in io.gt_cache_dir (so it
+  # works on read-only published .ozx). Estimator params live in the `focus:` block.
   focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
   # Nucleus Cellpose-SAM params (the cellpose path + the cellpose_watershed seeds).
@@ -73,6 +75,19 @@ io:
                         # GT membrane (A549: membrane in CAAX_*.ozx, nuclei in H2B_*.ozx);
                         # positions are matched by name, so the stores must share FOV names.
   require_complete_cache: false  # if true, eval raises on configured cache misses instead of filling
+
+# Phase-channel focus-plane estimation, shared by the deep-feature slab
+# (feature_metrics.focus_slab) and instance-seg slice_selection=focus. The plane is
+# read from precomputed focus_slice zattrs when present, else computed on the fly from
+# this channel and cached in io.gt_cache_dir (so focus-aware eval runs on read-only
+# published .ozx without re-packing them). pixel_size defaults to the lateral spacing
+# (pixel_metrics.spacing[-1]); na_det/lambda_ill are the mantis acquisition defaults.
+focus:
+  channel_name: Phase3D
+  na_det: 1.35
+  lambda_ill: 0.450
+  pixel_size: null  # null -> pixel_metrics.spacing[-1]
+  device: cpu
 
 pixel_metrics:
   spacing: ???

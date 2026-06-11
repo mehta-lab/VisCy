@@ -83,6 +83,8 @@ class _CacheContext:
     dimension: str = "2d"
     slice_selection: str = "frac"
     slice_fraction: float = 0.30
+    focus_channel_name: str | None = None
+    focus_slab_enabled: bool = False
     nuclei_channel_name: str | None = None
     nuclei_plate_path: str | None = None
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
@@ -256,6 +258,8 @@ def init_cache_context(
         dimension=OmegaConf.select(config, "segmentation.dimension", default="2d"),
         slice_selection=OmegaConf.select(config, "segmentation.slice_selection", default="frac"),
         slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
+        focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
+        focus_slab_enabled=slab_cfg is not None,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
         nuclei_plate_path=str(nuclei_plate_path) if nuclei_plate_path is not None else None,
         iou_thresholds=list(
@@ -339,7 +343,10 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
     Missing tags (cached manifest pre-dates version tracking, or the kind
     isn't loaded for this run) are treated as "no constraint" — they do
     NOT trigger invalidation. Operators handle that bootstrap transition
-    explicitly via ``force_recompute.<side>_<kind>``.
+    explicitly via ``force_recompute.<side>_<kind>``. The one exception:
+    when ``ctx.focus_slab_enabled`` is set, an untagged entry is full-stack
+    crops that would be silently reused as focus-projected, so it IS
+    invalidated.
 
     Under ``io.require_complete_cache=true`` a known mismatch is escalated
     to a hard :class:`StaleCacheError` — the user opted out of recompute,
@@ -374,7 +381,13 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         if entry is None:
             continue
         cached_version = entry.get("preprocess_version")
-        if cached_version is None or cached_version == current_version:
+        if cached_version == current_version:
+            continue
+        # Pre-version-tracking entries (cached_version is None) are normally "no
+        # constraint" (bootstrap). Exception: when focus_slab is enabled this run,
+        # an untagged entry holds full-stack crops that must NOT be reused as if
+        # focus-projected — fall through to invalidation.
+        if cached_version is None and not ctx.focus_slab_enabled:
             continue
         if ctx.require_complete:
             raise StaleCacheError(
@@ -717,6 +730,11 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
         "slice_fraction": ctx.slice_fraction,
         **ctx.source_tag,
     }
+    # slice_selection='focus' picks the 2D plane from this channel's focus estimate,
+    # so it must be part of the identity (only when active, to leave frac/sharpest
+    # identities byte-stable). Analog of the backend fix in #445.
+    if ctx.slice_selection == "focus":
+        identity["focus_channel_name"] = ctx.focus_channel_name
     if ctx.backend == "cellpose_watershed":
         # Whole-cell labels also depend on the watershed params and the GT nuclei
         # seeds; record the GT nuclei (path, channel) so a pred-side identity

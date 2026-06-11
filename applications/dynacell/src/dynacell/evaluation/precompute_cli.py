@@ -20,7 +20,12 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.focus import build_focus_slabs, read_focus_slab_config, write_focus_slice_metadata
+from dynacell.evaluation.focus import (
+    build_focus_slabs,
+    read_focus_compute_config,
+    read_focus_slab_config,
+    write_focus_slice_metadata,
+)
 from dynacell.evaluation.metrics import build_crops
 from dynacell.evaluation.model_loader import LoadFlags, init_gt_cache_context, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
@@ -31,12 +36,20 @@ from dynacell.evaluation.pipeline_cache import (
 )
 
 
-def _focus_slabs(config: DictConfig, pos_gt, t_count: int) -> list[slice | None]:
+def _focus_slabs(config: DictConfig, pos_gt, pos_name: str, t_count: int) -> list[slice | None]:
     """Per-timepoint in-focus slabs for a GT position, or ``[None]*t`` when disabled."""
     slab_cfg = read_focus_slab_config(config)
     if slab_cfg is None:
         return [None] * t_count
-    return build_focus_slabs(pos_gt, channel_name=slab_cfg.channel_name, halfwidth=slab_cfg.halfwidth, t_count=t_count)
+    fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
+    return build_focus_slabs(
+        pos_gt,
+        halfwidth=slab_cfg.halfwidth,
+        t_count=t_count,
+        compute=fc,
+        cache_dir=config.io.gt_cache_dir,
+        pos_name=pos_name,
+    )
 
 
 def precompute_gt_artifacts(config: DictConfig) -> None:
@@ -156,7 +169,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 gt_channel_index = pos_gt.get_channel_index(config.io.gt_channel_name)
                 target = np.asarray(pos_gt.data[:, gt_channel_index])
                 cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
-                z_slabs = _focus_slabs(config, pos_gt, target.shape[0])
+                z_slabs = _focus_slabs(config, pos_gt, pos_name_gt, target.shape[0])
 
                 if build.masks:
                     fov_masks(cache_ctx, pos_name_gt, target, seg_model)

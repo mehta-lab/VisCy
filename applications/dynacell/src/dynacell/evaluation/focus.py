@@ -18,7 +18,10 @@ the dependency graph ``applications/ → packages/`` only.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -65,6 +68,52 @@ def read_focus_slab_config(config: DictConfig) -> FocusSlabConfig | None:
     )
 
 
+@dataclass(frozen=True)
+class FocusComputeConfig:
+    """Resolved ``focus`` block: physical params for computing the focus plane.
+
+    Shared by the deep-feature slab path and the instance-seg ``slice_selection=focus``
+    path so both estimate the plane identically. ``pixel_size`` defaults to the lateral
+    spacing (``pixel_metrics.spacing[-1]``); ``na_det`` / ``lambda_ill`` are the mantis
+    acquisition defaults.
+
+    Attributes
+    ----------
+    channel_name : str
+        Phase channel the focus plane is estimated from.
+    na_det, lambda_ill, pixel_size : float
+        Detection NA, illumination wavelength, object-space lateral pixel size.
+    device : str
+        Torch device for the estimator (``"cpu"`` or ``"cuda"``).
+    """
+
+    channel_name: str
+    na_det: float
+    lambda_ill: float
+    pixel_size: float
+    device: str
+
+
+def read_focus_compute_config(config: DictConfig, *, channel_name: str | None = None) -> FocusComputeConfig:
+    """Resolve the ``focus`` compute block, defaulting ``pixel_size`` to the lateral spacing.
+
+    ``channel_name`` overrides ``focus.channel_name`` (e.g. the instance path passes
+    ``segmentation.focus_channel_name``). Used for the eval-time compute-if-absent path,
+    so focus works on read-only published ``.ozx`` stores that carry no ``focus_slice``
+    zattrs (the plane is derived from the phase channel already inside the store).
+    """
+    pixel_size = OmegaConf.select(config, "focus.pixel_size", default=None)
+    if pixel_size is None:
+        pixel_size = float(config.pixel_metrics.spacing[-1])
+    return FocusComputeConfig(
+        channel_name=channel_name or str(OmegaConf.select(config, "focus.channel_name", default="Phase3D")),
+        na_det=float(OmegaConf.select(config, "focus.na_det", default=1.35)),
+        lambda_ill=float(OmegaConf.select(config, "focus.lambda_ill", default=0.450)),
+        pixel_size=float(pixel_size),
+        device=str(OmegaConf.select(config, "focus.device", default="cpu")),
+    )
+
+
 def estimate_focus_plane(
     zyx: np.ndarray, *, na_det: float, lambda_ill: float, pixel_size: float, device: str = "cpu"
 ) -> int:
@@ -94,45 +143,146 @@ def focus_slab_from_plane(z_focus: int, z_total: int, halfwidth: int) -> slice:
     return slice(max(0, z_focus - halfwidth), min(z_total, z_focus + halfwidth + 1))
 
 
-def build_focus_slabs(position, *, channel_name: str, halfwidth: int, t_count: int) -> list[slice]:
-    """Per-timepoint in-focus slabs for ``position`` from its ``focus_slice`` zattrs.
+def build_focus_slabs(
+    position,
+    *,
+    halfwidth: int,
+    t_count: int,
+    compute: FocusComputeConfig,
+    cache_dir: str | Path | None = None,
+    pos_name: str | None = None,
+) -> list[slice]:
+    """Per-timepoint in-focus slabs for ``position``, centered on the focus plane.
 
-    Reads the cached focus plane per timepoint (written by ``dynacell precompute-gt
-    build.focus=true``) and centers a ``2*halfwidth + 1`` plane slab on each. Raises
-    if the metadata is absent — fail loud rather than silently fall back to a
-    full-volume projection while ``focus_slab`` is enabled.
-
-    ``position`` is the **GT** position (``(T, C, Z, Y, X)``); the same slabs apply
-    to the prediction, which maps slice-by-slice.
+    The plane is resolved by :func:`resolve_focus_planes` (precomputed zattrs →
+    ``gt_cache_dir`` cache → compute-from-phase + cache), then a ``2*halfwidth + 1``
+    plane slab is centered on each. ``position`` is the **GT** position
+    (``(T, C, Z, Y, X)``); the same slabs apply to the prediction, which maps
+    slice-by-slice.
     """
     z_total = position.data.shape[2]
-    slabs: list[slice] = []
-    for t in range(t_count):
-        plane = read_focus_plane(position, channel_name, t)
-        if plane is None:
-            raise ValueError(
-                f"feature_metrics.focus_slab is enabled but no focus_slice[{channel_name!r}] "
-                "metadata exists at this GT position. Run `dynacell precompute-gt build.focus=true` "
-                "first, or set feature_metrics.focus_slab.enabled=false."
-            )
-        slabs.append(focus_slab_from_plane(plane, z_total, halfwidth))
-    return slabs
+    planes = resolve_focus_planes(position, t_count=t_count, compute=compute, cache_dir=cache_dir, pos_name=pos_name)
+    return [focus_slab_from_plane(plane, z_total, halfwidth) for plane in planes]
 
 
-def read_focus_plane(position, channel_name: str, t: int) -> int | None:
-    """Read the cached per-timepoint focus plane from a position's zattrs.
+def _planes_from_zattrs(position, channel_name: str, t_count: int) -> list[int] | None:
+    """Per-timepoint focus planes from a position's ``focus_slice`` zattrs, or ``None``.
 
-    Returns ``None`` when no ``focus_slice`` metadata exists for ``channel_name``
-    (caller falls back to a fixed-fraction plane). Mirrors the layout written by
-    :func:`write_focus_slice_metadata`.
+    Returns ``None`` when no ``focus_slice[channel_name]`` metadata exists (caller then
+    computes from the phase channel). Falls back to the dataset-mean plane for any
+    timepoint missing from ``per_timepoint`` (DynaCLR ``z_range="auto"`` interop).
     """
     focus_meta = position.zattrs.get(FOCUS_FIELD, {}).get(channel_name)
     if focus_meta is None:
         return None
-    per_t = focus_meta.get("per_timepoint")
-    if per_t is not None and str(t) in per_t:
-        return int(per_t[str(t)])
-    return int(round(focus_meta["dataset_statistics"]["z_focus_mean"]))
+    per_t = focus_meta.get("per_timepoint") or {}
+    fallback = focus_meta.get("dataset_statistics", {}).get("z_focus_mean")
+    planes: list[int] = []
+    for t in range(t_count):
+        if str(t) in per_t:
+            planes.append(int(per_t[str(t)]))
+        elif fallback is not None:
+            planes.append(int(round(fallback)))
+        else:
+            return None
+    return planes
+
+
+def _focus_cache_path(cache_dir: str | Path, channel_name: str, pos_name: str) -> Path:
+    """Per-position focus-plane cache file under ``<cache_dir>/focus_planes/<channel>/``."""
+    return Path(cache_dir) / "focus_planes" / channel_name / f"{pos_name.replace('/', '__')}.json"
+
+
+def _read_focus_cache(
+    cache_dir: str | Path,
+    channel_name: str,
+    pos_name: str,
+    t_count: int,
+    na_det: float,
+    lambda_ill: float,
+    pixel_size: float,
+) -> list[int] | None:
+    """Read cached focus planes, or ``None`` on miss / param-mismatch / short cache."""
+    path = _focus_cache_path(cache_dir, channel_name, pos_name)
+    if not path.is_file():
+        return None
+    rec = json.loads(path.read_text())
+    params = rec.get("params", {})
+    if (params.get("na_det"), params.get("lambda_ill"), params.get("pixel_size")) != (na_det, lambda_ill, pixel_size):
+        return None
+    planes = rec.get("planes", [])
+    if len(planes) < t_count:
+        return None
+    return [int(p) for p in planes[:t_count]]
+
+
+def _write_focus_cache(
+    cache_dir: str | Path,
+    channel_name: str,
+    pos_name: str,
+    planes: list[int],
+    na_det: float,
+    lambda_ill: float,
+    pixel_size: float,
+) -> None:
+    """Atomically persist focus planes (tmp + ``os.replace``) so parallel evals don't tear writes."""
+    path = _focus_cache_path(cache_dir, channel_name, pos_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "params": {"na_det": na_det, "lambda_ill": lambda_ill, "pixel_size": pixel_size},
+        "planes": [int(p) for p in planes],
+    }
+    tmp = path.with_suffix(f".json.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload))
+    os.replace(tmp, path)
+
+
+def resolve_focus_planes(
+    position,
+    *,
+    t_count: int,
+    compute: FocusComputeConfig,
+    cache_dir: str | Path | None = None,
+    pos_name: str | None = None,
+) -> list[int]:
+    """Per-timepoint focus planes for ``position``. Source precedence:
+
+    1. ``focus_slice`` zattrs in the store (precomputed by ``precompute-gt build.focus``;
+       DynaCLR-compatible) — the iPSC writable-store fast path,
+    2. the ``gt_cache_dir`` focus cache (computed-and-persisted) — lets focus-aware eval
+       run on **read-only published ``.ozx``** that carry no zattrs,
+    3. compute from the position's phase (``compute.channel_name``) volume + persist.
+
+    Computing from phase is cheap and deterministic, so (2)/(3) reproduce the same planes
+    anyone could derive from the published data — no need to fork the immutable store.
+    """
+    channel_name = compute.channel_name
+    planes = _planes_from_zattrs(position, channel_name, t_count)
+    if planes is not None:
+        return planes
+    if cache_dir is not None and pos_name is not None:
+        cached = _read_focus_cache(
+            cache_dir, channel_name, pos_name, t_count, compute.na_det, compute.lambda_ill, compute.pixel_size
+        )
+        if cached is not None:
+            return cached
+    channel_index = list(position.channel_names).index(channel_name)
+    tzyx = np.asarray(position.data[:, channel_index])
+    planes = [
+        estimate_focus_plane(
+            tzyx[t],
+            na_det=compute.na_det,
+            lambda_ill=compute.lambda_ill,
+            pixel_size=compute.pixel_size,
+            device=compute.device,
+        )
+        for t in range(t_count)
+    ]
+    if cache_dir is not None and pos_name is not None:
+        _write_focus_cache(
+            cache_dir, channel_name, pos_name, planes, compute.na_det, compute.lambda_ill, compute.pixel_size
+        )
+    return planes
 
 
 def write_focus_slice_metadata(

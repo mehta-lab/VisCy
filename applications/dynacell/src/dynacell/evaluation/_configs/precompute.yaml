@@ -13,16 +13,8 @@ build:
   celldino: true
   focus: false  # write focus_slice zattrs (in-focus plane per FOV) to the GT store
 
-# Phase-channel focus estimation (build.focus=true). Lets projection slabs be
-# centered on the in-focus plane instead of a fixed depth fraction. pixel_size
-# defaults to the lateral spacing (pixel_metrics.spacing[-1]); na_det/lambda_ill
-# are the mantis acquisition defaults — override per dataset.
-focus:
-  channel_name: Phase3D
-  na_det: 1.35
-  lambda_ill: 0.450
-  pixel_size: null  # null -> pixel_metrics.spacing[-1]
-  device: cpu
+# The focus-estimator params (channel_name / na_det / lambda_ill / pixel_size / device)
+# are inherited from eval.yaml's top-level `focus:` block; override there or on the CLI.
 
 # precompute-gt only fills the GT cache; no eval loop runs and no prediction
 # plate is read. These flags stay off by default so save_dir / pred_path are
