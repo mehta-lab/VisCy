@@ -712,7 +712,7 @@ def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = 
     z_slab : slice or None
         When provided, restrict both the max-Z projection and the per-cell
         label footprint to this band of planes — an in-focus slab centered on
-        the segmentation slice (see :func:`segmentation_whole_cell.focus_slab`).
+        the GT phase focus plane (see :func:`focus.build_focus_slabs`).
         Out-of-focus caps (e.g. A549's all-membrane top planes) are excluded so
         the MIP is not dominated by them. ``None`` (default) projects the whole
         stack — the legacy behavior.

@@ -89,33 +89,6 @@ def slice_index(memb_vol: np.ndarray, *, selection: str = "frac", fraction: floa
     raise ValueError(f"Unknown slice_selection: {selection!r} (expected 'frac' or 'sharpest').")
 
 
-def focus_slab(memb_vol: np.ndarray, *, halfwidth: int, selection: str = "frac", fraction: float = 0.30) -> slice:
-    """Return an in-focus z-slab centered on :func:`slice_index`.
-
-    Builds a ``slice`` of width ``2*halfwidth + 1`` planes centered on the plane
-    :func:`slice_index` would pick, clipped to ``[0, Z)``. Reused to restrict a
-    max-Z projection (deep-feature crops, per-cell SSIM) to the in-focus band so
-    the projection is not dominated by out-of-focus caps — and so those tracks
-    share the plane the 2-D instance segmentation already selects.
-
-    Parameters
-    ----------
-    memb_vol : numpy.ndarray
-        3-D ``(Z, Y, X)`` reference volume (GT, so GT and prediction share the
-        slab). ``selection``/``fraction`` are forwarded to :func:`slice_index`.
-    halfwidth : int
-        Planes on each side of the center; ``0`` reproduces a single-slice pick.
-
-    Returns
-    -------
-    slice
-        ``slice(z_start, z_end)`` over the Z axis.
-    """
-    z0 = slice_index(memb_vol, selection=selection, fraction=fraction)
-    z = memb_vol.shape[0]
-    return slice(max(0, z0 - halfwidth), min(z, z0 + halfwidth + 1))
-
-
 def _relabel_sequential_device(labels):
     """Relabel a (possibly device) integer label image to a dense ``1..K`` uint16."""
     xp = get_array_module(labels)

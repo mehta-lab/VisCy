@@ -18,15 +18,51 @@ the dependency graph ``applications/ → packages/`` only.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 from iohub.ngff import open_ome_zarr
+from omegaconf import DictConfig, OmegaConf
 from waveorder.focus import focus_from_transverse_band
 
 from viscy_utils.meta_utils import write_meta_field
 
 FOCUS_FIELD = "focus_slice"
 MIDBAND_FRACTIONS: tuple[float, float] = (0.125, 0.25)
+
+
+@dataclass(frozen=True)
+class FocusSlabConfig:
+    """Resolved ``feature_metrics.focus_slab`` settings (only when enabled).
+
+    Attributes
+    ----------
+    channel_name : str
+        GT phase channel whose ``focus_slice`` zattrs supply the focus plane.
+    halfwidth : int
+        Planes on each side of the focus plane; the slab spans
+        ``2*halfwidth + 1`` planes.
+    """
+
+    channel_name: str
+    halfwidth: int
+
+
+def read_focus_slab_config(config: DictConfig) -> FocusSlabConfig | None:
+    """Resolve ``feature_metrics.focus_slab`` from a config, or ``None`` when off.
+
+    Returns ``None`` when the block is absent or ``enabled`` is false (the
+    default), so every call site shares one source of truth for the toggle and
+    the ``channel_name`` / ``halfwidth`` defaults.
+    """
+    cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
+    if cfg is None or not bool(OmegaConf.select(cfg, "enabled", default=False)):
+        return None
+    return FocusSlabConfig(
+        channel_name=str(OmegaConf.select(cfg, "channel_name", default="Phase3D")),
+        halfwidth=int(OmegaConf.select(cfg, "halfwidth", default=2)),
+    )
 
 
 def estimate_focus_plane(

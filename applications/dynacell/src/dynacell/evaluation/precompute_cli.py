@@ -20,7 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.focus import build_focus_slabs, write_focus_slice_metadata
+from dynacell.evaluation.focus import build_focus_slabs, read_focus_slab_config, write_focus_slice_metadata
 from dynacell.evaluation.metrics import build_crops
 from dynacell.evaluation.model_loader import LoadFlags, init_gt_cache_context, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
@@ -33,15 +33,10 @@ from dynacell.evaluation.pipeline_cache import (
 
 def _focus_slabs(config: DictConfig, pos_gt, t_count: int) -> list[slice | None]:
     """Per-timepoint in-focus slabs for a GT position, or ``[None]*t`` when disabled."""
-    cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
-    if cfg is None or not bool(OmegaConf.select(cfg, "enabled", default=False)):
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is None:
         return [None] * t_count
-    return build_focus_slabs(
-        pos_gt,
-        channel_name=str(OmegaConf.select(cfg, "channel_name", default="Phase3D")),
-        halfwidth=int(OmegaConf.select(cfg, "halfwidth", default=2)),
-        t_count=t_count,
-    )
+    return build_focus_slabs(pos_gt, channel_name=slab_cfg.channel_name, halfwidth=slab_cfg.halfwidth, t_count=t_count)
 
 
 def precompute_gt_artifacts(config: DictConfig) -> None:

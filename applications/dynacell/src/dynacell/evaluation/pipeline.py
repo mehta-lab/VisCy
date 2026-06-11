@@ -77,15 +77,15 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
     Used to feed the batched deep-feature warm pass the same GT-derived slabs the
     per-FOV path uses (so the warm cache is not poisoned with full-stack MIPs).
     """
-    cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
-    if cfg is None or not bool(OmegaConf.select(cfg, "enabled", default=False)):
-        return None
-    from dynacell.evaluation.focus import build_focus_slabs
+    from dynacell.evaluation.focus import build_focus_slabs, read_focus_slab_config
 
-    channel_name = str(OmegaConf.select(cfg, "channel_name", default="Phase3D"))
-    halfwidth = int(OmegaConf.select(cfg, "halfwidth", default=2))
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is None:
+        return None
     return {
-        name: build_focus_slabs(pos, channel_name=channel_name, halfwidth=halfwidth, t_count=pos.data.shape[0])
+        name: build_focus_slabs(
+            pos, channel_name=slab_cfg.channel_name, halfwidth=slab_cfg.halfwidth, t_count=pos.data.shape[0]
+        )
         for name, pos in gt_positions
     }
 
@@ -493,7 +493,7 @@ def _process_one_fov(
     ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
     paths in ``evaluate_predictions``.
     """
-    from dynacell.evaluation.focus import build_focus_slabs, read_focus_plane
+    from dynacell.evaluation.focus import build_focus_slabs, read_focus_plane, read_focus_slab_config
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
@@ -531,13 +531,10 @@ def _process_one_fov(
     # default). Computed once from the GT phase focus plane (focus_slice zattrs,
     # written by precompute-gt build.focus) and shared with the prediction
     # (slice-by-slice); None per t means full-stack projection. Does not touch CP.
-    focus_slab_cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
-    if focus_slab_cfg is not None and bool(OmegaConf.select(focus_slab_cfg, "enabled", default=False)):
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is not None:
         z_slabs: list[slice | None] = build_focus_slabs(
-            pos_gt,
-            channel_name=str(OmegaConf.select(focus_slab_cfg, "channel_name", default="Phase3D")),
-            halfwidth=int(OmegaConf.select(focus_slab_cfg, "halfwidth", default=2)),
-            t_count=T,
+            pos_gt, channel_name=slab_cfg.channel_name, halfwidth=slab_cfg.halfwidth, t_count=T
         )
     else:
         z_slabs = [None] * T

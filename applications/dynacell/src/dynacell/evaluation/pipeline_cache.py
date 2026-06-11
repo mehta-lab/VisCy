@@ -228,12 +228,11 @@ def init_cache_context(
     # preprocess_version — a toggle then auto-invalidates the deep caches via
     # _auto_invalidate_on_preprocess_version_mismatch. CP stays 3D, so its
     # identity is intentionally NOT tagged.
-    focus_slab_cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
-    if focus_slab_cfg is not None and bool(OmegaConf.select(focus_slab_cfg, "enabled", default=False)):
-        focus_tag = (
-            f"+focusslab_h{int(OmegaConf.select(focus_slab_cfg, 'halfwidth', default=2))}"
-            f"_{OmegaConf.select(focus_slab_cfg, 'channel_name', default='Phase3D')}"
-        )
+    from dynacell.evaluation.focus import read_focus_slab_config
+
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is not None:
+        focus_tag = f"+focusslab_h{slab_cfg.halfwidth}_{slab_cfg.channel_name}"
         dinov3_preprocess_version = (dinov3_preprocess_version + focus_tag) if dinov3_preprocess_version else None
         dynaclr_preprocess_version = (dynaclr_preprocess_version + focus_tag) if dynaclr_preprocess_version else None
         celldino_preprocess_version = (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
