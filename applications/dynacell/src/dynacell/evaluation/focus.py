@@ -62,9 +62,15 @@ def read_focus_slab_config(config: DictConfig) -> FocusSlabConfig | None:
     cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
     if cfg is None or not bool(OmegaConf.select(cfg, "enabled", default=False)):
         return None
+    halfwidth = int(OmegaConf.select(cfg, "halfwidth", default=2))
+    if halfwidth < 0:
+        raise ValueError(
+            f"feature_metrics.focus_slab.halfwidth must be >= 0, got {halfwidth} "
+            "(a negative halfwidth yields an empty slab and crashes the max-Z projection)."
+        )
     return FocusSlabConfig(
         channel_name=str(OmegaConf.select(cfg, "channel_name", default="Phase3D")),
-        halfwidth=int(OmegaConf.select(cfg, "halfwidth", default=2)),
+        halfwidth=halfwidth,
     )
 
 

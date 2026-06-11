@@ -116,5 +116,19 @@ def test_focus_slab_from_plane_pure():
     assert focus_slab_from_plane(10, 48, 0) == slice(10, 11)
 
 
+def test_read_focus_slab_config_rejects_negative_halfwidth():
+    """A negative halfwidth must fail early (it yields an empty slab → max-Z crash)."""
+    from omegaconf import OmegaConf
+
+    from dynacell.evaluation.focus import read_focus_slab_config
+
+    bad = OmegaConf.create({"feature_metrics": {"focus_slab": {"enabled": True, "halfwidth": -1}}})
+    with pytest.raises(ValueError, match="halfwidth must be >= 0"):
+        read_focus_slab_config(bad)
+    # halfwidth=0 is valid (single in-focus plane)
+    ok = OmegaConf.create({"feature_metrics": {"focus_slab": {"enabled": True, "halfwidth": 0}}})
+    assert read_focus_slab_config(ok).halfwidth == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
