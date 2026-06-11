@@ -222,6 +222,21 @@ def init_cache_context(
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
     cp_norm_cfg = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
     cp_glcm_cfg = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
+
+    # When focus_slab is enabled the deep-feature crops project over an in-focus
+    # slab (not the full stack), so fold its signature into each extractor's
+    # preprocess_version — a toggle then auto-invalidates the deep caches via
+    # _auto_invalidate_on_preprocess_version_mismatch. CP stays 3D, so its
+    # identity is intentionally NOT tagged.
+    focus_slab_cfg = OmegaConf.select(config, "feature_metrics.focus_slab", default=None)
+    if focus_slab_cfg is not None and bool(OmegaConf.select(focus_slab_cfg, "enabled", default=False)):
+        focus_tag = (
+            f"+focusslab_h{int(OmegaConf.select(focus_slab_cfg, 'halfwidth', default=2))}"
+            f"_{OmegaConf.select(focus_slab_cfg, 'channel_name', default='Phase3D')}"
+        )
+        dinov3_preprocess_version = (dinov3_preprocess_version + focus_tag) if dinov3_preprocess_version else None
+        dynaclr_preprocess_version = (dynaclr_preprocess_version + focus_tag) if dynaclr_preprocess_version else None
+        celldino_preprocess_version = (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
     # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
     # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
     # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
@@ -1027,19 +1042,28 @@ def fov_deep_features(
     cell_segmentation_arr: np.ndarray,
     feature_extractor,
     kind: FeatureKind,
+    *,
+    z_slabs: list[slice | None] | None = None,
 ) -> list[np.ndarray]:
     """Return per-cell deep embeddings per timepoint for one FOV.
 
     The cache side is taken from ``ctx.side``. ``kind`` is ``"dinov3"``,
     ``"dynaclr"``, or ``"celldino"``; the cache key (model name or
-    checkpoint/weights hash) is pulled from *ctx*.
+    checkpoint/weights hash) is pulled from *ctx*. ``z_slabs`` (per-timepoint
+    in-focus slabs, GT-derived) restricts the projection; ``None`` = full stack.
     """
     return _fov_deep_features(
         ctx,
         pos_name=pos_name,
         image_arr=image_arr,
         kind=kind,
-        compute_fn=lambda t: deep_features(image_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size),
+        compute_fn=lambda t: deep_features(
+            image_arr[t],
+            cell_segmentation_arr[t],
+            feature_extractor,
+            ctx.patch_size,
+            z_slab=None if z_slabs is None else z_slabs[t],
+        ),
     )
 
 
@@ -1357,8 +1381,14 @@ def precompute_deep_features(
     extractors: dict[FeatureKind, Any],
     *,
     flush_threshold: int = 256,
+    focus_slabs: dict[str, list[slice | None]] | None = None,
 ) -> None:
     """Batched precompute of deep features across all FOVs/timepoints.
+
+    ``focus_slabs`` maps ``pos_name`` to a per-timepoint in-focus slab list
+    (GT-derived, shared by every side); when provided, crops are projected over
+    that slab instead of the full stack. ``None`` (or a missing pos_name) =
+    full-stack projection.
 
     Iterates positions in lockstep across the configured sides, loads
     ``cell_seg`` once per position (shared across sides), loads each side's
@@ -1456,8 +1486,11 @@ def precompute_deep_features(
             ts_needed = work["ts_needed"]
             channel_index = pos.get_channel_index(side_channel_names[side])
             image = np.asarray(pos.data[:, channel_index])
+            pos_slabs = None if focus_slabs is None else focus_slabs.get(pos_name)
             for t in ts_needed:
-                crops = build_crops(image[t], cell_seg[t], ctx.patch_size)
+                crops = build_crops(
+                    image[t], cell_seg[t], ctx.patch_size, z_slab=None if pos_slabs is None else pos_slabs[t]
+                )
                 kinds_for_t = [k for k in extractors if t in needs[k]]
                 batchers[side].push(pos_name, t, crops, kinds_for_t)
 

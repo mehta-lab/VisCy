@@ -29,8 +29,11 @@ target_name: ???
 segmentation:
   backend: supermodel  # supermodel | cellpose (nucleus) | cellpose_watershed (whole-cell)
   dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
-  slice_selection: frac    # frac | sharpest — picks the 2d plane (dimension=2d)
+  slice_selection: frac    # frac | sharpest | focus — picks the 2d plane (dimension=2d)
   slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
+  # slice_selection=focus reads the in-focus plane per FOV from the GT
+  # focus_slice zattrs (write via precompute-gt build.focus); single slice, no slab.
+  focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
   # Nucleus Cellpose-SAM params (the cellpose path + the cellpose_watershed seeds).
   cellpose:
@@ -91,6 +94,16 @@ feature_metrics:
       enabled: false
       levels: 32
       distances: [1]
+  # In-focus slab for the 2D deep-feature crops + per-cell similarity. When
+  # enabled, the max-Z projection is restricted to a band centered on the phase
+  # focus plane (read from focus_slice zattrs; write via precompute-gt build.focus)
+  # instead of the full stack — keeps the MIP off the out-of-focus caps. Slab is
+  # taken from GT and applied to the prediction (slice-by-slice). Does NOT affect
+  # CP regionprops (those stay 3D).
+  focus_slab:
+    enabled: false
+    halfwidth: 2          # 2*halfwidth+1 planes (h=1-2 ≈ 3-5 planes is the sweet spot)
+    channel_name: Phase3D
 
 # Feature extractor configuration — required only when compute_feature_metrics=true
 # (or when the corresponding precompute-gt build.* flag is set). Fields stay ???
