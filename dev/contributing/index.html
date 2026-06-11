@@ -613,10 +613,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#before-you-open-a-pr" class="md-nav__link">
+  <a href="#before-you-open-a-pr-check-that" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Before you open a PR
+        Before you open a PR check that:
       </span>
     </span>
   </a>
@@ -766,10 +766,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#before-you-open-a-pr" class="md-nav__link">
+  <a href="#before-you-open-a-pr-check-that" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Before you open a PR
+        Before you open a PR check that:
       </span>
     </span>
   </a>
@@ -914,9 +914,11 @@ group.</p>
   (math, keyboard keys, …)? Enable its extension there, or it renders as text.</li>
 </ul>
 <h2 id="release-a-package">Release a package<a class="headerlink" href="#release-a-package" title="Permanent link">&para;</a></h2>
-<p>Versions come from git tags via
-<a href="https://github.com/ninoseki/uv-dynamic-versioning"><code>uv-dynamic-versioning</code></a>; the
-tag <strong>prefix</strong> picks the package.</p>
+<p>Publishing a GitHub Release ships that package to PyPI — no tokens, no manual upload,
+no version bump in code. Both the workspace libraries and the applications release this
+way. Versions come from the tag via
+<a href="https://github.com/ninoseki/uv-dynamic-versioning"><code>uv-dynamic-versioning</code></a>; the tag
+<strong>prefix</strong> picks the package, and each package versions independently.</p>
 <table>
 <thead>
 <tr>
@@ -926,6 +928,11 @@ tag <strong>prefix</strong> picks the package.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>viscy</code> (umbrella)</td>
+<td>none</td>
+<td><code>v0.6.0</code></td>
+</tr>
 <tr>
 <td><code>viscy-data</code></td>
 <td><code>viscy-data-</code></td>
@@ -947,31 +954,75 @@ tag <strong>prefix</strong> picks the package.</p>
 <td><code>viscy-utils-v0.3.0</code></td>
 </tr>
 <tr>
-<td><code>viscy</code> (umbrella)</td>
-<td>none</td>
-<td><code>v0.6.0</code></td>
+<td><code>airtable-utils</code></td>
+<td><code>airtable-utils-</code></td>
+<td><code>airtable-utils-v0.1.0</code></td>
+</tr>
+<tr>
+<td><code>cytoland</code></td>
+<td><code>cytoland-</code></td>
+<td><code>cytoland-v0.3.0</code></td>
+</tr>
+<tr>
+<td><code>dynacell</code></td>
+<td><code>dynacell-</code></td>
+<td><code>dynacell-v0.2.0</code></td>
+</tr>
+<tr>
+<td><code>dynaclr</code></td>
+<td><code>dynaclr-</code></td>
+<td><code>dynaclr-v0.1.0</code></td>
+</tr>
+<tr>
+<td><code>viscy-qc</code></td>
+<td><code>viscy-qc-</code></td>
+<td><code>viscy-qc-v0.1.0</code></td>
 </tr>
 </tbody>
 </table>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>git<span class="w"> </span>checkout<span class="w"> </span>main<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>pull<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>fetch<span class="w"> </span>--tags
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>git<span class="w"> </span>tag<span class="w"> </span>viscy-data-v0.2.1<span class="w">                          </span><span class="c1"># (1)!</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>uv<span class="w"> </span>build<span class="w"> </span>--package<span class="w"> </span>viscy-data<span class="w"> </span>--out-dir<span class="w"> </span>dist/<span class="w">      </span><span class="c1"># (2)!</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>ls<span class="w"> </span>dist/<span class="w">                                           </span><span class="c1"># viscy_data-0.2.1-...whl  (3)!</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>viscy-data-v0.2.1<span class="w">                  </span><span class="c1"># (4)!</span>
+<p>Create the Release on the tag:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="3:2"><input checked="checked" id="__tabbed_3_1" name="__tabbed_3" type="radio" /><input id="__tabbed_3_2" name="__tabbed_3" type="radio" /><div class="tabbed-labels"><label for="__tabbed_3_1"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 19V7H4v12zm0-16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm-7 14v-2h5v2zm-3.42-4L5.57 9H8.4l3.3 3.3c.39.39.39 1.03 0 1.42L8.42 17H5.59z"/></svg></span> gh CLI</label><label for="__tabbed_3_2"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2m-5.15 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56M14.34 14H9.66c-.1-.66-.16-1.32-.16-2s.06-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2M12 19.96c-.83-1.2-1.5-2.53-1.91-3.96h3.82c-.41 1.43-1.08 2.76-1.91 3.96M8 8H5.08A7.92 7.92 0 0 1 9.4 4.44C8.8 5.55 8.35 6.75 8 8m-2.92 8H8c.35 1.25.8 2.45 1.4 3.56A8 8 0 0 1 5.08 16m-.82-2C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2M12 4.03c.83 1.2 1.5 2.54 1.91 3.97h-3.82c.41-1.43 1.08-2.77 1.91-3.97M18.92 8h-2.95a15.7 15.7 0 0 0-1.38-3.56c1.84.63 3.37 1.9 4.33 3.56M12 2C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2"/></svg></span> Web</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># standard release</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>gh<span class="w"> </span>release<span class="w"> </span>create<span class="w"> </span>viscy-data-v0.2.1<span class="w"> </span>--generate-notes<span class="w"> </span>--title<span class="w"> </span><span class="s2">&quot;viscy-data v0.2.1&quot;</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># pre-release (rc / alpha / beta)</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>gh<span class="w"> </span>release<span class="w"> </span>create<span class="w"> </span>viscy-data-v0.2.1rc1<span class="w"> </span>--prerelease<span class="w"> </span>--generate-notes
 </span></code></pre></div>
+</div>
+<div class="tabbed-block">
 <ol>
-<li>One tag per package you ship.</li>
-<li>Version is derived from the tag.</li>
-<li>Verify the wheel name matches the tag before pushing.</li>
-<li>Nothing is public until you push the tag.</li>
+<li><strong>Releases → Draft a new release.</strong></li>
+<li>Choose or create the tag, e.g. <code>viscy-data-v0.2.1</code>.</li>
+<li>Tick <strong>Set as a pre-release</strong> for an <code>rc</code> / <code>a</code> / <code>b</code> tag.</li>
+<li><strong>Publish release.</strong></li>
 </ol>
+</div>
+</div>
+</div>
+<p>Spell versions the PEP 440 way: <code>v0.2.1</code>, <code>v0.2.1rc1</code>. A
+misspelled or unprefixed tag fails the run before anything builds.</p>
+<div class="admonition note">
+<p class="admonition-title">What CI does</p>
+<p>Publishing the Release runs <code>.github/workflows/release.yml</code>: parse the tag, build
+the sdist and wheel, verify the version matches the tag, publish to PyPI over OIDC
+(PEP 740 attestations, no stored secrets), and attach the artifacts to the Release.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">How publishing is authorized</p>
+<p>Each package publishes through PyPI
+<a href="https://docs.pypi.org/trusted-publishers/">trusted publishing</a> (OIDC): GitHub mints
+a short-lived credential per run, scoped to <code>release.yml</code> and that package's
+environment (<code>pypi-viscy</code>, <code>pypi-viscy-data</code>, …).</p>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Docs deploy automatically</p>
 <p>CI publishes the site with <a href="https://github.com/squidfunk/mike"><code>mike</code></a>: merging
 to <code>main</code> updates the <code>dev</code> build; a <code>vX.Y.Z</code> umbrella tag publishes a release
 and moves <code>stable</code>.</p>
 </div>
-<h2 id="before-you-open-a-pr">Before you open a PR<a class="headerlink" href="#before-you-open-a-pr" title="Permanent link">&para;</a></h2>
+<h2 id="before-you-open-a-pr-check-that">Before you open a PR check that:<a class="headerlink" href="#before-you-open-a-pr-check-that" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Tests cover the change and <code>uv run pytest</code> passes</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>uvx prek run --all-files</code> is clean</li>
