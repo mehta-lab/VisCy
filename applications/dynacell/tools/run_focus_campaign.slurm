@@ -52,7 +52,7 @@
 #SBATCH --partition=gpu
 #SBATCH --output=/hpc/mydata/alex.kalinin/logs/reeval/%x_%A_%a.out
 
-set -uo pipefail
+set -euo pipefail
 
 PHASE=${1:?"usage: run_focus_campaign.slurm <gtwarm|eval>"}
 
