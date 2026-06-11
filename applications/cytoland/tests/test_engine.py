@@ -206,3 +206,46 @@ def test_predict_sliding_windows_missing_out_stack_depth():
     vs = AugmentedPredictionVSUNet(model=model)
     with pytest.raises(ValueError, match="out_stack_depth"):
         vs.predict_sliding_windows(torch.randn(1, 1, 10, 4, 4))
+
+
+def test_rotation_tta_transforms():
+    """Verify the rotation TTA factory builds matched forward/inverse rotations."""
+    from cytoland.engine import rotation_tta_transforms
+
+    forward, inverse = rotation_tta_transforms()
+    assert len(forward) == len(inverse) == 4
+    x = torch.randn(1, 1, 5, 6, 8)  # non-square YX
+    for fwd_t, inv_t in zip(forward, inverse):
+        # inverse(forward(x)) is the identity and restores the original shape
+        assert torch.allclose(inv_t(fwd_t(x)), x)
+
+
+@pytest.mark.parametrize("yx", [(64, 64), (64, 48), (48, 64)])
+def test_predict_sliding_windows_rotation_tta_nonsquare(yx):
+    """Verify rotation TTA + sliding windows works for non-square FOVs.
+
+    Regression test: ``_predict_with_tta`` must crop to the augmented (rotated)
+    shape, otherwise 90/270-degree rotations on non-square inputs produce
+    mismatched shapes and fail to reduce.
+    """
+    z_window, depth, out_channels = 5, 8, 2
+    height, width = yx
+    model = VSUNet(
+        architecture="fcmae",
+        model_config={
+            "in_channels": 1,
+            "out_channels": out_channels,
+            "encoder_blocks": [2, 2, 2, 2],
+            "dims": [4, 8, 16, 32],
+            "decoder_conv_blocks": 1,
+            "stem_kernel_size": [z_window, 4, 4],
+            "in_stack_depth": z_window,
+            "pretraining": False,
+        },
+    )
+    vs = AugmentedPredictionVSUNet.with_rotation_tta(model.model, reduction="median").eval()
+    x = torch.randn(1, 1, depth, height, width)
+    with torch.inference_mode():
+        output = vs.predict_sliding_windows(x, out_channel=out_channels, step=1)
+    assert output.shape == (1, out_channels, depth, height, width)
+    assert torch.isfinite(output).all()

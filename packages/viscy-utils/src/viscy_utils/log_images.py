@@ -17,13 +17,19 @@ def detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int) -> list[li
     """Extract middle-Z slices from a batch for image grid logging.
 
     Layout: one row per sample, columns ordered as
-    ``anchor_ch0, anchor_ch1, ..., positive_ch0, positive_ch1, ..., negative_ch0, ...``
-    Channels expand horizontally within each view, which suits landscape monitors.
+    ``view0_ch0, view0_ch1, ..., view1_ch0, view1_ch1, ...``.
+    Each view contributes all of its own channels, so views with
+    different channel counts (e.g. a 1-channel ``source`` with a
+    2-channel ``target``/``pred``) are all logged in full. Channels
+    expand horizontally within each view, which suits landscape monitors.
 
     Parameters
     ----------
     imgs : Sequence[Tensor]
-        One ``(B, C, Z, Y, X)`` tensor per view (anchor, positive, negative).
+        One ``(B, C, Z, Y, X)`` tensor per view. Examples: ``(anchor,
+        positive, negative)`` for contrastive learning, or ``(source,
+        target, pred)`` for virtual staining. Views may have different
+        channel counts.
     log_samples_per_batch : int
         Number of samples from the batch to include (first N).
 
@@ -34,14 +40,13 @@ def detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int) -> list[li
         ``(view, channel)`` pairs in view-major order.
     """
     num_samples = min(imgs[0].shape[0], log_samples_per_batch)
-    n_channels = imgs[0].shape[1]
     rows = []
     for i in range(num_samples):
         row = []
         for img in imgs:
             patch = to_numpy(img[i])
             mid_z = patch.shape[1] // 2
-            for c in range(n_channels):
+            for c in range(patch.shape[0]):
                 row.append(patch[c, mid_z])
         rows.append(row)
     return rows
