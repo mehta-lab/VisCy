@@ -499,6 +499,14 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     glcm_enabled = bool(glcm_cfg.get("enabled", False))
     img = _robust_norm(image, norm.get("p_lo", 1.0), norm.get("p_hi", 99.0))
 
+    names = active_cp_feature_names(glcm_enabled)
+    # cuCIM's GPU regionprops_dict indexes results[0] on an empty list and raises
+    # IndexError when the label image has no regions, so short-circuit a no-cell
+    # FOV before any regionprops_table call. Some iPSC nucleus/membrane FOVs have
+    # an empty cleaned segmentation; er/mito FOVs always have cells.
+    if int(cell_segmentation.max()) == 0:
+        return np.empty((0, len(names)), dtype=float)
+
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     if use_cuda:
         img = ascupy(img)
@@ -540,7 +548,6 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     if glcm_enabled:
         columns.update(_per_cell_glcm(img, cell_segmentation, glcm_cfg))
 
-    names = active_cp_feature_names(glcm_enabled)
     if columns["intensity_mean"].shape[0] == 0:
         return np.empty((0, len(names)), dtype=float)
     return np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1)
