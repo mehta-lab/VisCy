@@ -62,6 +62,10 @@ optional-dependencies.eval = [
   "torch-fidelity @ git+https://github.com/toshas/torch-fidelity.git@5e211a9",
   "tqdm",
   "transformers",
+  # In-focus z-plane estimation (focus_from_transverse_band) for focus_slice
+  # metadata; same estimator qc.FocusSliceMetric wraps, used here directly to
+  # avoid an applications/ -> applications/ (qc) dependency.
+  "waveorder",
 ]
 optional-dependencies.eval_gpu = [
   # CUDA-13 builds so cupy/cucim match torch's CUDA-13 stack (PyPI torch 2.12 is

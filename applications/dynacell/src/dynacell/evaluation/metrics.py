@@ -499,6 +499,14 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     glcm_enabled = bool(glcm_cfg.get("enabled", False))
     img = _robust_norm(image, norm.get("p_lo", 1.0), norm.get("p_hi", 99.0))
 
+    names = active_cp_feature_names(glcm_enabled)
+    # cuCIM's GPU regionprops_dict indexes results[0] on an empty list and raises
+    # IndexError when the label image has no regions, so short-circuit a no-cell
+    # FOV before any regionprops_table call. Some iPSC nucleus/membrane FOVs have
+    # an empty cleaned segmentation; er/mito FOVs always have cells.
+    if int(cell_segmentation.max()) == 0:
+        return np.empty((0, len(names)), dtype=float)
+
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     if use_cuda:
         img = ascupy(img)
@@ -540,7 +548,6 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     if glcm_enabled:
         columns.update(_per_cell_glcm(img, cell_segmentation, glcm_cfg))
 
-    names = active_cp_feature_names(glcm_enabled)
     if columns["intensity_mean"].shape[0] == 0:
         return np.empty((0, len(names)), dtype=float)
     return np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1)
@@ -571,6 +578,7 @@ def per_cell_similarity(
     metrics: tuple[str, ...] = ("pcc",),
     reduce: tuple[str, ...] = ("mean", "median"),
     use_gpu: bool = True,
+    z_slab: slice | None = None,
 ) -> dict[str, float]:
     """Per-cell paired GT-vs-pred image similarity, reduced over cells.
 
@@ -585,12 +593,25 @@ def per_cell_similarity(
     than silently emitting all-NaN (or no) ``PerCell_*`` columns — a silent
     miss would hide a config typo and confuse the final-metrics cache gate,
     which keys off the expected ``PerCell_*`` columns.
+
+    Parameters
+    ----------
+    z_slab : slice or None
+        When provided, restrict the volume (and hence each cell's bbox + the
+        ``ssim`` max-Z projection) to this in-focus band of planes before
+        scoring. Mirrors :func:`build_crops`'s ``z_slab`` so the per-cell
+        similarity and the deep-feature embeddings see the same slab. ``None``
+        (default) uses the full stack — the legacy behavior.
     """
     _require_cubic()
     if not metrics or set(metrics) - {"pcc", "ssim"}:
         raise ValueError(f"cell_similarity.metrics must be a non-empty subset of {{'pcc', 'ssim'}}; got {metrics!r}")
     if not reduce or set(reduce) - {"mean", "median"}:
         raise ValueError(f"cell_similarity.reduce must be a non-empty subset of {{'mean', 'median'}}; got {reduce!r}")
+    if z_slab is not None:
+        predict_t = predict_t[z_slab]
+        target_t = target_t[z_slab]
+        cell_segmentation_t = cell_segmentation_t[z_slab]
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     to_xp = ascupy if use_cuda else asnumpy
     pred = to_xp(predict_t)
@@ -686,24 +707,38 @@ def features_from_crops(crops, feature_extractor):
     return np.stack(feats, axis=0)
 
 
-def build_crops(image, cell_segmentation, patch_size):
+def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = None):
     """Compute the 2-D max-z projection + per-cell crops for one image.
 
     Shared by every deep-feature extractor in the eval pipeline so the
     max-projection, cell iteration, and crop construction run once per
     (FOV, timepoint) instead of once per backbone.
+
+    Parameters
+    ----------
+    z_slab : slice or None
+        When provided, restrict both the max-Z projection and the per-cell
+        label footprint to this band of planes — an in-focus slab centered on
+        the GT phase focus plane (see :func:`focus.build_focus_slabs`).
+        Out-of-focus caps (e.g. A549's all-membrane top planes) are excluded so
+        the MIP is not dominated by them. ``None`` (default) projects the whole
+        stack — the legacy behavior.
     """
     if image.shape != cell_segmentation.shape:
         raise ValueError(f"Shape mismatch: image {image.shape} vs cell_segmentation {cell_segmentation.shape}")
+    if z_slab is not None:
+        image = image[z_slab]
+        cell_segmentation = cell_segmentation[z_slab]
     image_2d = _minmax_norm(np.max(image, axis=0))
     return _build_per_cell_crops_2d(image_2d, cell_segmentation, patch_size)
 
 
-def deep_features(image, cell_segmentation, feature_extractor, patch_size):
+def deep_features(image, cell_segmentation, feature_extractor, patch_size, *, z_slab: slice | None = None):
     """Per-cell deep embeddings for one image, shape ``(n_cells, feature_dim)``.
 
     Prefer :func:`build_crops` + :func:`features_from_crops` when the same
-    crops feed multiple extractors.
+    crops feed multiple extractors. ``z_slab`` is forwarded to
+    :func:`build_crops` (in-focus slab projection; ``None`` = full stack).
     """
-    crops = build_crops(image, cell_segmentation, patch_size)
+    crops = build_crops(image, cell_segmentation, patch_size, z_slab=z_slab)
     return features_from_crops(crops, feature_extractor)

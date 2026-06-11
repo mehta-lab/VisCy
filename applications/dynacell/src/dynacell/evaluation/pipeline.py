@@ -71,6 +71,27 @@ from dynacell.evaluation.runtime import (
 from dynacell.evaluation.utils import plot_metrics
 
 
+def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[slice | None]] | None:
+    """Per-FOV in-focus slabs keyed by GT position name, or ``None`` when disabled.
+
+    Used to feed the batched deep-feature warm pass the same GT-derived slabs the
+    per-FOV path uses (so the warm cache is not poisoned with full-stack MIPs).
+    """
+    from dynacell.evaluation.focus import build_focus_slabs, read_focus_compute_config, read_focus_slab_config
+
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is None:
+        return None
+    fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
+    cache_dir = OmegaConf.select(config, "io.gt_cache_dir", default=None)
+    return {
+        name: build_focus_slabs(
+            pos, halfwidth=slab_cfg.halfwidth, t_count=pos.data.shape[0], compute=fc, cache_dir=cache_dir, pos_name=name
+        )
+        for name, pos in gt_positions
+    }
+
+
 def _zscore_per_side(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-side z-score: separate (mean, std) computed for each matrix."""
     pred_z = (pred - pred.mean(axis=0)) / (pred.std(axis=0) + 1e-8)
@@ -120,25 +141,46 @@ def _fov_pred_features_per_t(
     celldino_feature_extractor,
     patch_size: int,
     spacing,
+    z_slabs: list[slice | None] | None = None,
 ) -> dict[str, list[np.ndarray] | None]:
     """Return per-backbone per-t prediction features.
 
     Uses the pred cache when configured; otherwise computes fresh
     per-timepoint, sharing one set of 2-D crops across all deep backbones
     to avoid redundant max-projection + crop construction per backbone.
+    ``z_slabs`` (GT-derived per-timepoint in-focus slabs) restricts the crop
+    projection; ``None`` = full stack.
     """
     if pred_cache_ctx.enabled:
         return {
             "cp": fov_cp_features(pred_cache_ctx, pos_name, predict, cell_segmentation),
             "dinov3": fov_deep_features(
-                pred_cache_ctx, pos_name, predict, cell_segmentation, dinov3_feature_extractor, "dinov3"
+                pred_cache_ctx,
+                pos_name,
+                predict,
+                cell_segmentation,
+                dinov3_feature_extractor,
+                "dinov3",
+                z_slabs=z_slabs,
             ),
             "dynaclr": fov_deep_features(
-                pred_cache_ctx, pos_name, predict, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+                pred_cache_ctx,
+                pos_name,
+                predict,
+                cell_segmentation,
+                dynaclr_feature_extractor,
+                "dynaclr",
+                z_slabs=z_slabs,
             ),
             "celldino": (
                 fov_deep_features(
-                    pred_cache_ctx, pos_name, predict, cell_segmentation, celldino_feature_extractor, "celldino"
+                    pred_cache_ctx,
+                    pos_name,
+                    predict,
+                    cell_segmentation,
+                    celldino_feature_extractor,
+                    "celldino",
+                    z_slabs=z_slabs,
                 )
                 if celldino_feature_extractor is not None
                 else None
@@ -164,7 +206,9 @@ def _fov_pred_features_per_t(
                 use_gpu=use_gpu,
             )
         )
-        crops_t = build_crops(predict[t], cell_segmentation[t], patch_size)
+        crops_t = build_crops(
+            predict[t], cell_segmentation[t], patch_size, z_slab=None if z_slabs is None else z_slabs[t]
+        )
         dinov3.append(features_from_crops(crops_t, dinov3_feature_extractor))
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
         if celldino is not None:
@@ -451,6 +495,12 @@ def _process_one_fov(
     ``_aggregate_fov_result``. Used by both the serial and process FOV-loop
     paths in ``evaluate_predictions``.
     """
+    from dynacell.evaluation.focus import (
+        build_focus_slabs,
+        read_focus_compute_config,
+        read_focus_slab_config,
+        resolve_focus_planes,
+    )
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
@@ -484,6 +534,24 @@ def _process_one_fov(
 
     T = predict.shape[0]
 
+    # In-focus slab for the 2D deep-feature crops + per-cell similarity (off by
+    # default). Computed once from the GT phase focus plane (focus_slice zattrs,
+    # written by precompute-gt build.focus) and shared with the prediction
+    # (slice-by-slice); None per t means full-stack projection. Does not touch CP.
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is not None:
+        fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
+        z_slabs: list[slice | None] = build_focus_slabs(
+            pos_gt,
+            halfwidth=slab_cfg.halfwidth,
+            t_count=T,
+            compute=fc,
+            cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
+            pos_name=pos_name_pred,
+        )
+    else:
+        z_slabs = [None] * T
+
     # Mask path: when compute_instance_ap is set, the binary fov_masks path is
     # replaced by an instance-label path (nucleus or whole-cell). gt_cells /
     # pred_cells are (T, D, H, W) uint16 instance labels; the binary mask metrics
@@ -501,8 +569,23 @@ def _process_one_fov(
             target_cells, predict_cells = target, predict
         else:
             sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
-            frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
-            z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
+            if sel == "focus":
+                # Single in-focus plane per FOV (still 2D, no slab). Same z applied to
+                # GT, prediction, and nuclei seeds. From precomputed focus_slice zattrs
+                # when present, else computed from the phase channel and cached in
+                # io.gt_cache_dir — so it works on read-only published .ozx.
+                focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
+                fc = read_focus_compute_config(config, channel_name=focus_ch)
+                z_idx = resolve_focus_planes(
+                    pos_gt,
+                    t_count=T,
+                    compute=fc,
+                    cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
+                    pos_name=pos_name_pred,
+                )
+            else:
+                frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
+                z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
             target_cells = np.stack([target[t, z_idx[t]] for t in range(T)])  # (T, Y, X)
             predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
         if backend == "cellpose_watershed":
@@ -562,11 +645,23 @@ def _process_one_fov(
             gt_cp_per_t = fov_cp_features(cache_ctx, pos_name_pred, target, cell_segmentation)
         with region_timer("deep_gt_dinov3", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_dinov3_per_t = fov_deep_features(
-                cache_ctx, pos_name_pred, target, cell_segmentation, dinov3_feature_extractor, "dinov3"
+                cache_ctx,
+                pos_name_pred,
+                target,
+                cell_segmentation,
+                dinov3_feature_extractor,
+                "dinov3",
+                z_slabs=z_slabs,
             )
         with region_timer("deep_gt_dynaclr", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             gt_dynaclr_per_t = fov_deep_features(
-                cache_ctx, pos_name_pred, target, cell_segmentation, dynaclr_feature_extractor, "dynaclr"
+                cache_ctx,
+                pos_name_pred,
+                target,
+                cell_segmentation,
+                dynaclr_feature_extractor,
+                "dynaclr",
+                z_slabs=z_slabs,
             )
         if celldino_feature_extractor is not None:
             with region_timer("deep_gt_celldino", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
@@ -577,6 +672,7 @@ def _process_one_fov(
                     cell_segmentation,
                     celldino_feature_extractor,
                     "celldino",
+                    z_slabs=z_slabs,
                 )
         with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             pred_per_t = _fov_pred_features_per_t(
@@ -589,6 +685,7 @@ def _process_one_fov(
                 celldino_feature_extractor,
                 config.feature_metrics.patch_size,
                 config.pixel_metrics.spacing,
+                z_slabs=z_slabs,
             )
 
     microssim_data: list[dict] = []
@@ -638,6 +735,7 @@ def _process_one_fov(
                         metrics=cell_sim_metrics,
                         reduce=cell_sim_reduce,
                         use_gpu=use_gpu,
+                        z_slab=z_slabs[t],
                     )
                 )
         if config.compute_microssim:
@@ -1139,6 +1237,11 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     side_positions["pred"] = pred_positions
                     side_channels["pred"] = io_config.pred_channel_name
                 if sides_for_precompute:
+                    # In-focus slabs (GT-derived, keyed by pos_name) so the
+                    # batched warm pass builds the same slab crops the per-FOV
+                    # path expects — else the cache would be poisoned with
+                    # full-stack MIPs under the focus_slab cache key.
+                    focus_slabs = _build_focus_slabs_map(config, gt_positions)
                     with region_timer("precompute_all", "<parent>"):
                         precompute_deep_features(
                             sides_for_precompute,
@@ -1147,6 +1250,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                             seg_positions,
                             deep_extractors,
                             flush_threshold=flush_threshold,
+                            focus_slabs=focus_slabs,
                         )
                         for ctx in sides_for_precompute.values():
                             flush_manifest(ctx)
@@ -1426,7 +1530,15 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
 
 
 def _final_metrics_cache_valid(config: DictConfig) -> bool:
-    """Return True when the saved CSV/NPY caches can be reused."""
+    """Return True when the saved CSV/NPY caches can be reused.
+
+    Note: this check validates column *presence*, not the projection that produced
+    the values. ``feature_metrics.focus_slab`` changes PerCell/feature values without
+    changing columns, so toggling it on a save_dir that already holds full-stack
+    metrics requires ``force_recompute.final_metrics=true`` to refresh (every focus
+    campaign launcher passes it). Encoding a focus signature into the saved rows would
+    let this auto-detect — a follow-up.
+    """
     force = config.force_recompute
     if force.all or force.final_metrics:
         return False

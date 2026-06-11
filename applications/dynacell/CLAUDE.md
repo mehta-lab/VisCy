@@ -159,6 +159,47 @@ For an A40 / single-GPU interactive node where you'd run serial anyway, this is 
 
 Tests: `applications/dynacell/tests/test_evaluation_grouped.py` validates byte-equal parity against sequential per-condition runs on the same cache-only fixture used by `test_evaluation_pipeline_parallel_cpu.py`, plus rejection cases for empty `conditions` and forbidden model-loading-field overrides.
 
+## Focus-aware 2D projection (`dynacell/evaluation/focus.py`)
+
+The 3D→2D reduction in eval is **focus-aware** so the projection isn't dominated by
+out-of-focus caps (A549 Z=48; the in-focus band is ~5 planes). Three knobs, all
+default-off (default behavior unchanged):
+
+- `feature_metrics.focus_slab.{enabled,halfwidth,channel_name}` — deep-feature crops
+  (`build_crops`) + `per_cell_similarity` max-project over a `2*halfwidth+1` slab
+  centered on the in-focus plane (h=2 → ±2 → 5 planes). CP regionprops stay 3D
+  (untagged). Enabling it folds `+focusslab_h{h}_{ch}_{sig}` into each deep-feature
+  `preprocess_version` so embedding caches auto-invalidate — `{sig}` is a short hash of
+  the focus-compute params (`focus.{na_det,lambda_ill,pixel_size}`), so a focus-param
+  change also invalidates (the same params are recorded in the `slice_selection=focus`
+  instance-mask cache identity).
+- `segmentation.slice_selection=focus` — 2D instance seg picks the in-focus plane
+  (single slice, no slab) vs the old `frac=0.30`.
+- `precompute-gt build.focus=true` — writes `focus_slice` zattrs (DynaCLR/qc schema)
+  to a **writable** GT store.
+
+**Plane source (precedence, in `resolve_focus_planes`):** (1) precomputed
+`focus_slice` zattrs in the store (iPSC `.zarr` fast path); (2) the
+`io.gt_cache_dir/focus_planes/<channel>/<pos>.json` cache; (3) compute from the
+`focus.{channel_name,na_det,lambda_ill,pixel_size,device}` phase channel + persist to
+that cache. **Compute-at-eval-time (3) is why focus works on the read-only published
+A549 `.ozx`** — they carry no zattrs and `pack_ozx` is not bit-reproducible, so we do
+NOT fork them; the plane is derived from the `Phase3D` already inside each store and
+the published bytes stay identical to AWS Open Data v1. The estimator is
+`waveorder.focus.focus_from_transverse_band` (NOT the `qc` app — keeps the dep graph
+`applications/ → packages/`); the zattrs writer uses `viscy_utils.meta_utils`.
+
+Heterogeneous T is real in the pooled A549 `.ozx` (positions differ in timepoint
+count); the per-position writer/resolver handle it (per-position `shape[0]`).
+
+**Re-eval campaign:** `tools/run_focus_campaign.slurm` + `tools/submit_focus_campaign.sh`
+run it two-phase to produce-then-hit the GT cache: phase 1 = the 4 `*_ipsc_trained`
+leaves (each touches its organelle's 3 A549 conditions + iPSC, so collectively they
+warm every GT cache), phase 2 = the other 16 leaves (`afterany` phase 1, read-only
+warm GT, fan out fully parallel, 2 evals/GPU, 12 h). Overrides: `glcm.enabled=true`,
+`focus_slab.enabled=true halfwidth=2`, `slice_selection=focus`,
+`force_recompute.final_metrics=true`.
+
 ## Predict submission modes
 
 `tools/submit_benchmark_batch.py` (and the `tools/predict_batch.sh` wrapper) covers three submission shapes. They are mutually exclusive — pick by parallelism shape, not by familiarity:
