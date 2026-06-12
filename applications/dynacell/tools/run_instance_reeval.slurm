@@ -51,29 +51,34 @@
 
 set -euo pipefail
 
-PHASE=${1:?"usage: run_instance_reeval.slurm <gtwarm|eval>"}
+PHASE=${1:?"usage: run_instance_reeval.slurm <gtwarm|eval> [nucleus|membrane|all]"}
+ORGANELLE=${2:-all}  # restrict to one organelle (e.g. a membrane-only no-carve re-run)
 
-# Phase 1 produces the nucleus + membrane GT instance caches; phase 2 reads them.
+# Phase 1 produces the GT instance caches; phase 2 reads them. The leaf list is
+# built per (phase, organelle) so a single-organelle re-run gets a compact array
+# (index 0.. with no gaps); submit_instance_reeval.sh sizes --array to match.
+LEAVES=()
 case "$PHASE" in
   gtwarm)
-    LEAVES=(
-      grouped/nucleus_ipsc_trained/eval_grouped
-      grouped/membrane_ipsc_trained/eval_grouped
-    )
+    [[ "$ORGANELLE" == all || "$ORGANELLE" == nucleus ]] && LEAVES+=(grouped/nucleus_ipsc_trained/eval_grouped)
+    [[ "$ORGANELLE" == all || "$ORGANELLE" == membrane ]] && LEAVES+=(grouped/membrane_ipsc_trained/eval_grouped)
     ;;
   eval)
-    LEAVES=(
-      grouped/nucleus_joint/eval_grouped
-      grouped/nucleus_a549_trained/eval_grouped
-      grouped/membrane_joint/eval_grouped
-      grouped/membrane_a549_trained/eval_grouped
-    )
+    [[ "$ORGANELLE" == all || "$ORGANELLE" == nucleus ]] &&
+      LEAVES+=(grouped/nucleus_joint/eval_grouped grouped/nucleus_a549_trained/eval_grouped)
+    [[ "$ORGANELLE" == all || "$ORGANELLE" == membrane ]] &&
+      LEAVES+=(grouped/membrane_joint/eval_grouped grouped/membrane_a549_trained/eval_grouped)
     ;;
   *)
     echo "Unknown phase '$PHASE' (expected gtwarm|eval)" >&2
     exit 2
     ;;
 esac
+
+if [[ ${#LEAVES[@]} -eq 0 ]]; then
+  echo "No leaves for phase '$PHASE' organelle '$ORGANELLE' (expected nucleus|membrane|all)" >&2
+  exit 2
+fi
 
 if [[ -z "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   echo "SLURM_ARRAY_TASK_ID unset — launch via sbatch --array (see submit_instance_reeval.sh)." >&2

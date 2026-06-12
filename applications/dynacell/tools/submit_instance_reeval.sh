@@ -1,18 +1,33 @@
 #!/bin/bash
-# Submit the two-phase instance-AP re-eval of the nucleus & membrane grouped
-# buckets (instance-AP unification follow-up). Phase 1 warms the GT instance-mask
-# cache for both organelles; phase 2 reads it.
+# Submit the two-phase instance-AP re-eval of the grouped nucleus/membrane
+# buckets. Phase 1 warms the GT instance-mask cache (ipsc_trained leaves fold
+# every test set, so they produce the full GT cache); phase 2 reads it.
+#
+# Optional first arg restricts to one organelle:
+#   submit_instance_reeval.sh            # both nucleus + membrane
+#   submit_instance_reeval.sh membrane   # membrane only (e.g. the no-carve re-run)
+#   submit_instance_reeval.sh nucleus    # nucleus only
 set -euo pipefail
+
+ORGANELLE=${1:-all}  # all | nucleus | membrane
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="${HERE}/run_instance_reeval.slurm"
 mkdir -p /hpc/mydata/alex.kalinin/logs/reeval
 
-J1=$(sbatch --parsable --array=0-1 "$LAUNCHER" gtwarm)
-echo "Phase 1 (gtwarm: nucleus+membrane ipsc_trained) submitted: array job $J1"
+# Array sizes must match the leaf counts run_instance_reeval.slurm builds per
+# (phase, organelle): gtwarm = 1 ipsc_trained leaf/organelle; eval = 2/organelle.
+case "$ORGANELLE" in
+  all)               GTWARM_ARRAY=0-1; EVAL_ARRAY=0-3 ;;
+  nucleus|membrane)  GTWARM_ARRAY=0-0; EVAL_ARRAY=0-1 ;;
+  *) echo "Unknown organelle '$ORGANELLE' (expected all|nucleus|membrane)" >&2; exit 2 ;;
+esac
 
-J2=$(sbatch --parsable --dependency="afterany:${J1}" --array=0-3 "$LAUNCHER" eval)
-echo "Phase 2 (eval: nucleus/membrane joint+a549_trained) submitted: array job $J2 (afterany:${J1})"
+J1=$(sbatch --parsable --array="$GTWARM_ARRAY" "$LAUNCHER" gtwarm "$ORGANELLE")
+echo "Phase 1 (gtwarm: ${ORGANELLE} ipsc_trained) submitted: array job $J1"
+
+J2=$(sbatch --parsable --dependency="afterany:${J1}" --array="$EVAL_ARRAY" "$LAUNCHER" eval "$ORGANELLE")
+echo "Phase 2 (eval: ${ORGANELLE} joint+a549_trained) submitted: array job $J2 (afterany:${J1})"
 
 echo "Watch:   squeue -j ${J1},${J2} -o '%.18i %.9P %.22j %.8T %.10M %.6D %R'"
 echo "Logs:    /hpc/mydata/alex.kalinin/logs/reeval/instance_reeval_${J1}_* and _${J2}_*"
