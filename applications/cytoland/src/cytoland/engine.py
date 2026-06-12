@@ -94,6 +94,8 @@ def rotation_tta_transforms(
     tuple[list[Callable], list[Callable]]
         The forward and inverse transform lists.
     """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
     forward = [partial(torch.rot90, k=k, dims=(-2, -1)) for k in range(n)]
     inverse = [partial(torch.rot90, k=-k, dims=(-2, -1)) for k in range(n)]
     return forward, inverse
