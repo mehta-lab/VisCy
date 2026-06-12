@@ -12,6 +12,9 @@ benchmark:
     target: h2b
 
 compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose
 
 conditions:
   - name: a549_mock

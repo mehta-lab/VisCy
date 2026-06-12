@@ -17,7 +17,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=37-step=102752.ckpt
 
 data:
   init_args:

@@ -24,9 +24,9 @@ def _write_tiny_hcs(path: Path, positions: list[tuple[str, str, str]], channel: 
             pos.create_image("0", data)
 
 
-def _seg_fn(img, target_name, seg_model=None):
+def _seg_fn(img, target_name, seg_model=None, **kwargs):
     """Deterministic segmentation stub: everything > 0 is foreground."""
-    del target_name, seg_model
+    del target_name, seg_model, kwargs
     return (np.asarray(img) > 0).astype(bool)
 
 

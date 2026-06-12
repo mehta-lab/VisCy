@@ -44,11 +44,13 @@ from dynacell.evaluation.cache import (
 )
 from dynacell.evaluation.instance_metrics import DEFAULT_IOU_THRESHOLDS
 from dynacell.evaluation.metrics import (
+    CP_FEATURE_VERSION,
     build_crops,
     cp_regionprops,
     deep_features,
     features_from_crops,
 )
+from dynacell.evaluation.runtime import region_timer
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
 
@@ -81,11 +83,17 @@ class _CacheContext:
     dimension: str = "2d"
     slice_selection: str = "frac"
     slice_fraction: float = 0.30
+    focus_channel_name: str | None = None
+    focus_slab_enabled: bool = False
+    focus_estimator_params: dict[str, float] = field(default_factory=dict)
     nuclei_channel_name: str | None = None
     nuclei_plate_path: str | None = None
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
     cellpose_params: dict[str, Any] = field(default_factory=dict)
     watershed_params: dict[str, Any] = field(default_factory=dict)
+    cp_feature_version: str | None = None
+    cp_norm: dict[str, Any] = field(default_factory=dict)
+    cp_glcm: dict[str, Any] = field(default_factory=dict)
     dinov3_model_name: str | None = None
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
@@ -215,7 +223,44 @@ def init_cache_context(
 
     cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
-    nuclei_plate_path = OmegaConf.select(config, "io.gt_path", default=None)
+    cp_norm_cfg = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
+    cp_glcm_cfg = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
+
+    # When focus_slab is enabled the deep-feature crops project over an in-focus
+    # slab (not the full stack), so fold its signature into each extractor's
+    # preprocess_version — a toggle then auto-invalidates the deep caches via
+    # _auto_invalidate_on_preprocess_version_mismatch. CP stays 3D, so its
+    # identity is intentionally NOT tagged.
+    #
+    # The slab (and the slice_selection=focus instance plane) sit on the focus plane
+    # estimated from focus.{na_det,lambda_ill,pixel_size}; changing those params moves
+    # the plane, so fold the estimator signature into the deep tag and the resolved
+    # params onto the context (consumed by _instance_identity). Both are channel-
+    # independent, so one resolve covers both paths.
+    from dynacell.evaluation.focus import read_focus_compute_config, read_focus_slab_config
+
+    slab_cfg = read_focus_slab_config(config)
+    slice_selection = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+    focus_estimator_params: dict[str, float] = {}
+    if slab_cfg is not None or slice_selection == "focus":
+        fc = read_focus_compute_config(config)
+        focus_estimator_params = fc.estimator_params
+        if slab_cfg is not None:
+            focus_tag = f"+focusslab_h{slab_cfg.halfwidth}_{slab_cfg.channel_name}_{fc.estimator_sig}"
+            dinov3_preprocess_version = (dinov3_preprocess_version + focus_tag) if dinov3_preprocess_version else None
+            dynaclr_preprocess_version = (
+                (dynaclr_preprocess_version + focus_tag) if dynaclr_preprocess_version else None
+            )
+            celldino_preprocess_version = (
+                (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
+            )
+    # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
+    # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
+    # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
+    # identity so a nuclei-store change invalidates whole-cell labels.
+    nuclei_plate_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None) or OmegaConf.select(
+        config, "io.gt_path", default=None
+    )
 
     base_kwargs: dict[str, Any] = dict(
         force=force,
@@ -227,8 +272,11 @@ def init_cache_context(
         backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
         compute_instance_ap=bool(OmegaConf.select(config, "compute_instance_ap", default=False)),
         dimension=OmegaConf.select(config, "segmentation.dimension", default="2d"),
-        slice_selection=OmegaConf.select(config, "segmentation.slice_selection", default="frac"),
+        slice_selection=slice_selection,
         slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
+        focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
+        focus_slab_enabled=slab_cfg is not None,
+        focus_estimator_params=focus_estimator_params,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
         nuclei_plate_path=str(nuclei_plate_path) if nuclei_plate_path is not None else None,
         iou_thresholds=list(
@@ -236,6 +284,9 @@ def init_cache_context(
         ),
         cellpose_params=(OmegaConf.to_container(cellpose_cfg, resolve=True) if cellpose_cfg is not None else {}),
         watershed_params=(OmegaConf.to_container(watershed_cfg, resolve=True) if watershed_cfg is not None else {}),
+        cp_feature_version=CP_FEATURE_VERSION,
+        cp_norm=(OmegaConf.to_container(cp_norm_cfg, resolve=True) if cp_norm_cfg is not None else {}),
+        cp_glcm=(OmegaConf.to_container(cp_glcm_cfg, resolve=True) if cp_glcm_cfg is not None else {}),
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
@@ -309,7 +360,10 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
     Missing tags (cached manifest pre-dates version tracking, or the kind
     isn't loaded for this run) are treated as "no constraint" — they do
     NOT trigger invalidation. Operators handle that bootstrap transition
-    explicitly via ``force_recompute.<side>_<kind>``.
+    explicitly via ``force_recompute.<side>_<kind>``. The one exception:
+    when ``ctx.focus_slab_enabled`` is set, an untagged entry is full-stack
+    crops that would be silently reused as focus-projected, so it IS
+    invalidated.
 
     Under ``io.require_complete_cache=true`` a known mismatch is escalated
     to a hard :class:`StaleCacheError` — the user opted out of recompute,
@@ -344,7 +398,13 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         if entry is None:
             continue
         cached_version = entry.get("preprocess_version")
-        if cached_version is None or cached_version == current_version:
+        if cached_version == current_version:
+            continue
+        # Pre-version-tracking entries (cached_version is None) are normally "no
+        # constraint" (bootstrap). Exception: when focus_slab is enabled this run,
+        # an untagged entry holds full-stack crops that must NOT be reused as if
+        # focus-projected — fall through to invalidation.
+        if cached_version is None and not ctx.focus_slab_enabled:
             continue
         if ctx.require_complete:
             raise StaleCacheError(
@@ -419,8 +479,8 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
             "cp",
             f"{ctx.label_prefix}cp_features",
             artifacts.get("cp_features"),
-            {"spacing": ctx.spacing, **ctx.source_tag},
-            ("spacing",),
+            _cp_identity(ctx),
+            ("spacing", "cp_norm_p_lo", "cp_norm_p_hi"),
         ),
     ]
     if ctx.compute_instance_ap:
@@ -687,6 +747,14 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
         "slice_fraction": ctx.slice_fraction,
         **ctx.source_tag,
     }
+    # slice_selection='focus' picks the 2D plane from this channel's focus estimate,
+    # so it must be part of the identity (only when active, to leave frac/sharpest
+    # identities byte-stable). Analog of the backend fix in #445. The plane also
+    # depends on the focus-compute params (na_det/lambda_ill/pixel_size), so record
+    # them too — otherwise a focus-param change reuses a stale in-focus plane.
+    if ctx.slice_selection == "focus":
+        identity["focus_channel_name"] = ctx.focus_channel_name
+        identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
     if ctx.backend == "cellpose_watershed":
         # Whole-cell labels also depend on the watershed params and the GT nuclei
         # seeds; record the GT nuclei (path, channel) so a pred-side identity
@@ -697,6 +765,38 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
             "nuclei_channel": ctx.nuclei_channel_name,
             "nuclei_path": ctx.nuclei_plate_path,
         }
+    return identity
+
+
+def _cp_identity(ctx: _CacheContext) -> dict[str, Any]:
+    """Return the cache-identity dict for a side's CP feature artifact.
+
+    Beyond ``spacing`` it records the CP recipe version and the
+    normalization / GLCM config so a recipe bump or a ``feature_metrics.cp.*``
+    change auto-invalidates the cached feature matrix (a pre-existing cache
+    lacks these keys → mismatch → recompute). ``cp_*`` keys are flat scalars so
+    they round-trip cleanly through the YAML manifest and ``diff_artifact_params``.
+
+    The GLCM quantization params (``levels``/``distances``) are recorded only
+    when GLCM is enabled — when it is off they do not affect the matrix, so
+    including them would needlessly invalidate an identical cache on a toggle.
+    ``diff_artifact_params`` compares the current identity's keys, so dropping
+    them is sufficient (any stale stored value is simply ignored).
+    """
+    glcm = ctx.cp_glcm or {}
+    norm = ctx.cp_norm or {}
+    glcm_enabled = bool(glcm.get("enabled", False))
+    identity: dict[str, Any] = {
+        "spacing": ctx.spacing,
+        "cp_feature_version": ctx.cp_feature_version,
+        "cp_glcm_enabled": glcm_enabled,
+        "cp_norm_p_lo": float(norm.get("p_lo", 1.0)),
+        "cp_norm_p_hi": float(norm.get("p_hi", 99.0)),
+        **ctx.source_tag,
+    }
+    if glcm_enabled:
+        identity["cp_glcm_levels"] = int(glcm.get("levels", 32))
+        identity["cp_glcm_distances"] = list(glcm.get("distances", [1]))
     return identity
 
 
@@ -936,7 +1036,7 @@ def fov_cp_features(
     """Return CP regionprops per timepoint for one FOV, loading from cache or computing+writing.
 
     The cache side is taken from ``ctx.side``. Result is a list of ``T``
-    arrays, each shape ``(n_cells_t, n_props_raw)``.
+    arrays, each shape ``(n_cells_t, n_features)``.
     """
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
@@ -946,15 +1046,24 @@ def fov_cp_features(
         force_key=f"{ctx.side}_cp",
         artifact_label=f"{ctx.label_prefix}cp_features",
         cache_kwargs={},
-        compute_fn=lambda t: cp_regionprops(image_arr[t], cell_segmentation_arr[t], ctx.spacing, use_gpu=ctx.use_gpu),
+        compute_fn=lambda t: cp_regionprops(
+            image_arr[t],
+            cell_segmentation_arr[t],
+            ctx.spacing,
+            norm=ctx.cp_norm,
+            glcm_cfg=ctx.cp_glcm,
+            use_gpu=ctx.use_gpu,
+        ),
     )
 
     if ctx.enabled and manifest_updated:
+        # Identity params (version/norm/glcm) come from _cp_identity so the
+        # written entry matches the read-time check in
+        # _auto_invalidate_on_artifact_param_mismatch (no spurious mismatch).
         entry: dict[str, Any] = {
             "path": "features/cp.zarr",
-            "spacing": ctx.spacing,
             "built_at": built_at_now(),
-            **ctx.source_tag,
+            **_cp_identity(ctx),
         }
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
         _add_position(ctx.manifest, ["cp_features"], pos_name)
@@ -970,19 +1079,28 @@ def fov_deep_features(
     cell_segmentation_arr: np.ndarray,
     feature_extractor,
     kind: FeatureKind,
+    *,
+    z_slabs: list[slice | None] | None = None,
 ) -> list[np.ndarray]:
     """Return per-cell deep embeddings per timepoint for one FOV.
 
     The cache side is taken from ``ctx.side``. ``kind`` is ``"dinov3"``,
     ``"dynaclr"``, or ``"celldino"``; the cache key (model name or
-    checkpoint/weights hash) is pulled from *ctx*.
+    checkpoint/weights hash) is pulled from *ctx*. ``z_slabs`` (per-timepoint
+    in-focus slabs, GT-derived) restricts the projection; ``None`` = full stack.
     """
     return _fov_deep_features(
         ctx,
         pos_name=pos_name,
         image_arr=image_arr,
         kind=kind,
-        compute_fn=lambda t: deep_features(image_arr[t], cell_segmentation_arr[t], feature_extractor, ctx.patch_size),
+        compute_fn=lambda t: deep_features(
+            image_arr[t],
+            cell_segmentation_arr[t],
+            feature_extractor,
+            ctx.patch_size,
+            z_slab=None if z_slabs is None else z_slabs[t],
+        ),
     )
 
 
@@ -1257,7 +1375,8 @@ def _flush_kind(
     flat: list[np.ndarray] = [c for _, _, crops in items for c in crops]
     counts = [len(crops) for _, _, crops in items]
 
-    feats = features_from_crops(flat, extractor)
+    with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
+        feats = features_from_crops(flat, extractor)
 
     cache_kwargs = _kind_cache_kwargs(ctx, kind)
     lock_tag = _kind_lock_tag(kind, cache_kwargs)
@@ -1299,8 +1418,14 @@ def precompute_deep_features(
     extractors: dict[FeatureKind, Any],
     *,
     flush_threshold: int = 256,
+    focus_slabs: dict[str, list[slice | None]] | None = None,
 ) -> None:
     """Batched precompute of deep features across all FOVs/timepoints.
+
+    ``focus_slabs`` maps ``pos_name`` to a per-timepoint in-focus slab list
+    (GT-derived, shared by every side); when provided, crops are projected over
+    that slab instead of the full stack. ``None`` (or a missing pos_name) =
+    full-stack projection.
 
     Iterates positions in lockstep across the configured sides, loads
     ``cell_seg`` once per position (shared across sides), loads each side's
@@ -1398,8 +1523,11 @@ def precompute_deep_features(
             ts_needed = work["ts_needed"]
             channel_index = pos.get_channel_index(side_channel_names[side])
             image = np.asarray(pos.data[:, channel_index])
+            pos_slabs = None if focus_slabs is None else focus_slabs.get(pos_name)
             for t in ts_needed:
-                crops = build_crops(image[t], cell_seg[t], ctx.patch_size)
+                crops = build_crops(
+                    image[t], cell_seg[t], ctx.patch_size, z_slab=None if pos_slabs is None else pos_slabs[t]
+                )
                 kinds_for_t = [k for k in extractors if t in needs[k]]
                 batchers[side].push(pos_name, t, crops, kinds_for_t)
 

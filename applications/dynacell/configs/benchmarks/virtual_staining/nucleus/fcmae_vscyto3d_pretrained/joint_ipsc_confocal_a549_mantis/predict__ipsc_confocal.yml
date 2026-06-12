@@ -1,0 +1,47 @@
+# FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: nucleus trained on joint
+# iPSC+A549, predicting against ipsc_confocal test_cropped.
+# CAVEAT: best PRE-DIVERGENCE val-loss checkpoint (epoch 62, loss/validate=0.6370)
+# from job 33631899 / wandb run pq8egvjj (20260603-160836_FCMAE_VSCyto3D_Pretrained_
+# JOINT_NUCL). That run diverged to NaN after ~epoch 97 and hit the 4-day TIMEOUT at
+# epoch 142/200, so the top-5 checkpoints froze at epoch 86 and epoch 62 is the best
+# usable weight. Re-train for a clean 200-epoch checkpoint before final benchmark numbers.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: ipsc_confocal
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__fcmae_vscyto3d_pretrained__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fcmae_vscyto3d_pretrained/checkpoints/epoch=62-step=33390.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_pretrained_jointtrained.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_NUCL_JOINTTR_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

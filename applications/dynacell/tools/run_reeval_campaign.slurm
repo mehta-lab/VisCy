@@ -47,8 +47,28 @@ echo "[reeval] task ${SLURM_ARRAY_TASK_ID}: leaf=${LEAF}"
 echo "[reeval] node=$(hostname) gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits | head -1)"
 
 # Pre-set BLAS / OpenBLAS / OMP thread caps before any C-extension loads.
-# Matches dynacell/CLAUDE.md "Eval runtime / parallelism" guidance.
-export DYNACELL_THREADS_PER_WORKER=32
+# Matches dynacell/CLAUDE.md "Eval runtime / parallelism" guidance. Derive from
+# the allocation rather than hardcoding (matches the #429 fix).
+export DYNACELL_THREADS_PER_WORKER=${SLURM_CPUS_PER_TASK:-32}
 
 cd /hpc/mydata/alex.kalinin/VisCy
-exec uv run dynacell evaluate-grouped "leaf=${LEAF}"
+# GLCM Haralick texture recompute: glcm.enabled flips the cp_features cache
+# identity (cp_glcm_enabled false->true) so only the CP artifact auto-invalidates
+# and recomputes on GPU; deep-feature / mask / instance caches are untouched.
+# force_recompute.final_metrics re-aggregates the saved CSV/NPY from the enriched
+# CP cache (it is reused on file-existence alone otherwise). final_metrics=true is
+# also baked into the leaves' _BASE_OVERLAY; repeated here so the recompute intent
+# is explicit at the launch site.
+# focus_slab restricts the 2D deep-feature / per-cell projection to an in-focus
+# slab centered on the GT phase focus plane (h=2 -> 5 planes), keeping the MIP off
+# the out-of-focus caps. slice_selection=focus picks the in-focus plane for 2D
+# instance seg (was frac=0.30). The plane is read from focus_slice zattrs when
+# present (iPSC) else computed from Phase3D and cached in io.gt_cache_dir -- so the
+# published A549 .ozx need no repackaging (compute-at-eval-time, PR #468 Option A).
+# NOTE: superseded by tools/run_focus_campaign.slurm (two-phase, 1 eval/GPU, 14h).
+exec uv run dynacell evaluate-grouped "leaf=${LEAF}" \
+  feature_metrics.cp.glcm.enabled=true \
+  feature_metrics.focus_slab.enabled=true \
+  feature_metrics.focus_slab.halfwidth=2 \
+  segmentation.slice_selection=focus \
+  force_recompute.final_metrics=true

@@ -12,6 +12,12 @@ benchmark:
     target: caax
 
 compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose_watershed
+  nuclei_channel_name: Nuclei
+  watershed:
+    subtract_nuclei: false
 
 conditions:
   - name: a549_mock
@@ -20,6 +26,7 @@ conditions:
         dataset: a549-mantis-caax-mock
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained_mock.zarr
+      nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
     save:
       save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_membrane_mock
   - name: a549_denv
@@ -28,6 +35,7 @@ conditions:
         dataset: a549-mantis-caax-denv
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained_denv.zarr
+      nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
     save:
       save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_membrane_denv
   - name: a549_zikv
@@ -36,5 +44,6 @@ conditions:
         dataset: a549-mantis-caax-zikv
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_a549trained_zikv.zarr
+      nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
     save:
       save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_a549trained_membrane_zikv

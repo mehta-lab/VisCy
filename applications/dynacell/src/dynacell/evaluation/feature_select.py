@@ -58,9 +58,9 @@ def variance_threshold(
     Notes
     -----
     Iterates columns and calls :func:`numpy.unique` per column —
-    ``O(n_features * n_samples log n_samples)``. Designed for the
-    ~30-column CP regionprops matrix; do not feed deep-feature matrices
-    (1024+ columns) through this without vectorizing first.
+    ``O(n_features * n_samples log n_samples)``. Designed for the small
+    (~15-22 column) CP regionprops matrix; do not feed deep-feature
+    matrices (1024+ columns) through this without vectorizing first.
     """
     n_samples, n_features = X_pooled.shape
     keep = np.ones(n_features, dtype=bool)

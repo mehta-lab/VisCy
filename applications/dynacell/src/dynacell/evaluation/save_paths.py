@@ -21,6 +21,9 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
     "unetvit3d": "unetvit3d",
+    # pix2pix3d GAN (UNetViT3D generator, DynacellGAN engine). Distinct paper
+    # key from the deterministic `unetvit3d` so eval dirs don't collide.
+    "pix2pix3d_unetvit": "pix2pix3d",
     # CELL-Diff variants all collapse to a single iterative paper key for
     # iPSC-trained evaluations (matches paper script line 51).
     "celldiff": "celldiff_iterative",

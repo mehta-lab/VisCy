@@ -526,8 +526,11 @@ def test_joint_train_smoke_leaf_composes() -> None:
 # A100 is excluded separately due to repeat NCCL coordination hangs on this
 # cluster's A100 partition. Every 4-GPU train leaf inherits this constraint
 # by default. Leaves needing other cards must explicitly opt out via
-# `--override launcher.sbatch.constraint=null`.
+# `--override launcher.sbatch.constraint=null`. A leaf may instead NARROW
+# within the Hopper set (e.g. `h200` only, for a GAN whose rank needs >80 GB) —
+# that still excludes A100, so it satisfies the invariant.
 _HARDWARE_4GPU_CONSTRAINT = "h100|h200"
+_HARDWARE_4GPU_GPUS = frozenset(_HARDWARE_4GPU_CONSTRAINT.split("|"))
 
 
 def _all_train_leaves() -> list[Path]:
@@ -539,18 +542,21 @@ def _all_train_leaves() -> list[Path]:
 def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
     """Every 4-GPU train leaf must inherit the A100-exclude constraint.
 
-    Data-driven: walks every train leaf under virtual_staining/ and
-    skips single-GPU leaves; for 4-GPU leaves, asserts the constraint.
-    Adding a new 4-GPU leaf without the override picks this up
+    Data-driven: walks every train leaf under virtual_staining/ and skips
+    single-GPU leaves. For 4-GPU leaves the constraint must be a non-empty
+    subset of the default Hopper set, so a leaf may narrow to ``h200`` for a
+    big-memory GAN but must not re-admit A100 (or the <80 GB cards) or unset
+    it. Adding a new 4-GPU leaf that loosens the constraint picks this up
     automatically.
     """
     cfg = load_composed_config(leaf)
     if cfg["trainer"]["devices"] != 4:
         pytest.skip(f"single-GPU leaf: {leaf.relative_to(BENCHMARKS)}")
     constraint = cfg["launcher"]["sbatch"].get("constraint")
-    assert constraint == _HARDWARE_4GPU_CONSTRAINT, (
+    selected = frozenset(constraint.split("|")) if constraint else frozenset()
+    assert selected and selected <= _HARDWARE_4GPU_GPUS, (
         f"{leaf.relative_to(BENCHMARKS)}: 4-GPU leaf has constraint={constraint!r}, "
-        f"expected {_HARDWARE_4GPU_CONSTRAINT!r}. If this leaf must run on A100, "
-        f"override with `--override launcher.sbatch.constraint=null` instead of "
-        f"unsetting the profile default."
+        f"expected a non-empty subset of {_HARDWARE_4GPU_CONSTRAINT!r} (must exclude A100 "
+        f"and the <80 GB cards; narrowing to e.g. 'h200' is allowed). If this leaf must run "
+        f"on A100, override with `--override launcher.sbatch.constraint=null`."
     )

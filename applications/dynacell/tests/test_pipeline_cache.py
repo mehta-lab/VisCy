@@ -23,6 +23,7 @@ from dynacell.evaluation.cache import (  # noqa: E402
     write_mask,
 )
 from dynacell.evaluation.pipeline_cache import (  # noqa: E402
+    _instance_identity,
     _resolve_force,
     flush_manifest,
     fov_cp_features,
@@ -336,6 +337,198 @@ def test_init_cache_spacing_mismatch_raises_under_limit_positions(tmp_path: Path
         )
 
 
+def _seed_cp_manifest(tmp_path: Path, cp_entry: dict[str, Any]) -> None:
+    """Write a manifest whose only artifact is a ``cp_features`` entry.
+
+    Mirrors the scaffold the spacing-mismatch tests use; the gt plate /
+    segmentation / channel match :func:`_make_config` so the only mismatch
+    surfaced is the one the caller seeds into *cp_entry*.
+    """
+    from dynacell.evaluation.cache import save_manifest
+
+    save_manifest(
+        cache_paths(tmp_path),
+        {
+            "cache_schema_version": 1,
+            "gt": {"plate_path": "/tmp/gt.zarr", "channel_name": "target"},
+            "cell_segmentation": {"plate_path": "/tmp/seg.zarr"},
+            "artifacts": {"cp_features": cp_entry},
+        },
+    )
+
+
+def test_init_cache_cp_version_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """A bumped ``CP_FEATURE_VERSION`` flips ``force["gt_cp"]``, not raises.
+
+    A cache written under an older recipe version must auto-invalidate so the
+    feature matrix is recomputed with the current recipe — the headline reason
+    the CP cache is versioned.
+    """
+    import warnings as _warnings
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": "v0_legacy",
+            "cp_glcm_enabled": False,
+            "cp_norm_p_lo": 1.0,
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "cp_feature_version" in str(w.message) for w in caught)
+
+
+def test_init_cache_cp_norm_mismatch_auto_invalidates(tmp_path: Path) -> None:
+    """Changing ``feature_metrics.cp.norm`` invalidates the CP cache.
+
+    ``cp_norm_p_lo`` is a numeric identity key (tolerance-compared); a stored
+    bound that differs from the config's (default ``p_lo=1.0``) recomputes.
+    """
+    import warnings as _warnings
+
+    from dynacell.evaluation.metrics import CP_FEATURE_VERSION
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": CP_FEATURE_VERSION,
+            "cp_glcm_enabled": False,
+            "cp_norm_p_lo": 5.0,  # config default is 1.0
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(_make_config(**{"io.gt_cache_dir": str(tmp_path)}), side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "cp_norm_p_lo" in str(w.message) for w in caught)
+
+
+def test_init_cache_cp_glcm_toggle_auto_invalidates(tmp_path: Path) -> None:
+    """Toggling ``feature_metrics.cp.glcm.enabled`` invalidates the CP cache.
+
+    GLCM on/off changes the matrix width, so a stored ``cp_glcm_enabled`` that
+    disagrees with the config must recompute. Config turns GLCM on; the cache
+    was written with it off.
+    """
+    import warnings as _warnings
+
+    from dynacell.evaluation.metrics import CP_FEATURE_VERSION
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": CP_FEATURE_VERSION,
+            "cp_glcm_enabled": False,
+            "cp_norm_p_lo": 1.0,
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    cfg = _make_config(
+        **{
+            "io.gt_cache_dir": str(tmp_path),
+            "feature_metrics.cp.glcm": {"enabled": True, "levels": 32, "distances": [1]},
+        }
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(cfg, side="gt")
+    assert ctx.force["gt_cp"] is True
+    assert any("artifact param mismatch" in str(w.message) and "cp_glcm_enabled" in str(w.message) for w in caught)
+
+
+def test_init_cache_cp_glcm_levels_ignored_when_glcm_disabled(tmp_path: Path) -> None:
+    """With GLCM off, changing ``levels``/``distances`` must NOT invalidate.
+
+    ``_cp_identity`` records the quantization params only when GLCM is enabled,
+    so stale stored ``cp_glcm_levels``/``cp_glcm_distances`` are ignored while
+    GLCM is off (``diff_artifact_params`` compares only the current identity's
+    keys) — toggling them recomputes nothing.
+    """
+    import warnings as _warnings
+
+    from dynacell.evaluation.metrics import CP_FEATURE_VERSION
+
+    _seed_cp_manifest(
+        tmp_path,
+        {
+            "spacing": [0.29, 0.108, 0.108],
+            "cp_feature_version": CP_FEATURE_VERSION,
+            "cp_glcm_enabled": False,
+            "cp_glcm_levels": 99,  # stale; must be ignored while GLCM is off
+            "cp_glcm_distances": [9],
+            "cp_norm_p_lo": 1.0,
+            "cp_norm_p_hi": 99.0,
+        },
+    )
+    cfg = _make_config(
+        **{
+            "io.gt_cache_dir": str(tmp_path),
+            "feature_metrics.cp.glcm": {"enabled": False, "levels": 16, "distances": [1]},
+        }
+    )
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        ctx = init_cache_context(cfg, side="gt")
+    assert ctx.force["gt_cp"] is False
+    assert not any("artifact param mismatch" in str(w.message) and "cp_features" in str(w.message) for w in caught)
+
+
+def _focus_config(**focus_overrides: Any):
+    """A ``_make_config`` with focus_slab + slice_selection=focus turned on."""
+    focus = {"na_det": 1.35, "lambda_ill": 0.450, "pixel_size": 0.1494, "device": "cpu"}
+    focus.update(focus_overrides)
+    return _make_config(
+        **{
+            "feature_metrics.focus_slab": {"enabled": True, "halfwidth": 2, "channel_name": "Phase3D"},
+            "segmentation": {"slice_selection": "focus", "focus_channel_name": "Phase3D"},
+            "focus": focus,
+        }
+    )
+
+
+def test_focus_params_fold_into_deep_tag_and_instance_identity() -> None:
+    """Focus-compute params gate the in-focus plane, so they must sit in the cache keys.
+
+    The deep-feature ``preprocess_version`` gets a ``+focusslab_h{h}_{ch}_{sig}`` tag and
+    the ``slice_selection=focus`` instance identity records the params; a ``pixel_size``
+    change then alters both, forcing a recompute instead of silently reusing stale planes.
+    """
+    ctx = init_cache_context(
+        _focus_config(), side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1"
+    )
+    assert ctx.dinov3_preprocess_version.startswith("v1+focusslab_h2_Phase3D_")
+    ident = _instance_identity(ctx)
+    assert ident["focus_channel_name"] == "Phase3D"
+    assert ident["focus_na_det"] == 1.35
+    assert ident["focus_pixel_size"] == 0.1494
+
+    # A pixel_size override moves the plane -> the deep tag and instance identity both change.
+    ctx2 = init_cache_context(
+        _focus_config(pixel_size=0.250), side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1"
+    )
+    assert ctx2.dinov3_preprocess_version != ctx.dinov3_preprocess_version
+    assert _instance_identity(ctx2)["focus_pixel_size"] == 0.250
+
+
+def test_focus_off_leaves_tag_and_identity_untagged() -> None:
+    """With focus disabled (the default), no focus tag or focus keys appear anywhere."""
+    ctx = init_cache_context(
+        _make_config(), side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1"
+    )
+    assert ctx.dinov3_preprocess_version == "v1"
+    ident = _instance_identity(ctx)
+    assert "focus_channel_name" not in ident
+    assert not any(k.startswith("focus_") for k in ident)
+
+
 def test_fov_gt_masks_cache_miss_computes_and_writes(tmp_path: Path, monkeypatch) -> None:
     """First call computes masks via segment() and writes them to cache."""
     import dynacell.evaluation.segmentation as segmentation
@@ -612,8 +805,8 @@ def test_fov_pred_deep_features_dinov3_cache_hit(tmp_path: Path) -> None:
 def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """CP feature miss computes via cp_regionprops and writes per timepoint."""
 
-    def fake_cp(target, cell_seg, spacing, use_gpu=True):
-        del cell_seg, spacing, use_gpu
+    def fake_cp(target, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
         return np.full((2, 3), float(target.sum()), dtype=np.float32)
 
     # Patch the globals of fov_cp_features itself — robust against sys.modules
@@ -639,8 +832,8 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
     """Prediction CP feature miss computes via cp_regionprops (side-agnostic) and writes per timepoint."""
 
-    def fake_cp(prediction, cell_seg, spacing, use_gpu=True):
-        del cell_seg, spacing, use_gpu
+    def fake_cp(prediction, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
         return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
@@ -1192,6 +1385,46 @@ def test_instance_cache_identity_invalidation(tmp_path: Path, monkeypatch) -> No
     assert ctx2.force["gt_instances"] is True
 
 
+def test_whole_cell_cache_invalidates_on_nuclei_gt_path(tmp_path: Path, monkeypatch) -> None:
+    """The whole-cell identity tracks the GT-nuclei store (io.nuclei_gt_path).
+
+    Same store → cache hit; a different nuclei store flips the identity → recompute.
+    Covers the A549 cross-store seeds (membrane in CAAX_*.ozx, nuclei in H2B_*.ozx).
+    """
+    from dynacell.evaluation import segmentation_whole_cell
+
+    monkeypatch.setattr(
+        segmentation_whole_cell, "segment_whole_cell", lambda memb, nuc, seed, sp, **kw: np.asarray(seed, np.uint16)
+    )
+
+    def wc_cfg(**extra):
+        return _make_config(
+            **{
+                "io.gt_cache_dir": str(tmp_path / "gt"),
+                "io.gt_path": "/tmp/memb_gt.zarr",
+                "target_name": "membrane",
+                "compute_instance_ap": True,
+                "segmentation.backend": "cellpose_watershed",
+                "segmentation.dimension": "2d",
+                "segmentation.nuclei_channel_name": "Nuclei",
+                "segmentation.cellpose": dict(_CELLPOSE_PARAMS),
+                "segmentation.watershed": dict(_WATERSHED_PARAMS),
+                **extra,
+            }
+        )
+
+    seed = np.zeros((1, 16, 16), np.uint16)
+    seed[:, :4, :4] = 1
+    ctx = init_cache_context(wc_cfg(**{"io.nuclei_gt_path": "/tmp/nuclei_A.zarr"}), side="gt")
+    fov_whole_cell_instances(ctx, "A/1/0", np.zeros((1, 16, 16), np.float32), np.zeros((1, 16, 16), np.float32), seed)
+    flush_manifest(ctx)
+
+    same = init_cache_context(wc_cfg(**{"io.nuclei_gt_path": "/tmp/nuclei_A.zarr"}), side="gt")
+    assert same.force["gt_instances"] is False
+    diff = init_cache_context(wc_cfg(**{"io.nuclei_gt_path": "/tmp/nuclei_B.zarr"}), side="gt")
+    assert diff.force["gt_instances"] is True
+
+
 def test_validate_instance_ap_config_rejects() -> None:
     """The bidirectional guard rejects every invalid backend/target/toggle combo."""
     from dynacell.evaluation.pipeline import _validate_instance_ap_config
@@ -1263,4 +1496,9 @@ def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
     np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "DICE": 0.8}], dtype=object))
     assert _final_metrics_cache_valid(cfg) is False  # no mAP column -> recompute
     np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "DICE": 0.8, "mAP": 0.5}], dtype=object))
-    assert _final_metrics_cache_valid(cfg) is True  # AP columns present -> reuse
+    assert _final_metrics_cache_valid(cfg) is False  # mAP but no instance_dice -> recompute
+    np.save(
+        save_dir / "mask_metrics.npy",
+        np.array([{"FOV": "A/1/0", "DICE": 0.8, "mAP": 0.5, "instance_dice": 0.7}], dtype=object),
+    )
+    assert _final_metrics_cache_valid(cfg) is True  # AP + instance_dice present -> reuse
