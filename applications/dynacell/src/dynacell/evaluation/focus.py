@@ -331,6 +331,12 @@ def write_focus_slice_metadata(
 
     Returns the dataset-level statistics dict.
     """
+    if str(plate_path).rstrip("/").endswith(".ozx"):
+        raise ValueError(
+            f"Cannot write focus_slice metadata to packed store {plate_path!r}: .ozx stores "
+            "are read-only. Run against the unpacked OME-Zarr (.zarr) and repackage, or point "
+            "io.gt_path at a writable copy."
+        )
     with open_ome_zarr(plate_path, mode="r+") as plate:
         channel_index = plate.channel_names.index(channel_name)
         per_position: list[tuple[object, list[int]]] = []
