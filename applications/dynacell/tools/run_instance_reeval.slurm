@@ -51,23 +51,29 @@
 
 set -euo pipefail
 
-PHASE=${1:?"usage: run_instance_reeval.slurm <gtwarm|eval> [nucleus|membrane|all]"}
+PHASE=${1:?"usage: run_instance_reeval.slurm <gtwarm|eval> [nucleus|membrane|all] [variant]"}
 ORGANELLE=${2:-all}  # restrict to one organelle (e.g. a membrane-only no-carve re-run)
+VARIANT=${3:-}       # optional leaf-dir suffix, e.g. "carved" -> grouped/<bucket>_carved/
+
+SUF=""
+[[ -n "$VARIANT" ]] && SUF="_${VARIANT}"
 
 # Phase 1 produces the GT instance caches; phase 2 reads them. The leaf list is
 # built per (phase, organelle) so a single-organelle re-run gets a compact array
 # (index 0.. with no gaps); submit_instance_reeval.sh sizes --array to match.
+# VARIANT appends a suffix to each bucket dir (carved leaves live alongside the
+# no-carve ones as grouped/<bucket>_carved/); only membrane has carved leaves.
 LEAVES=()
 case "$PHASE" in
   gtwarm)
-    [[ "$ORGANELLE" == all || "$ORGANELLE" == nucleus ]] && LEAVES+=(grouped/nucleus_ipsc_trained/eval_grouped)
-    [[ "$ORGANELLE" == all || "$ORGANELLE" == membrane ]] && LEAVES+=(grouped/membrane_ipsc_trained/eval_grouped)
+    [[ "$ORGANELLE" == all || "$ORGANELLE" == nucleus ]] && LEAVES+=("grouped/nucleus_ipsc_trained${SUF}/eval_grouped")
+    [[ "$ORGANELLE" == all || "$ORGANELLE" == membrane ]] && LEAVES+=("grouped/membrane_ipsc_trained${SUF}/eval_grouped")
     ;;
   eval)
     [[ "$ORGANELLE" == all || "$ORGANELLE" == nucleus ]] &&
-      LEAVES+=(grouped/nucleus_joint/eval_grouped grouped/nucleus_a549_trained/eval_grouped)
+      LEAVES+=("grouped/nucleus_joint${SUF}/eval_grouped" "grouped/nucleus_a549_trained${SUF}/eval_grouped")
     [[ "$ORGANELLE" == all || "$ORGANELLE" == membrane ]] &&
-      LEAVES+=(grouped/membrane_joint/eval_grouped grouped/membrane_a549_trained/eval_grouped)
+      LEAVES+=("grouped/membrane_joint${SUF}/eval_grouped" "grouped/membrane_a549_trained${SUF}/eval_grouped")
     ;;
   *)
     echo "Unknown phase '$PHASE' (expected gtwarm|eval)" >&2
