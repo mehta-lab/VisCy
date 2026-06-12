@@ -9,6 +9,10 @@ io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/dual_nucl_memb_vscyto3d_cytolandft.zarr
 
 compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose_watershed
+  nuclei_channel_name: Nuclei
 
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_cytolandft/eval_vscyto3d_cytolandft_membrane
