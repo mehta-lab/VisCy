@@ -196,7 +196,7 @@ count); the per-position writer/resolver handle it (per-position `shape[0]`).
 run it two-phase to produce-then-hit the GT cache: phase 1 = the 4 `*_ipsc_trained`
 leaves (each touches its organelle's 3 A549 conditions + iPSC, so collectively they
 warm every GT cache), phase 2 = the other 16 leaves (`afterany` phase 1, read-only
-warm GT, fan out fully parallel, 2 evals/GPU, 12 h). Overrides: `glcm.enabled=true`,
+warm GT, fan out fully parallel, 1 eval/GPU, 14 h). Overrides: `glcm.enabled=true`,
 `focus_slab.enabled=true halfwidth=2`, `slice_selection=focus`,
 `force_recompute.final_metrics=true`.
 
