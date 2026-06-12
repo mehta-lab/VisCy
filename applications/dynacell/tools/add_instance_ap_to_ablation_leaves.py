@@ -10,17 +10,19 @@ in place, to the nucleus & membrane ablation leaves:
 
 - nucleus  -> compute_instance_ap + segmentation.backend=cellpose
 - membrane -> compute_instance_ap + segmentation.backend=cellpose_watershed
-  + nuclei_channel_name=Nuclei, and per-A549-condition io.nuclei_gt_path
-  pointing at the separate H2B nuclei store (iPSC nuclei live in the same
-  cell.zarr, so the iPSC leaf gets no nuclei_gt_path).
+  + nuclei_channel_name=Nuclei + watershed.subtract_nuclei=false (score the full
+  whole cell, not the carved cytoplasm shell), and per-A549-condition
+  io.nuclei_gt_path pointing at the separate H2B nuclei store (iPSC nuclei live
+  in the same cell.zarr, so the iPSC leaf gets no nuclei_gt_path).
 
 ER/mito ablation leaves are left untouched (no cell-instance interpretation).
 
 Text-surgical (PyYAML/ruamel would drop the hand-written header comments):
 inserts the instance block after the ``compute_feature_metrics: true`` line and
 a ``nuclei_gt_path`` sibling after each per-condition ``pred_path`` whose zarr
-carries an A549 ``_<cond>`` suffix. Idempotent — a leaf that already declares
-``compute_instance_ap`` is skipped.
+carries an A549 ``_<cond>`` suffix. Idempotent — a fully-wired leaf is skipped;
+a membrane leaf wired before the no-carve fix gets only the
+``watershed.subtract_nuclei=false`` block inserted under its existing seg block.
 
 Usage::
 
@@ -53,6 +55,9 @@ _FEATURE_ANCHOR = "compute_feature_metrics: true"
 # A per-condition prediction zarr on A549 ends in _<cond>.zarr; the iPSC leaf's
 # single pred_path has no condition suffix and must not match.
 _PRED_COND_RE = re.compile(r"^(\s*)pred_path: .*_(mock|denv|zikv)\.zarr\s*$")
+# Membrane seg anchor + the no-carve watershed block inserted beneath it.
+_NUCLEI_CHANNEL_LINE = "  nuclei_channel_name: Nuclei\n"
+_WATERSHED_NOCARVE = "  watershed:\n    subtract_nuclei: false\n"
 
 
 def _instance_block(organelle: str) -> list[str]:
@@ -62,17 +67,33 @@ def _instance_block(organelle: str) -> list[str]:
         lines.append("  backend: cellpose\n")
     else:  # membrane
         lines.append("  backend: cellpose_watershed\n")
-        lines.append("  nuclei_channel_name: Nuclei\n")
+        lines.append(_NUCLEI_CHANNEL_LINE)
+        # Score the full whole cell, not the carved cytoplasm shell — the
+        # eval.yaml default subtract_nuclei=true carves the shared nucleus core
+        # and collapses AP@0.50 to ~0.04 even in-distribution (the IoU-brittle
+        # cytoplasm boundary). See generate_grouped_eval_configs.build_leaf_yaml.
+        lines.append(_WATERSHED_NOCARVE)
     return lines
 
 
-def patch_leaf(path: Path, organelle: str) -> bool:
-    """Inject the instance-AP wiring into one ablation leaf. Returns True if changed."""
-    text = path.read_text()
+def plan_patch(text: str, organelle: str, leaf_id: str) -> tuple[str | None, str]:
+    """Compute the patched text for one ablation leaf without writing.
+
+    Returns ``(new_text, action)``. ``new_text`` is ``None`` when nothing
+    changes; ``action`` is a short label for the report (``"fresh"``,
+    ``"watershed-upgrade"``, or ``"skip"``).
+    """
     if "compute_instance_ap" in text:
-        return False  # idempotent
+        # Already wired. Membrane leaves wired before the no-carve fix still lack
+        # the watershed.subtract_nuclei=false block; upgrade them in place so the
+        # whole-cell AP scores the full cell, not the carved cytoplasm shell.
+        if organelle != "membrane" or "subtract_nuclei" in text:
+            return None, "skip"
+        if _NUCLEI_CHANNEL_LINE not in text:
+            raise ValueError(f"{leaf_id}: instance-AP-wired membrane leaf missing the nuclei_channel anchor")
+        return text.replace(_NUCLEI_CHANNEL_LINE, _NUCLEI_CHANNEL_LINE + _WATERSHED_NOCARVE, 1), "watershed-upgrade"
     if _FEATURE_ANCHOR not in text:
-        raise ValueError(f"{path}: missing '{_FEATURE_ANCHOR}' anchor; structure unexpected")
+        raise ValueError(f"{leaf_id}: missing '{_FEATURE_ANCHOR}' anchor; structure unexpected")
 
     out: list[str] = []
     for line in text.splitlines(keepends=True):
@@ -84,8 +105,15 @@ def patch_leaf(path: Path, organelle: str) -> bool:
             if m:
                 indent, cond = m.group(1), m.group(2)
                 out.append(f"{indent}nuclei_gt_path: {a549_nuclei_store(cond)}\n")
-    path.write_text("".join(out))
-    return True
+    return "".join(out), "fresh"
+
+
+def patch_leaf(path: Path, organelle: str) -> str:
+    """Inject/upgrade the instance-AP wiring in one ablation leaf. Returns the action label."""
+    new_text, action = plan_patch(path.read_text(), organelle, str(path))
+    if new_text is not None:
+        path.write_text(new_text)
+    return action
 
 
 def ablation_leaves() -> list[tuple[Path, str]]:
@@ -112,17 +140,16 @@ def main(argv: list[str] | None = None) -> int:
     for leaf, organelle in pairs:
         rel = leaf.relative_to(_LEAF_ROOT)
         if args.dry_run:
-            already = "compute_instance_ap" in leaf.read_text()
-            print(f"  {'skip (already)' if already else 'would patch'}: {organelle:8} {rel}")
-            skipped += already
-            changed += not already
-            continue
-        if patch_leaf(leaf, organelle):
-            print(f"  patched ({organelle}): {rel}")
-            changed += 1
+            _, action = plan_patch(leaf.read_text(), organelle, str(rel))
         else:
-            print(f"  skip (already): {rel}")
+            action = patch_leaf(leaf, organelle)
+        if action == "skip":
+            print(f"  skip (already): {organelle:8} {rel}")
             skipped += 1
+        else:
+            verb = "would patch" if args.dry_run else "patched"
+            print(f"  {verb} ({action}): {organelle:8} {rel}")
+            changed += 1
     print(f"[ablation-instance-ap] {changed} patched, {skipped} already-wired, {len(pairs)} total")
     return 0
 

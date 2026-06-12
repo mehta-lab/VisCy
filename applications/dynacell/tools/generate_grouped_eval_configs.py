@@ -603,6 +603,12 @@ def build_leaf_yaml(
         seg: dict = {"backend": _INSTANCE_BACKEND[organelle]}
         if organelle == "membrane":
             seg["nuclei_channel_name"] = "Nuclei"
+            # Whole-cell AP must score the FULL cell, not the carved cytoplasm
+            # shell: with shared GT-nuclei seeds both GT and pred share an
+            # identical nucleus core, so carving it (the eval.yaml default
+            # subtract_nuclei=true) leaves only the IoU-brittle cytoplasm
+            # boundary and collapses AP@0.50 to ~0.04 even in-distribution.
+            seg["watershed"] = {"subtract_nuclei": False}
         body["segmentation"] = seg
     condition_blocks: list[dict] = []
     for parsed in conditions:
