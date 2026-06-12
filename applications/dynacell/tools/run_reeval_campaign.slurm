@@ -65,7 +65,7 @@ cd /hpc/mydata/alex.kalinin/VisCy
 # instance seg (was frac=0.30). The plane is read from focus_slice zattrs when
 # present (iPSC) else computed from Phase3D and cached in io.gt_cache_dir -- so the
 # published A549 .ozx need no repackaging (compute-at-eval-time, PR #468 Option A).
-# NOTE: superseded by tools/run_focus_campaign.slurm (two-phase, 2 evals/GPU, 12h).
+# NOTE: superseded by tools/run_focus_campaign.slurm (two-phase, 1 eval/GPU, 14h).
 exec uv run dynacell evaluate-grouped "leaf=${LEAF}" \
   feature_metrics.cp.glcm.enabled=true \
   feature_metrics.focus_slab.enabled=true \
