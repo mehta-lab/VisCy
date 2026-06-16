@@ -15,4 +15,4 @@ segmentation:
   backend: cellpose
 
 save:
-  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_randinit/eval_vscyto3d_randinit_nucleus
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_randinit_nucleus

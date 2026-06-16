@@ -12,4 +12,4 @@ io:
 compute_feature_metrics: true
 
 save:
-  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_randinit/eval_vscyto3d_randinit_er
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_randinit_er

@@ -18,4 +18,4 @@ segmentation:
     subtract_nuclei: false
 
 save:
-  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_randinit/eval_vscyto3d_randinit_membrane
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_randinit_membrane

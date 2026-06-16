@@ -18,4 +18,4 @@ segmentation:
     subtract_nuclei: false
 
 save:
-  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_cytoland/eval_vscyto3d_cytoland_membrane
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_cytoland_membrane

@@ -28,7 +28,7 @@ conditions:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_mock.zarr
       nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_cytoland/eval_vscyto3d_cytoland_membrane_mock
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_cytoland_membrane_mock
   - name: a549_denv
     benchmark:
       dataset_ref:
@@ -37,7 +37,7 @@ conditions:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_denv.zarr
       nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_cytoland/eval_vscyto3d_cytoland_membrane_denv
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_cytoland_membrane_denv
   - name: a549_zikv
     benchmark:
       dataset_ref:
@@ -46,4 +46,4 @@ conditions:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_zikv.zarr
       nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_cytoland/eval_vscyto3d_cytoland_membrane_zikv
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_cytoland_membrane_zikv

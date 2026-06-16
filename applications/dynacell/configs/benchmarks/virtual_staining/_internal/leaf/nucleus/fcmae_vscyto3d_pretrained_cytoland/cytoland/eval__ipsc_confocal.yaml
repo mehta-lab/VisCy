@@ -15,4 +15,4 @@ segmentation:
   backend: cellpose
 
 save:
-  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_cytoland/eval_vscyto3d_cytoland_nucleus
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_cytoland_nucleus
