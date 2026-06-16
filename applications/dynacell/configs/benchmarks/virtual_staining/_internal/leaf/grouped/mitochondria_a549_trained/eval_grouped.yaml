@@ -139,7 +139,7 @@ conditions:
       target: tomm20
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_celldiff_r2_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/celldiff_r2/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/celldiff_r2/mitochondria_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_celldiff_r2_a549trained_mitochondria
 - name: vscyto3d__a549_trained__ipsc
@@ -149,7 +149,7 @@ conditions:
       target: tomm20
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_fcmae_vscyto3d_pretrained_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fcmae_vscyto3d_pretrained/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fcmae_vscyto3d_pretrained/mitochondria_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_vscyto3d_a549trained_mitochondria
 - name: unext2__a549_trained__ipsc
@@ -159,7 +159,7 @@ conditions:
       target: tomm20
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_fcmae_vscyto3d_scratch_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fcmae_vscyto3d_scratch/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fcmae_vscyto3d_scratch/mitochondria_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_unext2_a549trained_mitochondria
 - name: fnet3d__a549_trained__ipsc
@@ -169,6 +169,6 @@ conditions:
       target: tomm20
   io:
     pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_fnet3d_paper_a549trained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fnet3d_paper/ipsc
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/a549_trained/fnet3d_paper/mitochondria_ipsc
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_a549trained_with_embeddings/eval_fnet3d_a549trained_mitochondria

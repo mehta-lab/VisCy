@@ -14,10 +14,12 @@ benchmark:
   predict_set: a549_mantis_caax_zikv
   model_name: pix2pix3d_unetvit
   experiment_id: membrane__ipsc_confocal__pix2pix3d_unetvit__a549_mantis_caax_zikv
+  dataset_ref:
+    target: caax
 
 model:
   init_args:
-    ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=25-step=83200.ckpt
 
 data:
   init_args:

@@ -20,6 +20,12 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.focus import (
+    build_focus_slabs,
+    read_focus_compute_config,
+    read_focus_slab_config,
+    write_focus_slice_metadata,
+)
 from dynacell.evaluation.metrics import build_crops
 from dynacell.evaluation.model_loader import LoadFlags, init_gt_cache_context, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
@@ -28,6 +34,22 @@ from dynacell.evaluation.pipeline_cache import (
     fov_cp_features,
     fov_masks,
 )
+
+
+def _focus_slabs(config: DictConfig, pos_gt, pos_name: str, t_count: int) -> list[slice | None]:
+    """Per-timepoint in-focus slabs for a GT position, or ``[None]*t`` when disabled."""
+    slab_cfg = read_focus_slab_config(config)
+    if slab_cfg is None:
+        return [None] * t_count
+    fc = read_focus_compute_config(config, channel_name=slab_cfg.channel_name)
+    return build_focus_slabs(
+        pos_gt,
+        halfwidth=slab_cfg.halfwidth,
+        t_count=t_count,
+        compute=fc,
+        cache_dir=config.io.gt_cache_dir,
+        pos_name=pos_name,
+    )
 
 
 def precompute_gt_artifacts(config: DictConfig) -> None:
@@ -65,6 +87,26 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     # produce no cache, so we surface it as an error).
     if build.celldino and config.feature_extractor.celldino.weights_path is None:
         raise ValueError("feature_extractor.celldino.weights_path is required when build.celldino=true")
+
+    # Focus metadata is written directly to the GT store (zattrs), not the
+    # artifact cache, and needs none of the models below — so do it first. The
+    # phase channel must exist in io.gt_path; packed .ozx stores are read-only
+    # (run against the unpacked OME-Zarr and repackage).
+    if OmegaConf.select(config, "build.focus", default=False):
+        focus_channel = str(OmegaConf.select(config, "focus.channel_name", default="Phase3D"))
+        pixel_size = OmegaConf.select(config, "focus.pixel_size", default=None)
+        if pixel_size is None:
+            pixel_size = float(config.pixel_metrics.spacing[-1])
+        print(f"Writing focus_slice to {config.io.gt_path} (channel={focus_channel})")
+        stats = write_focus_slice_metadata(
+            str(config.io.gt_path),
+            channel_name=focus_channel,
+            na_det=float(OmegaConf.select(config, "focus.na_det", default=1.35)),
+            lambda_ill=float(OmegaConf.select(config, "focus.lambda_ill", default=0.450)),
+            pixel_size=float(pixel_size),
+            device=str(OmegaConf.select(config, "focus.device", default="cpu")),
+        )
+        print(f"  focus_slice[{focus_channel}].dataset_statistics = {stats}")
 
     models = load_eval_models(
         config,
@@ -127,6 +169,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 gt_channel_index = pos_gt.get_channel_index(config.io.gt_channel_name)
                 target = np.asarray(pos_gt.data[:, gt_channel_index])
                 cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
+                z_slabs = _focus_slabs(config, pos_gt, pos_name_gt, target.shape[0])
 
                 if build.masks:
                     fov_masks(cache_ctx, pos_name_gt, target, seg_model)
@@ -143,7 +186,7 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                         kinds_for_t = [k for k in deep_extractors if t in needs[k]]
                         if not kinds_for_t:
                             continue
-                        crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size)
+                        crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size, z_slab=z_slabs[t])
                         batcher.push(pos_name_gt, t, crops, kinds_for_t)
 
                 flush_manifest(cache_ctx)

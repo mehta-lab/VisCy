@@ -11,6 +11,10 @@ build:
   dinov3: true
   dynaclr: true
   celldino: true
+  focus: false  # write focus_slice zattrs (in-focus plane per FOV) to the GT store
+
+# The focus-estimator params (channel_name / na_det / lambda_ill / pixel_size / device)
+# are inherited from eval.yaml's top-level `focus:` block; override there or on the CLI.
 
 # precompute-gt only fills the GT cache; no eval loop runs and no prediction
 # plate is read. These flags stay off by default so save_dir / pred_path are

@@ -10,9 +10,10 @@
 #                     ``leaf=<leaf_path_no_ext>``.
 #
 # Single vs grouped is decided from the leaf basename: leaves named
-# ``eval__a549_mantis`` invoke ``dynacell evaluate-grouped`` (the leaf's
-# ``conditions:`` list covers mock+denv+zikv in one process); all others
-# invoke ``dynacell evaluate``.
+# ``eval_grouped`` (current grouped convention, incl. the instance-AP
+# buckets) or ``eval__a549_mantis`` (legacy vscyto3d-ablations grouped)
+# carry a ``conditions:`` list and invoke ``dynacell evaluate-grouped``;
+# all others invoke ``dynacell evaluate``.
 #
 # Extra positional args after the leaf path are passed verbatim as Hydra
 # overrides (e.g. ``limit_positions=2 force_recompute.final_metrics=true``).
@@ -56,13 +57,14 @@ cd "${REPO}"
 
 ml uv
 
-# Decide single vs grouped from leaf basename.
+# Decide single vs grouped from leaf basename. Grouped leaves carry a
+# ``conditions:`` list: ``eval_grouped`` (current convention, incl. the
+# instance-AP buckets) and ``eval__a549_mantis`` (legacy ablations).
 LEAF_BASENAME=$(basename "${LEAF}")
-if [ "${LEAF_BASENAME}" = "eval__a549_mantis" ]; then
-  SUBCMD=evaluate-grouped
-else
-  SUBCMD=evaluate
-fi
+case "${LEAF_BASENAME}" in
+  eval_grouped|eval__a549_mantis) SUBCMD=evaluate-grouped ;;
+  *) SUBCMD=evaluate ;;
+esac
 
 echo "[run_eval_direct] subcmd=${SUBCMD} leaf=${LEAF} overrides=${EXTRA_OVERRIDES[*]:-<none>}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true

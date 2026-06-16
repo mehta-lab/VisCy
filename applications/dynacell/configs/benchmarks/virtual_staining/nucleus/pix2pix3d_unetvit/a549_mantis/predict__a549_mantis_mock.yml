@@ -1,0 +1,50 @@
+# pix2pix3d_unetvit predict: nucleus (Nuclei marker) trained on A549 mantis (h2b), predicting against a549_mantis_h2b_mock test.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_mock.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: a549_mantis
+  predict_set: a549_mantis_h2b_mock
+  model_name: pix2pix3d_unetvit
+  experiment_id: nucleus__a549_mantis__pix2pix3d_unetvit__a549_mantis_h2b_mock
+  # A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
+  # `nucleus` target from targets/nucleus.yml so the resolver finds h2b.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    # Best loss/validate_ema checkpoint, modernized Run-D 40ep run (job
+    # 33501550, best at epoch 39, validate_ema=1.51563). predict_step uses
+    # generator_ema (use_ema_at_predict=True default).
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=39-step=86400.ckpt
+
+data:
+  init_args:
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_pix2pix3d_unetvit_a549trained__h2b_mock.zarr
+
+launcher:
+  job_name: pix2pix3d_unetvit_A549TR_PRED_NUCL_h2b_mock
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions

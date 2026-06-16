@@ -43,6 +43,7 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
     "unetvit3d": "unetvit3d",
+    "pix2pix3d_unetvit": "pix2pix3d",
     "celldiff": "celldiff",
     "celldiff_r2": "celldiff_r2",
 }
@@ -90,10 +91,21 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_pretrained",
     "fnet3d_paper",
     "unetvit3d",
+    "pix2pix3d_unetvit",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff")  # r2 first so longest match wins
 _TRAIN_SETS: tuple[str, ...] = ("ipsc_trained", "joint", "a549_trained")
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
+
+# Instance average-precision (AP_0.50..0.95 / mAP / instance_dice) is defined only
+# for the two organelles with a cell-instance interpretation, and it is computed in
+# the SAME pass as the pixel/feature/semantic metrics — the instance masks feed both
+# the instance-AP columns and the semantic Dice/IoU rows. nucleus -> per-side
+# Cellpose nucleus instances; membrane -> GT-nuclei-seeded watershed whole-cell
+# instances. ER/mito have no cell instances, so they keep the semantic (supermodel)
+# mask path with no instance metrics.
+_INSTANCE_ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane"})
+_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
 
 # Known stale or duplicate-named zarrs to skip entirely.
 _SKIP_FILENAMES: frozenset[str] = frozenset(
@@ -264,11 +276,21 @@ def parse_zarr_name(zarr_path: Path, dynacell_root: Path = _DYNACELL_ROOT) -> Pa
             gene_token, cond_token = right.split("_", 1)
             if cond_token not in _A549_CONDITIONS:
                 raise ValueError(f"unknown A549 condition {cond_token!r} in {name}")
-            if gene_token != organelle_prefix:
+            # The `__<gene>` suffix carries the A549 marker for the organelle, which
+            # may differ from the left-hand organelle prefix: ER/mito coincide
+            # (sec61b/tomm20), but nucleus uses `h2b` and membrane uses `caax`
+            # (e.g. nucl_pix2pix3d_unetvit__h2b_mock). Validate against the canonical
+            # organelle->gene map rather than the prefix.
+            if gene_token != _A549_GENE[organelle]:
                 raise ValueError(
-                    f"legacy `__` form gene mismatch: prefix={organelle_prefix!r}, suffix gene={gene_token!r} in {name}"
+                    f"legacy `__` form gene mismatch: organelle={organelle!r} expects "
+                    f"gene={_A549_GENE[organelle]!r}, got {gene_token!r} in {name}"
                 )
-            body = left
+            # The train_set infix (if any) sits on the left of `__`, before the
+            # gene/condition suffix: nucl_<model>_a549trained__h2b_<cond>. Dihan's
+            # original ER/mito legacy zarrs were iPSC-trained (no infix), so this
+            # strip is a no-op there.
+            body, train_set_filename = _strip_known_suffix(left, ("jointtrained", "a549trained"))
             condition = cond_token
             is_legacy_form = True
         else:
@@ -445,9 +467,19 @@ def save_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Pa
 
 
 def pred_cache_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Return canonical pred_cache_dir (see plan "Pred cache layout")."""
+    """Return canonical pred_cache_dir (see plan "Pred cache layout").
+
+    The trailing segment is organelle-namespaced. A given
+    ``(train_set, model_variant)`` is evaluated once per organelle, and the four
+    organelles' prediction zarrs differ, so they must not share a cache dir.
+    A549 namespaces via the gene marker (``sec61b``/``tomm20``/``h2b``/``caax``)
+    plus the plate condition. iPSC has no plate condition, so it namespaces by
+    the logical organelle. A bare ``ipsc`` segment collapses all four organelles
+    onto one dir: the first to run wins the manifest's ``pred.plate_path`` and
+    every other organelle then raises StaleCacheError.
+    """
     if parsed.test_set == "ipsc":
-        cond_seg = "ipsc"
+        cond_seg = f"{parsed.organelle}_ipsc"
     else:
         gene = _A549_GENE[parsed.organelle]
         cond_seg = f"{gene}_{parsed.condition}"
@@ -462,6 +494,20 @@ def benchmark_dataset_ref(parsed: ParsedZarr) -> dict[str, str]:
         "dataset": _A549_SLUG_TEMPLATE[parsed.organelle].format(cond=parsed.condition),
         "target": _A549_GENE[parsed.organelle],
     }
+
+
+def a549_nuclei_store(condition: str) -> str:
+    """Test-store path of the A549 H2B (nuclei) manifest for ``condition``.
+
+    Whole-cell (membrane) instance segmentation seeds its watershed from the GT
+    nuclei, which on A549 live in a SEPARATE ``H2B_<cond>.ozx`` store (the membrane
+    GT is ``CAAX_<cond>.ozx``), positions matched 1:1 by name. iPSC nuclei live in
+    the same ``cell.zarr`` as the membrane GT, so no separate path is needed there.
+    """
+    manifest = _MANIFEST_ROOT / f"a549-mantis-h2b-{condition}" / "manifest.yaml"
+    with manifest.open() as f:
+        data = yaml.safe_load(f)
+    return data["targets"]["h2b"]["stores"]["test"]
 
 
 def condition_name(parsed: ParsedZarr) -> str:
@@ -546,15 +592,38 @@ def build_leaf_yaml(
         "target_name": organelle,
         **{k: v for k, v in _BASE_OVERLAY.items()},
     }
+    # nucleus & membrane compute instance AP in the same pass as pixel/feature/
+    # semantic metrics. The instance masks (Cellpose nucleus / GT-nuclei-seeded
+    # watershed whole-cell) feed both the AP_*/mAP/instance_dice columns AND the
+    # semantic Dice/IoU rows, so the semantic seg is instance-derived (matching how
+    # the paper tables are built) rather than the supermodel binary path. ER/mito
+    # have no cell instances and keep the default semantic path.
+    if organelle in _INSTANCE_ORGANELLES:
+        body["compute_instance_ap"] = True
+        seg: dict = {"backend": _INSTANCE_BACKEND[organelle]}
+        if organelle == "membrane":
+            seg["nuclei_channel_name"] = "Nuclei"
+            # Whole-cell AP must score the FULL cell, not the carved cytoplasm
+            # shell: with shared GT-nuclei seeds both GT and pred share an
+            # identical nucleus core, so carving it (the eval.yaml default
+            # subtract_nuclei=true) leaves only the IoU-brittle cytoplasm
+            # boundary and collapses AP@0.50 to ~0.04 even in-distribution.
+            seg["watershed"] = {"subtract_nuclei": False}
+        body["segmentation"] = seg
     condition_blocks: list[dict] = []
     for parsed in conditions:
+        io_block: dict = {
+            "pred_path": str(parsed.pred_path),
+            "pred_cache_dir": str(pred_cache_dir_for(parsed, dynacell_root)),
+        }
+        # Whole-cell watershed on A549 seeds from the separate H2B nuclei store
+        # (per-condition io override; iPSC reads nuclei from the membrane gt_path).
+        if organelle == "membrane" and parsed.test_set == "a549":
+            io_block["nuclei_gt_path"] = a549_nuclei_store(parsed.condition)
         block = {
             "name": condition_name(parsed),
             "benchmark": {"dataset_ref": benchmark_dataset_ref(parsed)},
-            "io": {
-                "pred_path": str(parsed.pred_path),
-                "pred_cache_dir": str(pred_cache_dir_for(parsed, dynacell_root)),
-            },
+            "io": io_block,
             "save": {"save_dir": str(save_dir_for(parsed, dynacell_root))},
         }
         condition_blocks.append(block)

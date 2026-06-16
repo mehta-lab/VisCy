@@ -12,6 +12,9 @@ benchmark:
     target: h2b
 
 compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose
 
 conditions:
   - name: a549_mock
@@ -21,7 +24,7 @@ conditions:
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_mock.zarr
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_cytoland/eval_vscyto3d_cytoland_nucleus_mock
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_cytoland_nucleus_mock
   - name: a549_denv
     benchmark:
       dataset_ref:
@@ -29,7 +32,7 @@ conditions:
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_denv.zarr
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_cytoland/eval_vscyto3d_cytoland_nucleus_denv
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_cytoland_nucleus_denv
   - name: a549_zikv
     benchmark:
       dataset_ref:
@@ -37,4 +40,4 @@ conditions:
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_zikv.zarr
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_cytoland/eval_vscyto3d_cytoland_nucleus_zikv
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_cytoland_nucleus_zikv

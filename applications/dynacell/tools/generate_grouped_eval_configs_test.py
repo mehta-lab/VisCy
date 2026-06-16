@@ -37,6 +37,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     _is_ablation_track_zarr,
     benchmark_dataset_ref,
+    build_leaf_yaml,
     parse_zarr_name,
     pred_cache_dir_for,
     save_dir_for,
@@ -123,6 +124,29 @@ from generate_grouped_eval_configs import (  # noqa: E402
                 False,
             ),
         ),
+        # pix2pix3d_unetvit: iPSC test (model code-name registration).
+        (
+            "ipsc/predictions/nucl_pix2pix3d_unetvit.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "ipsc_trained", "ipsc", None, False),
+        ),
+        (
+            "ipsc/predictions/nucl_pix2pix3d_unetvit_a549trained.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "ipsc", None, False),
+        ),
+        # pix2pix3d_unetvit A549: hybrid legacy `__<gene>_<cond>` where the gene
+        # marker differs from the organelle prefix (nucleus->h2b, membrane->caax).
+        (
+            "a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_mock.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "joint", "a549", "mock", True),
+        ),
+        (
+            "a549/predictions/nucl_pix2pix3d_unetvit_a549trained__h2b_zikv.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "a549", "zikv", True),
+        ),
+        (
+            "a549/predictions/memb_pix2pix3d_unetvit__caax_denv.zarr",
+            ("membrane", "pix2pix3d_unetvit", None, "ipsc_trained", "a549", "denv", True),
+        ),
     ],
 )
 def test_parse_zarr_name(rel: str, expect: tuple) -> None:
@@ -159,6 +183,55 @@ def test_parse_zarr_name_unknown_celldiff_variant_raises() -> None:
     fake_root = Path("/fake/root")
     with pytest.raises(ValueError, match="unknown CellDiff variant"):
         parse_zarr_name(fake_root / "ipsc/predictions/sec61b_celldiff_fakevariant.zarr", dynacell_root=fake_root)
+
+
+def test_parse_zarr_name_legacy_gene_mismatch_raises() -> None:
+    """Legacy `__<gene>` must match the organelle's marker (nucleus->h2b), not just parse."""
+    fake_root = Path("/fake/root")
+    with pytest.raises(ValueError, match="gene mismatch"):
+        parse_zarr_name(fake_root / "a549/predictions/nucl_fnet3d_paper__caax_mock.zarr", dynacell_root=fake_root)
+
+
+# ---------------------------------------------------------------------------
+# Registry drift guard (this module's _CODE_TO_PAPER vs the runtime resolver)
+# ---------------------------------------------------------------------------
+
+
+def test_paper_key_maps_agree_on_overlap() -> None:
+    """The campaign map and the runtime resolver must never assign DIFFERENT paper keys.
+
+    ``save_paths.PAPER_KEY`` (single-condition submitter + paper aggregation) and
+    this module's ``_CODE_TO_PAPER`` (grouped campaign) are separate maps with
+    intentionally different *membership* — but where they overlap they must agree,
+    or eval outputs land in mismatched dirs. Only documented differences are waived.
+    """
+    from generate_grouped_eval_configs import _CODE_TO_PAPER
+
+    from dynacell.evaluation.save_paths import PAPER_KEY
+
+    # Documented intentional difference: the grouped campaign keeps `celldiff`
+    # literal; the runtime resolver collapses it to `celldiff_iterative`.
+    waivers = {"celldiff"}
+    disagreements = {
+        m: (PAPER_KEY[m], _CODE_TO_PAPER[m])
+        for m in set(PAPER_KEY) & set(_CODE_TO_PAPER)
+        if m not in waivers and PAPER_KEY[m] != _CODE_TO_PAPER[m]
+    }
+    assert not disagreements, f"paper-key drift between save_paths.PAPER_KEY and _CODE_TO_PAPER: {disagreements}"
+
+
+def test_deterministic_models_known_to_runtime_resolver() -> None:
+    """Every deterministic campaign model must also be registered in the runtime resolver.
+
+    Catches "added a model to the generator parser but forgot ``save_paths.PAPER_KEY``"
+    — the asymmetry that let pix2pix3d slip the instance-AP track.
+    """
+    from generate_grouped_eval_configs import _DETERMINISTIC_MODELS
+
+    from dynacell.evaluation.save_paths import PAPER_KEY
+
+    missing = [m for m in _DETERMINISTIC_MODELS if m not in PAPER_KEY]
+    assert not missing, f"deterministic campaign models absent from save_paths.PAPER_KEY: {missing}"
 
 
 @pytest.mark.parametrize(
@@ -242,10 +315,15 @@ def test_pred_cache_dir_a549() -> None:
 
 
 def test_pred_cache_dir_ipsc() -> None:
-    """For iPSC, pred_cache_dir condition segment is literal ``ipsc`` (one test set)."""
+    """For iPSC, the pred_cache_dir condition segment is ``<organelle>_ipsc``.
+
+    iPSC has no plate condition, so the segment is namespaced by the logical
+    organelle (a bare ``ipsc`` would collapse all four organelles onto one dir
+    and race the manifest's ``pred.plate_path``).
+    """
     parsed = _make("ipsc/predictions/tomm20_fnet3d_paper.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/ipsc")
+    assert pc == Path("/X/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/mitochondria_ipsc")
 
 
 # ---------------------------------------------------------------------------
@@ -308,12 +386,20 @@ def test_walk_predictions_excludes_ablation_track() -> None:
 def base_eval_grouped_config():
     """Compose the eval_grouped primary config the same way Hydra does."""
     from hydra import compose, initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
 
     repo_root = Path(__file__).resolve().parents[3]
     base_dir = repo_root / "applications/dynacell/src/dynacell/evaluation/_configs"
     feature_extractor_overlay_dir = (
         repo_root / "applications/dynacell/configs/benchmarks/virtual_staining/_internal/shared/eval"
     )
+    # Defensive clear: this file lives under tools/, outside the tests/conftest.py
+    # that provides the `clear_global_hydra` fixture, so a Hydra-initializing test
+    # elsewhere in the run can leave the global singleton dirty. initialize_config_dir
+    # raises "GlobalHydra is already initialized" on a dirty singleton — an
+    # intermittent failure here. Clear before init; the with-block clears again on
+    # exit, so this fixture never leaks the singleton onward.
+    GlobalHydra.instance().clear()
     with initialize_config_dir(version_base="1.2", config_dir=str(base_dir)):
         # Bring in the external feature_extractor groups via searchpath override.
         cfg = compose(
@@ -379,3 +465,62 @@ def test_each_leaf_composes_and_resolves(base_eval_grouped_config) -> None:
                 merged,
                 cond.get("name", str(idx)),
             )
+
+
+# ---------------------------------------------------------------------------
+# 5. Instance-AP wiring in the unified grouped pass (nucleus & membrane only)
+# ---------------------------------------------------------------------------
+
+
+def test_nucleus_grouped_leaf_enables_cellpose_instance_ap() -> None:
+    """Nucleus bucket computes instance AP in the SAME pass as features.
+
+    backend=cellpose, no nuclei seeds, and compute_feature_metrics stays on — the
+    instance masks feed both the AP_*/mAP/instance_dice columns and the semantic
+    Dice/IoU rows, not a separate track.
+    """
+    leaf = build_leaf_yaml("nucleus", "joint", [_make("ipsc/predictions/nucl_fnet3d_paper_jointtrained.zarr")])
+    assert leaf["compute_instance_ap"] is True
+    assert leaf["compute_feature_metrics"] is True
+    assert leaf["segmentation"]["backend"] == "cellpose"
+    assert "nuclei_channel_name" not in leaf["segmentation"]
+    assert "watershed" not in leaf["segmentation"]  # cellpose nucleus path has no watershed stage
+    assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
+
+
+def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
+    """Membrane × a549 → watershed backend + per-condition H2B nuclei_gt_path."""
+    conds = [
+        _make("a549/predictions/memb_fnet3d_paper_a549trained_mock.zarr"),
+        _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr"),
+    ]
+    leaf = build_leaf_yaml("membrane", "a549_trained", conds)
+    assert leaf["compute_instance_ap"] is True
+    assert leaf["compute_feature_metrics"] is True
+    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
+    # Whole-cell AP must score the full cell, not the carved cytoplasm shell.
+    assert leaf["segmentation"]["watershed"]["subtract_nuclei"] is False
+    for block in leaf["conditions"]:
+        nuclei_gt = block["io"]["nuclei_gt_path"]
+        assert "H2B" in nuclei_gt and nuclei_gt.endswith(".ozx")
+
+
+def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:
+    """Membrane × iPSC reads nuclei from the same cell.zarr → no separate nuclei_gt_path."""
+    leaf = build_leaf_yaml("membrane", "ipsc_trained", [_make("ipsc/predictions/memb_fnet3d_paper.zarr")])
+    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
+    assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
+
+
+def test_er_and_mito_grouped_leaves_have_no_instance_ap() -> None:
+    """ER/mito have no cell instances → no instance AP, no segmentation backend override."""
+    for rel, organelle, train_set in (
+        ("ipsc/predictions/sec61b_fnet3d_paper_jointtrained.zarr", "er", "joint"),
+        ("ipsc/predictions/tomm20_fnet3d_paper_jointtrained.zarr", "mitochondria", "joint"),
+    ):
+        leaf = build_leaf_yaml(organelle, train_set, [_make(rel)])
+        assert "compute_instance_ap" not in leaf
+        assert "segmentation" not in leaf
+        assert leaf["compute_feature_metrics"] is True

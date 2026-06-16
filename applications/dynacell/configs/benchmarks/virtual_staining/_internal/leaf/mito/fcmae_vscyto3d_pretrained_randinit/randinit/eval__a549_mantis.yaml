@@ -22,7 +22,7 @@ conditions:
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_pretrained_randinit_mock.zarr
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_randinit/eval_vscyto3d_randinit_mitochondria_mock
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_randinit_mitochondria_mock
   - name: a549_denv
     benchmark:
       dataset_ref:
@@ -30,7 +30,7 @@ conditions:
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_pretrained_randinit_denv.zarr
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_randinit/eval_vscyto3d_randinit_mitochondria_denv
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_randinit_mitochondria_denv
   - name: a549_zikv
     benchmark:
       dataset_ref:
@@ -38,4 +38,4 @@ conditions:
     io:
       pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fcmae_vscyto3d_pretrained_randinit_zikv.zarr
     save:
-      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_randinit/eval_vscyto3d_randinit_mitochondria_zikv
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_with_embeddings/eval_vscyto3d_randinit_mitochondria_zikv

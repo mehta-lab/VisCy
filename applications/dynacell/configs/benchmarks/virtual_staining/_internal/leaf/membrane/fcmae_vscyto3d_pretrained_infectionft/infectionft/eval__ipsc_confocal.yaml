@@ -10,6 +10,12 @@ io:
   pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_infectionft.zarr
 
 compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose_watershed
+  nuclei_channel_name: Nuclei
+  watershed:
+    subtract_nuclei: false
 
 save:
-  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_infectionft/eval_vscyto3d_infectionft_membrane
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_infectionft_membrane
