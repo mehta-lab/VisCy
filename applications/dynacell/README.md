@@ -2,6 +2,10 @@
 
 **An evaluation framework for dynamic 3D virtual staining of live cells.**
 
+- 📦 **Dataset:** [DynaCell on the AWS Open Data Registry](https://registry.opendata.aws/dynacell/)
+- 🤗 **Demo:** [Interactive virtual-staining Space on Hugging Face](https://huggingface.co/spaces/biohub/dynacell)
+- 📓 **Notebook:** [Get to know the DynaCell dataset](examples/notebooks/get-to-know-dynacell-dataset.ipynb)
+
 Virtual staining predicts fluorescence-like images of cell structures from
 label-free microscopy (brightfield, phase contrast), enabling live-cell
 profiling without the phototoxicity and photobleaching of direct fluorescent
