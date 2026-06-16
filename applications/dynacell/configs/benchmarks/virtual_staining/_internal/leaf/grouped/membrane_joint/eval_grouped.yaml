@@ -15,8 +15,6 @@ compute_instance_ap: true
 segmentation:
   backend: cellpose_watershed
   nuclei_channel_name: Nuclei
-  watershed:
-    subtract_nuclei: false
 conditions:
 - name: celldiff_r2__joint__a549_denv
   benchmark:
