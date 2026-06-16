@@ -25,11 +25,12 @@ PAPER_KEY: dict[str, str] = {
     # key from the deterministic `unetvit3d` so eval dirs don't collide.
     "pix2pix3d_unetvit": "pix2pix3d",
     # CELL-Diff variants all collapse to a single iterative paper key for
-    # iPSC-trained evaluations (matches paper script line 51).
-    "celldiff": "celldiff_iterative",
-    "celldiff_iterative": "celldiff_iterative",
-    "celldiff_sliding_window": "celldiff_iterative",
-    "celldiff_denoise": "celldiff_iterative",
+    # iPSC-trained evaluations (matches paper script PAPER_KEY["CELL-Diff"]).
+    # The shipped CELL-Diff model is uniformly R2, so fresh dirs are celldiff_r2_*.
+    "celldiff": "celldiff_r2_iterative",
+    "celldiff_iterative": "celldiff_r2_iterative",
+    "celldiff_sliding_window": "celldiff_r2_iterative",
+    "celldiff_denoise": "celldiff_r2_iterative",
     # VSCyto3D ablations: random-init, external-ckpt (no-FT), and dynacell-FT
     # from cytoland / infection-FT sources. Launched outside the standard
     # submitter; eval YAMLs hand-authored. Paper-side aggregation script
@@ -108,14 +109,14 @@ def paper_key(code_model: str) -> str:
 def _a549trained_key(code_model: str) -> str:
     """A549-trained naming uses the bare paper key (no celldiff variant suffix)."""
     if code_model.startswith("celldiff"):
-        return "celldiff"
+        return "celldiff_r2"
     return paper_key(code_model)
 
 
 def _joint_key(code_model: str) -> str:
     """Joint-trained naming collapses celldiff variants and otherwise = paper key."""
     if code_model.startswith("celldiff"):
-        return "celldiff"
+        return "celldiff_r2"
     return paper_key(code_model)
 
 
@@ -176,7 +177,7 @@ def eval_save_dir(
     root = Path(data_root)
     if test_plate == "ipsc":
         if train_set == "ipsc_confocal":
-            return root / "ipsc" / "evaluations" / f"eval_{paper_key(code_model)}_{organelle_paper}"
+            return root / "ipsc" / "evaluations_with_embeddings" / f"eval_{paper_key(code_model)}_{organelle_paper}"
         if train_set == "a549_mantis":
             return (
                 root
@@ -185,7 +186,12 @@ def eval_save_dir(
                 / f"eval_{_a549trained_key(code_model)}_a549trained_{organelle_paper}"
             )
         # joint
-        return root / "ipsc" / "joint_evaluations" / f"eval_{_joint_key(code_model)}_joint_{organelle_paper}"
+        return (
+            root
+            / "ipsc"
+            / "evaluations_jointtrained_with_embeddings"
+            / f"eval_{_joint_key(code_model)}_jointtrained_{organelle_paper}"
+        )
     # A549 plate (mock | denv | zikv)
     if train_set == "ipsc_confocal":
         return (
@@ -202,4 +208,9 @@ def eval_save_dir(
             / f"eval_{_a549trained_key(code_model)}_a549trained_{organelle_paper}_{test_plate}"
         )
     # joint
-    return root / "a549" / "joint_evaluations" / f"eval_{_joint_key(code_model)}_joint_{organelle_paper}_{test_plate}"
+    return (
+        root
+        / "a549"
+        / "evaluations_jointtrained_with_embeddings"
+        / f"eval_{_joint_key(code_model)}_jointtrained_{organelle_paper}_{test_plate}"
+    )
