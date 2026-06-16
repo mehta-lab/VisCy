@@ -16,9 +16,12 @@ work). The trade-off is that the carved run overwrites the no-carve instance-MAS
 cache in the shared dirs; the no-carve final CSVs are untouched, so the headline
 results are safe — only a future no-carve re-run would re-segment.
 
-Run the carved leaves two-phase, same as the no-carve membrane re-run:
+Run each carved bucket leaf via the single-leaf launcher (it auto-detects
+``evaluate-grouped`` for grouped leaves), passing the focus + GLCM eval overrides:
     uv run python applications/dynacell/tools/make_carved_membrane_leaves.py
-    tools/submit_instance_reeval.sh membrane carved
+    sbatch applications/dynacell/tools/run_eval_direct.slurm \
+        configs/benchmarks/virtual_staining/_internal/leaf/grouped/membrane_a549_trained_carved/eval_grouped \
+        <focus + GLCM overrides>
 """
 
 from __future__ import annotations
