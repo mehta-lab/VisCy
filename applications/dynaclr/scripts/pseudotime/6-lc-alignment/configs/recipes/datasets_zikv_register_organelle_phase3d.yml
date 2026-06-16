@@ -1,0 +1,19 @@
+# Dataset roster for evaluating LC-registered organelle classification on Phase3D.
+# Each dataset names the Phase3D embedding zarr (per-model) and the
+# registration parquet (per-model, produced by register_by_lc.py).
+
+datasets:
+  - name: 07_22_ZIKV
+    organelle_embedding_filename: 2025_07_22_A549_Phase3D_ZIKV.zarr
+    registration_filename: 07_22_ZIKV_lc_registration.parquet
+    annotation_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+
+  - name: 07_24_ZIKV
+    organelle_embedding_filename: 2025_07_24_A549_Phase3D_ZIKV.zarr
+    registration_filename: 07_24_ZIKV_lc_registration.parquet
+    annotation_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+
+  - name: 08_26_ZIKV
+    organelle_embedding_filename: 2025_08_26_A549_Phase3D_ZIKV.zarr
+    registration_filename: 08_26_ZIKV_lc_registration.parquet
+    annotation_path: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV_combined_annotations.csv

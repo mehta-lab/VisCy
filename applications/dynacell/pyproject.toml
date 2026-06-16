@@ -29,6 +29,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  "hydra-core>=1.2",
   "lightning>=2.3",
   "monai",
   "omegaconf",
@@ -43,13 +44,12 @@ optional-dependencies.eval = [
   "aicsmlsegment",
   "aicssegmentation",
   "cellpose",
-  "cubic==0.7.0a2",
+  "cubic==0.7",
   "dynaclr",
   "hydra-core>=1.2",
-  "iohub",
+  "iohub>=0.3.6",
   "itk",
   "matplotlib",
-  "microssim @ git+https://github.com/juglab/microssim.git@8bccb17d",
   "pandas",
   "scikit-image",
   "scikit-learn>=1.4",
@@ -62,13 +62,22 @@ optional-dependencies.eval = [
   "torch-fidelity @ git+https://github.com/toshas/torch-fidelity.git@5e211a9",
   "tqdm",
   "transformers",
+  # In-focus z-plane estimation (focus_from_transverse_band) for focus_slice
+  # metadata; same estimator qc.FocusSliceMetric wraps, used here directly to
+  # avoid an applications/ -> applications/ (qc) dependency.
+  "waveorder",
 ]
 optional-dependencies.eval_gpu = [
-  "cucim-cu12",
-  "cupy-cuda12x",
+  # CUDA-13 builds so cupy/cucim match torch's CUDA-13 stack (PyPI torch 2.12 is
+  # cu13, and the HPC GPU driver is CUDA 13). cupy/cucim find their CUDA libs via
+  # cuda-pathfinder, which resolves to the cu13 nvidia wheels torch already pulls
+  # -- a consistent single-CUDA-major venv, so cupy works with no LD_LIBRARY_PATH.
+  # (cupy-cuda12x on a cu13 torch breaks: pathfinder hands it libcublas.so.13.)
+  "cucim-cu13",
+  "cupy-cuda13x",
 ]
 optional-dependencies.preprocess = [
-  "iohub",
+  "iohub>=0.3.6",
   "tqdm",
 ]
 optional-dependencies.report = [

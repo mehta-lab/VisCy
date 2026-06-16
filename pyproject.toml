@@ -34,6 +34,11 @@ urls.Repository = "https://github.com/mehta-lab/VisCy"
 dev = [ { include-group = "jupyter" }, { include-group = "test" } ]
 test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
 jupyter = [ "ipykernel>=7.1", "jupyterlab>=4.5.3" ]
+doc = [
+  "mike @ git+https://github.com/squidfunk/mike.git",
+  "mkdocstrings-python",
+  "zensical",
+]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
@@ -56,13 +61,20 @@ viscy-utils = { workspace = true }
 dynaclr = { workspace = true }
 cytoland = { workspace = true }
 airtable-utils = { workspace = true }
-qc = { workspace = true }
+viscy-qc = { workspace = true }
 dynacell = { workspace = true }
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 aicssegmentation = { git = "https://github.com/alxndrkalinin/aics-segmentation.git", branch = "main" }
 segmenter-model-zoo = { git = "https://github.com/alxndrkalinin/segmenter_model_zoo.git", branch = "main" }
 aicsmlsegment = { git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git", branch = "main" }
-iohub = { git = "https://github.com/czbiohub-sf/iohub.git", rev = "afe11f6a0f7d06b2105fac40c1ef4bb053417100" }
+# RAPIDS publishes cucim's CUDA-13 wheels only to the NVIDIA index (the PyPI
+# cucim-cu13 entry is an sdist stub with no binary wheel); pull it from there.
+cucim-cu13 = { index = "nvidia" }
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
 
 [tool.ruff]
 target-version = "py312"

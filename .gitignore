@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Zensical documentation build output
+/site/
+
 # IDE/Editor
 .idea/
 .vscode/
@@ -70,3 +73,6 @@ lightning_logs/
 checkpoints/
 
 plot_related/
+
+# Local-only planning docs (not for upstream)
+applications/dynaclr/docs/DAGs/evaluation_matrix.md

@@ -137,9 +137,16 @@ base:
   - ../../../_internal/shared/model/targets/<target>.yml
   - ../../../_internal/shared/model/model_overlays/<model>_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_<hw>.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 ```
+
+Predict leaves use `hardware_predict_any_gpu.yml` (single GPU, no
+vendor constraint) — measured 6.6 GB / 100% SM on celldiff at FP32 on
+H200, so a40 / a6000 / l40s / l4 all run the workload and drain the
+queue faster than pinning Hopper. Train leaves stay on
+`hardware_h200_single.yml` (or `hardware_4gpu.yml` for DDP) because
+their memory + bandwidth profiles differ.
 
 **Eval leaf** (at `<org>/<model>/<train_set>/eval__<predict_set>.yaml`):
 
@@ -203,6 +210,70 @@ uv run python applications/dynacell/tools/submit_benchmark_job.py $LEAF \
 `--dry-run` combined with `--print-*` drops the disk writes (preview
 wins). `trainer.devices` and `launcher.sbatch.gpus` must match or
 submission fails fast.
+
+### Multi-leaf submission with `submit_benchmark_batch.py`
+
+When you want to run several predict leaves under one launcher call
+(e.g., 3 A549 plates per organelle, or all 24 predicts in a Track-A
+ablation sweep), pick a mode by parallelism shape:
+
+| Mode | Flag | Squeue rows | Per-GPU concurrency | When to use |
+|---|---|---|---|---|
+| Serial (default) | (none) | 1 sbatch | 1 | N leaves back-to-back in one allocation; cheapest queue footprint |
+| Array | `--array` (+ `--max-array-concurrency K`) | 1 array (N tasks) | 1 per task | Each leaf gets its own GPU; cap concurrent tasks with K |
+| Chunked | `--parallel P` | ceil(N/P) sbatches | P (backgrounded) | One GPU runs P leaves concurrently (predict is GPU-light; 2–4 fit on A40 / H200) |
+
+`--parallel` is mutually exclusive with `--array` (rejected at parse
+time). With `--parallel > 1`, `cpus_per_task` scales by the chunk
+size, `OMP_NUM_THREADS`/`MKL_NUM_THREADS`/`OPENBLAS_NUM_THREADS` are
+pinned per backgrounded process, and per-leaf logs land at
+`{run_root}/slurm/${SLURM_JOB_ID}_<exp_id>.log`. Soft warning at
+`cpus_per_task > 128` if the scaled request would exceed typical node
+geometry.
+
+```bash
+LEAVES=configs/benchmarks/virtual_staining/er/fnet3d_paper/ipsc_confocal
+SET=(
+    $LEAVES/predict__a549_mantis_mock.yml
+    $LEAVES/predict__a549_mantis_denv.yml
+    $LEAVES/predict__a549_mantis_zikv.yml
+)
+
+# Serial (single sbatch, 3 srun in series — original behavior, default):
+uv run python applications/dynacell/tools/submit_benchmark_batch.py "${SET[@]}" --dry-run
+
+# Array (one sbatch array, K concurrent tasks each on its own GPU):
+uv run python applications/dynacell/tools/submit_benchmark_batch.py "${SET[@]}" \
+    --array --max-array-concurrency 2 --dry-run
+
+# Chunked (2 sbatches, each runs 2 predicts concurrent on one GPU):
+uv run python applications/dynacell/tools/submit_benchmark_batch.py "${SET[@]}" \
+    --parallel 2 --dry-run
+
+# Mixed hardware profiles across leaves (array mode only):
+uv run python applications/dynacell/tools/submit_benchmark_batch.py "${SET[@]}" \
+    --array --allow-mixed-directives --dry-run
+```
+
+For the common `predict__<predict_set>.yml` per-plate sweep over one
+`<org>/<model>/<train_set>/` cell, the thin wrapper
+`tools/predict_batch.sh` discovers the leaves automatically and
+forwards every flag to `submit_benchmark_batch.py`:
+
+```bash
+# 3 A549 plates for er + fnet3d_paper + iPSC-trained, chunked 2-up:
+bash applications/dynacell/tools/predict_batch.sh er fnet3d_paper ipsc a549 --parallel 2
+```
+
+For local execution (no sbatch — runs on the current host's GPU),
+`tools/predict_local.sh` has its own `--parallel N` that backgrounds
+N concurrent predicts on the foreground node (memory-confirmed 2-up
+on an A40).
+
+Failure handling for batched submissions: each rendered sbatch is
+submitted independently; if one fails, the helper reports which were
+queued vs skipped and exits 1. `scancel` the queued chunks listed in
+the stderr summary if you need to abort the whole batch.
 
 ## Dataset reference contract
 

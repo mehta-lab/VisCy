@@ -43,9 +43,9 @@ PHASE_CH = 0
 FLUOR_CH = 2
 _DEMO_REPO = "biohub/dynacell-demo-data"
 
-PATCH_D = 8        # Z window CELL-Diff operates on (center of the stack)
-PANEL_IN = 2.2     # per-panel width (inches) for data + regression → equal image heights
-FIG_H = 2.8        # figure height (inches) for data + regression
+PATCH_D = 8  # Z window CELL-Diff operates on (center of the stack)
+PANEL_IN = 2.2  # per-panel width (inches) for data + regression → equal image heights
+FIG_H = 2.8  # figure height (inches) for data + regression
 # Generative panels are larger: its controls column is taller (extra ODE-step slider).
 GEN_PANEL_IN = 3.0
 GEN_FIG_H = 3.6
@@ -54,6 +54,7 @@ GEN_FIG_H = 3.6
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def is_dark(request: gr.Request | None) -> bool:
     """Detect the client theme from the `__theme` query param (default: dark)."""
@@ -124,6 +125,7 @@ def compute_spectral_pcc(pred_zarr_path: str, gt_fluor_vol: np.ndarray) -> float
 # ---------------------------------------------------------------------------
 # Renderers (all transparent + themed; constant per-panel size → equal heights)
 # ---------------------------------------------------------------------------
+
 
 def render_phase_exp(
     zarr_state: str | None,
@@ -227,9 +229,9 @@ def render_trajectory_frame(
     if traj_info is None:
         return None
     with np.load(traj_info["traj_path"]) as data:
-        traj = data["traj"]    # (num_steps, 1, D, H, W)
+        traj = data["traj"]  # (num_steps, 1, D, H, W)
         phase = data["phase"]  # (D, H, W)
-        gt = data["gt"]        # (D, H, W)
+        gt = data["gt"]  # (D, H, W)
     z_start = traj_info["z_start"]
     patch_d = traj_info["patch_d"]
     organelle = traj_info["organelle"]
@@ -258,6 +260,7 @@ def render_trajectory_frame(
 # 1. Data
 # ---------------------------------------------------------------------------
 
+
 def load_demo_data(organelle: str, progress=gr.Progress(), request: gr.Request | None = None) -> tuple:
     """Download + extract the demo zarr; set every section's slider ranges; render view."""
     from huggingface_hub import hf_hub_download
@@ -278,17 +281,17 @@ def load_demo_data(organelle: str, progress=gr.Progress(), request: gr.Request |
         return gr.Slider(minimum=0, maximum=n_tp - 1, step=1, value=0)
 
     return (
-        data_path,                                                       # zarr_state
-        status,                                                          # data_status
-        t_slider(),                                                      # data_t
-        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid),      # data_z
-        t_slider(),                                                      # reg_t
-        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid),      # reg_z
-        t_slider(),                                                      # gen_t
-        gr.Slider(                                                       # gen_z (center patch)
+        data_path,  # zarr_state
+        status,  # data_status
+        t_slider(),  # data_t
+        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid),  # data_z
+        t_slider(),  # reg_t
+        gr.Slider(minimum=0, maximum=n_z - 1, step=1, value=z_mid),  # reg_z
+        t_slider(),  # gen_t
+        gr.Slider(  # gen_z (center patch)
             minimum=z_start, maximum=z_start + PATCH_D - 1, step=1, value=z_start + PATCH_D // 2
         ),
-        fig,                                                             # data_view
+        fig,  # data_view
     )
 
 
@@ -308,6 +311,7 @@ def on_data_slider(
 # ---------------------------------------------------------------------------
 # 2. Regression models
 # ---------------------------------------------------------------------------
+
 
 def run_regression(
     zarr_state: str | None,
@@ -347,8 +351,12 @@ def run_regression(
             print(f"Prediction failed for {model_key}: {e}")
 
     pred_info = {
-        "timepoint": tp, "organelle": organelle, "selected_models": list(selected_models),
-        "paths": pred_paths, "pccs": pred_pccs, "n_z": n_z,
+        "timepoint": tp,
+        "organelle": organelle,
+        "selected_models": list(selected_models),
+        "paths": pred_paths,
+        "pccs": pred_pccs,
+        "n_z": n_z,
     }
     progress(0.9, desc="Rendering...")
     fig = render_predictions(pred_info, min(int(z_slice), n_z - 1), zarr_state, is_dark(request))
@@ -371,6 +379,7 @@ def rerender_regression(
 # ---------------------------------------------------------------------------
 # 3. Generative model — CELL-Diff
 # ---------------------------------------------------------------------------
+
 
 def run_generative(
     zarr_state: str | None,
@@ -430,7 +439,8 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
         with gr.Column(scale=1):
             organelle = gr.Dropdown(
                 choices=[(ORGANELLE_LABELS[o], o) for o in ORGANELLES],
-                value="CAAX", label="Organelle",
+                value="CAAX",
+                label="Organelle",
                 info="Select the target organelle.",
             )
             load_demo_btn = gr.Button("Load Demo Data", variant="primary")
@@ -447,7 +457,8 @@ with gr.Blocks(title="DynaCell Virtual Staining") as demo:
         with gr.Column(scale=1):
             reg_models = gr.CheckboxGroup(
                 choices=[("FNet3D", "fnet3d"), ("VSCyto3D", "vscyto3d")],
-                value=REGRESSION_MODELS, label="Models",
+                value=REGRESSION_MODELS,
+                label="Models",
             )
             reg_t = gr.Slider(0, 4, step=1, value=0, label="Timepoint")
             reg_z = gr.Slider(0, 15, step=1, value=8, label="Z slice")

@@ -50,6 +50,7 @@ def main(config: Path):
     for i, model_entry in enumerate(config.models, 1):
         model_path = Path(model_entry.path)
         model_label = model_entry.label
+        experiment_name = model_path.stem
 
         click.echo(f"\nProcessing {i}/{len(config.models)}: {model_label}...")
 
@@ -60,28 +61,87 @@ def main(config: Path):
             if config.verbose:
                 click.echo(f"  Loaded {features_ad.shape[0]:,} samples with {features_ad.shape[1]} features")
 
-            stats, distributions, _ = compute_embeddings_smoothness(
-                features_ad,
-                distance_metric=config.distance_metric,
-                verbose=config.verbose,
-            )
+            group_col = config.group_by
+            if group_col and group_col in features_ad.obs.columns:
+                groups = features_ad.obs[group_col].unique().tolist()
+                click.echo(f"  Computing smoothness per {group_col}: {groups}")
+
+                per_group_rows = []
+                group_stats_list = []
+                group_distributions = {}
+
+                for group_val in groups:
+                    mask = features_ad.obs[group_col] == group_val
+                    group_ad = features_ad[mask].copy()
+
+                    if config.verbose:
+                        click.echo(f"    {group_col}={group_val}: {group_ad.shape[0]:,} cells")
+
+                    g_stats, g_dists, _ = compute_embeddings_smoothness(
+                        group_ad,
+                        distance_metric=config.distance_metric,
+                        verbose=config.verbose,
+                    )
+                    per_group_rows.append({group_col: group_val, **g_stats})
+                    group_stats_list.append(g_stats)
+                    group_distributions[group_val] = g_dists
+
+                    if config.save_plots:
+                        _create_smoothness_plot(
+                            g_dists,
+                            g_stats,
+                            f"{model_label}_{experiment_name}_{group_val}",
+                            config.distance_metric,
+                            output_dir,
+                        )
+
+                per_group_df = pd.DataFrame(per_group_rows)
+                per_group_df.insert(0, "experiment", experiment_name)
+                per_group_df.to_csv(
+                    output_dir / f"{model_label}_{experiment_name}_per_{group_col}_smoothness.csv", index=False
+                )
+                click.echo(f"  Per-{group_col} stats saved.")
+
+                # Aggregate: mean ± std across groups
+                metric_cols = [c for c in per_group_df.columns if c != group_col]
+                agg_means = per_group_df[metric_cols].mean()
+                agg_stds = per_group_df[metric_cols].std()
+                stats = agg_means.to_dict()
+                stats_std = {f"{k}_std": v for k, v in agg_stds.to_dict().items()}
+                stats.update(stats_std)
+
+                # Concatenate distributions across groups for the combined plot
+                distributions = {
+                    "adjacent_frame_distribution": np.concatenate(
+                        [d["adjacent_frame_distribution"] for d in group_distributions.values()]
+                    ),
+                    "random_frame_distribution": np.concatenate(
+                        [d["random_frame_distribution"] for d in group_distributions.values()]
+                    ),
+                }
+            else:
+                stats, distributions, _ = compute_embeddings_smoothness(
+                    features_ad,
+                    distance_metric=config.distance_metric,
+                    verbose=config.verbose,
+                )
 
             all_results[model_label] = stats
             all_distributions[model_label] = distributions
 
             save_results(
                 stats,
-                output_dir / f"{model_label}_smoothness_stats.csv",
+                output_dir / f"{model_label}_{experiment_name}_smoothness_stats.csv",
                 format="csv",
             )
 
             if config.save_distributions:
                 np.save(
-                    output_dir / f"{model_label}_adjacent_distribution.npy",
+                    output_dir / f"{model_label}_{experiment_name}_adjacent_distribution.npy",
                     distributions["adjacent_frame_distribution"],
                 )
                 np.save(
-                    output_dir / f"{model_label}_random_distribution.npy",
+                    output_dir / f"{model_label}_{experiment_name}_random_distribution.npy",
                     distributions["random_frame_distribution"],
                 )
 
@@ -91,7 +151,7 @@ def main(config: Path):
                 _create_smoothness_plot(
                     distributions,
                     stats,
-                    model_label,
+                    f"{model_label}_{experiment_name}",
                     config.distance_metric,
                     output_dir,
                 )

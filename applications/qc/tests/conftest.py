@@ -76,9 +76,7 @@ def multi_well_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
             rng = np.random.default_rng(42)
             pos.create_image(
                 "0",
-                rng.random(
-                    (NUM_TIMEPOINTS, len(MULTI_WELL_CHANNELS), *ZYX_SHAPE)
-                ).astype(np.float32),
+                rng.random((NUM_TIMEPOINTS, len(MULTI_WELL_CHANNELS), *ZYX_SHAPE)).astype(np.float32),
                 chunks=(1, 1, *ZYX_SHAPE),
             )
     dataset.close()

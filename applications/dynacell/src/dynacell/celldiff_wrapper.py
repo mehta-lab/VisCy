@@ -350,7 +350,6 @@ class CELLDiff3DVS(nn.Module):
         Tensor
             Predicted fluorescence of shape ``(..., D, H, W)``.
         """
-
         if self.path_type != "Linear" or self.prediction != "velocity":
             raise NotImplementedError(
                 "denoise_sliding_window only supports Linear path with velocity prediction, "
@@ -369,11 +368,11 @@ class CELLDiff3DVS(nn.Module):
                 raise ValueError("overlap_size must be int or a 3-tuple")
 
         for i in range(n_spatial):
-            S, P, O = spatial[i], patch_spatial[i], overlap[i]
+            S, P, Ov = spatial[i], patch_spatial[i], overlap[i]
             if S < P:
                 raise ValueError(f"spatial dim {i} ({S}) must be >= patch dim ({P})")
-            if not (0 <= O < P):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {O} vs {P})")
+            if not (0 <= Ov < P):
+                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {Ov} vs {P})")
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
@@ -382,8 +381,8 @@ class CELLDiff3DVS(nn.Module):
 
         start_lists: list[list[int]] = []
         for i in range(n_spatial):
-            S, P, O = spatial[i], patch_spatial[i], overlap[i]
-            stride = P - O
+            S, P, Ov = spatial[i], patch_spatial[i], overlap[i]
+            stride = P - Ov
             last = S - P
             starts = [0]
             while starts[-1] + stride < last:

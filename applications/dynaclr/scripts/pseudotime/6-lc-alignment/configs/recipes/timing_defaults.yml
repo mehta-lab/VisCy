@@ -1,0 +1,9 @@
+# Stage B defaults — knobs are documented in the DAG (Stage B section).
+
+n_init_frames: 2
+tau_sweep: [0.3, 0.4, 0.5, 0.6, 0.7]
+tau_lc: 0.5
+label_columns: [organelle_state, predicted_organelle_state]
+positive_label: remodel
+test_size: 0.2
+random_state: 42

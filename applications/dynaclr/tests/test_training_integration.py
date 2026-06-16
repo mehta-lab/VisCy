@@ -6,10 +6,10 @@ import pytest
 import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_metric_learning.losses import NTXentLoss
 from torch import nn
 
 from dynaclr.engine import ContrastiveModule
+from viscy_models.contrastive.loss import NTXentLoss
 
 
 def test_contrastive_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
@@ -54,7 +54,7 @@ def test_contrastive_ntxent_fast_dev_run(tmp_path, _SimpleEncoder, _SyntheticTri
 
 @pytest.mark.parametrize(
     "config_name,config_subdir",
-    [("fit.yml", "training"), ("predict.yml", "prediction")],
+    [("demo/demo_2d_fit.yml", "training"), ("predict.yml", "prediction")],
 )
 def test_config_class_paths_resolve(config_name, config_subdir, _extract_class_paths, _resolve_class_path):
     configs_dir = Path(__file__).parents[1] / "configs" / config_subdir

@@ -1,0 +1,167 @@
+# OPS 1000-gene × ALL-markers DynaCLR (SupCon, single-marker batches)
+# ====================================================================
+# Dataset: all 40 markers from the 53-experiment canonical list (81.5M cells,
+# 1001 perturbations).
+# Strategy: single-marker batches (batch_group_by=marker) + SupCon positives
+# (same gene within the batch) + sqrt(cell_count) group_weights so small
+# markers (TOMM20 235k) aren't drowned by Phase (40M) without over-cycling.
+#
+# Warm-started from the OPS-1000genes-lite CosineClassifier run (epoch 192).
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/OPS/OPS-1000genes-allmarkers.sh
+
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_4gpu.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
+  - ../recipes/data/ops_gene_reporter.yml
+  - ../recipes/augmentations/ops_2d_mild.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 300
+  # Train/val loops sized for trustworthy val signal on 40-marker single-marker batches.
+  limit_train_batches: 800        # ~20 per marker per epoch with 40 markers
+  limit_val_batches: 200          # 5 val batches per marker per val loop
+  val_check_interval: 1.0         # validate once per epoch
+  log_every_n_steps: 5
+  logger:
+    init_args:
+      project: OPS-1000genes-allmarkers
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+    - class_path: viscy_utils.callbacks.OnlineEvalCallback
+      init_args:
+        every_n_epochs: 10
+        label_key: perturbation
+        k: 20
+        # 1001 perturbation classes × ~51k val samples => many classes will
+        # have <5 samples, making 5-fold CV either slow or auto-downgraded.
+        # Single stratified 80/20 holdout is ~5x cheaper and sufficient as a
+        # monitoring probe.
+        knn_eval_mode: holdout
+
+model:
+  init_args:
+    encoder:
+      init_args:
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        projection_dim: 256
+        drop_path_rate: 0.0
+    loss_function:
+      init_args:
+        temperature: 0.5
+    # Warm-start disabled: lite-CosineClassifier head does not match the
+    # allmarkers head architecture, so loading it drove the model to
+    # collapse (effective_rank ~10 at epoch 0 in job 31265726). Re-enable
+    # only after the head shapes are reconciled.
+    # ckpt_path: /hpc/projects/organelle_phenotyping/models/OPS/OPS-1000genes-lite-CosineClassifier/OPS-1000genes-lite-CosineClassifier/20260331-150007/checkpoints/last.ckpt
+    #
+    # TODO: Stage 2 warm-start from BoC pretraining. Once
+    # OPS-1000genes-multimarker-BoC.yml converges (marker probe plateau),
+    # set ckpt_path to the best BoC checkpoint here. Encoder+projection
+    # architectures match by construction; classification heads are absent
+    # in both, so strict loading should succeed.
+    ckpt_path: /hpc/projects/organelle_phenotyping/models/OPS/OPS-1000genes-multimarker-BoC/OPS-1000genes-multimarker-BoC/irmmf96f/checkpoints/epoch=19-step=16000.ckpt
+    lr: 0.0002
+    # PCA pairplots colored by marker (feature quality) and experiment (batch
+    # effect check). perturbation is ~1001 classes — too many for a legend;
+    # rely on OnlineEvalCallback KNN for that.
+    pca_color_keys: [marker, experiment]
+    log_batches_per_epoch: 8
+    log_samples_per_batch: 1
+    example_input_array_shape: [1, 1, 1, 128, 128]
+
+data:
+  init_args:
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/ops_1000genes_allmarkers.parquet
+    # Reduce worker count to cut per-rank memory duplication. With 4 DDP ranks
+    # × 4 workers × 81M-row cell_index cached in each worker, the recipe's
+    # default overran the 480 GB node budget. 2 workers keeps I/O parallelism
+    # while halving memory pressure.
+    num_workers: 1
+    prefetch_factor: 2
+    buffer_size: 2
+    # Random anchor sampling over 81M rows → cache hit rate is ~0% on any
+    # realistic pool size. 500 MB × 4 ranks is dead weight; set to 0 and
+    # read from disk directly. Revisit for sequential/predict workloads.
+    cache_pool_bytes: 0
+    # Self-augmented positives (SimCLR-style). NTXentLoss in engine.py uses one
+    # unique label per anchor, so it never consumes multi-positive SupCon signal
+    # even when lookup returns a same-(gene,marker) cell. With 1001 genes in
+    # 512-sample single-marker batches, lookup also matched only ~9% of the
+    # time and often returned the same cell — collapsed rank 228→49 in 10
+    # epochs (job 31269237). `self` gives guaranteed aug-diverse positives;
+    # single-marker batches still supply 511 same-marker different-gene
+    # negatives per anchor, preserving perturbation discrimination signal.
+    positive_cell_source: self
+    # Override recipe default: single-marker batches, no sub-stratification.
+    batch_group_by: marker
+    stratify_by: null
+    # Sqrt-of-cell-count sampling (floor=1.0). Prevents Phase domination
+    # (13× weight) while avoiding over-cycling small markers (TOMM20/H2B = 1×).
+    group_weights:
+      Phase: 13.1
+      5xUPRE: 2.97
+      ATG101: 2.36
+      ATP1B3: 1.96
+      BODIPY_live_cell_dye: 1.35
+      CLTA: 2.4
+      COP-II: 2.1
+      COPE: 2.02
+      CellEvent-Caspase_live-cell_dye: 1.77
+      CellROX_live-cell_dye: 1.84
+      ChromaLIVE_488_excitation: 2.17
+      ChromaLIVE_561_excitation: 1.58
+      EEA1: 2.18
+      FBL: 2.02
+      FastAct_SPY555_Live_Cell_Dye: 2.23
+      FeRhoNox_live-cell_dye: 1.89
+      G3BP1: 2.29
+      H2B_(TOMM20-combo): 1.0
+      HSPA1B: 1.21
+      LAMP1: 1.7
+      LysoTracker_live-cell_dye: 3.1
+      MAP1LC3B: 3.29
+      MAP4: 2.27
+      MKI67: 2.57
+      NCLN: 2.06
+      NPM3: 1.59
+      PLIN2: 1.7
+      PSMB7: 1.84
+      Peroxi_SPY650_live_cell_dye: 2.57
+      RAB7A: 1.5
+      SEC61B: 2.97
+      SLC3A2: 2.2
+      SRRM2: 1.85
+      TOMM20: 1.0
+      TOMM70A: 1.86
+      VAMP3: 1.75
+      VAPA: 2.61
+      VIM: 2.25
+      VPS35: 2.39
+      pHrodo-dextran_Live_Cell_Dye: 1.76
+    # Expose gene_name as integer labels so OnlineEvalCallback can compute a
+    # perturbation kNN probe. No classifier head is trained on these labels.
+    label_columns:
+      perturbation: gene_name
+    normalizations:
+      - class_path: viscy_transforms.BatchedScaleIntensityRangePercentilesd
+        init_args:
+          keys: [channel_0]
+          lower: 1
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+          clip: true

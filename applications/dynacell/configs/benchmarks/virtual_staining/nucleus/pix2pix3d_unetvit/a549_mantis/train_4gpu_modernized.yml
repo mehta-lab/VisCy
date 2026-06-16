@@ -1,0 +1,59 @@
+# pix2pix3d_unetvit MODERNIZED fit on nucleus (Nuclei channel of cell.zarr) — A549 mantis-lightsheet pooled (mock + DENV + ZIKV), 4-GPU DDP.
+#
+# Finalized "Run D" recipe: modernized overlay (nonsat + R1 + G-EMA, equal LR)
+# + lambda_l1=10 + LeCam gamma=0.3 + 40 epochs. Those three deltas were the CLI
+# overrides that produced the COMPLETED run at
+# cell_diff_vs_viscy/a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+# (wandb best loss/validate_ema=1.516). Baked here so submission needs NO overrides.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: a549_mantis
+  model_name: pix2pix3d_unetvit
+  experiment_id: nucleus__a549_mantis__pix2pix3d_unetvit_modernized
+
+model:
+  init_args:
+    lambda_l1: 10.0
+    lecam_gamma: 0.3
+
+trainer:
+  max_epochs: 40
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_A549_NUCL_4gpu_modernized_lambdaL1_10_lecam_40ep
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints
+
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_all.zarr
+
+launcher:
+  job_name: pix2pix3d_unetvit_A549_NUCL_4gpu_modernized_lambdaL1_10_lecam_40ep
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+  # pix2pix3d GAN (UNetViT3D G + multiscale-patch D, large 3D crops) OOMs on
+  # 80 GB h100; needs h200 (141 GB). Narrow the hardware_4gpu h100|h200 default.
+  sbatch:
+    constraint: h200

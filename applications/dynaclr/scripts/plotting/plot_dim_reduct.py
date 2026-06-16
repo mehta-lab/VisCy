@@ -1,3 +1,5 @@
+"""Dimensionality-reduction plotting helpers for DynaCLR embeddings."""
+
 # %%
 from pathlib import Path
 

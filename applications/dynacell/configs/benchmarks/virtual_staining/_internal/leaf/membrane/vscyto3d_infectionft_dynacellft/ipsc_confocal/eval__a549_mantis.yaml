@@ -1,0 +1,49 @@
+# @package _global_
+# Track C (vscyto3d_infectionft_dynacellft trained on ipsc_confocal) grouped eval for membrane
+# channel of the dual predict zarr on A549 (mock + denv + zikv in one process).
+defaults:
+  - override /target: membrane
+  - override /predict_set: a549_mantis_caax_mock
+
+# Base anchors to the {gene}-{first_cond} manifest; each condition overlay below
+# swaps dataset, pred_path, and save_dir for mock / denv / zikv in one process.
+benchmark:
+  dataset_ref:
+    target: caax
+
+compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose_watershed
+  nuclei_channel_name: Nuclei
+  watershed:
+    subtract_nuclei: false
+
+conditions:
+  - name: a549_mock
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-caax-mock
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_mock.zarr
+      nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_mock.ozx
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft/eval_vscyto3d_infectionft_dynacellft_membrane_mock
+  - name: a549_denv
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-caax-denv
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_denv.zarr
+      nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft/eval_vscyto3d_infectionft_dynacellft_membrane_denv
+  - name: a549_zikv
+    benchmark:
+      dataset_ref:
+        dataset: a549-mantis-caax-zikv
+    io:
+      pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/dual_nucl_memb_vscyto3d_infectionft_dynacellft_zikv.zarr
+      nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_ZIKV.ozx
+    save:
+      save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_infectionft_dynacellft/eval_vscyto3d_infectionft_dynacellft_membrane_zikv

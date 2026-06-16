@@ -1,0 +1,26 @@
+# Evaluation config: CELL-DINO-temporal-MLP-2D-BagOfChannels-v1 × infectomics-annotated.
+# Variant: epoch=49-step=40000 checkpoint (run id 0ne38zcc).
+# Sibling row to DINOv3-temporal-MLP-v1, but with CELL-DINO (HPA-pretrained) as the frozen backbone.
+# Pinning to the versioned ckpt name keeps Nextflow caches isolated per epoch.
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/run_infectomics_annotated_epoch49_step40000.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/cell-dino-mlp-2d-mip-ntxent-t0p5-lr1e4-bs512/config.yaml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/cell-dino-mlp-2d-mip-ntxent-t0p5-lr1e4-bs512/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/0ne38zcc/checkpoints/epoch=49-step=40000.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/cell-dino-mlp-2d-mip-ntxent-t0p5-lr1e4-bs512/evaluations/infectomics-annotated_epoch49_step40000/
+
+# Use the trained MLP projection head as adata.X — without this the EmbeddingWriter
+# defaults to the frozen CELL-DINO backbone features, duplicating CELL-DINO-frozen.
+predict:
+  embedding_key: projections
+
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/CELL-DINO-temporal-MLP-2D-BagOfChannels-v1/infectomics_epoch49_step40000/

@@ -4,7 +4,7 @@ base:
   - ../../../_internal/shared/model/targets/nucleus.yml
   - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -17,7 +17,10 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH
+    # Best loss/validate_ema checkpoint, modernized Run-D 40ep run (job
+    # 33501549, converged early at epoch 15). predict_step uses generator_ema
+    # (use_ema_at_predict=True default).
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=15-step=51200.ckpt
 
 data:
   init_args:

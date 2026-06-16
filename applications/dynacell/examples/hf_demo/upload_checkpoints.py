@@ -9,6 +9,7 @@ AGENT.md). Run this from the HPC where checkpoints are stored:
 """
 
 from pathlib import Path
+
 from huggingface_hub import HfApi, create_repo
 
 REPO_ID = "biohub/dynacell-checkpoints"
@@ -17,47 +18,72 @@ RESOURCE_GROUP_ID = "6a234bb4507cbbbb04456767"
 
 # (hf_filename, local_path)
 CHECKPOINTS: list[tuple[str, str]] = [
-    ("celldiff_caax.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
-     "/a549_mantis/memb/celldiff_r2/checkpoints/last.ckpt"),
-    ("celldiff_h2b.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
-     "/a549_mantis/nucl/celldiff_r2/checkpoints/last.ckpt"),
-    ("celldiff_sec61b.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
-     "/a549_mantis/sec61b/celldiff_r2/checkpoints/last.ckpt"),
-    ("celldiff_tomm20.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
-     "/a549_mantis/tomm20/celldiff_r2/checkpoints/last.ckpt"),
-    ("fnet3d_caax.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/memb/fnet3d_paper/checkpoints/epoch=281-step=191760.ckpt"),
-    ("fnet3d_h2b.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/nucl/fnet3d_paper/checkpoints/epoch=293-step=199920.ckpt"),
-    ("fnet3d_sec61b.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/sec61b/fnet3d_paper/checkpoints/last.ckpt"),
-    ("fnet3d_tomm20.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/tomm20/fnet3d_paper/checkpoints/epoch=248-step=126990.ckpt"),
-    ("vscyto3d_caax.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/last.ckpt"),
-    ("vscyto3d_h2b.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/nucl/fcmae_vscyto3d_pretrained/checkpoints/last.ckpt"),
-    ("vscyto3d_sec61b.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/sec61b/fcmae_vscyto3d_pretrained_ws8500/checkpoints/last.ckpt"),
-    ("vscyto3d_tomm20.ckpt",
-     "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
-     "/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints/last.ckpt"),
+    (
+        "celldiff_caax.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
+        "/a549_mantis/memb/celldiff_r2/checkpoints/last.ckpt",
+    ),
+    (
+        "celldiff_h2b.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
+        "/a549_mantis/nucl/celldiff_r2/checkpoints/last.ckpt",
+    ),
+    (
+        "celldiff_sec61b.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
+        "/a549_mantis/sec61b/celldiff_r2/checkpoints/last.ckpt",
+    ),
+    (
+        "celldiff_tomm20.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy"
+        "/a549_mantis/tomm20/celldiff_r2/checkpoints/last.ckpt",
+    ),
+    (
+        "fnet3d_caax.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/memb/fnet3d_paper/checkpoints/epoch=281-step=191760.ckpt",
+    ),
+    (
+        "fnet3d_h2b.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/nucl/fnet3d_paper/checkpoints/epoch=293-step=199920.ckpt",
+    ),
+    (
+        "fnet3d_sec61b.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/sec61b/fnet3d_paper/checkpoints/last.ckpt",
+    ),
+    (
+        "fnet3d_tomm20.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/tomm20/fnet3d_paper/checkpoints/epoch=248-step=126990.ckpt",
+    ),
+    (
+        "vscyto3d_caax.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/last.ckpt",
+    ),
+    (
+        "vscyto3d_h2b.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/nucl/fcmae_vscyto3d_pretrained/checkpoints/last.ckpt",
+    ),
+    (
+        "vscyto3d_sec61b.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/sec61b/fcmae_vscyto3d_pretrained_ws8500/checkpoints/last.ckpt",
+    ),
+    (
+        "vscyto3d_tomm20.ckpt",
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell"
+        "/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints/last.ckpt",
+    ),
 ]
 
 
 def main() -> None:
     import os
+
     token = os.environ.get("HF_TOKEN")
     api = HfApi(token=token)
 

@@ -104,7 +104,5 @@ def hist_adapteq_2D(input_image, kernel_size=None, clip_limit=None):
     if clip_limit is not None:
         assert 0 <= clip_limit <= 1, f"Clip limit {clip_limit} is out of range [0, 1]"
 
-    adapt_eq_image = equalize_adapthist(
-        input_image, kernel_size=kernel_size, clip_limit=clip_limit
-    )
+    adapt_eq_image = equalize_adapthist(input_image, kernel_size=kernel_size, clip_limit=clip_limit)
     return adapt_eq_image

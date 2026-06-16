@@ -1,0 +1,15 @@
+# @package _global_
+# Track A (random init, no training) eval for er on iPSC.
+# Reads the frozen-randinit predict zarr produced by
+# <organelle>/fcmae_vscyto3d_pretrained/_no_train_randinit/predict__ipsc_confocal.yml.
+defaults:
+  - override /target: er_sec61b
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/sec61b_fcmae_vscyto3d_pretrained_randinit.zarr
+
+compute_feature_metrics: true
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_randinit_er

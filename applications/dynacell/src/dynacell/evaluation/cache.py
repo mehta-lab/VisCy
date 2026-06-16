@@ -45,10 +45,28 @@ class CachePaths:
     manifest: Path
     masks_dir: Path
     features_dir: Path
+    instance_masks_dir: Path
 
-    def mask_plate(self, target_name: str) -> Path:
-        """Return the HCS OME-Zarr plate for masks of *target_name*."""
-        return self.masks_dir / f"{target_name}.zarr"
+    def mask_plate(self, target_name: str, backend: str = "supermodel") -> Path:
+        """Return the HCS OME-Zarr plate for masks of *target_name*.
+
+        Non-default segmentation backends get a ``__{backend}`` filename infix so
+        masks from different segmenters never collide in one cache dir; the
+        default ``supermodel`` keeps the bare ``{target_name}.zarr`` path so
+        pre-existing caches are unaffected.
+        """
+        stem = target_name if backend == "supermodel" else f"{target_name}__{backend}"
+        return self.masks_dir / f"{stem}.zarr"
+
+    def instance_mask_plate(self, target_name: str, backend: str) -> Path:
+        """Return the HCS OME-Zarr plate for instance (uint16) labels.
+
+        Instance-label caches always carry a ``__{backend}`` infix
+        (``nucleus__cellpose.zarr`` / ``membrane__cellpose_watershed.zarr``) and
+        live under a separate directory from the binary ``organelle_masks`` so
+        the two never collide.
+        """
+        return self.instance_masks_dir / f"{target_name}__{backend}.zarr"
 
     def cp_features(self) -> Path:
         """Return the zarr group path for CP regionprops features."""
@@ -75,6 +93,7 @@ def cache_paths(cache_dir: Path | str) -> CachePaths:
         manifest=root / "manifest.yaml",
         masks_dir=root / "organelle_masks",
         features_dir=root / "features",
+        instance_masks_dir=root / "instance_masks",
     )
 
 
@@ -180,43 +199,61 @@ def seed_cache_identity(
         manifest["cell_segmentation"] = {"plate_path": cell_segmentation_path}
 
 
-def check_artifact_params(
+def diff_artifact_params(
     entry: dict[str, Any] | None,
     current: dict[str, Any],
     *,
-    artifact_label: str,
     numeric_keys: tuple[str, ...] = (),
-) -> None:
-    """Raise if a per-artifact manifest entry disagrees with *current* params.
+) -> list[tuple[str, Any, Any]]:
+    """Return per-key mismatches between a manifest entry and current params.
 
     Parameters
     ----------
     entry
         Manifest entry for the artifact, or ``None`` if no entry exists yet
-        (in which case this function is a no-op — the caller decides whether
-        to treat absence as miss or miss+error).
+        (returns an empty list — the caller decides whether to treat
+        absence as miss).
     current
         Current-config values keyed by the same names as in *entry*.
-    artifact_label
-        Human-readable label for the error message (e.g. ``"cp_features"``).
     numeric_keys
         Keys in *current* whose values should be compared with
         :func:`numpy.allclose` instead of ``==``.
+
+    Returns
+    -------
+    list of tuple
+        ``(key, cached_value, current_value)`` for every disagreement;
+        empty when *entry* is ``None`` or every key matches.
     """
     if entry is None:
-        return
+        return []
+    if not isinstance(entry, dict):
+        # A malformed manifest entry (string/list/scalar where a mapping is
+        # expected — hand-edit or partial-write corruption) must surface as
+        # mismatches so the caller can soft-invalidate, not as an
+        # AttributeError escaping through `entry.get(...)`.
+        return [(key, entry, value) for key, value in current.items()]
+    mismatches: list[tuple[str, Any, Any]] = []
     for key, value in current.items():
         cached_value = entry.get(key)
         if key in numeric_keys:
-            if cached_value is None or not np.allclose(
-                np.asarray(cached_value, dtype=float),
-                np.asarray(value, dtype=float),
-                rtol=1e-9,
-                atol=0.0,
-            ):
-                raise StaleCacheError(f"{artifact_label}: {key} mismatch: cached={cached_value!r}, current={value!r}")
+            # A malformed cached value (None, wrong dtype, wrong length) must
+            # surface as a mismatch so the caller can soft-invalidate, not as
+            # a TypeError/ValueError that escapes through diff_artifact_params.
+            try:
+                close = cached_value is not None and np.allclose(
+                    np.asarray(cached_value, dtype=float),
+                    np.asarray(value, dtype=float),
+                    rtol=1e-9,
+                    atol=0.0,
+                )
+            except (TypeError, ValueError):
+                close = False
+            if not close:
+                mismatches.append((key, cached_value, value))
         elif cached_value != value:
-            raise StaleCacheError(f"{artifact_label}: {key} mismatch: cached={cached_value!r}, current={value!r}")
+            mismatches.append((key, cached_value, value))
+    return mismatches
 
 
 def built_at_now() -> str:
@@ -224,7 +261,7 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def read_mask(paths: CachePaths, target_name: str, pos_name: str) -> np.ndarray | None:
+def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str = "supermodel") -> np.ndarray | None:
     """Read cached organelle masks for a single position.
 
     Returns
@@ -233,7 +270,7 @@ def read_mask(paths: CachePaths, target_name: str, pos_name: str) -> np.ndarray 
         Bool array of shape ``(T, D, H, W)``, or ``None`` if the plate or
         position is absent.
     """
-    plate_path = paths.mask_plate(target_name)
+    plate_path = paths.mask_plate(target_name, backend)
     if not plate_path.exists():
         return None
     with open_ome_zarr(plate_path, mode="r") as plate:
@@ -279,6 +316,7 @@ def write_mask(
     masks: np.ndarray,
     *,
     channel_name: str = _MASK_CHANNEL,
+    backend: str = "supermodel",
 ) -> None:
     """Append masks for a single position to the ``{target_name}.zarr`` plate.
 
@@ -297,9 +335,89 @@ def write_mask(
     """
     if masks.ndim != 4:
         raise ValueError(f"masks must be 4-D (T, D, H, W); got shape {masks.shape}")
-    plate_path = paths.mask_plate(target_name)
+    plate_path = paths.mask_plate(target_name, backend)
     plate_path.parent.mkdir(parents=True, exist_ok=True)
     data = masks.astype(bool)[:, None]  # (T, 1, D, H, W)
+    if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
+        _rewrite_inner_array(plate_path / pos_name, data)
+        return
+    mode = "r+" if plate_path.exists() else "w"
+    with open_ome_zarr(
+        plate_path,
+        mode=mode,
+        layout="hcs",
+        channel_names=[channel_name],
+        version="0.5",
+    ) as plate:
+        row, col, fov = pos_name.split("/")
+        try:
+            position = plate[pos_name]
+        except KeyError:
+            position = plate.create_position(row, col, fov)
+        try:
+            del position["0"]
+        except KeyError:
+            pass
+        position.create_image("0", data)
+
+
+_INSTANCE_MASK_CHANNEL = "instance_seg"
+
+
+def read_instance_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str) -> np.ndarray | None:
+    """Read cached instance labels for a single position.
+
+    Returns
+    -------
+    numpy.ndarray | None
+        uint16 array of shape ``(T, D, H, W)`` (2-D runs are stored with
+        ``D=1``), or ``None`` if the plate or position is absent.
+    """
+    plate_path = paths.instance_mask_plate(target_name, backend)
+    if not plate_path.exists():
+        return None
+    with open_ome_zarr(plate_path, mode="r") as plate:
+        try:
+            position = plate[pos_name]
+        except KeyError:
+            return None
+        data = np.asarray(position.data[:, 0]).astype(np.uint16)
+    return data
+
+
+def write_instance_mask(
+    paths: CachePaths,
+    target_name: str,
+    pos_name: str,
+    labels: np.ndarray,
+    *,
+    channel_name: str = _INSTANCE_MASK_CHANNEL,
+    backend: str,
+) -> None:
+    """Append uint16 instance labels for a single position to the instance plate.
+
+    Mirrors :func:`write_mask` but preserves integer labels (no bool coercion).
+
+    Parameters
+    ----------
+    paths
+        Cache paths.
+    target_name
+        Organelle name (mask plate filename stem, with the ``__{backend}`` infix).
+    pos_name
+        HCS position name in ``row/col/fov`` form.
+    labels
+        uint16 array of shape ``(T, D, H, W)`` (2-D runs use ``D=1``).
+    channel_name
+        OME-Zarr channel label to write for this instance plate.
+    backend
+        Segmentation backend (selects the plate filename infix).
+    """
+    if labels.ndim != 4:
+        raise ValueError(f"labels must be 4-D (T, D, H, W); got shape {labels.shape}")
+    plate_path = paths.instance_mask_plate(target_name, backend)
+    plate_path.parent.mkdir(parents=True, exist_ok=True)
+    data = labels.astype(np.uint16)[:, None]  # (T, 1, D, H, W)
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return

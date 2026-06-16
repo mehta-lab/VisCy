@@ -1,0 +1,17 @@
+# @package _global_
+# Track C (vscyto3d_cytolandft trained on a549_mantis) eval for nucleus channel
+# of the dual predict zarr on iPSC.
+defaults:
+  - override /target: nucleus
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/dual_nucl_memb_vscyto3d_cytolandft_a549trained.zarr
+
+compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cellpose
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_cytolandft_a549trained/eval_vscyto3d_cytolandft_a549trained_nucleus

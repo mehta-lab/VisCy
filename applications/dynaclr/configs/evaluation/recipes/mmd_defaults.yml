@@ -1,0 +1,29 @@
+# Default MMD algorithm settings shared across all MMD eval configs.
+# Use as a base: reference in per-experiment or pooled MMD configs to avoid
+# repeating these parameters. Override any field in the leaf config.
+#
+# Usage:
+#   base: recipes/mmd_defaults.yml
+#   input_path: /path/to/embeddings.zarr
+#   output_dir: /path/to/output
+#   comparisons:
+#     - cond_a: uninfected
+#       cond_b: ZIKV
+#       label: "uninfected vs ZIKV"
+
+group_by: perturbation
+save_plots: true
+
+mmd:
+  n_permutations: 1000
+  max_cells: 2000
+  min_cells: 20
+  seed: 42
+  balance_samples: false
+  share_bandwidth_from: null
+
+map_settings:
+  enabled: false
+  distance: cosine
+  null_size: 10000
+  seed: 0

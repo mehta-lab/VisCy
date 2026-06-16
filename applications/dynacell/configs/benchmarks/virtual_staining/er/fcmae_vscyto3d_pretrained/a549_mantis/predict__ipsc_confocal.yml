@@ -6,7 +6,7 @@ base:
   - ../../../_internal/shared/model/targets/er_sec61b.yml
   - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:

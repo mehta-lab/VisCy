@@ -1,0 +1,38 @@
+# Trainer recipe: DynaCLR shared training defaults.
+# Topology (accelerator / strategy / devices / num_nodes) lives in
+# recipes/topology/*.yml; precision and max_epochs live in leaves.
+# Leaves should compose at minimum trainer/fit.yml + a topology/*.yml
+# fragment.
+#
+# Logger project/name/save_dir are filled in by the SLURM launcher
+# (`train.sh` CLI overrides). Lightning's SaveConfigCallback writes the
+# resolved config to trainer.log_dir; W&B picks it up via save_dir.
+#
+# Leaves override: precision, max_epochs, logger.init_args.project/name,
+# and (optionally) re-list callbacks to add OnlineEvalCallback. Note that
+# `callbacks` is a list, so a leaf re-listing it REPLACES this list
+# entirely — copy the LR monitor + ModelCheckpoint entries when extending.
+
+seed_everything: 42
+
+trainer:
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  enable_model_summary: false
+  inference_mode: true
+  use_distributed_sampler: false
+  benchmark: true
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      entity: computational_imaging
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true

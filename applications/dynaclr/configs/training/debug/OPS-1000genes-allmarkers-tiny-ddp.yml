@@ -1,0 +1,33 @@
+# 4-GPU DDP test on OPS tiny (346k rows) WITHOUT fast_dev_run.
+# Purpose: narrow the hang — does it need full OPS scale (55M), or does
+# DDP+wandb+val_check_interval on any OPS-flavored data reproduce it?
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/OPS-1000genes-allmarkers-tiny-ddp.sh
+
+trainer:
+  strategy: ddp
+  devices: 2
+  num_nodes: 1
+  max_epochs: 1
+  limit_train_batches: 10
+  limit_val_batches: 5
+  val_check_interval: 0.5
+  num_sanity_val_steps: 0
+  callbacks: []
+  # 31265169 TIMEOUT with wandb logger on. Now disabling it to isolate
+  # whether wandb + DDP + no-fastdev is the bug.
+  logger: null
+
+data:
+  init_args:
+    cell_index_path: /hpc/mydata/eduardo.hirata/repos/viscy/tmp/ops_tiny.parquet
+    batch_size: 8
+    num_workers: 1
+    prefetch_factor: 2
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null

@@ -4,7 +4,8 @@ from viscy_utils.mp_utils import get_val_stats
 
 
 def test_get_val_stats():
-    values = np.random.randn(1000)
+    rng = np.random.default_rng(0)
+    values = rng.standard_normal(1000)
     stats = get_val_stats(values)
     assert "mean" in stats
     assert "std" in stats

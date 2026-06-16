@@ -301,10 +301,8 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
     assert str(cfg.io.gt_cache_dir).endswith(cache_suffix), (
         f"{organelle}/{model}/{cond_slug}: gt_cache_dir={cfg.io.gt_cache_dir} does not end with {cache_suffix}"
     )
-    # Spacing comes from the manifest. sec61b + tomm20 manifests use
-    # 0.1494 µm xy; h2b + caax use 0.116 µm xy. All share Z=0.174.
+    # Spacing comes from the manifest. All A549-mantis markers share the same
+    # acquisition pixel size (0.174 µm Z, 0.1494 µm XY) — verified against the
+    # store scale metadata for caax/h2b/sec61b/tomm20.
     spacing = list(cfg.pixel_metrics.spacing)
-    if marker in {"sec61b", "tomm20"}:
-        assert spacing == [0.174, 0.1494, 0.1494]
-    else:
-        assert spacing == [0.174, 0.116, 0.116]
+    assert spacing == [0.174, 0.1494, 0.1494]

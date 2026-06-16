@@ -1,0 +1,47 @@
+# pix2pix3d_unetvit predict: membrane (Membrane marker) trained on A549 mantis (caax), predicting against ipsc_confocal test_cropped.
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: a549_mantis
+  predict_set: ipsc_confocal
+  model_name: pix2pix3d_unetvit
+  experiment_id: membrane__a549_mantis__pix2pix3d_unetvit__ipsc_confocal
+
+model:
+  init_args:
+    # Best loss/validate_ema checkpoint of the modernized Run-D 40ep A549
+    # membrane run (job 33674784 / wandb 20260604-221028, best at epoch 37,
+    # validate_ema=0.3792). iPSC keys membrane as `membrane`, so no
+    # dataset_ref override is needed here (unlike the A549 test leaves).
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=37-step=82080.ckpt
+
+data:
+  init_args:
+    # override target-inherited normalizations: predict only reads source
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # clear target-inherited RandWeightedCropd; predict has no CPU augs
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/memb_pix2pix3d_unetvit_a549trained.zarr
+
+launcher:
+  job_name: pix2pix3d_unetvit_A549TR_PRED_MEMB_ON_IPSC
+  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions

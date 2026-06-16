@@ -18,6 +18,12 @@ Version:
     Use ``importlib.metadata.version('viscy-data')`` to get version.
 """
 
+# Pin iohub's default implementation to ``zarr-python`` before any store is
+# opened (avoids the broken ``zarrs`` Rust pipeline, which iohub still defaults
+# to). Imported first so the override is applied before any other import pulls
+# in iohub. See _zarr_codec.py.
+import viscy_data._zarr_codec  # noqa: F401  (import for side effect)
+
 # Type definitions (from _typing.py)
 from viscy_data._typing import (
     CELL_INDEX_CORE_COLUMNS,
@@ -65,6 +71,9 @@ try:
     )
 except ImportError:
     pass
+
+# Normalization metadata reader (from _utils.py)
+from viscy_data._utils import read_norm_meta
 
 # Channel dropout augmentation (from channel_dropout.py)
 from viscy_data.channel_dropout import ChannelDropout
@@ -144,6 +153,7 @@ __all__ = [
     "ChannelDropout",
     # Utilities
     "FlexibleBatchSampler",
+    "read_norm_meta",
     "SelectWell",
     "ShardedDistributedSampler",
     # Core

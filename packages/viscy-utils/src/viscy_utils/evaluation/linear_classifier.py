@@ -6,14 +6,14 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import joblib
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from viscy_utils.evaluation.annotation import load_annotation_anndata
@@ -31,9 +31,9 @@ class LinearClassifierPipeline:
     ----------
     classifier : LogisticRegression
         Trained logistic regression classifier.
-    scaler : Optional[StandardScaler]
+    scaler : StandardScaler | None
         Fitted StandardScaler, if feature scaling was used.
-    pca : Optional[PCA]
+    pca : PCA | None
         Fitted PCA transformer, if dimensionality reduction was used.
     config : dict
         Configuration used for training.
@@ -44,8 +44,8 @@ class LinearClassifierPipeline:
     def __init__(
         self,
         classifier: LogisticRegression,
-        scaler: Optional[StandardScaler],
-        pca: Optional[PCA],
+        scaler: StandardScaler | None,
+        pca: PCA | None,
         config: dict,
         task: str,
     ):
@@ -199,11 +199,12 @@ def train_linear_classifier(
     task: str,
     use_scaling: bool = True,
     use_pca: bool = False,
-    n_pca_components: Optional[int] = None,
-    classifier_params: Optional[dict[str, Any]] = None,
+    n_pca_components: int | None = None,
+    classifier_params: dict[str, Any] | None = None,
     split_train_data: float = 0.8,
     random_seed: int = 42,
-) -> tuple[LinearClassifierPipeline, dict[str, float]]:
+    groups: np.ndarray | None = None,
+) -> tuple[LinearClassifierPipeline, dict[str, float], dict[str, Any]]:
     """Train a linear classifier on embeddings with preprocessing and evaluation.
 
     Parameters
@@ -216,14 +217,22 @@ def train_linear_classifier(
         Whether to apply StandardScaler normalization.
     use_pca : bool
         Whether to apply PCA dimensionality reduction.
-    n_pca_components : Optional[int]
+    n_pca_components : int | None
         Number of PCA components (required if use_pca=True).
-    classifier_params : Optional[dict]
+    classifier_params : dict | None
         Parameters for LogisticRegression classifier.
     split_train_data : float
         Fraction of data to use for training (rest for validation).
     random_seed : int
         Random seed for reproducibility.
+    groups : np.ndarray or None
+        Per-cell group id used to define a leakage-free train/val split.
+        When provided, the split is a ``GroupShuffleSplit`` so no group
+        (e.g. track) lands in both halves. Stratification by ``y`` is not
+        applied when groups are used — group identity dominates and
+        stratification across groups is enforced loosely by drawing
+        multiple seeds (here just the first). When None, falls back to
+        ``train_test_split(stratify=y)``. Default: None.
 
     Returns
     -------
@@ -231,6 +240,9 @@ def train_linear_classifier(
         Trained classifier pipeline with preprocessing.
     dict
         Dictionary of evaluation metrics (train and validation if split).
+    dict
+        Raw validation outputs for plotting: ``y_val``, ``y_val_proba``,
+        ``classes``. Values are ``None`` when no validation split was made.
     """
     print("\n" + "=" * 60)
     print("TRAINING CLASSIFIER")
@@ -263,15 +275,33 @@ def train_linear_classifier(
         print("\n✓ Using full feature space (no PCA)")
 
     if split_train_data < 1.0:
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_full_transformed,
-            y_full,
-            train_size=split_train_data,
-            random_state=random_seed,
-            stratify=y_full,
-            shuffle=True,
-        )
-        print(f"\n✓ Split data: train ({len(X_train)}) / validation ({len(X_val)})")
+        if groups is not None:
+            if len(groups) != len(y_full):
+                raise ValueError(f"groups length {len(groups)} != n_cells {len(y_full)}")
+            gss = GroupShuffleSplit(
+                n_splits=1,
+                train_size=split_train_data,
+                random_state=random_seed,
+            )
+            idx_train, idx_val = next(gss.split(X_full_transformed, y_full, groups=groups))
+            X_train, X_val = X_full_transformed[idx_train], X_full_transformed[idx_val]
+            y_train, y_val = y_full[idx_train], y_full[idx_val]
+            n_train_groups = len(np.unique(groups[idx_train]))
+            n_val_groups = len(np.unique(groups[idx_val]))
+            print(
+                f"\n✓ Group-aware split: train ({len(X_train)} cells / {n_train_groups} groups) "
+                f"/ validation ({len(X_val)} cells / {n_val_groups} groups)"
+            )
+        else:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_full_transformed,
+                y_full,
+                train_size=split_train_data,
+                random_state=random_seed,
+                stratify=y_full,
+                shuffle=True,
+            )
+            print(f"\n✓ Split data: train ({len(X_train)}) / validation ({len(X_val)})")
     else:
         X_train = X_full_transformed
         y_train = y_full
@@ -314,8 +344,10 @@ def train_linear_classifier(
             train_metrics[f"train_{class_name}_precision"] = train_report[class_name]["precision"]
             train_metrics[f"train_{class_name}_recall"] = train_report[class_name]["recall"]
             train_metrics[f"train_{class_name}_f1"] = train_report[class_name]["f1-score"]
+            train_metrics[f"train_{class_name}_support"] = int(train_report[class_name]["support"])
 
     val_metrics = {}
+    y_val_proba: np.ndarray | None = None
     if X_val is not None and y_val is not None:
         y_val_pred = classifier.predict(X_val)
         val_report = classification_report(y_val, y_val_pred, digits=3, output_dict=True)
@@ -336,6 +368,15 @@ def train_linear_classifier(
             else:
                 val_metrics["val_auroc"] = roc_auc_score(y_val, y_val_proba, multi_class="ovr", average="macro")
             print(f"  Val AUROC: {val_metrics['val_auroc']:.3f}")
+
+            if len(classifier.classes_) > 2:
+                for i, class_name in enumerate(classifier.classes_):
+                    try:
+                        val_metrics[f"val_{class_name}_auroc"] = roc_auc_score(
+                            (y_val == class_name).astype(int), y_val_proba[:, i]
+                        )
+                    except ValueError:
+                        pass
         except ValueError as e:
             _logger.warning(f"Could not compute val AUROC (likely only one class present): {e}")
 
@@ -344,6 +385,7 @@ def train_linear_classifier(
                 val_metrics[f"val_{class_name}_precision"] = val_report[class_name]["precision"]
                 val_metrics[f"val_{class_name}_recall"] = val_report[class_name]["recall"]
                 val_metrics[f"val_{class_name}_f1"] = val_report[class_name]["f1-score"]
+                val_metrics[f"val_{class_name}_support"] = int(val_report[class_name]["support"])
 
     all_metrics = {**train_metrics, **val_metrics}
 
@@ -365,15 +407,21 @@ def train_linear_classifier(
         task=task,
     )
 
-    return pipeline, all_metrics
+    val_outputs: dict[str, Any] = {
+        "y_val": y_val,
+        "y_val_proba": y_val_proba,
+        "classes": classifier.classes_.tolist(),
+    }
+
+    return pipeline, all_metrics, val_outputs
 
 
 def predict_with_classifier(
     adata: ad.AnnData,
     pipeline: LinearClassifierPipeline,
     task: str,
-    artifact_metadata: Optional[dict] = None,
-    include_wells: Optional[list[str]] = None,
+    artifact_metadata: dict | None = None,
+    include_wells: list[str] | None = None,
 ) -> ad.AnnData:
     """Apply trained classifier to make predictions on new data.
 
@@ -385,12 +433,12 @@ def predict_with_classifier(
         Trained classifier pipeline with preprocessing.
     task : str
         Name of the classification task (used as column suffix).
-    artifact_metadata : Optional[dict]
+    artifact_metadata : dict | None
         W&B artifact metadata from ``load_pipeline_from_wandb``. When provided,
         provenance keys are stored in ``adata.uns`` under
         ``classifier_{task}_artifact``, ``classifier_{task}_id``, and
         ``classifier_{task}_version``.
-    include_wells : Optional[list[str]]
+    include_wells : list[str] | None
         Well prefixes to restrict prediction to (e.g. ``["A/1", "B/2"]``).
         Cells in other wells will have ``NaN`` for prediction columns.
         When ``None``, all cells are predicted.
@@ -449,8 +497,8 @@ def save_pipeline_to_wandb(
     metrics: dict[str, float],
     config: dict[str, Any],
     wandb_project: str,
-    wandb_entity: Optional[str] = None,
-    tags: Optional[list[str]] = None,
+    wandb_entity: str | None = None,
+    tags: list[str] | None = None,
 ) -> str:
     """Save trained pipeline and metrics to Weights & Biases.
 
@@ -464,9 +512,9 @@ def save_pipeline_to_wandb(
         Full training configuration.
     wandb_project : str
         W&B project name.
-    wandb_entity : Optional[str]
+    wandb_entity : str | None
         W&B entity (username or team).
-    tags : Optional[list[str]]
+    tags : list[str] | None
         Tags to add to the run.
 
     Returns
@@ -554,7 +602,7 @@ def load_pipeline_from_wandb(
     wandb_project: str,
     model_name: str,
     version: str = "latest",
-    wandb_entity: Optional[str] = None,
+    wandb_entity: str | None = None,
 ) -> tuple[LinearClassifierPipeline, dict, dict]:
     """Load trained pipeline and config from Weights & Biases.
 
@@ -566,7 +614,7 @@ def load_pipeline_from_wandb(
         Name of the model artifact.
     version : str
         Version of the artifact (default: 'latest').
-    wandb_entity : Optional[str]
+    wandb_entity : str | None
         W&B entity (username or team).
 
     Returns

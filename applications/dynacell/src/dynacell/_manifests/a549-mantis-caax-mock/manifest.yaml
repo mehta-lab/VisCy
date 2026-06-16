@@ -7,8 +7,8 @@ cell_type: A549
 imaging_modality: mantis-lightsheet
 spacing:
   z: 0.174
-  y: 0.116
-  x: 0.116
+  y: 0.1494
+  x: 0.1494
 channels:
   source: Phase3D
   auxiliary:

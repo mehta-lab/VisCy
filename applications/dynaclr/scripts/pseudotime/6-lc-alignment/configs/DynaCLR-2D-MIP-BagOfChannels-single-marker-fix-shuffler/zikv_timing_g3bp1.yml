@@ -1,0 +1,8 @@
+# Stage B leaf — G3BP1 event timing for the current 2D-MIP-BoC model.
+
+base:
+  - ../recipes/timing_defaults.yml
+  - ../recipes/datasets_zikv_timing_g3bp1.yml
+
+organelle_embedding_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/embeddings
+registration_dir: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/scripts/pseudotime/6-lc-alignment/out/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/zikv_register

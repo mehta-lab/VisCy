@@ -154,6 +154,79 @@ the [project settings](./pyproject.toml).
 Docstrings follow the [numpy style](https://numpydoc.readthedocs.io/en/latest/format.html)
 (`convention = "numpy"` in `[tool.ruff.lint.pydocstyle]`).
 
+### Documentation
+
+[Zensical](https://zensical.org/) builds one site for the whole monorepo, from
+`zensical.toml` and `docs/` at the repo root. Doc tools live in the root `doc`
+dependency group; subpackages carry none.
+
+Preview with live reload:
+
+```sh
+uv sync --all-packages --group doc    # --all-packages: mkdocstrings imports the packages
+uv run python docs/_gen_versions.py   # refresh the package version table
+uv run zensical serve                 # http://localhost:8000
+```
+
+Static build lands in `site/` (git-ignored):
+
+```sh
+uv run zensical build --clean
+```
+
+Authoring notes:
+
+- Markdown lives in `docs/`; `nav` in `zensical.toml` sets the order.
+- `::: viscy_data` renders a package's API. A template override
+  (`docs/_templates/python/material/module.html.jinja`) hides each package's
+  top-level docstring — write overview prose in the Markdown page instead.
+- `docs/_gen_versions.py` rewrites the version table in `docs/packages/index.md`.
+
+CI (`.github/workflows/docs.yml`) deploys via [`mike`](https://github.com/squidfunk/mike):
+`main` updates `dev`, a `vX.Y.Z` tag publishes that version and moves `stable`.
+
+### Releasing packages
+
+We use git tags for versioning, and each package has it's own tag. Each package reads
+[`uv-dynamic-versioning`](https://github.com/ninoseki/uv-dynamic-versioning); the tag
+**prefix** decides which package gets the version.
+
+| Package | Tag prefix | Example tag |
+|---|---|---|
+| `viscy-data` | `viscy-data-` | `viscy-data-v0.2.1` |
+| `viscy-models` | `viscy-models-` | `viscy-models-v0.4.0` |
+| `viscy-transforms` | `viscy-transforms-` | `viscy-transforms-v0.1.3` |
+| `viscy-utils` | `viscy-utils-` | `viscy-utils-v0.3.0` |
+| `viscy` (umbrella) | none | `v0.6.0` |
+
+Per-package, independent. Tag bumps only its own package. Umbrella reads bare tags.
+
+To cut a release:
+
+```sh
+# 1. clean main, latest tags
+git checkout main && git pull && git fetch --tags
+
+# 2. tag (one per package you ship)
+git tag viscy-data-v0.2.1
+
+# 3. build — version derived from the tag
+uv build --package viscy-data --out-dir dist/
+
+# 4. verify wheel name matches the tag before pushing
+ls dist/   # viscy_data-0.2.1-py3-none-any.whl
+
+# 5. push the tag (nothing public until this)
+git push origin viscy-data-v0.2.1
+```
+
+> **Note**: no version pins between workspace members. A built wheel's
+> `Requires-Dist` for a sibling package (e.g. `viscy-utils` → `viscy-data`) carries
+> **no** version constraint — `[tool.uv.sources]` workspace links resolve locally only,
+> not in published metadata ([astral-sh/uv#9811](https://github.com/astral-sh/uv/issues/9811)).
+> If you publish to PyPI, add an explicit pin (e.g. `"viscy-data>=0.1,<0.2"`) to the
+> dependent package's `dependencies`.
+
 ## Useful links
 
 ### uv documentation

@@ -1,0 +1,21 @@
+# Evaluation config: DynaCLR-2D-MIP-BagOfChannels × microglia (embed-only).
+# Microglia has no annotations and no marker-compatible LC source, so this
+# run only computes embeddings, dim-reductions, smoothness, and plots for
+# cross-model comparison. recipes/microglia.yml's `steps:` reflects this.
+# Data: 20191107_1209_1_GW23_dynamorph — Brightfield, Phase3D, Retardance.
+# Perturbations: untreated, IL17, IFN-beta, Rubella, Glioblastoma_supernatant.
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/microglia.yml
+
+training_config: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels.yml
+ckpt_path: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11/DynaCLR-2D-MIP-BagOfChannels/20260403-150013/checkpoints/last.ckpt
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/evaluations/microglia/
+
+predict:
+  batch_size: 256
+  num_workers: 4
+  precision: 32-true
+  devices: 1

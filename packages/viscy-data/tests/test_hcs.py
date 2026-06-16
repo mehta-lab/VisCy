@@ -7,7 +7,7 @@ from imageio import imwrite
 from iohub import open_ome_zarr
 from lightning.pytorch.trainer.states import TrainerFn
 from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandFlipd, RandSpatialCropSamplesd
-from pytest import TempPathFactory, fixture, importorskip, mark, raises
+from pytest import TempPathFactory, fixture, importorskip, mark, raises, skip
 
 from viscy_data import HCSDataModule
 from viscy_data.sliding_window import SlidingWindowDataset
@@ -952,12 +952,41 @@ def test_mmap_preload_recovers_from_partial_cache(hcs_with_fg_mask, tmp_path):
         break
 
 
+def _mmap_sharing_child(data_path, cache_dir, result_queue):
+    """Open the shared mmap buffer in a child process (module-level for spawn).
+
+    Defined at module scope so it is picklable under the ``spawn`` start
+    method (Windows/macOS default); a nested closure would fail with
+    ``AttributeError: Can't get local object``.
+    """
+    try:
+        from iohub import open_ome_zarr
+        from tensordict.memmap import MemoryMappedTensor
+
+        with open_ome_zarr(data_path, mode="r") as ds:
+            positions = [pos for _, pos in ds.positions()]
+        arr_shape = positions[0]["0"].shape
+        T, C = arr_shape[0], 2
+        shape = (len(positions) * T, C, *arr_shape[2:])
+        buf = MemoryMappedTensor.from_filename(cache_dir / "data.mmap", dtype=torch.float32, shape=shape)
+        result_queue.put(("ok", tuple(buf.shape)))
+    except Exception as e:
+        result_queue.put(("err", str(e)))
+
+
 def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     """Both parent and child processes can open the mmap buffer after prepare_data."""
-    import multiprocessing
+    import multiprocessing as mp
 
     importorskip("tensordict")
-    from tensordict.memmap import MemoryMappedTensor
+
+    # ``fork`` context because pytest imports tests under
+    # ``--import-mode=importlib``, whose path can't be re-resolved in a spawn
+    # child (``ModuleNotFoundError: 'packages'``). fork is unavailable on
+    # Windows, so skip there — same pattern as test_combined_ddp.py.
+    if "fork" not in mp.get_all_start_methods():
+        skip("fork start_method not available (Windows)")
+    ctx = mp.get_context("fork")
 
     dm = HCSDataModule(
         data_path=hcs_with_fg_mask,
@@ -972,23 +1001,9 @@ def test_mmap_preload_multi_process_sharing(hcs_with_fg_mask, tmp_path):
     dm.prepare_data()
     cache_dir = dm._mmap_cache_dir
 
-    result_queue = multiprocessing.Queue()
+    result_queue = ctx.Queue()
 
-    def _child(cache_dir, result_queue):
-        try:
-            from iohub import open_ome_zarr
-
-            with open_ome_zarr(hcs_with_fg_mask, mode="r") as ds:
-                positions = [pos for _, pos in ds.positions()]
-            arr_shape = positions[0]["0"].shape
-            T, C = arr_shape[0], 2
-            shape = (len(positions) * T, C, *arr_shape[2:])
-            buf = MemoryMappedTensor.from_filename(cache_dir / "data.mmap", dtype=torch.float32, shape=shape)
-            result_queue.put(("ok", tuple(buf.shape)))
-        except Exception as e:
-            result_queue.put(("err", str(e)))
-
-    proc = multiprocessing.Process(target=_child, args=(cache_dir, result_queue))
+    proc = ctx.Process(target=_mmap_sharing_child, args=(hcs_with_fg_mask, cache_dir, result_queue))
     proc.start()
     proc.join(timeout=30)
     status, value = result_queue.get_nowait()

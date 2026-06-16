@@ -1,0 +1,37 @@
+# 2-channel FCMAE predict overlay for VSCyto3D Nuclei + Membrane outputs.
+# Mirrors fcmae_vscyto3d_predict.yml but with out_channels=2 so DynacellUNet
+# instantiates the dual-head decoder that matches cytoland public + VSCyto3D
+# A549-infection-finetune state-dict shapes. All other arch hparams stay
+# identical to the single-channel overlay (verified against cytoland
+# checkpoint hparams: in_stack_depth=15, stem_kernel_size=(5,4,4), drop_path=0.1).
+base:
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [5, 4, 4]
+      in_stack_depth: 15
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    predict_method: full_image
+    predict_overlap: [4, 256, 256]
+data:
+  init_args:
+    z_window_size: 15
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]

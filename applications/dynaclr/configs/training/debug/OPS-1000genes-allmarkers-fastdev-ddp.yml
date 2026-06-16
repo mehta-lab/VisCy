@@ -1,0 +1,31 @@
+# SLURM fast_dev_run=5 override for OPS to localize the post-LOCAL_RANK hang.
+# Strips all callbacks, logger, wandb — just data + model + one train + val batch.
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/OPS-1000genes-allmarkers-fastdev-ddp.sh
+
+trainer:
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  # Narrowing: wandb logger (31264775) + OnlineEvalCallback (31264776)
+  # both confirmed harmless. Now testing val_check_interval and limit_*
+  # knobs. Dropping fast_dev_run so these actually take effect.
+  callbacks: []
+  max_epochs: 1
+  limit_train_batches: 10
+  limit_val_batches: 5
+  val_check_interval: 0.5
+  num_sanity_val_steps: 0
+
+data:
+  init_args:
+    batch_size: 16
+    num_workers: 1
+    prefetch_factor: 2
+    buffer_size: 2
+    cache_pool_bytes: 0
+
+model:
+  init_args:
+    ckpt_path: null
