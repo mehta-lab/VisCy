@@ -602,13 +602,10 @@ def build_leaf_yaml(
         body["compute_instance_ap"] = True
         seg: dict = {"backend": _INSTANCE_BACKEND[organelle]}
         if organelle == "membrane":
+            # Carved cytoplasm-shape metrics are canonical (6aedf52f): inherit
+            # the eval.yaml subtract_nuclei=true default — do NOT re-add a
+            # subtract_nuclei=false override here (that restores whole-cell).
             seg["nuclei_channel_name"] = "Nuclei"
-            # Carved cytoplasm-shape metrics are canonical (6aedf52f): both the
-            # semantic (binary whole-image) and instance-AP segmentations derive
-            # from the single GT-nuclei-seeded watershed with the eval.yaml
-            # default subtract_nuclei=true (the shared nucleus core is carved
-            # out). Do NOT add a subtract_nuclei=false override here — that
-            # reverts to the retired whole-cell, no-carve numbers.
         body["segmentation"] = seg
     condition_blocks: list[dict] = []
     for parsed in conditions:
