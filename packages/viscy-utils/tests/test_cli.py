@@ -6,8 +6,9 @@ from datetime import datetime
 
 import pytest
 from jsonargparse import Namespace
+from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 
-from viscy_utils.cli import _configure_wandb_logger
+from viscy_utils.cli import _configure_wandb_logger, _default_logger
 
 
 @pytest.fixture
@@ -62,6 +63,18 @@ def test_cli_predict_help(run_viscy):
     assert result.returncode == 0
     assert "model" in result.stdout
     assert "ckpt_path" in result.stdout
+
+
+def test_default_logger_uses_wandb_when_installed(monkeypatch):
+    monkeypatch.setattr("viscy_utils.cli.importlib.util.find_spec", lambda name: object())
+    assert isinstance(_default_logger(), WandbLogger)
+
+
+def test_default_logger_falls_back_to_tensorboard_without_wandb(monkeypatch):
+    # A base install (no `eval` extra) has no wandb; the default must still be
+    # instantiable so every trainer-building subcommand runs.
+    monkeypatch.setattr("viscy_utils.cli.importlib.util.find_spec", lambda name: None)
+    assert isinstance(_default_logger(), TensorBoardLogger)
 
 
 def _make_wandb_fit_config(name: str = "FNet3D_iPSC_SEC61B") -> Namespace:
