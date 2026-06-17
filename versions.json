@@ -1,10 +1,15 @@
 [
   {
-    "version": "iscy-data-v0.0.1a0",
-    "title": "iscy-data-v0.0.1a0",
+    "version": "iscy-data-v0.1.0a0",
+    "title": "iscy-data-v0.1.0a0",
     "aliases": [
       "stable"
     ]
+  },
+  {
+    "version": "iscy-data-v0.0.1a0",
+    "title": "iscy-data-v0.0.1a0",
+    "aliases": []
   },
   {
     "version": "dev",
