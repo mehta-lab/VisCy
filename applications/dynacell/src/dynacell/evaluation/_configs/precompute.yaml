@@ -11,6 +11,7 @@ build:
   dinov3: true
   dynaclr: true
   celldino: true
+  morphem: true
   focus: false  # write focus_slice zattrs (in-focus plane per FOV) to the GT store
 
 # The focus-estimator params (channel_name / na_det / lambda_ill / pixel_size / device)
