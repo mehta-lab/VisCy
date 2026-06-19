@@ -17,7 +17,7 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.cache import FeatureKind
+from dynacell.evaluation.cache import FeatureKind, StaleCacheError
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -105,6 +105,15 @@ def _cp_dropzero_zscore(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[n
     Returns ``(np.empty(...), np.empty(...))`` when all columns drop, so
     the caller can short-circuit and emit a NaN row.
     """
+    if pred_raw.ndim == 2 and target_raw.ndim == 2 and pred_raw.shape[1] and target_raw.shape[1]:
+        if pred_raw.shape[1] != target_raw.shape[1]:
+            raise StaleCacheError(
+                f"CP feature dimension mismatch: pred has {pred_raw.shape[1]} columns, "
+                f"GT has {target_raw.shape[1]}. A CP feature cache was built with a different "
+                "recipe (e.g. a GLCM toggle or a CP_FEATURE_VERSION change without a cache "
+                "rebuild). Rebuild with force_recompute.gt_cp=true and/or pred_cp=true "
+                "(or force_recompute.all=true)."
+            )
     non_zero_cols = ~np.all(target_raw == 0, axis=0)
     pred_mat = pred_raw[:, non_zero_cols]
     target_mat = target_raw[:, non_zero_cols]
