@@ -176,48 +176,26 @@ def _write_rows(out_path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def run_for_group(
-    eval_dirs: list[Path],
-    n_splits: int = 5,
-    rng_seed: int = 2020,
-) -> list[Path]:
-    """Probe each infected condition against mock and write a per-condition CSV.
+def _model_group_key(eval_dir: Path) -> tuple[str, str] | None:
+    """Group key for one condition dir: ``(parent, name minus trailing _{cond})``.
 
-    Unlike :func:`run` (long-form CSV over all pairs at one ``out_path``),
-    this writes one :data:`GROUP_PROBE_FILENAME` into *each infected
-    condition's* eval dir, holding only that condition's ``mock_vs_<cond>``
-    rows (every feature × {pred, gt}). This colocates the probe with the eval
-    dir the reporting layer already resolves per (model, pool, organelle,
-    condition), so the table generator can read it without knowing about
-    sibling conditions.
-
-    Requires a ``mock`` reference dir plus at least one infected dir; returns
-    the list of CSV paths written (empty when the group has no mock or no
-    infected condition, e.g. the in-distribution iPSC eval).
-
-    Parameters
-    ----------
-    eval_dirs : list[Path]
-        Per-condition eval dirs of one (model, pool, organelle) group. The
-        condition is inferred from each dir's trailing ``_{mock,denv,zikv}``;
-        dirs without a recognized token are ignored. Two dirs mapping to the
-        same condition raise ``ValueError`` (an ambiguous group) rather than
-        silently picking one.
-    n_splits, rng_seed : int
-        Forwarded to :func:`fov_stratified_auroc`.
+    Condition dirs of the same (model, pool, organelle) share a name prefix and
+    differ only in the trailing ``_{mock,denv,zikv}`` token (e.g.
+    ``eval_vscyto3d_mitochondria_mock`` / ``…_denv``), so stripping that token
+    groups a model's conditions together. Returns ``None`` for dirs without a
+    recognized token (the in-distribution iPSC eval), which join no group.
     """
-    by_condition: dict[str, Path] = {}
-    for d in eval_dirs:
-        try:
-            cond = _detect_condition(d)
-        except ValueError:
-            continue
-        if cond in by_condition:
-            raise ValueError(f"duplicate condition {cond!r}: {by_condition[cond]} and {d}")
-        by_condition[cond] = d
+    name = eval_dir.name
+    for token in _CONDITION_TOKENS:
+        if name.endswith(f"_{token}"):
+            return (str(eval_dir.parent), name[: -(len(token) + 1)])
+    return None
+
+
+def _probe_one_group(by_condition: dict[str, Path], n_splits: int, rng_seed: int) -> list[Path]:
+    """Run the mock-vs-infected probe for one (model, pool, organelle) group."""
     if "mock" not in by_condition:
         return []
-
     # Shared across pairs so the mock reference embeddings are read once, not
     # re-read for every infected condition. Local to this call -> released on return.
     cache: dict[Path, tuple[np.ndarray, np.ndarray]] = {}
@@ -233,6 +211,56 @@ def run_for_group(
         out_path = by_condition[cond] / GROUP_PROBE_FILENAME
         _write_rows(out_path, rows)
         written.append(out_path)
+    return written
+
+
+def run_for_group(
+    eval_dirs: list[Path],
+    n_splits: int = 5,
+    rng_seed: int = 2020,
+) -> list[Path]:
+    """Probe each infected condition against mock and write a per-condition CSV.
+
+    Unlike :func:`run` (long-form CSV over all pairs at one ``out_path``),
+    this writes one :data:`GROUP_PROBE_FILENAME` into *each infected
+    condition's* eval dir, holding only that condition's ``mock_vs_<cond>``
+    rows (every feature × {pred, gt}). This colocates the probe with the eval
+    dir the reporting layer already resolves per (model, pool, organelle,
+    condition), so the table generator can read it without knowing about
+    sibling conditions.
+
+    *eval_dirs* may span **multiple** (model, pool, organelle) groups — the
+    grouped-eval driver passes every condition save dir of a bucket, which
+    folds many models, each with its own ``_{mock,denv,zikv}`` dirs. The dirs
+    are partitioned by :func:`_model_group_key` (name minus the condition
+    token) and each model group is probed independently; passing the whole
+    bucket no longer collides on a "duplicate condition". A ``mock`` reference
+    is required per group. Dirs without a recognized token (the
+    in-distribution iPSC eval) are ignored.
+
+    Parameters
+    ----------
+    eval_dirs : list[Path]
+        Per-condition eval dirs (of one or more model groups). Two dirs mapping
+        to the same condition *within the same model group* raise ``ValueError``
+        (an ambiguous group) rather than silently picking one.
+    n_splits, rng_seed : int
+        Forwarded to :func:`fov_stratified_auroc`.
+    """
+    groups: dict[tuple[str, str], dict[str, Path]] = {}
+    for d in eval_dirs:
+        key = _model_group_key(d)
+        if key is None:
+            continue
+        cond = _detect_condition(d)  # key is not None -> a token is present
+        by_condition = groups.setdefault(key, {})
+        if cond in by_condition:
+            raise ValueError(f"duplicate condition {cond!r} in group {key[1]!r}: {by_condition[cond]} and {d}")
+        by_condition[cond] = d
+
+    written: list[Path] = []
+    for by_condition in groups.values():
+        written.extend(_probe_one_group(by_condition, n_splits, rng_seed))
     return written
 
 
