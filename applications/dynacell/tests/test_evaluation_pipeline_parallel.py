@@ -63,6 +63,7 @@ def _make_synthetic_result(
     dinov3 = _BackboneLists()
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
+    morphem = _BackboneLists()
     for t in range(t_count):
         fov_arr = np.full(cells_per_t, pos_name)
         t_arr = np.full(cells_per_t, t, dtype=np.int32)
@@ -72,7 +73,7 @@ def _make_synthetic_result(
         cp.gt_fovs.append(fov_arr)
         cp.pred_ts.append(t_arr)
         cp.gt_ts.append(t_arr)
-        for bl in (dinov3, dynaclr, celldino):
+        for bl in (dinov3, dynaclr, celldino, morphem):
             bl.pred_feats.append(np.full((cells_per_t, deep_dim), float(t), dtype=np.float32))
             bl.gt_feats.append(np.full((cells_per_t, deep_dim), float(t) + 0.5, dtype=np.float32))
             bl.pred_fovs.append(fov_arr)
@@ -93,6 +94,7 @@ def _make_synthetic_result(
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
         timings=[(pos_name, None, "mask_gt", 0.05), (pos_name, 0, "pixel_metrics", 0.02)],
     )
 
@@ -107,7 +109,7 @@ def test_fov_result_pickle_round_trip_preserves_arrays():
     assert restored.seg_array.shape == result.seg_array.shape
     assert restored.seg_array.dtype == np.bool_
     assert np.array_equal(restored.seg_array, result.seg_array)
-    for backbone_attr in ("cp", "dinov3", "dynaclr", "celldino"):
+    for backbone_attr in ("cp", "dinov3", "dynaclr", "celldino", "morphem"):
         original = getattr(result, backbone_attr)
         restored_bb = getattr(restored, backbone_attr)
         for list_name in ("pred_feats", "gt_feats", "pred_fovs", "gt_fovs", "pred_ts", "gt_ts"):

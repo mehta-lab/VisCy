@@ -26,7 +26,7 @@ import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
-FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino"]
+FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -83,6 +83,10 @@ class CachePaths:
     def celldino_features(self, weights_sha12: str) -> Path:
         """Return the zarr group path for CELL-DINO features keyed by *weights_sha12*."""
         return self.features_dir / "celldino" / f"{weights_sha12}.zarr"
+
+    def morphem_features(self, model_name: str) -> Path:
+        """Return the zarr group path for MorphEm features of *model_name*."""
+        return self.features_dir / "morphem" / f"{feature_slug(model_name)}.zarr"
 
 
 def cache_paths(cache_dir: Path | str) -> CachePaths:
@@ -464,6 +468,10 @@ def _features_group_path(
         if weights_sha12 is None:
             raise ValueError("weights_sha12 is required for kind='celldino'")
         return paths.celldino_features(weights_sha12)
+    if kind == "morphem":
+        if model_name is None:
+            raise ValueError("model_name is required for kind='morphem'")
+        return paths.morphem_features(model_name)
     raise ValueError(f"Unknown feature kind: {kind!r}")
 
 

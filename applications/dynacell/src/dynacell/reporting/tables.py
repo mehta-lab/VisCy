@@ -16,9 +16,13 @@ FEATURE_METRICS = [
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
     "CP_FID",
     "DINOv3_FID",
     "DynaCLR_FID",
+    "CellDINO_FID",
+    "MorphEm_FID",
 ]
 
 HIGHER_IS_BETTER = {
@@ -35,6 +39,8 @@ HIGHER_IS_BETTER = {
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
 }
 
 

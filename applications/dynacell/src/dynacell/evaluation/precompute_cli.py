@@ -73,12 +73,12 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     apply_thread_budget(runtime.threads_per_worker)
 
     build = config.build
-    build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino)
+    build_any_features = bool(build.cp or build.dinov3 or build.dynaclr or build.celldino or build.morphem)
 
     if build_any_features and config.io.cell_segmentation_path is None:
         raise ValueError(
             "io.cell_segmentation_path is required when any of "
-            "build.cp / build.dinov3 / build.dynaclr / build.celldino is true"
+            "build.cp / build.dinov3 / build.dynaclr / build.celldino / build.morphem is true"
         )
 
     # Stricter celldino gate than evaluate_predictions: precompute-gt
@@ -87,6 +87,11 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     # produce no cache, so we surface it as an error).
     if build.celldino and config.feature_extractor.celldino.weights_path is None:
         raise ValueError("feature_extractor.celldino.weights_path is required when build.celldino=true")
+
+    # Same strict gate for morphem: a null hub id with build.morphem=true
+    # would silently fill no cache, so surface it as an error here.
+    if build.morphem and config.feature_extractor.morphem.pretrained_model_name is None:
+        raise ValueError("feature_extractor.morphem.pretrained_model_name is required when build.morphem=true")
 
     # Focus metadata is written directly to the GT store (zattrs), not the
     # artifact cache, and needs none of the models below — so do it first. The
@@ -115,12 +120,14 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
             dinov3=bool(build.dinov3),
             dynaclr=bool(build.dynaclr),
             celldino=bool(build.celldino),
+            morphem=bool(build.morphem),
         ),
     )
     seg_model = models.seg_model
     dinov3_feature_extractor = models.dinov3
     dynaclr_feature_extractor = models.dynaclr
     celldino_feature_extractor = models.celldino
+    morphem_feature_extractor = models.morphem
 
     cache_ctx = init_gt_cache_context(config, models)
 
@@ -150,6 +157,8 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
                 deep_extractors["dynaclr"] = dynaclr_feature_extractor
             if build.celldino:
                 deep_extractors["celldino"] = celldino_feature_extractor
+            if build.morphem:
+                deep_extractors["morphem"] = morphem_feature_extractor
 
             flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
             batcher = (

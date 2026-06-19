@@ -98,9 +98,11 @@ class _CacheContext:
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
     celldino_weights_sha12: str | None = None
+    morphem_model_name: str | None = None
     dinov3_preprocess_version: str | None = None
     dynaclr_preprocess_version: str | None = None
     celldino_preprocess_version: str | None = None
+    morphem_preprocess_version: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -157,6 +159,11 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "pred_dinov3": all_flag or bool(force.pred_dinov3),
         "pred_dynaclr": all_flag or bool(force.pred_dynaclr),
         "pred_celldino": all_flag or bool(force.pred_celldino),
+        # morphem keys are read via OmegaConf.select (not direct attribute access)
+        # so resolved/grouped/benchmark configs composed before these keys existed
+        # don't ConfigAttributeError on the missing key — same pattern as instances.
+        "gt_morphem": all_flag or bool(OmegaConf.select(force, "gt_morphem", default=False)),
+        "pred_morphem": all_flag or bool(OmegaConf.select(force, "pred_morphem", default=False)),
         "gt_instances": all_flag or bool(OmegaConf.select(force, "gt_instances", default=False)),
         "pred_instances": all_flag or bool(OmegaConf.select(force, "pred_instances", default=False)),
         "final_metrics": all_flag or bool(force.final_metrics),
@@ -171,9 +178,11 @@ def init_cache_context(
     dynaclr_ckpt_path: str | None = None,
     dynaclr_encoder_cfg: dict[str, Any] | None = None,
     celldino_weights_path: str | None = None,
+    morphem_model_name: str | None = None,
     dinov3_preprocess_version: str | None = None,
     dynaclr_preprocess_version: str | None = None,
     celldino_preprocess_version: str | None = None,
+    morphem_preprocess_version: str | None = None,
 ) -> _CacheContext:
     """Open and validate the *side*-specific artifact cache for the run.
 
@@ -196,8 +205,11 @@ def init_cache_context(
     celldino_weights_path
         CELL-DINO ``.pth`` state_dict path; ``None`` when the CELL-DINO
         backbone is not configured.
+    morphem_model_name
+        MorphEm HuggingFace id (model-name-keyed cache, like DINOv3);
+        ``None`` when the MorphEm backbone is not configured.
     dinov3_preprocess_version, dynaclr_preprocess_version,
-    celldino_preprocess_version
+    celldino_preprocess_version, morphem_preprocess_version
         Per-extractor preprocess-recipe version tags (e.g.
         ``"self_normalize_v1"``). On a known mismatch against the cached
         manifest entry, the corresponding ``force_recompute.<side>_<kind>``
@@ -254,6 +266,9 @@ def init_cache_context(
             celldino_preprocess_version = (
                 (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
             )
+            morphem_preprocess_version = (
+                (morphem_preprocess_version + focus_tag) if morphem_preprocess_version else None
+            )
     # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
     # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
     # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
@@ -291,9 +306,11 @@ def init_cache_context(
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
         celldino_weights_sha12=celldino_weights_sha12,
+        morphem_model_name=morphem_model_name,
         dinov3_preprocess_version=dinov3_preprocess_version,
         dynaclr_preprocess_version=dynaclr_preprocess_version,
         celldino_preprocess_version=celldino_preprocess_version,
+        morphem_preprocess_version=morphem_preprocess_version,
     )
 
     if cache_dir is None:
@@ -390,6 +407,12 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         ),
         ("dynaclr", "dynaclr_features", ctx.dynaclr_preprocess_version, ctx.dynaclr_ckpt_sha12),
         ("celldino", "celldino_features", ctx.celldino_preprocess_version, ctx.celldino_weights_sha12),
+        (
+            "morphem",
+            "morphem_features",
+            ctx.morphem_preprocess_version,
+            feature_slug(ctx.morphem_model_name) if ctx.morphem_model_name is not None else None,
+        ),
     ]
     for kind, section_key, current_version, sub_key in checks:
         if current_version is None or sub_key is None:
@@ -530,6 +553,16 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
                     "patch_size": ctx.patch_size,
                     **ctx.source_tag,
                 },
+                (),
+            )
+        )
+    if ctx.morphem_model_name is not None:
+        checks.append(
+            (
+                "morphem",
+                f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]",
+                artifacts.get("morphem_features", {}).get(feature_slug(ctx.morphem_model_name)),
+                {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
                 (),
             )
         )
@@ -1159,6 +1192,23 @@ def _deep_feature_cache_metadata(
         }
         if ctx.celldino_preprocess_version is not None:
             entry["preprocess_version"] = ctx.celldino_preprocess_version
+    elif kind == "morphem":
+        if ctx.morphem_model_name is None:
+            raise ValueError("morphem_model_name is required for MorphEm feature caching")
+        force_key = f"{ctx.side}_morphem"
+        artifact_label = f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]"
+        cache_kwargs = {"model_name": ctx.morphem_model_name}
+        slug = feature_slug(ctx.morphem_model_name)
+        manifest_keys = ["morphem_features", slug]
+        entry = {
+            "path": f"features/morphem/{slug}.zarr",
+            "model_name": ctx.morphem_model_name,
+            "patch_size": ctx.patch_size,
+            **ctx.source_tag,
+            "built_at": built_at_now(),
+        }
+        if ctx.morphem_preprocess_version is not None:
+            entry["preprocess_version"] = ctx.morphem_preprocess_version
     else:
         raise ValueError(f"Unknown deep-feature kind: {kind!r}")
     return force_key, artifact_label, cache_kwargs, manifest_keys, entry

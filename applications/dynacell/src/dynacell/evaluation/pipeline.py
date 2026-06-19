@@ -139,6 +139,7 @@ def _fov_pred_features_per_t(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    morphem_feature_extractor,
     patch_size: int,
     spacing,
     z_slabs: list[slice | None] | None = None,
@@ -185,6 +186,19 @@ def _fov_pred_features_per_t(
                 if celldino_feature_extractor is not None
                 else None
             ),
+            "morphem": (
+                fov_deep_features(
+                    pred_cache_ctx,
+                    pos_name,
+                    predict,
+                    cell_segmentation,
+                    morphem_feature_extractor,
+                    "morphem",
+                    z_slabs=z_slabs,
+                )
+                if morphem_feature_extractor is not None
+                else None
+            ),
         }
     t_count = predict.shape[0]
     # Single per-t pass: build crops once per timepoint, fan out to every
@@ -194,6 +208,7 @@ def _fov_pred_features_per_t(
     dinov3: list[np.ndarray] = []
     dynaclr: list[np.ndarray] = []
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    morphem: list[np.ndarray] | None = [] if morphem_feature_extractor is not None else None
     use_gpu = pred_cache_ctx.use_gpu
     for t in range(t_count):
         cp.append(
@@ -213,7 +228,9 @@ def _fov_pred_features_per_t(
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
         if celldino is not None:
             celldino.append(features_from_crops(crops_t, celldino_feature_extractor))
-    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino}
+        if morphem is not None:
+            morphem.append(features_from_crops(crops_t, morphem_feature_extractor))
+    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino, "morphem": morphem}
 
 
 def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]]) -> None:
@@ -323,6 +340,7 @@ class FovResult:
     dinov3: _BackboneLists = field(default_factory=_BackboneLists)
     dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
     celldino: _BackboneLists = field(default_factory=_BackboneLists)
+    morphem: _BackboneLists = field(default_factory=_BackboneLists)
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
@@ -484,6 +502,7 @@ def _process_one_fov(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    morphem_feature_extractor,
     microssim_sim,
     predict_cached=None,
     target_cached=None,
@@ -639,6 +658,7 @@ def _process_one_fov(
     gt_dinov3_per_t = None
     gt_dynaclr_per_t = None
     gt_celldino_per_t = None
+    gt_morphem_per_t = None
     pred_per_t = None
     if config.compute_feature_metrics:
         with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
@@ -674,6 +694,17 @@ def _process_one_fov(
                     "celldino",
                     z_slabs=z_slabs,
                 )
+        if morphem_feature_extractor is not None:
+            with region_timer("deep_gt_morphem", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_morphem_per_t = fov_deep_features(
+                    cache_ctx,
+                    pos_name_pred,
+                    target,
+                    cell_segmentation,
+                    morphem_feature_extractor,
+                    "morphem",
+                    z_slabs=z_slabs,
+                )
         with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             pred_per_t = _fov_pred_features_per_t(
                 pred_cache_ctx,
@@ -683,6 +714,7 @@ def _process_one_fov(
                 dinov3_feature_extractor,
                 dynaclr_feature_extractor,
                 celldino_feature_extractor,
+                morphem_feature_extractor,
                 config.feature_metrics.patch_size,
                 config.pixel_metrics.spacing,
                 z_slabs=z_slabs,
@@ -697,6 +729,7 @@ def _process_one_fov(
     dinov3 = _BackboneLists()
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
+    morphem = _BackboneLists()
 
     # Bulk-upload predict/target once per FOV so compute_pixel_metrics' per-T
     # ascupy is a no-op via cupy-on-cupy. mask / feature / microssim paths
@@ -777,6 +810,7 @@ def _process_one_fov(
                 pred_dinov3 = pred_per_t["dinov3"][t]
                 pred_dynaclr = pred_per_t["dynaclr"][t]
                 pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
+                pred_morphem = pred_per_t["morphem"][t] if pred_per_t["morphem"] is not None else None
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                 if pred_cp.size and gt_cp_t.size:
                     pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
@@ -791,12 +825,18 @@ def _process_one_fov(
                     pairwise_metrics.update(
                         compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
                     )
+                if pred_morphem is not None:
+                    pairwise_metrics.update(
+                        compute_feature_similarity_pairwise(pred_morphem, gt_morphem_per_t[t], "MorphEm")
+                    )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
                 _extend_backbone(cp, pred_cp, gt_cp_t, pos_name_pred, t)
                 _extend_backbone(dinov3, pred_dinov3, gt_dinov3_per_t[t], pos_name_pred, t)
                 _extend_backbone(dynaclr, pred_dynaclr, gt_dynaclr_per_t[t], pos_name_pred, t)
                 gt_celldino_t = gt_celldino_per_t[t] if pred_celldino is not None else None
                 _extend_backbone(celldino, pred_celldino, gt_celldino_t, pos_name_pred, t)
+                gt_morphem_t = gt_morphem_per_t[t] if pred_morphem is not None else None
+                _extend_backbone(morphem, pred_morphem, gt_morphem_t, pos_name_pred, t)
 
         maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
 
@@ -830,6 +870,7 @@ def _process_one_fov(
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
         timings=get_timings()[timings_start:],
     )
 
@@ -913,6 +954,7 @@ def _worker_setup(config: DictConfig) -> None:
             "dinov3": models.dinov3,
             "dynaclr": models.dynaclr,
             "celldino": models.celldino,
+            "morphem": models.morphem,
             "cache_ctx": cache_ctx,
             "pred_cache_ctx": pred_cache_ctx,
         }
@@ -1010,6 +1052,7 @@ def _worker_run_fov(
             state["dinov3"],
             state["dynaclr"],
             state["celldino"],
+            state["morphem"],
             microssim_sim,
         )
 
@@ -1079,6 +1122,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         dinov3_feature_extractor = models.dinov3
         dynaclr_feature_extractor = models.dynaclr
         celldino_feature_extractor = models.celldino
+        morphem_feature_extractor = models.morphem
 
         cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
 
@@ -1220,6 +1264,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 }
                 if celldino_feature_extractor is not None:
                     deep_extractors["celldino"] = celldino_feature_extractor
+                if morphem_feature_extractor is not None:
+                    deep_extractors["morphem"] = morphem_feature_extractor
                 flush_threshold = int(
                     OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256)
                 )
@@ -1325,6 +1371,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dinov3_feature_extractor,
                         dynaclr_feature_extractor,
                         celldino_feature_extractor,
+                        morphem_feature_extractor,
                         microssim_sim,
                         predict_cached=cached_pair[0],
                         target_cached=cached_pair[1],
@@ -1433,6 +1480,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
             if celldino_feature_extractor is not None:
                 deep_tracks.append(("CellDINO", "celldino"))
+            if morphem_feature_extractor is not None:
+                deep_tracks.append(("MorphEm", "morphem"))
             for display_name, key in deep_tracks:
                 bb = parent_lists[key]
                 if bb.pred_feats:
@@ -1484,6 +1533,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
             if celldino_feature_extractor is not None:
                 expected_prefixes.append("CellDINO")
+            if morphem_feature_extractor is not None:
+                expected_prefixes.append("MorphEm")
             for name in expected_prefixes:
                 if f"Dataset_{name}_FID" not in dataset_row:
                     raw = {
@@ -1497,6 +1548,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             embedding_groups: dict[str, tuple] = {}
             for key in _BACKBONE_KEYS:
                 if key == "celldino" and celldino_feature_extractor is None:
+                    continue
+                if key == "morphem" and morphem_feature_extractor is None:
                     continue
                 bb = parent_lists[key]
                 embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
