@@ -80,35 +80,41 @@ def _make_wandb_fit_config(name: str = "FNet3D_iPSC_SEC61B") -> Namespace:
 def test_configure_wandb_logger_stamps_name_and_defaults_group(monkeypatch):
     monkeypatch.delenv("VISCY_WANDB_GROUP", raising=False)
     monkeypatch.delenv("VISCY_WANDB_LAUNCH", raising=False)
+    monkeypatch.delenv("WANDB_RUN_GROUP", raising=False)
     config = _make_wandb_fit_config()
 
     _configure_wandb_logger(config, "fit", now=datetime(2026, 4, 1, 14, 30, 45))
 
     init_args = config["fit"]["trainer"]["logger"]["init_args"]
     assert init_args["name"] == "20260401-143045_FNet3D_iPSC_SEC61B"
-    assert init_args["group"] == "FNet3D_iPSC_SEC61B"
+    # group is now passed via WANDB_RUN_GROUP env var, not init_args
+    assert "group" not in init_args
+    import os
+    assert os.environ.get("WANDB_RUN_GROUP") == "FNet3D_iPSC_SEC61B"
 
 
 def test_configure_wandb_logger_prefers_launch_group(monkeypatch):
     monkeypatch.delenv("VISCY_WANDB_GROUP", raising=False)
     monkeypatch.setenv("VISCY_WANDB_LAUNCH", "20260401-augfix-r1")
+    monkeypatch.delenv("WANDB_RUN_GROUP", raising=False)
     config = _make_wandb_fit_config()
 
     _configure_wandb_logger(config, "fit", now=datetime(2026, 4, 1, 14, 30, 45))
 
-    init_args = config["fit"]["trainer"]["logger"]["init_args"]
-    assert init_args["group"] == "20260401-augfix-r1"
+    import os
+    assert os.environ.get("WANDB_RUN_GROUP") == "20260401-augfix-r1"
 
 
 def test_configure_wandb_logger_prefers_explicit_group_override(monkeypatch):
     monkeypatch.setenv("VISCY_WANDB_GROUP", "sec61b-restart-r2")
     monkeypatch.setenv("VISCY_WANDB_LAUNCH", "20260401-augfix-r1")
+    monkeypatch.delenv("WANDB_RUN_GROUP", raising=False)
     config = _make_wandb_fit_config()
 
     _configure_wandb_logger(config, "fit", now=datetime(2026, 4, 1, 14, 30, 45))
 
-    init_args = config["fit"]["trainer"]["logger"]["init_args"]
-    assert init_args["group"] == "sec61b-restart-r2"
+    import os
+    assert os.environ.get("WANDB_RUN_GROUP") == "sec61b-restart-r2"
 
 
 def test_configure_wandb_logger_does_not_double_prefix(monkeypatch):

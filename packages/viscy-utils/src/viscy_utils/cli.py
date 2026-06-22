@@ -59,11 +59,10 @@ def _configure_wandb_logger(
     run_timestamp = (now or datetime.now()).strftime(_WANDB_RUN_TIMESTAMP_FORMAT)
     init_args["name"] = _prefix_wandb_run_name(base_name, run_timestamp)
 
-    group_override = os.getenv("VISCY_WANDB_GROUP") or os.getenv("VISCY_WANDB_LAUNCH")
-    if group_override:
-        init_args["group"] = group_override
-    elif init_args.get("group") is None:
-        init_args["group"] = base_name
+    # group and job_type are **kwargs in WandbLogger (not declared params), so
+    # jsonargparse rejects them if set in init_args. Pass group via env var instead.
+    group = os.getenv("VISCY_WANDB_GROUP") or os.getenv("VISCY_WANDB_LAUNCH") or base_name
+    os.environ.setdefault("WANDB_RUN_GROUP", group)
 
 
 class VisCyCLI(LightningCLI):
