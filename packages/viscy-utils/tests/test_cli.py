@@ -87,7 +87,6 @@ def test_configure_wandb_logger_stamps_name_and_defaults_group(monkeypatch):
     init_args = config["fit"]["trainer"]["logger"]["init_args"]
     assert init_args["name"] == "20260401-143045_FNet3D_iPSC_SEC61B"
     assert init_args["group"] == "FNet3D_iPSC_SEC61B"
-    assert init_args["job_type"] == "fit"
 
 
 def test_configure_wandb_logger_prefers_launch_group(monkeypatch):

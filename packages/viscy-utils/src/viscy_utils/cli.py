@@ -59,9 +59,6 @@ def _configure_wandb_logger(
     run_timestamp = (now or datetime.now()).strftime(_WANDB_RUN_TIMESTAMP_FORMAT)
     init_args["name"] = _prefix_wandb_run_name(base_name, run_timestamp)
 
-    if init_args.get("job_type") is None and subcommand is not None:
-        init_args["job_type"] = subcommand
-
     group_override = os.getenv("VISCY_WANDB_GROUP") or os.getenv("VISCY_WANDB_LAUNCH")
     if group_override:
         init_args["group"] = group_override
