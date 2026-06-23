@@ -1,6 +1,7 @@
 """Callback for writing embeddings to zarr store."""
 
 import logging
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Sequence
 
@@ -166,6 +167,11 @@ def write_embedding_dataset(
         elif hasattr(s, "cat") and isinstance(s.cat.categories.dtype, pd.StringDtype):
             ultrack_indices[col] = s.cat.rename_categories(s.cat.categories.astype(object))
 
+    # obs_names are an opaque, unique handle — never referenced directly (cell identity
+    # lives in the obs columns). Random UUIDs stay unique within a store and across any
+    # number of concatenated stores, so consumers never need obs_names_make_unique().
+    ultrack_indices.index = [str(uuid.uuid4()) for _ in range(len(ultrack_indices))]
+
     if embedding_key == "projections":
         if projections is None:
             raise ValueError("embedding_key='projections' requires projections to be provided.")
@@ -273,7 +279,7 @@ class EmbeddingWriter(BasePredictionWriter):
         """Write predictions and dimensionality reductions to a zarr store."""
         features = _move_and_stack_embeddings(predictions, "features")
         projections = _move_and_stack_embeddings(predictions, "projections")
-        ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
+        ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions], ignore_index=True)
 
         write_embedding_dataset(
             output_path=self.output_path,
