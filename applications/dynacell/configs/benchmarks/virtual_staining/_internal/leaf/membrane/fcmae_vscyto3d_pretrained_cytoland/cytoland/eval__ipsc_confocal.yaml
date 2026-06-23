@@ -14,8 +14,6 @@ compute_instance_ap: true
 segmentation:
   backend: cellpose_watershed
   nuclei_channel_name: Nuclei
-  watershed:
-    subtract_nuclei: false
 
 save:
   save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_vscyto3d_cytoland_membrane

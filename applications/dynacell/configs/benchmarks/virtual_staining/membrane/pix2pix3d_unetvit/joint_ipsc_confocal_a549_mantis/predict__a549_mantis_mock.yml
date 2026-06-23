@@ -14,6 +14,10 @@ benchmark:
   predict_set: a549_mantis_caax_mock
   model_name: pix2pix3d_unetvit
   experiment_id: membrane__joint_ipsc_confocal_a549_mantis__pix2pix3d_unetvit__a549_mantis_caax_mock
+  # A549 manifest keys membrane by gene (`caax`); override the iPSC-side
+  # `membrane` target from targets/membrane.yml so the resolver finds caax.
+  dataset_ref:
+    target: caax
 
 model:
   init_args:

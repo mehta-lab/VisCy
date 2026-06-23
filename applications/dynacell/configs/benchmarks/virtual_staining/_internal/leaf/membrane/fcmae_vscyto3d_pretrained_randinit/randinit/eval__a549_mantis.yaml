@@ -17,8 +17,6 @@ compute_instance_ap: true
 segmentation:
   backend: cellpose_watershed
   nuclei_channel_name: Nuclei
-  watershed:
-    subtract_nuclei: false
 
 conditions:
   - name: a549_mock

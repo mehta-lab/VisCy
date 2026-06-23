@@ -29,7 +29,7 @@ target_name: ???
 segmentation:
   backend: supermodel  # supermodel | cellpose (nucleus) | cellpose_watershed (whole-cell)
   dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
-  slice_selection: frac    # frac | sharpest | focus — picks the 2d plane (dimension=2d)
+  slice_selection: focus   # frac | sharpest | focus — picks the 2d plane (dimension=2d)
   slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
   # slice_selection=focus picks the in-focus plane per FOV (single slice, no slab).
   # The plane comes from precomputed focus_slice zattrs when present, else it is
@@ -106,7 +106,7 @@ feature_metrics:
   cp:
     norm: {p_lo: 1.0, p_hi: 99.0}   # robust percentile-clip before extraction
     glcm:                           # opt-in Haralick texture; needs cubic.feature.glcm_features
-      enabled: false
+      enabled: true
       levels: 32
       distances: [1]
   # In-focus slab for the 2D deep-feature crops + per-cell similarity. When
@@ -116,7 +116,7 @@ feature_metrics:
   # taken from GT and applied to the prediction (slice-by-slice). Does NOT affect
   # CP regionprops (those stay 3D).
   focus_slab:
-    enabled: false
+    enabled: true
     halfwidth: 2          # 2*halfwidth+1 planes (h=1-2 ≈ 3-5 planes is the sweet spot)
     channel_name: Phase3D
 

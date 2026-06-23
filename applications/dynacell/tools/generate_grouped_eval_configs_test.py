@@ -499,8 +499,9 @@ def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
     assert leaf["compute_feature_metrics"] is True
     assert leaf["segmentation"]["backend"] == "cellpose_watershed"
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
-    # Whole-cell AP must score the full cell, not the carved cytoplasm shell.
-    assert leaf["segmentation"]["watershed"]["subtract_nuclei"] is False
+    # Carved is canonical (6aedf52f): the leaf must NOT override subtract_nuclei,
+    # so both semantic + AP inherit the eval.yaml carved default (subtract_nuclei=true).
+    assert "watershed" not in leaf["segmentation"]
     for block in leaf["conditions"]:
         nuclei_gt = block["io"]["nuclei_gt_path"]
         assert "H2B" in nuclei_gt and nuclei_gt.endswith(".ozx")
