@@ -1,7 +1,6 @@
 """VisCy Lightning CLI with custom defaults."""
 
 import atexit
-import importlib.util
 import logging
 import os
 import re
@@ -16,7 +15,7 @@ import yaml
 from jsonargparse import Namespace, lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
 from lightning.pytorch.cli import LightningCLI
-from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 
 from viscy_utils.compose import load_composed_config
 from viscy_utils.trainer import VisCyTrainer
@@ -24,20 +23,6 @@ from viscy_utils.trainer import VisCyTrainer
 _WANDB_LOGGER_CLASS_PATH = "lightning.pytorch.loggers.WandbLogger"
 _WANDB_RUN_NAME_PREFIX = re.compile(r"^\d{8}-\d{6}_")
 _WANDB_RUN_TIMESTAMP_FORMAT = r"%Y%m%d-%H%M%S"
-
-
-def _default_logger():
-    """Return the default ``trainer.logger``: W&B when installed, else TensorBoard.
-
-    ``wandb`` is an optional dependency (the ``eval`` extra), so a base install
-    must not default to a logger it cannot instantiate -- otherwise every
-    trainer-building subcommand (``predict``, ``preprocess``, ``export``, ...)
-    fails at class instantiation. ``tensorboard`` is a core dependency, so it is
-    a safe fallback that keeps the CLI usable without the extra.
-    """
-    if importlib.util.find_spec("wandb") is not None:
-        return lazy_instance(WandbLogger)
-    return lazy_instance(TensorBoardLogger, save_dir=".")
 
 
 def _prefix_wandb_run_name(base_name: str, run_timestamp: str) -> str:
@@ -99,10 +84,10 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
-        """Set default logger (W&B when installed, else TensorBoard)."""
+        """Set default logger."""
         parser.set_defaults(
             {
-                "trainer.logger": _default_logger(),
+                "trainer.logger": lazy_instance(WandbLogger),
             }
         )
 
