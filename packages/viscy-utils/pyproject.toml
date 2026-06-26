@@ -44,7 +44,7 @@ dependencies = [
   "tensorstore",
   "torch>=2.10",
   "viscy-data",
-  "wandb",
+  "wandb>=0.12.10",
   "xarray",
 ]
 
