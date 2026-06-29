@@ -553,9 +553,7 @@ class TripletDataModule(HCSDataModule):
         self.z_range = slice(*z_range) if z_range is not None else None
         self._z_extraction_window = z_extraction_window
         self._z_focus_offset = z_focus_offset
-        self._focus_channel = focus_channel or (
-            source_channel[0] if isinstance(source_channel, (list, tuple)) else source_channel
-        )
+        self._focus_channel = focus_channel or self.source_channel[0]
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
         self._include_wells = fit_include_wells
