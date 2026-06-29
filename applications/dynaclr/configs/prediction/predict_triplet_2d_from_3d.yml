@@ -1,0 +1,81 @@
+# Sample triplet predict config: feed a 3D OME-Zarr to a 2D model.
+#
+# Demonstrates the TripletDataModule options that avoid materializing a separate
+# 2D MIP dataset:
+#   - z_reduction: collapse the extracted z_range window to a single slice
+#     (label-free channels -> center slice, others -> max projection).
+#   - reference_pixel_size: rescale each patch to the model's training pixel size
+#     when the inference dataset was acquired at a different magnification.
+#
+# See docs/DAGs/inference_triplet.md for the full pipeline.
+#
+# TODO: point to the path to save the embeddings
+# TODO: point to the path to the data
+# TODO: point to the path to the tracks
+# TODO: point to the path to the checkpoint
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: 32-true
+  inference_mode: true
+  logger: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 10
+    - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: #TODO point to the path to save the embeddings (e.g. /embeddings/embeddings.zarr)
+        embedding_key: features      # "projections" for frozen-backbone MLP heads
+        overwrite: true
+        pca_kwargs: null             # reductions left to a later step (dynaclr reduce-dimensionality)
+        phate_kwargs: null
+        umap_kwargs: null
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        in_stack_depth: 1            # 2D model — pairs with data.z_reduction below
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0          # stochastic depth off at inference
+    example_input_array_shape: [1, 1, 1, 160, 160]
+data:
+  class_path: viscy_data.triplet.TripletDataModule
+  init_args:
+    data_path: #TODO point to the path to the data (e.g. /registered_test.zarr)
+    tracks_path: #TODO point to the path to the tracks (e.g. /track_test.zarr)
+    source_channel:
+      - Phase3D
+    z_range: [15, 45]                # 3D window; collapsed to 1 slice by z_reduction.
+                                     # Center it on the focus plane to control which planes collapse.
+    z_reduction: mip                 # "mip" (max projection) or "center" (center slice).
+                                     # Label-free channels always take the center slice;
+                                     # others are max-projected. This sets the fallback only.
+    reference_pixel_size: 0.1494     # µm/px of the model's TRAINING dataset. Remove (or set
+                                     # null) when the inference dataset is at the same resolution.
+    initial_yx_patch_size: [160, 160]  # ignored when reference_pixel_size is set (computed from ratio)
+    final_yx_patch_size: [160, 160]  # patch size fed to the model after rescale + z_reduction
+    batch_size: 32
+    num_workers: 0                   # REQUIRED for predict (avoids zarr-fork deadlock)
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    # augmentations omitted: predict must be deterministic. The datamodule still
+    # applies normalizations + reference_pixel_size rescale + z_reduction at predict time.
+return_predictions: false
+ckpt_path: #TODO point to the path to the checkpoint (e.g. /checkpoints/epoch=94-step=2375.ckpt)
