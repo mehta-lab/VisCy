@@ -577,7 +577,7 @@ class TripletDataModule(HCSDataModule):
         if reference_pixel_size is not None:
             inference_pixel_size = _read_pixel_size(data_path)
             scale = reference_pixel_size / inference_pixel_size
-            self.initial_yx_patch_size = tuple(round(s * scale) for s in final_yx_patch_size)
+            self.initial_yx_patch_size = tuple(max(1, int(round(s * scale))) for s in final_yx_patch_size)
             _logger.info(
                 f"Pixel size rescaling enabled: "
                 f"reference={reference_pixel_size:.4f} µm/px, "
