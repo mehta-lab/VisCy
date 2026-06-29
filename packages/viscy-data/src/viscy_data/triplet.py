@@ -126,7 +126,7 @@ def _resolve_per_fov_z_ranges(
         fov_stats = pos.zattrs.get("focus_slice", {}).get(focus_channel, {}).get("fov_statistics", {})
         z_focus_mean = fov_stats.get("z_focus_mean")
         z_ranges[fov_name] = _focus_window(z_focus_mean, z_total, z_extraction_window, z_focus_offset)
-        _logger.info(
+        _logger.debug(
             "FOV '%s': focus-centered z_range=%s (z_total=%d, z_focus_mean=%s, window=%d).",
             fov_name,
             (z_ranges[fov_name].start, z_ranges[fov_name].stop),
