@@ -1,8 +1,10 @@
 import pandas as pd
+import torch
 from iohub import open_ome_zarr
-from pytest import mark
+from pytest import mark, raises
 
 from viscy_data import TripletDataModule, TripletDataset
+from viscy_data.channel_utils import parse_channel_name
 
 
 @mark.parametrize("include_wells", [None, ["A/1", "A/2", "B/1"]])
@@ -105,6 +107,186 @@ def test_datamodule_z_window_size(preprocessed_hcs_dataset, tracks_hcs_dataset, 
             expected_z_shape,
             *yx_patch_size,
         )
+
+
+def test_z_range_xor_extraction_window(preprocessed_hcs_dataset, tracks_hcs_dataset):
+    """Exactly one of z_range / z_extraction_window must be provided."""
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+    common = dict(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        num_workers=0,
+    )
+    with raises(ValueError, match="exactly one"):
+        TripletDataModule(z_range=None, z_extraction_window=None, **common)
+    with raises(ValueError, match="exactly one"):
+        TripletDataModule(z_range=(4, 9), z_extraction_window=8, **common)
+
+
+@mark.parametrize("z_focus_offset", [0.5, 0.3])
+def test_focus_centered_z_range(tmp_path_factory, preprocessed_hcs_dataset, tracks_hcs_dataset, z_focus_offset):
+    """z_extraction_window resolves a per-FOV focus-centered z_range from zattrs.
+
+    Writes a different per-FOV ``z_focus_mean`` to each position's ``focus_slice``
+    ``fov_statistics`` (on a private copy of the session-scoped dataset), then
+    checks each FOV gets its own window of ``z_extraction_window`` slices centered
+    on its focus plane with ``z_focus_offset`` of the window below it.
+    """
+    import shutil
+
+    z_extraction_window = 5
+    # Copy the session-scoped dataset so writing focus_slice does not leak.
+    data_path = tmp_path_factory.mktemp("focus") / "data.zarr"
+    shutil.copytree(preprocessed_hcs_dataset, data_path)
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+        fov_names = [name for name, _ in dataset.positions()]
+        z_total = dataset[fov_names[0]]["0"].shape[2]
+    focus_channel = channel_names[0]
+
+    # Give each FOV a distinct focus plane so per-FOV resolution is exercised.
+    per_fov_focus = {fov: float(3 + i % (z_total - 4)) for i, fov in enumerate(fov_names)}
+    with open_ome_zarr(data_path, mode="r+") as dataset:
+        for fov, pos in dataset.positions():
+            pos.zattrs["focus_slice"] = {focus_channel: {"fov_statistics": {"z_focus_mean": per_fov_focus[fov]}}}
+
+    def expected_window(z_focus_mean):
+        z_center = round(z_focus_mean)
+        z_below = int(z_extraction_window * z_focus_offset)
+        z_start = max(0, z_center - z_below)
+        z_end = min(z_total, z_start + z_extraction_window)
+        return slice(max(0, z_end - z_extraction_window), z_end)
+
+    dm = TripletDataModule(
+        data_path=data_path,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_extraction_window=z_extraction_window,
+        z_focus_offset=z_focus_offset,
+        focus_channel=focus_channel,
+        initial_yx_patch_size=(32, 32),
+        final_yx_patch_size=(32, 32),
+        num_workers=0,
+        batch_size=4,
+        return_negative=True,
+    )
+    assert dm.z_range is None  # explicit z_range not given; resolved per-FOV at setup
+    dm.setup(stage="fit")
+    resolved = dm.train_dataset.z_range
+    assert isinstance(resolved, dict)
+    # Every resolved FOV window matches its own focus plane and has uniform width.
+    for fov, z_slice in resolved.items():
+        assert z_slice == expected_window(per_fov_focus[fov.strip("/")]), f"FOV {fov} window mismatch"
+        assert z_slice.stop - z_slice.start == z_extraction_window
+    for batch in dm.train_dataloader():
+        dm.on_after_batch_transfer(batch, 0)
+        assert batch["anchor"].shape[2] == z_extraction_window
+        break
+        break
+
+
+@mark.parametrize("z_reduction", ["mip", "center"])
+def test_datamodule_z_reduction(preprocessed_hcs_dataset, tracks_hcs_dataset, z_reduction):
+    """z_reduction collapses the z_range window to a single slice per channel.
+
+    Label-free channels (Phase, Retardance) take the center slice; all other
+    channels (GFP, DAPI) are max-projected, regardless of ``z_reduction``,
+    which only sets the fallback strategy.
+    """
+    z_range = (4, 9)
+    yx_patch_size = [32, 32]
+    batch_size = 4
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+    dm = TripletDataModule(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_range=z_range,
+        initial_yx_patch_size=(32, 32),
+        final_yx_patch_size=(32, 32),
+        num_workers=0,
+        batch_size=batch_size,
+        return_negative=True,
+        z_reduction=z_reduction,
+    )
+    dm.setup(stage="fit")
+    labelfree = {ch for ch in channel_names if parse_channel_name(ch)["channel_type"] == "labelfree"}
+    assert labelfree, "fixture must contain at least one label-free channel"
+    assert set(channel_names) - labelfree, "fixture must contain at least one non-label-free channel"
+    z_window_size = z_range[1] - z_range[0]
+    center = z_window_size // 2
+    for batch in dm.train_dataloader():
+        # Snapshot the raw extracted patch before transforms reduce it.
+        raw = batch["anchor"].clone()
+        dm.on_after_batch_transfer(batch, 0)
+        reduced = batch["anchor"]
+        assert reduced.shape == (batch_size, len(channel_names), 1, *yx_patch_size)
+        for ci, ch in enumerate(channel_names):
+            mip = raw[:, ci].amax(dim=1, keepdim=True)
+            center_slice = raw[:, ci, center : center + 1]
+            if ch in labelfree:
+                assert torch.equal(reduced[:, ci], center_slice), f"label-free channel {ch} should be center-sliced"
+                # Random Z-stack: center slice must differ from MIP, so a strategy
+                # swap (center vs mip) would be caught rather than passing silently.
+                assert not torch.equal(reduced[:, ci], mip), f"label-free channel {ch} was max-projected, not centered"
+            else:
+                assert torch.equal(reduced[:, ci], mip), f"non-label-free channel {ch} should be max-projected"
+                assert not torch.equal(reduced[:, ci], center_slice), (
+                    f"non-label-free channel {ch} was centered, not MIP"
+                )
+
+
+def test_z_reduction_runs_on_normalized_stack(preprocessed_hcs_dataset, tracks_hcs_dataset):
+    """Z-reduction must run after normalization (production order: normalize -> reduce).
+
+    The fixture's ``dataset_statistics`` normalization is a fixed monotone-increasing
+    affine ``(x - 0.5) / (1/sqrt(12))``, which commutes with both center-slice and
+    MIP. So the datamodule output (normalize-then-reduce) must equal the same affine
+    applied to the reduced raw stack. A bug that reduced *before* normalizing, or
+    skipped normalization, would change the values and fail this check.
+    """
+    import numpy as np
+
+    from viscy_transforms import NormalizeSampled
+
+    z_range = (4, 9)
+    batch_size = 4
+    mean, std = 0.5, 1 / np.sqrt(12)  # matches preprocessed_hcs_dataset fixture
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+    normalizations = [
+        NormalizeSampled(keys=list(channel_names), level="dataset_statistics", subtrahend="mean", divisor="std")
+    ]
+    dm = TripletDataModule(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_range=z_range,
+        initial_yx_patch_size=(32, 32),
+        final_yx_patch_size=(32, 32),
+        num_workers=0,
+        batch_size=batch_size,
+        return_negative=True,
+        normalizations=normalizations,
+        z_reduction="mip",
+    )
+    dm.setup(stage="fit")
+    labelfree = {ch for ch in channel_names if parse_channel_name(ch)["channel_type"] == "labelfree"}
+    center = (z_range[1] - z_range[0]) // 2
+    for batch in dm.train_dataloader():
+        raw = batch["anchor"].clone()
+        dm.on_after_batch_transfer(batch, 0)
+        reduced = batch["anchor"]
+        for ci, ch in enumerate(channel_names):
+            if ch in labelfree:
+                reduced_raw = raw[:, ci, center : center + 1]
+            else:
+                reduced_raw = raw[:, ci].amax(dim=1, keepdim=True)
+            expected = (reduced_raw - mean) / (std + 1e-8)
+            assert torch.allclose(reduced[:, ci], expected, atol=1e-5), f"channel {ch} not reduced on normalized stack"
 
 
 def test_filter_anchors_time_interval_any(preprocessed_hcs_dataset, tracks_with_gaps_dataset):

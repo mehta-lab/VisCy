@@ -59,6 +59,84 @@ def _read_pixel_size(data_path: str | Path) -> float:
     raise ValueError(f"No positions found in {data_path}")
 
 
+def _focus_window(z_focus_mean: float | None, z_total: int, z_extraction_window: int, z_focus_offset: float) -> slice:
+    """Compute a fixed-width Z window centered on a focus plane.
+
+    Parameters
+    ----------
+    z_focus_mean : float or None
+        Focus plane (slice index). When ``None``, the window is centered on
+        ``z_total // 2``.
+    z_total : int
+        Total number of Z slices available in the FOV.
+    z_extraction_window : int
+        Window width (clamped to ``z_total``).
+    z_focus_offset : float
+        Fraction of the window placed below the focus plane (0.5 = symmetric).
+
+    Returns
+    -------
+    slice
+        ``slice(z_start, z_end)`` with ``z_end - z_start == min(z_extraction_window, z_total)``.
+    """
+    z_center = int(round(z_focus_mean)) if z_focus_mean is not None else z_total // 2
+    effective_extract = min(z_extraction_window, z_total)
+    z_below = int(effective_extract * z_focus_offset)
+    z_start = max(0, z_center - z_below)
+    z_end = min(z_total, z_start + effective_extract)
+    z_start = max(0, z_end - effective_extract)
+    return slice(z_start, z_end)
+
+
+def _resolve_per_fov_z_ranges(
+    positions: "list[Position]",
+    z_extraction_window: int,
+    z_focus_offset: float,
+    focus_channel: str,
+) -> dict[str, slice]:
+    """Resolve a per-FOV focus-centered Z window for each position.
+
+    Each FOV's window is centered on its own
+    ``zattrs["focus_slice"][focus_channel]["fov_statistics"]["z_focus_mean"]``
+    (the per-FOV focus plane used by the cell-index pipeline). All windows have
+    the same width (``z_extraction_window``), so the extracted patch Z-size is
+    uniform across FOVs. FOVs lacking a recorded focus fall back to the
+    geometric center (``z_total // 2``).
+
+    Parameters
+    ----------
+    positions : list[Position]
+        Open OME-Zarr positions.
+    z_extraction_window : int
+        Window width.
+    z_focus_offset : float
+        Fraction of the window placed below the focus plane.
+    focus_channel : str
+        Channel name to look up in each FOV's ``focus_slice`` metadata.
+
+    Returns
+    -------
+    dict[str, slice]
+        Map from stripped FOV name to its ``slice(z_start, z_end)``.
+    """
+    z_ranges: dict[str, slice] = {}
+    for pos in positions:
+        fov_name = pos.zgroup.name.strip("/")
+        z_total = pos["0"].shape[2]
+        fov_stats = pos.zattrs.get("focus_slice", {}).get(focus_channel, {}).get("fov_statistics", {})
+        z_focus_mean = fov_stats.get("z_focus_mean")
+        z_ranges[fov_name] = _focus_window(z_focus_mean, z_total, z_extraction_window, z_focus_offset)
+        _logger.info(
+            "FOV '%s': focus-centered z_range=%s (z_total=%d, z_focus_mean=%s, window=%d).",
+            fov_name,
+            (z_ranges[fov_name].start, z_ranges[fov_name].stop),
+            z_total,
+            z_focus_mean,
+            min(z_extraction_window, z_total),
+        )
+    return z_ranges
+
+
 def _default_tensorstore_config(cache_pool_bytes: int = 0) -> TensorStoreConfig:
     """Build a TensorStoreConfig with SLURM-aware concurrency."""
     cpus = os.environ.get("SLURM_CPUS_PER_TASK")
@@ -78,7 +156,7 @@ class TripletDataset(Dataset):
         tracks_tables: "list[pd.DataFrame]",
         channel_names: list[str],
         initial_yx_patch_size: tuple[int, int],
-        z_range: slice,
+        z_range: "slice | dict[str, slice]",
         fit: bool = True,
         predict_cells: bool = False,
         include_fov_names: list[str] | None = None,
@@ -98,8 +176,10 @@ class TripletDataset(Dataset):
             Input channel names
         initial_yx_patch_size : tuple[int, int]
             YX size of the initially sampled image patch
-        z_range : slice
-            Range of Z-slices
+        z_range : slice or dict[str, slice]
+            Range of Z-slices. A single ``slice`` applies to every FOV; a
+            ``dict`` maps each stripped FOV name to its own slice (per-FOV
+            focus-centered windows). All slices must have the same width.
         fit : bool, optional
             Fitting mode in which the full triplet will be sampled,
             only sample anchor if ``False``, by default True
@@ -141,6 +221,12 @@ class TripletDataset(Dataset):
         self.return_negative = return_negative
         self._tensorstores: dict[str, "ts.TensorStore"] = {}
 
+    def _fov_z_range(self, fov_name: str) -> slice:
+        """Return the Z slice for a FOV (per-FOV dict or shared single slice)."""
+        if isinstance(self.z_range, dict):
+            return self.z_range[fov_name.strip("/")]
+        return self.z_range
+
     def _get_tensorstore(self, position: Position) -> "ts.TensorStore":
         """Get cached tensorstore handle, opening via iohub's tensorstore impl on miss.
 
@@ -175,8 +261,9 @@ class TripletDataset(Dataset):
             tracks["fov_name"] = pos.zgroup.name.strip("/")
             tracks["global_track_id"] = tracks["fov_name"].str.cat(tracks["track_id"].astype(str), sep="_")
             image: ImageArray = pos["0"]
-            if self.z_range.stop > image.slices:
-                raise ValueError(f"Z range {self.z_range} exceeds image with Z={image.slices}")
+            z_range = self._fov_z_range(pos.zgroup.name)
+            if z_range.stop > image.slices:
+                raise ValueError(f"Z range {z_range} exceeds image with Z={image.slices}")
             y_range = (y_exclude, image.height - y_exclude)
             x_range = (x_exclude, image.width - x_exclude)
             # FIXME: Check if future time points are available after interval
@@ -254,7 +341,7 @@ class TripletDataset(Dataset):
         patch = image.oindex[
             time,
             [int(i) for i in self.channel_indices],
-            self.z_range,
+            self._fov_z_range(position.zgroup.name),
             slice(y_center - y_half, y_center + y_half),
             slice(x_center - x_half, x_center + x_half),
         ]
@@ -314,7 +401,10 @@ class TripletDataModule(HCSDataModule):
         data_path: str,
         tracks_path: str,
         source_channel: str | Sequence[str],
-        z_range: tuple[int, int],
+        z_range: tuple[int, int] | None = None,
+        z_extraction_window: int | None = None,
+        z_focus_offset: float = 0.5,
+        focus_channel: str | None = None,
         initial_yx_patch_size: tuple[int, int] = (512, 512),
         final_yx_patch_size: tuple[int, int] = (224, 224),
         split_ratio: float = 0.8,
@@ -336,6 +426,7 @@ class TripletDataModule(HCSDataModule):
         z_window_size: int | None = None,
         cache_pool_bytes: int = 0,
         reference_pixel_size: float | None = None,
+        z_reduction: Literal["mip", "center"] | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -347,8 +438,21 @@ class TripletDataModule(HCSDataModule):
             Tracks labels dataset path
         source_channel : str | Sequence[str]
             List of input channel names
-        z_range : tuple[int, int]
-            Range of valid z-slices
+        z_range : tuple[int, int] or None, optional
+            Explicit ``(z_start, z_end)`` slice range. Mutually exclusive with
+            ``z_extraction_window``: provide exactly one. When ``None``, the
+            range is resolved from the focus plane via ``z_extraction_window``.
+        z_extraction_window : int or None, optional
+            Number of Z slices to extract, centered on the plate's focus plane
+            (read from ``zattrs["focus_slice"]``). Mutually exclusive with
+            ``z_range``. By default ``None`` (use the explicit ``z_range``).
+        z_focus_offset : float, optional
+            Fraction of ``z_extraction_window`` placed below the focus plane,
+            by default 0.5 (symmetric). Only used with ``z_extraction_window``.
+        focus_channel : str or None, optional
+            Channel name whose ``focus_slice`` metadata centers the window.
+            Defaults to the first ``source_channel``. Only used with
+            ``z_extraction_window``.
         initial_yx_patch_size : tuple[int, int], optional
             YX size of the initially sampled image patch, by default (512, 512).
             Ignored when ``reference_pixel_size`` is set — the patch size is then
@@ -364,6 +468,17 @@ class TripletDataModule(HCSDataModule):
             physical area is covered. The extracted patch is then rescaled to
             ``final_yx_patch_size`` with bilinear interpolation. By default
             ``None`` (no rescaling).
+        z_reduction : {"mip", "center"} or None, optional
+            Collapse the extracted ``z_range`` window to a single Z-slice so a
+            3D dataset can feed a 2D model without materializing a separate
+            MIP dataset. Label-free channels take the center slice and all other
+            channels are max-projected; channel type is resolved per channel
+            name via :func:`viscy_data.channel_utils.parse_channel_name`. The
+            value (``"mip"`` or ``"center"``) only sets the fallback used when
+            no channel can be classified as label-free. The caller controls
+            which Z-planes are collapsed by setting ``z_range`` (e.g. a window
+            centered on the focus plane). By default ``None`` (no reduction;
+            full ``z_range`` is kept).
         split_ratio : float, optional
             Ratio of training samples, by default 0.8
         batch_size : int, optional
@@ -412,11 +527,18 @@ class TripletDataModule(HCSDataModule):
         """
         if num_workers > 1:
             warnings.warn("Using more than 1 thread worker will likely degrade performance.")
+        if (z_range is None) == (z_extraction_window is None):
+            raise ValueError("Provide exactly one of 'z_range' or 'z_extraction_window'.")
+        # Extraction window width is known without opening the zarr: it is the
+        # explicit z_range span or z_extraction_window. Per-FOV focus centering
+        # (when z_extraction_window is set) is resolved at setup() time, where
+        # the positions are open.
+        extraction_width = (z_range[1] - z_range[0]) if z_range is not None else z_extraction_window
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
             target_channel=[],
-            z_window_size=z_window_size or z_range[1] - z_range[0],
+            z_window_size=z_window_size or extraction_width,
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
@@ -428,7 +550,12 @@ class TripletDataModule(HCSDataModule):
             prefetch_factor=prefetch_factor,
             pin_memory=pin_memory,
         )
-        self.z_range = slice(*z_range)
+        self.z_range = slice(*z_range) if z_range is not None else None
+        self._z_extraction_window = z_extraction_window
+        self._z_focus_offset = z_focus_offset
+        self._focus_channel = focus_channel or (
+            source_channel[0] if isinstance(source_channel, (list, tuple)) else source_channel
+        )
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
         self._include_wells = fit_include_wells
@@ -440,6 +567,11 @@ class TripletDataModule(HCSDataModule):
         self.return_negative = return_negative
         self.augment_validation = augment_validation
         self._cache_pool_bytes = cache_pool_bytes
+        self.z_reduction = z_reduction
+
+        # Transforms appended after normalization and augmentation, in order.
+        extra_transforms: list[MapTransform] = []
+
         if reference_pixel_size is not None:
             inference_pixel_size = _read_pixel_size(data_path)
             scale = reference_pixel_size / inference_pixel_size
@@ -458,17 +590,36 @@ class TripletDataModule(HCSDataModule):
                 final_yx_patch_size[0] / self.initial_yx_patch_size[0],
                 final_yx_patch_size[1] / self.initial_yx_patch_size[1],
             )
-            rescale_transform = BatchedZoomd(
-                keys=list(self.source_channel),
-                scale_factor=(1.0, *scale_yx),
-                mode="bilinear",
-                antialias=True,
+            extra_transforms.append(
+                BatchedZoomd(
+                    keys=list(self.source_channel),
+                    scale_factor=(1.0, *scale_yx),
+                    mode="bilinear",
+                    antialias=True,
+                )
             )
-            self._augmentation_transform = Compose(self.normalizations + self.augmentations + [rescale_transform])
-            self._no_augmentation_transform = Compose(self.normalizations + [rescale_transform])
-        else:
-            self._augmentation_transform = Compose(self.normalizations + self.augmentations)
-            self._no_augmentation_transform = Compose(self.normalizations)
+
+        if z_reduction is not None:
+            from viscy_data.channel_utils import parse_channel_name
+            from viscy_transforms import BatchedChannelWiseZReductiond
+
+            labelfree_keys = [ch for ch in self.source_channel if parse_channel_name(ch)["channel_type"] == "labelfree"]
+            mip_keys = [ch for ch in self.source_channel if ch not in labelfree_keys]
+            _logger.info(
+                f"Z-reduction enabled (default_strategy={z_reduction}): collapsing z_range to 1 slice. "
+                f"MIP channels={mip_keys}, center-slice channels={labelfree_keys}."
+            )
+            extra_transforms.append(
+                BatchedChannelWiseZReductiond(
+                    keys=list(self.source_channel),
+                    labelfree_keys=labelfree_keys,
+                    default_strategy=z_reduction,
+                    allow_missing_keys=True,
+                )
+            )
+
+        self._augmentation_transform = Compose(self.normalizations + self.augmentations + extra_transforms)
+        self._no_augmentation_transform = Compose(self.normalizations + extra_transforms)
 
     def _align_tracks_tables_with_positions(
         self,
@@ -508,9 +659,26 @@ class TripletDataModule(HCSDataModule):
             "time_interval": self.time_interval,
         }
 
+    def _resolve_z_range(self, positions: "list[Position]") -> "slice | dict[str, slice]":
+        """Resolve the Z range for a set of positions.
+
+        Returns the explicit ``self.z_range`` slice when one was given, otherwise
+        a per-FOV focus-centered dict resolved from each position's
+        ``focus_slice`` metadata.
+        """
+        if self.z_range is not None:
+            return self.z_range
+        return _resolve_per_fov_z_ranges(
+            positions=positions,
+            z_extraction_window=self._z_extraction_window,
+            z_focus_offset=self._z_focus_offset,
+            focus_channel=self._focus_channel,
+        )
+
     def _setup_fit(self, dataset_settings: dict):
         """Set up training and validation triplet datasets."""
         positions, tracks_tables = self._align_tracks_tables_with_positions()
+        dataset_settings = {**dataset_settings, "z_range": self._resolve_z_range(positions)}
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
         tracks_tables = [tracks_tables[i] for i in shuffled_indices]
@@ -544,6 +712,7 @@ class TripletDataModule(HCSDataModule):
         """Set up the prediction triplet dataset."""
         self._set_predict_global_state()
         positions, tracks_tables = self._align_tracks_tables_with_positions()
+        dataset_settings = {**dataset_settings, "z_range": self._resolve_z_range(positions)}
         self.predict_dataset = TripletDataset(
             positions=positions,
             tracks_tables=tracks_tables,
@@ -621,7 +790,8 @@ class TripletDataModule(HCSDataModule):
         if isinstance(batch, Tensor):
             # example array
             return batch
-        expected_spatial = (self.z_window_size, *self.yx_patch_size)
+        expected_z = 1 if self.z_reduction is not None else self.z_window_size
+        expected_spatial = (expected_z, *self.yx_patch_size)
         for key in ["anchor", "positive", "negative"]:
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
