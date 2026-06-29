@@ -177,9 +177,10 @@ return_predictions: false              # writer persists to zarr; don't hold in 
 
 | Aspect              | Triplet path (this doc)                          | Parquet path (evaluation.md)                       |
 | ------------------- | ------------------------------------------------ | -------------------------------------------------- |
-| Data entry point    | `data_path` zarr + `tracks_path`                 | `cell_index.parquet` (built + preprocessed)        |
-| Setup cost          | reads tracking + zarr shape at init              | reads parquet only at init                         |
-| Focus / z window    | caller sets `z_range`; `z_reduction` collapses   | per-FOV `z_extraction_window` from `focus_slice`   |
-| 2D-from-3D          | `z_reduction: mip` / `center`                    | `BatchedChannelWiseZReductiond` in normalizations  |
+| Aspect              | Triplet path (this doc)                                           | Parquet path (evaluation.md)                       |
+| ------------------- | ------------------------------------------------------------------ | -------------------------------------------------- |
+| Data entry point    | `data_path` zarr + `tracks_path`                                   | `cell_index.parquet` (built + preprocessed)        |
+| Setup cost          | reads tracking + zarr shape at init                                | reads parquet only at init                         |
+| Focus / z window    | explicit `z_range` or per-FOV `z_extraction_window` from `focus_slice`; `z_reduction` collapses | per-FOV `z_extraction_window` from `focus_slice`   |
 | Pixel rescaling     | `reference_pixel_size`                           | `reference_pixel_size_xy_um`                       |
 | Best for            | ad-hoc predict over a single zarr + tracking     | large multi-experiment runs, reproducible recipes  |
