@@ -529,6 +529,10 @@ class TripletDataModule(HCSDataModule):
             warnings.warn("Using more than 1 thread worker will likely degrade performance.")
         if (z_range is None) == (z_extraction_window is None):
             raise ValueError("Provide exactly one of 'z_range' or 'z_extraction_window'.")
+        if z_extraction_window is not None and z_extraction_window <= 0:
+            raise ValueError("'z_extraction_window' must be a positive integer.")
+        if z_extraction_window is not None and not (0.0 <= z_focus_offset <= 1.0):
+            raise ValueError("'z_focus_offset' must be between 0.0 and 1.0 (inclusive).")
         # Extraction window width is known without opening the zarr: it is the
         # explicit z_range span or z_extraction_window. Per-FOV focus centering
         # (when z_extraction_window is set) is resolved at setup() time, where
