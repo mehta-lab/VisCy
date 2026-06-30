@@ -89,7 +89,6 @@ def load_organelle_embeddings(
             _logger.warning(f"[{ds_id}] no embedding zarr matched {prefix + embedding_pattern}: {exc}")
             continue
         adata = ad.read_zarr(zarr_path)
-        adata.obs_names_make_unique()
         out[ds_id] = adata
         _logger.info(f"[{ds_id}] loaded {Path(zarr_path).name} ({adata.n_obs} cells)")
     return out

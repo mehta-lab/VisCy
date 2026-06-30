@@ -73,7 +73,6 @@ def run_linear_classifiers(
             raise FileNotFoundError(f"No .zarr files found in {embeddings_path}")
         parts = [ad.read_zarr(p) for p in zarr_paths]
         adata = ad.concat(parts, join="outer")
-        adata.obs_names_make_unique()
         click.echo(f"  Loaded {len(zarr_paths)} per-experiment zarrs")
     else:
         adata = ad.read_zarr(embeddings_path)

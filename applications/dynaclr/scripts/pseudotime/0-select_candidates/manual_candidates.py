@@ -117,7 +117,6 @@ def _validate_against_anndata(dataset_id: str, fov_name: str, tracks: list[dict]
     ds_meta = DATASETS[dataset_id]
     emb_path = ds_meta["embedding_zarr"]
     adata = ad.read_zarr(emb_path)
-    adata.obs_names_make_unique()
     obs = adata.obs
     fov_obs = obs[obs["fov_name"].astype(str) == fov_name]
 
