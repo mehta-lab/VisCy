@@ -38,7 +38,8 @@ viscy predict --config configs/prediction/predict_triplet.yml
   │  ContrastiveModule.predict_step → backbone features (+ projections)
   │  EmbeddingWriter accumulates (features, index) and writes one combined store
   ▼
-embeddings.zarr     (AnnData: obsm["X_backbone"], obs = fov_name/track_id/t/...)
+embeddings.zarr     (AnnData: .X = embedding_key array, mirrored to obsm["X_backbone"]
+                     /["X_projections"]; obs = fov_name/track_id/t/...)
   │
   ▼
 dynaclr split-embeddings --input embeddings.zarr --output-dir embeddings/
@@ -82,7 +83,7 @@ downstream eval  (CPU/GPU, per analysis)
 | Pixel data (TCZYX)                | dataset.zarr on VAST                               | data prep             |
 | Cell tracks (track_id, t, y, x)   | tracking.zarr / CSV on VAST                        | data prep             |
 | Normalization stats (per FOV)     | dataset.zarr FOV `zattrs["normalization"]`         | `viscy preprocess`    |
-| Backbone embeddings               | `embeddings.zarr` → `obsm["X_backbone"]`           | `viscy predict`       |
+| Backbone embeddings               | `embeddings.zarr` → `.X` (+ `obsm["X_backbone"]`)  | `viscy predict`       |
 | Cell index (fov_name/track_id/t)  | `embeddings.zarr` → `obs`                          | `viscy predict`       |
 | Per-experiment embeddings         | `embeddings/{experiment}.zarr`                     | `split-embeddings`    |
 

@@ -34,8 +34,10 @@ from viscy_data._utils import (
     _read_norm_meta,
     _transform_channel_wise,
 )
+from viscy_data.channel_utils import parse_channel_name
 from viscy_data.hcs import HCSDataModule
 from viscy_data.select import _filter_fovs, _filter_wells
+from viscy_transforms import BatchedChannelWiseZReductiond, BatchedZoomd
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -123,6 +125,12 @@ def _resolve_per_fov_z_ranges(
     for pos in positions:
         fov_name = pos.zgroup.name.strip("/")
         z_total = pos["0"].shape[2]
+        if z_total < z_extraction_window:
+            raise ValueError(
+                f"FOV '{fov_name}' has Z={z_total} < z_extraction_window={z_extraction_window}; "
+                "its window would be narrower than the others and break cross-FOV batch stacking. "
+                "Lower z_extraction_window or exclude this FOV."
+            )
         fov_stats = pos.zattrs.get("focus_slice", {}).get(focus_channel, {}).get("fov_statistics", {})
         z_focus_mean = fov_stats.get("z_focus_mean")
         z_ranges[fov_name] = _focus_window(z_focus_mean, z_total, z_extraction_window, z_focus_offset)
@@ -586,8 +594,6 @@ class TripletDataModule(HCSDataModule):
                 f"Extracting {self.initial_yx_patch_size} px patches "
                 f"and resizing to {final_yx_patch_size} px."
             )
-            from viscy_transforms import BatchedZoomd
-
             scale_yx = (
                 final_yx_patch_size[0] / self.initial_yx_patch_size[0],
                 final_yx_patch_size[1] / self.initial_yx_patch_size[1],
@@ -602,9 +608,6 @@ class TripletDataModule(HCSDataModule):
             )
 
         if z_reduction is not None:
-            from viscy_data.channel_utils import parse_channel_name
-            from viscy_transforms import BatchedChannelWiseZReductiond
-
             labelfree_keys = [ch for ch in self.source_channel if parse_channel_name(ch)["channel_type"] == "labelfree"]
             mip_keys = [ch for ch in self.source_channel if ch not in labelfree_keys]
             _logger.info(

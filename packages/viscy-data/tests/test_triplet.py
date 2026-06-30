@@ -185,6 +185,7 @@ def test_focus_centered_z_range(tmp_path_factory, preprocessed_hcs_dataset, trac
         assert batch["anchor"].shape[2] == z_extraction_window
         break
 
+
 @mark.parametrize("z_reduction", ["mip", "center"])
 def test_datamodule_z_reduction(preprocessed_hcs_dataset, tracks_hcs_dataset, z_reduction):
     """z_reduction collapses the z_range window to a single slice per channel.
