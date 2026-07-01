@@ -105,7 +105,7 @@ def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:
 
 
 def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → watershed backend, slice 0.3, per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend, slice 0.3, per-condition H2B nuclei_gt_path."""
     conds = [
         _pz("membrane", "fnet3d_paper", "a549_trained", "a549", "mock"),
         _pz("membrane", "fcmae_vscyto3d_scratch", "joint", "a549", "zikv"),
@@ -114,7 +114,7 @@ def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
     assert leaf["target_name"] == "membrane"
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is False
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["slice_fraction"] == 0.3
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     for block in leaf["conditions"]:
@@ -130,10 +130,10 @@ def test_membrane_ipsc_leaf_has_no_nuclei_gt_path() -> None:
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
-def test_nucleus_leaf_is_cellpose_without_nuclei_channel() -> None:
-    """Nucleus → backend cellpose, no nuclei_channel_name, no nuclei_gt_path."""
+def test_nucleus_leaf_is_cpdino_without_nuclei_channel() -> None:
+    """Nucleus → backend cpdino, no nuclei_channel_name, no nuclei_gt_path."""
     leaf = build_leaf("nucleus", "ipsc", [_pz("nucleus", "fnet3d_paper", "ipsc_trained", "ipsc")])
-    assert leaf["segmentation"]["backend"] == "cellpose"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["slice_fraction"] == 0.5
     assert "nuclei_channel_name" not in leaf["segmentation"]
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]

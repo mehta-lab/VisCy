@@ -76,7 +76,7 @@ _INSTANCE_DENYLIST: frozenset[str] = frozenset()
 # CellDiff_r2 variants kept off the iPSC test set (iterative-only elsewhere).
 _IPSC_ONLY_VARIANTS: frozenset[str] = frozenset({"sliding_window", "denoise"})
 _SLICE_FRACTION: dict[str, float] = {"ipsc": 0.5, "a549": 0.3}
-_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
+_BACKEND: dict[str, str] = {"nucleus": "cpdino", "membrane": "cpdino"}
 
 _HYDRA_HEADER = "# @package _global_\n"
 _OUT_ROOT = _LEAF_OUT_ROOT.parent / "instance_ap"

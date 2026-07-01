@@ -105,7 +105,7 @@ _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 # instances. ER/mito have no cell instances, so they keep the semantic (supermodel)
 # mask path with no instance metrics.
 _INSTANCE_ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane"})
-_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
+_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cpdino", "membrane": "cpdino"}
 
 # Known stale or duplicate-named zarrs to skip entirely.
 _SKIP_FILENAMES: frozenset[str] = frozenset(

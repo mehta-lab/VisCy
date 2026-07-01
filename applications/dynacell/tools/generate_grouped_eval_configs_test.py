@@ -472,24 +472,24 @@ def test_each_leaf_composes_and_resolves(base_eval_grouped_config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_nucleus_grouped_leaf_enables_cellpose_instance_ap() -> None:
+def test_nucleus_grouped_leaf_enables_cpdino_instance_ap() -> None:
     """Nucleus bucket computes instance AP in the SAME pass as features.
 
-    backend=cellpose, no nuclei seeds, and compute_feature_metrics stays on — the
+    backend=cpdino, no nuclei seeds, and compute_feature_metrics stays on — the
     instance masks feed both the AP_*/mAP/instance_dice columns and the semantic
     Dice/IoU rows, not a separate track.
     """
     leaf = build_leaf_yaml("nucleus", "joint", [_make("ipsc/predictions/nucl_fnet3d_paper_jointtrained.zarr")])
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is True
-    assert leaf["segmentation"]["backend"] == "cellpose"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert "nuclei_channel_name" not in leaf["segmentation"]
-    assert "watershed" not in leaf["segmentation"]  # cellpose nucleus path has no watershed stage
+    assert "watershed" not in leaf["segmentation"]  # cpdino nucleus path has no watershed stage
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
 def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → watershed backend + per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend + per-condition H2B nuclei_gt_path."""
     conds = [
         _make("a549/predictions/memb_fnet3d_paper_a549trained_mock.zarr"),
         _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr"),
@@ -497,7 +497,7 @@ def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
     leaf = build_leaf_yaml("membrane", "a549_trained", conds)
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is True
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     # Carved is canonical (6aedf52f): the leaf must NOT override subtract_nuclei,
     # so both semantic + AP inherit the eval.yaml carved default (subtract_nuclei=true).
@@ -510,7 +510,7 @@ def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
 def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:
     """Membrane × iPSC reads nuclei from the same cell.zarr → no separate nuclei_gt_path."""
     leaf = build_leaf_yaml("membrane", "ipsc_trained", [_make("ipsc/predictions/memb_fnet3d_paper.zarr")])
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 

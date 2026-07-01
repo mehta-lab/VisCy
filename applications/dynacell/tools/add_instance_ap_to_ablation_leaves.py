@@ -55,24 +55,18 @@ _FEATURE_ANCHOR = "compute_feature_metrics: true"
 # A per-condition prediction zarr on A549 ends in _<cond>.zarr; the iPSC leaf's
 # single pred_path has no condition suffix and must not match.
 _PRED_COND_RE = re.compile(r"^(\s*)pred_path: .*_(mock|denv|zikv)\.zarr\s*$")
-# Membrane seg anchor + the no-carve watershed block inserted beneath it.
+# Membrane seg anchor (cpdino whole-cell needs the GT nucleus channel for the carve).
 _NUCLEI_CHANNEL_LINE = "  nuclei_channel_name: Nuclei\n"
-_WATERSHED_NOCARVE = "  watershed:\n    subtract_nuclei: false\n"
 
 
 def _instance_block(organelle: str) -> list[str]:
-    """Top-level instance-AP overlay lines for ``organelle`` (cellpose / watershed)."""
-    lines = ["compute_instance_ap: true\n", "segmentation:\n"]
-    if organelle == "nucleus":
-        lines.append("  backend: cellpose\n")
-    else:  # membrane
-        lines.append("  backend: cellpose_watershed\n")
+    """Top-level instance-AP overlay lines for ``organelle`` (cpdino instance backend)."""
+    lines = ["compute_instance_ap: true\n", "segmentation:\n", "  backend: cpdino\n"]
+    if organelle == "membrane":
+        # cpdino segments the whole cell directly and carves the nucleus
+        # (segmentation.cpdino.subtract_nuclei=true); it needs the GT nucleus channel.
+        # Unlike the old watershed path, carving does not collapse the AP.
         lines.append(_NUCLEI_CHANNEL_LINE)
-        # Score the full whole cell, not the carved cytoplasm shell — the
-        # eval.yaml default subtract_nuclei=true carves the shared nucleus core
-        # and collapses AP@0.50 to ~0.04 even in-distribution (the IoU-brittle
-        # cytoplasm boundary). See generate_grouped_eval_configs.build_leaf_yaml.
-        lines.append(_WATERSHED_NOCARVE)
     return lines
 
 
@@ -84,14 +78,10 @@ def plan_patch(text: str, organelle: str, leaf_id: str) -> tuple[str | None, str
     ``"watershed-upgrade"``, or ``"skip"``).
     """
     if "compute_instance_ap" in text:
-        # Already wired. Membrane leaves wired before the no-carve fix still lack
-        # the watershed.subtract_nuclei=false block; upgrade them in place so the
-        # whole-cell AP scores the full cell, not the carved cytoplasm shell.
-        if organelle != "membrane" or "subtract_nuclei" in text:
-            return None, "skip"
-        if _NUCLEI_CHANNEL_LINE not in text:
-            raise ValueError(f"{leaf_id}: instance-AP-wired membrane leaf missing the nuclei_channel anchor")
-        return text.replace(_NUCLEI_CHANNEL_LINE, _NUCLEI_CHANNEL_LINE + _WATERSHED_NOCARVE, 1), "watershed-upgrade"
+        # Already wired -> nothing to do. cpdino carves the nucleus by default
+        # (segmentation.cpdino.subtract_nuclei=true), so there is no no-carve
+        # override to retrofit.
+        return None, "skip"
     if _FEATURE_ANCHOR not in text:
         raise ValueError(f"{leaf_id}: missing '{_FEATURE_ANCHOR}' anchor; structure unexpected")
 
