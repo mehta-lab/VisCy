@@ -45,8 +45,11 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
+    cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
+    fov_cpdino_nucleus_instances,
+    fov_cpdino_whole_cell_instances,
     fov_deep_features,
     fov_masks,
     fov_nucleus_instances,
@@ -464,8 +467,13 @@ def _validate_instance_ap_config(config: DictConfig) -> None:
     - ``backend='cellpose_watershed'`` requires ``target_name='membrane'``, a
       non-null ``segmentation.nuclei_channel_name`` (the GT watershed seeds), and
       ``compute_instance_ap=true`` (whole-cell AP is the backend's sole purpose).
+    - ``backend='cpdino'`` (the default instance backend) serves both targets:
+      ``target_name='nucleus'`` (direct) and ``target_name='membrane'`` (whole-cell +
+      nucleus carve, which needs ``segmentation.nuclei_channel_name`` for the carve
+      seeds). Both require ``compute_instance_ap=true``.
     - ``compute_instance_ap=true`` requires an instance-producing pair:
-      ``(cellpose_watershed, membrane)`` or ``(cellpose, nucleus)``.
+      ``(cpdino, {nucleus, membrane})``, ``(cellpose_watershed, membrane)`` or
+      ``(cellpose, nucleus)``.
     """
     backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
@@ -483,13 +491,27 @@ def _validate_instance_ap_config(config: DictConfig) -> None:
         if not compute_instance_ap:
             raise ValueError("segmentation.backend='cellpose_watershed' requires compute_instance_ap=true")
 
+    if backend == "cpdino":
+        if target_name not in ("nucleus", "membrane"):
+            raise ValueError("segmentation.backend='cpdino' requires target_name in {'nucleus', 'membrane'}")
+        if target_name == "membrane" and nuclei_channel is None:
+            raise ValueError(
+                "segmentation.backend='cpdino' with target_name='membrane' requires "
+                "segmentation.nuclei_channel_name (the GT-plate channel for the nucleus carve seeds)"
+            )
+        if not compute_instance_ap:
+            raise ValueError("segmentation.backend='cpdino' requires compute_instance_ap=true")
+
     if compute_instance_ap:
-        valid = (backend == "cellpose_watershed" and target_name == "membrane") or (
-            backend == "cellpose" and target_name == "nucleus"
+        valid = (
+            (backend == "cpdino" and target_name in ("nucleus", "membrane"))
+            or (backend == "cellpose_watershed" and target_name == "membrane")
+            or (backend == "cellpose" and target_name == "nucleus")
         )
         if not valid:
             raise ValueError(
                 "compute_instance_ap=true requires an instance-producing backend/target: "
+                "(backend='cpdino', target_name in {'nucleus','membrane'}), "
                 "(backend='cellpose_watershed', target_name='membrane') or "
                 "(backend='cellpose', target_name='nucleus'); "
                 f"got backend={backend!r}, target_name={target_name!r}"
@@ -532,6 +554,7 @@ def _process_one_fov(
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
+    from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
     from dynacell.evaluation.segmentation_whole_cell import slice_index
 
     timings_start = len(get_timings())
@@ -649,6 +672,46 @@ def _process_one_fov(
                 pred_cells = fov_whole_cell_instances(
                     pred_cache_ctx, pos_name_pred, predict_cells, nuclei_cells, seed_stack
                 )
+        elif backend == "cpdino":
+            if config.target_name == "membrane":
+                # Whole-cell: cpdino segments the cell directly from the membrane channel
+                # (replaces the nuclei-seed + EDT watershed), then carves the nucleus. The
+                # carve seeds are cpdino instances of the GT nucleus channel — from a
+                # separate store (pos_nuclei) when GT nuclei live apart from the membrane
+                # (A549 H2B_*.ozx), else pos_gt (iPSC cell.zarr). Both GT and pred cells
+                # carve the same GT-nucleus footprint (byte-consistent with watershed).
+                nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+                nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
+                nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])
+                nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
+                gt_will_compute = not cache_ctx.enabled or not instance_cache_hit(cache_ctx, pos_name_pred)
+                pred_will_compute = not pred_cache_ctx.enabled or not instance_cache_hit(pred_cache_ctx, pos_name_pred)
+                seed_stack = None
+                if gt_will_compute or pred_will_compute:
+                    seg_spacing = (
+                        tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
+                    )
+                    infer = cpdino_infer_kwargs(cache_ctx)
+                    with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                        seed_stack = np.stack(
+                            [
+                                segment_cpdino_instances(nuclei_cells[t], seg_spacing, seg_model, do_3d=is3d, **infer)
+                                for t in range(T)
+                            ]
+                        )
+                with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    gt_cells = fov_cpdino_whole_cell_instances(
+                        cache_ctx, pos_name_pred, target_cells, seed_stack, seg_model
+                    )
+                with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    pred_cells = fov_cpdino_whole_cell_instances(
+                        pred_cache_ctx, pos_name_pred, predict_cells, seed_stack, seg_model
+                    )
+            else:  # nucleus: cpdino on the nucleus channel, independent per side
+                with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    gt_cells = fov_cpdino_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
+                with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    pred_cells = fov_cpdino_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
         else:  # backend == "cellpose": independent per-side nucleus instances
             with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
