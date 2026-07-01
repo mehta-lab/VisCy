@@ -195,3 +195,57 @@ def test_explicit_null_is_not_collision() -> None:
     )
     apply_dataset_ref(cfg)
     assert str(cfg.io.cell_segmentation_path).endswith("SEC61B_segmented_cleaned.zarr")
+
+
+def test_pred_is_source_reads_source_channel_and_defaults_pred_path() -> None:
+    """pred_is_source: pred channel -> manifest source, pred_path -> GT store."""
+    cfg = OmegaConf.create(
+        {
+            "benchmark": {"dataset_ref": {"dataset": "aics-hipsc", "target": "nucleus"}},
+            "io": {"pred_is_source": True},
+        }
+    )
+    apply_dataset_ref(cfg)
+    # source channel (Phase3D), NOT the derived Nuclei_prediction
+    assert cfg.io.pred_channel_name == "Phase3D"
+    assert cfg.io.gt_channel_name == "Nuclei"
+    # pred_path defaults to the same store as the GT (source + target co-located)
+    assert str(cfg.io.pred_path).endswith("test_cropped/cell.zarr")
+    assert str(cfg.io.pred_path) == str(cfg.io.gt_path)
+
+
+def test_pred_is_source_respects_explicit_pred_path() -> None:
+    """An explicit pred_path survives pred_is_source (only the channel is forced)."""
+    cfg = OmegaConf.create(
+        {
+            "benchmark": {"dataset_ref": {"dataset": "aics-hipsc", "target": "membrane"}},
+            "io": {"pred_is_source": True, "pred_path": "/some/input_store.zarr"},
+        }
+    )
+    apply_dataset_ref(cfg)
+    assert cfg.io.pred_channel_name == "Phase3D"
+    assert str(cfg.io.pred_path) == "/some/input_store.zarr"
+
+
+def test_pred_is_source_explicit_source_channel_agrees() -> None:
+    """Explicitly pinning pred_channel_name to the source channel is not a collision."""
+    cfg = OmegaConf.create(
+        {
+            "benchmark": {"dataset_ref": {"dataset": "aics-hipsc", "target": "nucleus"}},
+            "io": {"pred_is_source": True, "pred_channel_name": "Phase3D"},
+        }
+    )
+    apply_dataset_ref(cfg)
+    assert cfg.io.pred_channel_name == "Phase3D"
+
+
+def test_pred_is_source_wrong_explicit_channel_still_raises() -> None:
+    """Under pred_is_source, a pred_channel_name != source channel is still a collision."""
+    cfg = OmegaConf.create(
+        {
+            "benchmark": {"dataset_ref": {"dataset": "aics-hipsc", "target": "nucleus"}},
+            "io": {"pred_is_source": True, "pred_channel_name": "Nuclei_prediction"},
+        }
+    )
+    with pytest.raises(ValueError, match="conflicts with explicit fields"):
+        apply_dataset_ref(cfg)

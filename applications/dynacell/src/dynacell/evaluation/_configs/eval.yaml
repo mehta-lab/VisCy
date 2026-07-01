@@ -83,7 +83,11 @@ io:
   cell_segmentation_path: null  # required iff compute_feature_metrics=true
   gt_cache_dir: null  # required for precompute-gt and require_complete_cache=true
   pred_cache_dir: null  # optional prediction-side artifact cache for masks/features
-  pred_channel_name: ???  # e.g. Structure_prediction
+  pred_channel_name: ???  # e.g. Structure_prediction (auto-derived from the manifest)
+  pred_is_source: false   # no-model floor: read the manifest source channel (e.g. Phase3D)
+                          # as the "prediction" and score the raw input against the GT.
+                          # pred_channel_name -> source_channel; pred_path defaults to the
+                          # GT store (source + target share one store), so positions match.
   gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
   nuclei_gt_path: null  # cellpose_watershed only: store holding the GT nuclei seed channel
                         # (segmentation.nuclei_channel_name). null = read from gt_path (iPSC
