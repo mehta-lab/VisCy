@@ -61,18 +61,41 @@ for cfg in $CONFIGS; do
   CONFIG_FLAGS="${CONFIG_FLAGS} --config ${WORKSPACE_DIR}/${cfg}"
 done
 
+# Auto-resume after SLURM preemption/requeue: if no explicit CKPT_PATH was
+# given but a checkpoint exists in the (stable) run directory, resume from it.
+# A fresh run has no last.ckpt, so the first launch trains from scratch.
+if [ -z "${CKPT_PATH:-}" ] && [ -f "${RUN_DIR}/checkpoints/last.ckpt" ]; then
+  CKPT_PATH="${RUN_DIR}/checkpoints/last.ckpt"
+  echo "Resuming from ${CKPT_PATH}"
+fi
+
 CKPT_FLAG=""
 if [ -n "${CKPT_PATH:-}" ]; then
   CKPT_FLAG="--ckpt_path ${CKPT_PATH}"
 fi
 
-WANDB_ID_FLAG=""
-if [ -n "${WANDB_RUN_ID:-}" ]; then
-  WANDB_ID_FLAG="--trainer.logger.init_args.id=${WANDB_RUN_ID} --trainer.logger.init_args.resume=must"
+# Persist the W&B run id so a requeued job continues the same run (continuous
+# metrics across preemptions). The id is generated once on first launch and
+# reused on every resume. Generating it shell-side (rather than reading it back
+# from wandb) avoids touching logger.experiment in a callback, which can
+# deadlock DDP.
+WANDB_ID_FILE="${RUN_DIR}/.wandb_run_id"
+if [ -z "${WANDB_RUN_ID:-}" ]; then
+  if [ -f "${WANDB_ID_FILE}" ]; then
+    WANDB_RUN_ID="$(cat "${WANDB_ID_FILE}")"
+  else
+    WANDB_RUN_ID="$(python -c 'import secrets; print(secrets.token_hex(4))')"
+    echo "${WANDB_RUN_ID}" > "${WANDB_ID_FILE}"
+  fi
 fi
+
+# resume=allow (not must) so the first launch can create the run; subsequent
+# requeues find the existing id and continue it.
+WANDB_ID_FLAG="--trainer.logger.init_args.id=${WANDB_RUN_ID} --trainer.logger.init_args.resume=allow"
 
 srun uv run --project "$WORKSPACE_DIR" dynaclr fit \
   ${CONFIG_FLAGS} \
+  --slurm_auto_requeue \
   --trainer.default_root_dir="${RUN_DIR}" \
   --trainer.logger.init_args.project="${PROJECT}" \
   --trainer.logger.init_args.name="${RUN_NAME}" \

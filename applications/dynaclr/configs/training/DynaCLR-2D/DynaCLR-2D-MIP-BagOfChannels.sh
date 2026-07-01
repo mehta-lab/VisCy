@@ -16,6 +16,8 @@
 #SBATCH --cpus-per-task=15
 #SBATCH --mem-per-cpu=8G
 #SBATCH --time=3-00:00:00
+#SBATCH --requeue
+#SBATCH --signal=B:USR1@300
 
 # ── Run identity ──────────────────────────────────────────────────────
 # Warm-started from prior mixed-markers run (s1f8kgtp/last.ckpt, Apr 22)

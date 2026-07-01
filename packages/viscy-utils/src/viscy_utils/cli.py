@@ -4,6 +4,7 @@ import atexit
 import logging
 import os
 import re
+import signal
 import sys
 import tempfile
 from collections.abc import Callable
@@ -16,6 +17,7 @@ from jsonargparse import Namespace, lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.plugins.environments import SLURMEnvironment
 
 from viscy_utils.compose import load_composed_config
 from viscy_utils.trainer import VisCyTrainer
@@ -69,6 +71,40 @@ def _configure_wandb_logger(
         init_args["group"] = base_name
 
 
+def _configure_slurm_requeue(config: Namespace, subcommand: str | None) -> None:
+    """Attach :class:`SLURMEnvironment` with auto-requeue under SLURM batch jobs.
+
+    On a preemptible cluster, SLURM sends ``SIGUSR1`` before killing the job.
+    With :class:`SLURMEnvironment` attached, Lightning catches that signal,
+    writes a checkpoint, and calls ``scontrol requeue`` so the job resumes
+    from the checkpoint when resources free up.
+
+    Opt in with ``--slurm_auto_requeue``; when the flag is absent, normal
+    Lightning behavior is kept. Even when set, the plugin is attached only if
+    ``SLURMEnvironment.detect()`` is true, so passing it off SLURM (or in an
+    interactive allocation without it) is a no-op.
+    """
+    root = config[subcommand] if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    if not root.get("slurm_auto_requeue", False):
+        return
+    if not SLURMEnvironment.detect():
+        return
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return
+    plugins = trainer.get("plugins")
+    if plugins is None:
+        plugins = []
+    elif not isinstance(plugins, list):
+        plugins = [plugins]
+    if any(isinstance(p, SLURMEnvironment) for p in plugins):
+        return
+    plugins.append(SLURMEnvironment(auto_requeue=True, requeue_signal=signal.SIGUSR1))
+    trainer["plugins"] = plugins
+
+
 class VisCyCLI(LightningCLI):
     """Extending lightning CLI arguments and defaults."""
 
@@ -84,11 +120,21 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
-        """Set default logger."""
+        """Set default logger and SLURM auto-requeue toggle."""
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(WandbLogger),
             }
+        )
+        parser.add_argument(
+            "--slurm_auto_requeue",
+            action="store_true",
+            help=(
+                "Opt in to SLURMEnvironment(auto_requeue=True): when running "
+                "under SLURM, preempted jobs checkpoint and requeue "
+                "automatically. Absent (default) keeps normal Lightning "
+                "behavior. No effect off SLURM."
+            ),
         )
 
     def _parse_ckpt_path(self) -> None:
@@ -127,6 +173,7 @@ class VisCyCLI(LightningCLI):
     def before_instantiate_classes(self) -> None:
         """Apply shared config rewrites before Lightning object creation."""
         _configure_wandb_logger(self.config, self.subcommand)
+        _configure_slurm_requeue(self.config, self.subcommand)
 
 
 def _setup_environment() -> None:
