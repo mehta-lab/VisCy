@@ -91,6 +91,7 @@ class _CacheContext:
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
     cellpose_params: dict[str, Any] = field(default_factory=dict)
     watershed_params: dict[str, Any] = field(default_factory=dict)
+    cpdino_params: dict[str, Any] = field(default_factory=dict)
     cp_feature_version: str | None = None
     cp_norm: dict[str, Any] = field(default_factory=dict)
     cp_glcm: dict[str, Any] = field(default_factory=dict)
@@ -235,6 +236,7 @@ def init_cache_context(
 
     cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
+    cpdino_cfg = OmegaConf.select(config, "segmentation.cpdino", default=None)
     cp_norm_cfg = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
     cp_glcm_cfg = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
 
@@ -299,6 +301,7 @@ def init_cache_context(
         ),
         cellpose_params=(OmegaConf.to_container(cellpose_cfg, resolve=True) if cellpose_cfg is not None else {}),
         watershed_params=(OmegaConf.to_container(watershed_cfg, resolve=True) if watershed_cfg is not None else {}),
+        cpdino_params=(OmegaConf.to_container(cpdino_cfg, resolve=True) if cpdino_cfg is not None else {}),
         cp_feature_version=CP_FEATURE_VERSION,
         cp_norm=(OmegaConf.to_container(cp_norm_cfg, resolve=True) if cp_norm_cfg is not None else {}),
         cp_glcm=(OmegaConf.to_container(cp_glcm_cfg, resolve=True) if cp_glcm_cfg is not None else {}),
@@ -773,8 +776,12 @@ def _fov_masks(
 
 def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     """Return the cache-identity dict for a side's instance-label artifact."""
+    # cpdino keys on its own param block (raw image + normalize=True, no CLAHE), NOT the
+    # cellpose robust-clip/CLAHE params — so a cpdino cache never aliases a cellpose one
+    # even beyond the ``__{backend}`` stem separation.
+    seg_params = ctx.cpdino_params if ctx.backend == "cpdino" else ctx.cellpose_params
     identity: dict[str, Any] = {
-        **ctx.cellpose_params,
+        **seg_params,
         "dimension": ctx.dimension,
         "slice_selection": ctx.slice_selection,
         "slice_fraction": ctx.slice_fraction,
@@ -795,6 +802,15 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
         identity = {
             **identity,
             **ctx.watershed_params,
+            "nuclei_channel": ctx.nuclei_channel_name,
+            "nuclei_path": ctx.nuclei_plate_path,
+        }
+    if ctx.backend == "cpdino" and ctx.target_name == "membrane":
+        # Whole-cell cpdino carves out the GT nucleus footprint, so the labels depend on
+        # the GT nuclei source (like watershed) — record it so a pred-side identity
+        # captures that cross-side dependency.
+        identity = {
+            **identity,
             "nuclei_channel": ctx.nuclei_channel_name,
             "nuclei_path": ctx.nuclei_plate_path,
         }
@@ -978,6 +994,75 @@ def fov_whole_cell_instances(
 
     def compute_t(t: int) -> np.ndarray:
         return segment_whole_cell(memb_stack[t], nuc_stack[t], seed_stack[t], spacing, **ctx.watershed_params)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
+
+
+_CPDINO_NON_INFER_KEYS = frozenset({"model_name", "subtract_nuclei"})
+"""cpdino config keys that are not forwarded to ``segment_cpdino_instances``:
+``model_name`` selects the model at load time, ``subtract_nuclei`` gates the whole-cell
+carve. Everything else (normalize / flow / cellprob / min_size / stitch_threshold) is a
+segmenter inference kwarg."""
+
+
+def cpdino_infer_kwargs(ctx: _CacheContext) -> dict[str, Any]:
+    """Inference kwargs for ``segment_cpdino_instances`` from the ``segmentation.cpdino`` block."""
+    return {k: v for k, v in ctx.cpdino_params.items() if k not in _CPDINO_NON_INFER_KEYS}
+
+
+def fov_cpdino_nucleus_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    nuc_stack: np.ndarray,
+    model,
+) -> np.ndarray:
+    """Return cached/computed nucleus instance labels for one FOV (``backend=cpdino``).
+
+    *nuc_stack* is the per-side nucleus stack — ``(T, Y, X)`` in 2-D (already sliced) or
+    ``(T, Z, Y, X)`` in 3-D. Each timepoint is segmented independently with
+    :func:`dynacell.evaluation.segmentation_cpdino.segment_cpdino_instances` (raw image +
+    cellpose ``normalize=True``, no CLAHE). Returns ``(T, D, H, W)`` uint16.
+    """
+    from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
+
+    is3d = ctx.dimension == "3d"
+    spacing = _seg_spacing(ctx)
+    infer = cpdino_infer_kwargs(ctx)
+
+    def compute_t(t: int) -> np.ndarray:
+        return segment_cpdino_instances(nuc_stack[t], spacing, model, do_3d=is3d, **infer)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=nuc_stack, compute_t=compute_t)
+
+
+def fov_cpdino_whole_cell_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    memb_stack: np.ndarray,
+    seed_stack: np.ndarray | None,
+    model,
+) -> np.ndarray:
+    """Return cached/computed whole-cell instance labels (``backend=cpdino``, membrane).
+
+    cpdino segments the whole cell directly from *memb_stack* (raw membrane fluorescence,
+    ``(T, Y, X)`` 2-D or ``(T, Z, Y, X)`` 3-D); the GT-nucleus footprint *seed_stack*
+    (uint16 cpdino nucleus instances, same shape) is carved out when
+    ``segmentation.cpdino.subtract_nuclei`` is set. Returns ``(T, D, H, W)`` uint16.
+    *seed_stack* is only read on the compute path; pass ``None`` only when the cache is
+    guaranteed to hit (see :func:`instance_cache_hit`).
+    """
+    from dynacell.evaluation.segmentation_cpdino import segment_whole_cell_cpdino
+
+    is3d = ctx.dimension == "3d"
+    spacing = _seg_spacing(ctx)
+    infer = cpdino_infer_kwargs(ctx)
+    subtract = bool(ctx.cpdino_params.get("subtract_nuclei", True))
+
+    def compute_t(t: int) -> np.ndarray:
+        seed = seed_stack[t] if seed_stack is not None else None
+        return segment_whole_cell_cpdino(
+            memb_stack[t], seed, spacing, model, subtract_nuclei=subtract, do_3d=is3d, **infer
+        )
 
     return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
 
