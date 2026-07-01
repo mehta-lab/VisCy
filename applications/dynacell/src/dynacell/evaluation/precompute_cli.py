@@ -24,16 +24,22 @@ from dynacell.evaluation.focus import (
     build_focus_slabs,
     read_focus_compute_config,
     read_focus_slab_config,
+    resolve_focus_planes,
     write_focus_slice_metadata,
 )
 from dynacell.evaluation.metrics import build_crops
 from dynacell.evaluation.model_loader import LoadFlags, init_gt_cache_context, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
     DeepFeatureBatcher,
+    cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
+    fov_cpdino_nucleus_instances,
+    fov_cpdino_whole_cell_instances,
     fov_masks,
 )
+from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
+from dynacell.evaluation.segmentation_whole_cell import slice_index
 
 
 def _focus_slabs(config: DictConfig, pos_gt, pos_name: str, t_count: int) -> list[slice | None]:
@@ -50,6 +56,64 @@ def _focus_slabs(config: DictConfig, pos_gt, pos_name: str, t_count: int) -> lis
         cache_dir=config.io.gt_cache_dir,
         pos_name=pos_name,
     )
+
+
+def _gt_instance_slices(config: DictConfig, pos_gt, target: np.ndarray, pos_name: str):
+    """Return ``(target_cells, z_idx, is3d)`` for the GT instance build.
+
+    Mirrors the eval instance dispatch: 3-D uses the full ``(T, Z, Y, X)`` volume; 2-D
+    picks one plane per timepoint (in-focus or ``frac``) and returns ``(T, Y, X)``.
+    """
+    t_count = target.shape[0]
+    is3d = OmegaConf.select(config, "segmentation.dimension", default="2d") == "3d"
+    if is3d:
+        return target, None, True
+    sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+    if sel == "focus":
+        focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
+        fc = read_focus_compute_config(config, channel_name=focus_ch)
+        z_idx = resolve_focus_planes(
+            pos_gt, t_count=t_count, compute=fc, cache_dir=config.io.gt_cache_dir, pos_name=pos_name
+        )
+    else:
+        frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
+        z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(t_count)]
+    target_cells = np.stack([target[t, z_idx[t]] for t in range(t_count)])
+    return target_cells, z_idx, False
+
+
+def _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name, target, nuclei_plate) -> None:
+    """Prewarm the GT instance-label cache for the configured cpdino backend/target.
+
+    Nucleus target → cpdino on the GT nucleus channel. Membrane target → cpdino on the GT
+    membrane channel + carve the GT-nucleus footprint (cpdino nucleus instances; nuclei
+    read from *nuclei_plate* when the GT nuclei live in a separate store, else *pos_gt*).
+    Writes the same ``instance_masks/<target>__cpdino.zarr`` identity the eval reads.
+    """
+    backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
+    if backend != "cpdino":
+        raise ValueError(f"build.instances currently supports segmentation.backend='cpdino' only; got {backend!r}")
+    target_name = config.target_name
+    target_cells, z_idx, is3d = _gt_instance_slices(config, pos_gt, target, pos_name)
+    if target_name == "nucleus":
+        fov_cpdino_nucleus_instances(cache_ctx, pos_name, target_cells, seg_model)
+        return
+    if target_name == "membrane":
+        nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+        nuclei_src = nuclei_plate[pos_name] if nuclei_plate is not None else pos_gt
+        nuclei = np.asarray(nuclei_src.data[:, nuclei_src.get_channel_index(nuclei_channel)])
+        nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(nuclei.shape[0])])
+        spacing = tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
+        infer = cpdino_infer_kwargs(cache_ctx)
+        seed_stack = np.stack(
+            [
+                segment_cpdino_instances(nuclei_cells[t], spacing, seg_model, do_3d=is3d, **infer)
+                for t in range(len(nuclei_cells))
+            ]
+        )
+        fov_cpdino_whole_cell_instances(cache_ctx, pos_name, target_cells, seed_stack, seg_model)
+        return
+    raise ValueError(f"build.instances (cpdino) requires target_name in {{nucleus, membrane}}; got {target_name!r}")
 
 
 def precompute_gt_artifacts(config: DictConfig) -> None:
@@ -113,10 +177,13 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         )
         print(f"  focus_slice[{focus_channel}].dataset_statistics = {stats}")
 
+    build_instances = bool(OmegaConf.select(config, "build.instances", default=False))
     models = load_eval_models(
         config,
         flags=LoadFlags(
-            masks=bool(build.masks),
+            # build.instances needs the segmentation model too (prepare_segmentation_model
+            # loads cpdino for segmentation.backend=cpdino), so trigger the masks load.
+            masks=bool(build.masks or build_instances),
             dinov3=bool(build.dinov3),
             dynaclr=bool(build.dynaclr),
             celldino=bool(build.celldino),
@@ -137,6 +204,14 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     with open_ome_zarr(gt_path, mode="r") as gt_plate:
         gt_positions = list(gt_plate.positions())
         seg_plate = open_ome_zarr(seg_path, mode="r") if seg_path is not None else None
+        # Whole-cell instance prewarm needs the GT nucleus channel for the carve seeds.
+        # A separate store (A549 H2B_*.ozx) is opened here; when io.nuclei_gt_path is null
+        # or equals io.gt_path (iPSC cell.zarr), _build_gt_instances reads it from pos_gt.
+        nuclei_plate = None
+        if build_instances and config.target_name == "membrane":
+            nuclei_gt_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
+            if nuclei_gt_path is not None and str(nuclei_gt_path) != str(gt_path):
+                nuclei_plate = open_ome_zarr(nuclei_gt_path, mode="r")
         try:
             if seg_plate is not None:
                 seg_positions = list(seg_plate.positions())
@@ -182,6 +257,8 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
 
                 if build.masks:
                     fov_masks(cache_ctx, pos_name_gt, target, seg_model)
+                if build_instances:
+                    _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name_gt, target, nuclei_plate)
                 if build.cp:
                     fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
 
@@ -206,6 +283,8 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         finally:
             if seg_plate is not None:
                 seg_plate.close()
+            if nuclei_plate is not None:
+                nuclei_plate.close()
 
 
 @hydra.main(version_base="1.2", config_path="_configs", config_name="precompute")
