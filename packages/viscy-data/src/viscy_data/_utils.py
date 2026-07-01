@@ -187,6 +187,13 @@ def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
             if level_stats is None:
                 result[ch][level] = None
                 continue
+            if level == "timepoint_statistics":
+                # Nested {timepoint: {stat: tensor}}; stack within each timepoint.
+                result[ch][level] = {
+                    tp: {stat: torch.stack([m[ch][level][tp][stat] for m in norm_metas]) for stat in tp_stats}
+                    for tp, tp_stats in level_stats.items()
+                }
+                continue
             result[ch][level] = {stat: torch.stack([m[ch][level][stat] for m in norm_metas]) for stat in level_stats}
     return result
 
