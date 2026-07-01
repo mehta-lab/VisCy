@@ -13,7 +13,7 @@ force_recompute:
   final_metrics: true
 compute_instance_ap: true
 segmentation:
-  backend: cellpose
+  backend: cpdino
 conditions:
 - name: celldiff_r2__a549_trained__a549_denv
   benchmark:

@@ -15,7 +15,7 @@ benchmark:
 compute_feature_metrics: true
 compute_instance_ap: true
 segmentation:
-  backend: cellpose_watershed
+  backend: cpdino
   nuclei_channel_name: Nuclei
 
 conditions:

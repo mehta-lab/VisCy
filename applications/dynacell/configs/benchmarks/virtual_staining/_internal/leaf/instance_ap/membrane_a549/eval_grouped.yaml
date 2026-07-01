@@ -6,7 +6,7 @@ compute_feature_metrics: false
 compute_microssim: false
 use_gpu: true
 segmentation:
-  backend: cellpose_watershed
+  backend: cpdino
   slice_fraction: 0.3
   nuclei_channel_name: Nuclei
 io:

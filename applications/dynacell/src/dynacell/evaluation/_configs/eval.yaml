@@ -21,14 +21,16 @@ benchmark: null
 target_name: ???
 
 # Nucleus/membrane organelle-mask segmenter. `supermodel` = segmenter-model-zoo
-# SuperModel (default, unchanged behavior). `cellpose` = GPU Cellpose-SAM + fnet
-# pre/post (nucleus only). `cellpose_watershed` = whole-cell (membrane only):
-# GPU Cellpose-SAM nuclei seeds + membrane EDT watershed. The cellpose /
-# cellpose_watershed backends with compute_instance_ap=true add instance mAP
-# (cubic average_precision) to mask_metrics; labels cache under
-# instance_masks/<target>__<backend>.zarr.
+# SuperModel (default binary-mask backend, unchanged behavior). `cpdino` = GPU-resident
+# Cellpose-DINO ViT-L (recommended instance backend): raw image + cellpose normalize
+# (no CLAHE), segments nucleus (direct) or whole-cell (from the membrane channel + nucleus
+# carve). `cellpose` = legacy Cellpose-SAM + fnet CLAHE pre/post (nucleus only).
+# `cellpose_watershed` = legacy whole-cell (membrane only): Cellpose-SAM nuclei seeds +
+# membrane EDT watershed. The cpdino / cellpose / cellpose_watershed backends with
+# compute_instance_ap=true add instance mAP (cubic average_precision) to mask_metrics;
+# labels cache under instance_masks/<target>__<backend>.zarr.
 segmentation:
-  backend: supermodel  # supermodel | cellpose (nucleus) | cellpose_watershed (whole-cell)
+  backend: supermodel  # supermodel | cpdino (nucleus + whole-cell) | cellpose | cellpose_watershed
   dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
   slice_selection: focus   # frac | sharpest | focus — picks the 2d plane (dimension=2d)
   slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
@@ -38,7 +40,20 @@ segmentation:
   # works on read-only published .ozx). Estimator params live in the `focus:` block.
   focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
-  # Nucleus Cellpose-SAM params (the cellpose path + the cellpose_watershed seeds).
+  # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus
+  # (direct) and whole-cell (membrane + nucleus carve). Faithful to the cpv4 validation:
+  # the raw in-focus slice is passed to cellpose with normalize=true (its own percentile
+  # stretch) and NO CLAHE/downscale. cpv4 used cellpose's default min_size (15) for both
+  # channels, so cpdino keeps one value for nucleus and cell.
+  cpdino:
+    model_name: cpdino     # Cellpose-DINO ViT-L (cellpose>=4.2)
+    normalize: true        # cellpose 1st/99th-percentile stretch (no external CLAHE)
+    flow_threshold: 0.4
+    cellprob_threshold: 0.0
+    min_size: 15           # cellpose default spurious-instance filter (px/vox)
+    stitch_threshold: 0.0  # 2D single in-focus slice; >0 only for a 2D-per-plane 3D run
+    subtract_nuclei: true  # whole-cell: carve the nucleus footprint -> cytoplasm-only
+  # Nucleus Cellpose-SAM params (the legacy cellpose path + the cellpose_watershed seeds).
   cellpose:
     target_voxel_um: 0.58  # isotropic grid the nuclei are segmented on (always)
     cellprob_threshold: 0.0
