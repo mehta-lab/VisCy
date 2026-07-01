@@ -168,6 +168,33 @@ def test_cpdino_infer_kwargs_strips_non_inference_keys():
     assert kw["min_size"] == 15
 
 
+def test_separate_nuclei_store_loaded_for_cpdino_membrane():
+    """cpdino whole-cell needs the separate GT-nuclei store on A549 (carve seeds), like watershed.
+
+    Regression: the loader gated the separate-store open on backend=='cellpose_watershed',
+    so cpdino membrane fell back to the CAAX plate (no Nuclei channel) and crashed.
+    """
+    from dynacell.evaluation.pipeline import _separate_nuclei_path
+
+    a549 = OmegaConf.create(
+        {
+            "segmentation": {"backend": "cpdino"},
+            "compute_instance_ap": True,
+            "io": {"nuclei_gt_path": "/x/H2B_mock.ozx", "gt_path": "/x/CAAX_mock.ozx"},
+        }
+    )
+    assert _separate_nuclei_path(a549) == "/x/H2B_mock.ozx"
+    # iPSC single-store: nuclei live in the same cell.zarr -> no separate store.
+    ipsc = OmegaConf.create(
+        {
+            "segmentation": {"backend": "cpdino"},
+            "compute_instance_ap": True,
+            "io": {"nuclei_gt_path": None, "gt_path": "/x/cell.zarr"},
+        }
+    )
+    assert _separate_nuclei_path(ipsc) is None
+
+
 # ---------------------------------------------------------------------------
 # GPU end-to-end: real cpdino inference (skipped without CUDA).
 # ---------------------------------------------------------------------------
