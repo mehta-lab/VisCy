@@ -34,10 +34,19 @@ segmentation:
   dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
   slice_selection: focus   # frac | sharpest | focus — picks the 2d plane (dimension=2d)
   slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
-  # slice_selection=focus picks the in-focus plane per FOV (single slice, no slab).
-  # The plane comes from precomputed focus_slice zattrs when present, else it is
-  # computed on the fly from the phase channel and cached in io.gt_cache_dir (so it
-  # works on read-only published .ozx). Estimator params live in the `focus:` block.
+  # slice_selection=focus picks the in-focus plane per FOV. focus_anchor selects how:
+  #   nucleus_area (default) — the plane of maximum nuclear foreground area (widest
+  #     cross-section, Otsu on the GT nucleus channel). Robust to the confocal phase
+  #     speckle / basal-membrane edge artifacts that pull the spectral estimator to the
+  #     stack caps; the nuclear equator is also where the membrane draws clean polygons,
+  #     so one anchor serves nucleus + whole-cell. No store reads/zattrs needed.
+  #   phase_midband (legacy) — waveorder transverse-band estimator on focus_channel_name;
+  #     plane from precomputed focus_slice zattrs / gt-cache / compute-from-phase (works
+  #     on read-only .ozx). Estimator params live in the `focus:` block.
+  # focus_slab_halfwidth MIPs a +/-hw slab centered on the plane (0 = single slice), so a
+  # +/-1 plane error is harmless and near-plane nuclei are completed.
+  focus_anchor: nucleus_area
+  focus_slab_halfwidth: 1
   focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
   # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus

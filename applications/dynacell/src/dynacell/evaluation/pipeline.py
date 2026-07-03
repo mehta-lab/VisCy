@@ -549,7 +549,8 @@ def _process_one_fov(
         build_focus_slabs,
         read_focus_compute_config,
         read_focus_slab_config,
-        resolve_focus_planes,
+        resolve_focus_instance_planes,
+        slab_mip,
     )
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
@@ -620,25 +621,31 @@ def _process_one_fov(
             target_cells, predict_cells = target, predict
         else:
             sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+            slab_hw = (
+                int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)) if sel == "focus" else 0
+            )
             if sel == "focus":
-                # Single in-focus plane per FOV (still 2D, no slab). Same z applied to
-                # GT, prediction, and nuclei seeds. From precomputed focus_slice zattrs
-                # when present, else computed from the phase channel and cached in
-                # io.gt_cache_dir — so it works on read-only published .ozx.
-                focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
-                fc = read_focus_compute_config(config, channel_name=focus_ch)
-                z_idx = resolve_focus_planes(
-                    pos_gt,
-                    t_count=T,
-                    compute=fc,
-                    cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
-                    pos_name=pos_name_pred,
+                # In-focus plane per FOV; the same z (+ optional +/-slab_hw MIP) is applied to
+                # GT, prediction, and nuclei seeds. Default anchor is the plane of maximum
+                # nuclear foreground area (widest cross-section) — robust to the phase-midband
+                # edge artifacts on confocal iPSC. See focus.resolve_focus_instance_planes.
+                if str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area")) == "nucleus_area":
+                    if config.target_name == "nucleus":
+                        nucleus_vol = target  # GT nucleus fluorescence (T, Z, Y, X)
+                    else:  # membrane: nucleus channel from the GT nuclei source (cross-store on A549)
+                        nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+                        nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
+                        nucleus_vol = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])
+                else:
+                    nucleus_vol = None
+                z_idx = resolve_focus_instance_planes(
+                    config, t_count=T, pos_gt=pos_gt, pos_name=pos_name_pred, nucleus_vol=nucleus_vol
                 )
             else:
                 frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
                 z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
-            target_cells = np.stack([target[t, z_idx[t]] for t in range(T)])  # (T, Y, X)
-            predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
+            target_cells = slab_mip(target, z_idx, slab_hw)  # (T, Y, X)
+            predict_cells = slab_mip(predict, z_idx, slab_hw)
         if backend == "cellpose_watershed":
             nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
             # GT nuclei seeds come from a separate store (pos_nuclei) when the GT
@@ -648,7 +655,7 @@ def _process_one_fov(
             # plate, byte-identical to the single-store path.
             nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
             nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
-            nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
+            nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
             # Seed preflight: compute GT-nuclei watershed seeds only when at least
             # one side will actually run segment_whole_cell (a disabled cache or a
             # manifest-invalidated/forced slot counts as a miss).
@@ -683,7 +690,7 @@ def _process_one_fov(
                 nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
                 nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
                 nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])
-                nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
+                nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
                 gt_will_compute = not cache_ctx.enabled or not instance_cache_hit(cache_ctx, pos_name_pred)
                 pred_will_compute = not pred_cache_ctx.enabled or not instance_cache_hit(pred_cache_ctx, pos_name_pred)
                 seed_stack = None

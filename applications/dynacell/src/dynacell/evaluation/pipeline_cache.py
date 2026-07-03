@@ -84,6 +84,8 @@ class _CacheContext:
     slice_selection: str = "frac"
     slice_fraction: float = 0.30
     focus_channel_name: str | None = None
+    focus_anchor: str = "nucleus_area"
+    focus_slab_halfwidth: int = 0
     focus_slab_enabled: bool = False
     focus_estimator_params: dict[str, float] = field(default_factory=dict)
     nuclei_channel_name: str | None = None
@@ -292,6 +294,8 @@ def init_cache_context(
         slice_selection=slice_selection,
         slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
         focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
+        focus_anchor=str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area")),
+        focus_slab_halfwidth=int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)),
         focus_slab_enabled=slab_cfg is not None,
         focus_estimator_params=focus_estimator_params,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
@@ -793,8 +797,15 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     # depends on the focus-compute params (na_det/lambda_ill/pixel_size), so record
     # them too — otherwise a focus-param change reuses a stale in-focus plane.
     if ctx.slice_selection == "focus":
-        identity["focus_channel_name"] = ctx.focus_channel_name
-        identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
+        # The plane depends on the anchor method + slab width. Record both so a change to
+        # either invalidates the cached masks. The phase-midband estimator params only
+        # matter for that anchor — record them only then, so the nucleus_area identity
+        # stays clean (and old phase-anchor caches, which lack focus_anchor, miss).
+        identity["focus_anchor"] = ctx.focus_anchor
+        identity["focus_slab_halfwidth"] = ctx.focus_slab_halfwidth
+        if ctx.focus_anchor == "phase_midband":
+            identity["focus_channel_name"] = ctx.focus_channel_name
+            identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
     if ctx.backend == "cellpose_watershed":
         # Whole-cell labels also depend on the watershed params and the GT nuclei
         # seeds; record the GT nuclei (path, channel) so a pred-side identity

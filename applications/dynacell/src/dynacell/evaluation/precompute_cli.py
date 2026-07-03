@@ -24,7 +24,8 @@ from dynacell.evaluation.focus import (
     build_focus_slabs,
     read_focus_compute_config,
     read_focus_slab_config,
-    resolve_focus_planes,
+    resolve_focus_instance_planes,
+    slab_mip,
     write_focus_slice_metadata,
 )
 from dynacell.evaluation.metrics import build_crops
@@ -58,28 +59,30 @@ def _focus_slabs(config: DictConfig, pos_gt, pos_name: str, t_count: int) -> lis
     )
 
 
-def _gt_instance_slices(config: DictConfig, pos_gt, target: np.ndarray, pos_name: str):
-    """Return ``(target_cells, z_idx, is3d)`` for the GT instance build.
+def _gt_instance_slices(config: DictConfig, pos_gt, target: np.ndarray, pos_name: str, *, nucleus_vol=None):
+    """Return ``(target_cells, z_idx, is3d, slab_hw)`` for the GT instance build.
 
-    Mirrors the eval instance dispatch: 3-D uses the full ``(T, Z, Y, X)`` volume; 2-D
-    picks one plane per timepoint (in-focus or ``frac``) and returns ``(T, Y, X)``.
+    Mirrors the eval instance dispatch (``focus.resolve_focus_instance_planes`` +
+    ``slab_mip``): 3-D uses the full ``(T, Z, Y, X)`` volume; 2-D picks one plane per
+    timepoint (in-focus anchor or ``frac``) and returns the ``(T, Y, X)`` +/-slab MIP.
+    ``nucleus_vol`` (``(T, Z, Y, X)``) is the nucleus channel for the ``nucleus_area``
+    anchor (the target for nucleus, the GT-nuclei source for whole-cell).
     """
     t_count = target.shape[0]
     is3d = OmegaConf.select(config, "segmentation.dimension", default="2d") == "3d"
     if is3d:
-        return target, None, True
+        return target, None, True, 0
     sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+    slab_hw = int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)) if sel == "focus" else 0
     if sel == "focus":
-        focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
-        fc = read_focus_compute_config(config, channel_name=focus_ch)
-        z_idx = resolve_focus_planes(
-            pos_gt, t_count=t_count, compute=fc, cache_dir=config.io.gt_cache_dir, pos_name=pos_name
+        z_idx = resolve_focus_instance_planes(
+            config, t_count=t_count, pos_gt=pos_gt, pos_name=pos_name, nucleus_vol=nucleus_vol
         )
     else:
         frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
         z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(t_count)]
-    target_cells = np.stack([target[t, z_idx[t]] for t in range(t_count)])
-    return target_cells, z_idx, False
+    target_cells = slab_mip(target, z_idx, slab_hw)
+    return target_cells, z_idx, False, slab_hw
 
 
 def _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name, target, nuclei_plate) -> None:
@@ -94,15 +97,21 @@ def _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name, target, 
     if backend != "cpdino":
         raise ValueError(f"build.instances currently supports segmentation.backend='cpdino' only; got {backend!r}")
     target_name = config.target_name
-    target_cells, z_idx, is3d = _gt_instance_slices(config, pos_gt, target, pos_name)
-    if target_name == "nucleus":
-        fov_cpdino_nucleus_instances(cache_ctx, pos_name, target_cells, seg_model)
-        return
+    # Read GT nuclei up front: whole-cell always needs them (carve seeds), and the
+    # nucleus_area focus anchor uses the nucleus channel as its focus signal (the target
+    # itself for nucleus). Passing nucleus_vol keeps the plane identical to the eval.
+    nuclei = None
     if target_name == "membrane":
         nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
         nuclei_src = nuclei_plate[pos_name] if nuclei_plate is not None else pos_gt
         nuclei = np.asarray(nuclei_src.data[:, nuclei_src.get_channel_index(nuclei_channel)])
-        nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(nuclei.shape[0])])
+    nucleus_vol = target if target_name == "nucleus" else nuclei
+    target_cells, z_idx, is3d, slab_hw = _gt_instance_slices(config, pos_gt, target, pos_name, nucleus_vol=nucleus_vol)
+    if target_name == "nucleus":
+        fov_cpdino_nucleus_instances(cache_ctx, pos_name, target_cells, seg_model)
+        return
+    if target_name == "membrane":
+        nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
         spacing = tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
         infer = cpdino_infer_kwargs(cache_ctx)
         seed_stack = np.stack(
