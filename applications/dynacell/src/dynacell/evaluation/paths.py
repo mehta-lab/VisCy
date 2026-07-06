@@ -616,11 +616,12 @@ def eval_leaf(
 
         DATA_ROOT/<organelle>/<model>/<train_set>/<test>[__<cond>]/
             [<component>/]              # multi-target combined-token models only
-            [instance_ap/]             # track="instance_ap"
             [deconv_gt/]               # gt_repr="deconv" (er/mito legacy comparison)
+            [instance_ap/]             # track="instance_ap"
 
     The default track's metrics live at the leaf top (or component top);
-    ``instance_ap`` and ``deconv_gt`` are subtracks below it.
+    ``deconv_gt`` and ``instance_ap`` are subtracks below it — ``deconv_gt``
+    nests above ``instance_ap`` when both apply.
 
     Parameters
     ----------
