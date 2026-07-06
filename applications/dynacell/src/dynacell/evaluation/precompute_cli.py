@@ -103,6 +103,13 @@ def _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name, target, 
     nuclei = None
     if target_name == "membrane":
         nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+        if nuclei_channel is None:
+            raise ValueError(
+                "build.instances for target_name='membrane' requires "
+                "segmentation.nuclei_channel_name (the GT-nucleus channel carved into "
+                "whole-cell seeds). It is unset — set it, or run precompute-gt without "
+                "build.instances if you only need GT features."
+            )
         nuclei_src = nuclei_plate[pos_name] if nuclei_plate is not None else pos_gt
         nuclei = np.asarray(nuclei_src.data[:, nuclei_src.get_channel_index(nuclei_channel)])
     nucleus_vol = target if target_name == "nucleus" else nuclei
