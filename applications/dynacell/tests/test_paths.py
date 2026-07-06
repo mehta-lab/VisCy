@@ -228,6 +228,42 @@ def test_metrics_repo_dir_mirrors_leaf() -> None:
     assert comp.name == "nucleus"
 
 
+def test_metrics_repo_dir_default_root_not_doubled() -> None:
+    """The default repo_root must resolve to the repo root, not double `applications/`."""
+    got = metrics_repo_dir("er", "fnet3d_paper", "a549", "a549", "mock")
+    assert "applications/applications" not in str(got)
+    assert got.parts[-8:] == (
+        "applications",
+        "dynacell",
+        "results",
+        "metrics",
+        "er",
+        "fnet3d_paper",
+        "a549",
+        "a549__mock",
+    )
+    # base is <repo>/applications/dynacell/results/metrics -> the repo root exists.
+    assert (got.parents[7] / "applications" / "dynacell").is_dir()
+
+
+def test_metrics_repo_dir_gt_repr_deconv_mirrors_leaf() -> None:
+    """deconv gt_repr adds a deconv_gt subdir, mirroring eval_leaf (no raw/deconv collision)."""
+    raw = metrics_repo_dir("er", "fnet3d_paper", "a549", "a549", "mock", repo_root="/repo")
+    deconv = metrics_repo_dir("er", "fnet3d_paper", "a549", "a549", "mock", gt_repr="deconv", repo_root="/repo")
+    assert deconv == raw / "deconv_gt"
+    leaf_raw = eval_leaf("er", "fnet3d_paper", "a549", "a549", "mock", data_root="/d")
+    leaf_deconv = eval_leaf("er", "fnet3d_paper", "a549", "a549", "mock", gt_repr="deconv", data_root="/d")
+    assert leaf_deconv == leaf_raw / "deconv_gt"
+
+
+def test_ablation_model_rejects_forward_train_set() -> None:
+    """An ablation model is valid only with its ablation train_set, never a forward one."""
+    with pytest.raises(ValueError):
+        eval_leaf("nucleus", "fcmae_vscyto3d_pretrained_randinit", "a549", "ipsc")
+    ok = eval_leaf("nucleus", "fcmae_vscyto3d_pretrained_randinit", "randinit", "ipsc", data_root="/d")
+    assert ok == Path("/d/nucleus/fcmae_vscyto3d_pretrained_randinit/randinit/ipsc")
+
+
 # ---------------------------------------------------------------------------
 # iter_organelle_evals spans single-target + dual component subdirs
 # ---------------------------------------------------------------------------

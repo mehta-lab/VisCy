@@ -363,6 +363,11 @@ def _tuple_is_valid(organelle: str, train_set: str, model: str | None = None) ->
     is_deconv = train_set == "a549__deconv" or train_set.endswith("__deconv") or train_set == _LEGACY_JOINT_DECONV
     if is_deconv and organelle not in {"er", "mito"}:
         return False
+    # An ablation model is valid ONLY with its closed ablation train_set (the
+    # mirror of the ablation-train_set-requires-ablation-model rule below);
+    # pairing one with a forward train_set would mint a spurious path.
+    if model in _ABLATION_MODELS and train_set not in _ABLATION_TRAIN_SETS:
+        return False
     if train_set in _FORWARD_TRAIN_SETS:
         return True
     if train_set == _LEGACY_JOINT_DECONV:
@@ -736,21 +741,28 @@ def metrics_repo_dir(
     condition: str | None = None,
     component: str | None = None,
     track: str = "default",
+    gt_repr: str = "raw",
     repo_root: str | Path | None = None,
 ) -> Path:
     """Return the git-tracked metrics mirror dir for one leaf.
 
     ``applications/dynacell/results/metrics/<organelle>/<model>/<train_set>/
-    <test>[__cond][/<component>][/instance_ap]``. Mirrors the DATA_ROOT eval leaf
-    structure (component present only for multi-target combined tokens).
+    <test>[__cond][/<component>][/deconv_gt][/instance_ap]``. Mirrors the
+    DATA_ROOT :func:`eval_leaf` structure exactly (component present only for
+    multi-target combined tokens; ``deconv_gt`` for ``gt_repr="deconv"``), so
+    raw and deconv-GT ER/mito evals do not overwrite each other in the mirror.
     """
     organelle = _norm_organelle(organelle)
     train_set = _norm_train_set(train_set)
     _validate(organelle, train_set, model)
     if track not in {"default", "instance_ap"}:
         raise ValueError(f"unknown track {track!r}; expected 'default' or 'instance_ap'")
+    if gt_repr not in {"raw", "deconv"}:
+        raise ValueError(f"unknown gt_repr {gt_repr!r}; expected 'raw' or 'deconv'")
+    if gt_repr == "deconv" and organelle not in {"er", "mito"}:
+        raise ValueError(f"deconv GT eval is valid only for er|mito, got organelle={organelle!r}")
     if repo_root is None:
-        repo_root = Path(__file__).resolve().parents[4]  # .../applications/dynacell/src/dynacell/evaluation
+        repo_root = Path(__file__).resolve().parents[5]  # repo root (.../VisCy)
     base = Path(repo_root) / "applications" / "dynacell" / "results" / "metrics"
     leaf = _leaf_suffix(test_set, condition)
     path = base / organelle / model / train_set / leaf
@@ -762,6 +774,8 @@ def metrics_repo_dir(
         path = path / component
     elif component is not None:
         raise ValueError(f"single-target organelle {organelle!r} takes no component")
+    if gt_repr == "deconv":
+        path = path / "deconv_gt"
     if track == "instance_ap":
         path = path / "instance_ap"
     return path
