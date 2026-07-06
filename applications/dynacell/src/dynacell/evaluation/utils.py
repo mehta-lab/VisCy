@@ -341,7 +341,8 @@ class MorphEmFeatureExtractor:
         Returns
         -------
         torch.Tensor
-            1-D embedding vector of shape ``(384,)``.
+            Batch embedding of shape ``(1, D)`` (one row; ``D`` = 384 for the
+            ViT-S/16 backbone), matching the ``(N, D)`` extractor contract.
         """
         x = torch.as_tensor(image, device=self.device, dtype=torch.float32)[None, None, ...]
         with torch.inference_mode():
