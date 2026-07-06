@@ -865,6 +865,14 @@ _EVAL_PARENT_TRAIN_SET: dict[str, str] = {
     "evaluations_with_embeddings": "ipsc",
     "evaluations_a549trained_with_embeddings": "a549",
     "evaluations_jointtrained_with_embeddings": "joint",
+    # dynacell-FT ablation models (vscyto3d_cytolandft / _infectionft_dynacellft)
+    # save to evaluations_<variant>[_a549trained]/ (no _with_embeddings suffix).
+    # The base parent is the iPSC-FT model; the _a549trained parent is its
+    # A549-trained variant. The model key comes from the dir name.
+    "evaluations_cytolandft": "ipsc",
+    "evaluations_cytolandft_a549trained": "a549",
+    "evaluations_infectionft_dynacellft": "ipsc",
+    "evaluations_infectionft_dynacellft_a549trained": "a549",
 }
 # Ablation eval parents -> (model-suffix-ablation-token). These carry
 # fcmae_vscyto3d_pretrained_<token> models with the closed legacy train_set token.
@@ -1092,9 +1100,18 @@ def _normalize_eval_dir(path: Path, data_root: Path) -> CanonicalKey | None:
 
     body = name[len("eval_") :]
 
-    # Ablation eval dir: eval_vscyto3d_<abltoken>_<organelle> -> ablation model + legacy train_set.
+    # Ablation eval dir: eval_vscyto3d_<abltoken>_<organelle>[_<cond>] ->
+    # ablation model + legacy train_set. Strip the trailing A549 condition
+    # BEFORE the organelle, else _last_organelle_token sees `_denv` at the end
+    # and every A549 ablation dir fails to map (and the condition is lost).
     if parent in _ABLATION_EVAL_PARENTS:
         abltoken = _ABLATION_EVAL_PARENTS[parent]
+        abl_condition: str | None = None
+        if test_set == "a549":
+            body, cond = _strip_suffix(body, tuple(_CONDITIONS))
+            if cond is None:
+                return None
+            abl_condition = cond
         organelle = _last_organelle_token(body)
         if organelle is None:
             return None
@@ -1104,7 +1121,7 @@ def _normalize_eval_dir(path: Path, data_root: Path) -> CanonicalKey | None:
             model=model,
             train_set=abltoken,
             test_set=test_set,
-            condition=None,
+            condition=abl_condition,
             component=None,
             track=track,
             gt_repr="raw",

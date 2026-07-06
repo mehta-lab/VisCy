@@ -403,6 +403,22 @@ _LEGACY_CASES: list[tuple[str, CanonicalKey | None]] = [
         f"{_R}/ipsc/evaluations_randinit/eval_vscyto3d_randinit_nucleus",
         CanonicalKey("nucleus", "fcmae_vscyto3d_pretrained_randinit", "randinit", "ipsc"),
     ),
+    # A549 ablation eval dir carries a trailing condition — must map (not UNMAPPED)
+    # AND keep the condition (the branch strips the cond before the organelle).
+    (
+        f"{_R}/a549/evaluations_randinit/eval_vscyto3d_randinit_er_denv",
+        CanonicalKey("er", "fcmae_vscyto3d_pretrained_randinit", "randinit", "a549", "denv"),
+    ),
+    # dynacell-FT ablation model eval parents (no _with_embeddings suffix) -> map to
+    # the registered model + the parent's train_set (iPSC-FT base / a549-trained).
+    (
+        f"{_R}/a549/evaluations_cytolandft/eval_vscyto3d_cytolandft_nucleus_mock",
+        CanonicalKey("nucleus", "vscyto3d_cytolandft", "ipsc", "a549", "mock"),
+    ),
+    (
+        f"{_R}/a549/evaluations_infectionft_dynacellft_a549trained/eval_vscyto3d_infectionft_dynacellft_membrane_zikv",
+        CanonicalKey("membrane", "vscyto3d_infectionft_dynacellft", "a549", "a549", "zikv"),
+    ),
     # instance_ap eval parent -> track=instance_ap; a549trained infix.
     (
         f"{_R}/ipsc/evaluations_instance_ap/eval_celldiff_r2_a549trained_nucleus",
