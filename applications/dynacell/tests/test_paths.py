@@ -288,6 +288,16 @@ def test_resolve_model_deterministic_from_name() -> None:
     assert resolve_model({"model_name": "fnet3d_paper"}, None) == "fnet3d_paper"
 
 
+@pytest.mark.parametrize(
+    "variant",
+    ["celldiff_r2_iterative", "celldiff_r2_sliding_window", "celldiff_r2_denoise"],
+)
+def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
+    """R2 variants keep their own model key — a substring match would collapse them."""
+    ckpt = f"{_MODELS_ROOT_STR}/cell_diff_vs_viscy/a549_mantis/sec61b/{variant}/checkpoints/last.ckpt"
+    assert resolve_model({"model_name": "celldiff"}, ckpt) == variant
+
+
 # ---------------------------------------------------------------------------
 # normalize_legacy — one real on-disk path of each legacy form
 # ---------------------------------------------------------------------------

@@ -100,6 +100,16 @@ _ABLATION_MODELS: frozenset[str] = frozenset(
     }
 )
 
+# CELL-Diff R2 variants, longest-first. resolve_model matches these as ckpt path
+# SEGMENTS so the three R2 variants keep distinct on-disk homes; a substring test
+# on the full ckpt string would collapse them onto bare celldiff_r2.
+_CELLDIFF_R2_VARIANTS: tuple[str, ...] = (
+    "celldiff_r2_iterative",
+    "celldiff_r2_sliding_window",
+    "celldiff_r2_denoise",
+    "celldiff_r2",
+)
+
 # ===========================================================================
 # Map (b): canonical -> paper display registry
 # ===========================================================================
@@ -469,7 +479,9 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
     variant lives in ``ckpt_path`` (``.../celldiff_r2/...``), and the documented
     rule "joint celldiff = R2" applies. Resolution order:
 
-    1. If ``ckpt_path`` contains a ``celldiff_r2`` segment -> ``celldiff_r2``.
+    1. If ``ckpt_path`` (or ``model_name``) carries a ``celldiff_r2`` variant
+       segment -> that variant (``celldiff_r2_iterative`` / ``_sliding_window`` /
+       ``_denoise``, else bare ``celldiff_r2``). Variants stay distinct on disk.
     2. If ``ckpt_path`` contains a bare ``celldiff`` segment and the leaf/benchmark
        is joint-trained -> ``celldiff_r2`` (joint celldiff = R2).
     3. Otherwise, if the config ``model_name`` is a recognizable code key, use it.
@@ -506,8 +518,13 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
 
     # CELL-Diff identity comes from the ckpt path, never the bare model_name.
     if model_name.startswith("celldiff") or "celldiff" in ckpt_str:
-        if "celldiff_r2" in ckpt_parts or "celldiff_r2" in ckpt_str:
-            return "celldiff_r2"
+        # Match the most specific R2 variant present as a path SEGMENT (or the
+        # config model_name). A substring test on the full ckpt string would
+        # collapse celldiff_r2_iterative/_sliding_window/_denoise onto bare
+        # celldiff_r2 and make their predictions/evals share one path.
+        for variant in _CELLDIFF_R2_VARIANTS:  # longest-first
+            if variant in ckpt_parts or model_name == variant:
+                return variant
         # Bare `celldiff` segment in the ckpt path.
         if "celldiff" in ckpt_parts or model_name == "celldiff":
             if is_joint:
