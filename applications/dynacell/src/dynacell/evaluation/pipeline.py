@@ -1047,11 +1047,14 @@ def _separate_nuclei_path(config: DictConfig) -> str | None:
     cross-store case — membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
     ``None`` (iPSC single-store ``cell.zarr`` — nuclei read from the GT plate).
 
-    The ``cellpose_watershed`` (whole-cell watershed) and ``cpdino`` (whole-cell +
-    nucleus carve) membrane instance-AP paths consume a separate GT-nuclei store; for
-    any other backend ``nuclei_gt_path`` is an inert ``io`` field, so the helper returns
-    ``None`` rather than opening + position-validating a store that will never be read.
+    Only the whole-cell **membrane** instance-AP paths (``cellpose_watershed`` and
+    ``cpdino``, which carve the nucleus footprint) consume a separate GT-nuclei store.
+    For nucleus/ER/mito targets — or any other backend — ``nuclei_gt_path`` is an inert
+    ``io`` field, so the helper returns ``None`` rather than opening + position-validating
+    a store that will never be read.
     """
+    if OmegaConf.select(config, "target_name", default=None) != "membrane":
+        return None
     backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
     if not (compute_instance_ap and backend in ("cellpose_watershed", "cpdino")):
