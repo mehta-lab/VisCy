@@ -110,6 +110,34 @@ def test_rendered_sbatch_has_srun_at_expected_resolved_path(capsys, leaf_subpath
     assert expected_resolved_prefix in srun_line
 
 
+def test_resume_from_renders_ckpt_path(capsys, tmp_path):
+    """--resume-from appends --ckpt_path=<explicit path> to the fit srun line."""
+    ckpt = tmp_path / "resume.ckpt"
+    ckpt.write_bytes(b"stub")
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    rc = sbj.submit([str(leaf), "--resume-from", str(ckpt), "--print-script"])
+    assert rc == 0
+    srun_line = capsys.readouterr().out.splitlines()[-1]
+    assert srun_line.startswith("srun uv run python -m dynacell fit --config")
+    assert f"--ckpt_path={ckpt}" in srun_line
+
+
+def test_resume_missing_checkpoint_raises(tmp_path):
+    """--resume-from a nonexistent checkpoint fails fast before submission."""
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    with pytest.raises(SystemExit, match="resume checkpoint not found"):
+        sbj.submit([str(leaf), "--resume-from", str(tmp_path / "missing.ckpt"), "--print-script"])
+
+
+def test_resume_rejects_predict_mode(tmp_path):
+    """--resume/--resume-from is fit-only; a predict leaf must error before rendering."""
+    ckpt = tmp_path / "resume.ckpt"
+    ckpt.write_bytes(b"stub")
+    leaf = BENCHMARKS / "mito/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_denv.yml"
+    with pytest.raises(SystemExit, match="only valid for fit mode"):
+        sbj.submit([str(leaf), "--resume-from", str(ckpt), "--print-script"])
+
+
 def test_rendered_sbatch_has_preflight_srun_absolute_path(rendered_celldiff_sbatch):
     """Preflight srun invokes nccl_smoke_test.py by absolute path (no bare ``applications/...``)."""
     preflight_line = next(

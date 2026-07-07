@@ -194,6 +194,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "callback after compose. Required to re-run a leaf whose output "
         "store already contains the prediction channel. Off by default.",
     )
+    resume = ap.add_mutually_exclusive_group()
+    resume.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume a fit job from <run_root>/checkpoints/last.ckpt "
+        "(appends --ckpt_path to the training command). The standing policy "
+        "for re-training resubmits: never restart from scratch. Requires "
+        "last.ckpt to exist and be the intended (e.g. raw, de-shadowed) "
+        "checkpoint; run the checkpoint cleanup helper first if the dir "
+        "carries stale/pre-flip checkpoints. fit mode only.",
+    )
+    resume.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        metavar="CKPT",
+        help="resume a fit job from an explicit checkpoint path (appends "
+        "--ckpt_path=CKPT). Use when the resume source is not last.ckpt. "
+        "fit mode only.",
+    )
     ap.add_argument(
         "--dependency",
         default=None,
@@ -269,6 +289,23 @@ def submit(argv: list[str] | None = None) -> int:
             f"Check --override values or hardware profile."
         )
 
+    # Resume support: append ``--ckpt_path`` to the fit command so a resubmit
+    # continues from a checkpoint instead of restarting from scratch. Standing
+    # policy for re-training resubmits (verified via LightningCLI fit, which
+    # restores model+optimizer+loop state). fit mode only; predict has its own
+    # checkpoint handling.
+    resume_arg = ""
+    if args.resume or args.resume_from is not None:
+        if mode != "fit":
+            raise SystemExit(f"--resume/--resume-from is only valid for fit mode (got {mode!r})")
+        ckpt = args.resume_from if args.resume_from is not None else Path(run_root) / "checkpoints" / "last.ckpt"
+        if not ckpt.is_file():
+            raise SystemExit(
+                f"resume checkpoint not found: {ckpt}. Run the checkpoint cleanup helper "
+                f"(archive stale/pre-flip ckpts, promote the intended raw ckpt to last.ckpt) first."
+            )
+        resume_arg = f" --ckpt_path={shlex.quote(str(ckpt))}"
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S_%f")
     run_root_path = Path(run_root)
     resolved_dir = run_root_path / "resolved"
@@ -286,6 +323,7 @@ def submit(argv: list[str] | None = None) -> int:
         env_block=_render_env_block(env),
         mode=mode,
         resolved_config=str(resolved_path),
+        resume_arg=resume_arg,
         repo_root=str(_REPO_ROOT),
     )
 
