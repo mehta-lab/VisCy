@@ -111,7 +111,7 @@ data:
       - class_path: viscy_data.hcs.HCSDataModule
         init_args:
           <<: *hcs_init_args
-          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/SEC61B_all.zarr
 
 launcher:
   job_name: FNet3DPaper_JOINT_SEC61B
