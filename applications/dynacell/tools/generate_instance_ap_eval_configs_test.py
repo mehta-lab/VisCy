@@ -140,8 +140,7 @@ def test_nucleus_leaf_is_cpdino_without_nuclei_channel() -> None:
 
 
 def test_save_dir_under_instance_ap_parent() -> None:
-    """Save dirs land under the dedicated evaluations_instance_ap parent."""
+    """Save dirs land in the canonical eval leaf with a trailing instance_ap subdir."""
     p = _pz("nucleus", "fnet3d_paper", "a549_trained", "a549", "mock")
-    sd = save_dir_for(p)
-    assert "evaluations_instance_ap" in sd.parts
-    assert sd.name == "eval_fnet3d_a549trained_nucleus_mock"
+    sd = save_dir_for(p, dynacell_root=Path("/X"))
+    assert sd == Path("/X/nucleus/fnet3d_paper/a549/a549__mock/instance_ap")

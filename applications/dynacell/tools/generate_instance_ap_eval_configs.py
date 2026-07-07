@@ -52,13 +52,13 @@ if str(_TOOLS_DIR) not in sys.path:
 
 from generate_grouped_eval_configs import (  # noqa: E402
     _CODE_TO_PAPER,
-    _DIR_INFIX,
     _DYNACELL_ROOT,
     _IGNORE_NAMES,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
     _SKIP_FILENAMES,
     _SKIP_MODELS,
+    _TRAIN_SET_TO_CANONICAL,
     ParsedZarr,
     _is_ablation_track_zarr,
     benchmark_dataset_ref,
@@ -66,6 +66,8 @@ from generate_grouped_eval_configs import (  # noqa: E402
     parse_zarr_name,
     walk_predictions,
 )
+
+from dynacell.evaluation.paths import eval_leaf, pred_cache_dir  # noqa: E402
 
 _INSTANCE_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane")
 # Opt-out model gate (see module docstring): models that genuinely have no
@@ -113,31 +115,28 @@ def a549_nuclei_store(condition: str) -> str:
 
 
 def save_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Canonical instance-AP save_dir (parallel to the feature-metric campaign)."""
-    infix = _DIR_INFIX[p.train_set]
-    name = f"eval_{p.paper_variant}{infix}_{p.organelle}"
-    if p.test_set != "ipsc":
-        name += f"_{p.condition}"
-    return dynacell_root / p.test_set / "evaluations_instance_ap" / name
+    """Canonical instance-AP eval leaf dir (``paths.eval_leaf`` with the instance_ap track)."""
+    return eval_leaf(
+        organelle=p.organelle,
+        model=p.model_variant,
+        train_set=_TRAIN_SET_TO_CANONICAL[p.train_set],
+        test_set=p.test_set,
+        condition=p.condition,
+        track="instance_ap",
+        data_root=dynacell_root,
+    )
 
 
 def pred_cache_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Dedicated pred-side instance cache (kept apart from the mask/feature caches).
-
-    Namespaced by organelle: the cache manifest records a single ``pred.plate_path``
-    per dir, so nucleus (``nucl_*.zarr``) and membrane (``memb_*.zarr``) for the same
-    (train_set, model, condition) must not share a dir — otherwise the two grouped
-    jobs race over the manifest and the loser dies with ``StaleCacheError``.
-    """
-    cond_seg = "ipsc" if p.test_set == "ipsc" else str(p.condition)
-    return (
-        dynacell_root
-        / p.test_set
-        / "eval_cache_pred_instance_ap"
-        / p.organelle
-        / p.train_set
-        / p.model_variant
-        / cond_seg
+    """Canonical instance-AP pred-side feature cache (``paths.pred_cache_dir`` instance_ap track)."""
+    return pred_cache_dir(
+        organelle=p.organelle,
+        model=p.model_variant,
+        train_set=_TRAIN_SET_TO_CANONICAL[p.train_set],
+        test_set=p.test_set,
+        condition=p.condition,
+        track="instance_ap",
+        data_root=dynacell_root,
     )
 
 

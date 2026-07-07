@@ -207,7 +207,7 @@ def test_paper_key_maps_agree_on_overlap() -> None:
     """
     from generate_grouped_eval_configs import _CODE_TO_PAPER
 
-    from dynacell.evaluation.save_paths import PAPER_KEY
+    from dynacell.evaluation.paths import PAPER_KEY
 
     # Documented intentional difference: the grouped campaign keeps `celldiff`
     # literal; the runtime resolver collapses it to `celldiff_iterative`.
@@ -228,7 +228,7 @@ def test_deterministic_models_known_to_runtime_resolver() -> None:
     """
     from generate_grouped_eval_configs import _DETERMINISTIC_MODELS
 
-    from dynacell.evaluation.save_paths import PAPER_KEY
+    from dynacell.evaluation.paths import PAPER_KEY
 
     missing = [m for m in _DETERMINISTIC_MODELS if m not in PAPER_KEY]
     assert not missing, f"deterministic campaign models absent from save_paths.PAPER_KEY: {missing}"
@@ -270,17 +270,17 @@ def _make(rel: str) -> ParsedZarr:
 
 
 def test_save_dir_canonical_ipsc_ipsc_trained() -> None:
-    """iPSC-trained iPSC-test save_dir → evaluations_with_embeddings/eval_<paper>_<organelle>."""
+    """iPSC-trained iPSC-test save_dir → canonical <organelle>/<model>/<train>/<test> leaf."""
     parsed = _make("ipsc/predictions/sec61b_fnet3d_paper.zarr")
     sd = save_dir_for(parsed, dynacell_root=Path("/X"))
-    assert sd == Path("/X/ipsc/evaluations_with_embeddings/eval_fnet3d_er")
+    assert sd == Path("/X/er/fnet3d_paper/ipsc/ipsc")
 
 
 def test_save_dir_canonical_a549_joint() -> None:
-    """Joint-trained A549-test save_dir uses _jointtrained_ infix + the A549 dataset root."""
+    """Joint-trained A549-test save_dir → canonical leaf with the <test>__<cond> segment."""
     parsed = _make("a549/joint_predictions/memb_celldiff_r2_denv.zarr")
     sd = save_dir_for(parsed, dynacell_root=Path("/X"))
-    assert sd == Path("/X/a549/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_membrane_denv")
+    assert sd == Path("/X/membrane/celldiff_r2/joint/a549__denv")
 
 
 def test_dataset_ref_ipsc() -> None:
@@ -308,22 +308,22 @@ def test_dataset_ref_a549_membrane_uses_caax() -> None:
 
 
 def test_pred_cache_dir_a549() -> None:
-    """A549 pred_cache_dir condition segment is ``<gene>_<cond>`` (e.g. sec61b_denv)."""
+    """A549 canonical pred_cache_dir: <test>/eval_cache_pred/<org>/<model>/<train>/<test>__<cond>."""
     parsed = _make("a549/joint_predictions/sec61b_celldiff_r2_denv.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/a549/eval_cache_pred/joint/celldiff_r2/sec61b_denv")
+    assert pc == Path("/X/a549/eval_cache_pred/er/celldiff_r2/joint/a549__denv")
 
 
 def test_pred_cache_dir_ipsc() -> None:
-    """For iPSC, the pred_cache_dir condition segment is ``<organelle>_ipsc``.
+    """IPSC canonical pred_cache_dir keeps the organelle in the tuple (mito normalized).
 
-    iPSC has no plate condition, so the segment is namespaced by the logical
-    organelle (a bare ``ipsc`` would collapse all four organelles onto one dir
-    and race the manifest's ``pred.plate_path``).
+    The canonical grammar namespaces the pred cache on the full tuple
+    ``<test>/eval_cache_pred/<organelle>/<model>/<train>/<test>``, so the four
+    organelles never collapse onto one dir.
     """
     parsed = _make("ipsc/predictions/tomm20_fnet3d_paper.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/mitochondria_ipsc")
+    assert pc == Path("/X/ipsc/eval_cache_pred/mito/fnet3d_paper/ipsc/ipsc")
 
 
 # ---------------------------------------------------------------------------
