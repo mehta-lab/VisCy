@@ -489,7 +489,7 @@ def test_nucleus_grouped_leaf_enables_cpdino_instance_ap() -> None:
 
 
 def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → cpdino backend + per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend + per-condition dual-store nuclei_gt_path."""
     conds = [
         _make("a549/predictions/memb_fnet3d_paper_a549trained_mock.zarr"),
         _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr"),
@@ -504,7 +504,7 @@ def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
     assert "watershed" not in leaf["segmentation"]
     for block in leaf["conditions"]:
         nuclei_gt = block["io"]["nuclei_gt_path"]
-        assert "H2B" in nuclei_gt and nuclei_gt.endswith(".ozx")
+        assert "dual_nucl_memb" in nuclei_gt and nuclei_gt.endswith(".zarr")
 
 
 def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:

@@ -285,8 +285,11 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
     )
     apply_dataset_ref(cfg)
 
-    gt_suffix = f"{gene_token}_{cond_token}.ozx"
-    seg_suffix = f"{gene_token}_{cond_token}_seg_cleaned.zarr"
+    # Nucleus (h2b) + membrane (caax) GT now live in the merged dual store; ER/mito
+    # keep their per-marker stores. The suffix reflects the on-disk store stem.
+    store_stem = "dual_nucl_memb" if marker in ("caax", "h2b") else gene_token
+    gt_suffix = f"{store_stem}_{cond_token}.zarr"
+    seg_suffix = f"{store_stem}_{cond_token}_seg_cleaned.zarr"
     cache_suffix = f"eval_cache/{marker}_{cond_slug}"
 
     assert str(cfg.io.gt_path).endswith(gt_suffix), (

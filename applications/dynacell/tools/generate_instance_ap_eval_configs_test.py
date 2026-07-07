@@ -98,14 +98,14 @@ def test_audit_flags_unregistered_prediction(tmp_path) -> None:
 
 
 def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:
-    """The A549 nuclei store is the H2B manifest's test store for that plate."""
+    """The A549 nuclei store is the H2B manifest's test store (now the merged dual store)."""
     for cond in ("mock", "denv", "zikv"):
         store = a549_nuclei_store(cond)
-        assert store.endswith(".ozx") and "H2B" in store
+        assert store.endswith(".zarr") and "dual_nucl_memb" in store
 
 
 def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → cpdino backend, slice 0.3, per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend, slice 0.3, per-condition dual-store nuclei_gt_path."""
     conds = [
         _pz("membrane", "fnet3d_paper", "a549_trained", "a549", "mock"),
         _pz("membrane", "fcmae_vscyto3d_scratch", "joint", "a549", "zikv"),
@@ -118,7 +118,7 @@ def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
     assert leaf["segmentation"]["slice_fraction"] == 0.3
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     for block in leaf["conditions"]:
-        assert "H2B" in block["io"]["nuclei_gt_path"]
+        assert "dual_nucl_memb" in block["io"]["nuclei_gt_path"]
         assert block["benchmark"]["dataset_ref"]["target"] == "caax"
 
 

@@ -13,7 +13,7 @@ benchmark:
 
 io:
   pred_is_source: true
-  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
 
 compute_feature_metrics: true
 compute_instance_ap: true
