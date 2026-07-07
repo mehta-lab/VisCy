@@ -30,9 +30,6 @@ trainer:
     class_path: lightning.pytorch.strategies.DDPStrategy
     init_args:
       find_unused_parameters: true
-      timeout:
-        class_path: datetime.timedelta
-        init_args:
-          hours: 3
+      timeout: "3:00:00"  # h:m:s (jsonargparse parses timedelta from this string form)
   devices: 4
   num_nodes: 1
