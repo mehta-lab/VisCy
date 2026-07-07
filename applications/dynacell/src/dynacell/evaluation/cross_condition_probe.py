@@ -56,13 +56,38 @@ _FIELDNAMES = (
 GROUP_PROBE_FILENAME = "cross_condition_probe.csv"
 
 
+def _condition_and_leaf(eval_dir: Path) -> tuple[str, Path] | None:
+    """Return ``(condition, leaf_dir)`` for the eval dir, or ``None`` if it has no condition.
+
+    The eval save dir may be the condition leaf itself (single-target:
+    ``.../a549__mock``, legacy: ``.../eval_demo_membrane_mock``) or nest a
+    component / subtrack subdir below it — the radiant grammar puts a
+    per-component organelle dir under a multi-target (dual) model's leaf
+    (``.../a549__mock/nucleus``), and ``deconv_gt`` / ``instance_ap`` are further
+    subtracks. None of those trailing segments end in a condition token, so we
+    walk up from *eval_dir* and return the first ancestor whose name carries a
+    ``_{mock,denv,zikv}`` suffix (the ``<test>__<cond>`` leaf). The leaf is drawn
+    from *eval_dir*'s own parent chain, so ``eval_dir.relative_to(leaf)`` in
+    callers is always well-defined.
+    Returns ``None`` when no ancestor encodes a condition (e.g. the
+    in-distribution iPSC leaf ``.../ipsc``), which joins no group.
+    """
+    for candidate in (eval_dir, *eval_dir.parents):
+        for token in _CONDITION_TOKENS:
+            if candidate.name.endswith(f"_{token}"):
+                return token, candidate
+    return None
+
+
 def _detect_condition(eval_dir: Path) -> str:
-    """Extract ``mock``, ``denv``, or ``zikv`` from the dir name's trailing token."""
-    name = eval_dir.name
-    for token in _CONDITION_TOKENS:
-        if name.endswith(f"_{token}"):
-            return token
-    raise ValueError(f"cannot infer condition from eval_dir name {name!r}: expected trailing _{{mock,denv,zikv}}")
+    """Extract ``mock``, ``denv``, or ``zikv``, walking up past any component/subtrack subdir."""
+    match = _condition_and_leaf(eval_dir)
+    if match is None:
+        raise ValueError(
+            f"cannot infer condition from eval_dir {str(eval_dir)!r}: "
+            f"expected a <test>__{{mock,denv,zikv}} segment (optionally with a component/subtrack subdir)"
+        )
+    return match[0]
 
 
 def _load_embeddings(
@@ -176,20 +201,36 @@ def _write_rows(out_path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def _model_group_key(eval_dir: Path) -> tuple[str, str] | None:
-    """Group key for one condition dir: ``(parent, name minus trailing _{cond})``.
+def _model_group_key(eval_dir: Path) -> tuple[str, str, str] | None:
+    """Group key stable across condition: ``(leaf_parent, leaf_name_minus_cond, component_rel)``.
 
-    Condition dirs of the same (model, pool, organelle) share a name prefix and
-    differ only in the trailing ``_{mock,denv,zikv}`` token (e.g.
-    ``eval_vscyto3d_mitochondria_mock`` / ``…_denv``), so stripping that token
-    groups a model's conditions together. Returns ``None`` for dirs without a
-    recognized token (the in-distribution iPSC eval), which join no group.
+    Condition dirs of the same (model, train_set, test[, component]) differ only
+    in the condition token and must group together so a model's mock reference is
+    matched to its infected conditions. The token can sit in the leaf name
+    (legacy ``eval_vscyto3d_mitochondria_mock``; radiant single-target
+    ``a549__mock``) or one level above a component/subtrack subdir (radiant dual
+    model ``a549__mock/nucleus``). We locate the ``<test>__<cond>`` leaf via
+    :func:`_condition_and_leaf`, then key on:
+
+    * ``str(leaf.parent)`` — the ``<organelle>/<model>/<train_set>`` dir (legacy:
+      the model dir), so different models/train_sets never collide;
+    * the leaf name with the condition token stripped (``a549__mock`` -> ``a549_``;
+      ``eval_..._mock`` -> ``eval_...``), stable across mock/denv/zikv;
+    * the component/subtrack path *below* the leaf (``"."`` for a single-target
+      leaf, ``"nucleus"`` / ``"membrane"`` for a dual model's components) — this
+      keeps a dual model's two components in **separate** groups, so each
+      condition appears once per group (no duplicate-condition collision).
+
+    Returns ``None`` for dirs without a condition token (the in-distribution iPSC
+    eval), which join no group.
     """
-    name = eval_dir.name
-    for token in _CONDITION_TOKENS:
-        if name.endswith(f"_{token}"):
-            return (str(eval_dir.parent), name[: -(len(token) + 1)])
-    return None
+    match = _condition_and_leaf(eval_dir)
+    if match is None:
+        return None
+    token, leaf = match
+    stripped = leaf.name[: -(len(token) + 1)]
+    component_rel = str(eval_dir.relative_to(leaf))  # "." when eval_dir is the leaf itself
+    return (str(leaf.parent), stripped, component_rel)
 
 
 def _probe_one_group(by_condition: dict[str, Path], n_splits: int, rng_seed: int) -> list[Path]:
@@ -247,7 +288,7 @@ def run_for_group(
     n_splits, rng_seed : int
         Forwarded to :func:`fov_stratified_auroc`.
     """
-    groups: dict[tuple[str, str], dict[str, Path]] = {}
+    groups: dict[tuple[str, str, str], dict[str, Path]] = {}
     for d in eval_dirs:
         key = _model_group_key(d)
         if key is None:
