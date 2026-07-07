@@ -157,6 +157,37 @@ def _render_env_block(env: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
+    """Resolve the best-by-monitor checkpoint in ``ckpt_dir``.
+
+    Reads ``best_model_path`` from the ``ModelCheckpoint`` callback state saved
+    inside ``last.ckpt`` (the training recipe uses ``monitor: loss/validate``,
+    ``save_top_k: 5`` with the default ``epoch=N-step=M`` filename, so the loss
+    is not in the filename and the checkpoint state is the authoritative source).
+    Falls back to the highest-epoch ``epoch=*.ckpt`` when the state is missing or
+    points at a pruned file.
+    """
+    last = ckpt_dir / "last.ckpt"
+    if last.is_file():
+        import torch  # lazy: only imported for --ckpt best resolution
+
+        state = torch.load(last, map_location="cpu", weights_only=False)
+        for key, val in state.get("callbacks", {}).items():
+            if "ModelCheckpoint" in str(key) and isinstance(val, dict):
+                best = val.get("best_model_path")
+                if best and Path(best).is_file():
+                    return Path(best)
+    candidates = sorted(
+        ckpt_dir.glob("epoch=*.ckpt"),
+        key=lambda p: int(re.match(r"epoch=(\d+)", p.name).group(1)),  # type: ignore[union-attr]
+    )
+    if candidates:
+        return candidates[-1]
+    raise SystemExit(
+        f"--ckpt best: no resolvable checkpoint in {ckpt_dir} (no last.ckpt best_model_path, no epoch=*.ckpt)"
+    )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("leaf", type=Path, help="path to a benchmark leaf YAML")
@@ -193,6 +224,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="set init_args.overwrite=True on every HCSPredictionWriter "
         "callback after compose. Required to re-run a leaf whose output "
         "store already contains the prediction channel. Off by default.",
+    )
+    ap.add_argument(
+        "--ckpt",
+        default=None,
+        metavar="{best,last,PATH}",
+        help="predict mode: override model.init_args.ckpt_path. 'best' resolves "
+        "the best-by-monitor checkpoint (from last.ckpt's ModelCheckpoint state) "
+        "in the leaf's checkpoint dir; 'last' uses that dir's last.ckpt; a PATH is "
+        "used verbatim. Use 'best' for Phase-9 re-predict so a retrained model "
+        "predicts from its new best checkpoint instead of the leaf's hardcoded "
+        "(possibly stale) epoch. predict mode only (fit uses --resume).",
     )
     resume = ap.add_mutually_exclusive_group()
     resume.add_argument(
@@ -305,6 +347,27 @@ def submit(argv: list[str] | None = None) -> int:
                 f"(archive stale/pre-flip ckpts, promote the intended raw ckpt to last.ckpt) first."
             )
         resume_arg = f" --ckpt_path={shlex.quote(str(ckpt))}"
+
+    # Predict-mode checkpoint override: repoint model.init_args.ckpt_path so a
+    # re-predict uses the retrained model's best checkpoint rather than the leaf's
+    # hardcoded (possibly stale/deconv) epoch. predict mode only.
+    if args.ckpt is not None:
+        if mode != "predict":
+            raise SystemExit(f"--ckpt is only valid for predict mode (got {mode!r}); fit uses --resume")
+        model_init = composed.get("model", {}).get("init_args", {})
+        current_ckpt = model_init.get("ckpt_path")
+        if not current_ckpt:
+            raise SystemExit("--ckpt: leaf has no model.init_args.ckpt_path to resolve the checkpoint dir from")
+        ckpt_dir = Path(current_ckpt).parent
+        if args.ckpt == "best":
+            resolved_ckpt = _resolve_best_ckpt(ckpt_dir)
+        elif args.ckpt == "last":
+            resolved_ckpt = ckpt_dir / "last.ckpt"
+        else:
+            resolved_ckpt = Path(args.ckpt)
+        if not resolved_ckpt.is_file():
+            raise SystemExit(f"--ckpt resolved to a missing checkpoint: {resolved_ckpt}")
+        model_init["ckpt_path"] = str(resolved_ckpt)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S_%f")
     run_root_path = Path(run_root)

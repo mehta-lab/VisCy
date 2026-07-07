@@ -138,6 +138,50 @@ def test_resume_rejects_predict_mode(tmp_path):
         sbj.submit([str(leaf), "--resume-from", str(ckpt), "--print-script"])
 
 
+def test_ckpt_explicit_path_overrides(capsys, tmp_path):
+    """--ckpt PATH replaces the predict leaf's hardcoded model.init_args.ckpt_path."""
+    ckpt = tmp_path / "custom.ckpt"
+    ckpt.write_bytes(b"stub")
+    leaf = BENCHMARKS / "mito/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_denv.yml"
+    rc = sbj.submit([str(leaf), "--ckpt", str(ckpt), "--print-resolved-config"])
+    assert rc == 0
+    assert f"ckpt_path: {ckpt}" in capsys.readouterr().out
+
+
+def test_ckpt_missing_raises(tmp_path):
+    """--ckpt pointing at a nonexistent checkpoint fails fast before submission."""
+    leaf = BENCHMARKS / "mito/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_denv.yml"
+    with pytest.raises(SystemExit, match="missing checkpoint"):
+        sbj.submit([str(leaf), "--ckpt", str(tmp_path / "nope.ckpt"), "--print-resolved-config"])
+
+
+def test_ckpt_rejects_fit_mode():
+    """--ckpt is predict-only; a fit leaf must error (fit uses --resume)."""
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    with pytest.raises(SystemExit, match="only valid for predict"):
+        sbj.submit([str(leaf), "--ckpt", "best", "--print-script"])
+
+
+def test_resolve_best_ckpt_reads_best_model_path(tmp_path):
+    """_resolve_best_ckpt returns ModelCheckpoint.best_model_path from last.ckpt."""
+    torch = pytest.importorskip("torch")
+    best = tmp_path / "epoch=7-step=100.ckpt"
+    best.write_bytes(b"x")
+    (tmp_path / "epoch=3-step=40.ckpt").write_bytes(b"x")
+    torch.save(
+        {"callbacks": {"ModelCheckpoint{'monitor': 'loss/validate'}": {"best_model_path": str(best)}}},
+        tmp_path / "last.ckpt",
+    )
+    assert sbj._resolve_best_ckpt(tmp_path) == best
+
+
+def test_resolve_best_ckpt_fallback_highest_epoch(tmp_path):
+    """Without a usable last.ckpt state, fall back to the highest-epoch ckpt."""
+    for name in ("epoch=2-step=20.ckpt", "epoch=13-step=130.ckpt", "epoch=5-step=50.ckpt"):
+        (tmp_path / name).write_bytes(b"x")
+    assert sbj._resolve_best_ckpt(tmp_path).name == "epoch=13-step=130.ckpt"
+
+
 def test_rendered_sbatch_has_preflight_srun_absolute_path(rendered_celldiff_sbatch):
     """Preflight srun invokes nccl_smoke_test.py by absolute path (no bare ``applications/...``)."""
     preflight_line = next(
