@@ -25,6 +25,7 @@ from dynacell.evaluation.paths import (
     ORGANELLE_EVAL_TARGET,
     PAPER_KEY,
     CanonicalKey,
+    canonical_model_name,
     checkpoint_dir,
     eval_leaf,
     gt_cache_dir,
@@ -332,6 +333,32 @@ def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
     """R2 variants keep their own model key — a substring match would collapse them."""
     ckpt = f"{_MODELS_ROOT_STR}/cell_diff_vs_viscy/a549_mantis/sec61b/{variant}/checkpoints/last.ckpt"
     assert resolve_model({"model_name": "celldiff"}, ckpt) == variant
+
+
+@pytest.mark.parametrize(
+    ("run_dir_name", "expected"),
+    [
+        # recipe-suffixed run dirs -> canonical code key (the two live non-canonical forms)
+        ("fcmae_vscyto3d_pretrained_ws8500", "fcmae_vscyto3d_pretrained"),
+        ("pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep", "pix2pix3d_unetvit"),
+        # already-canonical run-dir names pass through unchanged
+        ("fcmae_vscyto3d_scratch", "fcmae_vscyto3d_scratch"),
+        ("fnet3d_paper", "fnet3d_paper"),
+        ("unetvit3d", "unetvit3d"),
+        ("celldiff_r2", "celldiff_r2"),
+        # longest-match: an exact ablation key wins over its prefix
+        ("fcmae_vscyto3d_pretrained_randinit", "fcmae_vscyto3d_pretrained_randinit"),
+        # longest-match: celldiff_r2_iterative wins over celldiff_r2 / celldiff
+        ("celldiff_r2_iterative", "celldiff_r2_iterative"),
+    ],
+)
+def test_canonical_model_name(run_dir_name: str, expected: str) -> None:
+    assert canonical_model_name(run_dir_name) == expected
+
+
+def test_canonical_model_name_unknown_raises() -> None:
+    with pytest.raises(ValueError):
+        canonical_model_name("totally_unknown_model")
 
 
 # ---------------------------------------------------------------------------

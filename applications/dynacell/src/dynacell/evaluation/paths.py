@@ -562,6 +562,47 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
     )
 
 
+def canonical_model_name(run_dir_name: str) -> str:
+    """Canonicalize an on-disk checkpoint run-dir name to its model code key.
+
+    On-disk checkpoint run dirs carry training-recipe suffixes that are not part
+    of the canonical model vocabulary — ``fcmae_vscyto3d_pretrained_ws8500`` is the
+    warmup-8500 recipe of ``fcmae_vscyto3d_pretrained``, and
+    ``pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep`` is a training recipe of
+    ``pix2pix3d_unetvit``. :func:`checkpoint_dir` takes ``model`` verbatim, so a
+    migration that consolidates existing run dirs into the canonical tree must map
+    each run-dir name to its code key first (unlike :func:`resolve_model`, which
+    recovers the code from a config's benchmark block + ckpt path).
+
+    Resolution: the longest model code key ``K`` in :data:`PAPER_KEY` such that
+    ``run_dir_name == K`` or ``run_dir_name`` starts with ``K + "_"``. Longest-first
+    so a more-specific key wins over its prefix (an ablation ``..._randinit`` over
+    ``fcmae_vscyto3d_pretrained``; ``celldiff_r2`` over ``celldiff``).
+
+    Parameters
+    ----------
+    run_dir_name : str
+        The checkpoint run-dir name (e.g. ``fcmae_vscyto3d_pretrained_ws8500``).
+
+    Returns
+    -------
+    str
+        The canonical model code key.
+
+    Raises
+    ------
+    ValueError
+        When no code key matches — never guesses.
+    """
+    for key in sorted(PAPER_KEY, key=len, reverse=True):
+        if run_dir_name == key or run_dir_name.startswith(key + "_"):
+            return key
+    raise ValueError(
+        f"cannot canonicalize checkpoint run-dir name {run_dir_name!r} to a model code key "
+        "(no matching key in PAPER_KEY)"
+    )
+
+
 # ===========================================================================
 # Grammar functions (forward)
 # ===========================================================================
