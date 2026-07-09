@@ -32,6 +32,9 @@ builders. Not part of the installable package — run with `uv run python applic
   the fixed `io.cell_segmentation_path` for feature crops.
 - `fuse_a549_dual_channel_zarr.py` — fuse A549 nucleus+membrane into the dual-channel zarr for two-channel leaves.
 - `save_random_init_vscyto3d_ckpts.py` — write untrained (`_randinit`) VSCyto3D checkpoints for ablations.
+- `assemble_release_checkpoints.py` — build/update the public S3 checkpoint zoo (`dynacell_v1/models/`) from the
+  pinned `predict__*.yml` checkpoints; idempotent (drives the recurring deconv→raw ER/Mito update). See
+  [RELEASING_CHECKPOINTS.md](./RELEASING_CHECKPOINTS.md).
 
 ## Diagnostics / tests
 
