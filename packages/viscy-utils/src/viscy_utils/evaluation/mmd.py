@@ -269,3 +269,60 @@ def mmd_permutation_test(
     null = mmd2_all[1:]
     p_value = float((np.sum(null >= observed) + 1) / (n_permutations + 1))
     return observed, p_value, null
+
+
+def witness_function(
+    query: NDArray,
+    X: NDArray,
+    Y: NDArray,
+    bandwidth: float | None = None,
+    chunk_size: int = 500,
+) -> NDArray:
+    """Evaluate the empirical MMD witness function at query points.
+
+    The witness function is the RKHS direction along which distributions P
+    (sampled by ``X``) and Q (sampled by ``Y``) differ most. Evaluated at a
+    point z with the Gaussian RBF kernel k:
+
+        w(z) = (1/n) sum_i k(z, x_i) - (1/m) sum_j k(z, y_j)
+
+    A positive score means z looks more like X (P); a negative score means it
+    looks more like Y (Q). The squared MMD equals the difference in mean witness
+    score between the two samples, so this is the per-point contribution to the
+    MMD.
+
+    Query points are processed in chunks so the intermediate kernel matrices
+    stay bounded regardless of ``len(query)``.
+
+    Parameters
+    ----------
+    query : NDArray
+        Points at which to evaluate the witness function, shape (q, d).
+    X : NDArray
+        Samples from distribution P, shape (n, d). Positive scores lean toward X.
+    Y : NDArray
+        Samples from distribution Q, shape (m, d). Negative scores lean toward Y.
+    bandwidth : float or None
+        Gaussian RBF bandwidth (sigma^2). None = median heuristic on (X, Y).
+    chunk_size : int
+        Number of query points evaluated per batch.
+
+    Returns
+    -------
+    NDArray
+        Witness scores, shape (q,), float64.
+    """
+    if bandwidth is None:
+        bandwidth = median_heuristic(X, Y)
+    device = _get_device()
+    Xt = torch.from_numpy(np.asarray(X, dtype=np.float32)).to(device)
+    Yt = torch.from_numpy(np.asarray(Y, dtype=np.float32)).to(device)
+    q = np.asarray(query, dtype=np.float32)
+    scores = np.empty(len(q), dtype=np.float64)
+    for start in range(0, len(q), chunk_size):
+        sl = slice(start, start + chunk_size)
+        Qc = torch.from_numpy(q[sl]).to(device)
+        k_x = _rbf_kernel(Qc, Xt, bandwidth).mean(dim=1)
+        k_y = _rbf_kernel(Qc, Yt, bandwidth).mean(dim=1)
+        scores[sl] = (k_x - k_y).double().cpu().numpy()
+    return scores

@@ -9,7 +9,12 @@ import pytest
 
 from dynaclr.evaluation.mmd.compute_mmd import run_mmd_analysis, run_mmd_pooled
 from dynaclr.evaluation.mmd.config import ComparisonSpec, MMDEvalConfig, MMDPooledConfig, MMDSettings
-from viscy_utils.evaluation.mmd import compute_mmd_unbiased, median_heuristic, mmd_permutation_test
+from viscy_utils.evaluation.mmd import (
+    compute_mmd_unbiased,
+    median_heuristic,
+    mmd_permutation_test,
+    witness_function,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -130,6 +135,41 @@ def test_compute_mmd_unbiased_symmetric():
     Y = rng.normal(1, 1, (100, 8))
     bw = median_heuristic(X, Y)
     assert abs(compute_mmd_unbiased(X, Y, bw) - compute_mmd_unbiased(Y, X, bw)) < 1e-10
+
+
+def test_witness_function_separates_distributions():
+    """Witness scores are positive for X-like points and negative for Y-like points."""
+    rng = np.random.default_rng(6)
+    X = rng.normal(0.0, 1.0, (200, 8))
+    Y = rng.normal(5.0, 1.0, (200, 8))
+    query = np.vstack([X, Y])
+    scores = witness_function(query, X, Y)
+    assert scores.shape == (len(query),)
+    assert scores[: len(X)].mean() > 0 > scores[len(X) :].mean()
+
+
+def test_witness_function_antisymmetric():
+    """Swapping X and Y negates the witness scores."""
+    rng = np.random.default_rng(7)
+    X = rng.normal(0.0, 1.0, (100, 8))
+    Y = rng.normal(3.0, 1.0, (100, 8))
+    query = rng.normal(1.5, 1.0, (50, 8))
+    bw = median_heuristic(X, Y)
+    w_xy = witness_function(query, X, Y, bandwidth=bw)
+    w_yx = witness_function(query, Y, X, bandwidth=bw)
+    assert np.allclose(w_xy, -w_yx, atol=1e-6)
+
+
+def test_witness_function_chunking_invariant():
+    """Chunk size does not change the result."""
+    rng = np.random.default_rng(8)
+    X = rng.normal(0.0, 1.0, (120, 8))
+    Y = rng.normal(2.0, 1.0, (120, 8))
+    query = rng.normal(1.0, 1.0, (77, 8))
+    bw = median_heuristic(X, Y)
+    small = witness_function(query, X, Y, bandwidth=bw, chunk_size=10)
+    large = witness_function(query, X, Y, bandwidth=bw, chunk_size=1000)
+    assert np.allclose(small, large, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
