@@ -189,12 +189,15 @@ def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
                         return rebased
                     if Path(best).is_file():
                         return Path(best)
-    candidates = sorted(
-        ckpt_dir.glob("epoch=*.ckpt"),
-        key=lambda p: int(re.match(r"epoch=(\d+)", p.name).group(1)),  # type: ignore[union-attr]
-    )
-    if candidates:
-        return candidates[-1]
+    # Highest-epoch fallback. Skip any nonconforming ``epoch=*.ckpt`` (e.g.
+    # ``epoch=final.ckpt``) rather than crashing mid-submit on a None re.match.
+    epoch_ckpts: list[tuple[int, Path]] = []
+    for p in ckpt_dir.glob("epoch=*.ckpt"):
+        m = re.match(r"epoch=(\d+)", p.name)
+        if m is not None:
+            epoch_ckpts.append((int(m.group(1)), p))
+    if epoch_ckpts:
+        return max(epoch_ckpts, key=lambda t: t[0])[1]
     raise SystemExit(
         f"--ckpt best: no resolvable checkpoint in {ckpt_dir} (no last.ckpt best_model_path, no epoch=*.ckpt)"
     )

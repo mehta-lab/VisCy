@@ -182,6 +182,15 @@ def test_resolve_best_ckpt_fallback_highest_epoch(tmp_path):
     assert sbj._resolve_best_ckpt(tmp_path).name == "epoch=13-step=130.ckpt"
 
 
+def test_resolve_best_ckpt_skips_nonconforming_epoch_files(tmp_path):
+    """A nonconforming ``epoch=*.ckpt`` (no digits) is skipped, not a crash, in the
+    highest-epoch fallback."""
+    (tmp_path / "epoch=final.ckpt").write_bytes(b"x")  # would break int(re.match(...).group(1))
+    (tmp_path / "epoch=4-step=40.ckpt").write_bytes(b"x")
+    (tmp_path / "epoch=11-step=110.ckpt").write_bytes(b"x")
+    assert sbj._resolve_best_ckpt(tmp_path).name == "epoch=11-step=110.ckpt"
+
+
 def test_resolve_best_ckpt_rebases_moved_dir(tmp_path):
     """best_model_path stored as a stale absolute path (moved/renamed ckpt dir) is
     re-based onto ckpt_dir, NOT silently degraded to the highest-epoch fallback."""
