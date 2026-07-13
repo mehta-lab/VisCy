@@ -416,6 +416,12 @@ _LEGACY_CASES: list[tuple[str, CanonicalKey | None]] = [
         f"{_R}/ipsc/predictions/memb_celldiff_iterative.zarr",
         CanonicalKey("membrane", "celldiff_iterative", "ipsc", "ipsc"),
     ),
+    # Nonstandard `nucleus_` prefix (unetvit3d A549-test nucleus predicts) -> maps
+    # like `nucl_` via longest-prefix match (iPSC-trained on A549 test).
+    (
+        f"{_R}/a549/predictions/nucleus_unetvit3d_denv.zarr",
+        CanonicalKey("nucleus", "unetvit3d", "ipsc", "a549", "denv"),
+    ),
     # --- eval dirs --------------------------------------------------------
     # iPSC-trained eval (with_embeddings), unext2 paper key -> code model.
     (

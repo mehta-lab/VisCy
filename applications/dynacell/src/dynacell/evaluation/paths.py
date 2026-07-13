@@ -821,6 +821,9 @@ _ZARR_ORG_PREFIX: dict[str, str] = {
     "sec61b": "er",
     "tomm20": "mito",
     "nucl": "nucleus",
+    # nonstandard prefix: the unetvit3d A549-test nucleus predicts were written
+    # `nucleus_unetvit3d_<cond>.zarr` (not `nucl_`). Longest-match wins over `nucl`.
+    "nucleus": "nucleus",
     "memb": "membrane",
     "dual_nucl_memb": "dual_nucleus_membrane",
 }
