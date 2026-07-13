@@ -246,69 +246,17 @@ _A549_GENE: dict[str, str] = {
 }
 
 # ===========================================================================
-# Map (c): canonical eval `target` group name (GT-repr-aware)
+# Map (c): canonical eval `target` group name
 # ===========================================================================
 
-# Base organelle -> eval-side Hydra `target` group name (raw GT). ER/Mito
-# disambiguate by gene to match the target YAMLs under
-# _internal/shared/eval/target/. The deconv variants live in the SAME eval target
-# tree and are gated on gt_repr="deconv".
-_ORGANELLE_EVAL_TARGET_RAW: dict[str, str] = {
+# Base organelle -> eval-side Hydra `target` group name. ER/Mito disambiguate by
+# gene to match the target YAMLs under _internal/shared/eval/target/.
+ORGANELLE_EVAL_TARGET: dict[str, str] = {
     "nucleus": "nucleus",
     "membrane": "membrane",
     "er": "er_sec61b",
     "mito": "mito_tomm20",
 }
-_ORGANELLE_EVAL_TARGET_DECONV: dict[str, str] = {
-    "er": "er_sec61b_deconvolved",
-    "mito": "mito_tomm20_deconvolved",
-}
-
-
-class _OrganelleEvalTargetMap:
-    """GT-repr-aware organelle -> eval `target` group name.
-
-    Behaves like the old ``ORGANELLE_EVAL_TARGET`` dict for the raw default
-    (``ORGANELLE_EVAL_TARGET[organelle]``), and adds
-    ``ORGANELLE_EVAL_TARGET.for_repr(organelle, gt_repr)`` for the deconv-GT track.
-    """
-
-    def __getitem__(self, organelle: str) -> str:
-        return self.for_repr(organelle, "raw")
-
-    def __contains__(self, organelle: str) -> bool:
-        return organelle in _ORGANELLE_EVAL_TARGET_RAW
-
-    def for_repr(self, organelle: str, gt_repr: str = "raw") -> str:
-        """Return the eval `target` group for ``organelle`` under ``gt_repr``.
-
-        Parameters
-        ----------
-        organelle : str
-            Canonical single-target organelle token (nucleus/membrane/er/mito).
-        gt_repr : {"raw", "deconv"}, optional
-            GT representation. ``deconv`` is valid only for ER/mito.
-
-        Raises
-        ------
-        ValueError
-            If organelle is unknown, or gt_repr is deconv for a non-ER/mito
-            organelle, or gt_repr is not one of {raw, deconv}.
-        """
-        if gt_repr == "raw":
-            if organelle not in _ORGANELLE_EVAL_TARGET_RAW:
-                raise ValueError(
-                    f"unknown organelle {organelle!r}; expected one of {sorted(_ORGANELLE_EVAL_TARGET_RAW)}"
-                )
-            return _ORGANELLE_EVAL_TARGET_RAW[organelle]
-        if gt_repr == "deconv":
-            if organelle not in _ORGANELLE_EVAL_TARGET_DECONV:
-                raise ValueError(f"deconv GT target is valid only for er|mito, got organelle={organelle!r}")
-            return _ORGANELLE_EVAL_TARGET_DECONV[organelle]
-        raise ValueError(f"unknown gt_repr {gt_repr!r}; expected 'raw' or 'deconv'")
-
-
-ORGANELLE_EVAL_TARGET = _OrganelleEvalTargetMap()
 
 # ===========================================================================
 # CanonicalKey
@@ -336,8 +284,6 @@ class CanonicalKey:
         single-target leaf or a shared multi-target prediction.
     track : str
         Eval track: ``default`` | ``instance_ap``.
-    gt_repr : str
-        GT representation the eval was scored against: ``raw`` | ``deconv``.
     """
 
     organelle: str
@@ -347,7 +293,6 @@ class CanonicalKey:
     condition: str | None = None
     component: str | None = None
     track: str = "default"
-    gt_repr: str = "raw"
 
 
 # ===========================================================================
@@ -648,7 +593,6 @@ def eval_leaf(
     condition: str | None = None,
     component: str | None = None,
     track: str = "default",
-    gt_repr: str = "raw",
     data_root: str | Path = DATA_ROOT,
 ) -> Path:
     """Return the canonical eval output dir (== ``save.save_dir``).
@@ -657,12 +601,10 @@ def eval_leaf(
 
         DATA_ROOT/<organelle>/<model>/<train_set>/<test>[__<cond>]/
             [<component>/]              # multi-target combined-token models only
-            [deconv_gt/]               # gt_repr="deconv" (er/mito legacy comparison)
             [instance_ap/]             # track="instance_ap"
 
     The default track's metrics live at the leaf top (or component top);
-    ``deconv_gt`` and ``instance_ap`` are subtracks below it — ``deconv_gt``
-    nests above ``instance_ap`` when both apply.
+    ``instance_ap`` is a subtrack below it.
 
     Parameters
     ----------
@@ -676,18 +618,12 @@ def eval_leaf(
         for single-target organelles.
     track : {"default", "instance_ap"}
         Eval track.
-    gt_repr : {"raw", "deconv"}
-        GT representation. ``deconv`` -> a ``deconv_gt/`` subdir (er/mito only).
     """
     organelle = _norm_organelle(organelle)
     train_set = _norm_train_set(train_set)
     _validate(organelle, train_set, model)
     if track not in {"default", "instance_ap"}:
         raise ValueError(f"unknown track {track!r}; expected 'default' or 'instance_ap'")
-    if gt_repr not in {"raw", "deconv"}:
-        raise ValueError(f"unknown gt_repr {gt_repr!r}; expected 'raw' or 'deconv'")
-    if gt_repr == "deconv" and organelle not in {"er", "mito"}:
-        raise ValueError(f"deconv GT eval is valid only for er|mito, got organelle={organelle!r}")
 
     leaf = _leaf_suffix(test_set, condition)
     path = Path(data_root) / organelle / model / train_set / leaf
@@ -701,8 +637,6 @@ def eval_leaf(
     elif component is not None:
         raise ValueError(f"single-target organelle {organelle!r} takes no component (got {component!r})")
 
-    if gt_repr == "deconv":
-        path = path / "deconv_gt"
     if track == "instance_ap":
         path = path / "instance_ap"
     return path
@@ -712,7 +646,6 @@ def gt_cache_dir(
     organelle: str,
     test_set: str,
     condition: str | None = None,
-    gt_repr: str = "raw",
     data_root: str | Path = DATA_ROOT,
 ) -> Path:
     """Return the FROZEN, target-keyed GT-feature cache dir (model-independent).
@@ -720,33 +653,23 @@ def gt_cache_dir(
     Reproduces the on-disk case-inconsistent convention verbatim:
 
     - iPSC: ``ipsc/eval_cache/<SEC61B|TOMM20|nucleus|membrane>``
-    - A549: ``a549/eval_cache/<gene>_<cond>[_deconv]`` (gene lowercase).
+    - A549: ``a549/eval_cache/<gene>_<cond>`` (gene lowercase).
 
-    ``gt_repr="deconv"`` emits the ``_deconv`` A549 variant (er/mito only).
     Single- and multi-target models share these caches (target-keyed).
     """
     organelle = _norm_organelle(organelle)
     if organelle in _MULTI_ORGANELLES:
         raise ValueError(f"gt_cache_dir is target-keyed; pass a component organelle, not {organelle!r}")
-    if gt_repr not in {"raw", "deconv"}:
-        raise ValueError(f"unknown gt_repr {gt_repr!r}; expected 'raw' or 'deconv'")
-    if gt_repr == "deconv" and organelle not in {"er", "mito"}:
-        raise ValueError(f"deconv GT cache is valid only for er|mito, got organelle={organelle!r}")
     root = Path(data_root)
     if test_set == "ipsc":
         if condition is not None:
             raise ValueError("iPSC GT cache takes no condition")
-        if gt_repr == "deconv":
-            raise ValueError("iPSC has no deconv GT cache")
         return root / "ipsc" / "eval_cache" / _IPSC_GT_CACHE_KEY[organelle]
     if test_set == "a549":
         if condition is None or condition not in _CONDITIONS:
             raise ValueError(f"A549 GT cache requires a condition in {sorted(_CONDITIONS)}, got {condition!r}")
         gene = _A549_GENE[organelle]
-        name = f"{gene}_{condition}"
-        if gt_repr == "deconv":
-            name = f"{name}_deconv"
-        return root / "a549" / "eval_cache" / name
+        return root / "a549" / "eval_cache" / f"{gene}_{condition}"
     raise ValueError(f"unknown test_set {test_set!r}; expected one of {sorted(_TEST_SETS)}")
 
 
@@ -783,26 +706,20 @@ def metrics_repo_dir(
     condition: str | None = None,
     component: str | None = None,
     track: str = "default",
-    gt_repr: str = "raw",
     repo_root: str | Path | None = None,
 ) -> Path:
     """Return the git-tracked metrics mirror dir for one leaf.
 
     ``applications/dynacell/results/metrics/<organelle>/<model>/<train_set>/
-    <test>[__cond][/<component>][/deconv_gt][/instance_ap]``. Mirrors the
-    DATA_ROOT :func:`eval_leaf` structure exactly (component present only for
-    multi-target combined tokens; ``deconv_gt`` for ``gt_repr="deconv"``), so
-    raw and deconv-GT ER/mito evals do not overwrite each other in the mirror.
+    <test>[__cond][/<component>][/instance_ap]``. Mirrors the DATA_ROOT
+    :func:`eval_leaf` structure exactly (component present only for multi-target
+    combined tokens).
     """
     organelle = _norm_organelle(organelle)
     train_set = _norm_train_set(train_set)
     _validate(organelle, train_set, model)
     if track not in {"default", "instance_ap"}:
         raise ValueError(f"unknown track {track!r}; expected 'default' or 'instance_ap'")
-    if gt_repr not in {"raw", "deconv"}:
-        raise ValueError(f"unknown gt_repr {gt_repr!r}; expected 'raw' or 'deconv'")
-    if gt_repr == "deconv" and organelle not in {"er", "mito"}:
-        raise ValueError(f"deconv GT eval is valid only for er|mito, got organelle={organelle!r}")
     if repo_root is None:
         repo_root = Path(__file__).resolve().parents[5]  # repo root (.../VisCy)
     base = Path(repo_root) / "applications" / "dynacell" / "results" / "metrics"
@@ -816,8 +733,6 @@ def metrics_repo_dir(
         path = path / component
     elif component is not None:
         raise ValueError(f"single-target organelle {organelle!r} takes no component")
-    if gt_repr == "deconv":
-        path = path / "deconv_gt"
     if track == "instance_ap":
         path = path / "instance_ap"
     return path
@@ -830,7 +745,6 @@ def iter_organelle_evals(
     test_set: str,
     condition: str | None = None,
     track: str = "default",
-    gt_repr: str = "raw",
     data_root: str | Path = DATA_ROOT,
 ) -> list[Path]:
     """Yield every eval dir for one component ``organelle`` across model arities.
@@ -848,7 +762,7 @@ def iter_organelle_evals(
         Model code keys to enumerate.
     train_sets : list[str]
         Train-set tokens to enumerate.
-    test_set, condition, track, gt_repr, data_root
+    test_set, condition, track, data_root
         Passed through to :func:`eval_leaf`.
 
     Returns
@@ -874,7 +788,6 @@ def iter_organelle_evals(
                         test_set,
                         condition,
                         track=track,
-                        gt_repr=gt_repr,
                         data_root=data_root,
                     )
                 )
@@ -893,7 +806,6 @@ def iter_organelle_evals(
                         condition,
                         component=organelle,
                         track=track,
-                        gt_repr=gt_repr,
                         data_root=data_root,
                     )
                 )
@@ -913,7 +825,7 @@ _ZARR_ORG_PREFIX: dict[str, str] = {
     "dual_nucl_memb": "dual_nucleus_membrane",
 }
 
-# Legacy eval-parent dir -> (train_set, gt_repr default handled per-parent).
+# Legacy eval-parent dir -> train_set (default handled per-parent).
 # For the *_with_embeddings families the train_set derives from the infix, not
 # the parent alone; these map (test_set, parent) -> train_set for the
 # ipsc-trained / a549trained / jointtrained triad.
@@ -1052,7 +964,6 @@ def _normalize_prediction_zarr(path: Path, data_root: Path) -> CanonicalKey | No
 
     condition: str | None = None
     train_set_infix: str | None = None
-    gt_repr = "raw"
 
     if test_set == "ipsc":
         body, train_set_infix = _strip_suffix(after_org, ("jointtrained", "a549trained"))
@@ -1114,7 +1025,6 @@ def _normalize_prediction_zarr(path: Path, data_root: Path) -> CanonicalKey | No
         condition=condition,
         component=None,
         track="default",
-        gt_repr=gt_repr,
     )
 
 
@@ -1143,7 +1053,7 @@ def _normalize_eval_dir(path: Path, data_root: Path) -> CanonicalKey | None:
     if parent == "evaluations_instance_ap" or (len(parts) >= 4 and parts[3] == "instance_ap"):
         track = "instance_ap"
 
-    # Determine train_set + gt_repr from the parent family.
+    # Determine train_set from the parent family.
     if parent in _EVAL_PARENT_TRAIN_SET:
         base_train = _EVAL_PARENT_TRAIN_SET[parent]
     elif parent == "evaluations_instance_ap":
@@ -1180,7 +1090,6 @@ def _normalize_eval_dir(path: Path, data_root: Path) -> CanonicalKey | None:
             condition=abl_condition,
             component=None,
             track=track,
-            gt_repr="raw",
         )
 
     # Strip trailing condition for A549.
@@ -1216,17 +1125,18 @@ def _normalize_eval_dir(path: Path, data_root: Path) -> CanonicalKey | None:
     if model is None:
         return None
 
-    # Deconv-provenance for ER/mito A549/joint evals.
-    gt_repr = "raw"
+    # Deconv-provenance train_set relabel for ER/mito A549/joint evals.
     if organelle in ("er", "mito"):
         if train_set == "a549":
             train_set = "a549__deconv"
         elif train_set == "joint":
             train_set = _LEGACY_JOINT_DECONV
-        # iPSC-trained ER/mito evaluated against deconv A549 GT (case b): the model
-        # train_set stays ipsc, but the eval was scored against deconv GT.
+        # iPSC-trained ER/mito evaluated against the legacy DECONV A549 GT: the
+        # deconv_gt eval track was DROPPED, so these legacy dirs are NOT migrated
+        # (left in place) rather than colliding with a future raw-GT eval of the
+        # same iPSC-trained model.
         elif train_set == "ipsc" and test_set == "a549":
-            gt_repr = "deconv"
+            return None
 
     if not _tuple_is_valid(organelle, train_set, model):
         return None
@@ -1238,7 +1148,6 @@ def _normalize_eval_dir(path: Path, data_root: Path) -> CanonicalKey | None:
         condition=condition,
         component=None,
         track=track,
-        gt_repr=gt_repr,
     )
 
 
@@ -1265,8 +1174,8 @@ def normalize_legacy(path: str | Path, data_root: str | Path = DATA_ROOT) -> Can
     ER/mito deconv-provenance rule) and eval dirs (the ``*_with_embeddings``
     triad, ``evaluations_instance_ap``, and the ablation parents). Deconv
     provenance: pre-flip ER/mito A549 artifacts -> ``a549__deconv``; ER/mito joint
-    -> ``joint__legacy_deconvgt``; iPSC-trained ER/mito A549 *evals* ->
-    ``gt_repr="deconv"``.
+    -> ``joint__legacy_deconvgt``. The legacy iPSC-trained ER/mito A549 deconv-GT
+    *eval* dirs are NOT migrated (the deconv_gt track was dropped) -> ``None``.
 
     Returns ``None`` (caller -> UNMAPPED) for a deliberately-skipped stale/alias-dup
     filename, a stale pre-2D eval parent, an ablation/dual track this grammar does

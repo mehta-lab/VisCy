@@ -97,12 +97,10 @@ def test_forward_paths_are_unique_per_tuple() -> None:
         seen_pred[pred] = tup
 
 
-def test_track_and_gt_repr_subdirs() -> None:
+def test_track_subdir() -> None:
     base = eval_leaf("nucleus", "fnet3d_paper", "ipsc", "ipsc", data_root=_DATA_ROOT)
     ap = eval_leaf("nucleus", "fnet3d_paper", "ipsc", "ipsc", track="instance_ap", data_root=_DATA_ROOT)
     assert ap == base / "instance_ap"
-    deconv = eval_leaf("er", "fnet3d_paper", "a549", "a549", "mock", gt_repr="deconv", data_root=_DATA_ROOT)
-    assert deconv == eval_leaf("er", "fnet3d_paper", "a549", "a549", "mock", data_root=_DATA_ROOT) / "deconv_gt"
 
 
 def test_multi_target_component_subdir() -> None:
@@ -206,13 +204,6 @@ def test_gt_cache_dir_case_inconsistency() -> None:
     assert gt_cache_dir("nucleus", "a549", "zikv", data_root=_DATA_ROOT) == root / "a549/eval_cache/h2b_zikv"
 
 
-def test_gt_cache_dir_deconv_variant() -> None:
-    got = gt_cache_dir("er", "a549", "denv", gt_repr="deconv", data_root=_DATA_ROOT)
-    assert got == Path(_DATA_ROOT) / "a549/eval_cache/sec61b_denv_deconv"
-    with pytest.raises(ValueError):
-        gt_cache_dir("nucleus", "a549", "mock", gt_repr="deconv", data_root=_DATA_ROOT)
-
-
 def test_pred_cache_dir_track_separation() -> None:
     d = pred_cache_dir("nucleus", "celldiff_r2", "joint", "a549", "mock", data_root=_DATA_ROOT)
     ap = pred_cache_dir("nucleus", "celldiff_r2", "joint", "a549", "mock", track="instance_ap", data_root=_DATA_ROOT)
@@ -245,16 +236,6 @@ def test_metrics_repo_dir_default_root_not_doubled() -> None:
     )
     # base is <repo>/applications/dynacell/results/metrics -> the repo root exists.
     assert (got.parents[7] / "applications" / "dynacell").is_dir()
-
-
-def test_metrics_repo_dir_gt_repr_deconv_mirrors_leaf() -> None:
-    """deconv gt_repr adds a deconv_gt subdir, mirroring eval_leaf (no raw/deconv collision)."""
-    raw = metrics_repo_dir("er", "fnet3d_paper", "a549", "a549", "mock", repo_root="/repo")
-    deconv = metrics_repo_dir("er", "fnet3d_paper", "a549", "a549", "mock", gt_repr="deconv", repo_root="/repo")
-    assert deconv == raw / "deconv_gt"
-    leaf_raw = eval_leaf("er", "fnet3d_paper", "a549", "a549", "mock", data_root="/d")
-    leaf_deconv = eval_leaf("er", "fnet3d_paper", "a549", "a549", "mock", gt_repr="deconv", data_root="/d")
-    assert leaf_deconv == leaf_raw / "deconv_gt"
 
 
 def test_ablation_model_rejects_forward_train_set() -> None:
@@ -451,11 +432,8 @@ _LEGACY_CASES: list[tuple[str, CanonicalKey | None]] = [
         f"{_R}/ipsc/evaluations_jointtrained_with_embeddings/eval_vscyto3d_jointtrained_membrane",
         CanonicalKey("membrane", "fcmae_vscyto3d_pretrained", "joint", "ipsc"),
     ),
-    # A549 test iPSC-trained ER eval -> deconv-GT track (gt_repr=deconv), train_set stays ipsc.
-    (
-        f"{_R}/a549/evaluations_with_embeddings/eval_fnet3d_er_mock",
-        CanonicalKey("er", "fnet3d_paper", "ipsc", "a549", "mock", gt_repr="deconv"),
-    ),
+    # A549 test iPSC-trained ER eval == legacy DECONV-GT track: DROPPED, NOT migrated -> None.
+    (f"{_R}/a549/evaluations_with_embeddings/eval_fnet3d_er_mock", None),
     # A549 test iPSC-trained nucleus eval (raw).
     (
         f"{_R}/a549/evaluations_with_embeddings/eval_fnet3d_nucleus_denv",
@@ -544,9 +522,8 @@ def test_paper_key_retained_entries() -> None:
     assert paper_key("unext2_timm_scratch") == "unext2_timm_scratch"
 
 
-def test_organelle_eval_target_gt_repr_aware() -> None:
+def test_organelle_eval_target() -> None:
     assert ORGANELLE_EVAL_TARGET["er"] == "er_sec61b"
-    assert ORGANELLE_EVAL_TARGET.for_repr("er", "deconv") == "er_sec61b_deconvolved"
-    assert ORGANELLE_EVAL_TARGET.for_repr("mito", "deconv") == "mito_tomm20_deconvolved"
-    with pytest.raises(ValueError):
-        ORGANELLE_EVAL_TARGET.for_repr("nucleus", "deconv")
+    assert ORGANELLE_EVAL_TARGET["mito"] == "mito_tomm20"
+    assert ORGANELLE_EVAL_TARGET["nucleus"] == "nucleus"
+    assert ORGANELLE_EVAL_TARGET["membrane"] == "membrane"

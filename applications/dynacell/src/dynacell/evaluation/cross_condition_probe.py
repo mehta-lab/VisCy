@@ -63,8 +63,8 @@ def _condition_and_leaf(eval_dir: Path) -> tuple[str, Path] | None:
     ``.../a549__mock``, legacy: ``.../eval_demo_membrane_mock``) or nest a
     component / subtrack subdir below it — the radiant grammar puts a
     per-component organelle dir under a multi-target (dual) model's leaf
-    (``.../a549__mock/nucleus``), and ``deconv_gt`` / ``instance_ap`` are further
-    subtracks. None of those trailing segments end in a condition token, so we
+    (``.../a549__mock/nucleus``), and ``instance_ap`` is a further subtrack.
+    None of those trailing segments end in a condition token, so we
     walk up from *eval_dir* and return the first ancestor whose name carries a
     ``_{mock,denv,zikv}`` suffix (the ``<test>__<cond>`` leaf). The leaf is drawn
     from *eval_dir*'s own parent chain, so ``eval_dir.relative_to(leaf)`` in
