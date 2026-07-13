@@ -182,6 +182,23 @@ def test_resolve_best_ckpt_fallback_highest_epoch(tmp_path):
     assert sbj._resolve_best_ckpt(tmp_path).name == "epoch=13-step=130.ckpt"
 
 
+def test_resolve_best_ckpt_rebases_moved_dir(tmp_path):
+    """best_model_path stored as a stale absolute path (moved/renamed ckpt dir) is
+    re-based onto ckpt_dir, NOT silently degraded to the highest-epoch fallback."""
+    torch = pytest.importorskip("torch")
+    # the true best (ep7) exists in the *current* dir; a later, more-overfit ckpt
+    # (ep13) also exists, which the highest-epoch fallback would wrongly pick.
+    best = tmp_path / "epoch=7-step=100.ckpt"
+    best.write_bytes(b"x")
+    (tmp_path / "epoch=13-step=130.ckpt").write_bytes(b"x")
+    stale_abs = f"/some/old/moved/tree/checkpoints/{best.name}"  # does not exist
+    torch.save(
+        {"callbacks": {"ModelCheckpoint{'monitor': 'loss/validate'}": {"best_model_path": stale_abs}}},
+        tmp_path / "last.ckpt",
+    )
+    assert sbj._resolve_best_ckpt(tmp_path) == best
+
+
 def test_rendered_sbatch_has_preflight_srun_absolute_path(rendered_celldiff_sbatch):
     """Preflight srun invokes nccl_smoke_test.py by absolute path (no bare ``applications/...``)."""
     preflight_line = next(

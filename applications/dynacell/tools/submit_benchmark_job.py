@@ -175,8 +175,20 @@ def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
         for key, val in state.get("callbacks", {}).items():
             if "ModelCheckpoint" in str(key) and isinstance(val, dict):
                 best = val.get("best_model_path")
-                if best and Path(best).is_file():
-                    return Path(best)
+                if best:
+                    # ``best_model_path`` is stored as an ABSOLUTE path into the
+                    # directory where training ran. After a checkpoint dir is
+                    # moved or renamed (e.g. the canonical-path migration) that
+                    # path is stale, and without re-basing this would silently
+                    # fall through to the highest-epoch (more overfit) ckpt. The
+                    # best ckpt file travels with the dir, so its basename under
+                    # ``ckpt_dir`` is authoritative; prefer that, then the literal
+                    # stored path, then the highest-epoch fallback below.
+                    rebased = ckpt_dir / Path(best).name
+                    if rebased.is_file():
+                        return rebased
+                    if Path(best).is_file():
+                        return Path(best)
     candidates = sorted(
         ckpt_dir.glob("epoch=*.ckpt"),
         key=lambda p: int(re.match(r"epoch=(\d+)", p.name).group(1)),  # type: ignore[union-attr]
