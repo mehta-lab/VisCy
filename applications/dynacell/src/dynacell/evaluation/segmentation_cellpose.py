@@ -90,9 +90,15 @@ def load_cellpose_model(use_gpu: bool = True, model_name: str = "cpsam") -> "mod
     """
     model = models.CellposeModel(gpu=use_gpu, pretrained_model=model_name)
     # cellpose>=4.2 sets ``backbone`` from the loaded weights. Keep a defensive
-    # fallback only for the SAM default on the older 4.1.x API that dropped the attr;
-    # a missing backbone on a DINO model would be a real error, so don't mask it.
+    # fallback only for the SAM models on the older 4.1.x API that dropped the attr;
+    # a missing backbone on a DINO model would be a real error (cubic would pick the
+    # wrong tile size), so raise instead of silently mislabelling it SAM.
     if not hasattr(model, "backbone"):
+        if model_name not in ("cpsam", "cpsam_v2"):
+            raise RuntimeError(
+                f"cellpose model {model_name!r} has no `backbone` attribute (cellpose<4.2); "
+                "cubic needs it to choose the DINO tile size. Upgrade to cellpose>=4.2."
+            )
         model.backbone = "sam_vitl"
     return model
 
