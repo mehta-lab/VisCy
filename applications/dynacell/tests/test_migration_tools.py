@@ -120,6 +120,47 @@ def test_checkpoints_dedup_and_noise_skip(tmp_path):
     assert any("_smoke" in s.src for s in skips)
 
 
+def test_checkpoint_curation_prunes_experiments(tmp_path):
+    """iPSC graveyard: noise/pre-D pix2pix/celldiff-R1 skipped; distinct-run collisions
+    resolved by config reference (paper's final recipe wins)."""
+    models_root = tmp_path / "models" / "dynacell"
+    cd = models_root.parent / "cell_diff_vs_viscy"
+
+    def mk(root, org, run):
+        d = root / "ipsc" / org / run / "checkpoints"
+        d.mkdir(parents=True)
+        (d / "last.ckpt").write_text(run)  # distinct content -> non-hardlinked
+        return d.parent
+
+    # sec61b (er): a config-referenced final fcmae + an unreferenced bare variant + noise + R1 celldiff.
+    mk(models_root, "sec61b", "fcmae_vscyto3d_pretrained_ws8500")  # paper final (referenced)
+    mk(models_root, "sec61b", "fcmae_vscyto3d_pretrained")  # bare, superseded (unreferenced)
+    mk(models_root, "sec61b", "fcmae_vscyto3d_pretrained_H100_sanity")  # noise
+    mk(cd, "sec61b", "celldiff")  # pre-R2, dropped
+    mk(cd, "sec61b", "celldiff_r2")  # paper final
+    mk(cd, "sec61b", "pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep")  # Run D (kept)
+    mk(cd, "sec61b", "pix2pix3d_unetvit_modernized_lambdaL1_1")  # pre-D (dropped)
+
+    referenced = {str(models_root / "ipsc" / "sec61b" / "fcmae_vscyto3d_pretrained_ws8500")}
+    rows, gaps = bmm.collect_checkpoints(models_root, full_hardlink_check=True, referenced_dirs=referenced)
+    assert gaps == []
+    moved = {r.src for r in rows if r.status == "move"}
+    skipped = {r.src: r.reason for r in rows if r.status == "skip"}
+
+    # Config-referenced final fcmae wins its dest; bare variant skipped as unreferenced.
+    assert str(models_root / "ipsc" / "sec61b" / "fcmae_vscyto3d_pretrained_ws8500") in moved
+    assert "unreferenced" in skipped[str(models_root / "ipsc" / "sec61b" / "fcmae_vscyto3d_pretrained")]
+    # celldiff_r2 kept, pre-R2 celldiff dropped; Run D kept, pre-D pruned.
+    assert str(cd / "ipsc" / "sec61b" / "celldiff_r2") in moved
+    assert "superseded" in skipped[str(cd / "ipsc" / "sec61b" / "celldiff")]
+    assert str(cd / "ipsc" / "sec61b" / "pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep") in moved
+    assert "pre-D" in skipped[str(cd / "ipsc" / "sec61b" / "pix2pix3d_unetvit_modernized_lambdaL1_1")]
+    assert "noise" in skipped[str(models_root / "ipsc" / "sec61b" / "fcmae_vscyto3d_pretrained_H100_sanity")]
+    # Every canonical dest is unique (no collision survived).
+    dests = [r.dest for r in rows if r.status == "move"]
+    assert len(dests) == len(set(dests))
+
+
 def test_predictions_dedup_and_ablation_skip(tmp_path):
     _, data_root = _fixture(tmp_path)
     rows, skips, gaps = bmm.collect_predictions(data_root, full_hardlink_check=True)

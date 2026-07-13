@@ -116,8 +116,15 @@ def test_build_ckpt_map_on_fixture(tmp_path):
         (d / "last.ckpt").write_text("c")
         return d.parent
 
+    # Both names are canonical pix2pix keeps (clean + Run D), so they hardlink-dedup
+    # rather than being pruned as pre-D experiments.
     a = mk("dynacell", "joint_ipsc_confocal_a549_mantis", "memb", "pix2pix3d_unetvit")
-    b = mk("cell_diff_vs_viscy", "joint_ipsc_confocal_a549_mantis", "memb", "pix2pix3d_unetvit_x")
+    b = mk(
+        "cell_diff_vs_viscy",
+        "joint_ipsc_confocal_a549_mantis",
+        "memb",
+        "pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep",
+    )
     # hardlink b's ckpt to a's so the two dedup to one dest
     os.remove(b / "checkpoints" / "last.ckpt")
     os.link(a / "checkpoints" / "last.ckpt", b / "checkpoints" / "last.ckpt")

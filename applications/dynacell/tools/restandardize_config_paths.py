@@ -46,7 +46,13 @@ import re
 import sys
 from pathlib import Path
 
-from build_migration_manifest import DATA_ROOT, MODELS_ROOT, collect_checkpoints
+from build_migration_manifest import (
+    CONFIG_ROOT,
+    DATA_ROOT,
+    MODELS_ROOT,
+    _referenced_model_dirs,
+    collect_checkpoints,
+)
 
 from dynacell.evaluation import paths
 
@@ -73,7 +79,9 @@ def build_ckpt_map(models_root: Path) -> dict[str, str]:
     Includes both the dedup ``move`` winner and its ``dedup_legacy`` siblings, so a
     config pointing at EITHER cross-root copy resolves to the same canonical dest.
     """
-    rows, gaps = collect_checkpoints(models_root, full_hardlink_check=False)
+    rows, gaps = collect_checkpoints(
+        models_root, full_hardlink_check=False, referenced_dirs=_referenced_model_dirs(CONFIG_ROOT)
+    )
     if gaps:
         raise RuntimeError("checkpoint enumeration has gaps; refusing to codemod:\n" + "\n".join(gaps))
     return {r.src: r.dest for r in rows if r.status in ("move", "dedup_legacy")}

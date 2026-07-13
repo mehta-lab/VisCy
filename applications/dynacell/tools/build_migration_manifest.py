@@ -3,12 +3,15 @@
 
 Enumerates the on-disk dynacell campaign artifacts and computes their canonical
 destinations with :mod:`dynacell.evaluation.paths` — the single source of truth.
-The tool deliberately carries **no independent skip policy**: whatever
-:func:`paths.normalize_legacy` / :func:`paths.checkpoint_dir` map is migrated;
-whatever they refuse (``None`` / ``ValueError``) is reported as a skip or a gap.
-The only tool-side exception is a noise-run filter for checkpoint run dirs
-(``*_smoke`` / ``*_debug`` / ``*_sanity``), which would otherwise canonicalize
-onto — and collide with — their real sibling run.
+For predictions/evals the tool carries **no independent skip policy**: whatever
+:func:`paths.normalize_legacy` maps is migrated; whatever it refuses (``None``) is
+a skip or a gap. For checkpoints (the ``ipsc`` term is an experiment graveyard) it
+applies a "keep only the paper's one final recipe per model" curation: noise /
+perf-probe runs (``*_smoke`` / ``*_debug`` / ``*_sanity`` / ``*tuning*``), pre-D
+pix2pix recipe experiments, and superseded/non-paper run dirs (pre-R2 ``celldiff``,
+legacy ``unext2``) are skipped; when several distinct runs canonicalize to one
+dest the config-referenced run (the paper's actual checkpoint) wins and the rest
+are skipped as unreferenced variants.
 
 Three artifact families:
 
@@ -39,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 from collections import defaultdict
 from dataclasses import astuple, dataclass
@@ -48,18 +52,33 @@ from dynacell.evaluation import paths
 
 MODELS_ROOT: Path = paths.MODELS_ROOT
 DATA_ROOT: Path = paths.DATA_ROOT
+# Benchmark config tree (source of the "which checkpoint the paper uses" reference
+# set that resolves distinct-run collisions in the iPSC experiment graveyard).
+CONFIG_ROOT: Path = Path(__file__).resolve().parents[3] / "applications/dynacell/configs/benchmarks/virtual_staining"
 # Checkpoints live under two source roots; the canonical tree consolidates both
 # under the models root (dynacell), so cell_diff_vs_viscy entries are cross-root
 # moves (still a same-filesystem rename — both under models/). The sibling root is
 # derived from ``models_root`` inside collect_checkpoints so a test can point it
 # at a fixture.
-# Campaign train terms (the raw on-disk source dir names). iPSC-trained-only
-# checkpoints (their own top-level term) are out of this campaign's scope.
-MODELS_TERMS: tuple[str, ...] = ("a549_mantis", "joint_ipsc_confocal_a549_mantis")
+# Campaign train terms (the raw on-disk source dir names). ``ipsc`` (the
+# iPSC-trained models) is fully canonicalized alongside a549/joint; its dir is an
+# experiment graveyard, so the curation rules below prune the clutter.
+MODELS_TERMS: tuple[str, ...] = ("a549_mantis", "joint_ipsc_confocal_a549_mantis", "ipsc")
 PRED_SUBDIRS: tuple[str, ...] = ("predictions", "joint_predictions", "joint_predictions_v2")
-# Run-dir markers that identify smoke/debug runs (excluded — they canonicalize
-# onto their real sibling's dest and would collide).
-NOISE_RUN_MARKERS: tuple[str, ...] = ("smoke", "debug", "sanity")
+# Run-dir markers that identify smoke/debug/perf-probe runs (excluded — they
+# canonicalize onto their real sibling's dest and would collide).
+NOISE_RUN_MARKERS: tuple[str, ...] = ("smoke", "debug", "sanity", "tuning")
+
+# pix2pix3d_unetvit recipe sweep: only Run D (LeCam + lambdaL1=10, 40ep) and the
+# consolidated clean name are canonical; the pre-D experiment recipes are pruned
+# (the whole sweep canonicalizes to `pix2pix3d_unetvit`, so keeping them all would
+# collide). See project_pix2pix3d_sec61b_recipe_sweep.
+_PIX2PIX_KEEP: frozenset[str] = frozenset({"pix2pix3d_unetvit", "pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep"})
+# Superseded / non-paper run-dir names dropped outright: ``celldiff`` is pre-R2
+# (the paper CELL-Diff is celldiff_r2); ``unext2`` is the ambiguous legacy
+# paper-key dir (the code model is fcmae_vscyto3d_scratch). "Keep only the paper's
+# one final recipe per model."
+_SUPERSEDED_RUN_NAMES: frozenset[str] = frozenset({"celldiff", "unext2"})
 
 # Non-artifact eval leaf names / suffixes to skip (not eval outputs).
 _EVAL_SKIP_EXACT: frozenset[str] = frozenset({"slurm"})
@@ -191,13 +210,50 @@ def _dedup_group(
 # ---------------------------------------------------------------------------
 
 
-def collect_checkpoints(models_root: Path, full_hardlink_check: bool) -> tuple[list[Row], list[str]]:
+def _checkpoint_skip_reason(model_dir_name: str, model: str | None) -> str | None:
+    """Curation skip for a checkpoint run dir (non-paper experiment clutter), else None."""
+    if _is_noise_run(model_dir_name):
+        return f"noise/perf-probe run ({model_dir_name})"
+    if model_dir_name in _SUPERSEDED_RUN_NAMES:
+        return f"superseded/non-paper run dir ({model_dir_name})"
+    if model == "pix2pix3d_unetvit" and model_dir_name not in _PIX2PIX_KEEP:
+        return f"pre-D pix2pix recipe experiment ({model_dir_name})"
+    return None
+
+
+def _referenced_model_dirs(config_root: Path) -> set[str]:
+    """Model dirs referenced by any config path value (ckpt_path/run_root/dirpath/save_dir).
+
+    A value under the two model roots identifies the paper's actual checkpoint for a
+    leaf; stripping any ``/checkpoints`` tail yields the run dir. Used to pick the
+    paper's final run when several distinct runs canonicalize to one dest.
+    """
+    roots = (str(MODELS_ROOT) + "/", str(MODELS_ROOT.parent / "cell_diff_vs_viscy") + "/")
+    refs: set[str] = set()
+    for leaf in config_root.rglob("*.y*ml"):
+        for match in re.finditer(r"/hpc/projects/\S+", leaf.read_text()):
+            val = match.group(0)
+            if val.startswith(roots):
+                refs.add(val.split("/checkpoints")[0])
+    return refs
+
+
+def collect_checkpoints(
+    models_root: Path,
+    full_hardlink_check: bool,
+    referenced_dirs: set[str] | None = None,
+) -> tuple[list[Row], list[str]]:
     """Whole model-dir moves for every checkpointed run in scope. Returns (rows, gaps).
 
-    A model dir hardlink-duplicated across the two source roots (``cp -al``
-    consolidation) canonicalizes to one dest; the group is deduped to a single
-    ``move`` winner (preferring the copy already under the canonical dynacell root)
-    plus ``dedup_legacy`` rows for the others.
+    Curation (the ``ipsc`` term is an experiment graveyard): noise/perf-probe runs,
+    pre-D pix2pix recipes, and ambiguous legacy paper-key dirs are skipped.
+
+    Collision resolution when >1 run canonicalizes to one dest:
+    - hardlink-identical (``cp -al`` cross-root consolidation) -> dedup to one
+      ``move`` winner (dynacell-root preferred) + ``dedup_legacy`` siblings;
+    - otherwise (distinct runs) resolve by config reference: the single
+      config-referenced run wins (``move``), the rest are skipped as unreferenced
+      experimental variants; zero referenced -> skip all; >1 referenced -> gap.
     """
     rows: list[Row] = []
     gaps: list[str] = []
@@ -212,30 +268,49 @@ def collect_checkpoints(models_root: Path, full_hardlink_check: bool) -> tuple[l
                 for model_dir in sorted(p for p in org_dir.iterdir() if p.is_dir()):
                     if not (model_dir / "checkpoints").is_dir():
                         continue
-                    if _is_noise_run(model_dir.name):
-                        rows.append(Row("checkpoint", "skip", str(model_dir), "", f"noise run dir ({model_dir.name})"))
-                        continue
                     try:
-                        model = paths.canonical_model_name(model_dir.name)
-                        # Move the whole model dir -> canonical <train_set>/<org>/<model>.
-                        dest = paths.checkpoint_dir(org_dir.name, model, term, models_root=models_root).parent
-                    except ValueError as exc:
-                        gaps.append(f"{model_dir}  -> ERR {exc}")
+                        model: str | None = paths.canonical_model_name(model_dir.name)
+                    except ValueError:
+                        model = None
+                    reason = _checkpoint_skip_reason(model_dir.name, model)
+                    if reason is not None:
+                        rows.append(Row("checkpoint", "skip", str(model_dir), "", reason))
                         continue
+                    if model is None:
+                        gaps.append(f"{model_dir}  -> ERR cannot canonicalize run-dir name")
+                        continue
+                    # Move the whole model dir -> canonical <train_set>/<org>/<model>.
+                    dest = paths.checkpoint_dir(org_dir.name, model, term, models_root=models_root).parent
                     dest_to_srcs[str(dest)].append(str(model_dir))
 
     for dest, srcs in sorted(dest_to_srcs.items()):
-        group_rows, gap = _dedup_group(
-            "checkpoint",
-            dest,
-            sorted(srcs),
-            full=full_hardlink_check,
-            sentinel="checkpoints/last.ckpt",
-            prefer_root=models_root,
-        )
-        rows.extend(group_rows)
-        if gap:
-            gaps.append(gap)
+        srcs = sorted(srcs)
+        if len(srcs) == 1:
+            rows.append(Row("checkpoint", "move", srcs[0], dest, ""))
+            continue
+        equivalent, _ = _group_hardlinked(srcs, full=full_hardlink_check, sentinel="checkpoints/last.ckpt")
+        if equivalent:
+            group_rows, gap = _dedup_group(
+                "checkpoint",
+                dest,
+                srcs,
+                full=full_hardlink_check,
+                sentinel="checkpoints/last.ckpt",
+                prefer_root=models_root,
+            )
+            rows.extend(group_rows)
+            if gap:
+                gaps.append(gap)
+            continue
+        # Distinct (non-hardlinked) runs -> resolve by config reference.
+        ref = [s for s in srcs if referenced_dirs and s in referenced_dirs]
+        if len(ref) == 1:
+            rows.append(Row("checkpoint", "move", ref[0], dest, "config-referenced winner"))
+            rows += [Row("checkpoint", "skip", o, "", f"unreferenced variant of {dest}") for o in srcs if o != ref[0]]
+        elif len(ref) == 0:
+            rows += [Row("checkpoint", "skip", s, "", f"unreferenced (superseded) run for {dest}") for s in srcs]
+        else:
+            gaps.append(f"COLLISION (>1 config-referenced distinct runs) {dest}: {ref}")
     return rows, gaps
 
 
@@ -419,7 +494,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    ck_rows, ck_gaps = collect_checkpoints(MODELS_ROOT, full_hardlink_check=args.full_hardlink_check)
+    referenced = _referenced_model_dirs(CONFIG_ROOT)
+    ck_rows, ck_gaps = collect_checkpoints(
+        MODELS_ROOT, full_hardlink_check=args.full_hardlink_check, referenced_dirs=referenced
+    )
     pr_rows, pr_skips, pr_gaps = collect_predictions(DATA_ROOT, full_hardlink_check=args.full_hardlink_check)
     ev_rows, ev_skips, ev_gaps = collect_evals(DATA_ROOT, include_own_track=args.include_own_track_evals)
 
