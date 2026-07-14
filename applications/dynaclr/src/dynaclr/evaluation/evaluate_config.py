@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from dynaclr.evaluation.dimensionality_reduction.config import PCAConfig, PHATEConfig, UMAPConfig
 from dynaclr.evaluation.mmd.config import ComparisonSpec, MAPSettings, MMDSettings
@@ -172,6 +172,90 @@ class TaskSpec(BaseModel):
     marker_filters: list[str] | None = None
 
 
+class WitnessLabelSource(BaseModel):
+    """Control/perturbed well spec for one experiment, used to weak-label via the MMD witness.
+
+    The MMD witness function scores each cell by how much it looks like the
+    control distribution (``control_wells``) vs the perturbed distribution
+    (``perturbed_wells``). Those scores are then gated into discrete
+    pseudo-labels that replace annotation-CSV labels for the classifier.
+
+    Parameters
+    ----------
+    experiment : str
+        Experiment name matching obs["experiment"] in the embeddings zarr.
+    control_wells : list[str]
+        Well ids (e.g. ``["C/1"]``) whose cells form the control reference
+        (witness group X). Matched against ``obs["fov_name"]`` by path prefix,
+        so ``"C/1"`` matches ``"C/1/000000"``.
+    perturbed_wells : list[str]
+        Well ids whose cells form the perturbed reference (witness group Y).
+        Cells in neither list are dropped (never treated as perturbed by
+        default), so dead/empty wells do not contaminate the reference.
+    """
+
+    experiment: str
+    control_wells: list[str]
+    perturbed_wells: list[str]
+
+    @model_validator(mode="after")
+    def _validate_wells(self) -> "WitnessLabelSource":
+        if not self.control_wells or not self.perturbed_wells:
+            raise ValueError(f"{self.experiment}: control_wells and perturbed_wells must both be non-empty")
+        overlap = set(self.control_wells) & set(self.perturbed_wells)
+        if overlap:
+            raise ValueError(f"{self.experiment}: wells appear in both control and perturbed: {sorted(overlap)}")
+        return self
+
+
+class WitnessSettings(BaseModel):
+    """Settings for MMD-witness weak labeling.
+
+    Parameters
+    ----------
+    label_column : str
+        Name of the pseudo-label obs column produced by gating (this is the
+        ``task`` the classifier trains on). Default: ``"witness_state"``.
+    control_label : str
+        Class name assigned to control-like cells (witness score above the
+        dead-zone). Default: ``"control"``.
+    perturbed_label : str
+        Class name assigned to perturbed-like cells (score below the
+        negative dead-zone). Default: ``"perturbed"``.
+    dead_zone : float
+        Fraction in [0, 1). Cells whose ``|witness score|`` falls at or below
+        the ``dead_zone`` quantile of all ``|witness score|`` are left unlabeled
+        ("unknown") and dropped from training — the analog of the annotation
+        path's ``!= "unknown"`` filter. 0.0 disables the dead-zone (plain sign
+        gating; every cell is labeled). Default: 0.1.
+    bandwidth : float or None
+        Gaussian RBF bandwidth for the witness kernel. None = median heuristic
+        on the pooled (control, perturbed) reference. Default: None.
+    max_reference_cells : int or None
+        Subsample each reference group (control, perturbed) to at most this
+        many cells before fitting the witness (bounds kernel cost). None =
+        use all. Default: 5000.
+    marker_filters : list[str] or None
+        If set, fit/score one witness classifier per listed marker. None
+        (default) runs one per marker discovered in the data (all unique
+        obs["marker"] values), matching the annotation path's behavior.
+    """
+
+    label_column: str = "witness_state"
+    control_label: str = "control"
+    perturbed_label: str = "perturbed"
+    dead_zone: float = 0.1
+    bandwidth: float | None = None
+    max_reference_cells: int | None = 5000
+    marker_filters: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "WitnessSettings":
+        if not 0.0 <= self.dead_zone < 1.0:
+            raise ValueError(f"dead_zone must be in [0, 1), got {self.dead_zone}")
+        return self
+
+
 class MMDStepConfig(BaseModel):
     """Configuration for one MMD evaluation block.
 
@@ -231,11 +315,28 @@ class LinearClassifiersStepConfig(BaseModel):
 
     Parameters
     ----------
+    label_source : {"annotations", "witness"}
+        Where per-cell labels come from. ``"annotations"`` (default) loads
+        labels from per-experiment annotation CSVs (``annotations`` + ``tasks``).
+        ``"witness"`` derives weak labels from the MMD witness score using
+        per-experiment control/perturbed wells (``witness_labels`` + ``witness``),
+        requiring no annotation CSVs. Everything downstream (classifier training,
+        publishing, append-predictions, plots) is identical for both.
     annotations : list[AnnotationSource]
         Per-experiment annotation CSVs. Each entry maps an experiment name
         (matching obs["experiment"] in embeddings.zarr) to a CSV path.
+        Required (with ``tasks``) when ``label_source="annotations"``.
     tasks : list[TaskSpec]
         Tasks to evaluate. Each task can optionally filter by marker.
+        Required (with ``annotations``) when ``label_source="annotations"``.
+    witness_labels : list[WitnessLabelSource]
+        Per-experiment control/perturbed well specs. Required when
+        ``label_source="witness"``. One classifier is trained per marker
+        (all markers, or the markers named in the witness settings) on the
+        gated witness pseudo-labels pooled across these experiments.
+    witness : WitnessSettings
+        Witness kernel + gating settings. Only used when
+        ``label_source="witness"``.
     publish_dir : str or None
         Central LC registry root for this model (e.g.,
         ``/hpc/projects/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/``).
@@ -269,8 +370,11 @@ class LinearClassifiersStepConfig(BaseModel):
         cell-level stratified ``train_test_split``. Default: None.
     """
 
-    annotations: list[AnnotationSource]
-    tasks: list[TaskSpec]
+    label_source: Literal["annotations", "witness"] = "annotations"
+    annotations: list[AnnotationSource] = []
+    tasks: list[TaskSpec] = []
+    witness_labels: list[WitnessLabelSource] = []
+    witness: WitnessSettings = WitnessSettings()
     publish_dir: str | None = None
     use_scaling: bool = True
     use_pca: bool = False
@@ -281,6 +385,16 @@ class LinearClassifiersStepConfig(BaseModel):
     split_train_data: float = 0.8
     random_seed: int = 42
     split_groups_by: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_label_source(self) -> "LinearClassifiersStepConfig":
+        if self.label_source == "annotations":
+            if not self.annotations or not self.tasks:
+                raise ValueError("label_source='annotations' requires non-empty annotations and tasks")
+        else:  # witness
+            if not self.witness_labels:
+                raise ValueError("label_source='witness' requires non-empty witness_labels")
+        return self
 
 
 class AppendPredictionsStepConfig(BaseModel):

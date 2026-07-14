@@ -2,26 +2,34 @@
 
 Pipeline
 --------
-1. Load source and target embedding zarrs (AnnData format).
-2. Filter cells to the uninfected reference population in each dataset.
-3. Fit a shared StandardScaler + PCA on the combined source + target cells.
-4. Fit a LinearTransport (LOT) map in PCA space using uninfected cells only,
-   mapping source → target distribution.
-5. Save the fitted pipeline (scaler, PCA, LOT) to disk with joblib.
+1. Pool one or more pre-filtered source AnnData objects and one or more
+   pre-filtered target AnnData objects (each already reduced to the
+   reference population, e.g. uninfected cells).
+2. Fit a shared StandardScaler on the combined source + target cells.
+3. Optionally fit a shared PCA on the scaled combined cells.
+4. Fit a LinearTransport (LOT) map mapping the pooled source distribution to
+   the pooled target distribution, in PCA space when PCA is enabled or in the
+   scaled embedding space otherwise.
+5. Save the fitted pipeline (scaler, optional PCA, LOT) to disk with joblib.
 
 The saved pipeline can then be applied to any source zarr to produce a new
-zarr whose embeddings are in the target's PCA coordinate system, corrected
-for cross-platform batch effects.
+zarr whose embeddings are corrected for cross-platform batch effects (in the
+target's PCA coordinate system when PCA is enabled).
+
+Callers are responsible for loading zarrs and filtering to the reference
+population before calling :func:`fit_lot_correction`; see
+``fit_lot_correction.py`` for the CLI that does this from a YAML config.
 """
 
 import logging
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import anndata as ad
 import joblib
 import numpy as np
 import ot
+import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
@@ -33,141 +41,174 @@ def _to_np(X) -> np.ndarray:
     return np.array(X.toarray() if hasattr(X, "toarray") else X, dtype=np.float32)
 
 
-def _apply_filter(obs, filter_spec: dict) -> np.ndarray:
-    """Return a boolean mask for rows of *obs* matching *filter_spec*.
+def _is_string_dtype(dtype) -> bool:
+    """Return True for pandas string extension dtypes that zarr cannot write.
+
+    Covers both ``pd.StringDtype`` (nullable strings) and ``pd.ArrowDtype``
+    backed by an Arrow string type, which pandas 3 uses by default and anndata
+    cannot serialize to zarr.
+    """
+    if isinstance(dtype, pd.StringDtype):
+        return True
+    if isinstance(dtype, pd.ArrowDtype):
+        return pd.api.types.is_string_dtype(dtype)
+    return False
+
+
+def _coerce_obs_for_zarr(obs: "pd.DataFrame") -> "pd.DataFrame":
+    """Return a copy of *obs* with string/Arrow dtypes coerced for zarr writing.
+
+    Under pandas 3 / anndata 0.12, ``.obs`` columns are often string extension
+    dtypes or Categoricals whose categories are string-extension-backed. Zarr
+    cannot serialize either, so string columns become plain object and
+    string-backed Categoricals are dropped to plain object (recategorizing keeps
+    the string-extension-backed categories, which still fail to write). The obs
+    index is also coerced to object.
+    """
+    obs = obs.copy()
+    obs.index = obs.index.astype(object)
+    for col in obs.columns:
+        dtype = obs[col].dtype
+        if _is_string_dtype(dtype):
+            obs[col] = obs[col].astype(object)
+        elif isinstance(dtype, pd.CategoricalDtype) and _is_string_dtype(dtype.categories.dtype):
+            obs[col] = obs[col].astype(str).astype(object)
+    return obs
+
+
+def _pool_embeddings(adatas: list[ad.AnnData]) -> np.ndarray:
+    """Stack the ``.X`` matrices of several AnnData objects into one array.
 
     Parameters
     ----------
-    obs : pd.DataFrame
-        AnnData ``.obs`` table.
-    filter_spec : dict
-        Must contain ``"column"`` plus one of:
-
-        * ``"startswith"`` – str or list[str]: keep rows where the column
-          value starts with any of the given prefixes.
-        * ``"equals"`` – str: keep rows where the column value equals the
-          given string.
+    adatas : list of AnnData
+        AnnData objects to pool. Must be non-empty and share the same number
+        of features (``.n_vars``).
 
     Returns
     -------
-    np.ndarray of bool
-        Boolean mask with the same length as *obs*.
+    np.ndarray
+        Row-wise concatenation of every ``.X`` as a float32 array of shape
+        ``(sum_of_n_obs, n_vars)``.
     """
-    col = filter_spec["column"]
-    values = obs[col].astype(str)
+    if not adatas:
+        raise ValueError("Expected at least one AnnData object to pool, got an empty list.")
 
-    if "startswith" in filter_spec:
-        prefixes = filter_spec["startswith"]
-        if isinstance(prefixes, str):
-            prefixes = [prefixes]
-        mask = np.zeros(len(obs), dtype=bool)
-        for p in prefixes:
-            mask |= values.str.startswith(p).values
-        return mask
+    n_vars = {a.n_vars for a in adatas}
+    if len(n_vars) != 1:
+        raise ValueError(f"All AnnData objects must share the same feature dimension, got n_vars={sorted(n_vars)}.")
 
-    if "equals" in filter_spec:
-        return (values == str(filter_spec["equals"])).values
-
-    raise ValueError(f"filter_spec must contain either 'startswith' or 'equals'. Got: {list(filter_spec.keys())}")
+    return np.vstack([_to_np(a.X) for a in adatas])
 
 
 def fit_lot_correction(
-    source_zarr: Union[str, Path],
-    target_zarr: Union[str, Path],
-    source_uninf_filter: dict,
-    target_uninf_filter: dict,
-    n_pca: int = 50,
-    ns_lot: int = 3000,
+    source_adatas: list[ad.AnnData],
+    target_adatas: list[ad.AnnData],
+    channel: Optional[str] = None,
+    n_pca: Optional[int] = 50,
+    ns_lot: Optional[int] = 3000,
     random_seed: int = 42,
 ) -> dict:
-    """Fit a shared PCA + LOT batch-correction pipeline.
+    """Fit a shared (optional PCA) + LOT batch-correction pipeline.
+
+    Both ``source_adatas`` and ``target_adatas`` are expected to be already
+    filtered to the reference population (e.g. uninfected cells). Multiple
+    datasets on each side are pooled (row-wise concatenated) before fitting,
+    so batch effects are estimated against the combined distributions.
 
     Parameters
     ----------
-    source_zarr : str or Path
-        Path to the source AnnData zarr (e.g. light-sheet embeddings).
-    target_zarr : str or Path
-        Path to the target AnnData zarr (e.g. confocal embeddings).
-    source_uninf_filter : dict
-        Filter spec selecting uninfected source cells used to fit LOT.
-    target_uninf_filter : dict
-        Filter spec selecting uninfected target cells used to fit LOT.
-    n_pca : int, optional
-        Number of PCA components, by default 50.
-    ns_lot : int, optional
-        Maximum number of cells subsampled per dataset for LOT fitting,
-        by default 3000.
+    source_adatas : list of AnnData
+        Pre-filtered source datasets (e.g. light-sheet embeddings). Pooled
+        into a single source distribution.
+    target_adatas : list of AnnData
+        Pre-filtered target datasets (e.g. confocal embeddings). Pooled into
+        a single target distribution.
+    channel : str or None, optional
+        The bag-of-channels channel/marker these embeddings were computed for
+        (e.g. ``"Phase3D"``). Recorded in the returned pipeline for provenance
+        so the fitted map is not blindly applied to a different channel. This
+        is a label only — the caller is responsible for filtering the input
+        AnnData to this channel. By default ``None``.
+    n_pca : int or None, optional
+        Number of PCA components for the shared PCA. When ``None``, PCA is
+        skipped and LOT is fit in the scaled embedding space. By default 50.
+    ns_lot : int or None, optional
+        Maximum number of cells subsampled per side for LOT fitting. This is a
+        compute cap on covariance estimation, not a source/target balancer:
+        ``LinearTransport`` only needs each side's mean and covariance, so the
+        two sides need not have equal counts. When ``None``, every pooled cell
+        is used. By default 3000.
     random_seed : int, optional
         Random seed for reproducibility, by default 42.
 
     Returns
     -------
-    dict with keys ``"scaler"``, ``"pca"``, ``"lot"``, ``"n_pca"``,
-    ``"ns_lot"``, ``"random_seed"``, ``"pca_variance_explained"``.
+    dict with keys ``"scaler"``, ``"pca"`` (``None`` when disabled), ``"lot"``,
+    ``"channel"``, ``"n_pca"``, ``"ns_lot"``, ``"random_seed"``,
+    ``"pca_variance_explained"`` (``None`` when PCA is disabled).
     """
     rng = np.random.default_rng(random_seed)
 
-    _logger.info("Loading source zarr: %s", source_zarr)
-    adata_src = ad.read_zarr(source_zarr)
-    adata_src.obs_names_make_unique()
+    _logger.info("Fitting LOT for channel: %s", channel if channel is not None else "(unspecified)")
 
-    _logger.info("Loading target zarr: %s", target_zarr)
-    adata_tgt = ad.read_zarr(target_zarr)
-    adata_tgt.obs_names_make_unique()
-
-    _logger.info("Source shape: %s  Target shape: %s", adata_src.shape, adata_tgt.shape)
-
-    X_src = _to_np(adata_src.X)
-    X_tgt = _to_np(adata_tgt.X)
-
-    src_uninf_mask = _apply_filter(adata_src.obs, source_uninf_filter)
-    tgt_uninf_mask = _apply_filter(adata_tgt.obs, target_uninf_filter)
+    X_src = _pool_embeddings(source_adatas)
+    X_tgt = _pool_embeddings(target_adatas)
 
     _logger.info(
-        "Uninfected cells — source: %d / %d,  target: %d / %d",
-        src_uninf_mask.sum(),
+        "Pooled source: %d cells from %d dataset(s);  target: %d cells from %d dataset(s)",
         len(X_src),
-        tgt_uninf_mask.sum(),
+        len(source_adatas),
         len(X_tgt),
+        len(target_adatas),
     )
 
-    if src_uninf_mask.sum() < 5 or tgt_uninf_mask.sum() < 5:
+    if len(X_src) < 5 or len(X_tgt) < 5:
         raise ValueError(
-            "Too few uninfected cells to fit LOT "
-            f"(source={src_uninf_mask.sum()}, target={tgt_uninf_mask.sum()}). "
-            "Check your filter specifications."
+            "Too few reference cells to fit LOT "
+            f"(source={len(X_src)}, target={len(X_tgt)}). "
+            "Check the datasets and their filtering."
         )
 
-    _logger.info("Fitting shared StandardScaler + PCA-%d ...", n_pca)
+    _logger.info("Fitting shared StandardScaler ...")
     scaler = StandardScaler()
     X_combined_scaled = scaler.fit_transform(np.vstack([X_src, X_tgt]))
-    pca = PCA(n_components=n_pca, random_state=random_seed)
-    Z_all = pca.fit_transform(X_combined_scaled)
-    var_exp = pca.explained_variance_ratio_.sum() * 100
-    _logger.info("PCA explained variance: %.1f%%", var_exp)
 
     n_src = len(X_src)
-    Z_src_uninf = Z_all[:n_src][src_uninf_mask]
-    Z_tgt_uninf = Z_all[n_src:][tgt_uninf_mask]
+    if n_pca is not None:
+        _logger.info("Fitting shared PCA-%d ...", n_pca)
+        pca = PCA(n_components=n_pca, random_state=random_seed)
+        Z_all = pca.fit_transform(X_combined_scaled)
+        var_exp = float(pca.explained_variance_ratio_.sum() * 100)
+        _logger.info("PCA explained variance: %.1f%%", var_exp)
+    else:
+        _logger.info("PCA disabled — fitting LOT in scaled embedding space.")
+        pca = None
+        Z_all = X_combined_scaled
+        var_exp = None
 
-    ns_src = min(len(Z_src_uninf), ns_lot)
-    ns_tgt = min(len(Z_tgt_uninf), ns_lot)
-    idx_src = rng.choice(len(Z_src_uninf), ns_src, replace=False)
-    idx_tgt = rng.choice(len(Z_tgt_uninf), ns_tgt, replace=False)
+    Z_src = Z_all[:n_src]
+    Z_tgt = Z_all[n_src:]
+
+    ns_src = len(Z_src) if ns_lot is None else min(len(Z_src), ns_lot)
+    ns_tgt = len(Z_tgt) if ns_lot is None else min(len(Z_tgt), ns_lot)
+    idx_src = rng.choice(len(Z_src), ns_src, replace=False)
+    idx_tgt = rng.choice(len(Z_tgt), ns_tgt, replace=False)
 
     _logger.info("Fitting LOT (source subsample=%d, target subsample=%d) ...", ns_src, ns_tgt)
     lot = ot.da.LinearTransport(reg=1e-3)
-    lot.fit(Xs=Z_src_uninf[idx_src], Xt=Z_tgt_uninf[idx_tgt])
+    lot.fit(Xs=Z_src[idx_src], Xt=Z_tgt[idx_tgt])
     _logger.info("LOT fitted.")
 
     return {
         "scaler": scaler,
         "pca": pca,
         "lot": lot,
+        "channel": channel,
         "n_pca": n_pca,
         "ns_lot": ns_lot,
         "random_seed": random_seed,
-        "pca_variance_explained": float(var_exp),
+        "pca_variance_explained": var_exp,
     }
 
 
@@ -179,9 +220,12 @@ def apply_lot_correction(
 ) -> None:
     """Apply a fitted LOT pipeline to an embedding zarr.
 
-    Transforms all cells through StandardScaler → PCA → LOT and writes an
-    AnnData zarr whose ``.X`` contains the corrected embeddings in the
-    target's PCA space. All ``.obs`` metadata is preserved.
+    Transforms all cells through StandardScaler → (optional PCA) → LOT and writes
+    an AnnData zarr whose ``.X`` contains the corrected embeddings. ``.obs`` and
+    the input ``.uns`` are preserved (plus a ``uns["lot_correction"]`` provenance
+    entry). ``obsm`` (e.g. ``X_backbone``, ``X_umap``, ``X_phate``, ``X_pca``),
+    ``varm``, ``obsp``, and ``layers`` are intentionally dropped: they were
+    computed in the *uncorrected* space and would contradict the corrected ``.X``.
 
     Parameters
     ----------
@@ -195,8 +239,6 @@ def apply_lot_correction(
         If ``False`` (default) and *output_zarr* already exists, raise.
     """
     import shutil
-
-    import pandas as pd
 
     output_zarr = Path(output_zarr)
     if output_zarr.exists():
@@ -215,33 +257,34 @@ def apply_lot_correction(
     pca = pipeline["pca"]
     lot = pipeline["lot"]
 
-    _logger.info("Applying StandardScaler → PCA → LOT ...")
-    Z = pca.transform(scaler.transform(X))
+    X_scaled = scaler.transform(X)
+    if pca is not None:
+        _logger.info("Applying StandardScaler → PCA → LOT ...")
+        Z = pca.transform(X_scaled)
+    else:
+        _logger.info("Applying StandardScaler → LOT (PCA disabled) ...")
+        Z = X_scaled
     Z_corrected = lot.transform(Z)
-    _logger.info("Corrected embeddings shape: %s  (n_pca=%d)", Z_corrected.shape, pipeline["n_pca"])
+    _logger.info("Corrected embeddings shape: %s  (n_pca=%s)", Z_corrected.shape, pipeline["n_pca"])
 
-    obs = adata_in.obs.copy()
-    for col in obs.columns:
-        dtype = obs[col].dtype
-        if isinstance(dtype, pd.StringDtype):
-            obs[col] = obs[col].astype(object)
-        elif isinstance(dtype, pd.CategoricalDtype) and isinstance(dtype.categories.dtype, pd.StringDtype):
-            obs[col] = obs[col].astype(object).astype("category")
+    obs = _coerce_obs_for_zarr(adata_in.obs)
 
     try:
         ad.settings.allow_write_nullable_strings = True
     except AttributeError:
         pass
 
-    adata_out = ad.AnnData(X=Z_corrected.astype(np.float32), obs=obs)
+    adata_out = ad.AnnData(X=Z_corrected.astype(np.float32), obs=obs, uns=dict(adata_in.uns))
+    adata_out.var.index = adata_out.var.index.astype(object)
     adata_out.uns["lot_correction"] = {
         "source_zarr": str(input_zarr),
+        "channel": pipeline.get("channel"),
         "n_pca": pipeline["n_pca"],
         "pca_variance_explained": pipeline.get("pca_variance_explained"),
     }
 
     _logger.info("Writing corrected zarr: %s", output_zarr)
-    adata_out.write_zarr(output_zarr)
+    adata_out.write_zarr(output_zarr, convert_strings_to_categoricals=False)
     _logger.info("Done.")
 
 
@@ -275,10 +318,12 @@ def load_lot_pipeline(path: Union[str, Path]) -> dict:
         Pipeline with keys ``"scaler"``, ``"pca"``, ``"lot"``.
     """
     pipeline = joblib.load(path)
+    var_exp = pipeline.get("pca_variance_explained")
     _logger.info(
-        "Pipeline loaded from %s  (n_pca=%d, pca_var=%.1f%%)",
+        "Pipeline loaded from %s  (channel=%s, n_pca=%s, pca_var=%s)",
         path,
+        pipeline.get("channel") or "(unspecified)",
         pipeline["n_pca"],
-        pipeline.get("pca_variance_explained", float("nan")),
+        "disabled" if var_exp is None else f"{var_exp:.1f}%",
     )
     return pipeline

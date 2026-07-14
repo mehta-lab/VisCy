@@ -45,74 +45,64 @@ class UninfFilter(BaseModel):
         return d
 
 
-class LotFitConfig(BaseModel):
-    """Configuration for fitting a LOT batch-correction pipeline.
+class DatasetSpec(BaseModel):
+    """A single embedding zarr plus an optional reference-population filter.
 
     Parameters
     ----------
-    source_zarr : str
-        Path to the source AnnData zarr (e.g. light-sheet embeddings).
-    target_zarr : str
-        Path to the target AnnData zarr (e.g. confocal embeddings).
-    source_uninf_filter : UninfFilter
-        Filter identifying uninfected cells in the source dataset.
-    target_uninf_filter : UninfFilter
-        Filter identifying uninfected cells in the target dataset.
-    n_pca : int, optional
-        Number of PCA components for the shared PCA, by default 50.
-    ns_lot : int, optional
-        Maximum cells subsampled per dataset for LOT fitting, by default 3000.
+    zarr : str
+        Path to an AnnData embedding zarr.
+    filter : UninfFilter, optional
+        Filter selecting the reference population (e.g. uninfected cells).
+        When omitted, all cells in the zarr are used.
+    """
+
+    zarr: str = Field(..., min_length=1)
+    filter: Optional[UninfFilter] = Field(default=None)
+
+    @model_validator(mode="after")
+    def validate_path(self):
+        if not Path(self.zarr).exists():
+            raise ValueError(f"zarr not found: {self.zarr}")
+        return self
+
+
+class LotFitConfig(BaseModel):
+    """Configuration for fitting a LOT batch-correction pipeline.
+
+    Source and target are lists of datasets so multiple acquisitions from the
+    same platform can be pooled into a single distribution before fitting.
+
+    Parameters
+    ----------
+    source : list[DatasetSpec]
+        Source datasets (e.g. light-sheet embeddings), each with an optional
+        reference-population filter. Pooled into one source distribution.
+    target : list[DatasetSpec]
+        Target datasets (e.g. confocal embeddings), each with an optional
+        reference-population filter. Pooled into one target distribution.
+    channel : str, optional
+        The bag-of-channels channel/marker these embeddings were computed for
+        (e.g. ``"Phase3D"``). Recorded in the fitted pipeline for provenance so
+        the map is not blindly applied to a different channel. By default
+        ``None``.
+    n_pca : int or None, optional
+        Number of PCA components for the shared PCA. Set to ``null`` to
+        disable PCA and fit LOT in the scaled embedding space. By default 50.
+    ns_lot : int or None, optional
+        Maximum cells subsampled per side for LOT fitting (compute cap on
+        covariance estimation). Set to ``null`` to use all pooled cells.
+        By default 3000.
     random_seed : int, optional
         Random seed, by default 42.
     output_pipeline : str
         Path to save the fitted pipeline (joblib pickle).
     """
 
-    source_zarr: str = Field(..., min_length=1)
-    target_zarr: str = Field(..., min_length=1)
-    source_uninf_filter: UninfFilter
-    target_uninf_filter: UninfFilter
-    n_pca: int = Field(default=50, gt=0)
-    ns_lot: int = Field(default=3000, gt=0)
+    source: list[DatasetSpec] = Field(..., min_length=1)
+    target: list[DatasetSpec] = Field(..., min_length=1)
+    channel: Optional[str] = Field(default=None)
+    n_pca: Optional[int] = Field(default=50, gt=0)
+    ns_lot: Optional[int] = Field(default=3000, gt=0)
     random_seed: int = Field(default=42)
     output_pipeline: str = Field(..., min_length=1)
-
-    @model_validator(mode="after")
-    def validate_paths(self):
-        if not Path(self.source_zarr).exists():
-            raise ValueError(f"source_zarr not found: {self.source_zarr}")
-        if not Path(self.target_zarr).exists():
-            raise ValueError(f"target_zarr not found: {self.target_zarr}")
-        return self
-
-
-class LotApplyConfig(BaseModel):
-    """Configuration for applying a fitted LOT pipeline to a zarr.
-
-    Parameters
-    ----------
-    input_zarr : str
-        Path to the source AnnData zarr to correct.
-    pipeline : str
-        Path to the fitted pipeline file (joblib pickle).
-    output_zarr : str
-        Path to write the corrected AnnData zarr.
-    overwrite : bool, optional
-        Overwrite output if it exists, by default False.
-    """
-
-    input_zarr: str = Field(..., min_length=1)
-    pipeline: str = Field(..., min_length=1)
-    output_zarr: str = Field(..., min_length=1)
-    overwrite: bool = Field(default=False)
-
-    @model_validator(mode="after")
-    def validate_paths(self):
-        if not Path(self.input_zarr).exists():
-            raise ValueError(f"input_zarr not found: {self.input_zarr}")
-        if not Path(self.pipeline).exists():
-            raise ValueError(f"pipeline file not found: {self.pipeline}")
-        output = Path(self.output_zarr)
-        if output.exists() and not self.overwrite:
-            raise ValueError(f"output_zarr already exists: {self.output_zarr}. Set overwrite: true to overwrite.")
-        return self
