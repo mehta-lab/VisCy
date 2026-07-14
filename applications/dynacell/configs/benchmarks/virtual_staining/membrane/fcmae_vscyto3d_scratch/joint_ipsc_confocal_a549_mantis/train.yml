@@ -34,7 +34,7 @@ trainer:
   logger:
     init_args:
       name: FCMAE_VSCyto3D_Scratch_JOINT_MEMB
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fcmae_vscyto3d_scratch
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/fcmae_vscyto3d_scratch
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -45,7 +45,7 @@ trainer:
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fcmae_vscyto3d_scratch/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/fcmae_vscyto3d_scratch/checkpoints
 
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
@@ -139,4 +139,4 @@ data:
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_JOINT_MEMB
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/memb/fcmae_vscyto3d_scratch
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/fcmae_vscyto3d_scratch

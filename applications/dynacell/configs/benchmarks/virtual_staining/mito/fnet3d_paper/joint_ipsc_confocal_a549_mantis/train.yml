@@ -34,7 +34,7 @@ trainer:
   logger:
     init_args:
       name: FNet3D_JOINT_TOMM20_paper
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fnet3d_paper
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -45,7 +45,7 @@ trainer:
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fnet3d_paper/checkpoints
 
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
@@ -115,7 +115,7 @@ data:
 
 launcher:
   job_name: FNet3DPaper_JOINT_TOMM20
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fnet3d_paper
   # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; the default
   # 256G cap is too tight (256G iPSC mem + ~50G A549 + worker peak OOMs).
   # 512G is the smallest tier that fits joint preload + worker overhead.

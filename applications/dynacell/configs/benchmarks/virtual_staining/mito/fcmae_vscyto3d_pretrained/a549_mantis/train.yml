@@ -31,7 +31,7 @@ trainer:
   logger:
     init_args:
       name: FCMAE_VSCyto3D_Pretrained_A549_TOMM20_ws8500
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fcmae_vscyto3d_pretrained
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -42,7 +42,7 @@ trainer:
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fcmae_vscyto3d_pretrained/checkpoints
 
 data:
   init_args:
@@ -52,4 +52,4 @@ data:
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_A549_TOMM20_ws8500
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/tomm20/fcmae_vscyto3d_pretrained_ws8500
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fcmae_vscyto3d_pretrained
