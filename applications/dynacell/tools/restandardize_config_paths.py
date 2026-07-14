@@ -111,16 +111,33 @@ def load_ckpt_map_from_manifest(manifest: Path) -> dict[str, str]:
 
 
 def _rewrite_ckpt_value(value: str, ckpt_map: dict[str, str]) -> str | None:
-    """Rewrite a checkpoint-tree value via the map, preserving a ``/checkpoints`` tail.
+    """Rewrite a checkpoint-tree value via the map, preserving any file/subdir tail.
+
+    Handles every on-disk shape a checkpoint-tree value takes in these leaves:
+
+    - a bare model dir (``save_dir`` / train ``run_root``) — an exact map key;
+    - ``<model_dir>/checkpoints`` or ``<model_dir>/checkpoints/<file>`` (``dirpath`` /
+      ``ckpt_path``), split on ``/checkpoints``;
+    - a bare best-epoch hardlink alias at ``<model_dir>/<file>`` with no ``checkpoints/``
+      subdir (several legacy iPSC runs store the best ckpt this way), or a sibling subdir
+      like ``<model_dir>/smoke`` — split on the final path separator.
+
+    Without the last branch ``find`` returned ``-1``, ``model_dir`` swallowed the whole
+    value, the map lookup missed, and the stale (migrated-away) path was silently kept.
 
     Returns the canonical value, or None if the value is not a migrated checkpoint
     (outside the two model roots, or a model dir absent from the map) -> preserve.
     """
     if not value.startswith(_MODELS_MIGRATED_ROOTS):
         return None
+    if value in ckpt_map:  # bare model dir (save_dir / train run_root), no tail
+        return ckpt_map[value]
     idx = value.find("/checkpoints")
-    model_dir = value[:idx] if idx != -1 else value
-    tail = value[idx:] if idx != -1 else ""
+    if idx != -1:
+        model_dir, tail = value[:idx], value[idx:]
+    else:
+        parent, _, filename = value.rpartition("/")
+        model_dir, tail = parent, "/" + filename
     dest = ckpt_map.get(model_dir)
     if dest is None:
         return None

@@ -69,6 +69,23 @@ def test_rewrite_train_leaf_fields():
     assert len(changes) == 3
 
 
+def test_rewrite_ckpt_run_root_alias_no_checkpoints_subdir():
+    """A best-epoch alias directly at the run-dir root (no ``checkpoints/`` subdir) is
+    repointed to the canonical model dir + alias filename, not silently preserved.
+
+    Regression: several legacy iPSC runs store the best ckpt as a bare alias at the run
+    root; ``value.find('/checkpoints')`` returns -1, and the old code let ``model_dir``
+    swallow the filename so the map lookup missed and the migrated-away path survived.
+    """
+    old_dir = f"{MODELS}/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500"
+    new_dir = f"{MODELS}/ipsc/er/fcmae_vscyto3d_pretrained"
+    ckpt_map = {old_dir: new_dir}
+    text = f"model:\n  init_args:\n    ckpt_path: {old_dir}/best_ep123_val0.40979.ckpt\n"
+    new_text, changes = rc.rewrite_leaf(text, ckpt_map)
+    assert f"ckpt_path: {new_dir}/best_ep123_val0.40979.ckpt" in new_text
+    assert len(changes) == 1
+
+
 def test_preserve_unmigrated_and_external_ckpt():
     """ckpt_path not in the map (iPSC-trained / published baseline / REPLACE_ME) -> untouched."""
     ipsc = f"{MODELS}/ipsc/nucl/fcmae_vscyto3d_pretrained/checkpoints/epoch=89-step=28080.ckpt"
