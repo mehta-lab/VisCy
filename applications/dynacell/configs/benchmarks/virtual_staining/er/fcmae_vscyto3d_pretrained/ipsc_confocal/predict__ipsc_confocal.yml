@@ -25,7 +25,7 @@ model:
     # ep 123 / val_loss 0.40979 (49-epoch plateau, scancelled at 3d 1h elapsed).
     # Hardlink alias at run_root; the underlying checkpoints/epoch=123-step=32736.ckpt
     # is also preserved in checkpoints_frozen_ep123_20260501_004946/.
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto3d_pretrained/best_ep123_val0.40979.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto3d_pretrained/checkpoints/epoch=123-step=32736.ckpt
 
 data:
   init_args:

@@ -23,7 +23,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fnet3d_paper/checkpoints/epoch=132-step=183008.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fnet3d_paper/checkpoints/epoch=139-step=192640.ckpt
 
 data:
   init_args:

@@ -17,7 +17,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/pix2pix3d_unetvit/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/pix2pix3d_unetvit/checkpoints/epoch=25-step=114036.ckpt
 
 data:
   init_args:
