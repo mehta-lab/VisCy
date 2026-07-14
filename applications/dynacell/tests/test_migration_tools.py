@@ -233,14 +233,15 @@ def test_apply_idempotent_and_rollback(tmp_path, monkeypatch):
     assert bmm.main(["--out", str(manifest), "--full-hardlink-check"]) == 0
 
     moves = rm.load_moves(manifest)
-    pending, already, errors = rm.preflight(moves)
+    pending, merges, already, errors = rm.preflight(moves)
     assert errors == []
     assert already == []
+    assert merges == []  # fixture evals map to fresh leaves -> plain renames
     assert len(pending) == len(moves)
 
     # Apply for real.
     journal = tmp_path / "manifest.journal.csv"
-    applied = rm.apply_moves(pending, journal, dry_run=False)
+    applied = rm.apply_moves(pending, merges, journal, dry_run=False)
     assert applied == len(pending)
     # Every winner src is gone; every dest exists.
     for m in pending:
@@ -252,9 +253,10 @@ def test_apply_idempotent_and_rollback(tmp_path, monkeypatch):
     assert (er_dest / "checkpoints" / "last.ckpt").is_file()
 
     # Idempotent re-run: everything is already-applied, nothing pending.
-    pending2, already2, errors2 = rm.preflight(rm.load_moves(manifest))
+    pending2, merges2, already2, errors2 = rm.preflight(rm.load_moves(manifest))
     assert errors2 == []
     assert pending2 == []
+    assert merges2 == []
     assert len(already2) == len(moves)
 
     # Rollback reverses every applied row.
@@ -272,7 +274,48 @@ def test_preflight_blocks_preexisting_dest(tmp_path, monkeypatch):
     manifest = tmp_path / "manifest.csv"
     assert bmm.main(["--out", str(manifest), "--full-hardlink-check"]) == 0
     moves = rm.load_moves(manifest)
-    # Pre-create one dest so BOTH src and dest exist -> unexpected, must error.
-    moves[0].dest.mkdir(parents=True, exist_ok=True)
-    _, _, errors = rm.preflight(moves)
+    # Pre-create one checkpoint dest so BOTH src and dest exist -> unexpected, must
+    # error (the merge path is eval-only; checkpoints/predictions never merge).
+    ckpt_move = next(m for m in moves if m.kind == "checkpoint")
+    ckpt_move.dest.mkdir(parents=True, exist_ok=True)
+    _, _, _, errors = rm.preflight(moves)
     assert any("DEST ALREADY EXISTS" in e for e in errors)
+
+
+def test_eval_merges_into_shared_prediction_leaf(tmp_path):
+    """An eval whose canonical dest leaf already holds prediction.zarr is merged,
+    not whole-dir renamed onto it; rollback restores the eval without touching
+    prediction.zarr."""
+    leaf = tmp_path / "data" / "er" / "celldiff_r2" / "a549__deconv" / "a549__denv"
+    # The prediction move ran first: the leaf exists and holds prediction.zarr.
+    _make_zarr(leaf / "prediction.zarr")
+    # Legacy eval src with typical outputs (no prediction.zarr, no instance_ap).
+    src = (
+        tmp_path / "data" / "a549" / "evaluations_a549trained_with_embeddings" / "eval_celldiff_r2_a549trained_er_denv"
+    )
+    _write(src / "pixel_metrics.csv", "p")
+    _write(src / "feature_metrics.csv", "f")
+    _write(src / "embeddings" / "gt_cp.npz", "e")
+    _make_zarr(src / "segmentation_results.zarr")
+
+    move = rm.Move("eval", src, leaf, "eval->leaf")
+    pending, merges, already, errors = rm.preflight([move])
+    assert errors == []
+    assert pending == []
+    assert merges == [move]
+
+    journal = tmp_path / "journal.csv"
+    assert rm.apply_moves(pending, merges, journal, dry_run=False) == 1
+    # Merge result: prediction.zarr survives + every eval child landed alongside it.
+    assert (leaf / "prediction.zarr" / "zarr.json").is_file()
+    assert (leaf / "pixel_metrics.csv").is_file()
+    assert (leaf / "embeddings" / "gt_cp.npz").is_file()
+    assert (leaf / "segmentation_results.zarr" / "zarr.json").is_file()
+    assert not src.exists()  # emptied src dir removed
+
+    # Rollback: eval children return to src; prediction.zarr stays in the leaf.
+    rm.rollback(journal, dry_run=False)
+    assert (src / "pixel_metrics.csv").is_file()
+    assert (src / "embeddings" / "gt_cp.npz").is_file()
+    assert not (leaf / "pixel_metrics.csv").exists()
+    assert (leaf / "prediction.zarr" / "zarr.json").is_file()

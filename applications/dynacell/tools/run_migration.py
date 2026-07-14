@@ -74,13 +74,18 @@ def _existing_ancestor(path: Path) -> Path:
     return p
 
 
-def preflight(moves: list[Move]) -> tuple[list[Move], list[Move], list[str]]:
+def preflight(moves: list[Move]) -> tuple[list[Move], list[Move], list[Move], list[str]]:
     """Classify moves and collect blocking errors.
 
-    Returns (pending, already_applied, errors). ``pending`` are src-present /
-    dest-absent renames to run; ``already_applied`` are idempotent no-ops.
+    Returns (pending, merges, already_applied, errors). ``pending`` are
+    src-present / dest-absent renames to run; ``merges`` are eval leaves whose
+    canonical dest dir already exists (the prediction move creates the shared
+    leaf and drops ``prediction.zarr`` into it first) — the eval's children are
+    merged into that leaf rather than whole-dir renamed onto it; ``already`` are
+    idempotent no-ops.
     """
     pending: list[Move] = []
+    merges: list[Move] = []
     already: list[Move] = []
     errors: list[str] = []
 
@@ -115,10 +120,22 @@ def preflight(moves: list[Move]) -> tuple[list[Move], list[Move], list[str]]:
         elif not src_exists and dest_exists:
             already.append(m)
         elif src_exists and dest_exists:
-            errors.append(f"DEST ALREADY EXISTS (unexpected) src={m.src} dest={m.dest}")
+            # Canonical eval leaf == the prediction leaf: prediction.zarr is
+            # already inside the dest dir. A whole-dir rename would collide, so
+            # merge the eval's children into the leaf iff none of them clash.
+            if m.kind == "eval" and m.src.is_dir() and m.dest.is_dir():
+                clashes = sorted(c.name for c in m.src.iterdir() if (m.dest / c.name).exists())
+                if clashes:
+                    errors.append(f"MERGE CLASH {m.dest} already has {clashes} (src {m.src})")
+                elif m.src.stat().st_dev != m.dest.stat().st_dev:
+                    errors.append(f"CROSS-DEVICE (merge unsafe) src={m.src} dest={m.dest}")
+                else:
+                    merges.append(m)
+            else:
+                errors.append(f"DEST ALREADY EXISTS (unexpected) src={m.src} dest={m.dest}")
         else:  # neither exists
             errors.append(f"SRC MISSING and DEST ABSENT (lost?) src={m.src} dest={m.dest}")
-    return pending, already, errors
+    return pending, merges, already, errors
 
 
 def _append_journal(journal: Path, kind: str, src: Path, dest: Path, result: str, detail: str) -> None:
@@ -130,8 +147,8 @@ def _append_journal(journal: Path, kind: str, src: Path, dest: Path, result: str
         w.writerow((_now(), kind, str(src), str(dest), result, detail))
 
 
-def apply_moves(pending: list[Move], journal: Path, dry_run: bool) -> int:
-    """Execute (or preview) the pending renames. Returns count applied."""
+def apply_moves(pending: list[Move], merges: list[Move], journal: Path, dry_run: bool) -> int:
+    """Execute (or preview) the pending renames and eval-leaf merges. Returns count applied."""
     applied = 0
     for m in pending:
         if dry_run:
@@ -148,6 +165,30 @@ def apply_moves(pending: list[Move], journal: Path, dry_run: bool) -> int:
         _append_journal(journal, m.kind, m.src, m.dest, "applied", m.reason)
         applied += 1
         print(f"  moved {m.kind}: {m.src.name} -> {m.dest}")
+
+    # Eval-leaf merges: rename each child of the eval src into the shared
+    # (prediction-occupied) dest leaf. Journal one row PER CHILD so --rollback
+    # reverses exactly, never touching prediction.zarr (which the eval never owns).
+    for m in merges:
+        children = sorted(m.src.iterdir())
+        if dry_run:
+            print(f"  [dry-run] MERGE {m.kind}: {m.src} ({len(children)} entries)\n            -> {m.dest}/")
+            continue
+        m.dest.mkdir(parents=True, exist_ok=True)
+        for child in children:
+            target = m.dest / child.name
+            if target.exists():
+                _append_journal(journal, m.kind, child, target, "error", "merge target exists")
+                raise FileExistsError(f"merge target exists: {target}")
+            try:
+                child.rename(target)
+            except OSError as exc:
+                _append_journal(journal, m.kind, child, target, "error", f"{type(exc).__name__}: {exc}")
+                raise
+            _append_journal(journal, m.kind, child, target, "applied", f"merge {m.reason}")
+        m.src.rmdir()  # src is now empty; fails loudly if not
+        applied += 1
+        print(f"  merged {m.kind}: {m.src.name} ({len(children)} entries) -> {m.dest}/")
     return applied
 
 
@@ -198,10 +239,11 @@ def main(argv: list[str] | None = None) -> int:
     moves = load_moves(args.manifest)
     if args.kind:
         moves = [m for m in moves if m.kind == args.kind]
-    pending, already, errors = preflight(moves)
+    pending, merges, already, errors = preflight(moves)
 
     print(
-        f"manifest moves: {len(moves)}  (pending {len(pending)}, already-applied {len(already)}, errors {len(errors)})"
+        f"manifest moves: {len(moves)}  (pending {len(pending)}, merges {len(merges)}, "
+        f"already-applied {len(already)}, errors {len(errors)})"
     )
     for e in errors:
         print(f"  ERROR {e}")
@@ -211,12 +253,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.limit is not None:
         pending = pending[: args.limit]
-        print(f"--limit {args.limit}: applying first {len(pending)} move(s)")
+        merges = merges[: max(0, args.limit - len(pending))]
+        print(f"--limit {args.limit}: applying first {len(pending)} rename(s) + {len(merges)} merge(s)")
 
-    print(f"{'DRY-RUN (no changes)' if dry_run else 'APPLYING'} — {len(pending)} rename(s):")
-    applied = apply_moves(pending, journal, dry_run)
+    print(f"{'DRY-RUN (no changes)' if dry_run else 'APPLYING'} — {len(pending)} rename(s), {len(merges)} merge(s):")
+    applied = apply_moves(pending, merges, journal, dry_run)
     if dry_run:
-        print(f"[dry-run] would move {len(pending)}; {len(already)} already applied. journal -> {journal}")
+        print(
+            f"[dry-run] would move {len(pending)} + merge {len(merges)}; "
+            f"{len(already)} already applied. journal -> {journal}"
+        )
     else:
         print(f"applied {applied}; {len(already)} already applied. journal -> {journal}")
     return 0
