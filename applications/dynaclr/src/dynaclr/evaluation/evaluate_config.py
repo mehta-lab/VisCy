@@ -239,6 +239,25 @@ class WitnessSettings(BaseModel):
         If set, fit/score one witness classifier per listed marker. None
         (default) runs one per marker discovered in the data (all unique
         obs["marker"] values), matching the annotation path's behavior.
+    eval_against : str or None
+        obs column of *ground-truth* labels to score the trained classifier
+        against, instead of the (self-referential) witness label. The witness
+        label is a deterministic function of the embedding, so evaluating the
+        classifier against it yields a trivial ~1.0 — meaningless as a measure
+        of biology. When ``eval_against`` names a column present on the cells
+        (e.g. ``"infection_state"``), the reported val metrics are recomputed
+        on the val split against that column via ``eval_class_map``, and the
+        summary marks ``eval_source="infection_state"``. When None, or when the
+        column is absent, metrics fall back to the witness label and the
+        summary marks ``eval_source="witness_label"`` (flagged as circular).
+        Default: ``"infection_state"``.
+    eval_class_map : dict[str, str] or None
+        Maps witness class names to ``eval_against`` class names for scoring,
+        e.g. ``{"control": "uninfected", "perturbed": "infected"}``. Required
+        when ``eval_against`` is set and the class vocabularies differ. Cells
+        whose ``eval_against`` value is missing/``unknown`` or not in the map
+        are dropped from the evaluation. Default:
+        ``{"control": "uninfected", "perturbed": "infected"}``.
     """
 
     label_column: str = "witness_state"
@@ -248,6 +267,8 @@ class WitnessSettings(BaseModel):
     bandwidth: float | None = None
     max_reference_cells: int | None = 5000
     marker_filters: list[str] | None = None
+    eval_against: str | None = "infection_state"
+    eval_class_map: dict[str, str] | None = {"control": "uninfected", "perturbed": "infected"}
 
     @model_validator(mode="after")
     def _validate(self) -> "WitnessSettings":

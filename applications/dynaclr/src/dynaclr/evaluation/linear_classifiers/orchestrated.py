@@ -39,7 +39,7 @@ matplotlib.use("Agg")
 if TYPE_CHECKING:
     import anndata as ad
 
-    from dynaclr.evaluation.evaluate_config import LinearClassifiersStepConfig
+    from dynaclr.evaluation.evaluate_config import LinearClassifiersStepConfig, WitnessSettings
 
 
 def _annotation_run_specs(
@@ -145,6 +145,83 @@ def _build_labeled_adata(
     if not annotated_parts:
         return None
     return annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
+
+
+def _evaluate_witness_against_annotations(
+    pipeline: Any,
+    combined: ad.AnnData,
+    idx_val: np.ndarray,
+    witness: WitnessSettings,
+) -> dict[str, float] | None:
+    """Score a witness-trained pipeline against ground-truth annotations on the val cells.
+
+    The witness label is a deterministic function of the embedding, so val
+    metrics computed against it are self-referential (~1.0). This recomputes
+    ``val_*`` metrics on the val split against ``witness.eval_against`` (e.g.
+    ``infection_state``), mapping the classifier's witness classes to the
+    annotation vocabulary via ``witness.eval_class_map``.
+
+    Parameters
+    ----------
+    pipeline : LinearClassifierPipeline
+        The trained pipeline (predicts witness class names).
+    combined : ad.AnnData
+        The labeled AnnData the classifier was trained on (obs may carry the
+        ground-truth column).
+    idx_val : np.ndarray
+        Row indices of the validation split (into ``combined``).
+    witness : WitnessSettings
+        Provides ``eval_against`` and ``eval_class_map``.
+
+    Returns
+    -------
+    dict[str, float] or None
+        ``val_*`` metrics (accuracy, weighted_f1, auroc, per-class f1) computed
+        against the mapped ground truth. None when evaluation is not possible
+        (no ``eval_against`` column, no class map, or no val cell has a usable
+        ground-truth label) — the caller then keeps the witness-label metrics.
+    """
+    from sklearn.metrics import f1_score, roc_auc_score
+
+    col = witness.eval_against
+    class_map = witness.eval_class_map
+    if col is None or class_map is None or col not in combined.obs.columns:
+        return None
+
+    truth_raw = combined.obs[col].to_numpy(dtype=object)[idx_val]
+    # Map witness classes → annotation vocabulary; keep only mapped truth values.
+    expected = {class_map.get(witness.control_label), class_map.get(witness.perturbed_label)}
+    keep = np.array([t in expected for t in truth_raw], dtype=bool)
+    if keep.sum() == 0:
+        return None
+
+    X_full = combined.X if isinstance(combined.X, np.ndarray) else combined.X.toarray()
+    X_val = X_full[idx_val][keep]
+    y_true = truth_raw[keep]
+    # Pipeline predicts witness class names; translate to annotation vocabulary.
+    y_pred_witness = pipeline.predict(X_val)
+    y_pred = np.array([class_map.get(p, p) for p in y_pred_witness], dtype=object)
+
+    classes = sorted(expected)
+    metrics: dict[str, float] = {
+        "val_accuracy": float((y_pred == y_true).mean()),
+        "val_weighted_f1": float(f1_score(y_true, y_pred, average="weighted", labels=classes, zero_division=0)),
+    }
+    per_class = f1_score(y_true, y_pred, average=None, labels=classes, zero_division=0)
+    for cls, f1 in zip(classes, per_class):
+        metrics[f"val_{cls}_f1"] = float(f1)
+
+    # AUROC needs the positive-class probability mapped to the annotation positive.
+    pos_witness = witness.perturbed_label
+    pipe_classes = list(pipeline.classifier.classes_)
+    if hasattr(pipeline, "predict_proba") and pos_witness in pipe_classes:
+        pos_idx = pipe_classes.index(pos_witness)
+        proba = pipeline.predict_proba(X_val)[:, pos_idx]
+        pos_truth = class_map.get(pos_witness)
+        y_bin = (y_true == pos_truth).astype(int)
+        if len(np.unique(y_bin)) == 2:
+            metrics["val_auroc"] = float(roc_auc_score(y_bin, proba))
+    return metrics
 
 
 def run_linear_classifiers(
@@ -277,12 +354,15 @@ def run_linear_classifiers(
         trained_pipelines.append((task, marker_filter, pipeline))
         click.echo(f"  Pipeline saved: {pipeline_filename}")
 
-        # Replay the same split to recover val obs (hours_post_perturbation).
-        # Must mirror train_linear_classifier exactly — same seed, same
-        # splitter (Group-aware when groups is set, cell-level otherwise).
+        # Replay the same split to recover the val indices. Must mirror
+        # train_linear_classifier exactly — same seed, same splitter
+        # (Group-aware when groups is set, cell-level otherwise). Used both for
+        # val_hours (F1-over-time plot) and, in witness mode, for scoring the
+        # classifier against ground-truth annotations on the val cells.
         y_full = combined.obs[task].to_numpy(dtype=object)
+        idx_val: np.ndarray | None = None
         val_hours: np.ndarray | None = None
-        if config.split_train_data < 1.0 and "hours_post_perturbation" in combined.obs.columns:
+        if config.split_train_data < 1.0:
             try:
                 idx = np.arange(len(combined))
                 if groups is not None:
@@ -300,14 +380,26 @@ def run_linear_classifiers(
                         stratify=y_full,
                         shuffle=True,
                     )
-                val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
+                if "hours_post_perturbation" in combined.obs.columns:
+                    val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
             except ValueError:
-                click.echo("  Could not replay stratified split for val_hours; F1-over-time plot skipped.")
+                click.echo("  Could not replay split for val evaluation; falling back to witness metrics.")
+
+        # Witness mode: the witness label is a deterministic function of the
+        # embedding, so val metrics against it are trivially ~1.0. Re-score the
+        # trained pipeline against ground-truth annotations on the val cells.
+        eval_source = "annotation" if config.label_source == "annotations" else "witness_label"
+        if config.label_source == "witness" and idx_val is not None:
+            anno_metrics = _evaluate_witness_against_annotations(pipeline, combined, idx_val, config.witness)
+            if anno_metrics is not None:
+                metrics = anno_metrics
+                eval_source = config.witness.eval_against
 
         row = {
             "task": task,
             "marker_filter": marker_filter,
             "n_samples": combined.n_obs,
+            "eval_source": eval_source,
             **metrics,
         }
         all_metrics.append(row)

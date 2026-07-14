@@ -39,6 +39,9 @@ def _make_separable_embeddings(
     X[n_per_well : 2 * n_per_well, 0] -= 2.0  # perturbed
     # C/3 stays near origin
 
+    # Ground-truth infection_state keyed to wells (A/1 control, B/2 perturbed,
+    # C/3 unlabeled) so eval-against-annotations has something to score.
+    well_to_infection = {"A/1": "uninfected", "B/2": "infected", "C/3": "unknown"}
     obs = pd.DataFrame(
         {
             "fov_name": [f"{w}/000000" for w in wells],
@@ -47,6 +50,7 @@ def _make_separable_embeddings(
             "experiment": [experiment] * total,
             "marker": [marker] * total,
             "hours_post_perturbation": [float(i % 5) * 24.0 for i in range(total)],
+            "infection_state": [well_to_infection[w] for w in wells],
         }
     )
     # pandas 3 defaults string columns to ArrowStringArray, which anndata's
@@ -132,8 +136,31 @@ def test_run_linear_classifiers_witness_mode(tmp_path):
     assert len(results) == 1
     assert results.iloc[0]["task"] == "witness_state"
     assert results.iloc[0]["marker_filter"] == "Phase3D"
-    # Separable control/perturbed clusters → classifier well above chance.
-    # (The ambiguous C/3 well, sign-labeled, caps this below 1.0.)
+    # obs carries infection_state → metrics are scored against it, not the
+    # self-referential witness label.
+    assert results.iloc[0]["eval_source"] == "infection_state"
+    # Wells align 1:1 with infection_state here, so agreement is high.
     assert results.iloc[0]["val_accuracy"] > 0.8
     assert (tmp_path / "out" / "metrics_summary.csv").exists()
     assert (tmp_path / "out" / "witness_state_summary.pdf").exists()
+
+
+def test_run_linear_classifiers_witness_falls_back_without_annotations(tmp_path):
+    """No eval_against column → metrics fall back to the witness label, flagged as such."""
+    zarr_path = tmp_path / "embeddings.zarr"
+    adata = _make_separable_embeddings(None)
+    # Drop the ground-truth column so eval-against has nothing to score.
+    del adata.obs["infection_state"]
+    adata.write_zarr(zarr_path)
+
+    config = LinearClassifiersStepConfig(
+        label_source="witness",
+        witness_labels=[
+            WitnessLabelSource(experiment="exp_A", control_wells=["A/1"], perturbed_wells=["B/2"]),
+        ],
+        witness=WitnessSettings(marker_filters=["Phase3D"], dead_zone=0.1),
+        split_train_data=0.8,
+    )
+
+    results = run_linear_classifiers(zarr_path, config, tmp_path / "out")
+    assert results.iloc[0]["eval_source"] == "witness_label"
