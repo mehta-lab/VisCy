@@ -53,6 +53,14 @@ linear_classifiers:
     bandwidth: null
     # Bound kernel cost: subsample each reference group to at most N cells.
     max_reference_cells: 5000
+    # Score the trained classifier against this ground-truth obs column on the
+    # val split, NOT the witness label — the witness label is a deterministic
+    # function of the embedding, so scoring against it is circular (~1.0). Set
+    # to null to fall back to witness-label metrics (flagged eval_source).
+    eval_against: infection_state
+    eval_class_map:
+      control: uninfected
+      perturbed: infected
   use_scaling: true
   use_pca: false
   split_train_data: 0.8
