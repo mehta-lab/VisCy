@@ -41,6 +41,7 @@ leaves are git-tracked, so ``--apply`` is fully reversible via git.
 from __future__ import annotations
 
 import argparse
+import csv
 import difflib
 import re
 import sys
@@ -78,6 +79,10 @@ def build_ckpt_map(models_root: Path) -> dict[str, str]:
 
     Includes both the dedup ``move`` winner and its ``dedup_legacy`` siblings, so a
     config pointing at EITHER cross-root copy resolves to the same canonical dest.
+
+    Re-enumerates the LIVE models tree — valid only BEFORE ``run_migration`` has
+    relocated the checkpoints (else the legacy dirs are gone and the map is empty).
+    After migrating, pass the frozen manifest to ``load_ckpt_map_from_manifest``.
     """
     rows, gaps = collect_checkpoints(
         models_root, full_hardlink_check=False, referenced_dirs=_referenced_model_dirs(CONFIG_ROOT)
@@ -85,6 +90,24 @@ def build_ckpt_map(models_root: Path) -> dict[str, str]:
     if gaps:
         raise RuntimeError("checkpoint enumeration has gaps; refusing to codemod:\n" + "\n".join(gaps))
     return {r.src: r.dest for r in rows if r.status in ("move", "dedup_legacy")}
+
+
+def load_ckpt_map_from_manifest(manifest: Path) -> dict[str, str]:
+    """Return {old model-dir -> canonical dest} from a frozen manifest CSV.
+
+    The codemod runs AFTER ``run_migration`` relocates the checkpoints, so the live
+    models tree can no longer be re-enumerated for the legacy dirs. The manifest is
+    the frozen record of what moved (checkpoint ``move`` + ``dedup_legacy`` rows) —
+    the same {src -> dest} pairs ``build_ckpt_map`` would have produced pre-migration.
+    """
+    out: dict[str, str] = {}
+    with manifest.open(newline="") as fh:
+        for row in csv.DictReader(fh):
+            if row["kind"] == "checkpoint" and row["status"] in ("move", "dedup_legacy"):
+                out[row["src"]] = row["dest"]
+    if not out:
+        raise RuntimeError(f"no checkpoint move rows in manifest {manifest}; refusing to codemod")
+    return out
 
 
 def _rewrite_ckpt_value(value: str, ckpt_map: dict[str, str]) -> str | None:
@@ -169,10 +192,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--apply", action="store_true", help="write changes in place (default: dry-run diff)")
     ap.add_argument("--models-root", type=Path, default=MODELS_ROOT, help="checkpoint models root (for the ckpt map)")
+    ap.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="frozen manifest CSV; build the ckpt map from it instead of re-scanning the "
+        "(already-migrated) models tree. Required when run AFTER run_migration --apply.",
+    )
     ap.add_argument("--show-diff", action="store_true", help="print a unified diff per changed file")
     args = ap.parse_args(argv)
 
-    ckpt_map = build_ckpt_map(args.models_root)
+    ckpt_map = load_ckpt_map_from_manifest(args.manifest) if args.manifest else build_ckpt_map(args.models_root)
     leaves = iter_leaves(args.config_root)
     n_changed = 0
     n_field_changes = 0

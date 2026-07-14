@@ -133,3 +133,23 @@ def test_build_ckpt_map_on_fixture(tmp_path):
     dest = f"{models_root}/joint/membrane/pix2pix3d_unetvit"
     assert cmap[str(a)] == dest
     assert cmap[str(b)] == dest  # dedup_legacy sibling maps to the same dest
+
+
+def test_load_ckpt_map_from_manifest(tmp_path):
+    """After migration the live tree is gone; the frozen manifest supplies the map.
+
+    Only checkpoint move/dedup_legacy rows contribute; predictions/evals/skips do not.
+    """
+    old_dedup = f"{CELLDIFF}/joint_ipsc_confocal_a549_mantis/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep"
+    new_dedup = f"{MODELS}/joint/membrane/pix2pix3d_unetvit"
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "kind,status,src,dest,reason\n"
+        f"checkpoint,move,{_OLD_CKPT_DIR},{_NEW_CKPT_DIR},raw a549 home\n"
+        f"checkpoint,dedup_legacy,{old_dedup},{new_dedup},cross-root dup\n"
+        f"checkpoint,skip,{MODELS}/ipsc/nucl/celldiff/checkpoints,,superseded R1\n"
+        "prediction,move,/data/a/x.zarr,/data/b/prediction.zarr,pred\n"
+        "eval,move,/data/a/eval_x,/data/b/leaf,eval\n"
+    )
+    cmap = rc.load_ckpt_map_from_manifest(manifest)
+    assert cmap == {_OLD_CKPT_DIR: _NEW_CKPT_DIR, old_dedup: new_dedup}
