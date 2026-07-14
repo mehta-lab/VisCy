@@ -95,9 +95,15 @@ dynaclr run-linear-classifiers -c linear_classifiers_witness_infectomics.yml
   │         |w| ≤ t → unknown (dropped, like annotation `!= "unknown"`)
   │    6. TRAIN logistic regression on the labeled subset
   │         (same train_linear_classifier, same group-aware split)
+  │    7. EVALUATE on the val split vs GROUND-TRUTH annotations
+  │         (witness.eval_against, e.g. infection_state), mapped via
+  │         eval_class_map {control: uninfected, perturbed: infected}.
+  │         NOT the witness label — that would be circular (see Gating rule).
+  │         Falls back to the witness label, flagged, if no annotation column.
   ▼
 output_dir/
-  metrics_summary.csv              (one row per marker: accuracy, F1, AUROC, …)
+  metrics_summary.csv              (one row per marker + eval_source column;
+                                    accuracy, F1, AUROC vs ground truth)
   witness_state_summary.pdf        (bar chart + ROC + F1-over-time per marker)
   pipelines/{task}_{marker}.joblib (+ manifest.json)  → append-predictions
   [publish_dir/vN/ + latest]       (if publish_dir set — central LC registry)
@@ -134,6 +140,33 @@ labels every cell by sign. The dead-zone is the honest analog of the annotation
 path's `label != "unknown"` filter: cells too close to the decision boundary are
 ambiguous and excluded from training rather than forced into a class.
 
+## Evaluation: avoid the circularity trap
+
+The witness label is a **deterministic function of the embedding**
+(`sign(w(z))`, and `w` is smooth in `z`). If you train logistic regression on
+`z` and then score it against that same witness label, it trivially recovers the
+witness function and reports **~1.000 accuracy/AUROC** — a meaningless artifact,
+not biology. On real 2D-MIP infectomics embeddings this reads `1.000` vs the
+witness label but only `0.71` vs true `infection_state`.
+
+So witness mode **evaluates the trained classifier against ground-truth
+annotations** on the val split (`witness.eval_against`, default
+`infection_state`), mapping witness classes to the annotation vocabulary via
+`eval_class_map`. `metrics_summary.csv` records `eval_source` — either the
+annotation column name (honest) or `witness_label` (fallback when no annotation
+column is present, flagged as circular). Representative real numbers, scored vs
+`infection_state`:
+
+| marker | val accuracy | val AUROC | reading |
+| ------------- | ------------ | --------- | ------------------------------------- |
+| viral_sensor  | 0.865        | 0.815     | strong — sensor reports infection      |
+| SEC61B        | 0.764        | 0.838     | good — ER remodeling is a real signal  |
+| Phase3D       | 0.580        | 0.536     | weak — label-free barely separates     |
+| G3BP1         | 0.491        | 0.554     | ~chance — witness axis ≠ infection here |
+
+This spread is the useful output: the weak-label proxy works where the marker
+carries infection signal and not where it doesn't.
+
 ## Config structure
 
 A ready-to-edit recipe lives at
@@ -155,6 +188,11 @@ linear_classifiers:
     dead_zone: 0.1                # drop lowest-|score| 10% as unknown; 0.0 = label all
     bandwidth: null               # null = median heuristic on pooled (control, perturbed)
     max_reference_cells: 5000     # subsample each reference group to bound kernel cost
+    eval_against: infection_state # ground-truth obs col to SCORE against (avoids
+                                  # circular ~1.0); null → score vs the witness label
+    eval_class_map:               # witness class → annotation class for scoring
+      control: uninfected
+      perturbed: infected
   use_scaling: true
   split_train_data: 0.8
   split_groups_by: [experiment, fov_name, track_id]   # track-level, leakage-free split
@@ -183,11 +221,16 @@ linear_classifiers:
   preserved. If cross-experiment batch offset dominates the witness axis, apply a
   LOT correction upstream (see [lot_correction.md](lot_correction.md)) before
   this step.
-- **Labels are weak.** Val AUROC/F1 here measure separability of the *witness-
-  gated* classes, not agreement with ground-truth annotations. To compare the
-  two label sources head to head, run both recipes on the same embeddings and
-  compare `metrics_summary.csv`.
+- **Labels are weak; metrics are honest.** The witness labels are a weak proxy,
+  but reported val metrics are scored against ground-truth `eval_against`
+  (see *Evaluation* above), so `metrics_summary.csv` measures agreement with
+  biology — not the circular witness-label reproduction. Always check the
+  `eval_source` column: `witness_label` there means no annotation was available
+  and the number is self-referential (~1.0), not a real score.
 - **The witness score is unsupervised in labels but supervised in wells** — the
   quality of the pseudo-labels is only as good as the control/perturbed well
   assignment. Mislabeling a well flips the sign for every cell in it.
+- **Class balance.** Gating is often lopsided (e.g. G3BP1 real run: ~53k control
+  / 2.8k perturbed). `class_weight: balanced` (the default) compensates, but a
+  near-empty perturbed class makes the val metrics high-variance.
 ```

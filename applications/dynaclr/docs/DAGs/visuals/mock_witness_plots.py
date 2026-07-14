@@ -16,7 +16,7 @@ OUT = Path("/home/eduardo.hirata/repos/viscy/applications/dynaclr/docs/DAGs/visu
 WONG = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#F0E442"]
 rng = np.random.default_rng(7)
 
-MOCK_TAG = "MOCK — illustrative synthetic data"
+MOCK_TAG = "illustrative — bar/ROC use real run values; hist/F1 synthetic"
 
 
 def _mock_note(fig):
@@ -57,10 +57,14 @@ def witness_score_hist():
 # 2) Per-marker metrics bar chart (mirrors _plot_metrics_bar).
 def metrics_bar():
     """Mock per-marker AUROC/accuracy/weighted-F1 bar chart (mirrors _plot_metrics_bar)."""
+    # Representative values from a real 2D-MIP-BagOfChannels infectomics run,
+    # scored vs ground-truth infection_state (eval_against). Strong where the
+    # marker carries infection signal (viral_sensor, SEC61B), near chance where
+    # it does not (Phase3D, G3BP1) — the useful discriminating signal.
     markers = ["G3BP1", "SEC61B", "Phase3D", "viral_sensor"]
-    auroc = [0.94, 0.89, 0.82, 0.97]
-    acc = [0.90, 0.85, 0.78, 0.93]
-    wf1 = [0.89, 0.84, 0.77, 0.92]
+    auroc = [0.554, 0.838, 0.536, 0.815]
+    acc = [0.491, 0.764, 0.580, 0.865]
+    wf1 = [0.388, 0.768, 0.466, 0.861]
     metrics = {"AUROC": auroc, "Accuracy": acc, "Weighted F1": wf1}
     colors = ["#0072B2", "#E69F00", "#009E73"]
 
@@ -74,7 +78,7 @@ def metrics_bar():
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, color="gray", linewidth=0.8, linestyle="--", label="Random (0.5)")
     ax.set_ylabel("Score")
-    ax.set_title("witness_state — classifier performance per marker")
+    ax.set_title("witness_state — performance vs infection_state (per marker)")
     ax.legend(fontsize=9)
     fig.tight_layout()
     save(fig, "mock_metrics_bar")
@@ -84,8 +88,8 @@ def metrics_bar():
 def roc_curves():
     """Mock per-marker one-vs-rest ROC curves (mirrors _plot_roc_curves)."""
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.set_title("ROC — witness_state (per marker)", fontsize=11)
-    aurocs = {"G3BP1": 0.94, "SEC61B": 0.89, "Phase3D": 0.82, "viral_sensor": 0.97}
+    ax.set_title("ROC — witness_state vs infection_state (per marker)", fontsize=11)
+    aurocs = {"G3BP1": 0.554, "SEC61B": 0.838, "Phase3D": 0.536, "viral_sensor": 0.815}
     for i, (marker, target_auc) in enumerate(aurocs.items()):
         # Build a smooth ROC with roughly the target AUROC.
         fpr = np.linspace(0, 1, 200)

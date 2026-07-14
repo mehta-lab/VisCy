@@ -23,6 +23,7 @@ digraph witness_dataflow {
     score [label="SCORE every cell\nw(z) = mean k(z,X) − mean k(z,Y)", fillcolor="#EAF3E1"];
     gate  [label="GATE scores → pseudo-labels\n(sign + dead-zone band)", fillcolor="#FBEFD6", shape=box];
     train [label="train_linear_classifier\n(logistic regression, group-aware split)", fillcolor="#EAF3E1"];
+    evaln [label="EVALUATE on val split vs\nground-truth annotations\n(eval_against, e.g. infection_state)\nNOT the witness label — avoids circular ~1.0", fillcolor="#F3E1EE", shape=box];
 
     subgraph cluster_out {
         label="outputs (identical to annotation path)";
@@ -43,7 +44,8 @@ digraph witness_dataflow {
     pool -> score [style=dashed, label="all cells"];
     score -> gate;
     gate -> train [label="labeled subset"];
-    train -> metrics;
+    train -> evaln;
+    evaln -> metrics [label="val metrics vs annotations"];
     train -> pdf;
     train -> joblib;
     joblib -> reg [style=dashed, label="if publish_dir"];
