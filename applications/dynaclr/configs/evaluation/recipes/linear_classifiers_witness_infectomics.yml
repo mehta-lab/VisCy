@@ -1,0 +1,65 @@
+# Linear classifier settings for the infectomics benchmark — WITNESS label source.
+#
+# Second option to `linear_classifiers_infectomics.yml`: instead of loading
+# per-cell labels from annotation CSVs, this derives weak labels from the MMD
+# witness score. For each marker, the witness is fit on control-vs-perturbed
+# cells pooled across all listed experiments, every cell is scored, and the
+# scores are gated into control/perturbed pseudo-labels. No annotation CSVs
+# are needed — only which wells are control and which are perturbed per
+# experiment.
+#
+# The control/perturbed wells below are TEMPLATES — edit them to match each
+# experiment's plate layout (mock/uninfected wells → control_wells; infected
+# wells → perturbed_wells). Cells in neither list are dropped, so dead/empty
+# wells never leak into the perturbed reference.
+linear_classifiers:
+  label_source: witness
+  witness_labels:
+    - experiment: "2025_01_28_A549_G3BP1_ZIKV_DENV_G3BP1"
+      control_wells: ["B/4"]           # mock / uninfected
+      perturbed_wells: ["C/2", "C/3"]  # ZIKV / DENV
+    - experiment: "2025_01_28_A549_viral_sensor_ZIKV_DENV"
+      control_wells: ["B/4"]
+      perturbed_wells: ["C/2", "C/3"]
+    - experiment: "2025_01_28_A549_Phase3D_ZIKV_DENV"
+      control_wells: ["B/4"]
+      perturbed_wells: ["C/2", "C/3"]
+    - experiment: "2025_07_24_A549_G3BP1_ZIKV"
+      control_wells: ["C/1"]           # mock (pseudo-control well)
+      perturbed_wells: ["C/2", "C/3"]  # ZIKV
+    - experiment: "2025_07_24_A549_SEC61_ZIKV"
+      control_wells: ["A/1"]           # mock well for the SEC61 layout
+      perturbed_wells: ["A/2", "A/3"]
+    - experiment: "2025_07_24_A549_viral_sensor_ZIKV"
+      control_wells: ["C/1"]
+      perturbed_wells: ["C/2", "C/3"]
+    - experiment: "2025_07_24_A549_Phase3D_ZIKV"
+      control_wells: ["C/1"]
+      perturbed_wells: ["C/2", "C/3"]
+  witness:
+    # One classifier per marker; None (omit) = every unique obs["marker"].
+    marker_filters:
+      - G3BP1
+      - SEC61B
+      - Phase3D
+      - viral_sensor
+    label_column: witness_state
+    control_label: control
+    perturbed_label: perturbed
+    # Drop the lowest-|score| 10% as unlabeled (analog of the annotation
+    # path's `!= "unknown"` filter). Set to 0.0 to label every cell by sign.
+    dead_zone: 0.1
+    # None = median heuristic on the pooled (control, perturbed) reference.
+    bandwidth: null
+    # Bound kernel cost: subsample each reference group to at most N cells.
+    max_reference_cells: 5000
+  use_scaling: true
+  use_pca: false
+  split_train_data: 0.8
+  random_seed: 42
+  # Track-level split — no track lands in both train/val. Same rationale as
+  # the annotation recipe (temporal-contrastive SSL leaks on cell-level splits).
+  split_groups_by:
+    - experiment
+    - fov_name
+    - track_id
