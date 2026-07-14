@@ -1,0 +1,50 @@
+digraph witness_dataflow {
+    rankdir=TB;
+    bgcolor="white";
+    node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", color="#4A4A4A"];
+    edge [fontname="Helvetica", fontsize=9, color="#4A4A4A"];
+    labelloc="t";
+    label=<<b>Witness-score linear classifiers &mdash; data flow (per marker)</b>>;
+    fontname="Helvetica";
+    fontsize=14;
+
+    emb   [label="embeddings/{experiment}.zarr\n(AnnData: X, obs=experiment/marker/fov_name)", fillcolor="#DCE9F5"];
+    pool  [label="POOL cells for this marker\nacross all listed experiments", fillcolor="#EAF3E1"];
+
+    subgraph cluster_ref {
+        label="build references from wells (fov_name path-prefix match)";
+        style="rounded,dashed"; color="#9A9A9A"; fontname="Helvetica"; fontsize=10;
+        ctrl [label="X = control_wells cells\n(e.g. C/1)", fillcolor="#CFE8CF"];
+        pert [label="Y = perturbed_wells cells\n(e.g. C/2, C/3)", fillcolor="#F5D6D6"];
+        drop_ref [label="cells in neither well set\n→ dropped (no leakage)", fillcolor="#EDEDED", style="rounded,filled,dashed"];
+    }
+
+    fit   [label="FIT witness bandwidth\n(median heuristic on pooled X,Y\nunless bandwidth set)", fillcolor="#EAF3E1"];
+    score [label="SCORE every cell\nw(z) = mean k(z,X) − mean k(z,Y)", fillcolor="#EAF3E1"];
+    gate  [label="GATE scores → pseudo-labels\n(sign + dead-zone band)", fillcolor="#FBEFD6", shape=box];
+    train [label="train_linear_classifier\n(logistic regression, group-aware split)", fillcolor="#EAF3E1"];
+
+    subgraph cluster_out {
+        label="outputs (identical to annotation path)";
+        style="rounded,dashed"; color="#9A9A9A"; fontname="Helvetica"; fontsize=10;
+        metrics [label="metrics_summary.csv", fillcolor="#DCE9F5"];
+        pdf     [label="witness_state_summary.pdf", fillcolor="#DCE9F5"];
+        joblib  [label="pipelines/{task}_{marker}.joblib\n(+ manifest.json)", fillcolor="#DCE9F5"];
+        reg     [label="publish_dir/vN/ + latest\n(central LC registry, optional)", fillcolor="#DCE9F5", style="rounded,filled,dashed"];
+    }
+
+    emb -> pool;
+    pool -> ctrl;
+    pool -> pert;
+    pool -> drop_ref [style=dashed, color="#9A9A9A"];
+    ctrl -> fit;
+    pert -> fit;
+    fit -> score;
+    pool -> score [style=dashed, label="all cells"];
+    score -> gate;
+    gate -> train [label="labeled subset"];
+    train -> metrics;
+    train -> pdf;
+    train -> joblib;
+    joblib -> reg [style=dashed, label="if publish_dir"];
+}

@@ -1,0 +1,30 @@
+digraph witness_gating {
+    rankdir=TB;
+    bgcolor="white";
+    node [fontname="Helvetica", fontsize=11, style="filled", color="#4A4A4A"];
+    edge [fontname="Helvetica", fontsize=10, color="#4A4A4A"];
+    labelloc="t";
+    label=<<b>Witness gating &mdash; score band &rarr; pseudo-label</b><br/><font point-size="10">t = quantile(|w|, dead_zone)</font>>;
+    fontname="Helvetica";
+    fontsize=14;
+
+    score [label="witness score w(z)", shape=box, style="rounded,filled", fillcolor="#EAF3E1"];
+
+    hi   [label="w(z) &gt; +t", shape=diamond, fillcolor="#FBEFD6"];
+    lo   [label="w(z) &lt; −t", shape=diamond, fillcolor="#FBEFD6"];
+
+    control   [label="control", shape=box, style="rounded,filled", fillcolor="#CFE8CF"];
+    perturbed [label="perturbed", shape=box, style="rounded,filled", fillcolor="#F5D6D6"];
+    unknown   [label="unknown\n(|w| ≤ t → dropped,\nlike annotation != 'unknown')", shape=box, style="rounded,filled,dashed", fillcolor="#EDEDED"];
+
+    score -> hi;
+    hi -> control [label="yes"];
+    hi -> lo [label="no"];
+    lo -> perturbed [label="yes"];
+    lo -> unknown [label="no"];
+
+    note [shape=note, fillcolor="#FFFDF0", fontsize=9,
+          label="dead_zone = 0.0 disables the band\n(plain sign: every cell labeled)"];
+    unknown -> note [style=invis];
+    { rank=same; unknown; note; }
+}

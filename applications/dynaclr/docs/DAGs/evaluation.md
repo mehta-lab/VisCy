@@ -128,6 +128,8 @@ configs/viewer.yaml               # nd-embedding viewer config (also valid input
   │        -c linear_classifiers.yaml    # reads per-experiment zarrs directory + annotation CSVs
   │        # joins annotations on (fov_name, t, track_id); trains one LogisticRegression
   │        # per (task, marker); marker_filters omitted → auto-discovers all markers
+  │        # label_source: witness → weak-label from the MMD witness score instead
+  │        #   of annotation CSVs (control/perturbed wells). See witness_score_classifiers.md
   │        # writes trained pipelines to linear_classifiers/pipelines/ (in-run staging)
   │        # if publish_dir is set: atomically promotes the bundle to the central
   │        # LC registry as {publish_dir}/vN/ and updates the `latest` symlink.

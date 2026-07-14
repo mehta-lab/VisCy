@@ -189,3 +189,8 @@ Examples: `linear-classifier-cell_death_state-phase`, `linear-classifier-infecti
 ## Further Reference
 
 See `annotations_and_linear_classifiers.md` for the full specification of the annotations schema and naming conventions.
+
+For an **annotation-free** label source — weak labels derived from the MMD
+witness score using per-experiment control/perturbed wells — see the
+[witness-score classifiers DAG](../DAGs/witness_score_classifiers.md)
+(`label_source: witness`).

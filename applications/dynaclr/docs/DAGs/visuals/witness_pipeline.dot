@@ -1,0 +1,23 @@
+digraph witness_pipeline {
+    rankdir=LR;
+    bgcolor="white";
+    node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled", fillcolor="#DCE9F5", color="#4A4A4A"];
+    edge [fontname="Helvetica", fontsize=9, color="#4A4A4A"];
+    labelloc="t";
+    label=<<b>Witness LC &mdash; pipeline dependency (Nextflow eval)</b>>;
+    fontname="Helvetica";
+    fontsize=14;
+
+    predict [label="predict\n(GPU)"];
+    split   [label="split-embeddings"];
+    lc      [label="run-linear-classifiers\nlabel_source: witness", fillcolor="#FBEFD6"];
+    append  [label="append-predictions"];
+    plot    [label="plot"];
+
+    predict -> split -> lc -> append -> plot;
+
+    note [shape=note, fillcolor="#FFFDF0", fontsize=9,
+          label="witness mode has no annotations →\nLINEAR_CLASSIFIERS stages empty CSV set;\nresume cache keys on YAML, not CSV hashes"];
+    lc -> note [style=invis];
+    { rank=same; lc; note; }
+}
