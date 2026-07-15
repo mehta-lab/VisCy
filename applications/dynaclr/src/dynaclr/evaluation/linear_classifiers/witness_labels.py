@@ -62,6 +62,64 @@ def _well_prefix_mask(fov_name: pd.Series, wells: list[str]) -> np.ndarray:
     return stripped.map(_matches).to_numpy(dtype=bool)
 
 
+_RANGE_OPS = {
+    "lt": lambda s, v: s < v,
+    "le": lambda s, v: s <= v,
+    "gt": lambda s, v: s > v,
+    "ge": lambda s, v: s >= v,
+}
+
+
+def obs_filter_mask(obs: pd.DataFrame, filter_dict: dict) -> np.ndarray:
+    """Boolean mask of rows matching an obs filter (AND across keys).
+
+    Each ``col -> spec`` entry contributes a condition; a row is kept only if it
+    matches every entry. Spec forms:
+
+    - scalar → equality (``obs[col] == spec``);
+    - list/tuple → membership (``obs[col].isin(spec)``);
+    - range dict → any of ``{lt, le, gt, ge}`` combined (one bound = half-line,
+      two = window), e.g. ``{"ge": 24, "le": 36}`` → ``24 <= col <= 36``.
+
+    A ``well`` or ``fov_name`` key routes to :func:`_well_prefix_mask` so wells
+    are just another filterable column.
+
+    Parameters
+    ----------
+    obs : pd.DataFrame
+        The AnnData ``obs`` table.
+    filter_dict : dict
+        Mapping of obs column name to a scalar / list / range-dict spec.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask, shape (len(obs),).
+    """
+    mask = np.ones(len(obs), dtype=bool)
+    for col, spec in filter_dict.items():
+        if col in ("well", "fov_name"):
+            wells = spec if isinstance(spec, (list, tuple)) else [spec]
+            mask &= _well_prefix_mask(obs["fov_name"], list(wells))
+            continue
+        if col not in obs.columns:
+            raise KeyError(f"obs_filter column '{col}' not found. Available: {list(obs.columns)}")
+        series = obs[col]
+        if isinstance(spec, dict):
+            unknown = set(spec) - set(_RANGE_OPS)
+            if unknown:
+                raise ValueError(
+                    f"range filter for '{col}' has unknown ops {sorted(unknown)}; use {sorted(_RANGE_OPS)}"
+                )
+            for op, val in spec.items():
+                mask &= _RANGE_OPS[op](series, val).to_numpy(dtype=bool)
+        elif isinstance(spec, (list, tuple)):
+            mask &= series.isin(list(spec)).to_numpy(dtype=bool)
+        else:
+            mask &= (series == spec).to_numpy(dtype=bool)
+    return mask
+
+
 def build_witness_labels(
     adata: ad.AnnData,
     witness_labels: list[WitnessLabelSource],
@@ -98,9 +156,14 @@ def build_witness_labels(
         exp_mask = (obs["experiment"] == src.experiment).to_numpy(dtype=bool)
         if not exp_mask.any():
             continue
-        fov = obs["fov_name"]
-        control_mask |= exp_mask & _well_prefix_mask(fov, src.control_wells)
-        perturbed_mask |= exp_mask & _well_prefix_mask(fov, src.perturbed_wells)
+        if src.control_wells is not None:
+            ctrl = _well_prefix_mask(obs["fov_name"], src.control_wells)
+            pert = _well_prefix_mask(obs["fov_name"], src.perturbed_wells)
+        else:
+            ctrl = obs_filter_mask(obs, src.control_filter)
+            pert = obs_filter_mask(obs, src.perturbed_filter)
+        control_mask |= exp_mask & ctrl
+        perturbed_mask |= exp_mask & pert
 
     X_all = adata.X if isinstance(adata.X, np.ndarray) else adata.X.toarray()
     X_ctrl = X_all[control_mask]

@@ -15,6 +15,7 @@ from dynaclr.evaluation.linear_classifiers.orchestrated import run_linear_classi
 from dynaclr.evaluation.linear_classifiers.witness_labels import (
     _well_prefix_mask,
     build_witness_labels,
+    obs_filter_mask,
 )
 
 
@@ -171,3 +172,59 @@ def test_run_linear_classifiers_witness_falls_back_without_annotations(tmp_path)
 
     results = run_linear_classifiers(zarr_path, config, tmp_path / "out")
     assert results.iloc[0]["eval_source"] == "witness_label"
+
+
+def test_obs_filter_mask_forms():
+    """obs_filter_mask supports scalar, list, range window, and well-prefix routing."""
+    obs = pd.DataFrame(
+        {
+            "fov_name": ["A/1/0", "A/2/0", "A/10/0", "A/2/1"],
+            "perturbation": ["uninfected", "DENV", "DENV", "DENV"],
+            "hours_post_perturbation": [3.0, 26.0, 8.0, 30.0],
+        }
+    )
+    # scalar equality
+    assert obs_filter_mask(obs, {"perturbation": "DENV"}).tolist() == [False, True, True, True]
+    # list membership
+    assert obs_filter_mask(obs, {"perturbation": ["uninfected"]}).tolist() == [True, False, False, False]
+    # two-bound range window
+    assert obs_filter_mask(obs, {"hours_post_perturbation": {"ge": 24, "le": 36}}).tolist() == [
+        False,
+        True,
+        False,
+        True,
+    ]
+    # well key routes to prefix match (no A/10 leak) and AND-combines with others
+    assert obs_filter_mask(obs, {"well": "A/2", "hours_post_perturbation": {"ge": 24}}).tolist() == [
+        False,
+        True,
+        False,
+        True,
+    ]
+
+
+def test_build_witness_labels_filter_based_late_window():
+    """Filter-based refs: control well vs perturbed well at late timepoints only."""
+    # control well A/1 (early t), perturbed well B/2 spanning early→late hours.
+    adata = _make_separable_embeddings(None)
+    # Give the perturbed well a real hours gradient so a late window selects a subset.
+    is_pert = adata.obs["fov_name"].str.startswith("B/2").to_numpy()
+    hours = adata.obs["hours_post_perturbation"].to_numpy().astype(float)
+    hours[is_pert] = np.linspace(3.0, 36.0, is_pert.sum())
+    adata.obs["hours_post_perturbation"] = hours
+
+    labels = build_witness_labels(
+        adata,
+        [
+            WitnessLabelSource(
+                experiment="exp_A",
+                control_filter={"well": "A/1"},
+                perturbed_filter={"well": "B/2", "hours_post_perturbation": {"ge": 24}},
+            )
+        ],
+        WitnessSettings(dead_zone=0.0),
+    )
+    # Only late (>=24h) B/2 cells are eligible for the perturbed reference; the
+    # early B/2 cells are not in either reference, but still get scored+labeled.
+    assert labels.n_obs == adata.n_obs
+    assert set(labels.obs["witness_state"].unique()) == {"control", "perturbed"}

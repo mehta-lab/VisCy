@@ -147,6 +147,47 @@ def _build_labeled_adata(
     return annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
 
 
+def _join_eval_annotations(combined: ad.AnnData, annotations: list, col: str) -> ad.AnnData:
+    """Join per-experiment annotation CSVs onto ``combined`` to supply ``obs[col]``.
+
+    For each ``AnnotationSource`` whose experiment is present, loads the CSV and
+    maps ``col`` onto the matching cells (via ``load_annotation_anndata``). Cells
+    with no annotation keep NaN. Used to score a witness-labeled run against
+    ground-truth infection labels the embeddings obs does not already carry.
+
+    Parameters
+    ----------
+    combined : ad.AnnData
+        The labeled AnnData (obs must carry ``experiment``).
+    annotations : list of AnnotationSource
+        Per-experiment CSV specs.
+    col : str
+        Task/column name to pull from each CSV into ``obs[col]``.
+
+    Returns
+    -------
+    ad.AnnData
+        ``combined`` with ``obs[col]`` populated where annotations matched.
+    """
+    values = pd.Series(np.full(combined.n_obs, np.nan, dtype=object), index=combined.obs.index)
+    for src in annotations:
+        exp_mask = (combined.obs["experiment"] == src.experiment).to_numpy(dtype=bool)
+        if not exp_mask.any():
+            continue
+        ann_path = Path(src.path)
+        if not ann_path.exists():
+            raise FileNotFoundError(f"eval annotation CSV not found: {src.path}")
+        sub = combined[exp_mask].copy()
+        try:
+            sub = load_annotation_anndata(sub, str(ann_path), col)
+        except KeyError:
+            click.echo(f"  eval_against {col!r} not in {ann_path.name} for {src.experiment!r}, skipping join.")
+            continue
+        values.loc[sub.obs.index] = sub.obs[col].to_numpy(dtype=object)
+    combined.obs[col] = values
+    return combined
+
+
 def _evaluate_witness_against_annotations(
     pipeline: Any,
     combined: ad.AnnData,
@@ -185,7 +226,15 @@ def _evaluate_witness_against_annotations(
 
     col = witness.eval_against
     class_map = witness.eval_class_map
-    if col is None or class_map is None or col not in combined.obs.columns:
+    if col is None or class_map is None:
+        return None
+
+    # If the ground-truth column is not already in obs, join it from the
+    # configured annotation CSVs (per experiment) — this is how a witness run
+    # trained on weak labels is scored against real infection annotations.
+    if col not in combined.obs.columns and witness.eval_annotations:
+        combined = _join_eval_annotations(combined, witness.eval_annotations, col)
+    if col not in combined.obs.columns:
         return None
 
     truth_raw = combined.obs[col].to_numpy(dtype=object)[idx_val]

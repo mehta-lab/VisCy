@@ -173,38 +173,70 @@ class TaskSpec(BaseModel):
 
 
 class WitnessLabelSource(BaseModel):
-    """Control/perturbed well spec for one experiment, used to weak-label via the MMD witness.
+    """Reference spec for one experiment, used to weak-label via the MMD witness.
 
     The MMD witness function scores each cell by how much it looks like the
-    control distribution (``control_wells``) vs the perturbed distribution
-    (``perturbed_wells``). Those scores are then gated into discrete
-    pseudo-labels that replace annotation-CSV labels for the classifier.
+    control reference (witness group X) vs the perturbed reference (group Y).
+    Those scores are then gated into discrete pseudo-labels that replace
+    annotation-CSV labels for the classifier.
+
+    Each side (control / perturbed) is defined in one of two mutually exclusive
+    ways:
+
+    - **Well-based** (``control_wells`` / ``perturbed_wells``): the simple case,
+      matched against ``obs["fov_name"]`` by path prefix (``"C/1"`` matches
+      ``"C/1/000000"`` but not ``"C/10/..."``).
+    - **Filter-based** (``control_filter`` / ``perturbed_filter``): an arbitrary
+      obs filter (``col -> scalar | list | range-dict``), enabling contrasts
+      like early-timepoint vs late-timepoint or control vs perturbed-at-late.
+      A range-dict uses ``{lt, le, gt, ge}`` (one bound = half-line, two =
+      window); a ``well``/``fov_name`` key routes to well-prefix matching.
+
+    Provide wells XOR a filter for each side (both sides must use the same
+    style). Cells matched by neither side are dropped (never silently labeled).
 
     Parameters
     ----------
     experiment : str
         Experiment name matching obs["experiment"] in the embeddings zarr.
-    control_wells : list[str]
-        Well ids (e.g. ``["C/1"]``) whose cells form the control reference
-        (witness group X). Matched against ``obs["fov_name"]`` by path prefix,
-        so ``"C/1"`` matches ``"C/1/000000"``.
-    perturbed_wells : list[str]
-        Well ids whose cells form the perturbed reference (witness group Y).
-        Cells in neither list are dropped (never treated as perturbed by
-        default), so dead/empty wells do not contaminate the reference.
+    control_wells : list[str] or None
+        Well ids for the control reference (group X). Well-based style.
+    perturbed_wells : list[str] or None
+        Well ids for the perturbed reference (group Y). Well-based style.
+    control_filter : dict or None
+        obs filter for the control reference (group X). Filter-based style.
+        E.g. ``{"well": "A/2"}`` or
+        ``{"perturbation": "infected", "hours_post_perturbation": {"ge": 24}}``.
+    perturbed_filter : dict or None
+        obs filter for the perturbed reference (group Y). Filter-based style.
     """
 
     experiment: str
-    control_wells: list[str]
-    perturbed_wells: list[str]
+    control_wells: list[str] | None = None
+    perturbed_wells: list[str] | None = None
+    control_filter: dict | None = None
+    perturbed_filter: dict | None = None
 
     @model_validator(mode="after")
-    def _validate_wells(self) -> "WitnessLabelSource":
-        if not self.control_wells or not self.perturbed_wells:
-            raise ValueError(f"{self.experiment}: control_wells and perturbed_wells must both be non-empty")
-        overlap = set(self.control_wells) & set(self.perturbed_wells)
-        if overlap:
-            raise ValueError(f"{self.experiment}: wells appear in both control and perturbed: {sorted(overlap)}")
+    def _validate_refs(self) -> "WitnessLabelSource":
+        control_styles = (self.control_wells is not None) + (self.control_filter is not None)
+        perturbed_styles = (self.perturbed_wells is not None) + (self.perturbed_filter is not None)
+        if control_styles != 1 or perturbed_styles != 1:
+            raise ValueError(
+                f"{self.experiment}: each side needs exactly one of wells / filter "
+                "(control_wells XOR control_filter, perturbed_wells XOR perturbed_filter)"
+            )
+        if (self.control_wells is not None) != (self.perturbed_wells is not None):
+            raise ValueError(f"{self.experiment}: mix of well-based and filter-based sides is not allowed")
+        if self.control_wells is not None:
+            if not self.control_wells or not self.perturbed_wells:
+                raise ValueError(f"{self.experiment}: control_wells and perturbed_wells must both be non-empty")
+            overlap = set(self.control_wells) & set(self.perturbed_wells)
+            if overlap:
+                raise ValueError(f"{self.experiment}: wells appear in both control and perturbed: {sorted(overlap)}")
+        else:
+            if not self.control_filter or not self.perturbed_filter:
+                raise ValueError(f"{self.experiment}: control_filter and perturbed_filter must both be non-empty")
         return self
 
 
@@ -258,6 +290,14 @@ class WitnessSettings(BaseModel):
         whose ``eval_against`` value is missing/``unknown`` or not in the map
         are dropped from the evaluation. Default:
         ``{"control": "uninfected", "perturbed": "infected"}``.
+    eval_annotations : list[AnnotationSource]
+        Optional per-experiment annotation CSVs to join onto the cells before
+        scoring, supplying the ``eval_against`` column when the embeddings obs
+        does not already carry it. This is how a witness-labeled run (weak
+        labels, no annotation for *training*) is still scored against
+        *ground-truth* infection labels. Joined via the same
+        ``load_annotation_anndata`` (fov_name/id or fov_name/t/track_id) as the
+        annotation path. Empty = rely on an existing obs column. Default: ``[]``.
     """
 
     label_column: str = "witness_state"
@@ -269,6 +309,7 @@ class WitnessSettings(BaseModel):
     marker_filters: list[str] | None = None
     eval_against: str | None = "infection_state"
     eval_class_map: dict[str, str] | None = {"control": "uninfected", "perturbed": "infected"}
+    eval_annotations: list[AnnotationSource] = []
 
     @model_validator(mode="after")
     def _validate(self) -> "WitnessSettings":
