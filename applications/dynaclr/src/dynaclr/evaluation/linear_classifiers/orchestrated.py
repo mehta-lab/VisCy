@@ -216,11 +216,15 @@ def _evaluate_witness_against_annotations(
 
     Returns
     -------
-    dict[str, float] or None
-        ``val_*`` metrics (accuracy, weighted_f1, auroc, per-class f1) computed
-        against the mapped ground truth. None when evaluation is not possible
-        (no ``eval_against`` column, no class map, or no val cell has a usable
-        ground-truth label) — the caller then keeps the witness-label metrics.
+    tuple[dict[str, float], dict] or None
+        ``(metrics, val_outputs)`` where ``metrics`` are the ``val_*`` scores
+        (accuracy, weighted_f1, auroc, per-class f1) computed against the mapped
+        ground truth, and ``val_outputs`` holds the annotation-scored
+        ``y_val`` / ``y_val_proba`` / ``classes`` so the ROC + F1-over-time
+        plots match the metrics (not the self-referential witness label).
+        None when evaluation is not possible (no ``eval_against`` column, no
+        class map, or no val cell has a usable ground-truth label) — the caller
+        then keeps the witness-label metrics and plots.
     """
     from sklearn.metrics import f1_score, roc_auc_score
 
@@ -247,6 +251,11 @@ def _evaluate_witness_against_annotations(
     X_full = combined.X if isinstance(combined.X, np.ndarray) else combined.X.toarray()
     X_val = X_full[idx_val][keep]
     y_true = truth_raw[keep]
+    # hours-post-perturbation for the kept val subset (F1-over-time plot), aligned
+    # to y_true so lengths match.
+    val_hours = None
+    if "hours_post_perturbation" in combined.obs.columns:
+        val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val][keep]
     # Pipeline predicts witness class names; translate to annotation vocabulary.
     y_pred_witness = pipeline.predict(X_val)
     y_pred = np.array([class_map.get(p, p) for p in y_pred_witness], dtype=object)
@@ -260,17 +269,26 @@ def _evaluate_witness_against_annotations(
     for cls, f1 in zip(classes, per_class):
         metrics[f"val_{cls}_f1"] = float(f1)
 
-    # AUROC needs the positive-class probability mapped to the annotation positive.
+    # Probability of the annotation-positive class, ordered to match `classes`,
+    # so the ROC/F1 plots are drawn against the ground truth (not the witness
+    # label). Column order of y_val_proba follows sorted(classes).
     pos_witness = witness.perturbed_label
+    pos_truth = class_map.get(pos_witness)
     pipe_classes = list(pipeline.classifier.classes_)
+    val_outputs: dict[str, Any] = {"y_val": None, "y_val_proba": None, "classes": classes, "val_hours": val_hours}
     if hasattr(pipeline, "predict_proba") and pos_witness in pipe_classes:
         pos_idx = pipe_classes.index(pos_witness)
-        proba = pipeline.predict_proba(X_val)[:, pos_idx]
-        pos_truth = class_map.get(pos_witness)
+        proba_pos = pipeline.predict_proba(X_val)[:, pos_idx]
         y_bin = (y_true == pos_truth).astype(int)
         if len(np.unique(y_bin)) == 2:
-            metrics["val_auroc"] = float(roc_auc_score(y_bin, proba))
-    return metrics
+            metrics["val_auroc"] = float(roc_auc_score(y_bin, proba_pos))
+        # Two-column proba aligned to `classes` (neg, pos) for the plotters.
+        neg_col = 1.0 - proba_pos
+        proba_2col = np.column_stack([neg_col, proba_pos])
+        if classes[1] != pos_truth:  # sorted order put pos first — swap columns
+            proba_2col = proba_2col[:, ::-1]
+        val_outputs = {"y_val": y_true, "y_val_proba": proba_2col, "classes": classes, "val_hours": val_hours}
+    return metrics, val_outputs
 
 
 def run_linear_classifiers(
@@ -439,10 +457,16 @@ def run_linear_classifiers(
         # trained pipeline against ground-truth annotations on the val cells.
         eval_source = "annotation" if config.label_source == "annotations" else "witness_label"
         if config.label_source == "witness" and idx_val is not None:
-            anno_metrics = _evaluate_witness_against_annotations(pipeline, combined, idx_val, config.witness)
-            if anno_metrics is not None:
-                metrics = anno_metrics
+            anno = _evaluate_witness_against_annotations(pipeline, combined, idx_val, config.witness)
+            if anno is not None:
+                # Swap in the annotation-scored metrics AND plotting arrays so the
+                # ROC / F1-over-time pages match the CSV (not the circular ~1.0
+                # witness-label score). val_hours comes back aligned to the kept
+                # (has-ground-truth) subset.
+                metrics, anno_val_outputs = anno
                 eval_source = config.witness.eval_against
+                val_hours = anno_val_outputs.pop("val_hours", val_hours)
+                val_outputs = anno_val_outputs
 
         row = {
             "task": task,
