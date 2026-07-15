@@ -120,7 +120,13 @@ def build_witness_labels(
     bandwidth = settings.bandwidth if settings.bandwidth is not None else median_heuristic(X_ref, Y_ref)
     scores = witness_function(X_all, X_ref, Y_ref, bandwidth=bandwidth)
 
-    return _gate_scores(adata, scores, settings)
+    # Well-of-origin tag for the gating diagnostic plot (control ref / perturbed
+    # ref / other), before subsetting to the labeled cells.
+    ref = np.full(len(obs), "other", dtype=object)
+    ref[control_mask] = "control_well"
+    ref[perturbed_mask] = "perturbed_well"
+
+    return _gate_scores(adata, scores, ref, bandwidth, settings)
 
 
 def _subsample(X: np.ndarray, max_n: int | None, rng: np.random.Generator) -> np.ndarray:
@@ -131,12 +137,24 @@ def _subsample(X: np.ndarray, max_n: int | None, rng: np.random.Generator) -> np
     return X[idx]
 
 
-def _gate_scores(adata: ad.AnnData, scores: np.ndarray, settings: WitnessSettings) -> ad.AnnData:
+def _gate_scores(
+    adata: ad.AnnData,
+    scores: np.ndarray,
+    ref: np.ndarray,
+    bandwidth: float,
+    settings: WitnessSettings,
+) -> ad.AnnData:
     """Gate witness scores into pseudo-labels and return only the labeled subset.
 
     Cells with ``|score|`` at or below the ``dead_zone`` quantile of ``|score|``
     are dropped (ambiguous). Above the dead-zone, sign decides the class:
     positive → control, negative → perturbed.
+
+    The returned AnnData carries the gating diagnostic used by the summary
+    plot: ``obs["witness_score"]`` (the kept cells' scores),
+    ``obs["witness_ref"]`` (control_well / perturbed_well / other), and
+    ``uns["witness_gating"]`` (threshold, bandwidth, dropped count, and the
+    full pre-gating score/ref arrays for the histogram).
 
     Parameters
     ----------
@@ -144,13 +162,19 @@ def _gate_scores(adata: ad.AnnData, scores: np.ndarray, settings: WitnessSetting
         Marker-filtered embeddings (same order as ``scores``).
     scores : np.ndarray
         Witness scores, shape (adata.n_obs,).
+    ref : np.ndarray
+        Well-of-origin tag per cell (control_well / perturbed_well / other),
+        shape (adata.n_obs,).
+    bandwidth : float
+        Kernel bandwidth used (recorded for the diagnostic).
     settings : WitnessSettings
         Gating settings.
 
     Returns
     -------
     ad.AnnData
-        Labeled subset with ``obs[settings.label_column]`` set.
+        Labeled subset with ``obs[settings.label_column]`` set and the gating
+        diagnostic attached (see above).
     """
     if settings.dead_zone > 0.0:
         threshold = float(np.quantile(np.abs(scores), settings.dead_zone))
@@ -162,4 +186,19 @@ def _gate_scores(adata: ad.AnnData, scores: np.ndarray, settings: WitnessSetting
 
     out = adata[labeled_mask].copy()
     out.obs[settings.label_column] = pd.Categorical(labels[labeled_mask])
+    out.obs["witness_score"] = scores[labeled_mask]
+    out.obs["witness_ref"] = pd.Categorical(ref[labeled_mask])
+    out.uns["witness_gating"] = {
+        "threshold": threshold,
+        "bandwidth": float(bandwidth),
+        "dead_zone": settings.dead_zone,
+        "n_total": int(len(scores)),
+        "n_labeled": int(labeled_mask.sum()),
+        "n_dropped": int((~labeled_mask).sum()),
+        "control_label": settings.control_label,
+        "perturbed_label": settings.perturbed_label,
+        # Full pre-gating arrays so the plot can show the dropped dead-zone band.
+        "scores_all": scores.astype(np.float64),
+        "ref_all": ref.astype(str),
+    }
     return out

@@ -407,6 +407,7 @@ def run_linear_classifiers(
             {
                 "marker_filter": marker_filter,
                 "val_hours": val_hours,
+                "gating": combined.uns.get("witness_gating"),
                 **val_outputs,
             }
         )
@@ -557,6 +558,10 @@ def _save_task_plots(
     pdf_path = output_dir / f"{task}_summary.pdf"
 
     with PdfPages(pdf_path) as pdf:
+        # Witness mode: lead with the gating diagnostic (how labels were chosen).
+        for vo in task_val_outputs:
+            if vo.get("gating") is not None:
+                _plot_witness_gating(pdf, task, vo["marker_filter"], vo["gating"])
         _plot_metrics_bar(pdf, task, task_df)
         for vo in task_val_outputs:
             if vo["y_val"] is None or vo["y_val_proba"] is None:
@@ -568,6 +573,61 @@ def _save_task_plots(
                 )
 
     click.echo(f"Plots written to {pdf_path}")
+
+
+def _plot_witness_gating(pdf: PdfPages, task: str, marker_filter: str | None, gating: dict[str, Any]) -> None:
+    """Witness-score histogram showing how pseudo-labels were gated.
+
+    Shows the pre-gating score distribution split by well-of-origin
+    (control-well vs perturbed-well vs other), the dead-zone band that is
+    dropped, the sign cut at 0, and the resulting labeled/dropped counts —
+    the "how were the labels chosen" diagnostic for one (task, marker).
+
+    Parameters
+    ----------
+    pdf : PdfPages
+        Open multipage PDF to append the figure to.
+    task : str
+        Task name (the witness label column).
+    marker_filter : str or None
+        Marker for this classifier.
+    gating : dict
+        The ``uns["witness_gating"]`` payload from ``build_witness_labels``:
+        ``scores_all``, ``ref_all``, ``threshold``, ``dead_zone``, counts, and
+        class names.
+    """
+    scores = np.asarray(gating["scores_all"], dtype=float)
+    ref = np.asarray(gating["ref_all"], dtype=object)
+    t = float(gating["threshold"])
+    ctrl_label = gating["control_label"]
+    pert_label = gating["perturbed_label"]
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    lo, hi = np.percentile(scores, [0.5, 99.5]) if len(scores) else (-1, 1)
+    bins = np.linspace(lo, hi, 60)
+    palette = {"control_well": "#009E73", "perturbed_well": "#D55E00", "other": "#999999"}
+    for grp, color in palette.items():
+        vals = scores[ref == grp]
+        if len(vals):
+            ax.hist(vals, bins=bins, color=color, alpha=0.6, label=f"{grp} (n={len(vals)})")
+
+    if t > 0:
+        ax.axvspan(-t, t, color="gray", alpha=0.25, label=f"dead-zone |w|≤{t:.3g} → dropped")
+    ax.axvline(0.0, color="k", linewidth=0.8, linestyle="--")
+
+    marker_txt = marker_filter if marker_filter else "all markers"
+    ax.set_title(
+        f"Witness gating — {task} ({marker_txt})\n"
+        f"labeled {gating['n_labeled']}/{gating['n_total']} "
+        f"(dropped {gating['n_dropped']}); w>0 → {ctrl_label}, w<0 → {pert_label}",
+        fontsize=10,
+    )
+    ax.set_xlabel("witness score  w(z) = mean k(z, control) − mean k(z, perturbed)")
+    ax.set_ylabel("cell count")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_metrics_bar(pdf: PdfPages, task: str, task_df: pd.DataFrame) -> None:

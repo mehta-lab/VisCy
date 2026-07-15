@@ -91,6 +91,13 @@ def test_build_witness_labels_separates_control_and_perturbed():
     assert (col[is_ctrl_well] == "control").mean() > 0.95
     assert (col[is_pert_well] == "perturbed").mean() > 0.95
 
+    # Gating diagnostic is attached for the summary-PDF plot.
+    assert "witness_score" in labels.obs.columns
+    assert set(labels.obs["witness_ref"].unique()) <= {"control_well", "perturbed_well", "other"}
+    gating = labels.uns["witness_gating"]
+    assert gating["n_labeled"] == labels.n_obs
+    assert len(gating["scores_all"]) == gating["n_total"] == adata.n_obs
+
 
 def test_build_witness_labels_dead_zone_drops_ambiguous():
     """A positive dead-zone drops the lowest-|score| cells (the ambiguous C/3 cluster)."""
