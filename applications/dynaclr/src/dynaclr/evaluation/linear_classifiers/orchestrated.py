@@ -188,6 +188,26 @@ def _join_eval_annotations(combined: ad.AnnData, annotations: list, col: str) ->
     return combined
 
 
+def _resolve_witness_eval(witness: WitnessSettings, marker: str | None) -> WitnessSettings:
+    """Apply a per-marker eval override from ``witness.marker_eval``, if any.
+
+    The witness axis means infection for viral_sensor but remodeling for
+    organelle markers, so a marker may be scored against a different obs column.
+    Returns a copy of ``witness`` with ``eval_against`` / ``eval_class_map``
+    replaced by ``marker_eval[marker]`` when present; otherwise returns
+    ``witness`` unchanged.
+    """
+    if not witness.marker_eval or marker not in witness.marker_eval:
+        return witness
+    override = witness.marker_eval[marker]
+    return witness.model_copy(
+        update={
+            "eval_against": override.get("eval_against", witness.eval_against),
+            "eval_class_map": override.get("eval_class_map", witness.eval_class_map),
+        }
+    )
+
+
 def _evaluate_witness_against_annotations(
     pipeline: Any,
     combined: ad.AnnData,
@@ -457,14 +477,18 @@ def run_linear_classifiers(
         # trained pipeline against ground-truth annotations on the val cells.
         eval_source = "annotation" if config.label_source == "annotations" else "witness_label"
         if config.label_source == "witness" and idx_val is not None:
-            anno = _evaluate_witness_against_annotations(pipeline, combined, idx_val, config.witness)
+            # Resolve the per-marker eval target: the witness axis means infection
+            # for viral_sensor but remodeling for organelle markers, so a marker
+            # may score against a different obs column (e.g. organelle_state).
+            witness_eff = _resolve_witness_eval(config.witness, marker_filter)
+            anno = _evaluate_witness_against_annotations(pipeline, combined, idx_val, witness_eff)
             if anno is not None:
                 # Swap in the annotation-scored metrics AND plotting arrays so the
                 # ROC / F1-over-time pages match the CSV (not the circular ~1.0
                 # witness-label score). val_hours comes back aligned to the kept
                 # (has-ground-truth) subset.
                 metrics, anno_val_outputs = anno
-                eval_source = config.witness.eval_against
+                eval_source = witness_eff.eval_against
                 val_hours = anno_val_outputs.pop("val_hours", val_hours)
                 val_outputs = anno_val_outputs
 

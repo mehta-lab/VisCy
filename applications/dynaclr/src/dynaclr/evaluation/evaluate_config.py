@@ -298,6 +298,16 @@ class WitnessSettings(BaseModel):
         *ground-truth* infection labels. Joined via the same
         ``load_annotation_anndata`` (fov_name/id or fov_name/t/track_id) as the
         annotation path. Empty = rely on an existing obs column. Default: ``[]``.
+    marker_eval : dict[str, dict] or None
+        Per-marker override of the eval target. The witness classifier measures
+        how much a *marker's* embedding changes between the references, so its
+        biological meaning is marker-dependent: viral_sensor → infection,
+        organelle markers (SEC61B/TOMM20/G3BP1) → remodeling. This maps a marker
+        to ``{"eval_against": <obs col>, "eval_class_map": {...}}`` so, e.g.,
+        viral_sensor is scored against ``infection_state`` while SEC61B is scored
+        against ``organelle_state`` in the SAME run. A marker absent from the map
+        falls back to the top-level ``eval_against`` / ``eval_class_map``.
+        Default: None (single target for all markers).
     """
 
     label_column: str = "witness_state"
@@ -310,6 +320,7 @@ class WitnessSettings(BaseModel):
     eval_against: str | None = "infection_state"
     eval_class_map: dict[str, str] | None = {"control": "uninfected", "perturbed": "infected"}
     eval_annotations: list[AnnotationSource] = []
+    marker_eval: dict[str, dict] | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "WitnessSettings":
