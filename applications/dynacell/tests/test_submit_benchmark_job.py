@@ -446,3 +446,69 @@ def test_sbatch_cmd_dependency_and_parsable(monkeypatch, tmp_path):
     assert "--parsable" in cmd
     assert "--dependency=afterok:42" in cmd
     assert cmd[-1].endswith(".sbatch")
+
+
+# --- predict resume (--resume-predict) ---------------------------------------
+
+
+def _write_hcs_store(path: Path, channels: list[str], fov_t: dict[str, int]) -> None:
+    """Write a minimal HCS OME-Zarr with one array per FOV at the given T length."""
+    np = pytest.importorskip("numpy")
+    from iohub.ngff import open_ome_zarr
+
+    with open_ome_zarr(path, layout="hcs", mode="a", channel_names=channels) as plate:
+        for fov_name, t in fov_t.items():
+            row, col, pos = fov_name.split("/")
+            position = plate.create_position(row, col, pos)
+            position.create_zeros("0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8))
+
+
+def test_completed_prediction_fovs_detects_partial(tmp_path):
+    """Only FOVs whose written T matches the input T count as complete."""
+    pytest.importorskip("iohub")
+    inp = tmp_path / "input.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 10})
+    out = tmp_path / "pred.zarr"
+    # fov0000, fov0001 complete (T=10); fov0002 killed mid-run (T=5).
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 5})
+    completed, total = sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"])
+    assert total == 3
+    assert completed == {"0/0/fov0000", "0/0/fov0001"}
+
+
+def test_completed_prediction_fovs_no_store(tmp_path):
+    """A missing output store yields no completed FOVs but the correct input total."""
+    pytest.importorskip("iohub")
+    inp = tmp_path / "input.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10})
+    completed, total = sbj._completed_prediction_fovs(str(tmp_path / "absent.zarr"), str(inp), ["Structure_prediction"])
+    assert total == 2
+    assert completed == set()
+
+
+def test_completed_prediction_fovs_missing_channel_not_complete(tmp_path):
+    """A FOV at full T but lacking the prediction channel is not complete."""
+    pytest.importorskip("iohub")
+    inp = tmp_path / "input.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10})
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(out, ["Other_prediction"], {"0/0/fov0000": 10})
+    completed, total = sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"])
+    assert total == 1
+    assert completed == set()
+
+
+def test_resume_predict_rejects_fit_mode():
+    """--resume-predict is predict-only; a fit leaf must error before rendering."""
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    with pytest.raises(SystemExit, match="only valid for predict"):
+        sbj.submit([str(leaf), "--resume-predict", "--print-script"])
+
+
+def test_resume_predict_rejects_ckpt_combo(tmp_path):
+    """--resume-predict and --ckpt are mutually exclusive (would mix two models)."""
+    ckpt = tmp_path / "custom.ckpt"
+    ckpt.write_bytes(b"stub")
+    leaf = BENCHMARKS / "mito/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_denv.yml"
+    with pytest.raises(SystemExit, match="cannot be combined with --ckpt"):
+        sbj.submit([str(leaf), "--resume-predict", "--ckpt", str(ckpt), "--print-resolved-config"])

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
@@ -114,6 +115,72 @@ def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
             f"{leaf_path}: --overwrite requested but no HCSPredictionWriter callback "
             f"found under trainer.callbacks (got class_paths={class_paths!r})"
         )
+
+
+def _as_channel_list(target_channel: Any) -> list[str]:
+    """Normalize a ``target_channel`` config value to a list of channel names."""
+    if target_channel is None:
+        raise SystemExit("--resume-predict requires data.init_args.target_channel")
+    if isinstance(target_channel, str):
+        return [target_channel]
+    return list(target_channel)
+
+
+def _prediction_output_store(composed: dict, leaf_path: Path) -> str:
+    """Return the ``HCSPredictionWriter.output_store`` path from the composed config."""
+    callbacks = composed.get("trainer", {}).get("callbacks", [])
+    if isinstance(callbacks, list):
+        for cb in callbacks:
+            if isinstance(cb, dict) and str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX):
+                store = cb.get("init_args", {}).get("output_store")
+                if store:
+                    return str(store)
+    raise SystemExit(f"{leaf_path}: --resume-predict requires an HCSPredictionWriter callback with output_store")
+
+
+def _completed_prediction_fovs(
+    output_store: str, data_path: str, prediction_channels: list[str]
+) -> tuple[set[str], int]:
+    """Return ``(complete FOV names, total input FOV count)`` for predict resume.
+
+    A FOV counts as complete when the output store holds every prediction
+    channel for it *and* its written T dimension equals that FOV's input T.
+    Predict configs set ``z_window_size`` to the full stack, so each timepoint
+    is written in a single ``write_sample`` call and the array's T grows
+    monotonically as timepoints finish — a crash mid-FOV leaves ``T < input T``.
+    A T-match is therefore a sufficient completeness signal. Metadata-only:
+    reads array shapes, never voxel data.
+
+    Parameters
+    ----------
+    output_store : str
+        Path to the (possibly partial) prediction OME-Zarr store.
+    data_path : str
+        Path to the input HCS OME-Zarr the predict run reads.
+    prediction_channels : list of str
+        Channel names the writer emits (``<target>_prediction``).
+
+    Returns
+    -------
+    tuple of (set of str, int)
+        Plate-relative names (e.g. ``"0/0/fov0000"``) of complete FOVs, and
+        the total number of input FOVs.
+    """
+    input_t: dict[str, int] = {}
+    with open_ome_zarr(data_path, mode="r") as plate:
+        for name, pos in plate.positions():
+            input_t[name] = pos["0"].shape[0]
+    total = len(input_t)
+    completed: set[str] = set()
+    if not os.path.exists(output_store):
+        return completed, total
+    with open_ome_zarr(output_store, mode="r") as plate:
+        for name, pos in plate.positions():
+            if not all(ch in pos.channel_names for ch in prediction_channels):
+                continue
+            if input_t.get(name) is not None and pos["0"].shape[0] == input_t[name]:
+                completed.add(name)
+    return completed, total
 
 
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
@@ -272,6 +339,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "fit mode only.",
     )
     ap.add_argument(
+        "--resume-predict",
+        action="store_true",
+        help="predict mode: resume a partially-written prediction store after a "
+        "wall-time kill. Skips FOVs already fully written (via exclude_fov_names) "
+        "and sets the writer overwrite=True, so the resubmit continues instead of "
+        "crashing on the existing prediction channel (overwrite=False) or recomputing "
+        "every FOV (--overwrite alone). Completeness is per-FOV (written T == input T). "
+        "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
+    )
+    ap.add_argument(
         "--dependency",
         default=None,
         metavar="afterok:<job_id>",
@@ -301,6 +378,12 @@ def submit(argv: list[str] | None = None) -> int:
     # compute node for wandb/checkpoint/prediction outputs.
     os.umask(0o002)
     args = _parse_args(argv)
+
+    if args.resume_predict and args.ckpt is not None:
+        raise SystemExit(
+            "--resume-predict cannot be combined with --ckpt: a resumed predict must reuse "
+            "the original checkpoint, or the store would mix predictions from two models"
+        )
 
     composed = load_composed_config(args.leaf, resolver=_dynacell_ref_resolver)
     for token in args.override:
@@ -383,6 +466,37 @@ def submit(argv: list[str] | None = None) -> int:
         if not resolved_ckpt.is_file():
             raise SystemExit(f"--ckpt resolved to a missing checkpoint: {resolved_ckpt}")
         model_init["ckpt_path"] = str(resolved_ckpt)
+
+    # Predict-mode resume: continue a partially-written prediction store instead of
+    # crashing or recomputing. The writer raises FileExistsError on an existing
+    # prediction channel when overwrite=False, and --overwrite alone re-runs every
+    # FOV from scratch (fatal for long diffusion predicts that can't fit one wall
+    # window). Skip fully-written FOVs via exclude_fov_names and set overwrite=True
+    # so the kept partial FOVs (and any re-done ones) can be rewritten.
+    if args.resume_predict:
+        if mode != "predict":
+            raise SystemExit(f"--resume-predict is only valid for predict mode (got {mode!r})")
+        output_store = _prediction_output_store(composed, args.leaf)
+        if os.path.exists(output_store):
+            data_init = composed.setdefault("data", {}).setdefault("init_args", {})
+            data_path = data_init.get("data_path")
+            if not data_path:
+                raise SystemExit(f"{args.leaf}: --resume-predict requires data.init_args.data_path")
+            pred_channels = [ch + "_prediction" for ch in _as_channel_list(data_init.get("target_channel"))]
+            completed, total = _completed_prediction_fovs(output_store, data_path, pred_channels)
+            if total and len(completed) == total:
+                print(f"--resume-predict: all {total} FOVs already complete in {output_store}; nothing to submit")
+                return 0
+            if completed:
+                existing = data_init.get("exclude_fov_names") or []
+                data_init["exclude_fov_names"] = sorted(set(existing) | completed)
+            _apply_overwrite_alias(composed, args.leaf)
+            print(
+                f"--resume-predict: {len(completed)}/{total} FOVs complete; "
+                f"predicting {total - len(completed)} remaining (overwrite=True)"
+            )
+        else:
+            print(f"--resume-predict: no store at {output_store}; running full predict")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S_%f")
     run_root_path = Path(run_root)
