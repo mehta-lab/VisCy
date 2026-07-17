@@ -191,6 +191,7 @@ Examples: `linear-classifier-cell_death_state-phase`, `linear-classifier-infecti
 See `annotations_and_linear_classifiers.md` for the full specification of the annotations schema and naming conventions.
 
 For an **annotation-free** label source — weak labels derived from the MMD
-witness score using per-experiment control/perturbed wells — see the
-[witness-score classifiers DAG](../DAGs/witness_score_classifiers.md)
-(`label_source: witness`).
+witness + a per-condition GMM, written as an annotation file and trained through
+this same path — see the
+[witness-GMM classifiers DAG](../DAGs/witness_gmm_classifiers.md)
+(`dynaclr witness-gmm-labels` → `run-linear-classifiers`).

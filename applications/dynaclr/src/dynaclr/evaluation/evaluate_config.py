@@ -240,92 +240,93 @@ class WitnessLabelSource(BaseModel):
         return self
 
 
-class WitnessSettings(BaseModel):
-    """Settings for MMD-witness weak labeling.
+class WitnessGmmExperiment(WitnessLabelSource):
+    """One experiment for witness-GMM labeling: refs plus its embeddings zarr.
+
+    Extends :class:`WitnessLabelSource` (which carries ``experiment`` and the
+    control/perturbed reference specs) with the path to the embeddings zarr the
+    witness is scored on.
 
     Parameters
     ----------
-    label_column : str
-        Name of the pseudo-label obs column produced by gating (this is the
-        ``task`` the classifier trains on). Default: ``"witness_state"``.
-    control_label : str
-        Class name assigned to control-like cells (witness score above the
-        dead-zone). Default: ``"control"``.
-    perturbed_label : str
-        Class name assigned to perturbed-like cells (score below the
-        negative dead-zone). Default: ``"perturbed"``.
-    dead_zone : float
-        Fraction in [0, 1). Cells whose ``|witness score|`` falls at or below
-        the ``dead_zone`` quantile of all ``|witness score|`` are left unlabeled
-        ("unknown") and dropped from training — the analog of the annotation
-        path's ``!= "unknown"`` filter. 0.0 disables the dead-zone (plain sign
-        gating; every cell is labeled). Default: 0.1.
-    bandwidth : float or None
-        Gaussian RBF bandwidth for the witness kernel. None = median heuristic
-        on the pooled (control, perturbed) reference. Default: None.
-    max_reference_cells : int or None
-        Subsample each reference group (control, perturbed) to at most this
-        many cells before fitting the witness (bounds kernel cost). None =
-        use all. Default: 5000.
-    marker_filters : list[str] or None
-        If set, fit/score one witness classifier per listed marker. None
-        (default) runs one per marker discovered in the data (all unique
-        obs["marker"] values), matching the annotation path's behavior.
-    eval_against : str or None
-        obs column of *ground-truth* labels to score the trained classifier
-        against, instead of the (self-referential) witness label. The witness
-        label is a deterministic function of the embedding, so evaluating the
-        classifier against it yields a trivial ~1.0 — meaningless as a measure
-        of biology. When ``eval_against`` names a column present on the cells
-        (e.g. ``"infection_state"``), the reported val metrics are recomputed
-        on the val split against that column via ``eval_class_map``, and the
-        summary marks ``eval_source="infection_state"``. When None, or when the
-        column is absent, metrics fall back to the witness label and the
-        summary marks ``eval_source="witness_label"`` (flagged as circular).
-        Default: ``"infection_state"``.
-    eval_class_map : dict[str, str] or None
-        Maps witness class names to ``eval_against`` class names for scoring,
-        e.g. ``{"control": "uninfected", "perturbed": "infected"}``. Required
-        when ``eval_against`` is set and the class vocabularies differ. Cells
-        whose ``eval_against`` value is missing/``unknown`` or not in the map
-        are dropped from the evaluation. Default:
-        ``{"control": "uninfected", "perturbed": "infected"}``.
-    eval_annotations : list[AnnotationSource]
-        Optional per-experiment annotation CSVs to join onto the cells before
-        scoring, supplying the ``eval_against`` column when the embeddings obs
-        does not already carry it. This is how a witness-labeled run (weak
-        labels, no annotation for *training*) is still scored against
-        *ground-truth* infection labels. Joined via the same
-        ``load_annotation_anndata`` (fov_name/id or fov_name/t/track_id) as the
-        annotation path. Empty = rely on an existing obs column. Default: ``[]``.
-    marker_eval : dict[str, dict] or None
-        Per-marker override of the eval target. The witness classifier measures
-        how much a *marker's* embedding changes between the references, so its
-        biological meaning is marker-dependent: viral_sensor → infection,
-        organelle markers (SEC61B/TOMM20/G3BP1) → remodeling. This maps a marker
-        to ``{"eval_against": <obs col>, "eval_class_map": {...}}`` so, e.g.,
-        viral_sensor is scored against ``infection_state`` while SEC61B is scored
-        against ``organelle_state`` in the SAME run. A marker absent from the map
-        falls back to the top-level ``eval_against`` / ``eval_class_map``.
-        Default: None (single target for all markers).
+    embeddings_zarr : str
+        Path to the embeddings zarr (AnnData) whose ``.obs`` carries
+        ``experiment``, ``marker``, ``fov_name``, ``id`` (or ``t``/``track_id``),
+        and the ``condition_column``. The witness references and the scored cells
+        both come from here.
     """
 
-    label_column: str = "witness_state"
-    control_label: str = "control"
-    perturbed_label: str = "perturbed"
-    dead_zone: float = 0.1
+    embeddings_zarr: str
+
+
+class WitnessGmmLabelsConfig(BaseModel):
+    """Stage-A config: generate an annotation file from the MMD-witness + GMM.
+
+    For each marker, the witness scores every cell against per-experiment
+    control/perturbed references, a two-component GMM is fit on the perturbed
+    cells' scores per condition, and confident cells are written out as an
+    **annotation file** — a named biological-state column (``label_column``) with
+    the real class vocabulary (``class_map``), keyed by cell exactly like a hand
+    annotation. The Stage-B training path (``run-linear-classifiers`` with
+    ``label_source="annotations"``) then consumes it unchanged.
+
+    The label's *meaning* is named by the modality it is computed from: a witness
+    over ``viral_sensor`` produces ``infection_state`` (infected/uninfected); over
+    an organelle marker it produces ``organelle_remodeling_state``
+    (remodel/noremodel). One config = one microscope/marker (no pooling, no LOT).
+
+    Parameters
+    ----------
+    experiments : list[WitnessGmmExperiment]
+        Per-experiment embeddings zarr + control/perturbed reference specs.
+    label_column : str
+        Name of the biological-state column written to the annotation file (e.g.
+        ``"infection_state"``). This is the ``task`` Stage B trains on.
+    class_map : dict[str, str]
+        Maps the GMM gate outcome to the class vocabulary:
+        ``{"positive": <perturbed class>, "negative": <control class>}`` — e.g.
+        ``{"positive": "infected", "negative": "uninfected"}``.
+    output_path : str
+        Path to write the annotation file (``.csv`` or ``.parquet`` by extension).
+    marker_filters : list[str] or None
+        Markers to label (one annotation column per config; usually one). None =
+        all unique ``obs["marker"]``. Default: None.
+    condition_column : str
+        obs column whose distinct values define per-condition GMM fits and carry
+        the biological condition (e.g. ``"perturbation"``). Default: ``"perturbation"``.
+    gmm_pos_threshold : float
+        GMM remodeled-component posterior at/above which a perturbed cell is a
+        confident positive. Default: 0.8.
+    bandwidth : float or None
+        Gaussian RBF bandwidth for the witness kernel. None = median heuristic on
+        the pooled (control, perturbed) reference. Default: None.
+    max_reference_cells : int or None
+        Subsample each reference group to at most this many cells before fitting
+        the witness (bounds kernel cost). None = use all. Default: 5000.
+    random_seed : int
+        Seed for reference subsampling and the GMM. Default: 42.
+    """
+
+    experiments: list[WitnessGmmExperiment]
+    label_column: str
+    class_map: dict[str, str]
+    output_path: str
+    marker_filters: list[str] | None = None
+    condition_column: str = "perturbation"
+    gmm_pos_threshold: float = 0.8
     bandwidth: float | None = None
     max_reference_cells: int | None = 5000
-    marker_filters: list[str] | None = None
-    eval_against: str | None = "infection_state"
-    eval_class_map: dict[str, str] | None = {"control": "uninfected", "perturbed": "infected"}
-    eval_annotations: list[AnnotationSource] = []
-    marker_eval: dict[str, dict] | None = None
+    random_seed: int = 42
 
     @model_validator(mode="after")
-    def _validate(self) -> "WitnessSettings":
-        if not 0.0 <= self.dead_zone < 1.0:
-            raise ValueError(f"dead_zone must be in [0, 1), got {self.dead_zone}")
+    def _validate(self) -> "WitnessGmmLabelsConfig":
+        if not self.experiments:
+            raise ValueError("witness_gmm_labels requires non-empty experiments")
+        missing = {"positive", "negative"} - set(self.class_map)
+        if missing:
+            raise ValueError(f"class_map must define {sorted(missing)} (got keys {sorted(self.class_map)})")
+        if not 0.0 < self.gmm_pos_threshold <= 1.0:
+            raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
         return self
 
 
@@ -388,28 +389,18 @@ class LinearClassifiersStepConfig(BaseModel):
 
     Parameters
     ----------
-    label_source : {"annotations", "witness"}
-        Where per-cell labels come from. ``"annotations"`` (default) loads
-        labels from per-experiment annotation CSVs (``annotations`` + ``tasks``).
-        ``"witness"`` derives weak labels from the MMD witness score using
-        per-experiment control/perturbed wells (``witness_labels`` + ``witness``),
-        requiring no annotation CSVs. Everything downstream (classifier training,
-        publishing, append-predictions, plots) is identical for both.
+    label_source : {"annotations"}
+        Where per-cell labels come from. ``"annotations"`` loads labels from
+        per-experiment annotation files (``annotations`` + ``tasks``). Witness →
+        GMM pseudo-labels are produced upstream by the ``witness-gmm-labels``
+        (Stage A) command as an annotation file and consumed here unchanged —
+        there is no separate witness label source.
     annotations : list[AnnotationSource]
-        Per-experiment annotation CSVs. Each entry maps an experiment name
-        (matching obs["experiment"] in embeddings.zarr) to a CSV path.
-        Required (with ``tasks``) when ``label_source="annotations"``.
+        Per-experiment annotation files (CSV or parquet). Each entry maps an
+        experiment name (matching obs["experiment"] in embeddings.zarr) to a
+        path. May be hand annotations or a Stage-A witness-GMM annotation file.
     tasks : list[TaskSpec]
         Tasks to evaluate. Each task can optionally filter by marker.
-        Required (with ``annotations``) when ``label_source="annotations"``.
-    witness_labels : list[WitnessLabelSource]
-        Per-experiment control/perturbed well specs. Required when
-        ``label_source="witness"``. One classifier is trained per marker
-        (all markers, or the markers named in the witness settings) on the
-        gated witness pseudo-labels pooled across these experiments.
-    witness : WitnessSettings
-        Witness kernel + gating settings. Only used when
-        ``label_source="witness"``.
     publish_dir : str or None
         Central LC registry root for this model (e.g.,
         ``/hpc/projects/.../linear_classifiers/DynaCLR-2D-MIP-BagOfChannels/``).
@@ -443,11 +434,9 @@ class LinearClassifiersStepConfig(BaseModel):
         cell-level stratified ``train_test_split``. Default: None.
     """
 
-    label_source: Literal["annotations", "witness"] = "annotations"
+    label_source: Literal["annotations"] = "annotations"
     annotations: list[AnnotationSource] = []
     tasks: list[TaskSpec] = []
-    witness_labels: list[WitnessLabelSource] = []
-    witness: WitnessSettings = WitnessSettings()
     publish_dir: str | None = None
     use_scaling: bool = True
     use_pca: bool = False
@@ -461,12 +450,8 @@ class LinearClassifiersStepConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_label_source(self) -> "LinearClassifiersStepConfig":
-        if self.label_source == "annotations":
-            if not self.annotations or not self.tasks:
-                raise ValueError("label_source='annotations' requires non-empty annotations and tasks")
-        else:  # witness
-            if not self.witness_labels:
-                raise ValueError("label_source='witness' requires non-empty witness_labels")
+        if not self.annotations or not self.tasks:
+            raise ValueError("label_source='annotations' requires non-empty annotations and tasks")
         return self
 
 

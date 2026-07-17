@@ -1,5 +1,9 @@
 # Evaluation DAG
 
+This document assumes a preprocessed dataset and a cell index parquet already
+exist. For the upstream stages (new dataset → find-Z + normalize → build parquet),
+see [end_to_end.md](end_to_end.md).
+
 This document describes the **per-run** evaluation pipeline (one model on
 one dataset). For the cross-model, cross-dataset matrix layout — including
 the central linear-classifier registry that lets Wave-2 datasets fetch LC
@@ -128,8 +132,8 @@ configs/viewer.yaml               # nd-embedding viewer config (also valid input
   │        -c linear_classifiers.yaml    # reads per-experiment zarrs directory + annotation CSVs
   │        # joins annotations on (fov_name, t, track_id); trains one LogisticRegression
   │        # per (task, marker); marker_filters omitted → auto-discovers all markers
-  │        # label_source: witness → weak-label from the MMD witness score instead
-  │        #   of annotation CSVs (control/perturbed wells). See witness_score_classifiers.md
+  │        # witness→GMM weak labels: produce an annotation file upstream with
+  │        #   `dynaclr witness-gmm-labels`, then train it here. See witness_gmm_classifiers.md
   │        # writes trained pipelines to linear_classifiers/pipelines/ (in-run staging)
   │        # if publish_dir is set: atomically promotes the bundle to the central
   │        # LC registry as {publish_dir}/vN/ and updates the `latest` symlink.

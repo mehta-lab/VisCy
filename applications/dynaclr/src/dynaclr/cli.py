@@ -137,6 +137,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="witness-gmm-labels",
+        import_path="dynaclr.evaluation.linear_classifiers.witness_gmm_labels.main",
+        short_help="Generate an annotation file from the MMD witness + GMM (Stage A)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="run-linear-classifiers",
         import_path="dynaclr.evaluation.linear_classifiers.orchestrated.main",
         short_help="Run linear classifiers on orchestrator embeddings (batch, CSV metrics)",

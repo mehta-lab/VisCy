@@ -39,7 +39,7 @@ matplotlib.use("Agg")
 if TYPE_CHECKING:
     import anndata as ad
 
-    from dynaclr.evaluation.evaluate_config import LinearClassifiersStepConfig, WitnessSettings
+    from dynaclr.evaluation.evaluate_config import LinearClassifiersStepConfig
 
 
 def _annotation_run_specs(
@@ -62,24 +62,6 @@ def _annotation_run_specs(
     return specs
 
 
-def _witness_run_specs(
-    config: LinearClassifiersStepConfig,
-    adata: ad.AnnData,
-) -> list[tuple[str, str | None]]:
-    """Expand (task, marker_filter) runs for the witness label source.
-
-    The single synthetic task is ``witness.label_column``; markers come from
-    ``witness.marker_filters`` (or every unique ``obs["marker"]`` when None).
-    """
-    task = config.witness.label_column
-    runs = (
-        config.witness.marker_filters
-        if config.witness.marker_filters is not None
-        else sorted(adata.obs["marker"].unique().tolist())
-    )
-    return [(task, m) for m in runs]
-
-
 def _build_labeled_adata(
     config: LinearClassifiersStepConfig,
     adata: ad.AnnData,
@@ -88,9 +70,10 @@ def _build_labeled_adata(
 ) -> ad.AnnData | None:
     """Return the marker-filtered, labeled AnnData for one run, or None if empty.
 
-    Annotation mode joins per-experiment CSVs and keeps rows with a valid
-    (non-``unknown``) label. Witness mode derives weak labels from the MMD
-    witness score using per-experiment control/perturbed wells.
+    Joins per-experiment annotation files (CSV or parquet) and keeps rows with a
+    valid (non-``unknown``) label. Witness→GMM pseudo-labels are just annotation
+    files produced upstream by the ``witness-gmm-labels`` command, so they flow
+    through this same path.
     """
     import anndata as ad
 
@@ -102,18 +85,7 @@ def _build_labeled_adata(
     if adata_task.n_obs == 0:
         return None
 
-    if config.label_source == "witness":
-        from dynaclr.evaluation.linear_classifiers.witness_labels import build_witness_labels
-
-        combined = build_witness_labels(
-            adata_task,
-            config.witness_labels,
-            config.witness,
-            random_seed=config.random_seed,
-        )
-        return combined if combined.n_obs > 0 else None
-
-    # Annotation mode: join CSVs per experiment and collect valid-labeled subsets.
+    # Join annotation files per experiment and collect valid-labeled subsets.
     annotated_parts: list[ad.AnnData] = []
     for ann_src in config.annotations:
         exp_mask = adata_task.obs["experiment"] == ann_src.experiment
@@ -145,170 +117,6 @@ def _build_labeled_adata(
     if not annotated_parts:
         return None
     return annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
-
-
-def _join_eval_annotations(combined: ad.AnnData, annotations: list, col: str) -> ad.AnnData:
-    """Join per-experiment annotation CSVs onto ``combined`` to supply ``obs[col]``.
-
-    For each ``AnnotationSource`` whose experiment is present, loads the CSV and
-    maps ``col`` onto the matching cells (via ``load_annotation_anndata``). Cells
-    with no annotation keep NaN. Used to score a witness-labeled run against
-    ground-truth infection labels the embeddings obs does not already carry.
-
-    Parameters
-    ----------
-    combined : ad.AnnData
-        The labeled AnnData (obs must carry ``experiment``).
-    annotations : list of AnnotationSource
-        Per-experiment CSV specs.
-    col : str
-        Task/column name to pull from each CSV into ``obs[col]``.
-
-    Returns
-    -------
-    ad.AnnData
-        ``combined`` with ``obs[col]`` populated where annotations matched.
-    """
-    values = pd.Series(np.full(combined.n_obs, np.nan, dtype=object), index=combined.obs.index)
-    for src in annotations:
-        exp_mask = (combined.obs["experiment"] == src.experiment).to_numpy(dtype=bool)
-        if not exp_mask.any():
-            continue
-        ann_path = Path(src.path)
-        if not ann_path.exists():
-            raise FileNotFoundError(f"eval annotation CSV not found: {src.path}")
-        sub = combined[exp_mask].copy()
-        try:
-            sub = load_annotation_anndata(sub, str(ann_path), col)
-        except KeyError:
-            click.echo(f"  eval_against {col!r} not in {ann_path.name} for {src.experiment!r}, skipping join.")
-            continue
-        values.loc[sub.obs.index] = sub.obs[col].to_numpy(dtype=object)
-    combined.obs[col] = values
-    return combined
-
-
-def _resolve_witness_eval(witness: WitnessSettings, marker: str | None) -> WitnessSettings:
-    """Apply a per-marker eval override from ``witness.marker_eval``, if any.
-
-    The witness axis means infection for viral_sensor but remodeling for
-    organelle markers, so a marker may be scored against a different obs column.
-    Returns a copy of ``witness`` with ``eval_against`` / ``eval_class_map``
-    replaced by ``marker_eval[marker]`` when present; otherwise returns
-    ``witness`` unchanged.
-    """
-    if not witness.marker_eval or marker not in witness.marker_eval:
-        return witness
-    override = witness.marker_eval[marker]
-    return witness.model_copy(
-        update={
-            "eval_against": override.get("eval_against", witness.eval_against),
-            "eval_class_map": override.get("eval_class_map", witness.eval_class_map),
-        }
-    )
-
-
-def _evaluate_witness_against_annotations(
-    pipeline: Any,
-    combined: ad.AnnData,
-    idx_val: np.ndarray,
-    witness: WitnessSettings,
-) -> dict[str, float] | None:
-    """Score a witness-trained pipeline against ground-truth annotations on the val cells.
-
-    The witness label is a deterministic function of the embedding, so val
-    metrics computed against it are self-referential (~1.0). This recomputes
-    ``val_*`` metrics on the val split against ``witness.eval_against`` (e.g.
-    ``infection_state``), mapping the classifier's witness classes to the
-    annotation vocabulary via ``witness.eval_class_map``.
-
-    Parameters
-    ----------
-    pipeline : LinearClassifierPipeline
-        The trained pipeline (predicts witness class names).
-    combined : ad.AnnData
-        The labeled AnnData the classifier was trained on (obs may carry the
-        ground-truth column).
-    idx_val : np.ndarray
-        Row indices of the validation split (into ``combined``).
-    witness : WitnessSettings
-        Provides ``eval_against`` and ``eval_class_map``.
-
-    Returns
-    -------
-    tuple[dict[str, float], dict] or None
-        ``(metrics, val_outputs)`` where ``metrics`` are the ``val_*`` scores
-        (accuracy, weighted_f1, auroc, per-class f1) computed against the mapped
-        ground truth, and ``val_outputs`` holds the annotation-scored
-        ``y_val`` / ``y_val_proba`` / ``classes`` so the ROC + F1-over-time
-        plots match the metrics (not the self-referential witness label).
-        None when evaluation is not possible (no ``eval_against`` column, no
-        class map, or no val cell has a usable ground-truth label) — the caller
-        then keeps the witness-label metrics and plots.
-    """
-    from sklearn.metrics import f1_score, roc_auc_score
-
-    col = witness.eval_against
-    class_map = witness.eval_class_map
-    if col is None or class_map is None:
-        return None
-
-    # If the ground-truth column is not already in obs, join it from the
-    # configured annotation CSVs (per experiment) — this is how a witness run
-    # trained on weak labels is scored against real infection annotations.
-    if col not in combined.obs.columns and witness.eval_annotations:
-        combined = _join_eval_annotations(combined, witness.eval_annotations, col)
-    if col not in combined.obs.columns:
-        return None
-
-    truth_raw = combined.obs[col].to_numpy(dtype=object)[idx_val]
-    # Map witness classes → annotation vocabulary; keep only mapped truth values.
-    expected = {class_map.get(witness.control_label), class_map.get(witness.perturbed_label)}
-    keep = np.array([t in expected for t in truth_raw], dtype=bool)
-    if keep.sum() == 0:
-        return None
-
-    X_full = combined.X if isinstance(combined.X, np.ndarray) else combined.X.toarray()
-    X_val = X_full[idx_val][keep]
-    y_true = truth_raw[keep]
-    # hours-post-perturbation for the kept val subset (F1-over-time plot), aligned
-    # to y_true so lengths match.
-    val_hours = None
-    if "hours_post_perturbation" in combined.obs.columns:
-        val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val][keep]
-    # Pipeline predicts witness class names; translate to annotation vocabulary.
-    y_pred_witness = pipeline.predict(X_val)
-    y_pred = np.array([class_map.get(p, p) for p in y_pred_witness], dtype=object)
-
-    classes = sorted(expected)
-    metrics: dict[str, float] = {
-        "val_accuracy": float((y_pred == y_true).mean()),
-        "val_weighted_f1": float(f1_score(y_true, y_pred, average="weighted", labels=classes, zero_division=0)),
-    }
-    per_class = f1_score(y_true, y_pred, average=None, labels=classes, zero_division=0)
-    for cls, f1 in zip(classes, per_class):
-        metrics[f"val_{cls}_f1"] = float(f1)
-
-    # Probability of the annotation-positive class, ordered to match `classes`,
-    # so the ROC/F1 plots are drawn against the ground truth (not the witness
-    # label). Column order of y_val_proba follows sorted(classes).
-    pos_witness = witness.perturbed_label
-    pos_truth = class_map.get(pos_witness)
-    pipe_classes = list(pipeline.classifier.classes_)
-    val_outputs: dict[str, Any] = {"y_val": None, "y_val_proba": None, "classes": classes, "val_hours": val_hours}
-    if hasattr(pipeline, "predict_proba") and pos_witness in pipe_classes:
-        pos_idx = pipe_classes.index(pos_witness)
-        proba_pos = pipeline.predict_proba(X_val)[:, pos_idx]
-        y_bin = (y_true == pos_truth).astype(int)
-        if len(np.unique(y_bin)) == 2:
-            metrics["val_auroc"] = float(roc_auc_score(y_bin, proba_pos))
-        # Two-column proba aligned to `classes` (neg, pos) for the plotters.
-        neg_col = 1.0 - proba_pos
-        proba_2col = np.column_stack([neg_col, proba_pos])
-        if classes[1] != pos_truth:  # sorted order put pos first — swap columns
-            proba_2col = proba_2col[:, ::-1]
-        val_outputs = {"y_val": y_true, "y_val_proba": proba_2col, "classes": classes, "val_hours": val_hours}
-    return metrics, val_outputs
 
 
 def run_linear_classifiers(
@@ -369,12 +177,8 @@ def run_linear_classifiers(
     trained_pipelines: list[tuple[str, str, Any]] = []
 
     # Build the list of (task, marker_filter) runs and, per run, resolve the
-    # labeled AnnData. Annotation and witness modes differ only here — the
-    # training/publish/plot path below is shared.
-    if config.label_source == "witness":
-        run_specs = _witness_run_specs(config, adata)
-    else:
-        run_specs = _annotation_run_specs(config, adata)
+    # labeled AnnData from the annotation files.
+    run_specs = _annotation_run_specs(config, adata)
 
     for task in {t for t, _ in run_specs}:
         val_outputs_by_task[task] = []
@@ -443,9 +247,8 @@ def run_linear_classifiers(
 
         # Replay the same split to recover the val indices. Must mirror
         # train_linear_classifier exactly — same seed, same splitter
-        # (Group-aware when groups is set, cell-level otherwise). Used both for
-        # val_hours (F1-over-time plot) and, in witness mode, for scoring the
-        # classifier against ground-truth annotations on the val cells.
+        # (Group-aware when groups is set, cell-level otherwise). Used for
+        # val_hours (the F1-over-time plot).
         y_full = combined.obs[task].to_numpy(dtype=object)
         idx_val: np.ndarray | None = None
         val_hours: np.ndarray | None = None
@@ -470,33 +273,13 @@ def run_linear_classifiers(
                 if "hours_post_perturbation" in combined.obs.columns:
                     val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
             except ValueError:
-                click.echo("  Could not replay split for val evaluation; falling back to witness metrics.")
-
-        # Witness mode: the witness label is a deterministic function of the
-        # embedding, so val metrics against it are trivially ~1.0. Re-score the
-        # trained pipeline against ground-truth annotations on the val cells.
-        eval_source = "annotation" if config.label_source == "annotations" else "witness_label"
-        if config.label_source == "witness" and idx_val is not None:
-            # Resolve the per-marker eval target: the witness axis means infection
-            # for viral_sensor but remodeling for organelle markers, so a marker
-            # may score against a different obs column (e.g. organelle_state).
-            witness_eff = _resolve_witness_eval(config.witness, marker_filter)
-            anno = _evaluate_witness_against_annotations(pipeline, combined, idx_val, witness_eff)
-            if anno is not None:
-                # Swap in the annotation-scored metrics AND plotting arrays so the
-                # ROC / F1-over-time pages match the CSV (not the circular ~1.0
-                # witness-label score). val_hours comes back aligned to the kept
-                # (has-ground-truth) subset.
-                metrics, anno_val_outputs = anno
-                eval_source = witness_eff.eval_against
-                val_hours = anno_val_outputs.pop("val_hours", val_hours)
-                val_outputs = anno_val_outputs
+                click.echo("  Could not replay split for val_hours; F1-over-time plot skipped.")
 
         row = {
             "task": task,
             "marker_filter": marker_filter,
             "n_samples": combined.n_obs,
-            "eval_source": eval_source,
+            "eval_source": "annotation",
             **metrics,
         }
         all_metrics.append(row)
@@ -504,7 +287,6 @@ def run_linear_classifiers(
             {
                 "marker_filter": marker_filter,
                 "val_hours": val_hours,
-                "gating": combined.uns.get("witness_gating"),
                 **val_outputs,
             }
         )
@@ -655,10 +437,6 @@ def _save_task_plots(
     pdf_path = output_dir / f"{task}_summary.pdf"
 
     with PdfPages(pdf_path) as pdf:
-        # Witness mode: lead with the gating diagnostic (how labels were chosen).
-        for vo in task_val_outputs:
-            if vo.get("gating") is not None:
-                _plot_witness_gating(pdf, task, vo["marker_filter"], vo["gating"])
         _plot_metrics_bar(pdf, task, task_df)
         for vo in task_val_outputs:
             if vo["y_val"] is None or vo["y_val_proba"] is None:
@@ -670,61 +448,6 @@ def _save_task_plots(
                 )
 
     click.echo(f"Plots written to {pdf_path}")
-
-
-def _plot_witness_gating(pdf: PdfPages, task: str, marker_filter: str | None, gating: dict[str, Any]) -> None:
-    """Witness-score histogram showing how pseudo-labels were gated.
-
-    Shows the pre-gating score distribution split by well-of-origin
-    (control-well vs perturbed-well vs other), the dead-zone band that is
-    dropped, the sign cut at 0, and the resulting labeled/dropped counts —
-    the "how were the labels chosen" diagnostic for one (task, marker).
-
-    Parameters
-    ----------
-    pdf : PdfPages
-        Open multipage PDF to append the figure to.
-    task : str
-        Task name (the witness label column).
-    marker_filter : str or None
-        Marker for this classifier.
-    gating : dict
-        The ``uns["witness_gating"]`` payload from ``build_witness_labels``:
-        ``scores_all``, ``ref_all``, ``threshold``, ``dead_zone``, counts, and
-        class names.
-    """
-    scores = np.asarray(gating["scores_all"], dtype=float)
-    ref = np.asarray(gating["ref_all"], dtype=object)
-    t = float(gating["threshold"])
-    ctrl_label = gating["control_label"]
-    pert_label = gating["perturbed_label"]
-
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    lo, hi = np.percentile(scores, [0.5, 99.5]) if len(scores) else (-1, 1)
-    bins = np.linspace(lo, hi, 60)
-    palette = {"control_well": "#009E73", "perturbed_well": "#D55E00", "other": "#999999"}
-    for grp, color in palette.items():
-        vals = scores[ref == grp]
-        if len(vals):
-            ax.hist(vals, bins=bins, color=color, alpha=0.6, label=f"{grp} (n={len(vals)})")
-
-    if t > 0:
-        ax.axvspan(-t, t, color="gray", alpha=0.25, label=f"dead-zone |w|≤{t:.3g} → dropped")
-    ax.axvline(0.0, color="k", linewidth=0.8, linestyle="--")
-
-    marker_txt = marker_filter if marker_filter else "all markers"
-    ax.set_title(
-        f"Witness gating — {task} ({marker_txt})\n"
-        f"labeled {gating['n_labeled']}/{gating['n_total']} "
-        f"(dropped {gating['n_dropped']}); w>0 → {ctrl_label}, w<0 → {pert_label}",
-        fontsize=10,
-    )
-    ax.set_xlabel("witness score  w(z) = mean k(z, control) − mean k(z, perturbed)")
-    ax.set_ylabel("cell count")
-    ax.legend(fontsize=8)
-    fig.tight_layout()
-    pdf.savefig(fig, bbox_inches="tight")
-    plt.close(fig)
 
 
 def _plot_metrics_bar(pdf: PdfPages, task: str, task_df: pd.DataFrame) -> None:
