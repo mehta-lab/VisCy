@@ -38,7 +38,6 @@ from viscy_data._utils import (
 from viscy_data.channel_utils import parse_channel_name
 from viscy_data.hcs import HCSDataModule
 from viscy_data.select import _filter_fovs, _filter_wells
-from viscy_transforms import BatchedChannelWiseZReductiond, BatchedZoomd
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -587,6 +586,8 @@ class TripletDataModule(HCSDataModule):
         extra_transforms: list[MapTransform] = []
 
         if reference_pixel_size is not None:
+            from viscy_transforms import BatchedZoomd
+
             inference_pixel_size = _read_pixel_size(data_path)
             scale = reference_pixel_size / inference_pixel_size
             # Round the extraction size up to an even number: the dataset extracts a
@@ -614,6 +615,8 @@ class TripletDataModule(HCSDataModule):
             )
 
         if z_reduction is not None:
+            from viscy_transforms import BatchedChannelWiseZReductiond
+
             labelfree_keys = [ch for ch in self.source_channel if parse_channel_name(ch)["channel_type"] == "labelfree"]
             mip_keys = [ch for ch in self.source_channel if ch not in labelfree_keys]
             _logger.info(
