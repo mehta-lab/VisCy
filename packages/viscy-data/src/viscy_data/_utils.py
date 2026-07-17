@@ -171,6 +171,24 @@ def _read_norm_meta(fov: Position) -> NormMeta | None:
 read_norm_meta = _read_norm_meta
 
 
+def _resolve_timepoint_norm_meta(norm_meta: NormMeta | None, t: int) -> NormMeta | None:
+    """Select the per-timepoint entry inside any ``timepoint_statistics`` level.
+
+    ``NormalizeSampled(level='timepoint_statistics')`` expects a flat
+    ``{stat_name: Tensor}`` dict. The zattrs layout stores a nested
+    ``{tp_idx: {stat_name: Tensor}}``, so the dataset must pick the
+    current-sample's timepoint before the transform runs.
+    """
+    if norm_meta is None:
+        return None
+    resolved = {}
+    for ch, levels in norm_meta.items():
+        resolved[ch] = {
+            name: values[str(t)] if name == "timepoint_statistics" else values for name, values in levels.items()
+        }
+    return resolved
+
+
 def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
     """Stack per-sample norm_meta dicts into batched tensors.
 
@@ -178,6 +196,10 @@ def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
     ``{channel: {level: {stat: scalar_tensor, ...}, ...}, ...}``.
     Returns the same structure but with ``(B,)`` tensors so that
     ``_match_image`` broadcasts them against ``(B, 1, Z, Y, X)`` patches.
+
+    ``timepoint_statistics`` is pre-resolved to the sample's timepoint by
+    :func:`_resolve_timepoint_norm_meta` before collation, so every level here
+    is already a flat ``{stat: scalar_tensor}`` dict.
     """
     ref = norm_metas[0]
     result: NormMeta = {}
@@ -186,20 +208,6 @@ def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
         for level, level_stats in ch_stats.items():
             if level_stats is None:
                 result[ch][level] = None
-                continue
-            if level == "timepoint_statistics":
-                # Nested {timepoint: {stat: tensor}}; stack within each timepoint.
-                for m in norm_metas:
-                    if m[ch][level].keys() != level_stats.keys():
-                        raise KeyError(
-                            f"norm_meta timepoint keys differ across the batch for channel '{ch}': "
-                            f"{sorted(level_stats)} vs {sorted(m[ch][level])}. "
-                            "All FOVs in a batch must expose the same set of timepoint_statistics."
-                        )
-                result[ch][level] = {
-                    tp: {stat: torch.stack([m[ch][level][tp][stat] for m in norm_metas]) for stat in tp_stats}
-                    for tp, tp_stats in level_stats.items()
-                }
                 continue
             result[ch][level] = {stat: torch.stack([m[ch][level][stat] for m in norm_metas]) for stat in level_stats}
     return result

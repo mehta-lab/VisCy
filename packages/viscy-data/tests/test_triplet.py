@@ -288,6 +288,98 @@ def test_z_reduction_runs_on_normalized_stack(preprocessed_hcs_dataset, tracks_h
             assert torch.allclose(reduced[:, ci], expected, atol=1e-5), f"channel {ch} not reduced on normalized stack"
 
 
+def test_timepoint_statistics_resolved_in_triplet_dataset(
+    tmp_path_factory, preprocessed_hcs_dataset, tracks_hcs_dataset
+):
+    """Triplet dataset must pre-resolve timepoint_statistics to each sample's t.
+
+    ``NormalizeSampled(level='timepoint_statistics')`` expects a flat
+    ``{stat: Tensor}`` dict, but zattrs store ``{tp_idx: {stat: Tensor}}``. The
+    dataset must select the sample's timepoint before the transform runs; without
+    that resolution the returned norm_meta stays keyed by timepoint index and
+    ``NormalizeSampled`` raises ``KeyError('mean')``. The tracks fixture places
+    anchors at t=0 and t=1, given distinct means so each sample must resolve to
+    its own timepoint.
+    """
+    import shutil
+
+    tp_stats = {"0": {"mean": 0.0, "std": 1.0}, "1": {"mean": 0.9, "std": 1.0}}
+    data_path = tmp_path_factory.mktemp("timepoint_norm") / "data.zarr"
+    shutil.copytree(preprocessed_hcs_dataset, data_path)
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    norm_meta = {ch: {"timepoint_statistics": tp_stats} for ch in channel_names}
+    with open_ome_zarr(data_path, mode="r+") as dataset:
+        dataset.zattrs["normalization"] = norm_meta
+        for _, fov in dataset.positions():
+            fov.zattrs["normalization"] = norm_meta
+
+    dm = TripletDataModule(
+        data_path=data_path,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_range=(4, 9),
+        initial_yx_patch_size=(32, 32),
+        final_yx_patch_size=(32, 32),
+        num_workers=0,
+        batch_size=4,
+        return_negative=False,
+    )
+    dm.setup(stage="fit")
+    dataset = dm.train_dataset
+    checked = 0
+    for i in range(len(dataset)):
+        sample = dataset.__getitems__([i])
+        t = int(dataset.valid_anchors.iloc[i]["t"])
+        for ch in channel_names:
+            level = sample["anchor_norm_meta"][0][ch]["timepoint_statistics"]
+            # Resolved: keyed by stat name, not by timepoint index.
+            assert "mean" in level, "timepoint_statistics not resolved to a flat {stat: value} dict"
+            assert abs(float(level["mean"]) - tp_stats[str(t)]["mean"]) < 1e-5, (
+                f"sample {i} (t={t}) resolved to the wrong timepoint mean"
+            )
+        checked += 1
+    assert checked > 0
+
+
+@mark.parametrize("reference_pixel_size", [1.08, 1.3186231])
+def test_reference_pixel_size_rescale_output_shape(preprocessed_hcs_dataset, tracks_hcs_dataset, reference_pixel_size):
+    """reference_pixel_size rescale must land exactly on final_yx_patch_size.
+
+    The fixture pixel size is 1.0 µm/px, so a reference of 1.08 makes the naive
+    ``initial = round(final * scale)`` land on an odd number (35). The dataset
+    extracts a centered window of width ``2 * (initial // 2)`` = 34, one pixel
+    short, so a scale-factor resize would undershoot to 31 rather than 32 and the
+    datamodule's spatial-shape check would raise. Rounding the extraction size to
+    an even number keeps the resize exact. 1.3186 mirrors the SEC61B_DENV run
+    (0.1494 / 0.1133).
+    """
+    z_range = (4, 9)
+    final_yx = (32, 32)
+    batch_size = 4
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+    dm = TripletDataModule(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_range=z_range,
+        final_yx_patch_size=final_yx,
+        reference_pixel_size=reference_pixel_size,
+        z_reduction="mip",
+        num_workers=0,
+        batch_size=batch_size,
+        return_negative=True,
+    )
+    dm.setup(stage="fit")
+    # Extraction size is rounded to an even number so the centered window is exact.
+    assert all(s % 2 == 0 for s in dm.initial_yx_patch_size)
+    for batch in dm.train_dataloader():
+        dm.on_after_batch_transfer(batch, 0)
+        # z_reduction collapses Z to 1; the rescale must hit final_yx exactly.
+        assert batch["anchor"].shape == (batch_size, len(channel_names), 1, *final_yx)
+
+
 def test_filter_anchors_time_interval_any(preprocessed_hcs_dataset, tracks_with_gaps_dataset):
     """Test that time_interval='any' returns all tracks unchanged."""
     with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
