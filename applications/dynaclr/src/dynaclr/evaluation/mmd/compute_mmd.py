@@ -19,7 +19,7 @@ from dynaclr.evaluation.mmd.config import (
     _resolve_bin_edges,
 )
 from viscy_utils.compose import load_composed_config
-from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test
+from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample
 
 
 def _extract_embeddings(adata: ad.AnnData, embedding_key: str | None) -> np.ndarray:
@@ -44,13 +44,6 @@ def _extract_embeddings(adata: ad.AnnData, embedding_key: str | None) -> np.ndar
     if hasattr(X, "toarray"):
         return X.toarray()
     return np.asarray(X)
-
-
-def _subsample(X: np.ndarray, max_n: int | None, rng: np.random.Generator) -> np.ndarray:
-    if max_n is None or len(X) <= max_n:
-        return X
-    idx = rng.choice(len(X), max_n, replace=False)
-    return X[idx]
 
 
 def _run_one_comparison(
@@ -90,12 +83,12 @@ def _run_one_comparison(
     All metric floats are NaN if fewer than min_cells cells in either group.
     """
     rng = np.random.default_rng(settings.seed)
-    emb_a = _subsample(emb_a, settings.max_cells, rng)
-    emb_b = _subsample(emb_b, settings.max_cells, rng)
+    emb_a = subsample(emb_a, settings.max_cells, rng)
+    emb_b = subsample(emb_b, settings.max_cells, rng)
     if settings.balance_samples:
         min_n = min(len(emb_a), len(emb_b))
-        emb_a = _subsample(emb_a, min_n, rng)
-        emb_b = _subsample(emb_b, min_n, rng)
+        emb_a = subsample(emb_a, min_n, rng)
+        emb_b = subsample(emb_b, min_n, rng)
     n_a_used = len(emb_a)
     n_b_used = len(emb_b)
     if n_a_used < settings.min_cells or n_b_used < settings.min_cells:

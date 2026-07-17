@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 from viscy_utils.cli_utils import load_config
-from viscy_utils.evaluation.mmd import median_heuristic, witness_function
+from viscy_utils.evaluation.mmd import median_heuristic, subsample, witness_function
 from viscy_utils.evaluation.witness_gmm import fit_gmm_labels
 
 if TYPE_CHECKING:
@@ -134,14 +134,6 @@ def obs_filter_mask(obs: pd.DataFrame, filter_dict: dict) -> np.ndarray:
     return mask
 
 
-def _subsample(X: np.ndarray, max_n: int | None, rng: np.random.Generator) -> np.ndarray:
-    """Randomly subsample rows of ``X`` to at most ``max_n`` (no-op if None/small)."""
-    if max_n is None or len(X) <= max_n:
-        return X
-    idx = rng.choice(len(X), max_n, replace=False)
-    return X[idx]
-
-
 _KEY_PRIMARY = ["experiment", "fov_name", "id"]
 _KEY_FALLBACK = ["experiment", "fov_name", "t", "track_id"]
 
@@ -216,8 +208,8 @@ def build_marker_annotation(
         _logger.warning("No control/perturbed reference cells found; skipping marker.")
         return None
 
-    X_ref = _subsample(X_ctrl, config.max_reference_cells, rng)
-    Y_ref = _subsample(Y_pert, config.max_reference_cells, rng)
+    X_ref = subsample(X_ctrl, config.max_reference_cells, rng)
+    Y_ref = subsample(Y_pert, config.max_reference_cells, rng)
     bandwidth = config.bandwidth if config.bandwidth is not None else median_heuristic(X_ref, Y_ref)
     scores = witness_function(X_all, X_ref, Y_ref, bandwidth=bandwidth)
 

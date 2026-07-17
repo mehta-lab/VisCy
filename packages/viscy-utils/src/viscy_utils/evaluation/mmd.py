@@ -1,37 +1,24 @@
 """Maximum Mean Discrepancy (MMD) with Gaussian RBF kernel and permutation test.
 
-GPU-accelerated via PyTorch: the pooled RBF kernel matrix is built once on the
-available device (CUDA if present, otherwise CPU) and reused across all
-permutations. The public API is device-agnostic — inputs and outputs are NumPy
-arrays / Python floats — so callers do not need to manage tensors or devices.
+GPU-accelerated via PyTorch: kernel matrices are built on the available device
+(CUDA if present, otherwise CPU). The public API is device-agnostic — inputs and
+outputs are NumPy arrays / Python floats — so callers do not need to manage
+tensors or devices.
 """
 
 import numpy as np
 import torch
 from numpy.typing import NDArray
 
+_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-_DEVICE: torch.device | None = None
 
-
-def _get_device() -> torch.device:
-    """Return a usable CUDA device, otherwise CPU (detected once and cached).
-
-    ``torch.cuda.is_available()`` only reports that a GPU is *present*, not that
-    the installed PyTorch build can launch kernels on it (e.g. a GPU whose
-    compute capability predates the build raises at the first kernel launch).
-    We therefore probe with a trivial kernel and fall back to CPU if it fails.
-    """
-    global _DEVICE
-    if _DEVICE is None:
-        _DEVICE = torch.device("cpu")
-        if torch.cuda.is_available():
-            try:
-                (torch.zeros(1, device="cuda") + 1.0).cpu()
-                _DEVICE = torch.device("cuda")
-            except RuntimeError:
-                _DEVICE = torch.device("cpu")
-    return _DEVICE
+def subsample(X: NDArray, max_n: int | None, rng: np.random.Generator) -> NDArray:
+    """Randomly subsample rows of ``X`` to at most ``max_n`` (no-op if None/small)."""
+    if max_n is None or len(X) <= max_n:
+        return X
+    idx = rng.choice(len(X), max_n, replace=False)
+    return X[idx]
 
 
 def _sq_dists(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
@@ -103,37 +90,12 @@ def median_heuristic(X: NDArray, Y: NDArray, subsample: int = 1000) -> float:
     if len(pool) > subsample:
         idx = rng.choice(len(pool), subsample, replace=False)
         pool = pool[idx]
-    device = _get_device()
+    device = _DEVICE
     P = torch.from_numpy(pool).to(device)
     d2 = _sq_dists(P, P)
     n = d2.shape[0]
     mask = torch.triu(torch.ones(n, n, dtype=torch.bool, device=device), diagonal=1)
     return float(d2[mask].median().item()) + 1e-12
-
-
-def gaussian_rbf_kernel(X: NDArray, Y: NDArray, bandwidth: float) -> NDArray:
-    """Compute Gaussian RBF kernel matrix K(X, Y).
-
-    K(x, y) = exp(-||x - y||^2 / (2 * bandwidth))
-
-    Parameters
-    ----------
-    X : NDArray
-        Shape (n, d).
-    Y : NDArray
-        Shape (m, d).
-    bandwidth : float
-        Kernel bandwidth (sigma^2). Must be > 0.
-
-    Returns
-    -------
-    NDArray
-        Kernel matrix, shape (n, m), float32.
-    """
-    device = _get_device()
-    A = torch.from_numpy(np.asarray(X, dtype=np.float32)).to(device)
-    B = torch.from_numpy(np.asarray(Y, dtype=np.float32)).to(device)
-    return _rbf_kernel(A, B, bandwidth).cpu().numpy()
 
 
 def compute_mmd_unbiased(X: NDArray, Y: NDArray, bandwidth: float | None = None) -> float:
@@ -159,7 +121,7 @@ def compute_mmd_unbiased(X: NDArray, Y: NDArray, bandwidth: float | None = None)
     """
     if bandwidth is None:
         bandwidth = median_heuristic(X, Y)
-    device = _get_device()
+    device = _DEVICE
     Xt = torch.from_numpy(np.asarray(X, dtype=np.float32)).to(device)
     Yt = torch.from_numpy(np.asarray(Y, dtype=np.float32)).to(device)
     n = len(X)
@@ -171,11 +133,7 @@ def compute_mmd_unbiased(X: NDArray, Y: NDArray, bandwidth: float | None = None)
     K_YY.fill_diagonal_(0.0)
     # Reduce in float64 so the estimate is symmetric in (X, Y) to machine
     # precision despite the float32 kernel.
-    mmd2 = (
-        K_XX.double().sum() / (n * (n - 1))
-        + K_YY.double().sum() / (m * (m - 1))
-        - 2.0 * K_XY.double().mean()
-    )
+    mmd2 = K_XX.double().sum() / (n * (n - 1)) + K_YY.double().sum() / (m * (m - 1)) - 2.0 * K_XY.double().mean()
     return float(mmd2.item())
 
 
@@ -238,7 +196,7 @@ def mmd_permutation_test(
             f"≈ {(N * N * 4) / 1e9:.1f} GB. Subsample X and/or Y so that "
             f"len(X) + len(Y) <= {_MMD_PERM_MAX_N}."
         )
-    device = _get_device()
+    device = _DEVICE
     pool = np.concatenate([X, Y], axis=0).astype(np.float32)
     P = torch.from_numpy(pool).to(device)
     # Compute full pooled kernel matrix once: (N, N)
@@ -314,7 +272,7 @@ def witness_function(
     """
     if bandwidth is None:
         bandwidth = median_heuristic(X, Y)
-    device = _get_device()
+    device = _DEVICE
     Xt = torch.from_numpy(np.asarray(X, dtype=np.float32)).to(device)
     Yt = torch.from_numpy(np.asarray(Y, dtype=np.float32)).to(device)
     q = np.asarray(query, dtype=np.float32)
