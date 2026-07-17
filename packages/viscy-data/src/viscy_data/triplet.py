@@ -57,7 +57,10 @@ def _read_pixel_size(data_path: str | Path) -> float:
     """
     with open_ome_zarr(data_path, mode="r") as store:
         for _, pos in store.positions():
-            return float(pos.scale[-1])
+            pixel_size = float(pos.scale[-1])
+            if not pixel_size > 0:
+                raise ValueError(f"Non-positive X pixel size {pixel_size} in {data_path}; check OME-Zarr scale.")
+            return pixel_size
     raise ValueError(f"No positions found in {data_path}")
 
 
@@ -585,7 +588,10 @@ class TripletDataModule(HCSDataModule):
         if reference_pixel_size is not None:
             inference_pixel_size = _read_pixel_size(data_path)
             scale = reference_pixel_size / inference_pixel_size
-            self.initial_yx_patch_size = tuple(max(1, int(round(s * scale))) for s in final_yx_patch_size)
+            # Round the extraction size up to an even number: the dataset extracts a
+            # centered window of width ``2 * (size // 2)``, so an odd ``size`` would be
+            # extracted one pixel short and the resize would then undershoot the target.
+            self.initial_yx_patch_size = tuple(max(2, 2 * round(s * scale / 2)) for s in final_yx_patch_size)
             _logger.info(
                 f"Pixel size rescaling enabled: "
                 f"reference={reference_pixel_size:.4f} µm/px, "
@@ -602,8 +608,7 @@ class TripletDataModule(HCSDataModule):
                 BatchedZoomd(
                     keys=list(self.source_channel),
                     scale_factor=(1.0, *scale_yx),
-                    mode="bilinear",
-                    antialias=True,
+                    mode="nearest-exact",
                 )
             )
 
