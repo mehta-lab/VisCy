@@ -189,6 +189,13 @@ def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
                 continue
             if level == "timepoint_statistics":
                 # Nested {timepoint: {stat: tensor}}; stack within each timepoint.
+                for m in norm_metas:
+                    if m[ch][level].keys() != level_stats.keys():
+                        raise KeyError(
+                            f"norm_meta timepoint keys differ across the batch for channel '{ch}': "
+                            f"{sorted(level_stats)} vs {sorted(m[ch][level])}. "
+                            "All FOVs in a batch must expose the same set of timepoint_statistics."
+                        )
                 result[ch][level] = {
                     tp: {stat: torch.stack([m[ch][level][tp][stat] for m in norm_metas]) for stat in tp_stats}
                     for tp, tp_stats in level_stats.items()
