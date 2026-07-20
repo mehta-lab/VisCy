@@ -30,6 +30,7 @@ from dynacell.evaluation.paths import (
     eval_leaf,
     gt_cache_dir,
     iter_organelle_evals,
+    key_from_prediction_store,
     metrics_repo_dir,
     normalize_legacy,
     paper_key,
@@ -95,6 +96,45 @@ def test_forward_paths_are_unique_per_tuple() -> None:
         assert pred not in seen_pred, f"pred collision: {tup} vs {seen_pred[pred]} -> {pred}"
         seen_leaf[leaf] = tup
         seen_pred[pred] = tup
+
+
+# ---------------------------------------------------------------------------
+# Inverse: key_from_prediction_store recovers the identity (incl. deconv provenance)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tup", _valid_canonical_tuples())
+def test_key_from_prediction_store_roundtrip(tup: tuple[str, str, str, str, str | None]) -> None:
+    org, model, train, test, cond = tup
+    pred = prediction_store(org, model, train, test, cond, data_root=_DATA_ROOT)
+    key = key_from_prediction_store(pred, data_root=_DATA_ROOT)
+    assert key == CanonicalKey(organelle=org, model=model, train_set=train, test_set=test, condition=cond)
+
+
+def test_key_from_prediction_store_preserves_deconv_provenance() -> None:
+    """ER/mito deconv markers must survive the inverse (the walker-fix core property)."""
+    for train in ("a549__deconv", "joint__legacy_deconvgt"):
+        pred = prediction_store("er", "celldiff_r2", train, "a549", "denv", data_root=_DATA_ROOT)
+        key = key_from_prediction_store(pred, data_root=_DATA_ROOT)
+        assert key.train_set == train
+
+
+def test_key_from_prediction_store_rejects_noncanonical_paths() -> None:
+    root = Path(_DATA_ROOT)
+    # Legacy prediction layout (must NOT parse as canonical).
+    with pytest.raises(ValueError):
+        key_from_prediction_store(root / "a549/predictions/sec61b_celldiff_r2_denv.zarr", data_root=_DATA_ROOT)
+    # Missing the prediction.zarr leaf (a leaf dir, not the zarr).
+    with pytest.raises(ValueError):
+        key_from_prediction_store(root / "er/celldiff_r2/a549__deconv/a549__denv", data_root=_DATA_ROOT)
+    # Path outside data_root.
+    with pytest.raises(ValueError):
+        key_from_prediction_store("/somewhere/else/prediction.zarr", data_root=_DATA_ROOT)
+    # Unknown condition in the leaf segment.
+    with pytest.raises(ValueError):
+        key_from_prediction_store(
+            root / "er/celldiff_r2/a549__deconv/a549__badcond/prediction.zarr", data_root=_DATA_ROOT
+        )
 
 
 def test_track_subdir() -> None:
