@@ -1,0 +1,137 @@
+# DynaCLR-3D-Gut-BagOfChannels (Phase 1)
+# =======================================
+# 3D bag-of-channels contrastive learning on Zuben's zebrafish gut data.
+# One random channel per sample (nuclear | septate | brush_border | SuH),
+# 24-slice Z window, 64x64 XY — matches Zuben's 24x64x64 patch convention.
+#
+# STATIC DATA: single timepoint (t=0), no tracking. Positives come from
+# SimCLR self-augmentation (positive_cell_source=self), NOT temporal lookup.
+#
+# Normalization reads per-FOV full-frame stats from the v3 .zattrs written by
+# `viscy preprocess`. Single timepoint → timepoint_statistics == fov_statistics.
+#
+# Z window centered on each cell's parquet `z` (z_center_source=cell_z), 24
+# slices, no random Z crop. XY extracted at 80 then center-cropped to 64.
+# Pipeline: extract (24,80,80) → normalize → affine → flip/contrast/noise
+#           → CenterCrop (24,64,64) [auto-appended].
+#
+# Launch:
+#   sbatch applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-Gut-BagOfChannels.sh
+
+base:
+  - ../recipes/trainer/fit.yml
+  - ../recipes/topology/ddp_2gpu.yml
+  - ../recipes/model/contrastive_encoder_convnext_tiny.yml
+
+trainer:
+  precision: bf16-mixed
+  max_epochs: 150
+  logger:
+    init_args:
+      project: DynaCLR-3D-Gut-BagOfChannels
+      name: gut-3d-z24-96to80to64-ntxent-t0p2-self
+  # Re-list callbacks WITHOUT OnlineEvalCallback (static data → degenerate
+  # temporal kNN eval). Loss/val + post-hoc PCA/UMAP colored by stage/marker
+  # is the evaluation signal for Phase 1.
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+
+model:
+  init_args:
+    encoder:
+      init_args:
+        in_stack_depth: 24
+        stem_kernel_size: [4, 4, 4]
+        stem_stride: [4, 4, 4]
+        projection_dim: 32
+        drop_path_rate: 0.1
+    loss_function:
+      init_args:
+        temperature: 0.2
+    lr: 0.00002
+    pca_color_keys: "[perturbation,experiment,marker]"
+    log_negative_metrics_every_n_epochs: 2
+    example_input_array_shape: [1, 1, 24, 64, 64]
+
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    cell_index_path: /hpc/projects/jacobo_group/collab/ed/dynaclr/dynaclr_cell_index_gut_v1.parquet
+    focus_channel: null
+    # Center the Z window on each cell's own focal plane (parquet `z` column),
+    # not a per-FOV focus — gut cells span the full stack within one store.
+    z_center_source: cell_z
+    # 24-slice window, symmetric about the cell plane (offset 0.5). No Z rescale
+    # (extraction == window) and no random Z crop.
+    z_window: 24
+    z_extraction_window: 24
+    z_focus_offset: 0.5
+    # Small XY margin (80 → 64) so the auto-appended CenterCrop trims affine
+    # rotation zero-fill; no explicit random XY crop.
+    yx_patch_size: [80, 80]
+    final_yx_patch_size: [64, 64]
+    channels_per_sample: 1
+    # STATIC: SimCLR self-positive (anchor == positive pre-augmentation).
+    positive_cell_source: self
+    stratify_by: [perturbation, marker]
+    # Each gut store is a single FOV → split cells within each gut (not by FOV,
+    # which would leave 0 val FOVs). All rows of one cell stay on one side.
+    split_mode: cell
+    split_ratio: 0.8
+    batch_size: 256
+    num_workers: 4
+    seed: 42
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel_0]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel_0]
+          prob: 0.8
+          scale_range: [[0.9, 1.1], [0.9, 1.1], [0.9, 1.1]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      # No random spatial crop — the Z window is already centered on the cell
+      # plane and XY is tight. The datamodule auto-appends a CenterCrop to
+      # [24, 64, 64], which also trims affine rotation zero-fill at the edges.
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          gamma: [0.6, 1.6]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          sigma_x: [0.25, 0.50]
+          sigma_y: [0.25, 0.50]
+          sigma_z: [0.0, 0.2]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.1
