@@ -87,7 +87,7 @@ def _configure_slurm_requeue(config: Namespace, subcommand: str | None) -> None:
     root = config[subcommand] if subcommand is not None else config
     if not isinstance(root, Namespace):
         return
-    if not root.get("slurm_auto_requeue", False):
+    if not config.get("slurm_auto_requeue", False):
         return
     if not SLURMEnvironment.detect():
         return
@@ -98,10 +98,15 @@ def _configure_slurm_requeue(config: Namespace, subcommand: str | None) -> None:
     if plugins is None:
         plugins = []
     elif not isinstance(plugins, list):
-        plugins = [plugins]
-    if any(isinstance(p, SLURMEnvironment) for p in plugins):
+    if any(
+        isinstance(p, SLURMEnvironment)
+        or (isinstance(p, Namespace) and p.get("class_path") == "lightning.pytorch.plugins.environments.SLURMEnvironment")
+        for p in plugins
+    ):
         return
-    plugins.append(SLURMEnvironment(auto_requeue=True, requeue_signal=signal.SIGUSR1))
+    plugins.append(
+        lazy_instance(SLURMEnvironment, auto_requeue=True, requeue_signal=signal.SIGUSR1.value)
+    )
     trainer["plugins"] = plugins
 
 

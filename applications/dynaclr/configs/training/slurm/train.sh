@@ -83,9 +83,7 @@ WANDB_ID_FILE="${RUN_DIR}/.wandb_run_id"
 if [ -z "${WANDB_RUN_ID:-}" ]; then
   if [ -f "${WANDB_ID_FILE}" ]; then
     WANDB_RUN_ID="$(cat "${WANDB_ID_FILE}")"
-  else
-    WANDB_RUN_ID="$(python -c 'import secrets; print(secrets.token_hex(4))')"
-    echo "${WANDB_RUN_ID}" > "${WANDB_ID_FILE}"
+    WANDB_RUN_ID="$(uv run --project "$WORKSPACE_DIR" python -c 'import secrets; print(secrets.token_hex(4))')"
   fi
 fi
 
