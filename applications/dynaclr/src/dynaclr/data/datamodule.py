@@ -190,6 +190,8 @@ class MultiExperimentDataModule(LightningDataModule):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
+        z_center_source: str = "fov_center",
+        split_mode: str = "fov",
         max_border_shift: int = -1,
         shuffle_val: bool = False,
         pin_memory: bool = True,
@@ -203,6 +205,10 @@ class MultiExperimentDataModule(LightningDataModule):
         self.z_window = z_window
         self.z_extraction_window = z_extraction_window
         self.z_focus_offset = z_focus_offset
+        self.z_center_source = z_center_source
+        if split_mode not in ("fov", "cell"):
+            raise ValueError(f"split_mode must be 'fov' or 'cell', got {split_mode!r}")
+        self.split_mode = split_mode
         self.yx_patch_size = yx_patch_size
         self.final_yx_patch_size = final_yx_patch_size
         self.val_experiments = val_experiments if val_experiments is not None else []
@@ -372,6 +378,7 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
+            z_center_source=self.z_center_source,
         )
 
         # Predict transform: normalizations + final center crop only (no augmentations).
@@ -419,6 +426,7 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
+            z_center_source=self.z_center_source,
         )
 
         if val_names:
@@ -445,6 +453,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
+                z_center_source=self.z_center_source,
             )
 
     def _setup_fov_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
@@ -474,36 +483,44 @@ class MultiExperimentDataModule(LightningDataModule):
         # (81M+ rows for OPS), which hashes a Python tuple per row and
         # dominates setup-time memory. Per-group isin against a small
         # Python-set of FOV names is O(group_size) with no object index.
-        train_fovs_per_exp: dict[str, set[str]] = {}
-        val_fovs_per_exp: dict[str, set[str]] = {}
+        # split_key: "fov_name" holds out whole FOVs; "cell_id" holds out cells
+        # within each experiment (needed when every experiment is a single FOV,
+        # e.g. one-position-per-store datasets). Splitting on cell_id keeps all
+        # rows of one cell (its channels) on the same side — no channel leakage.
+        split_key = "fov_name" if self.split_mode == "fov" else "cell_id"
+        train_keys_per_exp: dict[str, set[str]] = {}
+        val_keys_per_exp: dict[str, set[str]] = {}
 
         for exp_name, group in full_index.tracks.groupby("experiment"):
-            fovs = sorted(group["fov_name"].unique())
-            n_train = max(1, int(len(fovs) * self.split_ratio))
-            rng.shuffle(fovs)
-            train_fovs_per_exp[exp_name] = set(fovs[:n_train])
-            val_fovs_per_exp[exp_name] = set(fovs[n_train:])
+            keys = sorted(group[split_key].unique())
+            n_train = max(1, int(len(keys) * self.split_ratio))
+            rng.shuffle(keys)
+            train_keys_per_exp[exp_name] = set(keys[:n_train])
+            val_keys_per_exp[exp_name] = set(keys[n_train:])
 
-        n_train_fovs = sum(len(s) for s in train_fovs_per_exp.values())
-        n_val_fovs = sum(len(s) for s in val_fovs_per_exp.values())
+        n_train_keys = sum(len(s) for s in train_keys_per_exp.values())
+        n_val_keys = sum(len(s) for s in val_keys_per_exp.values())
         _logger.info(
-            "FOV split (ratio=%.2f): %d train FOVs, %d val FOVs",
+            "%s split (ratio=%.2f): %d train %s, %d val %s",
+            self.split_mode,
             self.split_ratio,
-            n_train_fovs,
-            n_val_fovs,
+            n_train_keys,
+            split_key,
+            n_val_keys,
+            split_key,
         )
 
         def _build_train_mask(df: pd.DataFrame) -> np.ndarray:
-            """Row-wise boolean mask: True if (experiment, fov_name) is train."""
+            """Row-wise boolean mask: True if the split key is in the train set."""
             mask = np.zeros(len(df), dtype=bool)
             # groupby("experiment") returns integer positions in ``df`` via
             # group.index after reset_index; we rely on the caller passing
             # reset-indexed frames (which is what MultiExperimentIndex produces).
             for exp_name, group in df.groupby("experiment", sort=False):
-                train_fovs = train_fovs_per_exp.get(exp_name, set())
-                if not train_fovs:
+                train_keys = train_keys_per_exp.get(exp_name, set())
+                if not train_keys:
                     continue
-                sub_mask = group["fov_name"].isin(train_fovs).to_numpy()
+                sub_mask = group[split_key].isin(train_keys).to_numpy()
                 mask[group.index.to_numpy()] = sub_mask
             return mask
 
@@ -583,6 +600,7 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
+            z_center_source=self.z_center_source,
         )
 
         if not val_tracks.empty:
@@ -602,6 +620,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
+                z_center_source=self.z_center_source,
             )
 
     # ------------------------------------------------------------------
