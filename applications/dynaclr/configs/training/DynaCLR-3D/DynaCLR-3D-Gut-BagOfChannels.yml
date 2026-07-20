@@ -4,8 +4,11 @@
 # One random channel per sample (nuclear | septate | brush_border | SuH),
 # 24-slice Z window, 64x64 XY — matches Zuben's 24x64x64 patch convention.
 #
-# STATIC DATA: single timepoint (t=0), no tracking. Positives come from
-# SimCLR self-augmentation (positive_cell_source=self), NOT temporal lookup.
+# STATIC DATA: single timepoint (t=0), no tracking. SimCLR self-positives
+# (same crop → same marker). One marker per batch (batch_group_by=marker) so the
+# model can't shortcut on channel identity; batches balanced across the 6 states
+# (stratify_by=perturbation) to counter the ~3.5x state imbalance.
+# (Phase 3, later: consecutive-state positives to regularize the space temporally.)
 #
 # Normalization reads per-FOV full-frame stats from the v3 .zattrs written by
 # `viscy preprocess`. Single timepoint → timepoint_statistics == fov_statistics.
@@ -79,9 +82,17 @@ data:
     yx_patch_size: [80, 80]
     final_yx_patch_size: [64, 64]
     channels_per_sample: 1
-    # STATIC: SimCLR self-positive (anchor == positive pre-augmentation).
+    # SimCLR self-positive: anchor == positive (same crop, two augmentations) →
+    # trivially the SAME marker, and no supervised pull that would fight the
+    # negatives. State structure emerges unsupervised.
     positive_cell_source: self
-    stratify_by: [perturbation, marker]
+    # One marker per batch: all negatives share the anchor's marker, so the model
+    # can't take the "tell channels apart" shortcut and must learn within-marker
+    # (cell-state) structure.
+    batch_group_by: marker
+    # Within the single-marker batch, balance the 6 developmental states — the
+    # dataset is ~3.5x imbalanced (stage_0 1379 vs stage_5 390 per marker).
+    stratify_by: [perturbation]
     # Each gut store is a single FOV → split cells within each gut (not by FOV,
     # which would leave 0 val FOVs). All rows of one cell stay on one side.
     split_mode: cell

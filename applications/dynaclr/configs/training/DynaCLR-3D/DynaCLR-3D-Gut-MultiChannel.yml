@@ -5,8 +5,10 @@
 # (B, 4, 24, 64, 64). Per-channel normalization: each channel normalized with
 # its own per-FOV full-frame stats from the v3 .zattrs.
 #
-# STATIC DATA: SimCLR self-positive (Phase 2a). Switch to consecutive-stage
-# positives later — see plan (needs a stage-adjacency bucket or code change).
+# STATIC DATA: SimCLR self-positives; batches balanced across the 6 states
+# (stratify_by=perturbation) to counter the ~3.5x state imbalance.
+# Switch to consecutive-state positives later (Phase 3) to regularize the space
+# temporally — needs a stage-adjacency bucket or code change (see plan).
 #
 # Z window centered on the parquet `z_focus` column (seeded from bbox-center z
 # by conform_parquet.py), 24 slices, no random Z crop. XY 80 → CenterCrop 64.
@@ -66,8 +68,11 @@ data:
     z_focus_offset: 0.5
     yx_patch_size: [80, 80]
     final_yx_patch_size: [64, 64]
-    # All 4 channels stacked per sample → (B, 4, Z, Y, X).
+    # All 4 channels stacked per sample → (B, 4, Z, Y, X). No marker shortcut
+    # here (every sample carries all channels), so no batch_group_by needed.
     channels_per_sample: null
+    # SimCLR self-positive (same crop, two augmentations); state structure emerges
+    # unsupervised. Batches balanced across the 6 states to counter imbalance.
     positive_cell_source: self
     stratify_by: [perturbation]
     split_mode: cell
