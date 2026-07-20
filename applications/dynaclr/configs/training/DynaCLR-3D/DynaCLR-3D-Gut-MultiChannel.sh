@@ -25,5 +25,11 @@ export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-Gut-
 export MODEL_ROOT="${MODEL_ROOT:-${WORKSPACE_DIR}/models}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-${WORKSPACE_DIR}/.venv-dynaclr}"
 
+# The shared trainer recipe logs to the `computational_imaging` W&B entity. Set
+# WANDB_ENTITY to your own entity to log there instead. Leave unset for default.
+if [ -n "${WANDB_ENTITY:-}" ]; then
+  export EXTRA_ARGS="${EXTRA_ARGS:-} --trainer.logger.init_args.entity=${WANDB_ENTITY}"
+fi
+
 # Absolute path (SLURM spools this script, so $(dirname "$0") would break).
 source "${WORKSPACE_DIR}/applications/dynaclr/configs/training/slurm/train.sh"

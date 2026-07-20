@@ -28,5 +28,12 @@ export MODEL_ROOT="${MODEL_ROOT:-${WORKSPACE_DIR}/models}"
 # Point at the dynaclr-pinned venv in your clone (avoids the shared .venv sync race).
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-${WORKSPACE_DIR}/.venv-dynaclr}"
 
+# The shared trainer recipe logs to the `computational_imaging` W&B entity. Set
+# WANDB_ENTITY to your own entity to log there instead (EXTRA_ARGS overrides the
+# recipe). Leave unset to keep the default.
+if [ -n "${WANDB_ENTITY:-}" ]; then
+  export EXTRA_ARGS="${EXTRA_ARGS:-} --trainer.logger.init_args.entity=${WANDB_ENTITY}"
+fi
+
 # Absolute path (SLURM spools this script, so $(dirname "$0") would break).
 source "${WORKSPACE_DIR}/applications/dynaclr/configs/training/slurm/train.sh"
