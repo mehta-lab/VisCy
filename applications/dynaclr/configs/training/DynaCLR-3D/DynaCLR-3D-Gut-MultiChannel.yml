@@ -8,8 +8,8 @@
 # STATIC DATA: SimCLR self-positive (Phase 2a). Switch to consecutive-stage
 # positives later — see plan (needs a stage-adjacency bucket or code change).
 #
-# Z window centered on each cell's parquet `z` (z_center_source=cell_z), 24
-# slices, no random Z crop. XY extracted at 80 then center-cropped to 64.
+# Z window centered on the parquet `z_focus` column (seeded from bbox-center z
+# by conform_parquet.py), 24 slices, no random Z crop. XY 80 → CenterCrop 64.
 #
 # Launch:
 #   sbatch applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-Gut-MultiChannel.sh
@@ -60,7 +60,7 @@ data:
   init_args:
     cell_index_path: /hpc/projects/jacobo_group/collab/ed/dynaclr/dynaclr_cell_index_gut_v1.parquet
     focus_channel: null
-    z_center_source: cell_z
+    # Z window centers on the parquet z_focus column (seeded from bbox-center z).
     z_window: 24
     z_extraction_window: 24
     z_focus_offset: 0.5

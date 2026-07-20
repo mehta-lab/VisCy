@@ -190,7 +190,6 @@ class MultiExperimentDataModule(LightningDataModule):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
-        z_center_source: str = "fov_center",
         split_mode: str = "fov",
         max_border_shift: int = -1,
         shuffle_val: bool = False,
@@ -205,7 +204,6 @@ class MultiExperimentDataModule(LightningDataModule):
         self.z_window = z_window
         self.z_extraction_window = z_extraction_window
         self.z_focus_offset = z_focus_offset
-        self.z_center_source = z_center_source
         if split_mode not in ("fov", "cell"):
             raise ValueError(f"split_mode must be 'fov' or 'cell', got {split_mode!r}")
         self.split_mode = split_mode
@@ -378,7 +376,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
-            z_center_source=self.z_center_source,
         )
 
         # Predict transform: normalizations + final center crop only (no augmentations).
@@ -426,7 +423,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
-            z_center_source=self.z_center_source,
         )
 
         if val_names:
@@ -453,7 +449,6 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
-                z_center_source=self.z_center_source,
             )
 
     def _setup_fov_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
@@ -600,7 +595,6 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
-            z_center_source=self.z_center_source,
         )
 
         if not val_tracks.empty:
@@ -620,7 +614,6 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
-                z_center_source=self.z_center_source,
             )
 
     # ------------------------------------------------------------------

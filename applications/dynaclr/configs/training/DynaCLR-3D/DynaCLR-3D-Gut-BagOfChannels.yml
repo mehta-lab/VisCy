@@ -10,8 +10,9 @@
 # Normalization reads per-FOV full-frame stats from the v3 .zattrs written by
 # `viscy preprocess`. Single timepoint → timepoint_statistics == fov_statistics.
 #
-# Z window centered on each cell's parquet `z` (z_center_source=cell_z), 24
-# slices, no random Z crop. XY extracted at 80 then center-cropped to 64.
+# Z window centered on the parquet `z_focus` column (seeded from bbox-center z
+# by conform_parquet.py), 24 slices, no random Z crop. XY extracted at 80 then
+# center-cropped to 64.
 # Pipeline: extract (24,80,80) → normalize → affine → flip/contrast/noise
 #           → CenterCrop (24,64,64) [auto-appended].
 #
@@ -66,11 +67,10 @@ data:
   init_args:
     cell_index_path: /hpc/projects/jacobo_group/collab/ed/dynaclr/dynaclr_cell_index_gut_v1.parquet
     focus_channel: null
-    # Center the Z window on each cell's own focal plane (parquet `z` column),
-    # not a per-FOV focus — gut cells span the full stack within one store.
-    z_center_source: cell_z
-    # 24-slice window, symmetric about the cell plane (offset 0.5). No Z rescale
-    # (extraction == window) and no random Z crop.
+    # The datamodule centers the Z window on the parquet `z_focus` column;
+    # conform_parquet.py seeds z_focus = bbox-center z (gut cells span the full
+    # stack within one store, so per-FOV focus won't do). 24-slice window,
+    # symmetric (offset 0.5), no Z rescale (extraction == window), no random crop.
     z_window: 24
     z_extraction_window: 24
     z_focus_offset: 0.5

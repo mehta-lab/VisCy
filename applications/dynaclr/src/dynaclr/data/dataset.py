@@ -199,17 +199,13 @@ class MultiExperimentTripletDataset(Dataset):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
-        z_center_source: str = "fov_center",
     ) -> None:
         if ts is None:
             raise ImportError(
                 "tensorstore is required for MultiExperimentTripletDataset. Install with: pip install tensorstore"
             )
-        if z_center_source not in ("fov_center", "cell_z"):
-            raise ValueError(f"z_center_source must be 'fov_center' or 'cell_z', got {z_center_source!r}")
         self.index = index
         self.fit = fit
-        self.z_center_source = z_center_source
         self.tau_range_hours = tau_range_hours
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
@@ -364,9 +360,8 @@ class MultiExperimentTripletDataset(Dataset):
             "norm_std",
             "norm_median",
             "norm_iqr",
+            "z_focus",
         }
-        if self.z_center_source == "cell_z":
-            hot_cols.add("z")
         if self.positive_match_columns:
             hot_cols.update(self.positive_match_columns)
         if getattr(self, "_label_encoders", None):
@@ -827,22 +822,24 @@ class MultiExperimentTripletDataset(Dataset):
             channel_names_to_read = exp.channel_names
         channel_indices = [exp.channel_names.index(name) for name in channel_names_to_read]
 
-        # Per-experiment z_range (scale-adjusted window size centered on a focus plane)
+        # Z window sizing comes from the per-experiment z_range; the center is
+        # the per-sample focus plane. Single source of truth: the parquet
+        # ``z_focus`` column when populated (written by preprocess-cell-index),
+        # otherwise fall back to the z_range center (which the registry derived
+        # from zattrs focus_slice, else mid-stack). z_focus_offset sets the
+        # fraction of the window placed below the focus plane (0.5 = symmetric).
         z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
         z_window_size = z_end_base - z_start_base
         z_count = round(z_window_size * scale_z)
-        if self.z_center_source == "cell_z":
-            # Window around the per-cell focal plane from the parquet. z_focus_offset
-            # sets the fraction placed below the plane (0.5 = symmetric), matching
-            # ExperimentRegistry's per-FOV focus convention.
-            z_plane = int(arrays["z"][idx])
+        z_focus_arr = arrays.get("z_focus")
+        z_focus_val = z_focus_arr[idx] if z_focus_arr is not None else None
+        if z_focus_val is not None and not (isinstance(z_focus_val, float) and np.isnan(z_focus_val)):
+            z_center = int(round(float(z_focus_val)))
             z_below = round(z_count * self.index.registry.z_focus_offset)
-            z_start = z_plane - z_below
-            z_end = z_start + z_count
+            z_start = z_center - z_below
         else:
-            z_focus = (z_start_base + z_end_base) // 2
-            z_start = z_focus - z_count // 2
-            z_end = z_start + z_count
+            z_start = (z_start_base + z_end_base) // 2 - z_count // 2
+        z_end = z_start + z_count
         # Clamp the window inside the image so edge cells still yield a full patch.
         z_total = image.shape[2]
         if z_start < 0:

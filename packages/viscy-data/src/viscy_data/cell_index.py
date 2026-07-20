@@ -82,7 +82,7 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("Z_shape", pa.int32()),
         ("Y_shape", pa.int32()),
         ("X_shape", pa.int32()),
-        ("z_focus_mean", pa.float32()),
+        ("z_focus", pa.float32()),
         ("norm_mean", pa.float32()),
         ("norm_std", pa.float32()),
         ("norm_median", pa.float32()),
@@ -238,6 +238,7 @@ def preprocess_cell_index(
     parquet_path: str | Path,
     output_path: str | Path | None = None,
     focus_channel: str | None = None,
+    focus_level: str = "fov",
 ) -> None:
     """Add normalization stats, focus slice, and remove invalid rows.
 
@@ -246,7 +247,8 @@ def preprocess_cell_index(
 
     - ``norm_mean``, ``norm_std``, ``norm_median``, ``norm_iqr``,
       ``norm_max``, ``norm_min`` — per-timepoint, per-channel statistics
-    - ``z_focus_mean`` — per-FOV focus plane from ``focus_slice``
+    - ``z_focus`` — the focus plane the training Z window is centered on,
+      sourced from ``focus_slice`` at the level chosen by ``focus_level``.
 
     Drops rows where timepoint stats are missing or ``norm_max == 0.0``
     (empty frames). The processed parquet is written to ``output_path``;
@@ -262,12 +264,20 @@ def preprocess_cell_index(
     focus_channel : str | None
         Channel name for ``focus_slice`` lookup (e.g. ``"Phase3D"``).
         When ``None``, uses the first channel_name in each FOV's group.
+    focus_level : {'fov', 'per_timepoint'}
+        Which ``focus_slice`` level feeds the ``z_focus`` column:
+        ``'fov'`` uses the per-FOV ``fov_statistics.z_focus_mean``;
+        ``'per_timepoint'`` uses the per-timepoint focus index for each
+        sample's ``t``. The per-cell tracked ``z`` column is left unchanged.
 
     Raises
     ------
     ValueError
-        If a FOV has no normalization metadata (run ``viscy preprocess`` first).
+        If a FOV has no normalization metadata (run ``viscy preprocess`` first),
+        or if ``focus_level`` is not one of the accepted values.
     """
+    if focus_level not in ("fov", "per_timepoint"):
+        raise ValueError(f"focus_level must be 'fov' or 'per_timepoint', got {focus_level!r}")
     if output_path is None:
         output_path = parquet_path
 
@@ -315,8 +325,9 @@ def preprocess_cell_index(
     t_arr = df["t"].astype(int).to_numpy()
 
     norm_arrays = {stat: np.full(len(df), float("nan"), dtype=np.float32) for stat in stat_keys}
+    # z_focus is the plane the training Z window centers on. The per-cell
+    # tracked ``z`` column is left untouched — it is a distinct quantity.
     focus_arr = np.full(len(df), float("nan"), dtype=np.float32)
-    z_arr = df["z"].to_numpy(dtype=np.int16).copy()
     valid_mask = np.ones(len(df), dtype=bool)
 
     for i in range(len(df)):
@@ -327,17 +338,18 @@ def preprocess_cell_index(
         for stat in stat_keys:
             norm_arrays[stat][i] = float(tp_stats[stat])
         fov_key = (store_arr[i], fov_arr[i])
-        z_focus = focus_lookup.get(fov_key)
-        if z_focus is not None:
-            focus_arr[i] = z_focus
-        z_t = focus_per_t_lookup.get(fov_key, {}).get(t_arr[i])
-        if z_t is not None:
-            z_arr[i] = z_t
+        if focus_level == "per_timepoint":
+            z_t = focus_per_t_lookup.get(fov_key, {}).get(t_arr[i])
+            if z_t is not None:
+                focus_arr[i] = z_t
+        else:  # "fov"
+            z_focus = focus_lookup.get(fov_key)
+            if z_focus is not None:
+                focus_arr[i] = z_focus
 
     for stat in stat_keys:
         df[f"norm_{stat}"] = norm_arrays[stat]
-    df["z_focus_mean"] = focus_arr
-    df["z"] = z_arr
+    df["z_focus"] = focus_arr
 
     df = df[valid_mask].reset_index(drop=True)
     n_dropped = n_before - len(df)

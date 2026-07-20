@@ -1,13 +1,15 @@
-"""Step 2: conform Zuben's cell-index parquet to the canonical schema.
+"""Step 2: conform Zuben's cell-index parquet to the canonical schema (end-to-end).
 
-- Repoints ``store_path`` from the v2 originals to the v3 copies under
-  ``/hpc/projects/organelle_phenotyping/datasets/zuben_gut_development`` (same basename).
-- Fills the few required/derived columns not present in the source
-  (``tracks_path``, ``microscope``, ``T_shape``, ``C_shape``).
-- ``write_cell_index`` adds every other missing schema column as null and casts dtypes.
+Single authoritative step, run after the v3 stores are preprocessed (Step 1):
 
-Norm columns are populated afterwards by ``dynaclr preprocess-cell-index`` reading the v3
-``.zattrs`` written by ``viscy preprocess``. Run this only after Step 1 completes.
+1. Repoint ``store_path`` from the v2 originals to the v3 copies (same basename).
+2. Fill required/derived columns absent from the source
+   (``tracks_path``, ``microscope``, ``T_shape``, ``C_shape``).
+3. ``preprocess_cell_index`` fills the ``norm_*`` columns from the v3 ``.zattrs``.
+4. Seed ``z_focus = z`` LAST — gut has no ``focus_slice`` zattrs, so the bbox-center
+   ``z`` IS the focus. This must come after step 3 because ``preprocess_cell_index``
+   also writes ``z_focus`` (as NaN here, since there is no focus_slice) and would
+   otherwise clobber it. The datamodule centers the Z window on ``z_focus``.
 
 Run::
 
@@ -18,7 +20,7 @@ import os
 
 import pandas as pd
 
-from viscy_data.cell_index import read_cell_index, write_cell_index
+from viscy_data.cell_index import preprocess_cell_index, read_cell_index, write_cell_index
 
 SRC = "/hpc/projects/jacobo_group/zuben/proj/gutCellClassifier/data/dynaclr_cell_index_bbox_center.parquet"
 V3_ROOT = "/hpc/projects/organelle_phenotyping/datasets/zuben_gut_development"
@@ -27,7 +29,7 @@ N_CHANNELS = 4
 
 
 def main() -> None:
-    """Repoint store paths to the v3 copies and conform the parquet to CELL_INDEX_SCHEMA."""
+    """Conform the parquet, fill norm stats, and seed z_focus from the bbox-center z."""
     df = pd.read_parquet(SRC)
     n_rows_in = len(df)
 
@@ -40,16 +42,22 @@ def main() -> None:
     df["T_shape"] = 1  # static: single timepoint
     df["C_shape"] = N_CHANNELS
 
-    # write_cell_index adds remaining nullable schema columns as None and casts
-    # to CELL_INDEX_SCHEMA; validate_cell_index runs inside.
     write_cell_index(df, OUT)
+
+    # Fill norm_* from the v3 .zattrs (writes z_focus as NaN — no focus_slice).
+    preprocess_cell_index(OUT, focus_channel="nuclear")
+
+    # Seed z_focus = z LAST so it survives preprocess_cell_index.
+    out_df = read_cell_index(OUT)
+    out_df["z_focus"] = out_df["z"].astype("float32")
+    write_cell_index(out_df, OUT)
 
     check = read_cell_index(OUT)
     print("# Step 2 — conform parquet\n")
     print(f"- rows in: **{n_rows_in}**, rows out: **{len(check)}**")
     print(f"- output: `{OUT}`")
-    print(f"- example store_path: `{check['store_path'].iloc[0]}`")
-    print("- next: `dynaclr preprocess-cell-index` with `--focus-channel nuclear` to fill norm_*")
+    print(f"- norm_mean NaN: **{int(check['norm_mean'].isna().sum())}**")
+    print(f"- z_focus NaN: **{int(check['z_focus'].isna().sum())}** (should be 0)")
 
 
 if __name__ == "__main__":
