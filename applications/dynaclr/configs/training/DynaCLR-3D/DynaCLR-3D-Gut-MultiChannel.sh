@@ -25,6 +25,14 @@ export CONFIGS="applications/dynaclr/configs/training/DynaCLR-3D/DynaCLR-3D-Gut-
 export MODEL_ROOT="${MODEL_ROOT:-${WORKSPACE_DIR}/models}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-${WORKSPACE_DIR}/.venv-dynaclr}"
 
+# W&B writes sample images to a temp dir under $TMPDIR before upload. On some
+# SLURM nodes the default /tmp is per-job and gets swept mid-run, causing
+# `FileNotFoundError: .../wandb-media/*.png` at validation image logging. Pin
+# TMPDIR + WANDB_DIR to persistent paths we create so they can't disappear.
+export TMPDIR="${TMPDIR:-${MODEL_ROOT}/tmp}"
+export WANDB_DIR="${WANDB_DIR:-${MODEL_ROOT}/wandb}"
+mkdir -p "$TMPDIR" "$WANDB_DIR"
+
 # The shared trainer recipe logs to the `computational_imaging` W&B entity. Set
 # WANDB_ENTITY to your own entity to log there instead. Leave unset for default.
 if [ -n "${WANDB_ENTITY:-}" ]; then
