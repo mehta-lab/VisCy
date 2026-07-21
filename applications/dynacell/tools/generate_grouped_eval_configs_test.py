@@ -2,7 +2,7 @@
 
 Tests fall into three groups:
 
-1. Pure-Python filename grammar (no dependencies).
+1. Pure-Python path grammar (no dependencies).
 2. Live-data checks (require the dynacell training tree on disk; marked
    with ``@pytest.mark.requires_data``).
 3. Real composition + resolver check per generated leaf (requires the
@@ -35,7 +35,6 @@ from generate_grouped_eval_configs import (  # noqa: E402
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
     ParsedZarr,
-    _is_ablation_track_zarr,
     benchmark_dataset_ref,
     build_leaf_yaml,
     parse_zarr_name,
@@ -52,105 +51,94 @@ from generate_grouped_eval_configs import (  # noqa: E402
 @pytest.mark.parametrize(
     "rel, expect",
     [
+        # ER (deconv provenance on a549/joint) — iPSC test.
         (
-            "ipsc/predictions/sec61b_fnet3d_paper.zarr",
-            ("er", "fnet3d_paper", None, "ipsc_trained", "ipsc", None, False),
+            "er/fnet3d_paper/ipsc/ipsc/prediction.zarr",
+            ("er", "fnet3d_paper", None, "ipsc_trained", "ipsc", "ipsc", None),
         ),
         (
-            "ipsc/predictions/sec61b_fnet3d_paper_jointtrained.zarr",
-            ("er", "fnet3d_paper", None, "joint", "ipsc", None, False),
+            "er/fnet3d_paper/joint__legacy_deconvgt/ipsc/prediction.zarr",
+            ("er", "fnet3d_paper", None, "joint", "joint__legacy_deconvgt", "ipsc", None),
         ),
         (
-            "ipsc/predictions/sec61b_fnet3d_paper_a549trained.zarr",
-            ("er", "fnet3d_paper", None, "a549_trained", "ipsc", None, False),
+            "er/fnet3d_paper/a549__deconv/ipsc/prediction.zarr",
+            ("er", "fnet3d_paper", None, "a549_trained", "a549__deconv", "ipsc", None),
+        ),
+        # ER (deconv provenance) — A549 test.
+        (
+            "er/fnet3d_paper/a549__deconv/a549__mock/prediction.zarr",
+            ("er", "fnet3d_paper", None, "a549_trained", "a549__deconv", "a549", "mock"),
         ),
         (
-            "a549/predictions/sec61b_fnet3d_paper__sec61b_mock.zarr",
-            ("er", "fnet3d_paper", None, "ipsc_trained", "a549", "mock", True),
+            "er/fnet3d_paper/joint__legacy_deconvgt/a549__mock/prediction.zarr",
+            ("er", "fnet3d_paper", None, "joint", "joint__legacy_deconvgt", "a549", "mock"),
+        ),
+        # CellDiff R2 variant dirs split into (model, variant).
+        (
+            "er/celldiff_r2_iterative/a549__deconv/ipsc/prediction.zarr",
+            ("er", "celldiff_r2", "iterative", "a549_trained", "a549__deconv", "ipsc", None),
         ),
         (
-            "a549/predictions/sec61b_fnet3d_paper_jointtrained_mock.zarr",
-            ("er", "fnet3d_paper", None, "joint", "a549", "mock", False),
+            "membrane/celldiff_r2_sliding_window/ipsc/ipsc/prediction.zarr",
+            ("membrane", "celldiff_r2", "sliding_window", "ipsc_trained", "ipsc", "ipsc", None),
         ),
         (
-            "a549/predictions/sec61b_fnet3d_paper_a549trained_mock.zarr",
-            ("er", "fnet3d_paper", None, "a549_trained", "a549", "mock", False),
+            "mito/celldiff_r2_iterative/a549__deconv/a549__mock/prediction.zarr",
+            ("mitochondria", "celldiff_r2", "iterative", "a549_trained", "a549__deconv", "a549", "mock"),
         ),
         (
-            "ipsc/predictions/sec61b_celldiff_iterative.zarr",
-            ("er", "celldiff", "iterative", "ipsc_trained", "ipsc", None, False),
+            "er/celldiff_r2/joint__legacy_deconvgt/ipsc/prediction.zarr",
+            ("er", "celldiff_r2", None, "joint", "joint__legacy_deconvgt", "ipsc", None),
         ),
         (
-            "ipsc/predictions/memb_celldiff_r2_sliding_window.zarr",
-            (
-                "membrane",
-                "celldiff_r2",
-                "sliding_window",
-                "ipsc_trained",
-                "ipsc",
-                None,
-                False,
-            ),
+            "membrane/celldiff_r2/joint/a549__denv/prediction.zarr",
+            ("membrane", "celldiff_r2", None, "joint", "joint", "a549", "denv"),
+        ),
+        # nucleus / membrane (raw a549 / joint provenance).
+        (
+            "nucleus/fnet3d_paper/joint/a549__mock/prediction.zarr",
+            ("nucleus", "fnet3d_paper", None, "joint", "joint", "a549", "mock"),
         ),
         (
-            "a549/predictions/tomm20_celldiff_r2_iterative__tomm20_mock.zarr",
-            ("mitochondria", "celldiff_r2", "iterative", "ipsc_trained", "a549", "mock", True),
+            "membrane/fcmae_vscyto3d_pretrained/joint/ipsc/prediction.zarr",
+            ("membrane", "fcmae_vscyto3d_pretrained", None, "joint", "joint", "ipsc", None),
         ),
         (
-            "ipsc/joint_predictions/sec61b_celldiff_r2.zarr",
-            ("er", "celldiff_r2", None, "joint", "ipsc", None, False),
+            "membrane/fcmae_vscyto3d_scratch/a549/a549__zikv/prediction.zarr",
+            ("membrane", "fcmae_vscyto3d_scratch", None, "a549_trained", "a549", "a549", "zikv"),
+        ),
+        # pix2pix3d_unetvit across pools + test sets.
+        (
+            "nucleus/pix2pix3d_unetvit/ipsc/ipsc/prediction.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "ipsc_trained", "ipsc", "ipsc", None),
         ),
         (
-            "a549/joint_predictions/memb_celldiff_r2_denv.zarr",
-            ("membrane", "celldiff_r2", None, "joint", "a549", "denv", False),
+            "nucleus/pix2pix3d_unetvit/a549/ipsc/prediction.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "a549", "ipsc", None),
         ),
         (
-            "a549/joint_predictions/nucl_fnet3d_paper_jointtrained_mock.zarr",
-            ("nucleus", "fnet3d_paper", None, "joint", "a549", "mock", False),
+            "nucleus/pix2pix3d_unetvit/joint/a549__mock/prediction.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "joint", "joint", "a549", "mock"),
         ),
         (
-            "ipsc/predictions/memb_fcmae_vscyto3d_pretrained_jointtrained.zarr",
-            ("membrane", "fcmae_vscyto3d_pretrained", None, "joint", "ipsc", None, False),
+            "nucleus/pix2pix3d_unetvit/a549/a549__zikv/prediction.zarr",
+            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "a549", "a549", "zikv"),
         ),
         (
-            "a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr",
-            (
-                "membrane",
-                "fcmae_vscyto3d_scratch",
-                None,
-                "a549_trained",
-                "a549",
-                "zikv",
-                False,
-            ),
-        ),
-        # pix2pix3d_unetvit: iPSC test (model code-name registration).
-        (
-            "ipsc/predictions/nucl_pix2pix3d_unetvit.zarr",
-            ("nucleus", "pix2pix3d_unetvit", None, "ipsc_trained", "ipsc", None, False),
-        ),
-        (
-            "ipsc/predictions/nucl_pix2pix3d_unetvit_a549trained.zarr",
-            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "ipsc", None, False),
-        ),
-        # pix2pix3d_unetvit A549: hybrid legacy `__<gene>_<cond>` where the gene
-        # marker differs from the organelle prefix (nucleus->h2b, membrane->caax).
-        (
-            "a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_mock.zarr",
-            ("nucleus", "pix2pix3d_unetvit", None, "joint", "a549", "mock", True),
-        ),
-        (
-            "a549/predictions/nucl_pix2pix3d_unetvit_a549trained__h2b_zikv.zarr",
-            ("nucleus", "pix2pix3d_unetvit", None, "a549_trained", "a549", "zikv", True),
-        ),
-        (
-            "a549/predictions/memb_pix2pix3d_unetvit__caax_denv.zarr",
-            ("membrane", "pix2pix3d_unetvit", None, "ipsc_trained", "a549", "denv", True),
+            "membrane/pix2pix3d_unetvit/ipsc/a549__denv/prediction.zarr",
+            ("membrane", "pix2pix3d_unetvit", None, "ipsc_trained", "ipsc", "a549", "denv"),
         ),
     ],
 )
 def test_parse_zarr_name(rel: str, expect: tuple) -> None:
-    """Grammar dispatch covers all seven canonical patterns + variants."""
+    """Path-grammar dispatch covers every pool/test/provenance + celldiff variants.
+
+    The expected tuple is
+    ``(organelle, model, variant, train_set, train_set_canonical, test_set, condition)``.
+    ``train_set`` is the generator bucket label; ``train_set_canonical`` is the full
+    canonical token carrying deconv provenance (``a549__deconv`` /
+    ``joint__legacy_deconvgt`` for ER/mito).
+    """
     fake_root = Path("/fake/root")
     parsed = parse_zarr_name(fake_root / rel, dynacell_root=fake_root)
     assert (
@@ -158,38 +146,38 @@ def test_parse_zarr_name(rel: str, expect: tuple) -> None:
         parsed.model,
         parsed.variant,
         parsed.train_set,
+        parsed.train_set_canonical,
         parsed.test_set,
         parsed.condition,
-        parsed.is_legacy_form,
     ) == expect
 
 
-def test_parse_zarr_name_unknown_raises() -> None:
-    """Unknown grammar must raise ValueError."""
+def test_parse_zarr_name_malformed_path_raises() -> None:
+    """A non-canonical / legacy path (not the 5-part prediction-store grammar) must raise."""
     fake_root = Path("/fake/root")
-    with pytest.raises(ValueError, match="organelle prefix"):
-        parse_zarr_name(fake_root / "ipsc/predictions/unknown_org_fnet3d_paper.zarr", dynacell_root=fake_root)
+    with pytest.raises(ValueError, match="canonical prediction store"):
+        parse_zarr_name(fake_root / "ipsc/predictions/sec61b_fnet3d_paper.zarr", dynacell_root=fake_root)
 
 
 def test_parse_zarr_name_unknown_model_raises() -> None:
-    """Unknown model code-name must raise ValueError."""
+    """An unknown model directory must raise ValueError."""
     fake_root = Path("/fake/root")
     with pytest.raises(ValueError, match="unknown model"):
-        parse_zarr_name(fake_root / "ipsc/predictions/sec61b_madeup_model.zarr", dynacell_root=fake_root)
+        parse_zarr_name(fake_root / "er/madeup_model/ipsc/ipsc/prediction.zarr", dynacell_root=fake_root)
 
 
 def test_parse_zarr_name_unknown_celldiff_variant_raises() -> None:
-    """Unknown CellDiff variant must raise ValueError."""
+    """An unknown CellDiff variant directory must raise ValueError."""
     fake_root = Path("/fake/root")
     with pytest.raises(ValueError, match="unknown CellDiff variant"):
-        parse_zarr_name(fake_root / "ipsc/predictions/sec61b_celldiff_fakevariant.zarr", dynacell_root=fake_root)
+        parse_zarr_name(fake_root / "er/celldiff_r2_fakevariant/ipsc/ipsc/prediction.zarr", dynacell_root=fake_root)
 
 
-def test_parse_zarr_name_legacy_gene_mismatch_raises() -> None:
-    """Legacy `__<gene>` must match the organelle's marker (nucleus->h2b), not just parse."""
+def test_parse_zarr_name_unknown_organelle_raises() -> None:
+    """An unknown organelle root directory must raise ValueError."""
     fake_root = Path("/fake/root")
-    with pytest.raises(ValueError, match="gene mismatch"):
-        parse_zarr_name(fake_root / "a549/predictions/nucl_fnet3d_paper__caax_mock.zarr", dynacell_root=fake_root)
+    with pytest.raises(ValueError, match="organelle"):
+        parse_zarr_name(fake_root / "bogus/fnet3d_paper/ipsc/ipsc/prediction.zarr", dynacell_root=fake_root)
 
 
 # ---------------------------------------------------------------------------
@@ -234,32 +222,6 @@ def test_deterministic_models_known_to_runtime_resolver() -> None:
     assert not missing, f"deterministic campaign models absent from save_paths.PAPER_KEY: {missing}"
 
 
-@pytest.mark.parametrize(
-    "name, expect",
-    [
-        # dual nucleus+membrane predicts (own track; ``dual_`` prefix).
-        ("dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_mock.zarr", True),
-        ("dual_nucl_memb_fcmae_vscyto3d_pretrained_infectionft.zarr", True),
-        # no-FT ablations (Track A/B infixes).
-        ("memb_fcmae_vscyto3d_pretrained_randinit_zikv.zarr", True),
-        ("tomm20_fcmae_vscyto3d_pretrained_randinit.zarr", True),
-        ("sec61b_fcmae_vscyto3d_pretrained_cytoland_denv.zarr", True),
-        ("nucl_fcmae_vscyto3d_pretrained_infectionft_mock.zarr", True),
-        # FT-combined ablations covered via substring (cytolandft / infectionft_dynacellft).
-        ("memb_vscyto3d_cytolandft_a549trained_mock.zarr", True),
-        ("memb_vscyto3d_infectionft_dynacellft_a549trained_mock.zarr", True),
-        # in-scope campaign zarrs must NOT be flagged.
-        ("memb_fcmae_vscyto3d_pretrained_a549trained_mock.zarr", False),
-        ("tomm20_fcmae_vscyto3d_pretrained_a549trained.zarr", False),
-        ("sec61b_celldiff_r2_iterative__sec61b_mock.zarr", False),
-        ("nucl_fnet3d_paper_jointtrained_denv.zarr", False),
-    ],
-)
-def test_is_ablation_track_zarr(name: str, expect: bool) -> None:
-    """Ablation / dual prediction families are recognized; campaign zarrs are not."""
-    assert _is_ablation_track_zarr(name) is expect
-
-
 # ---------------------------------------------------------------------------
 # 2. Save_dir + dataset_ref derivation
 # ---------------------------------------------------------------------------
@@ -271,27 +233,34 @@ def _make(rel: str) -> ParsedZarr:
 
 def test_save_dir_canonical_ipsc_ipsc_trained() -> None:
     """iPSC-trained iPSC-test save_dir → canonical <organelle>/<model>/<train>/<test> leaf."""
-    parsed = _make("ipsc/predictions/sec61b_fnet3d_paper.zarr")
+    parsed = _make("er/fnet3d_paper/ipsc/ipsc/prediction.zarr")
     sd = save_dir_for(parsed, dynacell_root=Path("/X"))
     assert sd == Path("/X/er/fnet3d_paper/ipsc/ipsc")
 
 
 def test_save_dir_canonical_a549_joint() -> None:
     """Joint-trained A549-test save_dir → canonical leaf with the <test>__<cond> segment."""
-    parsed = _make("a549/joint_predictions/memb_celldiff_r2_denv.zarr")
+    parsed = _make("membrane/celldiff_r2/joint/a549__denv/prediction.zarr")
     sd = save_dir_for(parsed, dynacell_root=Path("/X"))
     assert sd == Path("/X/membrane/celldiff_r2/joint/a549__denv")
 
 
+def test_save_dir_er_deconv_provenance_preserved() -> None:
+    """ER a549__deconv save_dir keeps the deconv token (not the lossy a549 bucket)."""
+    parsed = _make("er/fnet3d_paper/a549__deconv/a549__mock/prediction.zarr")
+    sd = save_dir_for(parsed, dynacell_root=Path("/X"))
+    assert sd == Path("/X/er/fnet3d_paper/a549__deconv/a549__mock")
+
+
 def test_dataset_ref_ipsc() -> None:
     """For iPSC, dataset_ref points at aics-hipsc + logical organelle target key."""
-    parsed = _make("ipsc/predictions/sec61b_fnet3d_paper.zarr")
+    parsed = _make("er/fnet3d_paper/ipsc/ipsc/prediction.zarr")
     assert benchmark_dataset_ref(parsed) == {"dataset": "aics-hipsc", "target": "sec61b"}
 
 
 def test_dataset_ref_a549_nucleus_uses_h2b() -> None:
     """A549 nucleus dataset_ref uses the gene-marker target key (h2b), not the logical name."""
-    parsed = _make("a549/predictions/nucl_fnet3d_paper_jointtrained_mock.zarr")
+    parsed = _make("nucleus/fnet3d_paper/joint/a549__mock/prediction.zarr")
     assert benchmark_dataset_ref(parsed) == {
         "dataset": "a549-mantis-h2b-mock",
         "target": "h2b",
@@ -300,7 +269,7 @@ def test_dataset_ref_a549_nucleus_uses_h2b() -> None:
 
 def test_dataset_ref_a549_membrane_uses_caax() -> None:
     """A549 membrane dataset_ref uses the gene-marker target key (caax), not the logical name."""
-    parsed = _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr")
+    parsed = _make("membrane/fcmae_vscyto3d_scratch/a549/a549__zikv/prediction.zarr")
     assert benchmark_dataset_ref(parsed) == {
         "dataset": "a549-mantis-caax-zikv",
         "target": "caax",
@@ -308,10 +277,10 @@ def test_dataset_ref_a549_membrane_uses_caax() -> None:
 
 
 def test_pred_cache_dir_a549() -> None:
-    """A549 canonical pred_cache_dir: <test>/eval_cache_pred/<org>/<model>/<train>/<test>__<cond>."""
-    parsed = _make("a549/joint_predictions/sec61b_celldiff_r2_denv.zarr")
+    """A549 ER joint pred_cache_dir keeps the deconv-provenance token (joint__legacy_deconvgt)."""
+    parsed = _make("er/celldiff_r2/joint__legacy_deconvgt/a549__denv/prediction.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/a549/eval_cache_pred/er/celldiff_r2/joint/a549__denv")
+    assert pc == Path("/X/a549/eval_cache_pred/er/celldiff_r2/joint__legacy_deconvgt/a549__denv")
 
 
 def test_pred_cache_dir_ipsc() -> None:
@@ -321,7 +290,7 @@ def test_pred_cache_dir_ipsc() -> None:
     ``<test>/eval_cache_pred/<organelle>/<model>/<train>/<test>``, so the four
     organelles never collapse onto one dir.
     """
-    parsed = _make("ipsc/predictions/tomm20_fnet3d_paper.zarr")
+    parsed = _make("mito/fnet3d_paper/ipsc/ipsc/prediction.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
     assert pc == Path("/X/ipsc/eval_cache_pred/mito/fnet3d_paper/ipsc/ipsc")
 
@@ -366,15 +335,16 @@ def test_all_pred_paths_exist_after_dedupe() -> None:
     not _DYNACELL_ROOT.exists(),
     reason=f"dynacell training root absent: {_DYNACELL_ROOT}",
 )
-def test_walk_predictions_excludes_ablation_track() -> None:
-    """walk_predictions must skip dual/ablation zarrs instead of crashing on them.
+def test_walk_predictions_excludes_celldiff_r1() -> None:
+    """walk_predictions must drop R1 CellDiff (bare + variant dirs) via _SKIP_MODELS.
 
-    These families coexist on disk with campaign zarrs; the walk used to raise
-    ``unknown prediction zarr grammar`` on the first ``dual_`` entry.
+    The canonical tree carries ``celldiff`` / ``celldiff_iterative`` /
+    ``celldiff_denoise`` / ``celldiff_sliding_window`` dirs; all resolve to model
+    ``celldiff`` and must be skipped, leaving only the R2 family in scope.
     """
     pool = walk_predictions(_DYNACELL_ROOT)
-    leaked = [str(p.pred_path) for p in pool if _is_ablation_track_zarr(p.pred_path.name)]
-    assert not leaked, f"ablation-track zarrs leaked into the pool: {leaked[:5]}"
+    leaked = [str(p.pred_path) for p in pool if p.model == "celldiff"]
+    assert not leaked, f"celldiff R1 leaked into the pool: {leaked[:5]}"
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +449,7 @@ def test_nucleus_grouped_leaf_enables_cpdino_instance_ap() -> None:
     instance masks feed both the AP_*/mAP/instance_dice columns and the semantic
     Dice/IoU rows, not a separate track.
     """
-    leaf = build_leaf_yaml("nucleus", "joint", [_make("ipsc/predictions/nucl_fnet3d_paper_jointtrained.zarr")])
+    leaf = build_leaf_yaml("nucleus", "joint", [_make("nucleus/fnet3d_paper/joint/ipsc/prediction.zarr")])
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is True
     assert leaf["segmentation"]["backend"] == "cpdino"
@@ -491,8 +461,8 @@ def test_nucleus_grouped_leaf_enables_cpdino_instance_ap() -> None:
 def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
     """Membrane × a549 → cpdino backend + per-condition dual-store nuclei_gt_path."""
     conds = [
-        _make("a549/predictions/memb_fnet3d_paper_a549trained_mock.zarr"),
-        _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr"),
+        _make("membrane/fnet3d_paper/a549/a549__mock/prediction.zarr"),
+        _make("membrane/fcmae_vscyto3d_scratch/a549/a549__zikv/prediction.zarr"),
     ]
     leaf = build_leaf_yaml("membrane", "a549_trained", conds)
     assert leaf["compute_instance_ap"] is True
@@ -509,7 +479,7 @@ def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
 
 def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:
     """Membrane × iPSC reads nuclei from the same cell.zarr → no separate nuclei_gt_path."""
-    leaf = build_leaf_yaml("membrane", "ipsc_trained", [_make("ipsc/predictions/memb_fnet3d_paper.zarr")])
+    leaf = build_leaf_yaml("membrane", "ipsc_trained", [_make("membrane/fnet3d_paper/ipsc/ipsc/prediction.zarr")])
     assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
@@ -518,8 +488,8 @@ def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:
 def test_er_and_mito_grouped_leaves_have_no_instance_ap() -> None:
     """ER/mito have no cell instances → no instance AP, no segmentation backend override."""
     for rel, organelle, train_set in (
-        ("ipsc/predictions/sec61b_fnet3d_paper_jointtrained.zarr", "er", "joint"),
-        ("ipsc/predictions/tomm20_fnet3d_paper_jointtrained.zarr", "mitochondria", "joint"),
+        ("er/fnet3d_paper/joint__legacy_deconvgt/ipsc/prediction.zarr", "er", "joint"),
+        ("mito/fnet3d_paper/joint__legacy_deconvgt/ipsc/prediction.zarr", "mitochondria", "joint"),
     ):
         leaf = build_leaf_yaml(organelle, train_set, [_make(rel)])
         assert "compute_instance_ap" not in leaf
