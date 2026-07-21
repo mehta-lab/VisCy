@@ -1,0 +1,19 @@
+# @package _global_
+# Phase baseline (no model): the raw Phase3D input scored as the "prediction"
+# against the iPSC nucleus GT. io.pred_is_source reads the manifest source channel
+# (Phase3D) and defaults io.pred_path to the GT store (cell.zarr), so pred/GT
+# positions match by construction. cpdino segments the phase image for instance AP.
+defaults:
+  - override /target: nucleus
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_is_source: true
+
+compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_phase_nucleus

@@ -462,6 +462,34 @@ def test_write_and_read_features_roundtrip(tmp_path: Path, kind: str, extras: di
     np.testing.assert_array_equal(loaded, feats)
 
 
+def test_read_features_drops_stale_dimension(tmp_path: Path) -> None:
+    """A stale-dimension entry (recipe change / partial rebuild) reads back as None.
+
+    The group records its feature dim from the latest non-empty write; an
+    existing entry whose column count disagrees is treated as a cache miss so
+    the caller recomputes it at the current recipe instead of crashing later on
+    an opaque pred-vs-GT dimension mismatch.
+    """
+    paths = cache_paths(tmp_path)
+    # Old-recipe 58-col entry, then a current-recipe 22-col entry: the group's
+    # recorded feature dim becomes 22, so the 58-col entry is now stale.
+    write_features(paths, "cp", "A/1/0", 0, np.ones((5, 58), dtype=np.float32))
+    write_features(paths, "cp", "A/1/1", 0, np.ones((5, 22), dtype=np.float32))
+
+    assert read_features(paths, "cp", "A/1/0", 0) is None  # stale -> recompute
+    current = read_features(paths, "cp", "A/1/1", 0)
+    assert current is not None and current.shape == (5, 22)
+
+
+def test_read_features_keeps_empty_sentinel(tmp_path: Path) -> None:
+    """The zero-cell ``(0, 0)`` sentinel is exempt from the dimension check."""
+    paths = cache_paths(tmp_path)
+    write_features(paths, "cp", "A/1/0", 0, np.ones((5, 22), dtype=np.float32))  # records dim=22
+    write_features(paths, "cp", "A/1/1", 0, np.empty((0, 0), dtype=np.float32))  # zero-cell slot
+    loaded = read_features(paths, "cp", "A/1/1", 0)
+    assert loaded is not None and loaded.shape == (0, 0)
+
+
 def test_read_features_missing_returns_none(tmp_path: Path) -> None:
     """Unwritten (position, timepoint) reads back as None."""
     paths = cache_paths(tmp_path)

@@ -21,6 +21,7 @@ import importlib
 import pickle
 
 import numpy as np
+import pytest
 
 
 def _live_pipeline_module():
@@ -63,6 +64,7 @@ def _make_synthetic_result(
     dinov3 = _BackboneLists()
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
+    morphem = _BackboneLists()
     for t in range(t_count):
         fov_arr = np.full(cells_per_t, pos_name)
         t_arr = np.full(cells_per_t, t, dtype=np.int32)
@@ -72,7 +74,7 @@ def _make_synthetic_result(
         cp.gt_fovs.append(fov_arr)
         cp.pred_ts.append(t_arr)
         cp.gt_ts.append(t_arr)
-        for bl in (dinov3, dynaclr, celldino):
+        for bl in (dinov3, dynaclr, celldino, morphem):
             bl.pred_feats.append(np.full((cells_per_t, deep_dim), float(t), dtype=np.float32))
             bl.gt_feats.append(np.full((cells_per_t, deep_dim), float(t) + 0.5, dtype=np.float32))
             bl.pred_fovs.append(fov_arr)
@@ -93,6 +95,7 @@ def _make_synthetic_result(
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
         timings=[(pos_name, None, "mask_gt", 0.05), (pos_name, 0, "pixel_metrics", 0.02)],
     )
 
@@ -107,7 +110,7 @@ def test_fov_result_pickle_round_trip_preserves_arrays():
     assert restored.seg_array.shape == result.seg_array.shape
     assert restored.seg_array.dtype == np.bool_
     assert np.array_equal(restored.seg_array, result.seg_array)
-    for backbone_attr in ("cp", "dinov3", "dynaclr", "celldino"):
+    for backbone_attr in ("cp", "dinov3", "dynaclr", "celldino", "morphem"):
         original = getattr(result, backbone_attr)
         restored_bb = getattr(restored, backbone_attr)
         for list_name in ("pred_feats", "gt_feats", "pred_fovs", "gt_fovs", "pred_ts", "gt_ts"):
@@ -130,6 +133,22 @@ def test_fov_result_pickle_handles_empty_backbones():
     restored = pickle.loads(pickle.dumps(result))
     assert restored.celldino.pred_feats == []
     assert restored.celldino.gt_feats == []
+
+
+def test_cp_dropzero_zscore_raises_on_dim_mismatch():
+    """Mismatched pred/GT CP dims raise an actionable StaleCacheError, not IndexError.
+
+    A stale CP cache built with a different recipe (e.g. a GLCM toggle or a
+    CP_FEATURE_VERSION change without a rebuild) used to crash _cp_dropzero_zscore
+    with a cryptic boolean-index IndexError; it must instead name the remedy.
+    """
+    pipeline = _live_pipeline_module()
+    from dynacell.evaluation.cache import StaleCacheError
+
+    pred = np.ones((4, 58), dtype=np.float32)
+    gt = np.ones((4, 22), dtype=np.float32)
+    with pytest.raises(StaleCacheError, match="CP feature dimension mismatch"):
+        pipeline._cp_dropzero_zscore(pred, gt)
 
 
 def test_aggregate_fov_result_extends_backbone_lists():

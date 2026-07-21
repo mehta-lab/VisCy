@@ -271,10 +271,10 @@ def test_migrated_target_predict_resolves_to_test_store(organelle: str, model: s
 
 # The a549_mantis predict leaf was split per treatment condition into
 # predict__a549_mantis_{mock,denv,zikv}.yml. Each condition points at the
-# condition-pooled test store in mantis_v1/test/. Per-organelle the gene
-# slug differs: er → SEC61B, mito → TOMM20, nucleus → H2B, membrane → CAAX.
-# The condition flag in the store filename is mock → "_mock", denv →
-# "_DENV", zikv → "_ZIKV".
+# condition-pooled test store in mantis/test/. Per-organelle the store
+# stem differs: er → SEC61B, mito → TOMM20; nucleus + membrane share the
+# merged dual_nucl_memb store. The condition flag in the store filename is
+# mock → "_mock", denv → "_DENV", zikv → "_ZIKV".
 #
 # Each cross-eval cell → (organelle, model, condition, gene_slug,
 # target_channel, store_filename). dataset_ref.dataset is
@@ -297,7 +297,8 @@ _A549_PREDICT_EXPECTATIONS = [
         condition,
         gene_slug,
         target_channel,
-        f"mantis_v1/test/{gene_upper}{_A549_CONDITION_SUFFIX[condition]}.ozx",
+        f"mantis/test/{'dual_nucl_memb' if gene_slug in ('h2b', 'caax') else gene_upper}"
+        f"{_A549_CONDITION_SUFFIX[condition]}.zarr",
     )
     for organelle, (gene_slug, gene_upper, target_channel) in _A549_GENE_INFO.items()
     for model in ("celldiff", "unetvit3d")
@@ -448,7 +449,7 @@ def test_joint_train_leaf_composes() -> None:
 
     # Child ordering + paths.
     assert children[0]["init_args"]["data_path"].endswith("ipsc/dataset_v4/train/SEC61B.zarr")
-    assert children[1]["init_args"]["data_path"].endswith("a549/mantis_v1/train/SEC61B_all.zarr")
+    assert children[1]["init_args"]["data_path"].endswith("a549/mantis/train/SEC61B_all.zarr")
 
     # Launcher: single GPU matches topology, SLURM invariant holds.
     assert cfg["launcher"]["mode"] == "fit"

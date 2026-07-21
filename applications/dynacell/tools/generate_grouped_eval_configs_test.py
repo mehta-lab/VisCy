@@ -207,7 +207,7 @@ def test_paper_key_maps_agree_on_overlap() -> None:
     """
     from generate_grouped_eval_configs import _CODE_TO_PAPER
 
-    from dynacell.evaluation.save_paths import PAPER_KEY
+    from dynacell.evaluation.paths import PAPER_KEY
 
     # Documented intentional difference: the grouped campaign keeps `celldiff`
     # literal; the runtime resolver collapses it to `celldiff_iterative`.
@@ -228,7 +228,7 @@ def test_deterministic_models_known_to_runtime_resolver() -> None:
     """
     from generate_grouped_eval_configs import _DETERMINISTIC_MODELS
 
-    from dynacell.evaluation.save_paths import PAPER_KEY
+    from dynacell.evaluation.paths import PAPER_KEY
 
     missing = [m for m in _DETERMINISTIC_MODELS if m not in PAPER_KEY]
     assert not missing, f"deterministic campaign models absent from save_paths.PAPER_KEY: {missing}"
@@ -270,17 +270,17 @@ def _make(rel: str) -> ParsedZarr:
 
 
 def test_save_dir_canonical_ipsc_ipsc_trained() -> None:
-    """iPSC-trained iPSC-test save_dir → evaluations_with_embeddings/eval_<paper>_<organelle>."""
+    """iPSC-trained iPSC-test save_dir → canonical <organelle>/<model>/<train>/<test> leaf."""
     parsed = _make("ipsc/predictions/sec61b_fnet3d_paper.zarr")
     sd = save_dir_for(parsed, dynacell_root=Path("/X"))
-    assert sd == Path("/X/ipsc/evaluations_with_embeddings/eval_fnet3d_er")
+    assert sd == Path("/X/er/fnet3d_paper/ipsc/ipsc")
 
 
 def test_save_dir_canonical_a549_joint() -> None:
-    """Joint-trained A549-test save_dir uses _jointtrained_ infix + the A549 dataset root."""
+    """Joint-trained A549-test save_dir → canonical leaf with the <test>__<cond> segment."""
     parsed = _make("a549/joint_predictions/memb_celldiff_r2_denv.zarr")
     sd = save_dir_for(parsed, dynacell_root=Path("/X"))
-    assert sd == Path("/X/a549/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_membrane_denv")
+    assert sd == Path("/X/membrane/celldiff_r2/joint/a549__denv")
 
 
 def test_dataset_ref_ipsc() -> None:
@@ -308,22 +308,22 @@ def test_dataset_ref_a549_membrane_uses_caax() -> None:
 
 
 def test_pred_cache_dir_a549() -> None:
-    """A549 pred_cache_dir condition segment is ``<gene>_<cond>`` (e.g. sec61b_denv)."""
+    """A549 canonical pred_cache_dir: <test>/eval_cache_pred/<org>/<model>/<train>/<test>__<cond>."""
     parsed = _make("a549/joint_predictions/sec61b_celldiff_r2_denv.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/a549/eval_cache_pred/joint/celldiff_r2/sec61b_denv")
+    assert pc == Path("/X/a549/eval_cache_pred/er/celldiff_r2/joint/a549__denv")
 
 
 def test_pred_cache_dir_ipsc() -> None:
-    """For iPSC, the pred_cache_dir condition segment is ``<organelle>_ipsc``.
+    """IPSC canonical pred_cache_dir keeps the organelle in the tuple (mito normalized).
 
-    iPSC has no plate condition, so the segment is namespaced by the logical
-    organelle (a bare ``ipsc`` would collapse all four organelles onto one dir
-    and race the manifest's ``pred.plate_path``).
+    The canonical grammar namespaces the pred cache on the full tuple
+    ``<test>/eval_cache_pred/<organelle>/<model>/<train>/<test>``, so the four
+    organelles never collapse onto one dir.
     """
     parsed = _make("ipsc/predictions/tomm20_fnet3d_paper.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
-    assert pc == Path("/X/ipsc/eval_cache_pred/ipsc_trained/fnet3d_paper/mitochondria_ipsc")
+    assert pc == Path("/X/ipsc/eval_cache_pred/mito/fnet3d_paper/ipsc/ipsc")
 
 
 # ---------------------------------------------------------------------------
@@ -472,24 +472,24 @@ def test_each_leaf_composes_and_resolves(base_eval_grouped_config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_nucleus_grouped_leaf_enables_cellpose_instance_ap() -> None:
+def test_nucleus_grouped_leaf_enables_cpdino_instance_ap() -> None:
     """Nucleus bucket computes instance AP in the SAME pass as features.
 
-    backend=cellpose, no nuclei seeds, and compute_feature_metrics stays on — the
+    backend=cpdino, no nuclei seeds, and compute_feature_metrics stays on — the
     instance masks feed both the AP_*/mAP/instance_dice columns and the semantic
     Dice/IoU rows, not a separate track.
     """
     leaf = build_leaf_yaml("nucleus", "joint", [_make("ipsc/predictions/nucl_fnet3d_paper_jointtrained.zarr")])
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is True
-    assert leaf["segmentation"]["backend"] == "cellpose"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert "nuclei_channel_name" not in leaf["segmentation"]
-    assert "watershed" not in leaf["segmentation"]  # cellpose nucleus path has no watershed stage
+    assert "watershed" not in leaf["segmentation"]  # cpdino nucleus path has no watershed stage
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
 def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → watershed backend + per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend + per-condition dual-store nuclei_gt_path."""
     conds = [
         _make("a549/predictions/memb_fnet3d_paper_a549trained_mock.zarr"),
         _make("a549/predictions/memb_fcmae_vscyto3d_scratch_a549trained_zikv.zarr"),
@@ -497,20 +497,20 @@ def test_membrane_a549_grouped_leaf_wires_cross_store_nuclei() -> None:
     leaf = build_leaf_yaml("membrane", "a549_trained", conds)
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is True
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     # Carved is canonical (6aedf52f): the leaf must NOT override subtract_nuclei,
     # so both semantic + AP inherit the eval.yaml carved default (subtract_nuclei=true).
     assert "watershed" not in leaf["segmentation"]
     for block in leaf["conditions"]:
         nuclei_gt = block["io"]["nuclei_gt_path"]
-        assert "H2B" in nuclei_gt and nuclei_gt.endswith(".ozx")
+        assert "dual_nucl_memb" in nuclei_gt and nuclei_gt.endswith(".zarr")
 
 
 def test_membrane_ipsc_grouped_leaf_has_no_nuclei_gt_path() -> None:
     """Membrane × iPSC reads nuclei from the same cell.zarr → no separate nuclei_gt_path."""
     leaf = build_leaf_yaml("membrane", "ipsc_trained", [_make("ipsc/predictions/memb_fnet3d_paper.zarr")])
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 

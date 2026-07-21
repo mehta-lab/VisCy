@@ -26,7 +26,7 @@ import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
-FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino"]
+FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -83,6 +83,10 @@ class CachePaths:
     def celldino_features(self, weights_sha12: str) -> Path:
         """Return the zarr group path for CELL-DINO features keyed by *weights_sha12*."""
         return self.features_dir / "celldino" / f"{weights_sha12}.zarr"
+
+    def morphem_features(self, model_name: str) -> Path:
+        """Return the zarr group path for MorphEm features of *model_name*."""
+        return self.features_dir / "morphem" / f"{feature_slug(model_name)}.zarr"
 
 
 def cache_paths(cache_dir: Path | str) -> CachePaths:
@@ -464,25 +468,60 @@ def _features_group_path(
         if weights_sha12 is None:
             raise ValueError("weights_sha12 is required for kind='celldino'")
         return paths.celldino_features(weights_sha12)
+    if kind == "morphem":
+        if model_name is None:
+            raise ValueError("model_name is required for kind='morphem'")
+        return paths.morphem_features(model_name)
     raise ValueError(f"Unknown feature kind: {kind!r}")
 
 
+# Group-level attribute recording the artifact's per-cell feature dimension.
+# Lets reads detect and drop stale entries left by a recipe change or an
+# interrupted partial rebuild (a feature group holding arrays of mixed column
+# counts) so the caller recomputes them at the current recipe instead of
+# crashing later on an opaque pred-vs-GT dimension mismatch.
+_FEATURE_DIM_ATTR = "feature_dim"
+
+
 def read_features_from_group(group, pos_name: str, t: int) -> np.ndarray | None:
-    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group."""
+    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group.
+
+    Returns ``None`` (treated as a cache miss → recompute) when the stored
+    array's feature dimension disagrees with the group's recorded
+    :data:`_FEATURE_DIM_ATTR` — i.e. a stale entry from a different recipe or a
+    partially-rebuilt cache. The zero-cell ``(0, 0)`` sentinel is exempt (it
+    carries no column count). Groups written before this attribute existed have
+    no recorded dim, so no entry is dropped (bootstrap-safe).
+    """
     key = f"{pos_name}/t{t}"
     if key not in group:
         return None
-    return np.asarray(group[key])
+    arr = np.asarray(group[key])
+    expected = group.attrs.get(_FEATURE_DIM_ATTR)
+    if expected is not None and arr.ndim == 2 and arr.shape[1] > 0 and arr.shape[1] != int(expected):
+        return None
+    return arr
 
 
 def write_features_to_group(group, pos_name: str, t: int, features: np.ndarray) -> None:
-    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group."""
+    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group.
+
+    Records the artifact's feature dimension in :data:`_FEATURE_DIM_ATTR` from
+    the first non-empty write (and updates it if a later write carries a
+    different dim — the current recipe is authoritative, and stale entries from
+    the old dim then fail the read-side check and get recomputed). The
+    zero-cell ``(0, 0)`` sentinel never sets the attribute.
+    """
     if features.ndim != 2:
         raise ValueError(f"features must be 2-D (n_cells, feature_dim); got shape {features.shape}")
     key = f"{pos_name}/t{t}"
     if key in group:
         del group[key]
     group.create_array(key, data=np.asarray(features))
+    if features.shape[0] > 0 and features.shape[1] > 0:
+        dim = int(features.shape[1])
+        if group.attrs.get(_FEATURE_DIM_ATTR) != dim:
+            group.attrs[_FEATURE_DIM_ATTR] = dim
 
 
 @contextmanager

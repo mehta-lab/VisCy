@@ -31,13 +31,17 @@ from pathlib import Path
 
 import yaml
 
+from dynacell.evaluation.paths import PAPER_KEY, eval_leaf, pred_cache_dir
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 _DYNACELL_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell")
 
-# Code → paper name (per dynacell/CLAUDE.md table).
+# Campaign model registry (membership gate for the instance-AP opt-out + the
+# drift-guard tests against paths.PAPER_KEY). Paper display names come from the
+# authoritative paths.PAPER_KEY; this map's values are kept for the drift check.
 _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
@@ -105,7 +109,7 @@ _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 # instances. ER/mito have no cell instances, so they keep the semantic (supermodel)
 # mask path with no instance metrics.
 _INSTANCE_ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane"})
-_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
+_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cpdino", "membrane": "cpdino"}
 
 # Known stale or duplicate-named zarrs to skip entirely.
 _SKIP_FILENAMES: frozenset[str] = frozenset(
@@ -171,8 +175,8 @@ class ParsedZarr:
 
     @property
     def paper_name(self) -> str:
-        """Paper-side display name for the model (per dynacell/CLAUDE.md)."""
-        return _CODE_TO_PAPER[self.model]
+        """Paper-side display name for the model (authoritative ``paths.PAPER_KEY``)."""
+        return PAPER_KEY[self.model]
 
     @property
     def paper_variant(self) -> str:
@@ -437,53 +441,38 @@ def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
 # Save_dir + pred_cache_dir derivation
 # ---------------------------------------------------------------------------
 
-# Parent dir per (test_set, train_set) — per plan Decision #1.
-_PARENT_DIR: dict[tuple[str, str], str] = {
-    ("ipsc", "ipsc_trained"): "evaluations_with_embeddings",
-    ("ipsc", "a549_trained"): "evaluations_a549trained_with_embeddings",
-    ("ipsc", "joint"): "evaluations_jointtrained_with_embeddings",
-    ("a549", "ipsc_trained"): "evaluations_with_embeddings",
-    ("a549", "a549_trained"): "evaluations_a549trained_with_embeddings",
-    ("a549", "joint"): "evaluations_jointtrained_with_embeddings",
-}
-
-# Eval dir name infix per train_set.
-_DIR_INFIX: dict[str, str] = {
-    "ipsc_trained": "",
-    "a549_trained": "_a549trained",
-    "joint": "_jointtrained",
+# Generator train_set token -> canonical paths.py train_set token. The walker
+# parses legacy zarr names into the ``*_trained`` spellings; the canonical grammar
+# uses the bare pool token.
+_TRAIN_SET_TO_CANONICAL: dict[str, str] = {
+    "ipsc_trained": "ipsc",
+    "a549_trained": "a549",
+    "joint": "joint",
 }
 
 
 def save_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Return the canonical campaign save_dir for ``parsed``."""
-    parent = _PARENT_DIR[(parsed.test_set, parsed.train_set)]
-    infix = _DIR_INFIX[parsed.train_set]
-    if parsed.test_set == "ipsc":
-        eval_name = f"eval_{parsed.paper_variant}{infix}_{parsed.organelle}"
-    else:
-        eval_name = f"eval_{parsed.paper_variant}{infix}_{parsed.organelle}_{parsed.condition}"
-    return dynacell_root / parsed.test_set / parent / eval_name
+    """Return the canonical eval leaf dir for ``parsed`` (see ``paths.eval_leaf``)."""
+    return eval_leaf(
+        organelle=parsed.organelle,
+        model=parsed.model_variant,
+        train_set=_TRAIN_SET_TO_CANONICAL[parsed.train_set],
+        test_set=parsed.test_set,
+        condition=parsed.condition,
+        data_root=dynacell_root,
+    )
 
 
 def pred_cache_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Return canonical pred_cache_dir (see plan "Pred cache layout").
-
-    The trailing segment is organelle-namespaced. A given
-    ``(train_set, model_variant)`` is evaluated once per organelle, and the four
-    organelles' prediction zarrs differ, so they must not share a cache dir.
-    A549 namespaces via the gene marker (``sec61b``/``tomm20``/``h2b``/``caax``)
-    plus the plate condition. iPSC has no plate condition, so it namespaces by
-    the logical organelle. A bare ``ipsc`` segment collapses all four organelles
-    onto one dir: the first to run wins the manifest's ``pred.plate_path`` and
-    every other organelle then raises StaleCacheError.
-    """
-    if parsed.test_set == "ipsc":
-        cond_seg = f"{parsed.organelle}_ipsc"
-    else:
-        gene = _A549_GENE[parsed.organelle]
-        cond_seg = f"{gene}_{parsed.condition}"
-    return dynacell_root / parsed.test_set / "eval_cache_pred" / parsed.train_set / parsed.model_variant / cond_seg
+    """Return the canonical pred-side feature cache dir (see ``paths.pred_cache_dir``)."""
+    return pred_cache_dir(
+        organelle=parsed.organelle,
+        model=parsed.model_variant,
+        train_set=_TRAIN_SET_TO_CANONICAL[parsed.train_set],
+        test_set=parsed.test_set,
+        condition=parsed.condition,
+        data_root=dynacell_root,
+    )
 
 
 def benchmark_dataset_ref(parsed: ParsedZarr) -> dict[str, str]:

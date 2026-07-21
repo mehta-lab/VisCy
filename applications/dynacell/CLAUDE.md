@@ -22,6 +22,27 @@ no FT), `vscyto3d_cytolandft` / `vscyto3d_infectionft_dynacellft` (+ dynacell FT
 dual nucleus+membrane). The same suffixes appear as zarr-filename infixes;
 `_cytolandft` / `_infectionft_dynacellft` combine with `_a549trained`.
 
+## Training data: A549 condition pooling
+
+A549 training data is **condition-pooled**: both joint (iPSC+A549) and A549-only fits
+read a single `<TARGET>_all.zarr` per target combining **mock + ZIKV + DENV** (not
+mock-only), at
+`/hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/{H2B,CAAX,SEC61B,TOMM20}_all.zarr`.
+Built by `assemble.py` (paper repo `dynacell_paper/preprocess/a549_mantis/`) with
+`condition=None`, so its per-condition position filter drops nothing — it walks every
+train-split position across all three conditions.
+
+- The pooled store is a single flattened well (`0/0`) with sequential FOV names
+  (`fov0000…`); the **condition is dropped from the FOV name**, so you cannot read the
+  conditions off the on-disk layout — only from the build script / config comment.
+- There is **no `*joint*` train-set fragment** — joint train leaves compose
+  `_internal/shared/model/train_sets/{a549_mantis,ipsc_confocal}.yml` and author the two
+  `HCSDataModule` children of `BatchedConcatDataModule` inline (A549 child →
+  `<TARGET>_all.zarr`, iPSC child → `ipsc/dataset_v4/train/cell.zarr`).
+- Deliberate asymmetry: **train pools conditions; predict/eval stays per-condition**
+  (canonical per-treatment `.ozx` in the manifest registry) — hence test sets and the
+  paper tables break out mock/denv/zikv.
+
 ## Prediction zarr naming
 
 Set by `trainer.callbacks[…HCSPredictionWriter].init_args.output_store` in each

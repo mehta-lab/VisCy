@@ -101,3 +101,60 @@ def test_dinov3_preprocess_version_is_v2() -> None:
     ``pipeline_cache.py``) keys on this string.
     """
     assert eval_utils.DinoV3FeatureExtractor.PREPROCESS_VERSION == "imagenet_normalize_v2"
+
+
+class _StubMorphEm(torch.nn.Module):
+    """Stand-in for ``MorphEmModel`` that skips the HF load entirely."""
+
+    def __init__(self, model_name: str, img_size: int = 224, freeze: bool = True) -> None:
+        super().__init__()
+        self.model_name = model_name
+
+    def preprocess_2d(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        feats = torch.zeros(x.shape[0], 384)
+        return feats, feats
+
+
+def test_morphem_extract_features_returns_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``extract_features`` returns a single ``(1, 384)`` CLS embedding."""
+    monkeypatch.setattr(eval_utils, "MorphEmModel", _StubMorphEm)
+    extractor = eval_utils.MorphEmFeatureExtractor("CaicedoLab/MorphEm")
+    out = extractor.extract_features(np.zeros((64, 64), dtype=np.float32))
+    assert tuple(out.shape) == (1, 384)
+
+
+def test_morphem_extract_features_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``extract_features_batch`` stacks crops and returns ``(N, 384)``."""
+    monkeypatch.setattr(eval_utils, "MorphEmModel", _StubMorphEm)
+    extractor = eval_utils.MorphEmFeatureExtractor("CaicedoLab/MorphEm")
+    images = [np.zeros((64, 64), dtype=np.float32) for _ in range(3)]
+    out = extractor.extract_features_batch(images, batch_size=2)
+    assert tuple(out.shape) == (3, 384)
+
+
+def test_morphem_preprocess_version() -> None:
+    """The recipe-version tag must read ``per_image_norm_v1``."""
+    assert eval_utils.MorphEmFeatureExtractor.PREPROCESS_VERSION == "per_image_norm_v1"
+
+
+def test_morphem_null_name_soft_skips_in_load_eval_models() -> None:
+    """A null ``pretrained_model_name`` disables MorphEm without crashing.
+
+    Mirrors the celldino ``weights_path: null`` disable path: with the
+    flag on but the hub id unset, ``load_eval_models`` returns
+    ``models.morphem is None`` and no identity tags.
+    """
+    from omegaconf import OmegaConf
+
+    from dynacell.evaluation.model_loader import LoadFlags, load_eval_models
+
+    config = OmegaConf.create(
+        {"target_name": "nucleus", "feature_extractor": {"morphem": {"pretrained_model_name": None}}}
+    )
+    models = load_eval_models(config, flags=LoadFlags(masks=False, morphem=True))
+    assert models.morphem is None
+    assert models.morphem_model_name is None
+    assert models.morphem_preprocess_version is None

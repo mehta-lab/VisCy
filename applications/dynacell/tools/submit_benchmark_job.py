@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
@@ -116,6 +117,72 @@ def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
         )
 
 
+def _as_channel_list(target_channel: Any) -> list[str]:
+    """Normalize a ``target_channel`` config value to a list of channel names."""
+    if target_channel is None:
+        raise SystemExit("--resume-predict requires data.init_args.target_channel")
+    if isinstance(target_channel, str):
+        return [target_channel]
+    return list(target_channel)
+
+
+def _prediction_output_store(composed: dict, leaf_path: Path) -> str:
+    """Return the ``HCSPredictionWriter.output_store`` path from the composed config."""
+    callbacks = composed.get("trainer", {}).get("callbacks", [])
+    if isinstance(callbacks, list):
+        for cb in callbacks:
+            if isinstance(cb, dict) and str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX):
+                store = cb.get("init_args", {}).get("output_store")
+                if store:
+                    return str(store)
+    raise SystemExit(f"{leaf_path}: --resume-predict requires an HCSPredictionWriter callback with output_store")
+
+
+def _completed_prediction_fovs(
+    output_store: str, data_path: str, prediction_channels: list[str]
+) -> tuple[set[str], int]:
+    """Return ``(complete FOV names, total input FOV count)`` for predict resume.
+
+    A FOV counts as complete when the output store holds every prediction
+    channel for it *and* its written T dimension equals that FOV's input T.
+    Predict configs set ``z_window_size`` to the full stack, so each timepoint
+    is written in a single ``write_sample`` call and the array's T grows
+    monotonically as timepoints finish — a crash mid-FOV leaves ``T < input T``.
+    A T-match is therefore a sufficient completeness signal. Metadata-only:
+    reads array shapes, never voxel data.
+
+    Parameters
+    ----------
+    output_store : str
+        Path to the (possibly partial) prediction OME-Zarr store.
+    data_path : str
+        Path to the input HCS OME-Zarr the predict run reads.
+    prediction_channels : list of str
+        Channel names the writer emits (``<target>_prediction``).
+
+    Returns
+    -------
+    tuple of (set of str, int)
+        Plate-relative names (e.g. ``"0/0/fov0000"``) of complete FOVs, and
+        the total number of input FOVs.
+    """
+    input_t: dict[str, int] = {}
+    with open_ome_zarr(data_path, mode="r") as plate:
+        for name, pos in plate.positions():
+            input_t[name] = pos["0"].shape[0]
+    total = len(input_t)
+    completed: set[str] = set()
+    if not os.path.exists(output_store):
+        return completed, total
+    with open_ome_zarr(output_store, mode="r") as plate:
+        for name, pos in plate.positions():
+            if not all(ch in pos.channel_names for ch in prediction_channels):
+                continue
+            if input_t.get(name) is not None and pos["0"].shape[0] == input_t[name]:
+                completed.add(name)
+    return completed, total
+
+
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
 
 
@@ -157,6 +224,52 @@ def _render_env_block(env: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
+    """Resolve the best-by-monitor checkpoint in ``ckpt_dir``.
+
+    Reads ``best_model_path`` from the ``ModelCheckpoint`` callback state saved
+    inside ``last.ckpt`` (the training recipe uses ``monitor: loss/validate``,
+    ``save_top_k: 5`` with the default ``epoch=N-step=M`` filename, so the loss
+    is not in the filename and the checkpoint state is the authoritative source).
+    Falls back to the highest-epoch ``epoch=*.ckpt`` when the state is missing or
+    points at a pruned file.
+    """
+    last = ckpt_dir / "last.ckpt"
+    if last.is_file():
+        import torch  # lazy: only imported for --ckpt best resolution
+
+        state = torch.load(last, map_location="cpu", weights_only=False)
+        for key, val in state.get("callbacks", {}).items():
+            if "ModelCheckpoint" in str(key) and isinstance(val, dict):
+                best = val.get("best_model_path")
+                if best:
+                    # ``best_model_path`` is stored as an ABSOLUTE path into the
+                    # directory where training ran. After a checkpoint dir is
+                    # moved or renamed (e.g. the canonical-path migration) that
+                    # path is stale, and without re-basing this would silently
+                    # fall through to the highest-epoch (more overfit) ckpt. The
+                    # best ckpt file travels with the dir, so its basename under
+                    # ``ckpt_dir`` is authoritative; prefer that, then the literal
+                    # stored path, then the highest-epoch fallback below.
+                    rebased = ckpt_dir / Path(best).name
+                    if rebased.is_file():
+                        return rebased
+                    if Path(best).is_file():
+                        return Path(best)
+    # Highest-epoch fallback. Skip any nonconforming ``epoch=*.ckpt`` (e.g.
+    # ``epoch=final.ckpt``) rather than crashing mid-submit on a None re.match.
+    epoch_ckpts: list[tuple[int, Path]] = []
+    for p in ckpt_dir.glob("epoch=*.ckpt"):
+        m = re.match(r"epoch=(\d+)", p.name)
+        if m is not None:
+            epoch_ckpts.append((int(m.group(1)), p))
+    if epoch_ckpts:
+        return max(epoch_ckpts, key=lambda t: t[0])[1]
+    raise SystemExit(
+        f"--ckpt best: no resolvable checkpoint in {ckpt_dir} (no last.ckpt best_model_path, no epoch=*.ckpt)"
+    )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("leaf", type=Path, help="path to a benchmark leaf YAML")
@@ -195,6 +308,47 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "store already contains the prediction channel. Off by default.",
     )
     ap.add_argument(
+        "--ckpt",
+        default=None,
+        metavar="{best,last,PATH}",
+        help="predict mode: override model.init_args.ckpt_path. 'best' resolves "
+        "the best-by-monitor checkpoint (from last.ckpt's ModelCheckpoint state) "
+        "in the leaf's checkpoint dir; 'last' uses that dir's last.ckpt; a PATH is "
+        "used verbatim. Use 'best' for Phase-9 re-predict so a retrained model "
+        "predicts from its new best checkpoint instead of the leaf's hardcoded "
+        "(possibly stale) epoch. predict mode only (fit uses --resume).",
+    )
+    resume = ap.add_mutually_exclusive_group()
+    resume.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume a fit job from <run_root>/checkpoints/last.ckpt "
+        "(appends --ckpt_path to the training command). The standing policy "
+        "for re-training resubmits: never restart from scratch. Requires "
+        "last.ckpt to exist and be the intended (e.g. raw, de-shadowed) "
+        "checkpoint; run the checkpoint cleanup helper first if the dir "
+        "carries stale/pre-flip checkpoints. fit mode only.",
+    )
+    resume.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        metavar="CKPT",
+        help="resume a fit job from an explicit checkpoint path (appends "
+        "--ckpt_path=CKPT). Use when the resume source is not last.ckpt. "
+        "fit mode only.",
+    )
+    ap.add_argument(
+        "--resume-predict",
+        action="store_true",
+        help="predict mode: resume a partially-written prediction store after a "
+        "wall-time kill. Skips FOVs already fully written (via exclude_fov_names) "
+        "and sets the writer overwrite=True, so the resubmit continues instead of "
+        "crashing on the existing prediction channel (overwrite=False) or recomputing "
+        "every FOV (--overwrite alone). Completeness is per-FOV (written T == input T). "
+        "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
+    )
+    ap.add_argument(
         "--dependency",
         default=None,
         metavar="afterok:<job_id>",
@@ -224,6 +378,12 @@ def submit(argv: list[str] | None = None) -> int:
     # compute node for wandb/checkpoint/prediction outputs.
     os.umask(0o002)
     args = _parse_args(argv)
+
+    if args.resume_predict and args.ckpt is not None:
+        raise SystemExit(
+            "--resume-predict cannot be combined with --ckpt: a resumed predict must reuse "
+            "the original checkpoint, or the store would mix predictions from two models"
+        )
 
     composed = load_composed_config(args.leaf, resolver=_dynacell_ref_resolver)
     for token in args.override:
@@ -269,6 +429,75 @@ def submit(argv: list[str] | None = None) -> int:
             f"Check --override values or hardware profile."
         )
 
+    # Resume support: append ``--ckpt_path`` to the fit command so a resubmit
+    # continues from a checkpoint instead of restarting from scratch. Standing
+    # policy for re-training resubmits (verified via LightningCLI fit, which
+    # restores model+optimizer+loop state). fit mode only; predict has its own
+    # checkpoint handling.
+    resume_arg = ""
+    if args.resume or args.resume_from is not None:
+        if mode != "fit":
+            raise SystemExit(f"--resume/--resume-from is only valid for fit mode (got {mode!r})")
+        ckpt = args.resume_from if args.resume_from is not None else Path(run_root) / "checkpoints" / "last.ckpt"
+        if not ckpt.is_file():
+            raise SystemExit(
+                f"resume checkpoint not found: {ckpt}. Run the checkpoint cleanup helper "
+                f"(archive stale/pre-flip ckpts, promote the intended raw ckpt to last.ckpt) first."
+            )
+        resume_arg = f" --ckpt_path={shlex.quote(str(ckpt))}"
+
+    # Predict-mode checkpoint override: repoint model.init_args.ckpt_path so a
+    # re-predict uses the retrained model's best checkpoint rather than the leaf's
+    # hardcoded (possibly stale/deconv) epoch. predict mode only.
+    if args.ckpt is not None:
+        if mode != "predict":
+            raise SystemExit(f"--ckpt is only valid for predict mode (got {mode!r}); fit uses --resume")
+        model_init = composed.get("model", {}).get("init_args", {})
+        current_ckpt = model_init.get("ckpt_path")
+        if not current_ckpt:
+            raise SystemExit("--ckpt: leaf has no model.init_args.ckpt_path to resolve the checkpoint dir from")
+        ckpt_dir = Path(current_ckpt).parent
+        if args.ckpt == "best":
+            resolved_ckpt = _resolve_best_ckpt(ckpt_dir)
+        elif args.ckpt == "last":
+            resolved_ckpt = ckpt_dir / "last.ckpt"
+        else:
+            resolved_ckpt = Path(args.ckpt)
+        if not resolved_ckpt.is_file():
+            raise SystemExit(f"--ckpt resolved to a missing checkpoint: {resolved_ckpt}")
+        model_init["ckpt_path"] = str(resolved_ckpt)
+
+    # Predict-mode resume: continue a partially-written prediction store instead of
+    # crashing or recomputing. The writer raises FileExistsError on an existing
+    # prediction channel when overwrite=False, and --overwrite alone re-runs every
+    # FOV from scratch (fatal for long diffusion predicts that can't fit one wall
+    # window). Skip fully-written FOVs via exclude_fov_names and set overwrite=True
+    # so the kept partial FOVs (and any re-done ones) can be rewritten.
+    if args.resume_predict:
+        if mode != "predict":
+            raise SystemExit(f"--resume-predict is only valid for predict mode (got {mode!r})")
+        output_store = _prediction_output_store(composed, args.leaf)
+        if os.path.exists(output_store):
+            data_init = composed.setdefault("data", {}).setdefault("init_args", {})
+            data_path = data_init.get("data_path")
+            if not data_path:
+                raise SystemExit(f"{args.leaf}: --resume-predict requires data.init_args.data_path")
+            pred_channels = [ch + "_prediction" for ch in _as_channel_list(data_init.get("target_channel"))]
+            completed, total = _completed_prediction_fovs(output_store, data_path, pred_channels)
+            if total and len(completed) == total:
+                print(f"--resume-predict: all {total} FOVs already complete in {output_store}; nothing to submit")
+                return 0
+            if completed:
+                existing = data_init.get("exclude_fov_names") or []
+                data_init["exclude_fov_names"] = sorted(set(existing) | completed)
+            _apply_overwrite_alias(composed, args.leaf)
+            print(
+                f"--resume-predict: {len(completed)}/{total} FOVs complete; "
+                f"predicting {total - len(completed)} remaining (overwrite=True)"
+            )
+        else:
+            print(f"--resume-predict: no store at {output_store}; running full predict")
+
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S_%f")
     run_root_path = Path(run_root)
     resolved_dir = run_root_path / "resolved"
@@ -286,6 +515,7 @@ def submit(argv: list[str] | None = None) -> int:
         env_block=_render_env_block(env),
         mode=mode,
         resolved_config=str(resolved_path),
+        resume_arg=resume_arg,
         repo_root=str(_REPO_ROOT),
     )
 

@@ -84,6 +84,8 @@ class _CacheContext:
     slice_selection: str = "frac"
     slice_fraction: float = 0.30
     focus_channel_name: str | None = None
+    focus_anchor: str = "nucleus_area"
+    focus_slab_halfwidth: int = 0
     focus_slab_enabled: bool = False
     focus_estimator_params: dict[str, float] = field(default_factory=dict)
     nuclei_channel_name: str | None = None
@@ -91,6 +93,7 @@ class _CacheContext:
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
     cellpose_params: dict[str, Any] = field(default_factory=dict)
     watershed_params: dict[str, Any] = field(default_factory=dict)
+    cpdino_params: dict[str, Any] = field(default_factory=dict)
     cp_feature_version: str | None = None
     cp_norm: dict[str, Any] = field(default_factory=dict)
     cp_glcm: dict[str, Any] = field(default_factory=dict)
@@ -98,9 +101,11 @@ class _CacheContext:
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
     celldino_weights_sha12: str | None = None
+    morphem_model_name: str | None = None
     dinov3_preprocess_version: str | None = None
     dynaclr_preprocess_version: str | None = None
     celldino_preprocess_version: str | None = None
+    morphem_preprocess_version: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -157,6 +162,11 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "pred_dinov3": all_flag or bool(force.pred_dinov3),
         "pred_dynaclr": all_flag or bool(force.pred_dynaclr),
         "pred_celldino": all_flag or bool(force.pred_celldino),
+        # morphem keys are read via OmegaConf.select (not direct attribute access)
+        # so resolved/grouped/benchmark configs composed before these keys existed
+        # don't ConfigAttributeError on the missing key — same pattern as instances.
+        "gt_morphem": all_flag or bool(OmegaConf.select(force, "gt_morphem", default=False)),
+        "pred_morphem": all_flag or bool(OmegaConf.select(force, "pred_morphem", default=False)),
         "gt_instances": all_flag or bool(OmegaConf.select(force, "gt_instances", default=False)),
         "pred_instances": all_flag or bool(OmegaConf.select(force, "pred_instances", default=False)),
         "final_metrics": all_flag or bool(force.final_metrics),
@@ -171,9 +181,11 @@ def init_cache_context(
     dynaclr_ckpt_path: str | None = None,
     dynaclr_encoder_cfg: dict[str, Any] | None = None,
     celldino_weights_path: str | None = None,
+    morphem_model_name: str | None = None,
     dinov3_preprocess_version: str | None = None,
     dynaclr_preprocess_version: str | None = None,
     celldino_preprocess_version: str | None = None,
+    morphem_preprocess_version: str | None = None,
 ) -> _CacheContext:
     """Open and validate the *side*-specific artifact cache for the run.
 
@@ -196,8 +208,11 @@ def init_cache_context(
     celldino_weights_path
         CELL-DINO ``.pth`` state_dict path; ``None`` when the CELL-DINO
         backbone is not configured.
+    morphem_model_name
+        MorphEm HuggingFace id (model-name-keyed cache, like DINOv3);
+        ``None`` when the MorphEm backbone is not configured.
     dinov3_preprocess_version, dynaclr_preprocess_version,
-    celldino_preprocess_version
+    celldino_preprocess_version, morphem_preprocess_version
         Per-extractor preprocess-recipe version tags (e.g.
         ``"self_normalize_v1"``). On a known mismatch against the cached
         manifest entry, the corresponding ``force_recompute.<side>_<kind>``
@@ -223,6 +238,7 @@ def init_cache_context(
 
     cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
+    cpdino_cfg = OmegaConf.select(config, "segmentation.cpdino", default=None)
     cp_norm_cfg = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
     cp_glcm_cfg = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
 
@@ -254,6 +270,9 @@ def init_cache_context(
             celldino_preprocess_version = (
                 (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
             )
+            morphem_preprocess_version = (
+                (morphem_preprocess_version + focus_tag) if morphem_preprocess_version else None
+            )
     # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
     # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
     # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
@@ -275,6 +294,8 @@ def init_cache_context(
         slice_selection=slice_selection,
         slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
         focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
+        focus_anchor=str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area")),
+        focus_slab_halfwidth=int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)),
         focus_slab_enabled=slab_cfg is not None,
         focus_estimator_params=focus_estimator_params,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
@@ -284,6 +305,7 @@ def init_cache_context(
         ),
         cellpose_params=(OmegaConf.to_container(cellpose_cfg, resolve=True) if cellpose_cfg is not None else {}),
         watershed_params=(OmegaConf.to_container(watershed_cfg, resolve=True) if watershed_cfg is not None else {}),
+        cpdino_params=(OmegaConf.to_container(cpdino_cfg, resolve=True) if cpdino_cfg is not None else {}),
         cp_feature_version=CP_FEATURE_VERSION,
         cp_norm=(OmegaConf.to_container(cp_norm_cfg, resolve=True) if cp_norm_cfg is not None else {}),
         cp_glcm=(OmegaConf.to_container(cp_glcm_cfg, resolve=True) if cp_glcm_cfg is not None else {}),
@@ -291,9 +313,11 @@ def init_cache_context(
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
         celldino_weights_sha12=celldino_weights_sha12,
+        morphem_model_name=morphem_model_name,
         dinov3_preprocess_version=dinov3_preprocess_version,
         dynaclr_preprocess_version=dynaclr_preprocess_version,
         celldino_preprocess_version=celldino_preprocess_version,
+        morphem_preprocess_version=morphem_preprocess_version,
     )
 
     if cache_dir is None:
@@ -390,6 +414,12 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         ),
         ("dynaclr", "dynaclr_features", ctx.dynaclr_preprocess_version, ctx.dynaclr_ckpt_sha12),
         ("celldino", "celldino_features", ctx.celldino_preprocess_version, ctx.celldino_weights_sha12),
+        (
+            "morphem",
+            "morphem_features",
+            ctx.morphem_preprocess_version,
+            feature_slug(ctx.morphem_model_name) if ctx.morphem_model_name is not None else None,
+        ),
     ]
     for kind, section_key, current_version, sub_key in checks:
         if current_version is None or sub_key is None:
@@ -530,6 +560,16 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
                     "patch_size": ctx.patch_size,
                     **ctx.source_tag,
                 },
+                (),
+            )
+        )
+    if ctx.morphem_model_name is not None:
+        checks.append(
+            (
+                "morphem",
+                f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]",
+                artifacts.get("morphem_features", {}).get(feature_slug(ctx.morphem_model_name)),
+                {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
                 (),
             )
         )
@@ -740,8 +780,12 @@ def _fov_masks(
 
 def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     """Return the cache-identity dict for a side's instance-label artifact."""
+    # cpdino keys on its own param block (raw image + normalize=True, no CLAHE), NOT the
+    # cellpose robust-clip/CLAHE params — so a cpdino cache never aliases a cellpose one
+    # even beyond the ``__{backend}`` stem separation.
+    seg_params = ctx.cpdino_params if ctx.backend == "cpdino" else ctx.cellpose_params
     identity: dict[str, Any] = {
-        **ctx.cellpose_params,
+        **seg_params,
         "dimension": ctx.dimension,
         "slice_selection": ctx.slice_selection,
         "slice_fraction": ctx.slice_fraction,
@@ -753,8 +797,15 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     # depends on the focus-compute params (na_det/lambda_ill/pixel_size), so record
     # them too — otherwise a focus-param change reuses a stale in-focus plane.
     if ctx.slice_selection == "focus":
-        identity["focus_channel_name"] = ctx.focus_channel_name
-        identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
+        # The plane depends on the anchor method + slab width. Record both so a change to
+        # either invalidates the cached masks. The phase-midband estimator params only
+        # matter for that anchor — record them only then, so the nucleus_area identity
+        # stays clean (and old phase-anchor caches, which lack focus_anchor, miss).
+        identity["focus_anchor"] = ctx.focus_anchor
+        identity["focus_slab_halfwidth"] = ctx.focus_slab_halfwidth
+        if ctx.focus_anchor == "phase_midband":
+            identity["focus_channel_name"] = ctx.focus_channel_name
+            identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
     if ctx.backend == "cellpose_watershed":
         # Whole-cell labels also depend on the watershed params and the GT nuclei
         # seeds; record the GT nuclei (path, channel) so a pred-side identity
@@ -762,6 +813,15 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
         identity = {
             **identity,
             **ctx.watershed_params,
+            "nuclei_channel": ctx.nuclei_channel_name,
+            "nuclei_path": ctx.nuclei_plate_path,
+        }
+    if ctx.backend == "cpdino" and ctx.target_name == "membrane":
+        # Whole-cell cpdino carves out the GT nucleus footprint, so the labels depend on
+        # the GT nuclei source (like watershed) — record it so a pred-side identity
+        # captures that cross-side dependency.
+        identity = {
+            **identity,
             "nuclei_channel": ctx.nuclei_channel_name,
             "nuclei_path": ctx.nuclei_plate_path,
         }
@@ -945,6 +1005,75 @@ def fov_whole_cell_instances(
 
     def compute_t(t: int) -> np.ndarray:
         return segment_whole_cell(memb_stack[t], nuc_stack[t], seed_stack[t], spacing, **ctx.watershed_params)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
+
+
+_CPDINO_NON_INFER_KEYS = frozenset({"model_name", "subtract_nuclei"})
+"""cpdino config keys that are not forwarded to ``segment_cpdino_instances``:
+``model_name`` selects the model at load time, ``subtract_nuclei`` gates the whole-cell
+carve. Everything else (normalize / flow / cellprob / min_size / stitch_threshold) is a
+segmenter inference kwarg."""
+
+
+def cpdino_infer_kwargs(ctx: _CacheContext) -> dict[str, Any]:
+    """Inference kwargs for ``segment_cpdino_instances`` from the ``segmentation.cpdino`` block."""
+    return {k: v for k, v in ctx.cpdino_params.items() if k not in _CPDINO_NON_INFER_KEYS}
+
+
+def fov_cpdino_nucleus_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    nuc_stack: np.ndarray,
+    model,
+) -> np.ndarray:
+    """Return cached/computed nucleus instance labels for one FOV (``backend=cpdino``).
+
+    *nuc_stack* is the per-side nucleus stack — ``(T, Y, X)`` in 2-D (already sliced) or
+    ``(T, Z, Y, X)`` in 3-D. Each timepoint is segmented independently with
+    :func:`dynacell.evaluation.segmentation_cpdino.segment_cpdino_instances` (raw image +
+    cellpose ``normalize=True``, no CLAHE). Returns ``(T, D, H, W)`` uint16.
+    """
+    from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
+
+    is3d = ctx.dimension == "3d"
+    spacing = _seg_spacing(ctx)
+    infer = cpdino_infer_kwargs(ctx)
+
+    def compute_t(t: int) -> np.ndarray:
+        return segment_cpdino_instances(nuc_stack[t], spacing, model, do_3d=is3d, **infer)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=nuc_stack, compute_t=compute_t)
+
+
+def fov_cpdino_whole_cell_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    memb_stack: np.ndarray,
+    seed_stack: np.ndarray | None,
+    model,
+) -> np.ndarray:
+    """Return cached/computed whole-cell instance labels (``backend=cpdino``, membrane).
+
+    cpdino segments the whole cell directly from *memb_stack* (raw membrane fluorescence,
+    ``(T, Y, X)`` 2-D or ``(T, Z, Y, X)`` 3-D); the GT-nucleus footprint *seed_stack*
+    (uint16 cpdino nucleus instances, same shape) is carved out when
+    ``segmentation.cpdino.subtract_nuclei`` is set. Returns ``(T, D, H, W)`` uint16.
+    *seed_stack* is only read on the compute path; pass ``None`` only when the cache is
+    guaranteed to hit (see :func:`instance_cache_hit`).
+    """
+    from dynacell.evaluation.segmentation_cpdino import segment_whole_cell_cpdino
+
+    is3d = ctx.dimension == "3d"
+    spacing = _seg_spacing(ctx)
+    infer = cpdino_infer_kwargs(ctx)
+    subtract = bool(ctx.cpdino_params.get("subtract_nuclei", True))
+
+    def compute_t(t: int) -> np.ndarray:
+        seed = seed_stack[t] if seed_stack is not None else None
+        return segment_whole_cell_cpdino(
+            memb_stack[t], seed, spacing, model, subtract_nuclei=subtract, do_3d=is3d, **infer
+        )
 
     return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
 
@@ -1159,6 +1288,23 @@ def _deep_feature_cache_metadata(
         }
         if ctx.celldino_preprocess_version is not None:
             entry["preprocess_version"] = ctx.celldino_preprocess_version
+    elif kind == "morphem":
+        if ctx.morphem_model_name is None:
+            raise ValueError("morphem_model_name is required for MorphEm feature caching")
+        force_key = f"{ctx.side}_morphem"
+        artifact_label = f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]"
+        cache_kwargs = {"model_name": ctx.morphem_model_name}
+        slug = feature_slug(ctx.morphem_model_name)
+        manifest_keys = ["morphem_features", slug]
+        entry = {
+            "path": f"features/morphem/{slug}.zarr",
+            "model_name": ctx.morphem_model_name,
+            "patch_size": ctx.patch_size,
+            **ctx.source_tag,
+            "built_at": built_at_now(),
+        }
+        if ctx.morphem_preprocess_version is not None:
+            entry["preprocess_version"] = ctx.morphem_preprocess_version
     else:
         raise ValueError(f"Unknown deep-feature kind: {kind!r}")
     return force_key, artifact_label, cache_kwargs, manifest_keys, entry

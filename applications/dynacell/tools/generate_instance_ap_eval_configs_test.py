@@ -98,14 +98,14 @@ def test_audit_flags_unregistered_prediction(tmp_path) -> None:
 
 
 def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:
-    """The A549 nuclei store is the H2B manifest's test store for that plate."""
+    """The A549 nuclei store is the H2B manifest's test store (now the merged dual store)."""
     for cond in ("mock", "denv", "zikv"):
         store = a549_nuclei_store(cond)
-        assert store.endswith(".ozx") and "H2B" in store
+        assert store.endswith(".zarr") and "dual_nucl_memb" in store
 
 
 def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → watershed backend, slice 0.3, per-condition H2B nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend, slice 0.3, per-condition dual-store nuclei_gt_path."""
     conds = [
         _pz("membrane", "fnet3d_paper", "a549_trained", "a549", "mock"),
         _pz("membrane", "fcmae_vscyto3d_scratch", "joint", "a549", "zikv"),
@@ -114,11 +114,11 @@ def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
     assert leaf["target_name"] == "membrane"
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is False
-    assert leaf["segmentation"]["backend"] == "cellpose_watershed"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["slice_fraction"] == 0.3
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     for block in leaf["conditions"]:
-        assert "H2B" in block["io"]["nuclei_gt_path"]
+        assert "dual_nucl_memb" in block["io"]["nuclei_gt_path"]
         assert block["benchmark"]["dataset_ref"]["target"] == "caax"
 
 
@@ -130,18 +130,17 @@ def test_membrane_ipsc_leaf_has_no_nuclei_gt_path() -> None:
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
-def test_nucleus_leaf_is_cellpose_without_nuclei_channel() -> None:
-    """Nucleus → backend cellpose, no nuclei_channel_name, no nuclei_gt_path."""
+def test_nucleus_leaf_is_cpdino_without_nuclei_channel() -> None:
+    """Nucleus → backend cpdino, no nuclei_channel_name, no nuclei_gt_path."""
     leaf = build_leaf("nucleus", "ipsc", [_pz("nucleus", "fnet3d_paper", "ipsc_trained", "ipsc")])
-    assert leaf["segmentation"]["backend"] == "cellpose"
+    assert leaf["segmentation"]["backend"] == "cpdino"
     assert leaf["segmentation"]["slice_fraction"] == 0.5
     assert "nuclei_channel_name" not in leaf["segmentation"]
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
 
 def test_save_dir_under_instance_ap_parent() -> None:
-    """Save dirs land under the dedicated evaluations_instance_ap parent."""
+    """Save dirs land in the canonical eval leaf with a trailing instance_ap subdir."""
     p = _pz("nucleus", "fnet3d_paper", "a549_trained", "a549", "mock")
-    sd = save_dir_for(p)
-    assert "evaluations_instance_ap" in sd.parts
-    assert sd.name == "eval_fnet3d_a549trained_nucleus_mock"
+    sd = save_dir_for(p, dynacell_root=Path("/X"))
+    assert sd == Path("/X/nucleus/fnet3d_paper/a549/a549__mock/instance_ap")

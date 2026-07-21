@@ -549,6 +549,26 @@ def test_dynacell_gan_predict_step():
     assert prediction.shape == batch["source"].shape
 
 
+def test_dynacell_gan_sliding_window_larger_than_patch():
+    """``sliding_window`` tiles a GAN input larger than the generator's fixed
+    input_spatial_size and returns the full input spatial shape (the 640x960
+    A549 test vs 512x512 ViT generator case, scaled down)."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        predict_method="sliding_window",
+        predict_overlap=(2, 16, 16),
+    )
+    model.eval()
+    model.on_predict_start()
+    # Spatial dims larger than the generator's [8, 64, 64] to force tiling.
+    source = MetaTensor(torch.randn(1, 1, 8, 96, 128))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 1, 8, 96, 128)
+
+
 def test_dynacell_gan_validate_logs_alias(monkeypatch):
     """``on_validation_epoch_end`` logs the ``loss/validate`` weighted mean."""
     model = DynacellGAN(

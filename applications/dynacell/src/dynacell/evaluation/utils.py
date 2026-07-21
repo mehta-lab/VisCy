@@ -22,9 +22,10 @@ except ImportError:
     ContrastiveEncoder = None  # type: ignore[assignment, misc]
 
 try:
-    from viscy_models.foundation import CellDinoModel
+    from viscy_models.foundation import CellDinoModel, MorphEmModel
 except ImportError:
     CellDinoModel = None  # type: ignore[assignment, misc]
+    MorphEmModel = None  # type: ignore[assignment, misc]
 
 matplotlib.use("Agg")
 from pathlib import Path
@@ -56,6 +57,15 @@ def _require_cell_dino():
     if CellDinoModel is None:
         raise ImportError(
             "viscy_models.foundation.CellDinoModel is required for CellDinoFeatureExtractor. "
+            "Install the in-tree workspace package via `uv sync --all-packages --all-extras` "
+            "from the VisCy repo root, or `pip install -e packages/viscy-models`."
+        )
+
+
+def _require_morphem():
+    if MorphEmModel is None:
+        raise ImportError(
+            "viscy_models.foundation.MorphEmModel is required for MorphEmFeatureExtractor. "
             "Install the in-tree workspace package via `uv sync --all-packages --all-extras` "
             "from the VisCy repo root, or `pip install -e packages/viscy-models`."
         )
@@ -277,6 +287,82 @@ class CellDinoFeatureExtractor:
             chunk = np.stack(images[i : i + batch_size], axis=0)
             batch = torch.as_tensor(chunk, device=self.device, dtype=torch.float32)[:, None, ...]
             with torch.inference_mode():
+                features, _ = self.model(batch)
+            out_chunks.append(features)
+        return torch.cat(out_chunks, dim=0)
+
+
+class MorphEmFeatureExtractor:
+    """MorphEm (CaicedoLab/MorphEm, DINO ViT-S/16 on microscopy) embedder for cell images.
+
+    Wraps :class:`viscy_models.foundation.MorphEmModel` so the eval pipeline
+    can use it via the same ``extract_features(image_2d)`` contract as the
+    DINOv3 / DynaCLR / CELL-DINO extractors. Unlike :class:`CellDinoModel`,
+    ``MorphEmModel.forward`` does **not** normalize inline, so this extractor
+    calls :meth:`viscy_models.foundation.MorphEmModel.preprocess_2d`
+    explicitly (per-image z-score then resize to 224) before the backbone.
+    """
+
+    # Version tag for the input-side preprocessing recipe. Stored under
+    # ``artifacts.morphem_features.<slug>.preprocess_version`` in the cache
+    # manifest. Current recipe is per-image per-channel spatial z-score
+    # (PerImageNormalize) then bilinear resize to 224, applied in
+    # :meth:`viscy_models.foundation.MorphEmModel.preprocess_2d`. Bump on any
+    # future change so cached features auto-invalidate.
+    PREPROCESS_VERSION = "per_image_norm_v1"
+
+    def __init__(self, pretrained_model_name: str, img_size: int = 224):
+        """Load MorphEm from a HuggingFace hub id (or local snapshot dir).
+
+        Parameters
+        ----------
+        pretrained_model_name :
+            HuggingFace id (``"CaicedoLab/MorphEm"``) or a local snapshot
+            directory; resolved from the shared ``HF_HUB_CACHE``.
+        img_size :
+            Spatial size the model interpolates inputs to, by default 224.
+        """
+        _require_morphem()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = MorphEmModel(model_name=pretrained_model_name, img_size=img_size, freeze=True)
+        self.model.to(device)
+        self.model.eval()
+        self.device = device
+
+    def extract_features(self, image: np.ndarray) -> torch.Tensor:
+        """Extract the channel-mean CLS token from a 2-D image patch.
+
+        Parameters
+        ----------
+        image :
+            2-D array (H, W); wrapped to ``(1, 1, H, W)`` so MorphEm treats
+            it as a single-channel, single-batch input.
+
+        Returns
+        -------
+        torch.Tensor
+            Batch embedding of shape ``(1, D)`` (one row; ``D`` = 384 for the
+            ViT-S/16 backbone), matching the ``(N, D)`` extractor contract.
+        """
+        x = torch.as_tensor(image, device=self.device, dtype=torch.float32)[None, None, ...]
+        with torch.inference_mode():
+            x = self.model.preprocess_2d(x)
+            features, _ = self.model(x)
+        return features
+
+    def extract_features_batch(self, images: list[np.ndarray], batch_size: int = 32) -> torch.Tensor:
+        """Run MorphEm over a batch of 2-D crops in one or more chunks.
+
+        Stacks the crops to ``(N, 1, H, W)`` and chunks at ``batch_size`` to
+        bound VRAM; each chunk is per-image z-scored + resized before the
+        ViT-S/16 backbone runs.
+        """
+        out_chunks: list[torch.Tensor] = []
+        for i in range(0, len(images), batch_size):
+            chunk = np.stack(images[i : i + batch_size], axis=0)
+            batch = torch.as_tensor(chunk, device=self.device, dtype=torch.float32)[:, None, ...]
+            with torch.inference_mode():
+                batch = self.model.preprocess_2d(batch)
                 features, _ = self.model(batch)
             out_chunks.append(features)
         return torch.cat(out_chunks, dim=0)

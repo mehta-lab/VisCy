@@ -50,4 +50,4 @@ fi
 # leak the preflight values into the training srun.
 unset MASTER_ADDR MASTER_PORT
 
-srun uv run python -m dynacell @@mode --config @@resolved_config
+srun uv run python -m dynacell @@mode --config @@resolved_config@@resume_arg

@@ -17,7 +17,7 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.cache import FeatureKind
+from dynacell.evaluation.cache import FeatureKind, StaleCacheError
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -45,8 +45,11 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
+    cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
+    fov_cpdino_nucleus_instances,
+    fov_cpdino_whole_cell_instances,
     fov_deep_features,
     fov_masks,
     fov_nucleus_instances,
@@ -105,6 +108,15 @@ def _cp_dropzero_zscore(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[n
     Returns ``(np.empty(...), np.empty(...))`` when all columns drop, so
     the caller can short-circuit and emit a NaN row.
     """
+    if pred_raw.ndim == 2 and target_raw.ndim == 2 and pred_raw.shape[1] and target_raw.shape[1]:
+        if pred_raw.shape[1] != target_raw.shape[1]:
+            raise StaleCacheError(
+                f"CP feature dimension mismatch: pred has {pred_raw.shape[1]} columns, "
+                f"GT has {target_raw.shape[1]}. A CP feature cache was built with a different "
+                "recipe (e.g. a GLCM toggle or a CP_FEATURE_VERSION change without a cache "
+                "rebuild). Rebuild with force_recompute.gt_cp=true and/or pred_cp=true "
+                "(or force_recompute.all=true)."
+            )
     non_zero_cols = ~np.all(target_raw == 0, axis=0)
     pred_mat = pred_raw[:, non_zero_cols]
     target_mat = target_raw[:, non_zero_cols]
@@ -139,6 +151,7 @@ def _fov_pred_features_per_t(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    morphem_feature_extractor,
     patch_size: int,
     spacing,
     z_slabs: list[slice | None] | None = None,
@@ -185,6 +198,19 @@ def _fov_pred_features_per_t(
                 if celldino_feature_extractor is not None
                 else None
             ),
+            "morphem": (
+                fov_deep_features(
+                    pred_cache_ctx,
+                    pos_name,
+                    predict,
+                    cell_segmentation,
+                    morphem_feature_extractor,
+                    "morphem",
+                    z_slabs=z_slabs,
+                )
+                if morphem_feature_extractor is not None
+                else None
+            ),
         }
     t_count = predict.shape[0]
     # Single per-t pass: build crops once per timepoint, fan out to every
@@ -194,6 +220,7 @@ def _fov_pred_features_per_t(
     dinov3: list[np.ndarray] = []
     dynaclr: list[np.ndarray] = []
     celldino: list[np.ndarray] | None = [] if celldino_feature_extractor is not None else None
+    morphem: list[np.ndarray] | None = [] if morphem_feature_extractor is not None else None
     use_gpu = pred_cache_ctx.use_gpu
     for t in range(t_count):
         cp.append(
@@ -213,7 +240,9 @@ def _fov_pred_features_per_t(
         dynaclr.append(features_from_crops(crops_t, dynaclr_feature_extractor))
         if celldino is not None:
             celldino.append(features_from_crops(crops_t, celldino_feature_extractor))
-    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino}
+        if morphem is not None:
+            morphem.append(features_from_crops(crops_t, morphem_feature_extractor))
+    return {"cp": cp, "dinov3": dinov3, "dynaclr": dynaclr, "celldino": celldino, "morphem": morphem}
 
 
 def _save_embeddings(save_dir: Path, groups: dict[str, tuple[list, list, list]]) -> None:
@@ -323,6 +352,7 @@ class FovResult:
     dinov3: _BackboneLists = field(default_factory=_BackboneLists)
     dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
     celldino: _BackboneLists = field(default_factory=_BackboneLists)
+    morphem: _BackboneLists = field(default_factory=_BackboneLists)
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
@@ -437,8 +467,13 @@ def _validate_instance_ap_config(config: DictConfig) -> None:
     - ``backend='cellpose_watershed'`` requires ``target_name='membrane'``, a
       non-null ``segmentation.nuclei_channel_name`` (the GT watershed seeds), and
       ``compute_instance_ap=true`` (whole-cell AP is the backend's sole purpose).
+    - ``backend='cpdino'`` (the default instance backend) serves both targets:
+      ``target_name='nucleus'`` (direct) and ``target_name='membrane'`` (whole-cell +
+      nucleus carve, which needs ``segmentation.nuclei_channel_name`` for the carve
+      seeds). Both require ``compute_instance_ap=true``.
     - ``compute_instance_ap=true`` requires an instance-producing pair:
-      ``(cellpose_watershed, membrane)`` or ``(cellpose, nucleus)``.
+      ``(cpdino, {nucleus, membrane})``, ``(cellpose_watershed, membrane)`` or
+      ``(cellpose, nucleus)``.
     """
     backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
@@ -456,13 +491,27 @@ def _validate_instance_ap_config(config: DictConfig) -> None:
         if not compute_instance_ap:
             raise ValueError("segmentation.backend='cellpose_watershed' requires compute_instance_ap=true")
 
+    if backend == "cpdino":
+        if target_name not in ("nucleus", "membrane"):
+            raise ValueError("segmentation.backend='cpdino' requires target_name in {'nucleus', 'membrane'}")
+        if target_name == "membrane" and nuclei_channel is None:
+            raise ValueError(
+                "segmentation.backend='cpdino' with target_name='membrane' requires "
+                "segmentation.nuclei_channel_name (the GT-plate channel for the nucleus carve seeds)"
+            )
+        if not compute_instance_ap:
+            raise ValueError("segmentation.backend='cpdino' requires compute_instance_ap=true")
+
     if compute_instance_ap:
-        valid = (backend == "cellpose_watershed" and target_name == "membrane") or (
-            backend == "cellpose" and target_name == "nucleus"
+        valid = (
+            (backend == "cpdino" and target_name in ("nucleus", "membrane"))
+            or (backend == "cellpose_watershed" and target_name == "membrane")
+            or (backend == "cellpose" and target_name == "nucleus")
         )
         if not valid:
             raise ValueError(
                 "compute_instance_ap=true requires an instance-producing backend/target: "
+                "(backend='cpdino', target_name in {'nucleus','membrane'}), "
                 "(backend='cellpose_watershed', target_name='membrane') or "
                 "(backend='cellpose', target_name='nucleus'); "
                 f"got backend={backend!r}, target_name={target_name!r}"
@@ -484,6 +533,7 @@ def _process_one_fov(
     dinov3_feature_extractor,
     dynaclr_feature_extractor,
     celldino_feature_extractor,
+    morphem_feature_extractor,
     microssim_sim,
     predict_cached=None,
     target_cached=None,
@@ -499,11 +549,13 @@ def _process_one_fov(
         build_focus_slabs,
         read_focus_compute_config,
         read_focus_slab_config,
-        resolve_focus_planes,
+        resolve_focus_instance_planes,
+        slab_mip,
     )
     from dynacell.evaluation.instance_metrics import instance_average_precision
     from dynacell.evaluation.segmentation import segment
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
+    from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
     from dynacell.evaluation.segmentation_whole_cell import slice_index
 
     timings_start = len(get_timings())
@@ -569,25 +621,31 @@ def _process_one_fov(
             target_cells, predict_cells = target, predict
         else:
             sel = OmegaConf.select(config, "segmentation.slice_selection", default="frac")
+            slab_hw = (
+                int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)) if sel == "focus" else 0
+            )
             if sel == "focus":
-                # Single in-focus plane per FOV (still 2D, no slab). Same z applied to
-                # GT, prediction, and nuclei seeds. From precomputed focus_slice zattrs
-                # when present, else computed from the phase channel and cached in
-                # io.gt_cache_dir — so it works on read-only published .ozx.
-                focus_ch = str(OmegaConf.select(config, "segmentation.focus_channel_name", default="Phase3D"))
-                fc = read_focus_compute_config(config, channel_name=focus_ch)
-                z_idx = resolve_focus_planes(
-                    pos_gt,
-                    t_count=T,
-                    compute=fc,
-                    cache_dir=OmegaConf.select(config, "io.gt_cache_dir", default=None),
-                    pos_name=pos_name_pred,
+                # In-focus plane per FOV; the same z (+ optional +/-slab_hw MIP) is applied to
+                # GT, prediction, and nuclei seeds. Default anchor is the plane of maximum
+                # nuclear foreground area (widest cross-section) — robust to the phase-midband
+                # edge artifacts on confocal iPSC. See focus.resolve_focus_instance_planes.
+                if str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area")) == "nucleus_area":
+                    if config.target_name == "nucleus":
+                        nucleus_vol = target  # GT nucleus fluorescence (T, Z, Y, X)
+                    else:  # membrane: nucleus channel from the GT nuclei source (cross-store on A549)
+                        nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+                        nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
+                        nucleus_vol = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])
+                else:
+                    nucleus_vol = None
+                z_idx = resolve_focus_instance_planes(
+                    config, t_count=T, pos_gt=pos_gt, pos_name=pos_name_pred, nucleus_vol=nucleus_vol
                 )
             else:
                 frac = float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30))
                 z_idx = [slice_index(target[t], selection=sel, fraction=frac) for t in range(T)]
-            target_cells = np.stack([target[t, z_idx[t]] for t in range(T)])  # (T, Y, X)
-            predict_cells = np.stack([predict[t, z_idx[t]] for t in range(T)])
+            target_cells = slab_mip(target, z_idx, slab_hw)  # (T, Y, X)
+            predict_cells = slab_mip(predict, z_idx, slab_hw)
         if backend == "cellpose_watershed":
             nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
             # GT nuclei seeds come from a separate store (pos_nuclei) when the GT
@@ -597,7 +655,7 @@ def _process_one_fov(
             # plate, byte-identical to the single-store path.
             nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
             nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])  # (T, Z, Y, X)
-            nuclei_cells = nuclei if is3d else np.stack([nuclei[t, z_idx[t]] for t in range(T)])
+            nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
             # Seed preflight: compute GT-nuclei watershed seeds only when at least
             # one side will actually run segment_whole_cell (a disabled cache or a
             # manifest-invalidated/forced slot counts as a miss).
@@ -621,6 +679,46 @@ def _process_one_fov(
                 pred_cells = fov_whole_cell_instances(
                     pred_cache_ctx, pos_name_pred, predict_cells, nuclei_cells, seed_stack
                 )
+        elif backend == "cpdino":
+            if config.target_name == "membrane":
+                # Whole-cell: cpdino segments the cell directly from the membrane channel
+                # (replaces the nuclei-seed + EDT watershed), then carves the nucleus. The
+                # carve seeds are cpdino instances of the GT nucleus channel — from a
+                # separate store (pos_nuclei) when GT nuclei live apart from the membrane
+                # (A549 H2B_*.ozx), else pos_gt (iPSC cell.zarr). Both GT and pred cells
+                # carve the same GT-nucleus footprint (byte-consistent with watershed).
+                nuclei_channel = OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None)
+                nuclei_source = pos_nuclei if pos_nuclei is not None else pos_gt
+                nuclei = np.asarray(nuclei_source.data[:, nuclei_source.get_channel_index(nuclei_channel)])
+                nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
+                gt_will_compute = not cache_ctx.enabled or not instance_cache_hit(cache_ctx, pos_name_pred)
+                pred_will_compute = not pred_cache_ctx.enabled or not instance_cache_hit(pred_cache_ctx, pos_name_pred)
+                seed_stack = None
+                if gt_will_compute or pred_will_compute:
+                    seg_spacing = (
+                        tuple(config.pixel_metrics.spacing) if is3d else tuple(config.pixel_metrics.spacing[-2:])
+                    )
+                    infer = cpdino_infer_kwargs(cache_ctx)
+                    with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                        seed_stack = np.stack(
+                            [
+                                segment_cpdino_instances(nuclei_cells[t], seg_spacing, seg_model, do_3d=is3d, **infer)
+                                for t in range(T)
+                            ]
+                        )
+                with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    gt_cells = fov_cpdino_whole_cell_instances(
+                        cache_ctx, pos_name_pred, target_cells, seed_stack, seg_model
+                    )
+                with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    pred_cells = fov_cpdino_whole_cell_instances(
+                        pred_cache_ctx, pos_name_pred, predict_cells, seed_stack, seg_model
+                    )
+            else:  # nucleus: cpdino on the nucleus channel, independent per side
+                with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    gt_cells = fov_cpdino_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
+                with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                    pred_cells = fov_cpdino_nucleus_instances(pred_cache_ctx, pos_name_pred, predict_cells, seg_model)
         else:  # backend == "cellpose": independent per-side nucleus instances
             with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 gt_cells = fov_nucleus_instances(cache_ctx, pos_name_pred, target_cells, seg_model)
@@ -639,6 +737,7 @@ def _process_one_fov(
     gt_dinov3_per_t = None
     gt_dynaclr_per_t = None
     gt_celldino_per_t = None
+    gt_morphem_per_t = None
     pred_per_t = None
     if config.compute_feature_metrics:
         with region_timer("cp_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
@@ -674,6 +773,17 @@ def _process_one_fov(
                     "celldino",
                     z_slabs=z_slabs,
                 )
+        if morphem_feature_extractor is not None:
+            with region_timer("deep_gt_morphem", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
+                gt_morphem_per_t = fov_deep_features(
+                    cache_ctx,
+                    pos_name_pred,
+                    target,
+                    cell_segmentation,
+                    morphem_feature_extractor,
+                    "morphem",
+                    z_slabs=z_slabs,
+                )
         with region_timer("features_pred_per_t", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
             pred_per_t = _fov_pred_features_per_t(
                 pred_cache_ctx,
@@ -683,6 +793,7 @@ def _process_one_fov(
                 dinov3_feature_extractor,
                 dynaclr_feature_extractor,
                 celldino_feature_extractor,
+                morphem_feature_extractor,
                 config.feature_metrics.patch_size,
                 config.pixel_metrics.spacing,
                 z_slabs=z_slabs,
@@ -697,6 +808,7 @@ def _process_one_fov(
     dinov3 = _BackboneLists()
     dynaclr = _BackboneLists()
     celldino = _BackboneLists()
+    morphem = _BackboneLists()
 
     # Bulk-upload predict/target once per FOV so compute_pixel_metrics' per-T
     # ascupy is a no-op via cupy-on-cupy. mask / feature / microssim paths
@@ -777,6 +889,7 @@ def _process_one_fov(
                 pred_dinov3 = pred_per_t["dinov3"][t]
                 pred_dynaclr = pred_per_t["dynaclr"][t]
                 pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
+                pred_morphem = pred_per_t["morphem"][t] if pred_per_t["morphem"] is not None else None
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                 if pred_cp.size and gt_cp_t.size:
                     pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
@@ -791,12 +904,18 @@ def _process_one_fov(
                     pairwise_metrics.update(
                         compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
                     )
+                if pred_morphem is not None:
+                    pairwise_metrics.update(
+                        compute_feature_similarity_pairwise(pred_morphem, gt_morphem_per_t[t], "MorphEm")
+                    )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
                 _extend_backbone(cp, pred_cp, gt_cp_t, pos_name_pred, t)
                 _extend_backbone(dinov3, pred_dinov3, gt_dinov3_per_t[t], pos_name_pred, t)
                 _extend_backbone(dynaclr, pred_dynaclr, gt_dynaclr_per_t[t], pos_name_pred, t)
                 gt_celldino_t = gt_celldino_per_t[t] if pred_celldino is not None else None
                 _extend_backbone(celldino, pred_celldino, gt_celldino_t, pos_name_pred, t)
+                gt_morphem_t = gt_morphem_per_t[t] if pred_morphem is not None else None
+                _extend_backbone(morphem, pred_morphem, gt_morphem_t, pos_name_pred, t)
 
         maybe_empty_cuda_cache(t, cuda_empty_cache_every_n_timepoints)
 
@@ -830,6 +949,7 @@ def _process_one_fov(
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
         timings=get_timings()[timings_start:],
     )
 
@@ -913,6 +1033,7 @@ def _worker_setup(config: DictConfig) -> None:
             "dinov3": models.dinov3,
             "dynaclr": models.dynaclr,
             "celldino": models.celldino,
+            "morphem": models.morphem,
             "cache_ctx": cache_ctx,
             "pred_cache_ctx": pred_cache_ctx,
         }
@@ -926,14 +1047,17 @@ def _separate_nuclei_path(config: DictConfig) -> str | None:
     cross-store case — membrane in ``CAAX_*.ozx``, nuclei in ``H2B_*.ozx``), else
     ``None`` (iPSC single-store ``cell.zarr`` — nuclei read from the GT plate).
 
-    Only the ``cellpose_watershed`` instance-AP path consumes a separate GT-nuclei
-    store; for any other backend ``nuclei_gt_path`` is an inert ``io`` field, so the
-    helper returns ``None`` rather than opening + position-validating a store that
-    will never be read.
+    Only the whole-cell **membrane** instance-AP paths (``cellpose_watershed`` and
+    ``cpdino``, which carve the nucleus footprint) consume a separate GT-nuclei store.
+    For nucleus/ER/mito targets — or any other backend — ``nuclei_gt_path`` is an inert
+    ``io`` field, so the helper returns ``None`` rather than opening + position-validating
+    a store that will never be read.
     """
+    if OmegaConf.select(config, "target_name", default=None) != "membrane":
+        return None
     backend = OmegaConf.select(config, "segmentation.backend", default="supermodel")
     compute_instance_ap = bool(getattr(config, "compute_instance_ap", False))
-    if not (compute_instance_ap and backend == "cellpose_watershed"):
+    if not (compute_instance_ap and backend in ("cellpose_watershed", "cpdino")):
         return None
     nuclei_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
     if nuclei_path is None or str(nuclei_path) == str(config.io.gt_path):
@@ -1010,6 +1134,7 @@ def _worker_run_fov(
             state["dinov3"],
             state["dynaclr"],
             state["celldino"],
+            state["morphem"],
             microssim_sim,
         )
 
@@ -1079,6 +1204,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         dinov3_feature_extractor = models.dinov3
         dynaclr_feature_extractor = models.dynaclr
         celldino_feature_extractor = models.celldino
+        morphem_feature_extractor = models.morphem
 
         cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
 
@@ -1220,6 +1346,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 }
                 if celldino_feature_extractor is not None:
                     deep_extractors["celldino"] = celldino_feature_extractor
+                if morphem_feature_extractor is not None:
+                    deep_extractors["morphem"] = morphem_feature_extractor
                 flush_threshold = int(
                     OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256)
                 )
@@ -1325,6 +1453,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dinov3_feature_extractor,
                         dynaclr_feature_extractor,
                         celldino_feature_extractor,
+                        morphem_feature_extractor,
                         microssim_sim,
                         predict_cached=cached_pair[0],
                         target_cached=cached_pair[1],
@@ -1433,6 +1562,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
             if celldino_feature_extractor is not None:
                 deep_tracks.append(("CellDINO", "celldino"))
+            if morphem_feature_extractor is not None:
+                deep_tracks.append(("MorphEm", "morphem"))
             for display_name, key in deep_tracks:
                 bb = parent_lists[key]
                 if bb.pred_feats:
@@ -1484,6 +1615,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
             if celldino_feature_extractor is not None:
                 expected_prefixes.append("CellDINO")
+            if morphem_feature_extractor is not None:
+                expected_prefixes.append("MorphEm")
             for name in expected_prefixes:
                 if f"Dataset_{name}_FID" not in dataset_row:
                     raw = {
@@ -1497,6 +1630,8 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             embedding_groups: dict[str, tuple] = {}
             for key in _BACKBONE_KEYS:
                 if key == "celldino" and celldino_feature_extractor is None:
+                    continue
+                if key == "morphem" and morphem_feature_extractor is None:
                     continue
                 bb = parent_lists[key]
                 embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)

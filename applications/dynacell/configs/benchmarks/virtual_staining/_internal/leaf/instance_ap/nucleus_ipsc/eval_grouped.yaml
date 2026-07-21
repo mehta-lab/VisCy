@@ -6,7 +6,7 @@ compute_feature_metrics: false
 compute_microssim: false
 use_gpu: true
 segmentation:
-  backend: cellpose
+  backend: cpdino
   slice_fraction: 0.5
 io:
   require_complete_cache: false
