@@ -224,33 +224,32 @@ def _render_env_block(env: dict | None) -> str:
     return "\n".join(lines)
 
 
-def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
-    """Resolve the best-by-monitor checkpoint in ``ckpt_dir``.
+def resolve_best_ckpt(ckpt_dir: Path) -> Path | None:
+    """Best-by-monitor checkpoint in ``ckpt_dir``, or None if none is resolvable.
 
-    Reads ``best_model_path`` from the ``ModelCheckpoint`` callback state saved
-    inside ``last.ckpt`` (the training recipe uses ``monitor: loss/validate``,
-    ``save_top_k: 5`` with the default ``epoch=N-step=M`` filename, so the loss
-    is not in the filename and the checkpoint state is the authoritative source).
-    Falls back to the highest-epoch ``epoch=*.ckpt`` when the state is missing or
-    points at a pruned file.
+    Reads ``best_model_path`` from the ``ModelCheckpoint`` callback state in the most
+    recently modified ``last*.ckpt``. A resumed run leaves ``last.ckpt`` alongside
+    ``last-vN.ckpt``; the newest is the authoritative training state — keying on
+    ``last.ckpt`` alone mis-resolves a resumed run to its FIRST segment's best (e.g.
+    the messy legacy iPSC dirs, where ``last.ckpt`` is epoch 1 but ``last-v5.ckpt`` is
+    epoch 183). The training recipe uses ``monitor: loss/validate``, ``save_top_k: 5``
+    with the default ``epoch=N-step=M`` filename, so the loss is not in the filename and
+    the checkpoint state is the authoritative source.
+
+    ``best_model_path`` is an ABSOLUTE path into the directory where training ran, so
+    after a dir move/rename (e.g. the canonical-path migration) it is stale; the best
+    file travels with the dir, so its basename under ``ckpt_dir`` is authoritative —
+    prefer that, then the literal stored path, then the highest-epoch ``epoch=*.ckpt``.
     """
-    last = ckpt_dir / "last.ckpt"
-    if last.is_file():
-        import torch  # lazy: only imported for --ckpt best resolution
+    lasts = sorted(ckpt_dir.glob("last*.ckpt"), key=lambda p: p.stat().st_mtime)
+    if lasts:
+        import torch  # lazy: only imported for best-ckpt resolution
 
-        state = torch.load(last, map_location="cpu", weights_only=False)
+        state = torch.load(lasts[-1], map_location="cpu", weights_only=False)
         for key, val in state.get("callbacks", {}).items():
             if "ModelCheckpoint" in str(key) and isinstance(val, dict):
                 best = val.get("best_model_path")
                 if best:
-                    # ``best_model_path`` is stored as an ABSOLUTE path into the
-                    # directory where training ran. After a checkpoint dir is
-                    # moved or renamed (e.g. the canonical-path migration) that
-                    # path is stale, and without re-basing this would silently
-                    # fall through to the highest-epoch (more overfit) ckpt. The
-                    # best ckpt file travels with the dir, so its basename under
-                    # ``ckpt_dir`` is authoritative; prefer that, then the literal
-                    # stored path, then the highest-epoch fallback below.
                     rebased = ckpt_dir / Path(best).name
                     if rebased.is_file():
                         return rebased
@@ -263,11 +262,17 @@ def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
         m = re.match(r"epoch=(\d+)", p.name)
         if m is not None:
             epoch_ckpts.append((int(m.group(1)), p))
-    if epoch_ckpts:
-        return max(epoch_ckpts, key=lambda t: t[0])[1]
-    raise SystemExit(
-        f"--ckpt best: no resolvable checkpoint in {ckpt_dir} (no last.ckpt best_model_path, no epoch=*.ckpt)"
-    )
+    return max(epoch_ckpts, key=lambda t: t[0])[1] if epoch_ckpts else None
+
+
+def _resolve_best_ckpt(ckpt_dir: Path) -> Path:
+    """Best-by-monitor checkpoint in ``ckpt_dir``; raise if none is resolvable."""
+    best = resolve_best_ckpt(ckpt_dir)
+    if best is None:
+        raise SystemExit(
+            f"--ckpt best: no resolvable checkpoint in {ckpt_dir} (no last*.ckpt best_model_path, no epoch=*.ckpt)"
+        )
+    return best
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -50,7 +50,7 @@ trainer:
   logger:
     init_args:
       name: FNet3D_iPSC_MEMB_paper
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_paper
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -58,14 +58,16 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_paper/checkpoints
 
 launcher:
   job_name: FNet3DPaper_MEMB
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/memb/fnet3d_paper
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_paper
   # cell.zarr-backed preload (same plate as nucleus) puts MaxVMSize over
   # the shared 256G cap; bump to match nucleus.
   sbatch:

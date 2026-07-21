@@ -20,7 +20,7 @@ model:
     # Best loss/validate_ema checkpoint, modernized Run-D 40ep run (job
     # 33501549, converged early at epoch 15). predict_step uses generator_ema
     # (use_ema_at_predict=True default).
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/nucl/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=15-step=51200.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix3d_unetvit/checkpoints/epoch=15-step=51200.ckpt
 
 data:
   init_args:
@@ -39,8 +39,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_pix2pix3d_unetvit.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/ipsc/ipsc/prediction.zarr
 
 launcher:
   job_name: pix2pix3d_unetvit_PRED_NUCL
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/ipsc/ipsc

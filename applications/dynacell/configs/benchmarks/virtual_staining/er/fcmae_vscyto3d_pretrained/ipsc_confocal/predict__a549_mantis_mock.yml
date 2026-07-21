@@ -26,7 +26,7 @@ model:
     # ep 123 / val_loss 0.40979 (49-epoch plateau, scancelled at 3d 1h elapsed).
     # Hardlink alias at run_root; the underlying checkpoints/epoch=123-step=32736.ckpt
     # is also preserved in checkpoints_frozen_ep123_20260501_004946/.
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fcmae_vscyto3d_pretrained_ws8500/best_ep123_val0.40979.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto3d_pretrained/checkpoints/epoch=123-step=32736.ckpt
 
 data:
   init_args:
@@ -43,8 +43,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fcmae_vscyto3d_pretrained__sec61b_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_pretrained/ipsc/a549__mock/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_PRED_SEC61B_ON_A549_sec61b_mock
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_pretrained/ipsc/a549__mock

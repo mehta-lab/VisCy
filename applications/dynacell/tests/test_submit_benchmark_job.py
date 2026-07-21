@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -206,6 +207,29 @@ def test_resolve_best_ckpt_rebases_moved_dir(tmp_path):
         tmp_path / "last.ckpt",
     )
     assert sbj._resolve_best_ckpt(tmp_path) == best
+
+
+def test_resolve_best_ckpt_prefers_newest_last_v(tmp_path):
+    """A resumed run leaves last.ckpt + last-vN.ckpt; the newest (by mtime) is
+    authoritative. Keying on last.ckpt alone mis-resolves to the first segment's best
+    (the messy legacy iPSC dirs: last.ckpt is epoch 1, last-v5.ckpt is epoch 183)."""
+    torch = pytest.importorskip("torch")
+    stale_best = tmp_path / "epoch=1-step=10.ckpt"
+    stale_best.write_bytes(b"x")
+    true_best = tmp_path / "epoch=183-step=1830.ckpt"
+    true_best.write_bytes(b"x")
+    torch.save(
+        {"callbacks": {"ModelCheckpoint{'monitor': 'loss/validate'}": {"best_model_path": str(stale_best)}}},
+        tmp_path / "last.ckpt",
+    )
+    torch.save(
+        {"callbacks": {"ModelCheckpoint{'monitor': 'loss/validate'}": {"best_model_path": str(true_best)}}},
+        tmp_path / "last-v5.ckpt",
+    )
+    # make last.ckpt older so last-v5.ckpt is the newest by mtime
+    older = (tmp_path / "last-v5.ckpt").stat().st_mtime - 100
+    os.utime(tmp_path / "last.ckpt", (older, older))
+    assert sbj.resolve_best_ckpt(tmp_path) == true_best
 
 
 def test_rendered_sbatch_has_preflight_srun_absolute_path(rendered_celldiff_sbatch):
