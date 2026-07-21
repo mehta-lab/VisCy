@@ -54,6 +54,8 @@ model:
         temperature: 0.2
     lr: 0.00002
     pca_color_keys: "[perturbation,experiment,marker]"
+    # PCA pairplot cadence (overrides the base recipe's 10).
+    log_embeddings_every_n_epochs: 5
     log_negative_metrics_every_n_epochs: 2
     example_input_array_shape: [1, 4, 24, 64, 64]
 
