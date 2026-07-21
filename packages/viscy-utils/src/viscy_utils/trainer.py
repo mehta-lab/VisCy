@@ -30,6 +30,7 @@ class VisCyTrainer(Trainer):
         compute_fg_masks: bool = False,
         fg_mask_channels: list[str] | None = None,
         fg_mask_key: str = "fg_mask",
+        csv_dir: Path | None = None,
         model: LightningModule | None = None,
     ):
         """Compute dataset statistics for normalization.
@@ -57,11 +58,19 @@ class VisCyTrainer(Trainer):
             that had Otsu thresholds computed (``channel_names``).
         fg_mask_key : str, optional
             Zarr array key for the mask, by default ``"fg_mask"``.
+        csv_dir : Path or None, optional
+            If given, statistics are written to a per-store CSV sidecar
+            under this directory instead of into the store's ``.zattrs``,
+            and the store is opened read-only. Use for datasets mounted
+            without write access. Incompatible with ``compute_fg_masks``,
+            which writes a mask array into the store. By default None.
         model : LightningModule, optional
             Ignored placeholder, by default None.
         """
         if model is not None:
             _logger.warning("Ignoring model configuration during preprocessing.")
+        if csv_dir is not None and compute_fg_masks:
+            raise ValueError("compute_fg_masks writes into the store and is incompatible with csv_dir.")
         with open_ome_zarr(data_path, layout="hcs", mode="r") as dataset:
             channel_indices = (
                 [dataset.channel_names.index(c) for c in channel_names] if channel_names != -1 else channel_names
@@ -76,6 +85,7 @@ class VisCyTrainer(Trainer):
             grid_spacing=block_size,
             compute_otsu=compute_otsu,
             otsu_grid_spacing=otsu_grid_spacing,
+            csv_dir=csv_dir,
         )
         if compute_fg_masks:
             if not compute_otsu:

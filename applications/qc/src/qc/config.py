@@ -69,9 +69,15 @@ class QCConfig(BaseModel):
         Configuration for focus slice detection. None to skip.
     annotation : AnnotationConfig or None
         Channel and experiment metadata annotation. None to skip.
+    csv_dir : str or None
+        If given, QC metric results are written to a per-store CSV sidecar
+        under this directory instead of into the store's ``.zattrs``, and
+        the store is opened read-only. Use for datasets mounted without
+        write access. By default None (write to ``.zattrs`` as usual).
     """
 
     data_path: str
     num_workers: int = 4
     focus_slice: FocusSliceConfig | None = None
     annotation: AnnotationConfig | None = None
+    csv_dir: str | None = None

@@ -7,6 +7,7 @@ import re
 import subprocess
 
 import click
+from viscy_data.meta_csv import backfill_zattrs_to_csv
 
 from airtable_utils.prepare import (
     PrepareConfig,
@@ -15,6 +16,7 @@ from airtable_utils.prepare import (
     check_zarr_version,
     discover_channels,
     discover_wells,
+    discover_zarr_stores,
     filter_raw_channels,
     format_status_table,
     generate_concatenate_script,
@@ -100,7 +102,7 @@ def run(dataset_name: str, config_path: str, dry_run: bool, force: bool) -> None
         ver = check_zarr_version(vast["zarr"])
         is_v3 = ver["zarr_format"] == 3
         is_ome05 = ver["ome_version"] == "0.5"
-        is_preprocessed = check_preprocessed(vast["zarr"])
+        is_preprocessed = check_preprocessed(vast["zarr"], csv_dir=cfg.csv_dir)
 
         if is_v3 and is_ome05 and is_preprocessed:
             click.echo(
@@ -149,7 +151,7 @@ def run(dataset_name: str, config_path: str, dry_run: bool, force: bool) -> None
     click.echo(f"  Wrote: {crop_concat_path}")
 
     # 8. Generate qc_config.yml
-    qc_cfg = generate_qc_config(vast["zarr"], cfg.qc)
+    qc_cfg = generate_qc_config(vast["zarr"], cfg.qc, csv_dir=cfg.csv_dir)
     qc_config_path = vast["output_dir"] / "qc_config.yml"
     write_yaml(qc_cfg, qc_config_path)
     click.echo(f"  Wrote: {qc_config_path}")
@@ -192,6 +194,7 @@ def run(dataset_name: str, config_path: str, dry_run: bool, force: bool) -> None
         workspace_dir=cfg.workspace_dir,
         preprocess_params=cfg.preprocess,
         slurm_cfg=cfg.slurm.preprocess,
+        csv_dir=cfg.csv_dir,
     )
     preprocess_script_path = vast["output_dir"] / "03_preprocess.sh"
     preprocess_script_path.write_text(preprocess_script)
@@ -246,8 +249,98 @@ def status(dataset_names: tuple[str, ...], config_path: str) -> None:
     """Check NFS/VAST existence and version status for one or more datasets."""
     cfg = _load_prepare_config(config_path)
 
-    rows = [check_dataset_status(name, cfg.nfs_root, cfg.vast_root) for name in dataset_names]
+    rows = [check_dataset_status(name, cfg.nfs_root, cfg.vast_root, csv_dir=cfg.csv_dir) for name in dataset_names]
     click.echo(format_status_table(rows))
+
+
+@prepare.command("batch-preprocess")
+@click.argument("data_root", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to prepare config YAML.",
+)
+@click.option("--dry-run", is_flag=True, help="Generate configs/scripts without submitting SLURM jobs.")
+def batch_preprocess(data_root: str, config_path: str, dry_run: bool) -> None:
+    """Preprocess every not-yet-preprocessed dataset zarr under DATA_ROOT.
+
+    Discovers `{name}/{name}.zarr` stores under DATA_ROOT, skips any already
+    marked preprocessed in the CSV sidecar, mirrors metadata that's already
+    sitting in a store's own `.zattrs` (e.g. computed elsewhere with write
+    access, then copied here) into the CSV sidecar for free, and only
+    generates + submits QC/normalization SLURM jobs for stores with neither.
+    Safe to re-run repeatedly as new datasets appear — anything already
+    covered (via CSV or zattrs) is always skipped, so this never redoes work.
+    """
+    cfg = _load_prepare_config(config_path)
+    if cfg.csv_dir is None:
+        raise click.ClickException(
+            "batch-preprocess requires 'csv_dir' in the prepare config — datasets under "
+            "DATA_ROOT may be owned by teammates without write access to their .zattrs."
+        )
+    jobs_root = cfg.jobs_dir or cfg.csv_dir
+
+    stores = discover_zarr_stores(data_root)
+    click.echo(f"Discovered {len(stores)} dataset(s) under {data_root}.")
+
+    pending = [store for store in stores if not check_preprocessed(store, csv_dir=cfg.csv_dir)]
+
+    backfilled = []
+    todo = []
+    for store in pending:
+        if backfill_zattrs_to_csv(store, cfg.csv_dir):
+            backfilled.append(store)
+        else:
+            todo.append(store)
+
+    click.echo(
+        f"  {len(stores) - len(pending)} already in CSV sidecar, "
+        f"{len(backfilled)} backfilled from existing zattrs, {len(todo)} need SLURM jobs."
+    )
+
+    for store in todo:
+        dataset_name = store.stem
+        job_dir = jobs_root / "_jobs" / dataset_name
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        qc_config_path = job_dir / "qc_config.yml"
+        write_yaml(generate_qc_config(store, cfg.qc, csv_dir=cfg.csv_dir), qc_config_path)
+
+        qc_script_path = job_dir / "02_qc.sh"
+        qc_script_path.write_text(
+            generate_qc_slurm(dataset_name, job_dir, qc_config_path, cfg.workspace_dir, cfg.slurm.qc)
+        )
+
+        preprocess_script_path = job_dir / "03_preprocess.sh"
+        preprocess_script_path.write_text(
+            generate_preprocess_slurm(
+                dataset_name,
+                job_dir,
+                store,
+                cfg.workspace_dir,
+                cfg.preprocess,
+                cfg.slurm.preprocess,
+                csv_dir=cfg.csv_dir,
+            )
+        )
+        click.echo(f"  Wrote: {job_dir}")
+
+        if dry_run:
+            continue
+
+        result_qc = subprocess.run(["sbatch", str(qc_script_path)], capture_output=True, text=True, check=True)
+        qc_job_id = _parse_slurm_job_id(result_qc.stdout)
+        result_pp = subprocess.run(["sbatch", str(preprocess_script_path)], capture_output=True, text=True, check=True)
+        pp_job_id = _parse_slurm_job_id(result_pp.stdout)
+        click.echo(f"  {dataset_name}: QC job {qc_job_id}, preprocess job {pp_job_id}")
+
+    if dry_run:
+        click.echo("\n--dry-run: configs and scripts generated, nothing submitted.")
+    else:
+        click.echo(f"\nSubmitted jobs for {len(todo)} dataset(s).")
 
 
 def main() -> None:

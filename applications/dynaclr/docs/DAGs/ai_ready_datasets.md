@@ -45,12 +45,20 @@ tracking.zarr   (cell tracking results)
   ├──► sbatch 02_qc.sh                   # GPU (~30 min)
   │       qc run -c qc_config.yml        # focus-slice detection on Phase3D channel
   │       → writes focus_slice metadata into {dataset}.zarr
+  │         (or a CSV sidecar under csv_dir, if set — read-only stores)
   │
   └──► sbatch 03_preprocess.sh           # CPU, preempted partition (~4 hrs)
           viscy preprocess               # computes per-channel normalization stats
               --data_path {dataset}.zarr
           → writes normalization metadata into {dataset}.zarr
+            (or a CSV sidecar under csv_dir, if set — read-only stores)
 ```
+
+If `prepare_config.yaml` sets `csv_dir`, both jobs open `{dataset}.zarr`
+read-only and write to a per-store CSV sidecar under `csv_dir` instead —
+use this when VAST datasets are mounted read+execute only. See
+[training.md](training.md) for the corresponding `--csv-dir` flag on
+`preprocess-cell-index`.
 
 ## Pipeline DAG (process dependency)
 
@@ -92,6 +100,8 @@ Both write metadata back to the same zarr; their outputs are checked by
 nfs_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
 vast_root: /hpc/projects/organelle_phenotyping/datasets
 workspace_dir: /hpc/mydata/eduardo.hirata/repos/viscy
+csv_dir: null                  # optional: set to a path to preprocess read-only
+                                # datasets via CSV sidecars instead of zarr zattrs
 
 concatenate:
   channel_names: null          # null = auto-detect raw channels (Phase3D + "raw " prefix)
@@ -141,8 +151,11 @@ node or an interactive session; it blocks until biahub's internal SLURM jobs fin
 `01_concatenate.sh` completes; no need to wait for QC before running preprocess.
 - Channel auto-detection (`channel_names: null`) keeps channels with prefix `Phase3D` or `raw` .
 Virtual stains (`nuclei_prediction`, `membrane_prediction`) and deconvolved channels are excluded.
-- `check_preprocessed()` checks for `normalization` key in zarr metadata; used by `prepare status`
-and as a gate before evaluation.
+- `check_preprocessed()` checks for `normalization` key in zarr metadata (or, when `csv_dir` is set,
+for a `normalization` row in the per-store CSV sidecar); used by `prepare status` and as a gate
+before evaluation.
+- `csv_dir` is a single shared root for all datasets under one `prepare_config.yaml` — per-store
+CSVs are named from a slug of the store path, so multiple datasets can safely share one root.
 - Raw channel names written to `crop_concat.yml` are repeated once per well entry — this is a
 biahub concatenate requirement.
 
@@ -161,3 +174,74 @@ All AI-ready data lives under `/hpc/projects/organelle_phenotyping/`:
 
 Collection YAMLs use `datasets_root: /hpc/projects/organelle_phenotyping` and
 `${datasets_root}/datasets/...` placeholders — resolved at load time by `load_collection()`.
+
+## Batch preprocessing on Reef (many datasets, incremental)
+
+`prepare run` assumes Bruno's NFS-assemble → `biahub concatenate` → VAST
+pipeline. On Reef, `{name}.zarr` + `tracking.zarr` stores are usually
+Globus-copied from Bruno already assembled — there's nothing to
+concatenate, and per-file ownership varies by whoever ran the transfer
+(everyone else in the group has read-only access to those files). For this
+case, use `prepare batch-preprocess <data_root> -c prepare_config.yaml`
+instead of `prepare run` per dataset:
+
+```bash
+prepare batch-preprocess /bio/projects/compimaging/data/infectomics/imaging/datasets \
+    -c reef_prepare_config.yaml
+
+# Dry-run: generate configs/scripts without submitting
+prepare batch-preprocess /bio/projects/compimaging/data/infectomics/imaging/datasets \
+    -c reef_prepare_config.yaml \
+    --dry-run
+```
+
+It discovers every `{data_root}/{name}/{name}.zarr` store (skipping sibling
+`tracking.zarr` dirs), skips any already marked preprocessed in the CSV
+sidecar (via `check_preprocessed(..., csv_dir=...)`), and generates +
+submits `02_qc.sh`/`03_preprocess.sh`-equivalent SLURM jobs for the rest —
+**always** via `csv_dir` (required for this command), never `.zattrs`
+directly, so it works uniformly regardless of who owns a given dataset.
+Re-running it as new datasets land only processes the new ones; nothing
+already in the sidecar gets redone.
+
+Since the batch may not have write access into each dataset's own
+directory, generated `qc_config.yml`/`02_qc.sh`/`03_preprocess.sh` land
+under `{jobs_dir or csv_dir}/_jobs/{dataset_name}/` instead — a writable
+scratch location shared by everyone using the same `prepare_config.yaml`.
+
+Reef also needs an explicit `--qos` on every `sbatch` (see
+[docs/clusters/reef.md](../../../../docs/clusters/reef.md)) — set
+`slurm.qc.qos`/`slurm.preprocess.qos` in the config; unset on Bruno-style
+configs, which don't need it. Example Reef config:
+
+```yaml
+csv_dir: /bio/projects/compimaging/data/infectomics/metadata_csv
+jobs_dir: /bio/projects/compimaging/data/infectomics/metadata_csv   # optional; defaults to csv_dir
+workspace_dir: /mnt/main0/home/eduardo.hirata/repos/VisCy
+
+qc:
+  channel_names: [Phase3D]
+  NA_det: 1.35
+  lambda_ill: 0.450
+  pixel_size: 0.1494
+  device: cuda
+
+preprocess:
+  channel_names: -1
+  num_workers: 32
+  block_size: 32
+
+slurm:
+  qc:
+    partition: h100_reserved
+    gres: gpu:1
+    qos: mid
+    time: "00:30:00"
+  preprocess:
+    partition: cpu
+    qos: mid
+    time: "04:00:00"
+```
+
+`nfs_root`/`vast_root`/`concatenate` can be left at their defaults — this
+command never reads them.

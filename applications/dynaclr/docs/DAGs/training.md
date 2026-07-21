@@ -6,7 +6,8 @@ Datasets must be AI-ready before building a collection. See [ai_ready_datasets.m
 for the full data preparation pipeline (`prepare run` → concatenate → QC → preprocess).
 
 A dataset is ready when `prepare status` shows `preprocessed: yes` — meaning both
-`normalization` and `focus_slice` metadata exist in the zarr zattrs.
+`normalization` and `focus_slice` metadata exist in the zarr zattrs (or, for
+read-only stores, in the per-store CSV sidecar under `csv_dir`).
 
 ## Step-by-step detail
 
@@ -30,8 +31,10 @@ dynaclr build-cell-index \
   ▼
 dynaclr preprocess-cell-index \
     /hpc/.../collections/<collection>.parquet \
-    --focus-channel Phase3D
-  │  opens each unique FOV once from zarr zattrs:
+    --focus-channel Phase3D \
+    [--csv-dir /path/to/csv_sidecars]
+  │  opens each unique FOV once from zarr zattrs (or CSV sidecars under
+  │  --csv-dir, for read-only stores):
   │    norm_mean/std/median/iqr/max/min  — per (cell, timepoint, channel)
   │    z_focus_mean                      — per FOV (mean across timepoints)
   │    z                                 — per timepoint focus slice index
@@ -71,7 +74,7 @@ viscy fit  (GPU, hours–days)
 | Step                  | Command                                                                   | Input                                  | Output                                                    |
 | --------------------- | ------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------- |
 | Build cell index      | `dynaclr build-cell-index <collection.yml> <out.parquet> --num-workers 8` | collection YAML + zarr + tracking CSVs | parquet with TCZYX shape columns                          |
-| Preprocess cell index | `dynaclr preprocess-cell-index <parquet> --focus-channel Phase3D`         | parquet + zarr zattrs                  | parquet with norm stats, per-timepoint z, empties removed |
+| Preprocess cell index | `dynaclr preprocess-cell-index <parquet> --focus-channel Phase3D [--csv-dir <dir>]` | parquet + zarr zattrs (or CSV sidecars) | parquet with norm stats, per-timepoint z, empties removed |
 | Train (interactive)   | `uv run viscy fit --config configs/training/<model>.yml`                  | training config + parquet              | checkpoints + logs                                        |
 | Train (SLURM)         | `sbatch configs/training/<model>.sh`                                      | training config + parquet              | checkpoints + logs                                        |
 | Resume (SLURM)        | `CKPT_PATH=.../last.ckpt sbatch configs/training/<model>.sh`              | checkpoint path env var                | resumed checkpoints                                       |
@@ -151,7 +154,8 @@ Version `collection.yml` in git. The parquet is derived deterministically from:
 
 1. The collection YAML (experiment definitions, channels, wells)
 2. Tracking zarrs (cell positions)
-3. Zarr zattrs (normalization + focus stats from `viscy preprocess` + `qc run`)
+3. Zarr zattrs, or CSV sidecars for read-only stores (normalization + focus
+   stats from `viscy preprocess` + `qc run`)
 
 To reproduce: `build-cell-index` → `preprocess-cell-index` from the same collection YAML.
 
@@ -159,6 +163,7 @@ To reproduce: `build-cell-index` → `preprocess-cell-index` from the same colle
 
 - `preprocess-cell-index` overwrites the parquet in-place by default. Pass `--output` to write elsewhere.
 - `--focus-channel Phase3D` selects which channel's `per_timepoint` focus indices are written to the `z` column. Use the channel that has the sharpest axial contrast (label-free Phase3D for most experiments).
+- `--csv-dir <dir>` reads norm/focus metadata from the per-store CSV sidecars under `<dir>` instead of opening each FOV's zarr zattrs. Use this when the source stores were preprocessed with `viscy preprocess`/`qc run --csv_dir <dir>` (read-only stores) — see [ai_ready_datasets.md](ai_ready_datasets.md).
 - At training time, `ExperimentRegistry.__post_init__` reads `plate.zattrs["focus_slice"][channel]["dataset_statistics"]["z_focus_mean"]` to compute per-experiment z_ranges for patch extraction. This is the only zarr metadata read at training startup; the parquet is self-contained for all per-cell data.
 - The `z` column in the parquet is carried through to embeddings obs during predict — downstream consumers (e.g., visualization) can use it to recover the in-focus plane for each cell at each timepoint.
 - For performance tuning (num_workers, pin_memory, batch_size, augmentation placement), see [profiling.md](profiling.md) — authored after the first validated profiling sweep.

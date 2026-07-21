@@ -7,6 +7,7 @@ from scipy.ndimage import median_filter
 from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
+from viscy_data.meta_csv import build_provenance_fields, metadata_to_rows, write_meta_rows_csv
 from viscy_utils.mp_utils import get_val_stats
 
 
@@ -59,7 +60,13 @@ def _grid_sample(position, grid_spacing, channel_index):
 
 
 def generate_normalization_metadata(
-    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32, compute_otsu=False, otsu_grid_spacing=8
+    zarr_dir,
+    num_workers=4,
+    channel_ids=-1,
+    grid_spacing=32,
+    compute_otsu=False,
+    otsu_grid_spacing=8,
+    csv_dir=None,
 ):
     """Generate pixel intensity metadata for normalization.
 
@@ -83,10 +90,15 @@ def generate_normalization_metadata(
         Grid spacing for Otsu sampling, by default 8. Denser than the
         default ``grid_spacing=32`` to capture inter-cell gaps. A median
         filter is applied before thresholding to smooth noise.
+    csv_dir : str or Path or None, optional
+        If given, the store is opened read-only and statistics are written
+        to a per-store CSV sidecar under this directory instead of into
+        the store's ``.zattrs`` — for datasets mounted without write
+        access. By default None (write to ``.zattrs`` as usual).
     """
     with ngff.open_ome_zarr(
         zarr_dir,
-        mode="r+",
+        mode="r" if csv_dir else "r+",
         implementation="tensorstore",
         implementation_config=TensorStoreConfig(data_copy_concurrency=num_workers),
     ) as plate:
@@ -108,7 +120,7 @@ def generate_normalization_metadata(
             dataset_sample_values = []
             position_and_statistics = []
 
-            for _, pos in tqdm(position_map, desc="Positions"):
+            for pos_name, pos in tqdm(position_map, desc="Positions"):
                 samples = _grid_sample(pos, grid_spacing, channel_index)
                 dataset_sample_values.append(samples)
                 fov_stats = get_val_stats(samples)
@@ -128,7 +140,7 @@ def generate_normalization_metadata(
                 for t in range(num_timepoints):
                     fov_timepoint_statistics[str(t)] = get_val_stats(samples[t])
                 fov_statistics["timepoint_statistics"] = fov_timepoint_statistics
-                position_and_statistics.append((pos, fov_statistics))
+                position_and_statistics.append((pos_name, pos, fov_statistics))
 
             dataset_statistics = {
                 "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
@@ -140,20 +152,43 @@ def generate_normalization_metadata(
                 all_fov_samples_at_t = np.stack([samples[t] for samples in dataset_sample_values])
                 dataset_timepoint_statistics[str(t)] = get_val_stats(all_fov_samples_at_t)
 
-            write_meta_field(
-                position=plate,
-                metadata=dataset_statistics | {"timepoint_statistics": dataset_timepoint_statistics},
-                field_name="normalization",
-                subfield_name=channel_name,
-            )
-
-            for pos, position_statistics in position_and_statistics:
+            if csv_dir is not None:
+                provenance = build_provenance_fields()
+                rows = metadata_to_rows(
+                    dataset_statistics | {"timepoint_statistics": dataset_timepoint_statistics},
+                    store_path=zarr_dir,
+                    position_path=None,
+                    channel_name=channel_name,
+                    field_name="normalization",
+                )
+                for pos_name, _, position_statistics in position_and_statistics:
+                    rows.extend(
+                        metadata_to_rows(
+                            dataset_statistics | position_statistics,
+                            store_path=zarr_dir,
+                            position_path=pos_name,
+                            channel_name=channel_name,
+                            field_name="normalization",
+                        )
+                    )
+                for row in rows:
+                    row.update(provenance)
+                write_meta_rows_csv(csv_dir, zarr_dir, rows)
+            else:
                 write_meta_field(
-                    position=pos,
-                    metadata=dataset_statistics | position_statistics,
+                    position=plate,
+                    metadata=dataset_statistics | {"timepoint_statistics": dataset_timepoint_statistics},
                     field_name="normalization",
                     subfield_name=channel_name,
                 )
+
+                for _, pos, position_statistics in position_and_statistics:
+                    write_meta_field(
+                        position=pos,
+                        metadata=dataset_statistics | position_statistics,
+                        field_name="normalization",
+                        subfield_name=channel_name,
+                    )
 
 
 def generate_fg_masks(

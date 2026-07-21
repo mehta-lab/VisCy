@@ -26,6 +26,7 @@ dependencies = [
   "airtable-utils",
   "click",
   "pydantic",
+  "viscy-data",
   "viscy-utils",
   "waveorder",
 ]

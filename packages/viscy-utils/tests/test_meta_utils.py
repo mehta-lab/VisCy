@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from iohub import open_ome_zarr
 
+from viscy_data.meta_csv import read_meta_rows_csv
 from viscy_utils.meta_utils import generate_fg_masks, generate_normalization_metadata
 
 GRID_SPACING = 8
@@ -188,3 +189,62 @@ def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
 
     with pytest.raises(FileExistsError):
         generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
+
+
+def test_csv_dir_does_not_write_zattrs(tmp_path, small_hcs_dataset):
+    """csv_dir opens the store read-only and never touches .zattrs."""
+    generate_normalization_metadata(small_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, csv_dir=tmp_path)
+
+    with open_ome_zarr(small_hcs_dataset, mode="r") as plate:
+        assert "normalization" not in plate.zattrs
+        for _, fov in plate.positions():
+            assert "normalization" not in fov.zattrs
+
+
+def test_csv_dir_matches_manual_computation(tmp_path, small_hcs_dataset):
+    """CSV sidecar timepoint rows match manually computed per-FOV statistics."""
+    generate_normalization_metadata(small_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, csv_dir=tmp_path)
+    sidecar = read_meta_rows_csv(tmp_path, small_hcs_dataset)
+    assert sidecar is not None
+
+    with open_ome_zarr(small_hcs_dataset, mode="r") as plate:
+        num_timepoints = next(plate.positions())[1]["0"].shape[0]
+        for fov_name, fov in plate.positions():
+            raw = fov["0"][:]
+            for ch_idx, channel in enumerate(plate.channel_names):
+                for t in range(num_timepoints):
+                    sampled = raw[t, ch_idx, :, ::GRID_SPACING, ::GRID_SPACING]
+                    expected_mean = float(np.nanmean(sampled))
+                    row = sidecar[
+                        (sidecar["position_path"] == fov_name)
+                        & (sidecar["channel_name"] == channel)
+                        & (sidecar["field_name"] == "normalization")
+                        & (sidecar["scope"] == "timepoint")
+                        & (sidecar["timepoint"] == t)
+                    ]
+                    assert len(row) == 1, f"missing row for {fov_name}/{channel}/t={t}"
+                    np.testing.assert_allclose(row.iloc[0]["mean"], expected_mean, rtol=1e-5)
+
+
+def test_csv_dir_stores_otsu_threshold(tmp_path, bimodal_hcs_dataset):
+    """csv_dir + compute_otsu writes otsu_threshold on the fov-scope row."""
+    generate_normalization_metadata(
+        bimodal_hcs_dataset,
+        num_workers=1,
+        grid_spacing=GRID_SPACING,
+        compute_otsu=True,
+        otsu_grid_spacing=4,
+        csv_dir=tmp_path,
+    )
+    sidecar = read_meta_rows_csv(tmp_path, bimodal_hcs_dataset)
+    fov_rows = sidecar[(sidecar["field_name"] == "normalization") & (sidecar["scope"] == "fov")]
+    assert not fov_rows["otsu_threshold"].isna().any()
+
+
+def test_csv_dir_includes_provenance_columns(tmp_path, small_hcs_dataset):
+    """Every sidecar row carries written_at, git_commit, cli_invocation."""
+    generate_normalization_metadata(small_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, csv_dir=tmp_path)
+    sidecar = read_meta_rows_csv(tmp_path, small_hcs_dataset)
+    for col in ("written_at", "git_commit", "cli_invocation"):
+        assert col in sidecar.columns
+        assert not sidecar[col].isna().any()
