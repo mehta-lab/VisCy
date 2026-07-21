@@ -51,16 +51,13 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 from generate_grouped_eval_configs import (  # noqa: E402
+    _CANONICAL_ORGANELLE_ROOTS,
     _CODE_TO_PAPER,
     _DYNACELL_ROOT,
-    _IGNORE_NAMES,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
-    _SKIP_FILENAMES,
     _SKIP_MODELS,
-    _TRAIN_SET_TO_CANONICAL,
     ParsedZarr,
-    _is_ablation_track_zarr,
     benchmark_dataset_ref,
     condition_name,
     parse_zarr_name,
@@ -119,7 +116,7 @@ def save_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
     return eval_leaf(
         organelle=p.organelle,
         model=p.model_variant,
-        train_set=_TRAIN_SET_TO_CANONICAL[p.train_set],
+        train_set=p.train_set_canonical,
         test_set=p.test_set,
         condition=p.condition,
         track="instance_ap",
@@ -132,7 +129,7 @@ def pred_cache_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> P
     return pred_cache_dir(
         organelle=p.organelle,
         model=p.model_variant,
-        train_set=_TRAIN_SET_TO_CANONICAL[p.train_set],
+        train_set=p.train_set_canonical,
         test_set=p.test_set,
         condition=p.condition,
         track="instance_ap",
@@ -204,26 +201,20 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
     caller controls exit behavior; pure-string output keeps it unit-testable.
     """
     errors: list[str] = []
-    for dataset in ("ipsc", "a549"):
-        for subdir in ("predictions", "joint_predictions"):
-            root = dynacell_root / dataset / subdir
-            if not root.is_dir():
-                continue
-            for entry in sorted(root.iterdir()):
-                name = entry.name
-                if name in _IGNORE_NAMES or name.startswith(("_", ".")):
-                    continue
-                if not name.endswith(".zarr") or name in _SKIP_FILENAMES:
-                    continue
-                if _is_ablation_track_zarr(name) or not entry.is_dir():
-                    continue
-                try:
-                    parse_zarr_name(entry, dynacell_root=dynacell_root)
-                except ValueError as exc:
-                    errors.append(
-                        f"unregistered/unparseable prediction {entry} -> {exc}; register its "
-                        f"model in generate_grouped_eval_configs (_DETERMINISTIC_MODELS + _CODE_TO_PAPER)"
-                    )
+    for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
+        root = dynacell_root / organelle_root
+        if not root.is_dir():
+            continue
+        # Bounded 3-level glob mirroring walk_predictions (the canonical layout is
+        # <model>/<train_set>/<test>/prediction.zarr); rglob would descend chunk trees.
+        for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
+            try:
+                parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
+            except ValueError as exc:
+                errors.append(
+                    f"unregistered/unparseable prediction {zarr_path} -> {exc}; register its "
+                    f"model in generate_grouped_eval_configs (_DETERMINISTIC_MODELS + _CODE_TO_PAPER)"
+                )
     return errors
 
 

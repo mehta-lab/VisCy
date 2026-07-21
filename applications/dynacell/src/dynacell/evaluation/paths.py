@@ -27,10 +27,10 @@ to a :class:`CanonicalKey` (or ``None`` -> UNMAPPED, never a guess).
 
 Historical note
 ---------------
-This module replaces ``save_paths.py``. The legacy ``eval_save_dir`` /
-``PAPER_KEY`` (paper-key + ``*_with_embeddings`` scheme) is retained here only via
-the display registry and :func:`normalize_legacy`; the forward grammar emits the
-new model-centric layout ``<organelle>/<model>/<train_set>/<test>[__cond]/``.
+The legacy paper-key + ``*_with_embeddings`` scheme (formerly ``save_paths.py``,
+now removed) survives only via the display registry (:data:`PAPER_KEY`) and
+:func:`normalize_legacy`; the forward grammar emits the new model-centric layout
+``<organelle>/<model>/<train_set>/<test>[__cond]/``.
 """
 
 from __future__ import annotations
@@ -369,6 +369,30 @@ def _leaf_suffix(test_set: str, condition: str | None) -> str:
     raise ValueError(f"unknown test_set {test_set!r}; expected one of {sorted(_TEST_SETS)}")
 
 
+def _parse_leaf_suffix(leaf: str) -> tuple[str, str | None]:
+    """Inverse of :func:`_leaf_suffix`: parse a ``<test>[__<condition>]`` segment.
+
+    Parameters
+    ----------
+    leaf : str
+        Leaf segment: ``ipsc`` or ``a549__<condition>``.
+
+    Returns
+    -------
+    tuple[str, str | None]
+        ``(test_set, condition)``; ``condition`` is ``None`` for iPSC.
+    """
+    if leaf == "ipsc":
+        return "ipsc", None
+    prefix = "a549__"
+    if leaf.startswith(prefix):
+        condition = leaf[len(prefix) :]
+        if condition not in _CONDITIONS:
+            raise ValueError(f"unknown condition {condition!r} in leaf {leaf!r}; expected one of {sorted(_CONDITIONS)}")
+        return "a549", condition
+    raise ValueError(f"cannot parse leaf segment {leaf!r}; expected 'ipsc' or 'a549__<condition>'")
+
+
 # ===========================================================================
 # Display helpers (retained public API)
 # ===========================================================================
@@ -583,6 +607,61 @@ def prediction_store(
     _validate(organelle, train_set, model)
     leaf = _leaf_suffix(test_set, condition)
     return Path(data_root) / organelle / model / train_set / leaf / "prediction.zarr"
+
+
+def key_from_prediction_store(path: str | Path, data_root: str | Path = DATA_ROOT) -> CanonicalKey:
+    """Inverse of :func:`prediction_store`: recover the identity from a zarr path.
+
+    Parses a
+    ``DATA_ROOT/<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr``
+    path back into a :class:`CanonicalKey`. Used by the eval-config generators to
+    discover predictions at their canonical on-disk locations, where identity is
+    encoded by the directory grammar rather than a zarr filename.
+
+    Parameters
+    ----------
+    path : str | Path
+        Absolute path to a ``prediction.zarr`` under ``data_root``.
+    data_root : str | Path
+        Prediction tree root (default :data:`DATA_ROOT`).
+
+    Returns
+    -------
+    CanonicalKey
+        Identity with ``component=None`` and ``track="default"`` (a prediction
+        zarr is shared across components and eval tracks).
+
+    Raises
+    ------
+    ValueError
+        If ``path`` is not under ``data_root``, does not match the prediction-store
+        grammar, or the recovered tuple is not data-valid.
+    """
+    try:
+        rel = Path(path).relative_to(data_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"not a canonical prediction store: {path!r} is not under data_root {data_root} "
+            f"(expected <organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr)"
+        ) from exc
+    parts = rel.parts
+    if len(parts) != 5 or parts[4] != "prediction.zarr":
+        raise ValueError(
+            f"not a canonical prediction store: {path!r} (expected "
+            f"<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr under {data_root})"
+        )
+    organelle = _norm_organelle(parts[0])
+    model = parts[1]
+    train_set = _norm_train_set(parts[2])
+    test_set, condition = _parse_leaf_suffix(parts[3])
+    _validate(organelle, train_set, model)
+    return CanonicalKey(
+        organelle=organelle,
+        model=model,
+        train_set=train_set,
+        test_set=test_set,
+        condition=condition,
+    )
 
 
 def eval_leaf(

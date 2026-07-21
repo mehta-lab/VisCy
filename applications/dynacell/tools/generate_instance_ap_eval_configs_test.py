@@ -26,8 +26,10 @@ from generate_instance_ap_eval_configs import (  # noqa: E402
     save_dir_for,
 )
 
+_BUCKET_TO_CANONICAL = {"ipsc_trained": "ipsc", "a549_trained": "a549", "joint": "joint"}
 
-def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> ParsedZarr:
+
+def _pz(organelle, model, train_set, test_set, condition=None, variant=None, train_set_canonical=None) -> ParsedZarr:
     name = f"{organelle}_{model}.zarr"
     return ParsedZarr(
         pred_path=Path(f"/tmp/{test_set}/predictions/{name}"),
@@ -35,9 +37,9 @@ def _pz(organelle, model, train_set, test_set, condition=None, variant=None) -> 
         model=model,
         variant=variant,
         train_set=train_set,
+        train_set_canonical=train_set_canonical or _BUCKET_TO_CANONICAL[train_set],
         test_set=test_set,
         condition=condition,
-        is_legacy_form=False,
     )
 
 
@@ -81,19 +83,19 @@ def test_instance_eligibility_is_opt_out() -> None:
 
 
 def test_audit_clean_when_all_predictions_registered(tmp_path) -> None:
-    """A registered prediction zarr produces no coverage error."""
-    (tmp_path / "ipsc" / "predictions" / "nucl_fnet3d_paper.zarr").mkdir(parents=True)
-    (tmp_path / "a549" / "joint_predictions" / "memb_celldiff_r2_denv.zarr").mkdir(parents=True)
+    """A registered prediction zarr at its canonical path produces no coverage error."""
+    (tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
+    (tmp_path / "membrane" / "celldiff_r2" / "joint" / "a549__denv" / "prediction.zarr").mkdir(parents=True)
     assert audit_prediction_coverage(tmp_path) == []
 
 
 def test_audit_flags_unregistered_prediction(tmp_path) -> None:
     """An unregistered model's prediction surfaces as an actionable error, not a crash."""
-    (tmp_path / "ipsc" / "predictions" / "nucl_fnet3d_paper.zarr").mkdir(parents=True)
-    (tmp_path / "ipsc" / "predictions" / "nucl_brandnewmodel.zarr").mkdir(parents=True)
+    (tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
+    (tmp_path / "nucleus" / "brandnewmodel" / "ipsc" / "ipsc" / "prediction.zarr").mkdir(parents=True)
     errors = audit_prediction_coverage(tmp_path)
     assert len(errors) == 1
-    assert "nucl_brandnewmodel.zarr" in errors[0]
+    assert "brandnewmodel" in errors[0]
     assert "register" in errors[0].lower()
 
 
