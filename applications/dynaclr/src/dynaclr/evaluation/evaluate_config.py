@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from dynaclr.evaluation.dimensionality_reduction.config import PCAConfig, PHATEConfig, UMAPConfig
 from dynaclr.evaluation.mmd.config import ComparisonSpec, MAPSettings, MMDSettings
@@ -172,6 +172,164 @@ class TaskSpec(BaseModel):
     marker_filters: list[str] | None = None
 
 
+class WitnessLabelSource(BaseModel):
+    """Reference spec for one experiment, used to weak-label via the MMD witness.
+
+    The MMD witness function scores each cell by how much it looks like the
+    control reference (witness group X) vs the perturbed reference (group Y).
+    Those scores are then gated into discrete pseudo-labels that replace
+    annotation-CSV labels for the classifier.
+
+    Each side (control / perturbed) is defined in one of two mutually exclusive
+    ways:
+
+    - **Well-based** (``control_wells`` / ``perturbed_wells``): the simple case,
+      matched against ``obs["fov_name"]`` by path prefix (``"C/1"`` matches
+      ``"C/1/000000"`` but not ``"C/10/..."``).
+    - **Filter-based** (``control_filter`` / ``perturbed_filter``): an arbitrary
+      obs filter (``col -> scalar | list | range-dict``), enabling contrasts
+      like early-timepoint vs late-timepoint or control vs perturbed-at-late.
+      A range-dict uses ``{lt, le, gt, ge}`` (one bound = half-line, two =
+      window); a ``well``/``fov_name`` key routes to well-prefix matching.
+
+    Provide wells XOR a filter for each side (both sides must use the same
+    style). Cells matched by neither side are dropped (never silently labeled).
+
+    Parameters
+    ----------
+    experiment : str
+        Experiment name matching obs["experiment"] in the embeddings zarr.
+    control_wells : list[str] or None
+        Well ids for the control reference (group X). Well-based style.
+    perturbed_wells : list[str] or None
+        Well ids for the perturbed reference (group Y). Well-based style.
+    control_filter : dict or None
+        obs filter for the control reference (group X). Filter-based style.
+        E.g. ``{"well": "A/2"}`` or
+        ``{"perturbation": "infected", "hours_post_perturbation": {"ge": 24}}``.
+    perturbed_filter : dict or None
+        obs filter for the perturbed reference (group Y). Filter-based style.
+    """
+
+    experiment: str
+    control_wells: list[str] | None = None
+    perturbed_wells: list[str] | None = None
+    control_filter: dict | None = None
+    perturbed_filter: dict | None = None
+
+    @model_validator(mode="after")
+    def _validate_refs(self) -> "WitnessLabelSource":
+        control_styles = (self.control_wells is not None) + (self.control_filter is not None)
+        perturbed_styles = (self.perturbed_wells is not None) + (self.perturbed_filter is not None)
+        if control_styles != 1 or perturbed_styles != 1:
+            raise ValueError(
+                f"{self.experiment}: each side needs exactly one of wells / filter "
+                "(control_wells XOR control_filter, perturbed_wells XOR perturbed_filter)"
+            )
+        if (self.control_wells is not None) != (self.perturbed_wells is not None):
+            raise ValueError(f"{self.experiment}: mix of well-based and filter-based sides is not allowed")
+        if self.control_wells is not None:
+            if not self.control_wells or not self.perturbed_wells:
+                raise ValueError(f"{self.experiment}: control_wells and perturbed_wells must both be non-empty")
+            overlap = set(self.control_wells) & set(self.perturbed_wells)
+            if overlap:
+                raise ValueError(f"{self.experiment}: wells appear in both control and perturbed: {sorted(overlap)}")
+        else:
+            if not self.control_filter or not self.perturbed_filter:
+                raise ValueError(f"{self.experiment}: control_filter and perturbed_filter must both be non-empty")
+        return self
+
+
+class WitnessGmmExperiment(WitnessLabelSource):
+    """One experiment for witness-GMM labeling: refs plus its embeddings zarr.
+
+    Extends :class:`WitnessLabelSource` (which carries ``experiment`` and the
+    control/perturbed reference specs) with the path to the embeddings zarr the
+    witness is scored on.
+
+    Parameters
+    ----------
+    embeddings_zarr : str
+        Path to the embeddings zarr (AnnData) whose ``.obs`` carries
+        ``experiment``, ``marker``, ``fov_name``, ``id`` (or ``t``/``track_id``),
+        and the ``condition_column``. The witness references and the scored cells
+        both come from here.
+    """
+
+    embeddings_zarr: str
+
+
+class WitnessGmmLabelsConfig(BaseModel):
+    """Stage-A config: generate an annotation file from the MMD-witness + GMM.
+
+    For each marker, the witness scores every cell against per-experiment
+    control/perturbed references, a two-component GMM is fit on the perturbed
+    cells' scores per condition, and confident cells are written out as an
+    **annotation file** — a named biological-state column (``label_column``) with
+    the real class vocabulary (``class_map``), keyed by cell exactly like a hand
+    annotation. The Stage-B training path (``run-linear-classifiers`` with
+    ``label_source="annotations"``) then consumes it unchanged.
+
+    The label's *meaning* is named by the modality it is computed from: a witness
+    over ``viral_sensor`` produces ``infection_state`` (infected/uninfected); over
+    an organelle marker it produces ``organelle_remodeling_state``
+    (remodel/noremodel). One config = one microscope/marker (no pooling, no LOT).
+
+    Parameters
+    ----------
+    experiments : list[WitnessGmmExperiment]
+        Per-experiment embeddings zarr + control/perturbed reference specs.
+    label_column : str
+        Name of the biological-state column written to the annotation file (e.g.
+        ``"infection_state"``). This is the ``task`` Stage B trains on.
+    class_map : dict[str, str]
+        Maps the GMM gate outcome to the class vocabulary:
+        ``{"positive": <perturbed class>, "negative": <control class>}`` — e.g.
+        ``{"positive": "infected", "negative": "uninfected"}``.
+    output_path : str
+        Path to write the annotation file (``.csv`` or ``.parquet`` by extension).
+    marker_filters : list[str] or None
+        Markers to label (one annotation column per config; usually one). None =
+        all unique ``obs["marker"]``. Default: None.
+    condition_column : str
+        obs column whose distinct values define per-condition GMM fits and carry
+        the biological condition (e.g. ``"perturbation"``). Default: ``"perturbation"``.
+    gmm_pos_threshold : float
+        GMM remodeled-component posterior at/above which a perturbed cell is a
+        confident positive. Default: 0.8.
+    bandwidth : float or None
+        Gaussian RBF bandwidth for the witness kernel. None = median heuristic on
+        the pooled (control, perturbed) reference. Default: None.
+    max_reference_cells : int or None
+        Subsample each reference group to at most this many cells before fitting
+        the witness (bounds kernel cost). None = use all. Default: 5000.
+    random_seed : int
+        Seed for reference subsampling and the GMM. Default: 42.
+    """
+
+    experiments: list[WitnessGmmExperiment]
+    label_column: str
+    class_map: dict[str, str]
+    output_path: str
+    marker_filters: list[str] | None = None
+    condition_column: str = "perturbation"
+    gmm_pos_threshold: float = 0.8
+    bandwidth: float | None = None
+    max_reference_cells: int | None = 5000
+    random_seed: int = 42
+
+    @model_validator(mode="after")
+    def _validate(self) -> "WitnessGmmLabelsConfig":
+        if not self.experiments:
+            raise ValueError("witness_gmm_labels requires non-empty experiments")
+        missing = {"positive", "negative"} - set(self.class_map)
+        if missing:
+            raise ValueError(f"class_map must define {sorted(missing)} (got keys {sorted(self.class_map)})")
+        if not 0.0 < self.gmm_pos_threshold <= 1.0:
+            raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
+        return self
+
+
 class MMDStepConfig(BaseModel):
     """Configuration for one MMD evaluation block.
 
@@ -231,9 +389,16 @@ class LinearClassifiersStepConfig(BaseModel):
 
     Parameters
     ----------
+    label_source : {"annotations"}
+        Where per-cell labels come from. ``"annotations"`` loads labels from
+        per-experiment annotation files (``annotations`` + ``tasks``). Witness →
+        GMM pseudo-labels are produced upstream by the ``witness-gmm-labels``
+        (Stage A) command as an annotation file and consumed here unchanged —
+        there is no separate witness label source.
     annotations : list[AnnotationSource]
-        Per-experiment annotation CSVs. Each entry maps an experiment name
-        (matching obs["experiment"] in embeddings.zarr) to a CSV path.
+        Per-experiment annotation files (CSV or parquet). Each entry maps an
+        experiment name (matching obs["experiment"] in embeddings.zarr) to a
+        path. May be hand annotations or a Stage-A witness-GMM annotation file.
     tasks : list[TaskSpec]
         Tasks to evaluate. Each task can optionally filter by marker.
     publish_dir : str or None
@@ -269,8 +434,9 @@ class LinearClassifiersStepConfig(BaseModel):
         cell-level stratified ``train_test_split``. Default: None.
     """
 
-    annotations: list[AnnotationSource]
-    tasks: list[TaskSpec]
+    label_source: Literal["annotations"] = "annotations"
+    annotations: list[AnnotationSource] = []
+    tasks: list[TaskSpec] = []
     publish_dir: str | None = None
     use_scaling: bool = True
     use_pca: bool = False
@@ -281,6 +447,12 @@ class LinearClassifiersStepConfig(BaseModel):
     split_train_data: float = 0.8
     random_seed: int = 42
     split_groups_by: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_label_source(self) -> "LinearClassifiersStepConfig":
+        if not self.annotations or not self.tasks:
+            raise ValueError("label_source='annotations' requires non-empty annotations and tasks")
+        return self
 
 
 class AppendPredictionsStepConfig(BaseModel):

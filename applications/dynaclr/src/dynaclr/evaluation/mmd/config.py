@@ -180,15 +180,57 @@ class MMDCombinedConfig(_MMDBaseConfig):
 
     Conditions are auto-discovered from the data intersection — no explicit
     comparisons needed. For each marker shared between a pair of experiments,
-    runs MMD per (condition, time_bin) after per-experiment mean centering.
+    runs MMD per (condition, time_bin).
 
     Parameters
     ----------
     input_paths : list[str]
         Paths to per-experiment AnnData zarr stores.
+    center_per_experiment : bool
+        Subtract each experiment's own mean embedding before computing MMD.
+        Default True detects *residual* batch effects independent of a global
+        offset. Set False to keep the raw mean shift between experiments — this
+        is required to validate a LOT correction whose main job is removing that
+        offset (centering would delete the very effect being measured, so a
+        genuine platform separation would collapse to a small MMD). Default: True.
     """
 
     input_paths: list[str]
+    center_per_experiment: bool = True
+
+
+class MMDOverTimeConfig(MMDCombinedConfig):
+    """Pre/post batch-effect MMD over time in a single run.
+
+    Runs the combined cross-experiment MMD (per marker × condition × time bin)
+    on both the uncorrected embeddings (``input_paths``) and their LOT-corrected
+    counterparts (``corrected_paths``), tags each result set with a
+    ``correction`` column (``"pre"`` / ``"post"``), and returns one combined
+    DataFrame — so the batch effect before and after correction can be plotted
+    as two series over time instead of living in two separate output folders.
+
+    Parameters
+    ----------
+    corrected_paths : list[str]
+        Paths to the LOT-corrected per-experiment AnnData zarr stores. Should
+        cover the same experiments as ``input_paths`` (matched by
+        ``obs["experiment"]``, not list order).
+    target_experiments : list[str] or None
+        ``obs["experiment"]`` value(s) of the target/reference platform (v2).
+        Used to tag each experiment pair as ``pair_kind="cross"`` (source↔target,
+        the batch effect being corrected) vs ``"within"`` (source↔source, the
+        within-platform baseline). When None, all pairs are ``"cross"``.
+        Default: None.
+    """
+
+    corrected_paths: list[str]
+    target_experiments: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_over_time(self) -> "MMDOverTimeConfig":
+        if not self.corrected_paths:
+            raise ValueError("corrected_paths must not be empty")
+        return self
 
 
 class MMDPooledConfig(_MMDBaseConfig):
