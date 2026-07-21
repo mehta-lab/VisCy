@@ -27,10 +27,10 @@ to a :class:`CanonicalKey` (or ``None`` -> UNMAPPED, never a guess).
 
 Historical note
 ---------------
-This module replaces ``save_paths.py``. The legacy ``eval_save_dir`` /
-``PAPER_KEY`` (paper-key + ``*_with_embeddings`` scheme) is retained here only via
-the display registry and :func:`normalize_legacy`; the forward grammar emits the
-new model-centric layout ``<organelle>/<model>/<train_set>/<test>[__cond]/``.
+The legacy paper-key + ``*_with_embeddings`` scheme (formerly ``save_paths.py``,
+now removed) survives only via the display registry (:data:`PAPER_KEY`) and
+:func:`normalize_legacy`; the forward grammar emits the new model-centric layout
+``<organelle>/<model>/<train_set>/<test>[__cond]/``.
 """
 
 from __future__ import annotations
