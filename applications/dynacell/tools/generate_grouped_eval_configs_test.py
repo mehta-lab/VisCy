@@ -180,6 +180,13 @@ def test_parse_zarr_name_unknown_organelle_raises() -> None:
         parse_zarr_name(fake_root / "bogus/fnet3d_paper/ipsc/ipsc/prediction.zarr", dynacell_root=fake_root)
 
 
+def test_parse_zarr_name_out_of_scope_train_set_raises() -> None:
+    """A paths-valid but out-of-scope train_set (e.g. ``a549__bf``) raises ValueError, not KeyError."""
+    fake_root = Path("/fake/root")
+    with pytest.raises(ValueError, match="grouped-campaign bucket"):
+        parse_zarr_name(fake_root / "er/fnet3d_paper/a549__bf/a549__mock/prediction.zarr", dynacell_root=fake_root)
+
+
 # ---------------------------------------------------------------------------
 # Registry drift guard (this module's _CODE_TO_PAPER vs the runtime resolver)
 # ---------------------------------------------------------------------------

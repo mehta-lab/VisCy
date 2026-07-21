@@ -198,18 +198,30 @@ def parse_zarr_name(zarr_path: Path, dynacell_root: Path = _DYNACELL_ROOT) -> Pa
     ``<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr`` via
     :func:`paths.key_from_prediction_store` (the single source of the path
     grammar) — never from a zarr filename. Raises ``ValueError`` on a
-    non-canonical/legacy path, an unknown model dir, or an unknown CellDiff
-    variant.
+    non-canonical/legacy path, an unknown model dir, an unknown CellDiff
+    variant, or a train_set that is valid in ``paths.py`` but out of scope for
+    the grouped campaign (e.g. the ablation tokens or ``a549__bf``).
     """
     key = paths.key_from_prediction_store(zarr_path, dynacell_root)
     organelle = _CANONICAL_ORG_TO_INTERNAL.get(key.organelle, key.organelle)
     model, variant = _split_model_variant(key.model, str(zarr_path))
+    # ``key.train_set`` is already paths-valid; a token that is not a campaign
+    # bucket (ablations, a549__bf, ...) is out of scope, not a crash. Raise the
+    # documented ValueError so the instance-AP coverage audit can catch it and
+    # report it alongside the other out-of-scope predictions instead of dying on
+    # a bare KeyError.
+    bucket = _CANONICAL_TRAIN_SET_TO_BUCKET.get(key.train_set)
+    if bucket is None:
+        raise ValueError(
+            f"train_set {key.train_set!r} in {zarr_path} is valid in paths.py but is not a "
+            f"grouped-campaign bucket (in scope: {sorted(_CANONICAL_TRAIN_SET_TO_BUCKET)})"
+        )
     return ParsedZarr(
         pred_path=zarr_path,
         organelle=organelle,
         model=model,
         variant=variant,
-        train_set=_CANONICAL_TRAIN_SET_TO_BUCKET[key.train_set],
+        train_set=bucket,
         train_set_canonical=key.train_set,
         test_set=key.test_set,
         condition=key.condition,
