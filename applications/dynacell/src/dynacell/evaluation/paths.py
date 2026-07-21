@@ -637,7 +637,13 @@ def key_from_prediction_store(path: str | Path, data_root: str | Path = DATA_ROO
         If ``path`` is not under ``data_root``, does not match the prediction-store
         grammar, or the recovered tuple is not data-valid.
     """
-    rel = Path(path).relative_to(data_root)
+    try:
+        rel = Path(path).relative_to(data_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"not a canonical prediction store: {path!r} is not under data_root {data_root} "
+            f"(expected <organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr)"
+        ) from exc
     parts = rel.parts
     if len(parts) != 5 or parts[4] != "prediction.zarr":
         raise ValueError(
