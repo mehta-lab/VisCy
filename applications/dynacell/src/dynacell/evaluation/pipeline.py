@@ -1248,6 +1248,24 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             if nuclei_path is not None:
                 nuclei_plate = aux_stack.enter_context(open_ome_zarr(Path(nuclei_path), mode="r"))
                 nuclei_by_name = dict(nuclei_plate.positions())
+
+            # Optional explicit FOV exclusion (e.g. drop positions whose prediction
+            # zarr is incomplete). Applied uniformly to pred/gt/seg so the counts
+            # stay aligned and the strict-mode validation below still holds. Unlike
+            # ``limit_positions`` this does NOT set ``partial_walk``, so deep-feature
+            # caches auto-invalidate/self-heal normally. Match on the full position
+            # name (``0/0/fov0011``) or its leaf (``fov0011``).
+            exclude = OmegaConf.select(config, "io.exclude_fov_names", default=None) or []
+            if exclude:
+                exclude_set = set(exclude)
+
+                def _keep(name: str) -> bool:
+                    return name not in exclude_set and name.rsplit("/", 1)[-1] not in exclude_set
+
+                pred_positions = [(n, p) for n, p in pred_positions if _keep(n)]
+                gt_positions = [(n, p) for n, p in gt_positions if _keep(n)]
+                seg_positions = [(n, p) for n, p in seg_positions if _keep(n)]
+
             # Position-count alignment.
             #
             # When ``limit_positions`` is unset (production), require strict
