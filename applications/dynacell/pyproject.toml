@@ -47,7 +47,7 @@ optional-dependencies.eval = [
   "cubic==0.7",
   "dynaclr",
   "hydra-core>=1.2",
-  "iohub>=0.3.6",
+  "iohub>=0.3.10",
   "itk",
   "matplotlib",
   "pandas",
@@ -77,7 +77,7 @@ optional-dependencies.eval_gpu = [
   "cupy-cuda13x",
 ]
 optional-dependencies.preprocess = [
-  "iohub>=0.3.6",
+  "iohub>=0.3.10",
   "tqdm",
 ]
 optional-dependencies.report = [

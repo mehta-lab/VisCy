@@ -23,7 +23,7 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "click",
-  "iohub>=0.3.6",
+  "iohub>=0.3.10",
   "pandas",
   "pyairtable",
   "pydantic",
