@@ -253,7 +253,9 @@ def extract_focus_slab_store(
         )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open_ome_zarr(output_path, layout="hcs", mode="w-", channel_names=list(src.channel_names)) as dst:
+        with open_ome_zarr(
+            output_path, layout="hcs", mode="w-", channel_names=list(src.channel_names), version="0.5"
+        ) as dst:
             plate_custom = _custom_zattrs(src)
             if plate_custom:
                 dst.zattrs.update(plate_custom)
