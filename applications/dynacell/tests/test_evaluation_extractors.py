@@ -44,9 +44,9 @@ def test_dinov3_extract_features_passes_do_rescale_false(monkeypatch: pytest.Mon
 
     The DINOv3 ``AutoImageProcessor`` ships with ``do_rescale=True`` and
     ``rescale_factor=1/255`` — appropriate for uint8 [0, 255] PIL input.
-    Our crops arrive as float [0, 1] (``_minmax_norm`` is applied
-    upstream by :func:`build_crops`), so leaving rescale on divides by
-    255 a second time and the model sees essentially-black inputs whose
+    Our crops arrive as float [0, 1] (robust percentile normalization is
+    applied upstream by :func:`build_crops`), so leaving rescale on divides
+    by 255 a second time and the model sees essentially-black inputs whose
     pooled features are cosine-uncorrelated with the intended
     representation.
     """
@@ -91,16 +91,16 @@ def test_dinov3_extractor_pins_processor_do_rescale_false_at_init(monkeypatch: p
     assert processor_mock.do_rescale is False
 
 
-def test_dinov3_preprocess_version_is_v2() -> None:
-    """The recipe-version tag must read ``imagenet_normalize_v2``.
+def test_dinov3_preprocess_version_is_v3() -> None:
+    """The recipe-version tag must read ``imagenet_normalize_v3``.
 
-    The v2 bump invalidates every v1 cache entry, which was extracted
-    with ``do_rescale=True`` and is incompatible with the corrected
-    feature distribution. Soft-invalidate (see
-    ``_auto_invalidate_on_preprocess_version_mismatch`` in
+    The v3 bump invalidates every v2 cache entry, which was extracted from
+    raw min-max crops (outlier-dominated, GT-vs-pred asymmetric) before
+    ``build_crops`` switched to robust percentile normalization. Soft-
+    invalidate (see ``_auto_invalidate_on_preprocess_version_mismatch`` in
     ``pipeline_cache.py``) keys on this string.
     """
-    assert eval_utils.DinoV3FeatureExtractor.PREPROCESS_VERSION == "imagenet_normalize_v2"
+    assert eval_utils.DinoV3FeatureExtractor.PREPROCESS_VERSION == "imagenet_normalize_v3"
 
 
 class _StubMorphEm(torch.nn.Module):
@@ -136,8 +136,14 @@ def test_morphem_extract_features_batch(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_morphem_preprocess_version() -> None:
-    """The recipe-version tag must read ``per_image_norm_v1``."""
-    assert eval_utils.MorphEmFeatureExtractor.PREPROCESS_VERSION == "per_image_norm_v1"
+    """The recipe-version tag must read ``per_image_norm_v2``.
+
+    The v2 bump invalidates v1 caches after ``build_crops`` switched to
+    robust percentile normalization — the non-affine percentile clip
+    changes the z-scored input even though the min-max prescale alone
+    would cancel under MorphEm's per-image z-score.
+    """
+    assert eval_utils.MorphEmFeatureExtractor.PREPROCESS_VERSION == "per_image_norm_v2"
 
 
 def test_morphem_null_name_soft_skips_in_load_eval_models() -> None:
