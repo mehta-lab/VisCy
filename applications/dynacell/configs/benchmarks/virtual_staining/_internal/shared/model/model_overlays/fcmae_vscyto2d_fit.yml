@@ -18,7 +18,7 @@
 #     switches this to DDP, re-add the fcmae_vscyto3d_fit.yml
 #     DDPStrategy(find_unused_parameters=true, timeout="3:00:00") block.
 #
-# HCS data hparams (bs=32, z=1, yx=384, flattened augs) live in
+# HCS data hparams (bs=16, z=1, yx=384, flattened augs) live in
 # data_overlays/fcmae_vscyto2d_fit.yml; single-store train leaves compose
 # both, joint (BatchedConcatDataModule) leaves compose only this one and
 # author data: themselves.
@@ -48,7 +48,7 @@ model:
     lr: 0.0004
     schedule: WarmupCosine
     # Phase-B TODO: re-size warmup_steps to ~1 epoch once the focus-store
-    # FOV count is known (single-GPU bs=32 at z_window_size=1 emits ~5
+    # FOV count is known (single-GPU bs=16 at z_window_size=1 emits ~5
     # windows/FOV/T, so steps/epoch differ from the 3D 4-GPU baseline).
     warmup_steps: 4000
     warmup_multiplier: 1e-3
