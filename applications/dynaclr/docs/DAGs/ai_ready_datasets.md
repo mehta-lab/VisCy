@@ -1,5 +1,8 @@
 # Data Preparation DAG
 
+This is stage ① of the full pipeline. For how it connects to parquet build,
+predict, and evaluation, see [end_to_end.md](end_to_end.md).
+
 ## Entry point
 
 `prepare run <dataset_name> -c prepare_config.yaml` (from `airtable_utils`) discovers wells and
