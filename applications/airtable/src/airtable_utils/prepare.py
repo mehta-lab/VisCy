@@ -11,6 +11,8 @@ import yaml
 from iohub import open_ome_zarr
 from pydantic import BaseModel, Field
 
+from viscy_data.meta_csv import read_meta_rows_csv
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ class SlurmStageConfig(BaseModel):
     time: str = "06:00:00"
     gres: str | None = None
     constraint: str | None = None
+    qos: str | None = None
 
 
 class SlurmConfig(BaseModel):
@@ -92,6 +95,8 @@ class PrepareConfig(BaseModel):
     nfs_root: Path = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics")
     vast_root: Path = Path("/hpc/projects/organelle_phenotyping/datasets")
     workspace_dir: Path = Path("/hpc/mydata/eduardo.hirata/repos/viscy")
+    csv_dir: Path | None = None
+    jobs_dir: Path | None = None
     concatenate: ConcatenateConfig = Field(default_factory=ConcatenateConfig)
     qc: QCParams = Field(default_factory=QCParams)
     preprocess: PreprocessParams = Field(default_factory=PreprocessParams)
@@ -195,19 +200,28 @@ def check_zarr_version(zarr_path: Path) -> dict[str, int | str | None]:
     return result
 
 
-def check_preprocessed(zarr_path: Path) -> bool:
-    """Check if normalization metadata has been written to the zarr store.
+def check_preprocessed(zarr_path: Path, csv_dir: Path | None = None) -> bool:
+    """Check if normalization metadata has been written for the zarr store.
 
     Parameters
     ----------
     zarr_path : Path
         Path to the zarr store root.
+    csv_dir : Path or None
+        If given, check the per-store CSV sidecar under this directory
+        (written by ``viscy preprocess --csv_dir ...``) instead of the
+        store's ``.zattrs``/``zarr.json`` — for datasets prepared without
+        write access.
 
     Returns
     -------
     bool
         True if normalization stats are present.
     """
+    if csv_dir is not None:
+        sidecar = read_meta_rows_csv(csv_dir, zarr_path)
+        return sidecar is not None and bool((sidecar["field_name"] == "normalization").any())
+
     zarr_json = zarr_path / "zarr.json"
     zattrs = zarr_path / ".zattrs"
 
@@ -221,6 +235,34 @@ def check_preprocessed(zarr_path: Path) -> bool:
         return "normalization" in attrs
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Batch discovery (filesystem glob, no NFS/Airtable dependency)
+# ---------------------------------------------------------------------------
+
+
+def discover_zarr_stores(data_root: Path) -> list[Path]:
+    """Find dataset zarr stores under a root laid out like VAST's convention.
+
+    Matches ``{data_root}/{dataset_name}/{dataset_name}.zarr`` exactly (the
+    zarr's own basename must match its containing directory's name) — this
+    excludes sibling ``tracking.zarr`` dirs as well as any other variant
+    zarr stores (e.g. ``{dataset_name}_chunked.zarr``,
+    ``{dataset_name}_sharded.zarr``) that may sit alongside the canonical
+    store for rechunking/testing purposes.
+
+    Parameters
+    ----------
+    data_root : Path
+        Root directory containing one subdirectory per dataset.
+
+    Returns
+    -------
+    list[Path]
+        Sorted paths to each dataset's zarr store.
+    """
+    return sorted(p for p in Path(data_root).glob("*/*.zarr") if p.stem == p.parent.name)
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +381,7 @@ def generate_crop_concat_config(
     }
 
 
-def generate_qc_config(data_path: Path, qc_params: QCParams) -> dict:
+def generate_qc_config(data_path: Path, qc_params: QCParams, csv_dir: Path | None = None) -> dict:
     """Build a QC config dict compatible with ``qc run -c``.
 
     Parameters
@@ -348,6 +390,9 @@ def generate_qc_config(data_path: Path, qc_params: QCParams) -> dict:
         Path to the VAST zarr (target of QC).
     qc_params : QCParams
         Focus-slice QC parameters.
+    csv_dir : Path or None
+        If given, ``qc run`` writes results to a per-store CSV sidecar
+        under this directory (read-only store) instead of ``.zattrs``.
 
     Returns
     -------
@@ -357,6 +402,7 @@ def generate_qc_config(data_path: Path, qc_params: QCParams) -> dict:
     return {
         "data_path": str(data_path),
         "num_workers": qc_params.num_workers,
+        "csv_dir": str(csv_dir) if csv_dir else None,
         "focus_slice": {
             "channel_names": qc_params.channel_names,
             "NA_det": qc_params.NA_det,
@@ -412,6 +458,8 @@ def _slurm_header(job_name: str, output_dir: Path, cfg: SlurmStageConfig) -> str
         lines.append(f"#SBATCH --gres={cfg.gres}")
     if cfg.constraint:
         lines.append(f'#SBATCH --constraint="{cfg.constraint}"')
+    if cfg.qos:
+        lines.append(f"#SBATCH --qos={cfg.qos}")
     return "\n".join(lines)
 
 
@@ -532,7 +580,7 @@ def generate_qc_slurm(
         export PYTHONNOUSERSITE=1
 
         echo "=== QC: focus slice detection ==="
-        uv run --project "{workspace_dir}" --package qc \
+        uv run --project "{workspace_dir}" --package viscy-qc \
             qc run -c "{qc_config_path}"
         echo "QC complete."
     """)
@@ -546,6 +594,7 @@ def generate_preprocess_slurm(
     workspace_dir: Path,
     preprocess_params: PreprocessParams,
     slurm_cfg: SlurmStageConfig,
+    csv_dir: Path | None = None,
 ) -> str:
     """Generate SLURM script for normalization preprocessing (CPU only).
 
@@ -563,6 +612,10 @@ def generate_preprocess_slurm(
         Normalization preprocessing parameters.
     slurm_cfg : SlurmStageConfig
         SLURM resource parameters.
+    csv_dir : Path or None
+        If given, ``viscy preprocess`` writes results to a per-store CSV
+        sidecar under this directory (read-only store) instead of
+        ``.zattrs``.
 
     Returns
     -------
@@ -576,6 +629,7 @@ def generate_preprocess_slurm(
         ch_flag = f"--channel_names={ch_arg}"
     else:
         ch_flag = " ".join(f"--channel_names={c}" for c in ch_arg)
+    csv_dir_flag = f' --csv_dir "{csv_dir}"' if csv_dir else ""
 
     body = dedent(f"""\
 
@@ -586,7 +640,7 @@ def generate_preprocess_slurm(
         uv run --project "{workspace_dir}" --package dynaclr \
             viscy preprocess --data_path "{vast_zarr_path}" \
             {ch_flag} --num_workers {preprocess_params.num_workers} \
-            --block_size {preprocess_params.block_size}
+            --block_size {preprocess_params.block_size}{csv_dir_flag}
         echo "Preprocess complete."
     """)
     return header + "\n" + body
@@ -597,7 +651,9 @@ def generate_preprocess_slurm(
 # ---------------------------------------------------------------------------
 
 
-def check_dataset_status(dataset_name: str, nfs_root: Path, vast_root: Path) -> dict[str, str]:
+def check_dataset_status(
+    dataset_name: str, nfs_root: Path, vast_root: Path, csv_dir: Path | None = None
+) -> dict[str, str]:
     """Check existence and version info for a dataset across NFS and VAST.
 
     Parameters
@@ -608,6 +664,9 @@ def check_dataset_status(dataset_name: str, nfs_root: Path, vast_root: Path) -> 
         NFS root directory.
     vast_root : Path
         VAST root directory.
+    csv_dir : Path or None
+        If given, check the ``preprocessed`` status via the CSV sidecar
+        under this directory instead of ``.zattrs`` (see ``check_preprocessed``).
 
     Returns
     -------
@@ -629,7 +688,7 @@ def check_dataset_status(dataset_name: str, nfs_root: Path, vast_root: Path) -> 
         ver = check_zarr_version(vast["zarr"])
         zarr_fmt = str(ver["zarr_format"]) if ver["zarr_format"] else "?"
         ome_ver = str(ver["ome_version"]) if ver["ome_version"] else "?"
-        preprocessed = "yes" if check_preprocessed(vast["zarr"]) else "no"
+        preprocessed = "yes" if check_preprocessed(vast["zarr"], csv_dir=csv_dir) else "no"
 
     return {
         "dataset": dataset_name,

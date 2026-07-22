@@ -31,6 +31,7 @@ from viscy_data._typing import (
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
 )
+from viscy_data.meta_csv import read_meta_rows_csv
 
 _logger = logging.getLogger(__name__)
 
@@ -238,11 +239,14 @@ def preprocess_cell_index(
     parquet_path: str | Path,
     output_path: str | Path | None = None,
     focus_channel: str | None = None,
+    csv_dir: str | Path | None = None,
 ) -> None:
     """Add normalization stats, focus slice, and remove invalid rows.
 
     Reads precomputed metadata from each FOV's ``zattrs`` (written by
-    ``viscy preprocess``) and writes them as parquet columns:
+    ``viscy preprocess``) — or, if ``csv_dir`` is given, from the per-store
+    CSV sidecar written by the read-only equivalent of that step (see
+    ``viscy_data.meta_csv``) — and writes them as parquet columns:
 
     - ``norm_mean``, ``norm_std``, ``norm_median``, ``norm_iqr``,
       ``norm_max``, ``norm_min`` — per-timepoint, per-channel statistics
@@ -262,11 +266,17 @@ def preprocess_cell_index(
     focus_channel : str | None
         Channel name for ``focus_slice`` lookup (e.g. ``"Phase3D"``).
         When ``None``, uses the first channel_name in each FOV's group.
+    csv_dir : str | Path | None
+        If given, read normalization/focus_slice metadata from the
+        per-store CSV sidecar under this directory (as written by
+        ``generate_normalization_metadata``/``generate_qc_metadata`` with
+        ``csv_dir`` set) instead of opening each FOV's zarr store.
 
     Raises
     ------
     ValueError
-        If a FOV has no normalization metadata (run ``viscy preprocess`` first).
+        If a FOV has no normalization metadata (run ``viscy preprocess``,
+        or the ``csv_dir`` equivalent, first).
     """
     if output_path is None:
         output_path = parquet_path
@@ -275,14 +285,48 @@ def preprocess_cell_index(
     n_before = len(df)
 
     fov_col = "fov" if "fov" in df.columns else "fov_name"
+    stat_keys = ["mean", "std", "median", "iqr", "max", "min"]
 
-    # Build lookups from zarr zattrs (one open per unique FOV)
+    # Build lookups from zarr zattrs, or from CSV sidecars if csv_dir is set
+    # (one open/read per unique FOV or store).
     stat_lookup: dict[tuple[str, str, str, int], dict[str, float]] = {}
     focus_lookup: dict[tuple[str, str], float] = {}
     focus_per_t_lookup: dict[tuple[str, str], dict[int, int]] = {}
 
     for (store_path, fov), group in df.groupby(["store_path", fov_col]):
         fov_path = f"{group['well'].iloc[0]}/{fov}" if "/" not in str(fov) else str(fov)
+        fc = focus_channel or group["channel_name"].iloc[0]
+
+        if csv_dir is not None:
+            sidecar = read_meta_rows_csv(csv_dir, store_path)
+            if sidecar is None:
+                raise ValueError(
+                    f"Store '{store_path}' has no CSV sidecar under '{csv_dir}'. "
+                    "Run `viscy preprocess --csv_dir ...` on this dataset first."
+                )
+            fov_rows = sidecar[sidecar["position_path"] == fov_path]
+            norm_rows = fov_rows[(fov_rows["field_name"] == "normalization") & (fov_rows["scope"] == "timepoint")]
+            if norm_rows.empty:
+                raise ValueError(
+                    f"FOV '{fov_path}' in store '{store_path}' has no normalization metadata "
+                    f"in the CSV sidecar under '{csv_dir}'."
+                )
+            for _, row in norm_rows.iterrows():
+                stat_lookup[(str(store_path), str(fov), str(row["channel_name"]), int(row["timepoint"]))] = {
+                    stat: row[stat] for stat in stat_keys
+                }
+
+            focus_rows = fov_rows[(fov_rows["field_name"] == "focus_slice") & (fov_rows["channel_name"] == fc)]
+            fov_focus = focus_rows[focus_rows["scope"] == "fov"]
+            if not fov_focus.empty and pd.notna(fov_focus["z_focus_mean"].iloc[0]):
+                focus_lookup[(str(store_path), str(fov))] = float(fov_focus["z_focus_mean"].iloc[0])
+            per_t_focus = focus_rows[focus_rows["scope"] == "timepoint"]
+            if not per_t_focus.empty:
+                focus_per_t_lookup[(str(store_path), str(fov))] = {
+                    int(r["timepoint"]): int(r["value"]) for _, r in per_t_focus.iterrows()
+                }
+            continue
+
         with open_ome_zarr(f"{store_path}/{fov_path}", mode="r") as pos:
             norm_meta = pos.zattrs.get("normalization", None)
             focus_meta = pos.zattrs.get("focus_slice", {})
@@ -295,7 +339,6 @@ def preprocess_cell_index(
             for t_str, tp_stats in ch_stats.get("timepoint_statistics", {}).items():
                 stat_lookup[(str(store_path), str(fov), ch_name, int(t_str))] = tp_stats
 
-        fc = focus_channel or group["channel_name"].iloc[0]
         ch_focus = focus_meta.get(fc, {})
         fov_stats = ch_focus.get("fov_statistics", {})
         z_focus = fov_stats.get("z_focus_mean")
@@ -308,7 +351,6 @@ def preprocess_cell_index(
             }
 
     # Vectorized lookup: build norm + focus column arrays
-    stat_keys = ["mean", "std", "median", "iqr", "max", "min"]
     store_arr = df["store_path"].astype(str).to_numpy()
     fov_arr = df[fov_col].astype(str).to_numpy()
     ch_arr = df["channel_name"].astype(str).to_numpy()

@@ -59,6 +59,7 @@ def run(config_path: str):
             zarr_dir=cfg.data_path,
             metrics=metrics,
             num_workers=cfg.num_workers,
+            csv_dir=cfg.csv_dir,
         )
         click.echo("QC metrics complete.")
 

@@ -53,6 +53,7 @@ class ContrastiveModule(LightningModule):
         auxiliary_heads: dict[str, BaseHead] | None = None,
     ) -> None:
         super().__init__()
+        self.save_hyperparameters(ignore=["encoder", "loss_function", "projection", "auxiliary_heads"])
         self.model = encoder
         if projection is not None:
             self.model.projection = projection
@@ -89,10 +90,10 @@ class ContrastiveModule(LightningModule):
         if hasattr(self.loss_function, "step"):
             self.loss_function.step(self.current_epoch)
         if hasattr(self.loss_function, "temperature"):
-            self.log("hparams/temperature", self.loss_function.temperature)
+            self.log("hparams/temperature", self.loss_function.temperature, sync_dist=True)
         for head in self.auxiliary_heads.values():
             head.step(self.current_epoch)
-            self.log(f"hparams/loss_weight/{head.head_name}", head.get_weight())
+            self.log(f"hparams/loss_weight/{head.head_name}", head.get_weight(), sync_dist=True)
 
     def on_fit_start(self) -> None:  # noqa: D102
         if self.freeze_backbone:
@@ -189,8 +190,9 @@ class ContrastiveModule(LightningModule):
         )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        if self.trainer.is_global_zero and self.logger is not None:
-            log_image_grid(self.logger, key, imgs, self.current_epoch, cmaps=["gray"] * 3)
+        if not imgs or not self.trainer.is_global_zero or self.logger is None:
+            return
+        log_image_grid(self.logger, key, imgs, self.current_epoch, cmaps=["gray"] * 3)
 
     def _log_step_samples(self, batch_idx, samples: tuple, stage: Literal["train", "val"]):
         if batch_idx < self.log_batches_per_epoch:
@@ -365,6 +367,7 @@ class BetaVaeModule(LightningModule):
         log_enhanced_visualizations_frequency: int = 30,
     ):
         super().__init__()
+        self.save_hyperparameters(ignore=["vae", "loss_function"])
         self.model = vae
         self.loss_function = loss_function
         self.beta = beta

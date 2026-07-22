@@ -9,6 +9,9 @@
 //   --parquet_out       output parquet path
 //   --focus_channel     channel used for per-timepoint z (default: Phase3D)
 //   --num_workers       build-cell-index parallelism (default: 8)
+//   --csv_dir           optional: read norm/focus metadata from CSV sidecars
+//                        (written by `viscy preprocess`/`qc run --csv_dir`)
+//                        instead of zarr zattrs, for read-only stores
 
 include { BUILD_CELL_INDEX       } from '../modules/preprocessing/build_cell_index'
 include { PREPROCESS_CELL_INDEX  } from '../modules/preprocessing/preprocess_cell_index'
@@ -21,8 +24,9 @@ workflow TRAINING_PREPROCESSING {
         focus_channel
         num_workers
         workspace_dir
+        csv_dir
 
     main:
     BUILD_CELL_INDEX(collection_yaml, parquet_out, num_workers, workspace_dir)
-    PREPROCESS_CELL_INDEX(BUILD_CELL_INDEX.out.parquet, focus_channel, workspace_dir)
+    PREPROCESS_CELL_INDEX(BUILD_CELL_INDEX.out.parquet, focus_channel, csv_dir, workspace_dir)
 }

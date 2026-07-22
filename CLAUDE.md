@@ -55,6 +55,10 @@ Invariant: `#SBATCH --ntasks-per-node=N` must equal `trainer.devices` in the YAM
 
 The dynacell launcher (`applications/dynacell/tools/submit_benchmark_job.py`) already emits `--ntasks-per-node` correctly; this note is for hand-written scripts (e.g., `applications/cytoland/examples/configs/*/run_*.slurm`).
 
+### Running jobs on Reef/Kelp (CoreWeave) vs Bruno
+
+Our SLURM scripts above target Bruno (home institution, not preemptible). Reef/Kelp is a separate, preemptible CoreWeave cluster with different partitions, QOS, filesystem paths, and job-launch tooling (`slurm_run`) — see [docs/clusters/reef.md](./docs/clusters/reef.md) before adapting or writing a `.slurm`/`sbatch` script for Reef.
+
 ### Job monitoring and inspection
 
 **Process state ≠ training completeness.** Wandb's `state: finished` only means `wandb.finish()` was called — Lightning calls it on clean SIGTERM teardown via `SLURMEnvironment`, so a `scancel`'d run shows `finished` identically to one that hit `max_epochs`. Always cross-check.

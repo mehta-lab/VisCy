@@ -19,6 +19,7 @@
 //       --parquet_out /hpc/.../collections/<name>.parquet \
 //       --focus_channel Phase3D \
 //       --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+//       [--csv_dir /path/to/csv_sidecars] \
 //       -resume
 //
 // Zarr/parquet files are read/written in place on VAST (no staging).
@@ -65,6 +66,7 @@ workflow training_preprocessing {
         params.parquet_out,
         params.focus_channel,
         params.num_workers,
-        params.workspace_dir
+        params.workspace_dir,
+        params.csv_dir
     )
 }

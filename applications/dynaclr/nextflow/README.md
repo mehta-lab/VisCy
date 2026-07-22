@@ -42,7 +42,11 @@ nextflow run applications/dynaclr/nextflow/main.nf -entry training_preprocessing
     --parquet_out /hpc/projects/organelle_phenotyping/models/collections/<name>.parquet \
     --focus_channel Phase3D \
     --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+    [--csv_dir /path/to/csv_sidecars] \
     -resume
+# --csv_dir is optional: pass it when the source stores were preprocessed
+# read-only (via `viscy preprocess`/`qc run --csv_dir ...`) and norm/focus
+# metadata lives in per-store CSV sidecars instead of zarr zattrs.
 
 # Local test (no SLURM) — append `-profile local`
 ```

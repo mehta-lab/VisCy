@@ -6,6 +6,7 @@ from iohub.core.config import TensorStoreConfig
 
 from qc.focus import FocusSliceMetric
 from qc.qc_metrics import generate_qc_metadata
+from viscy_data.meta_csv import read_meta_rows_csv
 
 
 @pytest.fixture
@@ -114,3 +115,58 @@ def test_generate_qc_metadata_all_channels(temporal_hcs_dataset, focus_metric_al
             assert ch in plate.zattrs["focus_slice"]
             for _, pos in plate.positions():
                 assert ch in pos.zattrs["focus_slice"]
+
+
+def test_csv_dir_does_not_write_zattrs(tmp_path, fresh_temporal_hcs_dataset, focus_metric):
+    """csv_dir opens the store read-only and never touches .zattrs."""
+    generate_qc_metadata(
+        zarr_dir=fresh_temporal_hcs_dataset,
+        metrics=[focus_metric],
+        num_workers=1,
+        csv_dir=tmp_path,
+    )
+
+    with open_ome_zarr(fresh_temporal_hcs_dataset, mode="r") as plate:
+        assert "focus_slice" not in plate.zattrs
+        for _, pos in plate.positions():
+            assert "focus_slice" not in pos.zattrs
+
+
+def test_csv_dir_matches_zattrs_values(tmp_path, temporal_hcs_dataset, focus_metric):
+    """CSV sidecar rows carry the same fov/per-timepoint focus values as the zattrs path."""
+    generate_qc_metadata(
+        zarr_dir=temporal_hcs_dataset,
+        metrics=[focus_metric],
+        num_workers=1,
+        csv_dir=tmp_path,
+    )
+    sidecar = read_meta_rows_csv(tmp_path, temporal_hcs_dataset)
+    assert sidecar is not None
+
+    generate_qc_metadata(
+        zarr_dir=temporal_hcs_dataset,
+        metrics=[focus_metric],
+        num_workers=1,
+    )
+    with open_ome_zarr(temporal_hcs_dataset, mode="r") as plate:
+        for fov_name, pos in plate.positions():
+            zattrs_meta = pos.zattrs["focus_slice"]["Phase"]
+            fov_row = sidecar[
+                (sidecar["position_path"] == fov_name)
+                & (sidecar["channel_name"] == "Phase")
+                & (sidecar["field_name"] == "focus_slice")
+                & (sidecar["scope"] == "fov")
+            ]
+            assert len(fov_row) == 1
+            assert fov_row.iloc[0]["z_focus_mean"] == pytest.approx(zattrs_meta["fov_statistics"]["z_focus_mean"])
+
+            for t_str, expected_idx in zattrs_meta["per_timepoint"].items():
+                tp_row = sidecar[
+                    (sidecar["position_path"] == fov_name)
+                    & (sidecar["channel_name"] == "Phase")
+                    & (sidecar["field_name"] == "focus_slice")
+                    & (sidecar["scope"] == "timepoint")
+                    & (sidecar["timepoint"] == int(t_str))
+                ]
+                assert len(tp_row) == 1
+                assert int(tp_row.iloc[0]["value"]) == expected_idx

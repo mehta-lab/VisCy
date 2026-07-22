@@ -57,6 +57,25 @@ def temporal_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     return dataset_path
 
 
+@fixture(scope="function")
+def fresh_temporal_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
+    """Function-scoped (unshared) counterpart to ``temporal_hcs_dataset``.
+
+    Use this for assertions about the *absence* of zattrs fields — other
+    tests write into the session-scoped ``temporal_hcs_dataset``, so it
+    can't be used to check that a code path left zattrs untouched.
+    """
+    dataset_path = tmp_path_factory.mktemp("fresh_temporal_qc.zarr")
+    _build_temporal_hcs(
+        dataset_path,
+        CHANNEL_NAMES,
+        NUM_TIMEPOINTS,
+        ZYX_SHAPE,
+        np.float32,
+    )
+    return dataset_path
+
+
 MULTI_WELL_CHANNELS = ["Phase", "Fluorescence_405"]
 
 
