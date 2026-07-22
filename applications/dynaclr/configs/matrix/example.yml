@@ -1,0 +1,40 @@
+# Example model matrix — run many models in parallel through train → predict → eval.
+#
+# `dynaclr run-matrix` reads this, resolves each model, and submits three SLURM jobs
+# per model chained by --dependency=afterok (train → predict → eval). Models run
+# in parallel; stages chain within a model.
+#
+#   uv run dynaclr run-matrix -c <this> --dry-run
+#
+# `defaults:` holds fields shared across the sweep. Each `models:` entry gives
+# just its training .sh; family / run / train_configs are parsed from the .sh's
+# `export PROJECT= / RUN_NAME= / CONFIGS=` lines (override by setting them here).
+
+defaults:
+  ckpt_name: last # → checkpoints/last.ckpt (pin an epoch with e.g. epoch105-step84800)
+  collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_14_A549_SEC61B_DENV.yml
+  eval_config: applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/infectomics-annotated.yaml
+  datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+  predict_flags:
+    z_range: [15, 45]
+    z_reduction: mip
+    reference_pixel_size: 0.1494
+
+models:
+  # One line per model — the training .sh is the identity + config source.
+  # For the train→predict chain, ckpt_name: last resolves {run}/checkpoints/last.ckpt.
+  - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+  - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.sh
+
+  # markers: run exactly these (extras in the collection ignored); omit = all channels.
+  # ckpt_names: sweep multiple checkpoints — one train, then a predict→eval chain per ckpt.
+  # - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+  #   markers: [SEC61B, Phase3D]
+  #   ckpt_names: [last, epoch105-step84800]
+
+  # Predict/eval an ALREADY-trained model: Lightning nests checkpoints under a
+  # wandb-run-id subdir, which isn't derivable from the identity — give the
+  # explicit `checkpoint:` path (overrides the derived {run}/checkpoints/ default).
+  # - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+  #   ckpt_name: epoch105-step84800
+  #   checkpoint: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/jbrwhzr3/checkpoints/epoch=105-step=84800.ckpt

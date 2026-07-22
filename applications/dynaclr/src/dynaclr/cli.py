@@ -274,6 +274,30 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="run-matrix",
+        import_path="dynaclr.evaluation.orchestration.matrix.main",
+        short_help="Run many models through train→predict→eval in parallel (SLURM afterok chain)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="predict-batch",
+        import_path="dynaclr.evaluation.orchestration.predict_batch.main",
+        short_help="Batch predict embeddings for one model over a collection (+ AI-ready preflight)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="eval",
+        import_path="dynaclr.evaluation.orchestration.eval_launch.main",
+        short_help="Launch eval_from_embeddings over a model/run/ckpt's embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="plot-embeddings",
         import_path="dynaclr.evaluation.plot_embeddings.main",
         short_help="Generate scatter plots from an AnnData embedding store",
