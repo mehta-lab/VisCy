@@ -146,6 +146,75 @@ def test_morphem_preprocess_version() -> None:
     assert eval_utils.MorphEmFeatureExtractor.PREPROCESS_VERSION == "per_image_norm_v2"
 
 
+class _CaptureContrastive:
+    """Stand-in ``ContrastiveModule`` that records the tensor it is called with."""
+
+    def __init__(self) -> None:
+        self.device = torch.device("cpu")
+        self.last_input: torch.Tensor | None = None
+
+    def to(self, *args, **kwargs) -> "_CaptureContrastive":
+        return self
+
+    def eval(self) -> "_CaptureContrastive":
+        return self
+
+    def __call__(self, x: torch.Tensor) -> tuple[torch.Tensor, None]:
+        self.last_input = x
+        return torch.zeros(x.shape[0], 8), None
+
+
+def _make_dynaclr_extractor(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _CaptureContrastive]:
+    """Build a DynaCLR extractor whose model is a capture stub (no checkpoint)."""
+    capture = _CaptureContrastive()
+
+    class _StubModule:
+        @staticmethod
+        def load_from_checkpoint(checkpoint, map_location, encoder):
+            return capture
+
+    monkeypatch.setattr(eval_utils, "ContrastiveModule", _StubModule)
+    monkeypatch.setattr(eval_utils, "ContrastiveEncoder", lambda **kw: object())
+    extractor = eval_utils.DynaCLRFeatureExtractor(checkpoint="unused.ckpt", encoder_config={})
+    return extractor, capture
+
+
+def test_dynaclr_zscores_crop_before_encoder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The crop reaching the encoder must be per-image z-scored (mean~0, std~1).
+
+    DynaCLR trains on ``NormalizeSampled`` z-scored inputs, so feeding it the
+    bounded [0, 1] crop from ``build_crops`` was a train/test mismatch. The
+    extractor now per-crop z-scores; an arbitrary-range crop must arrive at
+    the encoder with zero spatial mean and unit spatial std.
+    """
+    extractor, capture = _make_dynaclr_extractor(monkeypatch)
+    crop = np.arange(256, dtype=np.float32).reshape(16, 16) * 3.0 + 50.0  # non-constant, offset range
+
+    extractor.extract_features(crop)
+
+    x = capture.last_input
+    assert x is not None
+    assert float(x.mean().abs()) < 1e-4
+    assert abs(float(x.std(unbiased=False)) - 1.0) < 1e-3
+
+
+def test_dynaclr_batch_zscores_each_crop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Batched crops are z-scored independently per crop."""
+    extractor, capture = _make_dynaclr_extractor(monkeypatch)
+    crops = [
+        np.full((8, 8), 5.0, dtype=np.float32) + np.arange(64, dtype=np.float32).reshape(8, 8),
+        np.arange(64, dtype=np.float32).reshape(8, 8) * 10.0,  # very different range
+    ]
+
+    extractor.extract_features_batch(crops, batch_size=8)
+
+    x = capture.last_input  # (2, 1, 1, 8, 8)
+    per_crop_mean = x.mean(dim=(-2, -1))
+    per_crop_std = x.std(dim=(-2, -1), unbiased=False)
+    assert torch.all(per_crop_mean.abs() < 1e-4)
+    assert torch.all((per_crop_std - 1.0).abs() < 1e-3)
+
+
 def test_morphem_null_name_soft_skips_in_load_eval_models() -> None:
     """A null ``pretrained_model_name`` disables MorphEm without crashing.
 
