@@ -72,7 +72,17 @@ def _require_morphem():
 
 
 class DynaCLRFeatureExtractor:
-    """DynaCLR-based contrastive feature extractor for cell images."""
+    """DynaCLR-based contrastive feature extractor for cell images.
+
+    DynaCLR is trained on ``NormalizeSampled`` z-scored inputs (per-FOV or
+    per-(FOV, timepoint) mean/std), so this extractor per-crop z-scores each
+    2-D crop before the encoder to match the training input *shape*
+    (zero-mean / unit-std). Per-crop statistics are used because the exact
+    training-time per-FOV/timepoint stats are not available at eval for every
+    store (e.g. the read-only A549 ``.ozx``); this leaves a scope difference
+    (per masked crop vs whole-FOV) but closes the shape gap that raw [0, 1]
+    crops left open.
+    """
 
     # Version tag for the input-side preprocessing recipe. Stored alongside
     # cached features in the per-cache-dir manifest under
@@ -81,7 +91,26 @@ class DynaCLRFeatureExtractor:
     # input changes (normalization, channel handling, resize, etc.). The
     # cache layer compares cached vs current version on context init and
     # auto-invalidates the cached features for this extractor on mismatch.
-    PREPROCESS_VERSION = "v1"
+    # The v2 bump folds two changes over the v1 raw-[0, 1] recipe: (1)
+    # ``build_crops`` switched from raw min-max to robust percentile (1-99
+    # clip + min-max) normalization upstream, and (2) per-crop spatial
+    # z-score here, to match DynaCLR's ``NormalizeSampled`` z-scored training
+    # distribution instead of feeding it bounded [0, 1] crops.
+    PREPROCESS_VERSION = "v2"
+
+    @staticmethod
+    def _zscore(x: torch.Tensor) -> torch.Tensor:
+        """Per-image spatial z-score over the trailing ``(H, W)`` dims.
+
+        Uses the same ``(x - m) / (s + 1e-7)`` form (biased std) as
+        :meth:`viscy_models.foundation.CellDinoModel.preprocess_2d` and the
+        MorphEm wrapper, so all non-DINOv3 backbones share one z-score
+        convention. Operates per leading index, so a batched ``(N, 1, 1, H, W)``
+        tensor is normalized independently per crop.
+        """
+        m = x.mean(dim=(-2, -1), keepdim=True)
+        s = x.std(dim=(-2, -1), unbiased=False, keepdim=True)
+        return (x - m) / (s + 1e-7)
 
     def __init__(self, checkpoint: str, encoder_config: dict):
         """Load DynaCLR model from checkpoint.
@@ -115,6 +144,7 @@ class DynaCLRFeatureExtractor:
             1-D embedding vector of shape ``(embedding_dim,)``.
         """
         image = torch.as_tensor(image, device=self.model.device)[None, None, None, ...]
+        image = self._zscore(image)
         with torch.inference_mode():
             features, _ = self.model(image)
         return features
@@ -123,12 +153,15 @@ class DynaCLRFeatureExtractor:
         """Run the encoder over a batch of 2-D crops in one or more chunks.
 
         Stacks the crops to ``(N, 1, 1, H, W)`` so the contrastive encoder
-        sees a real batch. Chunks at ``batch_size`` to bound VRAM.
+        sees a real batch. Each crop is per-image z-scored (see
+        :meth:`_zscore`) before the encoder. Chunks at ``batch_size`` to
+        bound VRAM.
         """
         out_chunks: list[torch.Tensor] = []
         for i in range(0, len(images), batch_size):
             chunk = np.stack(images[i : i + batch_size], axis=0)
             batch = torch.as_tensor(chunk, device=self.model.device)[:, None, None, ...]
+            batch = self._zscore(batch)
             with torch.inference_mode():
                 features, _ = self.model(batch)
             out_chunks.append(features)
