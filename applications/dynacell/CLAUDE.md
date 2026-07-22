@@ -11,7 +11,7 @@ code/paper boundary. This table is the source of truth (referenced by
 | --- | --- |
 | `fcmae_vscyto3d_scratch` | **UNeXt2** |
 | `fcmae_vscyto3d_pretrained` | **VSCyto3D** (FCMAE-pretrained UNeXt2) |
-| `unetvit3d` | **UNetViT3D** (deterministic; iPSC-trained only) |
+| `unetvit3d` | **UNetViT3D** (deterministic; iPSC-trained for nucleus/membrane; ER/mito also have a549/joint checkpoints from the A549 raw-regen campaign gap-fill) |
 | `pix2pix3d_unetvit` | **pix2pix3d** (GAN; same UNetViT3D generator, `DynacellGAN` engine) |
 | `fnet3d_paper` | **FNet3D** |
 | `celldiff` / `celldiff_r2` | **CELL-Diff** (variants: `iterative`, `sliding_window`, `denoise`/Mean Predictor) |
