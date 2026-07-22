@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 from viscy_utils.cli_utils import load_config
-from viscy_utils.evaluation.mmd import median_heuristic, subsample, witness_function
+from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample, witness_function
 from viscy_utils.evaluation.witness_gmm import fit_gmm_labels
 
 if TYPE_CHECKING:
@@ -227,9 +227,27 @@ def build_marker_annotation(
         cond_mask = perturbed_mask & (conditions == cond)
         if cond_mask.sum() < 5:
             continue
+        # Significance gate: is this condition's cloud actually distinct from the
+        # control reference? A non-significant MMD means the perturbation left no
+        # detectable signature — skip rather than manufacture labels from noise.
+        _mmd2, p_value, _null = mmd_permutation_test(
+            X_ref,
+            subsample(X_all[cond_mask], config.max_reference_cells, rng),
+            n_permutations=config.mmd_n_permutations,
+            bandwidth=bandwidth,
+            seed=config.random_seed,
+        )
+        if p_value > config.mmd_pvalue_threshold:
+            _logger.warning(
+                "MMD not significant for condition %r (p=%.3g > %.3g); no positives labeled.",
+                cond,
+                p_value,
+                config.mmd_pvalue_threshold,
+            )
+            continue
         res = fit_gmm_labels(scores[cond_mask], pos_threshold=config.gmm_pos_threshold, random_state=config.random_seed)
         if not res.separated:
-            _logger.warning("GMM unimodal for condition %r; no positives labeled.", cond)
+            _logger.warning("GMM unimodal for condition %r (p=%.3g); no positives labeled.", cond, p_value)
             continue
         any_separated = True
         idx = np.flatnonzero(cond_mask)[res.hard_label == 1]

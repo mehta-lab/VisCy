@@ -179,3 +179,33 @@ def test_build_marker_annotation_none_when_reference_missing(tmp_path):
         output_path=str(tmp_path / "labels.csv"),
     )
     assert build_marker_annotation(adata, cfg.experiments, cfg) is None
+
+
+def test_build_marker_annotation_mmd_gate_skips_nonsignificant(tmp_path):
+    """When control and perturbed clouds are indistinguishable, the MMD
+    significance gate skips the condition (no positives → None)."""
+    rng = np.random.default_rng(0)
+    n = 120
+    wells = ["A/1"] * n + ["B/2"] * n
+    total = len(wells)
+    # Both wells drawn from the SAME distribution — no real separation.
+    X = rng.standard_normal((total, 16)).astype(np.float32)
+    well_to_pert = {"A/1": "uninfected", "B/2": "DENV"}
+    obs = pd.DataFrame(
+        {
+            "fov_name": [f"{w}/000000" for w in wells],
+            "id": list(range(total)),
+            "t": [i % 5 for i in range(total)],
+            "track_id": list(range(total)),
+            "experiment": ["exp_A"] * total,
+            "marker": ["viral_sensor"] * total,
+            "perturbation": [well_to_pert[w] for w in wells],
+        }
+    )
+    for col in obs.select_dtypes("string").columns:
+        obs[col] = obs[col].astype(object)
+    obs.index = pd.Index([str(i) for i in range(total)], dtype=object)
+    adata = ad.AnnData(X=X, obs=obs, var=pd.DataFrame(index=[str(i) for i in range(16)]))
+
+    cfg = _config(tmp_path / "labels.csv")
+    assert build_marker_annotation(adata, cfg.experiments, cfg) is None

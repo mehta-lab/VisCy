@@ -297,6 +297,14 @@ class WitnessGmmLabelsConfig(BaseModel):
     gmm_pos_threshold : float
         GMM remodeled-component posterior at/above which a perturbed cell is a
         confident positive. Default: 0.8.
+    mmd_pvalue_threshold : float
+        Significance gate applied per perturbed condition before the GMM: the
+        condition's cloud is MMD-permutation-tested against the control reference,
+        and if the p-value exceeds this threshold the separation is not significant
+        and the condition is skipped (no positives). Set to 1.0 to disable the
+        gate. Default: 0.05.
+    mmd_n_permutations : int
+        Number of permutations for the MMD significance test. Default: 1000.
     bandwidth : float or None
         Gaussian RBF bandwidth for the witness kernel. None = median heuristic on
         the pooled (control, perturbed) reference. Default: None.
@@ -314,6 +322,8 @@ class WitnessGmmLabelsConfig(BaseModel):
     marker_filters: list[str] | None = None
     condition_column: str = "perturbation"
     gmm_pos_threshold: float = 0.8
+    mmd_pvalue_threshold: float = 0.05
+    mmd_n_permutations: int = 1000
     bandwidth: float | None = None
     max_reference_cells: int | None = 5000
     random_seed: int = 42
@@ -327,6 +337,8 @@ class WitnessGmmLabelsConfig(BaseModel):
             raise ValueError(f"class_map must define {sorted(missing)} (got keys {sorted(self.class_map)})")
         if not 0.0 < self.gmm_pos_threshold <= 1.0:
             raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
+        if not 0.0 < self.mmd_pvalue_threshold <= 1.0:
+            raise ValueError(f"mmd_pvalue_threshold must be in (0, 1], got {self.mmd_pvalue_threshold}")
         return self
 
 

@@ -36,6 +36,11 @@ witness_gmm_labels:
   label_column: infection_state
   class_map: {positive: infected, negative: uninfected}
   gmm_pos_threshold: 0.8
+  # Significance gate: skip a condition whose MMD vs the control reference is not
+  # significant (no detectable perturbation signature). A condition is labeled only
+  # if BOTH the MMD is significant AND the GMM is bimodal. Set to 1.0 to disable.
+  mmd_pvalue_threshold: 0.05
+  mmd_n_permutations: 1000
   bandwidth: null                # median heuristic on pooled (control, perturbed)
   max_reference_cells: 5000
   condition_column: perturbation
