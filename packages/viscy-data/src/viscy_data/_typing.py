@@ -254,7 +254,7 @@ CELL_INDEX_IMAGING_COLUMNS = [
     "Z_shape",
     "Y_shape",
     "X_shape",
-    "z_focus_mean",
+    "z_focus",
 ]
 
 CELL_INDEX_NORMALIZATION_COLUMNS = [

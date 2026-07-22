@@ -360,6 +360,7 @@ class MultiExperimentTripletDataset(Dataset):
             "norm_std",
             "norm_median",
             "norm_iqr",
+            "z_focus",
         }
         if self.positive_match_columns:
             hot_cols.update(self.positive_match_columns)
@@ -717,9 +718,13 @@ class MultiExperimentTripletDataset(Dataset):
         -------
         NormMeta or None
         """
-        # Parquet path: norm columns present and value is not NA
+        # Parquet fast-path: one norm_* row = one channel's stats. Only valid in
+        # bag-of-channels mode (one channel per sample, keyed "channel_0"). In
+        # all-channels / fixed mode a sample reads multiple channels but the row
+        # carries only its own channel's stats, so fall through to the zarr
+        # zattrs path below, which returns every channel's stats.
         norm_mean_arr = arrays.get("norm_mean")
-        if norm_mean_arr is not None:
+        if self._channel_mode == "from_index" and norm_mean_arr is not None:
             norm_mean = norm_mean_arr[idx]
             if norm_mean is not None and not (isinstance(norm_mean, float) and np.isnan(norm_mean)):
                 tp_stats = {
@@ -728,12 +733,7 @@ class MultiExperimentTripletDataset(Dataset):
                     "median": torch.tensor(arrays["norm_median"][idx], dtype=torch.float32),
                     "iqr": torch.tensor(arrays["norm_iqr"][idx], dtype=torch.float32),
                 }
-                if self._channel_mode == "from_index":
-                    return {"channel_0": {"timepoint_statistics": tp_stats}}
-                else:
-                    ch_arr = arrays.get("channel_name")
-                    ch_name = ch_arr[idx] if ch_arr is not None else "channel_0"
-                    return {ch_name: {"timepoint_statistics": tp_stats}}
+                return {"channel_0": {"timepoint_statistics": tp_stats}}
 
         # Fallback: read from zarr zattrs (old parquets without norm columns)
         store_path = arrays["store_path"][idx]
@@ -822,13 +822,36 @@ class MultiExperimentTripletDataset(Dataset):
             channel_names_to_read = exp.channel_names
         channel_indices = [exp.channel_names.index(name) for name in channel_names_to_read]
 
-        # Per-experiment z_range (scale-adjusted window size centered on z_range center)
+        # Z window sizing comes from the per-experiment z_range; the center is
+        # the per-sample focus plane. Single source of truth: the parquet
+        # ``z_focus`` column when populated (written by preprocess-cell-index),
+        # otherwise fall back to the z_range center (which the registry derived
+        # from zattrs focus_slice, else mid-stack). z_focus_offset sets the
+        # fraction of the window placed below the focus plane (0.5 = symmetric).
         z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
         z_window_size = z_end_base - z_start_base
         z_count = round(z_window_size * scale_z)
-        z_focus = (z_start_base + z_end_base) // 2
-        z_start = z_focus - z_count // 2
+        z_focus_arr = arrays.get("z_focus")
+        z_focus_val = z_focus_arr[idx] if z_focus_arr is not None else None
+        # Guard against NaN for both Python float and numpy float. The old
+        # ``isinstance(x, float)`` check missed numpy floats, crashing int(NaN)
+        # on parquets with unpopulated z_focus rows. ``np.isnan`` handles both.
+        z_focus_missing = z_focus_val is None or (
+            isinstance(z_focus_val, (float, np.floating)) and np.isnan(z_focus_val)
+        )
+        if not z_focus_missing:
+            z_center = int(round(float(z_focus_val)))
+            z_below = round(z_count * self.index.registry.z_focus_offset)
+            z_start = z_center - z_below
+        else:
+            z_start = (z_start_base + z_end_base) // 2 - z_count // 2
         z_end = z_start + z_count
+        # Clamp the window inside the image so edge cells still yield a full patch.
+        z_total = image.shape[2]
+        if z_start < 0:
+            z_start, z_end = 0, z_count
+        elif z_end > z_total:
+            z_start, z_end = z_total - z_count, z_total
         patch = image.oindex[
             t,
             [int(c) for c in channel_indices],
