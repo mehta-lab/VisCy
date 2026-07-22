@@ -10,7 +10,8 @@
 #   - z_window_size: 20 -> 1
 #   - RandWeightedCropd spatial_size [20,600,600] -> [1,600,600]
 #   - BatchedRandAffined rotate_range [3.14,0,0] -> [0,0,0],
-#     scale_range Z [0.7,1.3] -> [0,0] (no Z rotate/scale)
+#     scale_range Z [0.7,1.3] -> [1,1] (identity = no Z scale; kornia
+#     affine scale is an absolute factor, so 1.0 is the no-op, not 0)
 #   - BatchedCenterSpatialCropd roi_size [15,384,384] -> [1,384,384]
 #   - BatchedRandGaussianSmoothd sigma_z [0.25,0.75] -> [0,0]
 # XY augmentation policy (shear/scale/contrast/intensity/noise/smooth) is
@@ -37,7 +38,7 @@ data:
           prob: 0.8
           rotate_range: [0, 0, 0]
           shear_range: [0.0, 0.05, 0.05]
-          scale_range: [[0, 0], [0.5, 1.5], [0.5, 1.5]]
+          scale_range: [[1, 1], [0.5, 1.5], [0.5, 1.5]]
       - class_path: viscy_transforms.BatchedCenterSpatialCropd
         init_args:
           keys: [source, target]
