@@ -55,6 +55,9 @@ CONFIG: dict[str, Any] = {
     # occlusion
     "occ_size": 8,
     "stride": 4,
+    "fill": "zero",  # occluder fill: "zero" | "mean" | "blur" | float. "blur" preserves
+    # gross shape/density and removes only fine texture (faithful for phase); "zero"/"mean"
+    # erase to background (≈0 under z-score). See occlusion_saliency docstring.
     "distance": "signed_delta",  # signed_delta (classifier) | l2 | cosine (embedding)
     "cmap": "icefire",
     "clip_value": 0.2,
@@ -273,7 +276,7 @@ def main(cfg: dict[str, Any]) -> None:
             clf_fn,
             occ_size=int(cfg["occ_size"]),
             stride=int(cfg["stride"]),
-            fill_value=0.0,
+            fill_value=cfg.get("fill", "zero"),
             batch_size=64,
             distance=cfg["distance"],
         )
