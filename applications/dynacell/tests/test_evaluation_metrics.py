@@ -484,6 +484,39 @@ def test_deep_features_shape_mismatch_raises(monkeypatch) -> None:
         metrics.deep_features(target, cell_seg, _IdentityExtractor(), patch_size=2)
 
 
+def test_build_crops_robust_norm_survives_hot_pixel(monkeypatch) -> None:
+    """A lone hot pixel must not compress the in-cell crop toward black.
+
+    Regression for the raw-min-max recipe: a single saturated pixel
+    anywhere in the max-projection set the whole-FOV scale and flattened
+    every cell's real signal to ~0, and did so asymmetrically for GT
+    (hot-pixel-prone fluorescence) vs prediction (smooth) — a GT-vs-pred
+    intensity-range mismatch injected straight into the deep features.
+    Robust percentile normalization (``_robust_norm``, 1-99 clip) clips
+    the outlier so the cell crop keeps its contrast.
+    """
+    metrics = _import_metrics_with_stubs(monkeypatch)
+    d, h, w = 1, 12, 12  # 144 px: p99 index lands on real signal, so a lone outlier is clipped
+    image = np.full((d, h, w), 5.0, dtype=np.float32)  # uniform real background
+    image[0, 2:5, 2:5] = np.arange(10, 100, 10, dtype=np.float32).reshape(3, 3)  # in-cell gradient
+    image[0, 10, 10] = 1.0e6  # hot pixel outside the cell
+    cell_seg = np.zeros((d, h, w), dtype=np.int32)
+    cell_seg[0, 2:5, 2:5] = 1
+
+    crops = metrics.build_crops(image, cell_seg, patch_size=4)
+
+    assert len(crops) == 1
+    # float32 (not float64): _robust_norm upcasts via np.percentile, but crops
+    # must match float32 model weights (DINOv3/DynaCLR feed them straight in).
+    assert crops[0].dtype == np.float32
+    foreground = crops[0][crops[0] > 0]
+    # Raw min-max would map the 10..90 signal to ~1e-5 (max == 1e6); robust
+    # norm clips the hot pixel so the in-cell values keep real spread.
+    assert foreground.size == 9
+    assert float(foreground.max()) > 0.5
+    assert float(foreground.std()) > 0.1
+
+
 class _BatchAwareExtractor:
     """Extractor that records whether ``extract_features_batch`` was used.
 

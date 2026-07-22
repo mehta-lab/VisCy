@@ -140,16 +140,19 @@ class DinoV3FeatureExtractor:
 
     # Version tag for the input-side preprocessing recipe. Stored under
     # ``artifacts.dinov3_features.<slug>.preprocess_version`` in the cache
-    # manifest. Current recipe is per-image min/max scale to ``[0, 1]``
-    # (already done upstream by ``build_crops``) followed by ImageNet
-    # ``(mean, std)`` normalization via ``AutoImageProcessor`` with
-    # ``do_rescale=False`` — the processor's default ``rescale_factor``
-    # of ``1/255`` would otherwise divide our [0, 1] float crops a second
-    # time, leaving the model with essentially-black inputs and features
-    # cosine-uncorrelated with the intended representation. The v2 bump
-    # invalidates every v1 cache entry, which was extracted with the
-    # buggy double-rescale path.
-    PREPROCESS_VERSION = "imagenet_normalize_v2"
+    # manifest. Current recipe is per-image robust percentile-clip
+    # (``[1, 99]``) + min-max scale to ``[0, 1]`` (done upstream by
+    # ``build_crops``) followed by ImageNet ``(mean, std)`` normalization
+    # via ``AutoImageProcessor`` with ``do_rescale=False`` — the processor's
+    # default ``rescale_factor`` of ``1/255`` would otherwise divide our
+    # [0, 1] float crops a second time, leaving the model with
+    # essentially-black inputs and features cosine-uncorrelated with the
+    # intended representation. DINOv3 has no internal per-image z-score, so
+    # this upstream scaling is load-bearing: the v3 bump invalidates every
+    # v2 cache entry, which used raw min-max crops where a single hot pixel
+    # in the FOV compressed all crops toward black and injected a GT-vs-pred
+    # intensity-range mismatch. v2 in turn had fixed the v1 double-rescale.
+    PREPROCESS_VERSION = "imagenet_normalize_v3"
 
     def __init__(self, pretrained_model_name: str):
         """Load DINOv3 model from HuggingFace Hub.
@@ -164,8 +167,9 @@ class DinoV3FeatureExtractor:
         self.processor = AutoImageProcessor.from_pretrained(pretrained_model_name)
         # Belt-and-suspenders: HF defaults `do_rescale=True` with
         # `rescale_factor=1/255` (uint8 → [0, 1]) on the processor instance.
-        # Our crops are already float [0, 1] from `_minmax_norm`, so the
-        # rescale must not run. Per-call ``do_rescale=False`` below covers
+        # Our crops are already float [0, 1] from ``build_crops`` (robust
+        # percentile normalization), so the rescale must not run. Per-call
+        # ``do_rescale=False`` below covers
         # the current invocations; pinning the instance attribute here
         # keeps any future helper that calls ``self.processor(...)`` without
         # the kwarg from silently regressing to the double-rescaled path.
@@ -231,8 +235,12 @@ class CellDinoFeatureExtractor:
     # :meth:`viscy_models.foundation.CellDinoModel.preprocess_2d`. Bump on
     # any future change so cached features auto-invalidate. The bump from
     # the previous min/max-to-[0,1] recipe (which had no version tag) is
-    # one such transition — see commit e648c4ce.
-    PREPROCESS_VERSION = "self_normalize_v1"
+    # one such transition — see commit e648c4ce. The v2 bump reflects
+    # ``build_crops`` switching to robust percentile (1-99 clip + min-max)
+    # normalization upstream: the percentile clip is not affine, so it
+    # changes the z-scored input even though the min-max prescale alone
+    # would cancel under the per-image z-score.
+    PREPROCESS_VERSION = "self_normalize_v2"
 
     def __init__(self, weights_path: str, img_size: int = 224, patch_size: int = 16):
         """Load a CELL-DINO checkpoint from a local ``.pth`` state_dict.
@@ -308,8 +316,12 @@ class MorphEmFeatureExtractor:
     # manifest. Current recipe is per-image per-channel spatial z-score
     # (PerImageNormalize) then bilinear resize to 224, applied in
     # :meth:`viscy_models.foundation.MorphEmModel.preprocess_2d`. Bump on any
-    # future change so cached features auto-invalidate.
-    PREPROCESS_VERSION = "per_image_norm_v1"
+    # future change so cached features auto-invalidate. The v2 bump reflects
+    # ``build_crops`` switching to robust percentile (1-99 clip + min-max)
+    # normalization upstream: the percentile clip is not affine, so it
+    # changes the z-scored input even though the min-max prescale alone
+    # would cancel under the per-image z-score.
+    PREPROCESS_VERSION = "per_image_norm_v2"
 
     def __init__(self, pretrained_model_name: str, img_size: int = 224):
         """Load MorphEm from a HuggingFace hub id (or local snapshot dir).

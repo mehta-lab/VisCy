@@ -29,8 +29,6 @@ except ImportError:
     _cubic_filters = None  # type: ignore[assignment]
     _cubic_ndimage = None  # type: ignore[assignment]
 
-from dynacell.evaluation.utils import _minmax_norm
-
 
 def _require_cubic():
     # Only cubic itself is required: the metric helpers below gate the GPU
@@ -734,6 +732,18 @@ def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = 
     max-projection, cell iteration, and crop construction run once per
     (FOV, timepoint) instead of once per backbone.
 
+    The projection is robust-normalized per image (percentile-clip
+    ``[1, 99]`` then min-max to ``[0, 1]`` via :func:`_robust_norm`) — the
+    same recipe :func:`cp_regionprops` uses — so GT and prediction crops
+    land on comparable, outlier-robust ranges before the backbones. Raw
+    min-max (the previous recipe) let a single hot/saturated pixel anywhere
+    in the max-projection set the scale and compress every cell crop toward
+    black, and did so asymmetrically for GT vs prediction (real fluorescence
+    carries hot pixels/debris that model outputs rarely reproduce) — a
+    GT↔pred intensity-range mismatch injected straight into the features.
+    The clip is not affine, so it changes even the z-score-based backbones'
+    (CELL-DINO, MorphEm) inputs, not just DINOv3's.
+
     Parameters
     ----------
     z_slab : slice or None
@@ -749,7 +759,12 @@ def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = 
     if z_slab is not None:
         image = image[z_slab]
         cell_segmentation = cell_segmentation[z_slab]
-    image_2d = _minmax_norm(np.max(image, axis=0))
+    # ``_robust_norm`` upcasts to float64 (``np.percentile`` returns float64);
+    # cast back to float32 so crops match the float32 model weights. DINOv3's
+    # HF processor and DynaCLR (no explicit dtype) would otherwise feed float64
+    # into float32 conv/linear layers → "Input type (double) and bias type
+    # (float) should be the same". CELL-DINO/MorphEm are already dtype-guarded.
+    image_2d = _robust_norm(np.max(image, axis=0)).astype(np.float32, copy=False)
     return _build_per_cell_crops_2d(image_2d, cell_segmentation, patch_size)
 
 
