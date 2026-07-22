@@ -58,6 +58,12 @@ class Unet3d(UNet3DBase):
         (``example_input_array``, ``DivisiblePad``, sliding window prediction).
         The model itself handles arbitrary Z as long as it is divisible
         by ``2**depth``.
+    downsample_z : bool
+        Whether to downsample the Z axis in the encoder (``True`` preserves the
+        FNet3D behavior). Set ``False`` for a Z-preserving 2D-style network
+        (stride ``(1, 2, 2)``, ``ConvTranspose3d`` kernel ``(1, 3, 3)``), which
+        is required to run at ``Z=1`` without tripping the base ``D % 16``
+        divisor check.
     """
 
     def __init__(
@@ -67,6 +73,7 @@ class Unet3d(UNet3DBase):
         depth: int = 4,
         mult_chan: int = 32,
         in_stack_depth: int | None = None,
+        downsample_z: bool = True,
     ) -> None:
         dims = [mult_chan * (2**i) for i in range(depth + 1)]
         bottleneck = ConvBottleneck3D(dims[-1], residual=False, norm="batch", activation="relu")
@@ -76,7 +83,7 @@ class Unet3d(UNet3DBase):
             dims=dims,
             num_res_block=[1] * depth,
             bottleneck=bottleneck,
-            downsample_z=True,
+            downsample_z=downsample_z,
             residual=False,
             norm="batch",
             activation="relu",
