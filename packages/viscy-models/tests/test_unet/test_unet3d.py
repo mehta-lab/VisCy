@@ -67,6 +67,33 @@ def test_engine_attributes():
     assert model.downsamples_z is True
 
 
+def test_downsample_z_default_preserves_fnet3d():
+    """Default downsample_z keeps the FNet3D Z-downsampling behavior."""
+    model = Unet3d(depth=4, mult_chan=32, in_stack_depth=32)
+    assert model.downsamples_z is True
+
+
+def test_downsample_z_false_z1_forward():
+    """downsample_z=False enables the FNet2D use case: a Z=1 forward runs and preserves Z.
+
+    With downsample_z=True (the FNet3D default) a Z=1 input trips the base
+    ``D % 2**depth`` divisor check; the Z-preserving path must skip that check.
+    """
+    model = Unet3d(in_channels=1, out_channels=1, depth=4, mult_chan=32, downsample_z=False)
+    assert model.downsamples_z is False
+    x = torch.randn(2, 1, 1, 64, 64)  # Y,X divisible by 2**4=16; Z=1
+    y = model(x)
+    assert y.shape == (2, 1, 1, 64, 64)
+
+
+def test_downsample_z_false_skips_z_divisor_check():
+    """With downsample_z=False, Z need not be divisible by 2**depth (only Y/X are checked)."""
+    model = Unet3d(in_channels=1, out_channels=1, depth=2, mult_chan=16, downsample_z=False)
+    x = torch.randn(1, 1, 3, 16, 16)  # Z=3 not divisible by 2^2=4, but Z is not downsampled
+    y = model(x)
+    assert y.shape == (1, 1, 3, 16, 16)
+
+
 def test_state_dict_keys():
     """State dict uses iterative encoder-decoder key structure."""
     model = Unet3d(in_channels=1, out_channels=1, depth=2, mult_chan=16)

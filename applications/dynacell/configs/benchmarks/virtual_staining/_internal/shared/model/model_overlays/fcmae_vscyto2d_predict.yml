@@ -1,0 +1,49 @@
+# FCMAE-2D (FullyConvolutionalMAE, pretraining=False) predict overlay for
+# the in-focus 2D benchmark track. Mirrors fcmae_vscyto3d_predict.yml but
+# with 2D geometry.
+#
+# CRITICAL: predict rebuilds the model from THIS overlay's model_config
+# and then loads the trained weights (engine.py:308), so the full 2D
+# model_config MUST be re-declared here (in_stack_depth=1,
+# stem_kernel_size=[1,2,2]) and data.z_window_size MUST be 1 — otherwise
+# load_state_dict fails on a stem/conv shape mismatch against the 2D
+# checkpoint. Used by both fcmae_vscyto2d_pretrained and
+# fcmae_vscyto2d_scratch predict leaves — predict loads the full trained
+# checkpoint, so the pretrained-encoder warm-start path (encoder_only +
+# ckpt_path) from the fit leaf does NOT belong here.
+#
+# The 2D model predicts each z-plane of the full-Z 3D test store from its
+# own phase plane (z_window_size=1 -> one window per z; the writer keys
+# each output to its z-index, z_padding=0). 640x960 / 512x512 need no YX
+# pad (num_blocks=4 -> multiple of 16).
+base:
+  - ../../../../../../recipes/trainer/predict.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [1, 2, 2]
+      in_stack_depth: 1
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    predict_method: full_image
+    predict_overlap: [4, 256, 256]
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 1
+    num_workers: 0
+    yx_patch_size: [512, 512]
