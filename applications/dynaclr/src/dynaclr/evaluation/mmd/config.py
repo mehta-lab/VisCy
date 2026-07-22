@@ -262,3 +262,45 @@ class MMDPooledConfig(_MMDBaseConfig):
         if not self.comparisons:
             raise ValueError("comparisons must not be empty")
         return self
+
+
+class EmbeddingConsistencyConfig(_MMDBaseConfig):
+    """Per-marker dataset-to-dataset embedding-consistency QC.
+
+    Enumerates the input embedding zarrs for one model/run/checkpoint across
+    datasets via :func:`dynaclr.evaluation.paths.iter_embeddings`, runs pairwise
+    cross-dataset MMD on control cells only (``obs_filter``), and aggregates the
+    long-form output into a symmetric per-marker dataset x dataset MMD matrix.
+    A diagonal-dominant matrix (low off-diagonal MMD) means the embedding space
+    is comparable across acquisitions; large off-diagonal MMD flags a batch
+    effect that LOT correction must fix before downstream tasks trust the
+    embeddings. This QC only *detects and reports* — it does not correct.
+
+    Parameters
+    ----------
+    model_family : str
+        Model-family identity to pool over (path component).
+    run : str
+        Training-run identity to pool over (path component).
+    ckpt_name : str
+        Checkpoint identity to pool over (path component).
+    datasets_root : str or None
+        Base under which datasets live. None uses the canonical
+        :data:`dynaclr.evaluation.paths.DATASETS_ROOT`. Default: None.
+    center_per_experiment : bool
+        Subtract each dataset's own mean embedding before computing MMD, so the
+        matrix reports *residual* batch effects independent of a global offset.
+        Default: True.
+
+    Notes
+    -----
+    ``obs_filter`` (inherited) selects the control cells, e.g.
+    ``{"perturbation": "uninfected"}`` — so perturbation biology cannot
+    masquerade as a batch effect.
+    """
+
+    model_family: str
+    run: str
+    ckpt_name: str
+    datasets_root: str | None = None
+    center_per_experiment: bool = True

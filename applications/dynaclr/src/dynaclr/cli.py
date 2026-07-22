@@ -233,6 +233,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="embedding-consistency-qc",
+        import_path="dynaclr.evaluation.mmd.consistency.main",
+        short_help="Per-marker dataset x dataset embedding-consistency MMD matrix (control cells)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="prepare-eval-configs",
         import_path="dynaclr.evaluation.evaluate.main",
         short_help="Generate evaluation YAML configs and print JSON manifest (Nextflow entry point)",
