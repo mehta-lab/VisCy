@@ -1,0 +1,44 @@
+# Organelle-remodeling model matrix — persistent, iterated on over time.
+#
+# ONE model (DynaCLR-2D-MIP-BagOfChannels single-marker) applied to MANY datasets.
+# One row per dataset-collection; all rows share the same train_sbatch (identity),
+# so the model is trained once elsewhere — here you iterate PREDICT + EVAL:
+#
+#   # embeddings for every dataset (skip train — model already trained):
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml \
+#       --stages predict,eval --dry-run        # inspect, then drop --dry-run
+#
+#   # add a dataset later: append a row, re-run (only new ones lack embeddings).
+#
+# Checkpoint: existing model → Lightning nests under {run}/{PROJECT}/{wandb_id}/checkpoints/,
+# so give an explicit `checkpoint:` (the derived {run}/checkpoints/ path is empty). Set it once
+# in defaults; all rows share the same trained checkpoint.
+
+defaults:
+  # identity: the training .sh's PROJECT/RUN_NAME are the (model_family, run) keys.
+  train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+  ckpt_name: epoch105-step84800
+  checkpoint: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/jbrwhzr3/checkpoints/epoch=105-step=84800.ckpt
+  eval_config: applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/infectomics-annotated.yaml
+  datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+  predict_flags: {z_range: [15, 45], z_reduction: mip, reference_pixel_size: 0.1494}
+
+# One row per dataset — the collection is the only thing that differs.
+# markers: run exactly the organelle marker(s) present in each dataset (extras ignored).
+models:
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2024_11_07_A549_SEC61_DENV.yml
+    markers: [SEC61B]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_14_A549_SEC61B_DENV.yml
+    markers: [SEC61B]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_28_A549_SEC61B_DENV.yml
+    markers: [SEC61B]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_08_A549_G3BP1_ZIKV.yml
+    markers: [G3BP1]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_21_A549_G3BP1_DENV.yml
+    markers: [G3BP1]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_10_A549_TOMM20_ZIKV.yml
+    markers: [TOMM20]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_30_A549_TOMM20_DENV.yml
+    markers: [TOMM20]
+  - collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV.yml
+    markers: [SEC61B, TOMM20, G3BP1]
