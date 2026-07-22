@@ -298,11 +298,12 @@ class WitnessGmmLabelsConfig(BaseModel):
         GMM remodeled-component posterior at/above which a perturbed cell is a
         confident positive. Default: 0.8.
     mmd_pvalue_threshold : float
-        Significance gate applied per perturbed condition before the GMM: the
-        condition's cloud is MMD-permutation-tested against the control reference,
-        and if the p-value exceeds this threshold the separation is not significant
-        and the condition is skipped (no positives). Set to 1.0 to disable the
-        gate. Default: 0.05.
+        Target FDR level for the significance gate. Each perturbed condition is
+        MMD-permutation-tested against the control reference; the raw p-values
+        across the whole run's (marker, condition) family are corrected with
+        Benjamini-Yekutieli FDR control, and a condition is skipped when its
+        **adjusted** p-value exceeds this level. Set to 1.0 to disable the gate.
+        Default: 0.05.
     mmd_n_permutations : int
         Number of permutations for the MMD significance test. Default: 1000.
     bandwidth : float or None

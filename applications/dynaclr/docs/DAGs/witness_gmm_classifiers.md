@@ -24,7 +24,7 @@ flowchart TD
         A1["references from wells/filters:<br/>X = control cells, Y = perturbed cells"]
         A2["bandwidth = median_heuristic(X, Y)<br/><i>viscy_utils.evaluation.mmd</i>"]
         A3["score every cell: w(z) = witness_function(z, X, Y, bw)<br/><i>mmd</i>"]
-        AG["per perturbed CONDITION: MMD permutation test (X vs cond)<br/><i>mmd.mmd_permutation_test</i><br/>p > mmd_pvalue_threshold → not significant → skip condition"]
+        AG["per perturbed CONDITION: MMD permutation test (X vs cond)<br/><i>mmd.mmd_permutation_test</i><br/>run-wide Benjamini-Yekutieli FDR; adjusted p > mmd_pvalue_threshold → skip"]
         A4["per perturbed CONDITION: 2-component GMM on w[cond]<br/><i>witness_gmm.fit_gmm_labels</i><br/>remod = argmin(means); posterior ≥ gmm_pos_threshold → positive<br/>negatives = ALL control-well cells; ambiguous → dropped<br/>unimodal GMM (separated=False) → condition skipped"]
         A5["map GMM ±1 → class_map vocabulary<br/>(e.g. infected / uninfected)"]
         A1 --> A2 --> A3 --> AG --> A4 --> A5
@@ -87,13 +87,17 @@ threshold, which is exactly what the GMM removes. The GMM is the principled repl
 the time gate: it finds the remodeled sub-population within the full mixture. Add a time
 gate only for a specific reason (e.g. debugging, or a marker with no clean late window).
 
-**Significance gate (before the GMM).** Per condition, an MMD permutation test
-(`mmd_permutation_test`, X vs the condition's cells) checks whether the two clouds are
-*actually distinct*. If `p > mmd_pvalue_threshold` (default 0.05) the perturbation left no
-detectable signature and the condition is skipped — no labels manufactured from noise. A
-condition contributes positives only if it is **both** MMD-significant **and** GMM-bimodal
-(`separated=True`); the two guard different failure modes (references differ vs. the
-perturbed cloud splits cleanly). Set `mmd_pvalue_threshold: 1.0` to disable the gate.
+**Significance gate (before the GMM, FDR-controlled).** Per condition, an MMD permutation
+test (`mmd_permutation_test`, X vs the condition's cells) checks whether the two clouds are
+*actually distinct*. Because one Stage-A run tests many (marker × condition) pairs, the raw
+p-values are corrected with **Benjamini-Yekutieli FDR control**
+(`scipy.stats.false_discovery_control(method="by")`) across the whole run, and a condition
+is skipped when its **adjusted** p-value exceeds `mmd_pvalue_threshold` (the target FDR
+level, default 0.05). A condition contributes positives only if it is **both**
+FDR-significant **and** GMM-bimodal (`separated=True`); the two guard different failure
+modes (references differ vs. the perturbed cloud splits cleanly). This is a **two-pass**
+flow: score + p-value every condition (pass 1), BY-adjust run-wide, then GMM-label the
+survivors (pass 2). Set `mmd_pvalue_threshold: 1.0` to disable the gate.
 
 ```mermaid
 flowchart LR
@@ -128,7 +132,7 @@ witness_gmm_labels:
   label_column: infection_state
   class_map: {positive: infected, negative: uninfected}
   gmm_pos_threshold: 0.8
-  mmd_pvalue_threshold: 0.05              # skip a condition if MMD vs control is not significant
+  mmd_pvalue_threshold: 0.05              # target FDR level (BY-adjusted p) for the MMD gate
   mmd_n_permutations: 1000
   bandwidth: null                         # median heuristic
   max_reference_cells: 5000

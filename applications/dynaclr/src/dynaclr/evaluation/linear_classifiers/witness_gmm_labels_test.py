@@ -7,11 +7,27 @@ import pandas as pd
 from dynaclr.evaluation.evaluate_config import WitnessGmmExperiment, WitnessGmmLabelsConfig
 from dynaclr.evaluation.linear_classifiers.witness_gmm_labels import (
     _well_prefix_mask,
-    build_marker_annotation,
+    compute_marker_scores,
     generate_witness_gmm_annotation,
+    label_marker,
     obs_filter_mask,
 )
 from viscy_utils.evaluation.annotation import load_annotation_anndata
+
+
+def build_marker_annotation(adata, experiments, config):
+    """Test helper: compose the two-pass Stage-A labeling (all conditions
+    treated as significant unless the raw MMD gate would exclude them).
+
+    Mirrors the run-level flow for a single marker: score → per-condition MMD
+    p-value → treat p ≤ threshold as significant → GMM-label. Returns None when
+    the marker has no references or no condition survives both gates.
+    """
+    ms = compute_marker_scores(adata, experiments, config)
+    if ms is None:
+        return None
+    significant = {c for c, p in ms.cond_pvalues.items() if p <= config.mmd_pvalue_threshold}
+    return label_marker(ms, significant, config)
 
 
 def _make_separable_embeddings(
