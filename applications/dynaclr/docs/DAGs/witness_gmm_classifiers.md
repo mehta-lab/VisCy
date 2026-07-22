@@ -62,6 +62,48 @@ flowchart TD
 
 
 
+## Reference construction & the GMM gate (why no time gate)
+
+The two witness references are built **asymmetrically**, and this is the crux of the
+method:
+
+- **Control cloud (X) = all cells in the control/uninfected wells, all timepoints.**
+  An uninfected cell looks uninfected at any hpi, so pooling every timepoint gives a
+  large, *clean* reference. No gating.
+- **Perturbed cloud (Y) = all cells in the perturbed wells, all timepoints.** A perturbed
+  well is a **mixture**: early cells have not remodeled yet, late cells have. Y is
+  therefore *dirty* by construction.
+
+The witness `w(z) = mean k(z, X) − mean k(z, Y)` is scored against both clouds. The
+**per-condition GMM is then fit on the perturbed cells' scores only** — it separates the
+remodeled mode from the not-yet-remodeled mode *inside* the dirty Y. Control cells are
+taken as negatives wholesale (well identity). This asymmetry is why the GMM is fit on one
+side but not the other.
+
+**No time gate by default.** A `hours_post_perturbation` window on the perturbed filter
+would pre-clean Y by hand — but that discards data and re-introduces a hand-tuned
+threshold, which is exactly what the GMM removes. The GMM is the principled replacement for
+the time gate: it finds the remodeled sub-population within the full mixture. Add a time
+gate only for a specific reason (e.g. debugging, or a marker with no clean late window).
+
+```mermaid
+flowchart LR
+    subgraph refs["reference clouds (per marker, all timepoints)"]
+        X["X = control wells<br/><b>clean</b> (uninfected at any hpi)"]
+        Y["Y = perturbed wells<br/><b>dirty mixture</b><br/>early: not remodeled · late: remodeled"]
+    end
+    W["witness score per cell<br/>w(z) = mean k(z,X) − mean k(z,Y)"]
+    G["2-component GMM on w over Y<br/>(separates the mixture)"]
+    POS["remodeled mode → positive<br/>(posterior ≥ threshold)"]
+    NEG["all X cells → negative<br/>(well identity, no gate)"]
+    X --> W
+    Y --> W
+    W --> G --> POS
+    X --> NEG
+    POS --> LAB["annotation file<br/>positive / negative"]
+    NEG --> LAB
+```
+
 ## Recipe / config
 
 **Stage A** — `labels_config.yml`:
@@ -71,8 +113,8 @@ witness_gmm_labels:
   experiments:
     - experiment: "2026_04_28_A549_SEC61B_DENV"
       embeddings_zarr: ".../2-phenotyping/predictions/embeddings"
-      control_filter: {perturbation: uninfected}
-      perturbed_filter: {perturbation: [DENV], hours_post_perturbation: {ge: 18, lt: 24}}
+      control_filter: {perturbation: uninfected}   # all uninfected cells, all timepoints
+      perturbed_filter: {perturbation: [DENV]}      # all DENV cells, all timepoints (no time gate)
   marker_filters: [viral_sensor]          # from viral_sensor → infection_state
   label_column: infection_state
   class_map: {positive: infected, negative: uninfected}
@@ -108,6 +150,25 @@ Invoke:
 dynaclr witness-gmm-labels -c labels_config.yml
 dynaclr run-linear-classifiers -c train_config.yml
 ```
+
+## The deployable artifact (do NOT recompute the scaler / PCA)
+
+> **Note:** each `pipelines/{task}_{marker}.joblib` is a `LinearClassifierPipeline`
+> holding the **fitted** `StandardScaler`, the **fitted** `PCA` (when `use_pca: true`),
+> and the logistic-regression weights — all frozen from training. Applying to a new
+> dataset (`apply-linear-classifier` / `append-predictions`) calls
+> `scaler.transform → pca.transform → classifier.predict_proba` — **`.transform`, never
+> `.fit`**. The scaler's mean/std and PCA's rotation are **not** recomputed on new data,
+> and must not be: re-fitting would re-center/re-rotate the new embeddings into a
+> different space than the classifier's `w·x+b` boundary was learned in, silently
+> corrupting predictions. The pipeline is embedding-only and self-contained — no witness
+> references or GMM are carried into it (those live only in Stage A).
+>
+> **Validity condition:** reusing the frozen scaler/PCA is correct only when the new
+> embeddings share the training distribution — i.e. the **same microscope / domain**.
+> Under a batch shift (e.g. mantis v1 → v2) applying the frozen pipeline is mechanically
+> valid but biologically off; that is why the design is **one LC per microscope** rather
+> than cross-domain transfer.
 
 ## Related
 

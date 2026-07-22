@@ -22,8 +22,15 @@ witness_gmm_labels:
   experiments:
     - experiment: "2025_07_24_A549_viral_sensor_ZIKV"
       embeddings_zarr: "/path/to/2025_07_24_A549_viral_sensor_ZIKV/embeddings"
+      # Both references are pooled by well identity across ALL timepoints (default).
+      # The perturbed cloud is intentionally a MIXTURE (early cells not yet remodeled +
+      # late remodeled cells) — the per-condition GMM separates the remodeled mode from
+      # that mixture, so no time gate is needed. A time gate here would discard data and
+      # re-introduce a hand-tuned threshold (the thing the GMM replaces). Only add
+      # `hours_post_perturbation: {ge: N}` to the perturbed_filter if you have a specific
+      # reason to pre-restrict the reference.
       control_filter: {perturbation: uninfected}
-      perturbed_filter: {perturbation: [ZIKV], hours_post_perturbation: {ge: 18, lt: 24}}
+      perturbed_filter: {perturbation: [ZIKV]}
   # From viral_sensor the witness axis means infection.
   marker_filters: [viral_sensor]
   label_column: infection_state
