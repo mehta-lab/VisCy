@@ -296,6 +296,14 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="predict-triplet",
+        import_path="dynaclr.evaluation.predict_triplet.main",
+        short_help="Per-reporter triplet embedding inference from a collection + checkpoint",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI.
