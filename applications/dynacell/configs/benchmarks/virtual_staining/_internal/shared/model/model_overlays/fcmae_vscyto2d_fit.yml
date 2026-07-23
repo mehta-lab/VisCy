@@ -53,11 +53,5 @@ model:
     warmup_steps: 4000
     warmup_multiplier: 1e-3
 trainer:
-  # 32-true (not 16-mixed): the 2D FCMAE diverges to NaN under fp16 mixed
-  # precision (activation/gradient overflow during training — GradScaler does
-  # not catch it), unlike the 3D FCMAE (stable at 16-mixed) and FNet2D
-  # (32-true). Verified 2026-07-23: MixedLoss/ms_ssim_25d is finite in both
-  # fp32 and fp16 autocast on real inputs, so the NaN is training-dynamics, not
-  # the loss forward. 2D nets are light, so full fp32 is affordable.
-  precision: 32-true
+  precision: 16-mixed
   max_epochs: 200
