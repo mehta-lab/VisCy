@@ -158,7 +158,15 @@ class UNet3DBase(nn.Module):
         -------
         Tensor
             Output tensor of shape ``(B, out_channels, D, H, W)``.
+
+        Raises
+        ------
+        ValueError
+            If ``x`` is not a 5D tensor, or a downsampled spatial dimension is
+            not divisible by ``2**num_blocks``.
         """
+        if x.ndim != 5:
+            raise ValueError(f"Expected 5D input (B, C, D, H, W), got {x.ndim}D.")
         for dim_name, size in zip(("D", "H", "W"), x.shape[2:]):
             if self.downsamples_z or dim_name != "D":
                 if size % self._divisor != 0:

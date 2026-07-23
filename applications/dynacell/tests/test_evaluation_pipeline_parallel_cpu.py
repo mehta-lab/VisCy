@@ -154,6 +154,38 @@ def test_limit_positions_with_partial_pred_zarr(tmp_path: Path):
     assert len(mask_rows) == 1 * T
 
 
+@pytest.mark.parametrize("exclude", [["A/1/1"], ["1"]])
+def test_exclude_fov_names_drops_positions(tmp_path: Path, exclude: list[str]):
+    """``io.exclude_fov_names`` drops matching FOVs from pred/gt/seg before eval.
+
+    End-to-end via evaluate_predictions on the standard 3-position fixture:
+    excluding one position — matched either by its full name ``A/1/1`` or by
+    its leaf ``1`` — leaves ``N_POSITIONS - 1`` positions' worth of rows, and
+    the strict pred/gt count-alignment still holds because the filter is applied
+    uniformly.
+    """
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir()
+    pred_path, gt_path, gt_cache_dir, pred_cache_dir = build_fixture(fixture_root)
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+
+    cfg = build_eval_config(
+        pred_path,
+        gt_path,
+        gt_cache_dir,
+        pred_cache_dir,
+        save_dir,
+        executor="serial",
+        fov_workers=1,
+    )
+    cfg.io.exclude_fov_names = exclude
+    pipeline = live_pipeline_module()
+    pixel_rows, mask_rows, _ = pipeline.evaluate_predictions(cfg)
+    assert len(pixel_rows) == (N_POSITIONS - 1) * T
+    assert len(mask_rows) == (N_POSITIONS - 1) * T
+
+
 def test_limit_positions_rejects_pred_with_unknown_position(tmp_path: Path):
     """``limit_positions`` only relaxes count strict equality when pred ⊂ gt.
 
