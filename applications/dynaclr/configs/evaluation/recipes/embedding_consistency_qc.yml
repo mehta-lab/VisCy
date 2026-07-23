@@ -31,3 +31,13 @@ obs_filter:
 
 # Measure residual batch effects independent of a global mean offset.
 center_per_experiment: true
+
+# Temporal binning (optional; unset here = all timepoints pooled).
+# WARNING: setting temporal_bin_size or temporal_bins changes ONLY the MMD
+# matrix — it computes one MMD² per (condition, bin) and the matrix cell becomes
+# the MEAN over bins (per-bin values kept in consistency_mmd_results.csv). The
+# Pearson matrix always pools all timepoints into one mean per dataset, so once
+# bins are on the two matrices describe different populations. Requires the obs
+# column 'hours_post_perturbation'.
+# temporal_bin_size: 6.0
+# temporal_bins: [0, 6, 12, 24]

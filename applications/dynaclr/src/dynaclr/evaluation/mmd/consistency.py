@@ -80,23 +80,20 @@ def plot_consistency_matrix(matrix: pd.DataFrame, marker: str, output_path: Path
         Output file path.
     """
     n = len(matrix)
-    fig, ax = plt.subplots(figsize=(max(4, n * 0.9), max(3.5, n * 0.8)))
+    fig, ax = plt.subplots(figsize=(max(6, n * 1.3), max(5, n * 1.1)))
     sns.heatmap(
         matrix,
         ax=ax,
         cmap="viridis",
         square=True,
         linewidths=0.5,
-        annot=True,
-        fmt=".3f",
-        cbar_kws={"label": "MMD²"},
+        cbar_kws={"label": "MMD²", "shrink": 0.7},
     )
-    ax.set_title(f"Embedding consistency — {marker}\n(control cells, dataset × dataset MMD²)")
+    ax.set_title(f"Embedding consistency — {marker}\ncontrol cells, dataset × dataset MMD²", pad=12)
     ax.set_xlabel("Dataset")
     ax.set_ylabel("Dataset")
-    ax.tick_params(axis="x", labelsize=8, rotation=45)
-    ax.tick_params(axis="y", labelsize=8, rotation=0)
-    fig.tight_layout()
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=8)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -172,7 +169,7 @@ def plot_corr_matrix(matrix: pd.DataFrame, marker: str, output_path: Path) -> No
         Output file path.
     """
     n = len(matrix)
-    fig, ax = plt.subplots(figsize=(max(4, n * 0.9), max(3.5, n * 0.8)))
+    fig, ax = plt.subplots(figsize=(max(6, n * 1.3), max(5, n * 1.1)))
     sns.heatmap(
         matrix,
         ax=ax,
@@ -181,16 +178,13 @@ def plot_corr_matrix(matrix: pd.DataFrame, marker: str, output_path: Path) -> No
         vmax=1.0,
         square=True,
         linewidths=0.5,
-        annot=True,
-        fmt=".3f",
-        cbar_kws={"label": "Pearson r"},
+        cbar_kws={"label": "Pearson r", "shrink": 0.7},
     )
-    ax.set_title(f"Embedding consistency — {marker}\n(control cells, mean-embedding correlation)")
+    ax.set_title(f"Embedding consistency — {marker}\ncontrol cells, mean-embedding correlation", pad=12)
     ax.set_xlabel("Dataset")
     ax.set_ylabel("Dataset")
-    ax.tick_params(axis="x", labelsize=8, rotation=45)
-    ax.tick_params(axis="y", labelsize=8, rotation=0)
-    fig.tight_layout()
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=8)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -212,6 +206,29 @@ def run_consistency_qc(config: EmbeddingConsistencyConfig) -> pd.DataFrame:
     -------
     pd.DataFrame
         The long-form pairwise MMD results (same schema as ``run_mmd_combined``).
+
+    Notes
+    -----
+    The two matrices do **not** always summarize the same population:
+
+    - **MMD²** partitions each dataset pair by ``group_by`` condition and, when
+      ``temporal_bin_size``/``temporal_bins`` is set, by temporal bin. It runs
+      one MMD² per (condition, bin) and the matrix cell is the **mean** of those
+      values (see :func:`mmd_matrix_per_marker`). With the default (no temporal
+      bins, ``obs_filter`` collapsing ``group_by`` to a single value) this is a
+      single MMD² over all control cells at all timepoints pooled. The per-bin
+      values survive in ``consistency_mmd_results.csv`` even though the matrix
+      shows only their average.
+    - **Pearson correlation** ignores ``group_by`` and time entirely: it pools
+      every cell passing ``obs_filter`` into one mean embedding per dataset
+      (see :func:`corr_matrix_per_marker`).
+
+    Consequence: with no temporal bins the two matrices describe the same
+    population, but **turning on temporal bins makes the MMD matrix a
+    mean-over-bins statistic while the Pearson matrix stays all-time pooled** —
+    they then measure different things. Per-bin-then-average (MMD) controls for
+    differences in *time sampling* between acquisitions, which is usually the
+    right batch-effect choice, but the matrix itself is not time-resolved.
     """
     datasets_root = config.datasets_root if config.datasets_root is not None else DATASETS_ROOT
     input_paths = [
