@@ -1,172 +1,63 @@
-# Recipe: Extract Embeddings from a Trained Model
+# Extract per-marker embeddings
 
-## Goal
+Use `dynaclr predict-triplet` for collection-driven inference. It maps physical
+channels to marker names and writes one AnnData zarr per experiment-marker pair.
 
-Extract per-cell embeddings from a trained DynaCLR checkpoint for downstream
-analysis (clustering, classification, visualization). Use `viscy predict`
-with an `EmbeddingWriter` callback — the output is an AnnData zarr store
-with embeddings in `.X` and optional PCA/PHATE in `.obsm`.
+## Required inputs
 
-## Step 1: Create the predict config
+- A collection YAML under
+  [`applications/dynaclr/configs/collections/`](../../configs/collections/).
+- An AI-ready image zarr and tracking store for each experiment.
+- A checkpoint compatible with the selected model family.
+- Model, run, and checkpoint names used to construct the output path.
 
-Create `predict.yml`:
+The collection must include `data_path`, `tracks_path`, `channels`, and
+`perturbation_wells` for every experiment. Use `channels[].wells` when the same
+physical channel represents different markers in different wells.
 
-```yaml
-seed_everything: 42
+## Run
 
-trainer:
-  accelerator: gpu
-  strategy: auto
-  devices: auto
-  precision: 32-true
-  inference_mode: true
-  callbacks:
-    - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
-      init_args:
-        output_path: /path/to/embeddings.zarr
-        # Optional: compute PCA and PHATE during prediction
-        pca_kwargs:
-          n_components: 8
-        phate_kwargs:
-          knn: 5
-          decay: 40
-          n_jobs: -1
-          random_state: 42
-        # Set either to null to skip:
-        # pca_kwargs: null
-        # phate_kwargs: null
-
-model:
-  class_path: dynaclr.engine.ContrastiveModule
-  init_args:
-    encoder:
-      class_path: viscy_models.contrastive.ContrastiveEncoder
-      init_args:
-        backbone: convnext_tiny
-        in_channels: 2
-        in_stack_depth: 30
-        stem_kernel_size: [5, 4, 4]
-        stem_stride: [5, 4, 4]
-        embedding_dim: 768
-        projection_dim: 32
-    example_input_array_shape: [1, 2, 30, 256, 256]
-
-data:
-  class_path: viscy_data.triplet.TripletDataModule
-  init_args:
-    data_path: /path/to/test_data.zarr
-    tracks_path: /path/to/test_tracks
-    source_channel:
-      - Phase3D
-      - GFP
-    z_range: [15, 45]
-    batch_size: 32
-    num_workers: 16
-    initial_yx_patch_size: [160, 160]
-    final_yx_patch_size: [160, 160]
-    normalizations:
-      - class_path: viscy_transforms.NormalizeSampled
-        init_args:
-          keys: [Phase3D]
-          level: fov_statistics
-          subtrahend: mean
-          divisor: std
-      - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
-        init_args:
-          keys: [GFP]
-          lower: 50
-          upper: 99
-          b_min: 0.0
-          b_max: 1.0
-
-return_predictions: false
-ckpt_path: /path/to/checkpoints/best.ckpt
+```sh
+uv run dynaclr predict-triplet \
+  -c applications/dynaclr/configs/collections/<collection>.yml \
+  --checkpoint /path/to/checkpoint.ckpt \
+  --model-family <model-family> \
+  --run <run-name> \
+  --ckpt-name <checkpoint-name> \
+  --datasets-root /path/to/datasets-root \
+  --z-range 15 45 \
+  --z-reduction mip \
+  --reference-pixel-size 0.1494 \
+  --yx-patch-size 160 160 \
+  --batch-size 32 \
+  --num-workers 0
 ```
 
-See `configs/prediction/predict.yml` for the full template.
+Use `--markers SEC61B,TOMM20` to select markers or `--no-labelfree` to skip
+label-free channels. Keep `--num-workers 0` for zarr-backed prediction.
 
-**Key differences from training config:**
-- `initial_yx_patch_size` = `final_yx_patch_size` (no random crop margin needed)
-- No augmentations (deterministic inference)
-- `EmbeddingWriter` callback handles output
-- Single GPU is usually sufficient
+The model's training config determines the correct spatial size,
+normalization, z reduction, and pixel size. Do not guess these values from the
+inference dataset.
 
-## Step 2: Run prediction
+## Validate
 
-```bash
-viscy predict -c predict.yml
+Outputs follow:
+
+```text
+<dataset>/2-phenotyping/predictions/<model-family>/<run>/<checkpoint>/<marker>.zarr
 ```
 
-Or via SLURM:
+Inspect each output:
 
-```bash
-#!/bin/bash
-#SBATCH --job-name=dynaclr_predict
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem-per-cpu=7G
-#SBATCH --time=0-01:00:00
-
-WORKSPACE_DIR=/path/to/viscy
-uv run --project "$WORKSPACE_DIR" --package dynaclr viscy predict -c predict.yml
+```sh
+uv run dynaclr info /path/to/<marker>.zarr
 ```
 
-See `configs/prediction/predict_slurm.sh`.
+Confirm the row count, feature count, marker, checkpoint provenance, and cell
+identifiers. Treat different checkpoints as different feature spaces.
 
-## Step 3: Inspect the output
-
-The output is an AnnData zarr store:
-
-```python
-import anndata as ad
-
-adata = ad.read_zarr("/path/to/embeddings.zarr")
-print(adata)
-# AnnData object with n_obs x n_vars
-#   obs: fov_name, track_id, t, ...
-#   obsm: X_pca, X_phate (if configured)
-```
-
-- `.X` — embedding vectors (n_cells x embedding_dim)
-- `.obs` — cell metadata (FOV, track ID, timepoint, etc.)
-- `.obsm["X_pca"]` — PCA projection (if `pca_kwargs` was set)
-- `.obsm["X_phate"]` — PHATE projection (if `phate_kwargs` was set)
-
-## Step 4: (Optional) Reduce dimensionality post-hoc
-
-If you skipped PCA/PHATE during prediction, or want to try different
-parameters, use the dimensionality reduction CLI:
-
-```yaml
-# reduce.yaml
-input_path: /path/to/embeddings.zarr
-pca:
-  n_components: 32
-  normalize_features: true
-umap:
-  n_components: 2
-  n_neighbors: 15
-  normalize: true
-phate:
-  n_components: 2
-  knn: 5
-  decay: 40
-  scale_embeddings: true
-```
-
-```bash
-dynaclr reduce-dimensionality -c reduce.yaml
-```
-
-Results are written to `.obsm` as `X_pca`, `X_umap`, `X_phate`.
-See `configs/dimensionality_reduction/example_reduce.yaml`.
-
-## Tips
-
-- **Match normalizations** to training — using different normalization
-  at inference will produce degraded embeddings.
-- **Patch size at inference** should equal `final_yx_patch_size` from
-  training (no augmentation margin needed).
-- **Batch size** can be larger at inference since no gradients are stored.
-- **Multiple datasets** — run predict separately per dataset, then evaluate
-  with linear classifiers that can combine multiple zarr stores.
+See [per-marker inference](../DAGs/inference_triplet.md) for the workflow visual,
+batch prediction, and complete option reference. Use
+[evaluation](../DAGs/evaluation.md) when prediction should start from a
+cell-index parquet and continue directly into evaluation.
