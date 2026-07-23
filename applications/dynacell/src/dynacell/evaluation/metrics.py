@@ -183,8 +183,8 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     # the in-focus 2D path passes (H, W) arrays → trailing YX spacing + the
     # ring-based FRC; the full-3D path keeps the (Z, Y, X) spacing + shell-based
     # FSC. The 3D path is byte-identical to before (ndim==3 → full spacing, FSC).
-    ndim = int(pred_xp.ndim)
-    freq_spacing = list(spacing)[-ndim:] if hasattr(spacing, "__len__") and len(spacing) > ndim else spacing
+    ndim = pred_xp.ndim
+    freq_spacing = list(spacing)[-ndim:]
 
     if spectral_pcc_kwargs is not None:
         metrics["Spectral_PCC"] = spectral_pcc(pred_xp, target_xp, spacing=freq_spacing, **spectral_pcc_kwargs)
