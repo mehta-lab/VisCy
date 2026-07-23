@@ -30,14 +30,11 @@ dynaclr build-cell-index \
   ▼
 dynaclr preprocess-cell-index \
     /hpc/.../collections/<collection>.parquet \
-    --focus-channel Phase3D --focus-level fov
+    --focus-channel Phase3D
   │  opens each unique FOV once from zarr zattrs:
   │    norm_mean/std/median/iqr/max/min  — per (cell, timepoint, channel)
-  │    z_focus                           — focus plane the Z window centers on,
-  │                                         from focus_slice at --focus-level
-  │                                         (fov = per-FOV mean; per_timepoint =
-  │                                         per-timepoint index). `z` (tracked
-  │                                         position) is left unchanged.
+  │    z_focus_mean                      — per FOV (mean across timepoints)
+  │    z                                 — per timepoint focus slice index
   │  drops empty frames (max == 0)
   ▼
 <collection>.parquet  (ready: self-contained, no zarr reads at training time)
@@ -47,9 +44,8 @@ viscy fit --config configs/training/<model>.yml
   │  OR: sbatch configs/training/<model>.sh   (SLURM, recommended)
   │  MultiExperimentDataModule reads parquet only at init
   │  tensorstore opens zarr lazily on first batch
-  │  Z window centers on the parquet `z_focus` column (per-sample). If z_focus
-  │  is null, falls back to the per-experiment z_range from zattrs focus_slice,
-  │  else mid-stack. z_focus_offset sets the below/above split.
+  │  ExperimentRegistry reads plate.zattrs["focus_slice"] once at startup
+  │  for z_ranges (z_extraction_window centered on dataset z_focus_mean)
   ▼
 checkpoints/  +  wandb logs
 ```
@@ -75,7 +71,7 @@ viscy fit  (GPU, hours–days)
 | Step                  | Command                                                                   | Input                                  | Output                                                    |
 | --------------------- | ------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------- |
 | Build cell index      | `dynaclr build-cell-index <collection.yml> <out.parquet> --num-workers 8` | collection YAML + zarr + tracking CSVs | parquet with TCZYX shape columns                          |
-| Preprocess cell index | `dynaclr preprocess-cell-index <parquet> --focus-channel Phase3D --focus-level fov` | parquet + zarr zattrs        | parquet with norm stats + z_focus, empties removed        |
+| Preprocess cell index | `dynaclr preprocess-cell-index <parquet> --focus-channel Phase3D`         | parquet + zarr zattrs                  | parquet with norm stats, per-timepoint z, empties removed |
 | Train (interactive)   | `uv run viscy fit --config configs/training/<model>.yml`                  | training config + parquet              | checkpoints + logs                                        |
 | Train (SLURM)         | `sbatch configs/training/<model>.sh`                                      | training config + parquet              | checkpoints + logs                                        |
 | Resume (SLURM)        | `CKPT_PATH=.../last.ckpt sbatch configs/training/<model>.sh`              | checkpoint path env var                | resumed checkpoints                                       |
@@ -89,8 +85,8 @@ viscy fit  (GPU, hours–days)
 | Pixel data (TCZYX arrays)               | zarr store on VAST                                        | `prepare run` → concatenate                  |
 | Cell tracking (y, x, t, track_id)       | tracking.zarr on VAST                                     | `prepare run` → concatenate                  |
 | Normalization stats (per FOV/timepoint) | zarr zattrs → parquet `norm_*` columns                    | `viscy preprocess` → `preprocess-cell-index` |
-| Tracked cell z (per cell)               | tracking → parquet `z` column (unchanged by preprocess)   | `build-cell-index`                           |
-| Focus plane (Z window center)           | zarr zattrs focus_slice → parquet `z_focus`               | `viscy preprocess` → `preprocess-cell-index --focus-level` |
+| Focus slice (per timepoint)             | zarr zattrs → parquet `z` column                          | `viscy preprocess` → `preprocess-cell-index` |
+| Focus slice mean (per FOV)              | zarr zattrs → parquet `z_focus_mean`                      | `viscy preprocess` → `preprocess-cell-index` |
 | TCZYX shape per FOV                     | parquet columns                                           | `build-cell-index`                           |
 | Collection definition                   | `configs/collections/<name>.yml` in git                   | manually authored                            |
 | Parquet                                 | `/hpc/projects/organelle_phenotyping/models/collections/` | `build-cell-index`                           |
@@ -162,8 +158,7 @@ To reproduce: `build-cell-index` → `preprocess-cell-index` from the same colle
 ## Notes
 
 - `preprocess-cell-index` overwrites the parquet in-place by default. Pass `--output` to write elsewhere.
-- `--focus-channel Phase3D` selects which channel's `focus_slice` metadata feeds the `z_focus` column. Use the channel with sharpest axial contrast (label-free Phase3D for most experiments). `--focus-level {fov,per_timepoint}` picks per-FOV mean vs per-timepoint index.
-- **Z window centering is parquet-first.** At training time the datamodule centers the Z window on the per-sample `z_focus` column. If `z_focus` is null it falls back to the per-experiment `z_range` (which `ExperimentRegistry` derives from `plate.zattrs["focus_slice"][channel]["dataset_statistics"]["z_focus_mean"]`, else mid-stack). Existing parquets without a `z_focus` column read as all-null → identical to the previous zattrs-only behavior.
-- `z_focus` and `z` are distinct: `z_focus` = where the Z window centers; `z` = the tracked cell position (unchanged by preprocess). Datasets without focus_slice (e.g. static bbox-center data) can seed `z_focus = z` in their own prep script.
-- The `z` column is carried through to embeddings obs during predict for downstream consumers.
+- `--focus-channel Phase3D` selects which channel's `per_timepoint` focus indices are written to the `z` column. Use the channel that has the sharpest axial contrast (label-free Phase3D for most experiments).
+- At training time, `ExperimentRegistry.__post_init__` reads `plate.zattrs["focus_slice"][channel]["dataset_statistics"]["z_focus_mean"]` to compute per-experiment z_ranges for patch extraction. This is the only zarr metadata read at training startup; the parquet is self-contained for all per-cell data.
+- The `z` column in the parquet is carried through to embeddings obs during predict — downstream consumers (e.g., visualization) can use it to recover the in-focus plane for each cell at each timepoint.
 - For performance tuning (num_workers, pin_memory, batch_size, augmentation placement), see [profiling.md](profiling.md) — authored after the first validated profiling sweep.

@@ -17,14 +17,7 @@ from viscy_data.cell_index import preprocess_cell_index
     default=None,
     help="Channel name for focus_slice lookup (e.g. Phase3D). Default: first channel per FOV.",
 )
-@click.option(
-    "--focus-level",
-    type=click.Choice(["fov", "per_timepoint"]),
-    default="fov",
-    show_default=True,
-    help="focus_slice level written to the z_focus column: per-FOV mean or per-timepoint index.",
-)
-def main(parquet_path, output, focus_channel, focus_level):
+def main(parquet_path, output, focus_channel):
     """Preprocess a cell index parquet: add normalization stats, focus slice, remove empty frames.
 
     Reads precomputed metadata from zarr zattrs and writes them as parquet
@@ -34,5 +27,4 @@ def main(parquet_path, output, focus_channel, focus_level):
         parquet_path=parquet_path,
         output_path=output,
         focus_channel=focus_channel,
-        focus_level=focus_level,
     )
