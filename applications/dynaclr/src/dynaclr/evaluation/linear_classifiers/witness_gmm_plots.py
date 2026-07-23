@@ -29,23 +29,38 @@ from viscy_utils.evaluation.witness_gmm import GmmLabelResult
 
 def plot_witness_gmm(
     scores: NDArray,
+    control_scores: NDArray,
     result: GmmLabelResult,
     pos_threshold: float,
     marker: str,
     condition: str,
     output_path: Path,
+    pos_label: str = "remodeled",
+    neg_label: str = "unaffected",
 ) -> None:
-    """Plot perturbed-cell witness scores with the fitted GMM overlaid.
+    """Plot perturbed vs control witness scores with the fitted GMM overlaid.
 
-    Shows the histogram of the condition's witness scores, the two Gaussian
-    component densities, and the posterior-threshold decision boundary (cells
-    whose remodeled-component posterior clears ``pos_threshold`` are the
-    confident positives). This is the bimodality the GMM gate reads.
+    Two histograms are overlaid so the reader can see *which population each GMM
+    mode corresponds to*:
+
+    - **perturbed** (grey): the condition's cells — the mixture the GMM is fit on.
+    - **control** (blue): the clean negative-reference cells (control wells) — NOT
+      GMM-fit, shown only as the reference cloud.
+
+    The two GMM component densities (fit on the perturbed mixture) are drawn on
+    top: the ``pos_label`` mode (red, lower mean, perturbed-leaning) and the
+    ``neg_label`` mode (blue). A sound gate has the ``neg_label`` component sitting
+    on top of the control histogram (both are control-like) and the ``pos_label``
+    component pulled away toward negative scores. The dashed line is the
+    posterior-``pos_threshold`` decision boundary.
 
     Parameters
     ----------
     scores : NDArray
         Witness scores for the condition's perturbed cells, shape ``(n,)``.
+    control_scores : NDArray
+        Witness scores of the control-reference cells, shape ``(m,)`` (the clean
+        negative reference; not GMM-fit, overlaid for comparison).
     result : GmmLabelResult
         The fitted GMM result for this condition.
     pos_threshold : float
@@ -56,27 +71,47 @@ def plot_witness_gmm(
         Condition name (title).
     output_path : Path
         Output file path.
+    pos_label : str
+        Class name for the positive (perturbed-leaning) mode, for the legend.
+    neg_label : str
+        Class name for the negative (control-like) mode, for the legend.
     """
     scores = np.asarray(scores).ravel()
+    control_scores = np.asarray(control_scores).ravel()
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.hist(scores, bins=60, density=True, color="0.7", edgecolor="white", label="witness scores")
 
-    grid = np.linspace(scores.min(), scores.max(), 400)
+    # Shared bins across both populations so the overlaid histograms are comparable.
+    lo = float(min(scores.min(), control_scores.min())) if control_scores.size else float(scores.min())
+    hi = float(max(scores.max(), control_scores.max())) if control_scores.size else float(scores.max())
+    bins = np.linspace(lo, hi, 61)
+    ax.hist(scores, bins=bins, density=True, color="0.7", alpha=0.7, label=f"perturbed ({condition}, n={len(scores)})")
+    if control_scores.size:
+        ax.hist(
+            control_scores,
+            bins=bins,
+            density=True,
+            histtype="step",
+            color="tab:blue",
+            lw=1.5,
+            label=f"control reference (n={len(control_scores)})",
+        )
+
+    grid = np.linspace(lo, hi, 400)
     means = result.gmm.means_.ravel()
     stds = np.sqrt(result.gmm.covariances_.ravel())
     weights = result.gmm.weights_.ravel()
     for k in range(len(means)):
         density = weights[k] / (stds[k] * np.sqrt(2 * np.pi)) * np.exp(-0.5 * ((grid - means[k]) / stds[k]) ** 2)
-        is_remod = k == result.remod_component
+        is_pos = k == result.remod_component
         ax.plot(
             grid,
             density,
             lw=2,
-            color="tab:red" if is_remod else "tab:blue",
-            label=f"{'remodeled' if is_remod else 'unaffected'} (w={weights[k]:.2f})",
+            color="tab:red" if is_pos else "tab:cyan",
+            label=f"GMM {pos_label if is_pos else neg_label} mode (w={weights[k]:.2f})",
         )
 
-    # Score at which the remodeled-component posterior equals pos_threshold — the
+    # Score at which the positive-component posterior equals pos_threshold — the
     # decision boundary, found on the score grid (posterior is monotone in score
     # for a two-component 1-D GMM).
     grid_post = result.gmm.predict_proba(grid.reshape(-1, 1))[:, result.remod_component]
@@ -89,7 +124,7 @@ def plot_witness_gmm(
     ax.set_title(
         f"Witness-GMM gate — {marker} / {condition}\n"
         f"{'bimodal' if result.separated else 'UNIMODAL (skipped)'} · "
-        f"{n_pos}/{len(scores)} confident positives"
+        f"{n_pos}/{len(scores)} confident {pos_label}"
     )
     ax.set_xlabel("witness score  (negative = perturbed-leaning)")
     ax.set_ylabel("density")
@@ -134,17 +169,44 @@ def plot_mmd_null(
         Output file path.
     """
     null = np.asarray(null).ravel()
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.hist(null, bins=50, color="0.7", edgecolor="white", label="permutation null")
-    ax.axvline(observed_mmd2, color="tab:red", lw=2, label=f"observed MMD² = {observed_mmd2:.3g}")
-    ax.set_title(
-        f"MMD significance — {marker} / {condition}\n"
-        f"raw p={p_value:.3g} · BY-adj p={p_adjusted:.3g} · "
-        f"{'SIGNIFICANT' if significant else 'not significant (skipped)'}"
+    null_max = float(null.max())
+    null_std = float(null.std())
+    # Effect size: how many null-SD the observed value sits above the null mean.
+    z = (observed_mmd2 - float(null.mean())) / null_std if null_std > 0 else np.inf
+
+    # The null clusters near ~0 while the observed MMD² is far to the right; on one
+    # shared axis the null collapses to an invisible sliver. Use a broken x-axis:
+    # left panel zooms the null distribution, right panel marks the observed value.
+    fig, (axl, axr) = plt.subplots(
+        1, 2, figsize=(8, 4.5), sharey=True, gridspec_kw={"width_ratios": [3, 1], "wspace": 0.05}
     )
-    ax.set_xlabel("MMD²")
-    ax.set_ylabel("count")
-    ax.legend(fontsize=8)
+    axl.hist(null, bins=50, color="0.7", edgecolor="0.5", label="permutation null")
+    axl.set_xlim(min(0.0, float(null.min())), null_max * 1.15 + 1e-9)
+    axl.set_ylabel("count")
+    axl.set_xlabel("MMD²  (null region)")
+    axl.legend(fontsize=8, loc="upper right")
+
+    axr.axvline(observed_mmd2, color="tab:red", lw=2, label=f"observed = {observed_mmd2:.3g}")
+    pad = max(observed_mmd2 * 0.02, null_max)
+    axr.set_xlim(observed_mmd2 - pad, observed_mmd2 + pad)
+    axr.set_xlabel("observed")
+    axr.legend(fontsize=8, loc="upper right")
+
+    # Broken-axis diagonal marks between the two panels.
+    d = 0.015
+    for ax_, xs in ((axl, (1 - d, 1 + d)), (axr, (-d, d))):
+        ax_.plot(xs, (-d, d), transform=ax_.transAxes, color="k", clip_on=False, lw=1)
+        ax_.plot(xs, (1 - d, 1 + d), transform=ax_.transAxes, color="k", clip_on=False, lw=1)
+    axl.spines["right"].set_visible(False)
+    axr.spines["left"].set_visible(False)
+    axr.tick_params(left=False)
+
+    fig.suptitle(
+        f"MMD significance — {marker} / {condition}\n"
+        f"raw p={p_value:.3g} · BY-adj p={p_adjusted:.3g} · observed {z:.0f}σ above null · "
+        f"{'SIGNIFICANT' if significant else 'not significant (skipped)'}",
+        fontsize=11,
+    )
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -169,6 +231,7 @@ def plot_remodeling_vs_time(
     cond_time: dict,
     cond_gmm: dict,
     control_time: NDArray | None,
+    control_pos: NDArray | None,
     positive_class: str,
     marker: str,
     output_path: Path,
@@ -182,9 +245,14 @@ def plot_remodeling_vs_time(
     what reveals the remodeling/infection *rise* over time (the fraction over
     labeled cells alone is flat ~100% by construction, since the gate keeps only
     positives). The numerator is the GMM confident-positive count
-    (``hard_label == 1``). The control reference is drawn dashed as the ~0%
-    baseline. Error bars are Bernoulli SEM per timepoint. Style follows the
-    paper's ``plot_infection_state_vs_time`` figure.
+    (``hard_label == 1``).
+
+    The control reference is drawn dashed and is the **empirical false-positive
+    rate**: the fraction of control-well cells whose witness score would clear the
+    same GMM posterior threshold (``control_pos``), NOT a hardcoded zero. It
+    should hug 0 if the gate is clean; a rise flags leakage into the negatives.
+    Error bars are Bernoulli SEM per timepoint. Style follows the paper's
+    ``plot_infection_state_vs_time`` figure.
 
     Parameters
     ----------
@@ -195,8 +263,10 @@ def plot_remodeling_vs_time(
         ``condition -> GmmLabelResult``; ``hard_label == 1`` marks confident
         positives among that condition's perturbed cells.
     control_time : NDArray or None
-        Time value per control-reference cell (the 0% baseline, drawn dashed).
-        None → no baseline line.
+        Time value per control-reference cell. None → no baseline line.
+    control_pos : NDArray or None
+        Boolean per control cell: clears the GMM posterior threshold (would be
+        a false positive). Aligned with ``control_time``. Drives the dashed line.
     positive_class : str
         The positive class value (e.g. ``"infected"``), for labeling.
     marker : str
@@ -230,17 +300,18 @@ def plot_remodeling_vs_time(
             label=f"{condition} (n={int(stats['n'].sum())})",
         )
 
-    if control_time is not None and len(control_time):
-        stats = _pct_positive_by_time(control_time, np.zeros(len(control_time)))
+    if control_time is not None and len(control_time) and control_pos is not None:
+        stats = _pct_positive_by_time(control_time, control_pos)
+        fp_rate = 100.0 * float(np.mean(control_pos))
         ax.errorbar(
             stats["t"],
             stats["pct"],
             yerr=stats["sem"],
             linestyle="--",
-            linewidth=1.0,
-            alpha=0.6,
+            linewidth=1.2,
+            alpha=0.7,
             color="0.4",
-            label=f"control (n={int(stats['n'].sum())})",
+            label=f"control false-positive rate (n={int(stats['n'].sum())}, {fp_rate:.1f}%)",
         )
 
     ax.set_ylim(-5, 105)

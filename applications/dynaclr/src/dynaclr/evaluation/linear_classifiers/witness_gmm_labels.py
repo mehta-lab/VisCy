@@ -211,7 +211,9 @@ class _MarkerLabels:
     cond_gmm: dict  # condition -> GmmLabelResult
     cond_scores: dict  # condition -> witness scores (all perturbed cells for the condition)
     cond_time: dict  # condition -> time value per perturbed cell (hpp if present, else t)
-    control_time: np.ndarray | None  # time value per control-reference cell (the 0% baseline)
+    control_time: np.ndarray | None  # time value per control-reference cell
+    control_scores: np.ndarray  # witness scores of the control-reference cells (the clean negative reference)
+    control_pos: np.ndarray  # per control cell: clears the GMM posterior threshold (empirical false positive)
 
 
 def compute_marker_scores(
@@ -301,6 +303,14 @@ def label_marker(
     labels = np.full(len(obs), None, dtype=object)
     labels[control_mask] = neg_label
 
+    # Per-cell provenance carried into the annotation file: the raw witness score
+    # (every scored cell) and the GMM posterior of the assigned class. Control
+    # cells are the clean negative reference (not GMM-fit) → posterior 1.0 (full
+    # confidence by design); perturbed positives get their remodel-mode posterior.
+    # The posterior doubles as a per-sample confidence weight for Stage-B training.
+    gmm_posterior = np.full(len(obs), np.nan, dtype=float)
+    gmm_posterior[control_mask] = 1.0
+
     time_col = "hours_post_perturbation" if "hours_post_perturbation" in obs.columns else "t"
     time_values = obs[time_col].to_numpy() if time_col in obs.columns else None
 
@@ -324,8 +334,10 @@ def label_marker(
             _logger.warning("GMM unimodal for condition %r; no positives labeled.", cond)
             continue
         any_separated = True
-        idx = np.flatnonzero(cond_mask)[res.hard_label == 1]
+        cond_idx = np.flatnonzero(cond_mask)
+        idx = cond_idx[res.hard_label == 1]
         labels[idx] = pos_label
+        gmm_posterior[idx] = res.posterior[res.hard_label == 1]
 
     if not any_separated:
         return None
@@ -334,10 +346,36 @@ def label_marker(
     carry = key_cols + [c for c in _METADATA_COLUMNS if c in obs.columns and c not in key_cols]
     frame = obs.loc[keep, carry].copy()
     frame[config.label_column] = labels[keep]
+    frame["witness_score"] = scores[keep]
+    frame["gmm_posterior"] = gmm_posterior[keep]
     # Normalize fov_name to match the annotation-loader convention.
     frame["fov_name"] = frame["fov_name"].astype(object).str.strip("/")
     control_time = time_values[control_mask] if time_values is not None else None
-    return _MarkerLabels(frame.reset_index(drop=True), cond_gmm, cond_scores, cond_time, control_time)
+    control_scores = scores[control_mask]
+
+    # Score the CONTROL cells against the fitted GMM(s) — a control cell is a
+    # false positive if its remodel-mode posterior clears the threshold under any
+    # separated condition's GMM (the same rule perturbed cells are gated by). This
+    # drives the remodeling-vs-time control line as an empirical FALSE-POSITIVE
+    # rate, not a hardcoded zero. NaN posterior for controls when no GMM separated.
+    control_pos = np.zeros(control_mask.sum(), dtype=bool)
+    control_post = np.full(control_mask.sum(), np.nan, dtype=float)
+    ctrl_X = scores[control_mask].reshape(-1, 1)
+    for res in cond_gmm.values():
+        if not res.separated:
+            continue
+        post = res.gmm.predict_proba(ctrl_X)[:, res.remod_component]
+        control_post = post if np.isnan(control_post).all() else np.maximum(control_post, post)
+        control_pos |= post >= config.gmm_pos_threshold
+    return _MarkerLabels(
+        frame.reset_index(drop=True),
+        cond_gmm,
+        cond_scores,
+        cond_time,
+        control_time,
+        control_scores,
+        control_pos,
+    )
 
 
 def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
@@ -438,16 +476,42 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
 
     # Pass 2: GMM-label each marker using the FDR-significant conditions.
     frames: list[pd.DataFrame] = []
+    mmd_rows: list[dict] = []  # per (marker, condition) provenance sidecar
     for marker, ms in marker_scores.items():
         result = label_marker(ms, significant.get(marker, set()), config)
+        cond_gmm = result.cond_gmm if result else {}
+        # Provenance row per tested (marker, condition): MMD gate + GMM summary.
+        for cond, mmd in ms.cond_mmd.items():
+            res = cond_gmm.get(cond)
+            mmd_rows.append(
+                {
+                    "marker": str(marker),
+                    "condition": str(cond),
+                    "n_perturbed": int((ms.perturbed_mask & (ms.conditions == cond)).sum()),
+                    "mmd2": mmd.mmd2,
+                    "p_raw": mmd.p_value,
+                    "p_adjusted": p_adj_by_key[(marker, cond)],
+                    "mmd_significant": cond in significant.get(marker, set()),
+                    "gmm_separated": bool(res.separated) if res is not None else False,
+                    "gmm_remodel_weight": float(res.gmm.weights_[res.remod_component]) if res is not None else np.nan,
+                    "n_confident_positive": int((res.hard_label == 1).sum()) if res is not None else 0,
+                    "gmm_bic": res.bic if res is not None else np.nan,
+                    "gmm_aic": res.aic if res is not None else np.nan,
+                    "gmm_bic_1comp": res.bic_1comp if res is not None else np.nan,
+                    "gmm_delta_bic": (res.bic_1comp - res.bic) if res is not None else np.nan,
+                }
+            )
         # Witness-GMM diagnostic for every fitted condition (labeled or unimodal-skipped).
-        for cond, res in (result.cond_gmm if result else {}).items():
+        for cond, res in cond_gmm.items():
             plot_witness_gmm(
                 result.cond_scores[cond],
+                result.control_scores,
                 res,
                 config.gmm_pos_threshold,
                 marker=str(marker),
                 condition=str(cond),
+                pos_label=config.class_map["positive"],
+                neg_label=config.class_map["negative"],
                 output_path=plots_dir / f"witness_gmm_{marker}_{cond}.png",
             )
         if result is None:
@@ -460,6 +524,7 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
             result.cond_time,
             result.cond_gmm,
             result.control_time,
+            result.control_pos,
             config.class_map["positive"],
             marker=str(marker),
             output_path=plots_dir / f"remodeling_vs_time_{marker}.png",
@@ -483,6 +548,12 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
     else:
         out.to_csv(output_path, index=False)
     _logger.info("Wrote %d annotations (%s) to %s", len(out), config.label_column, output_path)
+
+    # Population-level provenance sidecar: one row per (marker, condition) with the
+    # MMD gate (mmd2, raw/BY-adjusted p, significance) and the GMM summary.
+    mmd_path = labels_dir / f"{stem}_mmd.csv"
+    pd.DataFrame(mmd_rows).to_csv(mmd_path, index=False)
+    _logger.info("Wrote MMD/GMM provenance to %s", mmd_path)
     return output_path
 
 

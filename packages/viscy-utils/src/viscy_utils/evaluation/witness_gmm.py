@@ -47,6 +47,16 @@ class GmmLabelResult:
         ``|mean_0 - mean_1| > eps * pooled_std``). ``False`` flags a near-noise
         marker whose scores are effectively unimodal — the caller should skip it
         rather than manufacture labels from a single mode.
+    bic : float
+        Bayesian information criterion of the fitted mixture (lower is better).
+    aic : float
+        Akaike information criterion of the fitted mixture (lower is better).
+    bic_1comp : float
+        BIC of a single-component (unimodal) fit to the same scores. A large
+        ``bic_1comp - bic`` corroborates that two components are justified — an
+        independent, likelihood-based cross-check on the ``separated`` heuristic.
+        Note: at large ``n`` the likelihood term dominates the parameter penalty,
+        so 2 components almost always wins; read the *gap*, not the sign.
     """
 
     gmm: GaussianMixture
@@ -55,6 +65,9 @@ class GmmLabelResult:
     hard_label: NDArray
     converged: bool
     separated: bool
+    bic: float
+    aic: float
+    bic_1comp: float
 
 
 def fit_gmm_labels(
@@ -119,6 +132,11 @@ def fit_gmm_labels(
     mean_gap = float(means.max() - means.min())
     separated = bool(mean_gap > separation_eps * component_std)
 
+    # Likelihood-based model-selection scores. bic_1comp is a single-component fit
+    # to the same data, so the caller can read the ΔBIC (bic_1comp - bic) as an
+    # independent cross-check on the `separated` heuristic.
+    gmm_1 = GaussianMixture(n_components=1, random_state=random_state, n_init=n_init).fit(X)
+
     return GmmLabelResult(
         gmm=gmm,
         remod_component=remod_component,
@@ -126,4 +144,7 @@ def fit_gmm_labels(
         hard_label=hard_label,
         converged=bool(gmm.converged_),
         separated=separated,
+        bic=float(gmm.bic(X)),
+        aic=float(gmm.aic(X)),
+        bic_1comp=float(gmm_1.bic(X)),
     )

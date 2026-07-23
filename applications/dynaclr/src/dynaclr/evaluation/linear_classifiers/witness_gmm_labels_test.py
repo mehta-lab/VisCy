@@ -160,11 +160,20 @@ def test_generate_writes_annotation_file(tmp_path):
     assert set(df["infection_state"].unique()) == {"infected", "uninfected"}
     # Full tracking metadata carried through (not just exp/fov/id/t/state).
     assert {"track_id", "marker", "perturbation"}.issubset(df.columns)
+    # Per-cell provenance: raw witness score + GMM posterior (confidence weight).
+    assert {"witness_score", "gmm_posterior"}.issubset(df.columns)
+    # Control cells (uninfected) are the clean reference → posterior 1.0; positives ∈ (0, 1].
+    ctrl = df["infection_state"] == "uninfected"
+    assert (df.loc[ctrl, "gmm_posterior"] == 1.0).all()
+    assert (df.loc[~ctrl, "gmm_posterior"] > 0).all() and (df.loc[~ctrl, "gmm_posterior"] <= 1.0).all()
     # Diagnostic plots written alongside the labels.
     plots = tmp_path / "ckpt" / "labels" / "plots"
     assert (plots / "witness_gmm_viral_sensor_DENV.png").exists()
     assert (plots / "mmd_null_viral_sensor_DENV.png").exists()
     assert (plots / "remodeling_vs_time_viral_sensor.png").exists()
+    # Population-level provenance sidecar.
+    mmd = pd.read_csv(tmp_path / "ckpt" / "labels" / "viral_sensor_infection_state_mmd.csv")
+    assert {"marker", "condition", "mmd2", "p_raw", "p_adjusted", "mmd_significant"}.issubset(mmd.columns)
 
 
 def test_annotation_joins_by_key_under_shuffle(tmp_path):
