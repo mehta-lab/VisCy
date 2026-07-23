@@ -171,6 +171,11 @@ def mean_average_precision(
     return map_metric.compute()
 
 
+# Floors the SSIM/CS denominators so a zero data_range (c1=c2=0) on a flat window
+# cannot produce 0/0; negligible relative to the c1/c2 stability constants otherwise.
+_SSIM_DENOM_EPS: float = 1e-8
+
+
 def _compute_ssim_and_cs_bf16(
     y_pred: torch.Tensor,
     y: torch.Tensor,
@@ -259,12 +264,33 @@ def _compute_ssim_and_cs_bf16(
     c1 = (k1 * data_range) ** 2
     c2 = (k2 * data_range) ** 2
 
-    sigma_x = mu_xx - mu_x * mu_x
-    sigma_y = mu_yy - mu_y * mu_y
-    sigma_xy = mu_xy - mu_x * mu_y
+    # Repair bf16 catastrophic cancellation in the second moments. With bf16
+    # mean / mean-of-squares convolutions, ``mu_xx - mu_x**2`` cancels badly for
+    # windows over large-magnitude inputs (e.g. z-scored FCMAE targets with a tiny
+    # iqr → normalized values in the hundreds) and can round to a slightly *negative*
+    # variance. At depth=1 (2D) each window has only ``1*H_k*W_k`` samples, so the
+    # cancellation is far more likely than at depth=15 (3D, where the extra Z samples
+    # keep the estimate stable) — a near-flat window then drives the SSIM denominator
+    # to ~0 and produces intermittent NaN loss that trains fine for a while then
+    # diverges.
+    #
+    # A variance is non-negative by definition, so clamp both diagonal terms to >=0.
+    # The covariance must then be bounded by Cauchy-Schwarz (|sigma_xy| <=
+    # sqrt(sigma_x*sigma_y)): exact fp32 recovers cs=1 on a flat window because the
+    # equally-negative sigma_x/sigma_y/sigma_xy cancel in the ratio, so clamping only
+    # the diagonal terms would leave an unbalanced negative sigma_xy and inflate |cs|
+    # to >10 on background windows. With the bound a flat window gives
+    # sigma_x=sigma_y=sigma_xy=0 -> cs = c2 / c2 = 1, matching exact fp32; on
+    # well-conditioned windows the bound is slack and both clamps are no-ops.
+    sigma_x = (mu_xx - mu_x * mu_x).clamp_min(0.0)
+    sigma_y = (mu_yy - mu_y * mu_y).clamp_min(0.0)
+    sigma_xy_bound = (sigma_x * sigma_y).sqrt()
+    sigma_xy = torch.clamp(mu_xy - mu_x * mu_y, min=-sigma_xy_bound, max=sigma_xy_bound)
 
-    contrast_sensitivity = (2 * sigma_xy + c2) / (sigma_x + sigma_y + c2)
-    ssim_full = ((2 * mu_x * mu_y + c1) / (mu_x * mu_x + mu_y * mu_y + c1)) * contrast_sensitivity
+    # ``_SSIM_DENOM_EPS`` floors the denominators so a zero data_range (→ c1=c2=0) on a
+    # flat window cannot yield 0/0; negligible vs the c1/c2 stability constants otherwise.
+    contrast_sensitivity = (2 * sigma_xy + c2) / (sigma_x + sigma_y + c2 + _SSIM_DENOM_EPS)
+    ssim_full = ((2 * mu_x * mu_y + c1) / (mu_x * mu_x + mu_y * mu_y + c1 + _SSIM_DENOM_EPS)) * contrast_sensitivity
 
     return ssim_full, contrast_sensitivity
 
