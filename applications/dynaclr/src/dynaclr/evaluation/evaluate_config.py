@@ -286,8 +286,16 @@ class WitnessGmmLabelsConfig(BaseModel):
         Maps the GMM gate outcome to the class vocabulary:
         ``{"positive": <perturbed class>, "negative": <control class>}`` — e.g.
         ``{"positive": "infected", "negative": "uninfected"}``.
-    output_path : str
-        Path to write the annotation file (``.csv`` or ``.parquet`` by extension).
+    output_dir : str
+        Directory for Stage-A outputs. The annotation file is written to
+        ``<output_dir>/labels/<marker(s)>_<label_column>.<annotation_format>``
+        (the marker prefix disambiguates sibling single-marker configs that share
+        a ``label_column``; dropped when ``marker_filters`` is None) and diagnostic
+        plots to ``<output_dir>/labels/plots/``. Keeping labels under a
+        ``labels/`` subtree lets Stage B write its trained classifiers to a
+        sibling ``classifiers/`` subtree under the same checkpoint root.
+    annotation_format : str
+        Annotation-file format, ``"csv"`` or ``"parquet"``. Default: ``"csv"``.
     marker_filters : list[str] or None
         Markers to label (one annotation column per config; usually one). None =
         all unique ``obs["marker"]``. Default: None.
@@ -319,7 +327,8 @@ class WitnessGmmLabelsConfig(BaseModel):
     experiments: list[WitnessGmmExperiment]
     label_column: str
     class_map: dict[str, str]
-    output_path: str
+    output_dir: str
+    annotation_format: str = "csv"
     marker_filters: list[str] | None = None
     condition_column: str = "perturbation"
     gmm_pos_threshold: float = 0.8
@@ -340,6 +349,8 @@ class WitnessGmmLabelsConfig(BaseModel):
             raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
         if not 0.0 < self.mmd_pvalue_threshold <= 1.0:
             raise ValueError(f"mmd_pvalue_threshold must be in (0, 1], got {self.mmd_pvalue_threshold}")
+        if self.annotation_format not in ("csv", "parquet"):
+            raise ValueError(f"annotation_format must be 'csv' or 'parquet', got {self.annotation_format!r}")
         return self
 
 

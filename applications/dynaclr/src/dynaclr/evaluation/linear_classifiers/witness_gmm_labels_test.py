@@ -27,7 +27,8 @@ def build_marker_annotation(adata, experiments, config):
     if ms is None:
         return None
     significant = {c for c, p in ms.cond_pvalues.items() if p <= config.mmd_pvalue_threshold}
-    return label_marker(ms, significant, config)
+    result = label_marker(ms, significant, config)
+    return result.frame if result is not None else None
 
 
 def _make_separable_embeddings(
@@ -74,7 +75,7 @@ def _make_separable_embeddings(
     return ad.AnnData(X=X, obs=obs, var=var)
 
 
-def _config(output_path, experiment="exp_A", embeddings_zarr="unused.zarr"):
+def _config(output_dir, experiment="exp_A", embeddings_zarr="unused.zarr", annotation_format="csv"):
     return WitnessGmmLabelsConfig(
         experiments=[
             WitnessGmmExperiment(
@@ -88,7 +89,8 @@ def _config(output_path, experiment="exp_A", embeddings_zarr="unused.zarr"):
         label_column="infection_state",
         class_map={"positive": "infected", "negative": "uninfected"},
         condition_column="perturbation",
-        output_path=str(output_path),
+        output_dir=str(output_dir),
+        annotation_format=annotation_format,
     )
 
 
@@ -148,11 +150,21 @@ def test_generate_writes_annotation_file(tmp_path):
     """generate_witness_gmm_annotation writes a parquet/csv annotation file."""
     zarr_path = tmp_path / "embeddings.zarr"
     _make_separable_embeddings().write_zarr(zarr_path)
-    out = generate_witness_gmm_annotation(_config(tmp_path / "labels.parquet", embeddings_zarr=str(zarr_path)))
+    out = generate_witness_gmm_annotation(
+        _config(tmp_path / "ckpt", embeddings_zarr=str(zarr_path), annotation_format="parquet")
+    )
     assert out.exists()
+    assert out == tmp_path / "ckpt" / "labels" / "viral_sensor_infection_state.parquet"
     df = pd.read_parquet(out)
     assert "infection_state" in df.columns
     assert set(df["infection_state"].unique()) == {"infected", "uninfected"}
+    # Full tracking metadata carried through (not just exp/fov/id/t/state).
+    assert {"track_id", "marker", "perturbation"}.issubset(df.columns)
+    # Diagnostic plots written alongside the labels.
+    plots = tmp_path / "ckpt" / "labels" / "plots"
+    assert (plots / "witness_gmm_viral_sensor_DENV.png").exists()
+    assert (plots / "mmd_null_viral_sensor_DENV.png").exists()
+    assert (plots / "remodeling_vs_time_viral_sensor.png").exists()
 
 
 def test_annotation_joins_by_key_under_shuffle(tmp_path):
@@ -161,7 +173,7 @@ def test_annotation_joins_by_key_under_shuffle(tmp_path):
     adata = _make_separable_embeddings()
     zarr_path = tmp_path / "embeddings.zarr"
     adata.write_zarr(zarr_path)
-    out = generate_witness_gmm_annotation(_config(tmp_path / "labels.csv", embeddings_zarr=str(zarr_path)))
+    out = generate_witness_gmm_annotation(_config(tmp_path / "ckpt", embeddings_zarr=str(zarr_path)))
 
     # Shuffle the embedding rows, then join the annotation back by key.
     rng = np.random.default_rng(3)
@@ -192,7 +204,7 @@ def test_build_marker_annotation_none_when_reference_missing(tmp_path):
         marker_filters=["viral_sensor"],
         label_column="infection_state",
         class_map={"positive": "infected", "negative": "uninfected"},
-        output_path=str(tmp_path / "labels.csv"),
+        output_dir=str(tmp_path / "ckpt"),
     )
     assert build_marker_annotation(adata, cfg.experiments, cfg) is None
 

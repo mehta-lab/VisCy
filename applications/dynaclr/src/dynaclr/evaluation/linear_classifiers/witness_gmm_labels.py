@@ -37,6 +37,11 @@ import numpy as np
 import pandas as pd
 from scipy.stats import false_discovery_control
 
+from dynaclr.evaluation.linear_classifiers.witness_gmm_plots import (
+    plot_mmd_null,
+    plot_remodeling_vs_time,
+    plot_witness_gmm,
+)
 from viscy_utils.cli_utils import load_config
 from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample, witness_function
 from viscy_utils.evaluation.witness_gmm import fit_gmm_labels
@@ -139,6 +144,22 @@ def obs_filter_mask(obs: pd.DataFrame, filter_dict: dict) -> np.ndarray:
 _KEY_PRIMARY = ["experiment", "fov_name", "id"]
 _KEY_FALLBACK = ["experiment", "fov_name", "t", "track_id"]
 
+# Tracking / spatial / biological metadata carried through to the annotation file
+# in addition to the join key, so the label CSV is self-describing (an
+# annotation-format file that keeps track lineage, position, marker, and
+# perturbation rather than only exp/fov/id/t/state).
+_METADATA_COLUMNS = [
+    "t",
+    "track_id",
+    "parent_track_id",
+    "parent_id",
+    "y",
+    "x",
+    "marker",
+    "perturbation",
+    "hours_post_perturbation",
+]
+
 
 def _annotation_key_columns(obs: pd.DataFrame) -> list[str]:
     """Pick the annotation join key present in ``obs`` (``id`` primary, else t+track_id)."""
@@ -153,6 +174,15 @@ def _annotation_key_columns(obs: pd.DataFrame) -> list[str]:
 
 
 @dataclass
+class _MmdResult:
+    """MMD permutation-test outcome for one condition (cached for diagnostics)."""
+
+    mmd2: float
+    p_value: float
+    null: np.ndarray
+
+
+@dataclass
 class _MarkerScores:
     """Cached per-marker witness scores + reference masks for two-pass labeling."""
 
@@ -161,7 +191,27 @@ class _MarkerScores:
     perturbed_mask: np.ndarray
     scores: np.ndarray  # witness score per cell
     conditions: np.ndarray  # obs[condition_column] as array
-    cond_pvalues: dict  # condition -> MMD permutation p-value (raw)
+    cond_mmd: dict  # condition -> _MmdResult (raw MMD² + p-value + null)
+
+    @property
+    def cond_pvalues(self) -> dict:
+        """condition -> raw MMD permutation p-value."""
+        return {cond: res.p_value for cond, res in self.cond_mmd.items()}
+
+
+@dataclass
+class _MarkerLabels:
+    """Result of GMM-labeling one marker: the annotation frame plus, for
+    diagnostics, the per-condition GMM fits, the scores they were fit on, and the
+    time vector over the *full* perturbed population (labeled + GMM-dropped) so
+    the remodeling-vs-time plot has the whole-well denominator, not just the
+    confident positives."""
+
+    frame: pd.DataFrame
+    cond_gmm: dict  # condition -> GmmLabelResult
+    cond_scores: dict  # condition -> witness scores (all perturbed cells for the condition)
+    cond_time: dict  # condition -> time value per perturbed cell (hpp if present, else t)
+    control_time: np.ndarray | None  # time value per control-reference cell (the 0% baseline)
 
 
 def compute_marker_scores(
@@ -208,34 +258,36 @@ def compute_marker_scores(
     # Per-condition MMD significance: is this condition's cloud distinct from the
     # control reference? Raw p-values here; FDR-corrected run-wide by the caller.
     conditions = obs[config.condition_column].to_numpy()
-    cond_pvalues: dict = {}
+    cond_mmd: dict = {}
     for cond in pd.unique(conditions[perturbed_mask]):
         cond_mask = perturbed_mask & (conditions == cond)
         if cond_mask.sum() < 5:
             continue
-        _mmd2, p_value, _null = mmd_permutation_test(
+        mmd2, p_value, null = mmd_permutation_test(
             X_ref,
             subsample(X_all[cond_mask], config.max_reference_cells, rng),
             n_permutations=config.mmd_n_permutations,
             bandwidth=bandwidth,
             seed=config.random_seed,
         )
-        cond_pvalues[cond] = float(p_value)
+        cond_mmd[cond] = _MmdResult(mmd2=float(mmd2), p_value=float(p_value), null=np.asarray(null))
 
-    return _MarkerScores(obs, control_mask, perturbed_mask, scores, conditions, cond_pvalues)
+    return _MarkerScores(obs, control_mask, perturbed_mask, scores, conditions, cond_mmd)
 
 
 def label_marker(
     marker_scores: _MarkerScores,
     significant_conditions: set,
     config: WitnessGmmLabelsConfig,
-) -> pd.DataFrame | None:
+) -> _MarkerLabels | None:
     """Pass 2: GMM-gate each significant condition and assemble the annotation frame.
 
     A condition is labeled only if it is in ``significant_conditions`` (cleared
     the FDR-controlled MMD gate, decided run-wide) AND its GMM is bimodal.
     Negatives are all control-well cells (well identity). ``None`` when no
-    condition survives both gates.
+    condition survives both gates. The returned :class:`_MarkerLabels` also
+    carries the per-condition GMM fits and the scores they were fit on, for the
+    Stage-A diagnostic plots.
     """
     obs = marker_scores.obs
     key_cols = _annotation_key_columns(obs)
@@ -249,6 +301,12 @@ def label_marker(
     labels = np.full(len(obs), None, dtype=object)
     labels[control_mask] = neg_label
 
+    time_col = "hours_post_perturbation" if "hours_post_perturbation" in obs.columns else "t"
+    time_values = obs[time_col].to_numpy() if time_col in obs.columns else None
+
+    cond_gmm: dict = {}
+    cond_scores: dict = {}
+    cond_time: dict = {}
     any_separated = False
     for cond in pd.unique(conditions[perturbed_mask]):
         cond_mask = perturbed_mask & (conditions == cond)
@@ -258,6 +316,10 @@ def label_marker(
             _logger.warning("MMD not significant (FDR) for condition %r; no positives labeled.", cond)
             continue
         res = fit_gmm_labels(scores[cond_mask], pos_threshold=config.gmm_pos_threshold, random_state=config.random_seed)
+        cond_gmm[cond] = res
+        cond_scores[cond] = scores[cond_mask]
+        if time_values is not None:
+            cond_time[cond] = time_values[cond_mask]
         if not res.separated:
             _logger.warning("GMM unimodal for condition %r; no positives labeled.", cond)
             continue
@@ -269,21 +331,29 @@ def label_marker(
         return None
 
     keep = labels != None  # noqa: E711 — object-array null test
-    frame = obs.loc[keep, key_cols].copy()
-    if "t" in obs.columns and "t" not in frame.columns:
-        frame["t"] = obs.loc[keep, "t"].to_numpy()
+    carry = key_cols + [c for c in _METADATA_COLUMNS if c in obs.columns and c not in key_cols]
+    frame = obs.loc[keep, carry].copy()
     frame[config.label_column] = labels[keep]
     # Normalize fov_name to match the annotation-loader convention.
     frame["fov_name"] = frame["fov_name"].astype(object).str.strip("/")
-    return frame.reset_index(drop=True)
+    control_time = time_values[control_mask] if time_values is not None else None
+    return _MarkerLabels(frame.reset_index(drop=True), cond_gmm, cond_scores, cond_time, control_time)
 
 
 def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
-    """Run Stage A end to end and write the annotation file.
+    """Run Stage A end to end and write the annotation file plus diagnostics.
 
     Loads each experiment's embeddings zarr, pools per marker, labels via
-    :func:`build_marker_annotation`, concatenates, and writes to
-    ``config.output_path`` (CSV or parquet by extension).
+    :func:`label_marker`, concatenates, and writes the annotation to
+    ``<output_dir>/labels/<label_column>.<annotation_format>``. Diagnostic plots
+    (the label-decision evidence) go to ``<output_dir>/labels/plots/``:
+
+    - ``mmd_null_<marker>_<condition>.png`` — MMD permutation-null + observed +
+      p-values (the significance gate), for every tested condition.
+    - ``witness_gmm_<marker>_<condition>.png`` — witness-score histogram + fitted
+      GMM (the bimodality gate), for every FDR-significant condition.
+    - ``remodeling_vs_time_<marker>.png`` — fraction of cells in the positive
+      class vs time per condition, for every labeled marker.
 
     Parameters
     ----------
@@ -332,8 +402,10 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
     # Benjamini-Yekutieli FDR control across the whole run's (marker, condition)
     # family; a condition is significant if its adjusted p ≤ mmd_pvalue_threshold.
     adjusted = false_discovery_control(np.asarray(pvals), method="by")
+    p_adj_by_key: dict[tuple[str, object], float] = {}
     significant: dict[str, set] = {}
     for (marker, cond), p_adj in zip(pval_keys, adjusted):
+        p_adj_by_key[(marker, cond)] = float(p_adj)
         if p_adj <= config.mmd_pvalue_threshold:
             significant.setdefault(marker, set()).add(cond)
         else:
@@ -345,23 +417,67 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
                 config.mmd_pvalue_threshold,
             )
 
+    labels_dir = Path(config.output_dir) / "labels"
+    plots_dir = labels_dir / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    # MMD-null diagnostic for every tested (marker, condition) — the significance gate.
+    for marker, ms in marker_scores.items():
+        for cond, mmd in ms.cond_mmd.items():
+            p_adj = p_adj_by_key[(marker, cond)]
+            plot_mmd_null(
+                mmd.mmd2,
+                mmd.null,
+                mmd.p_value,
+                p_adj,
+                significant=cond in significant.get(marker, set()),
+                marker=str(marker),
+                condition=str(cond),
+                output_path=plots_dir / f"mmd_null_{marker}_{cond}.png",
+            )
+
     # Pass 2: GMM-label each marker using the FDR-significant conditions.
     frames: list[pd.DataFrame] = []
     for marker, ms in marker_scores.items():
-        frame = label_marker(ms, significant.get(marker, set()), config)
-        if frame is None:
+        result = label_marker(ms, significant.get(marker, set()), config)
+        # Witness-GMM diagnostic for every fitted condition (labeled or unimodal-skipped).
+        for cond, res in (result.cond_gmm if result else {}).items():
+            plot_witness_gmm(
+                result.cond_scores[cond],
+                res,
+                config.gmm_pos_threshold,
+                marker=str(marker),
+                condition=str(cond),
+                output_path=plots_dir / f"witness_gmm_{marker}_{cond}.png",
+            )
+        if result is None:
             _logger.warning("Marker %r produced no labels (no significant + bimodal condition); skipping.", marker)
             continue
+        frame = result.frame
         counts = frame[config.label_column].value_counts().to_dict()
         _logger.info("Marker %r: %d labeled cells %s", marker, len(frame), counts)
+        plot_remodeling_vs_time(
+            result.cond_time,
+            result.cond_gmm,
+            result.control_time,
+            config.class_map["positive"],
+            marker=str(marker),
+            output_path=plots_dir / f"remodeling_vs_time_{marker}.png",
+            time_is_hpp="hours_post_perturbation" in ms.obs.columns,
+        )
         frames.append(frame)
 
     if not frames:
         raise RuntimeError("No markers produced labels — check references, thresholds, and condition_column.")
 
     out = pd.concat(frames, ignore_index=True)
-    output_path = Path(config.output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Disambiguate by marker: sibling single-marker configs often share a
+    # label_column (e.g. three organelle markers → organelle_remodeling_state),
+    # which would clobber a bare <label_column>.<fmt>. Prefix with the filtered
+    # marker(s) so each config writes its own file.
+    stem = f"{'_'.join(config.marker_filters)}_{config.label_column}" if config.marker_filters else config.label_column
+    output_path = labels_dir / f"{stem}.{config.annotation_format}"
+    labels_dir.mkdir(parents=True, exist_ok=True)
     if output_path.suffix == ".parquet":
         out.to_parquet(output_path, index=False)
     else:

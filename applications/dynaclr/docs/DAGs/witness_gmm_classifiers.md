@@ -1,190 +1,159 @@
-# Witness-GMM annotations → linear classifiers DAG
+# Witness-GMM classifier training
 
-**Written:** 2026-07-16
-**Status:** Active. Replaces the earlier witness-score classifier path
-(the sign+dead-zone gate + circular annotation grading, now removed).
-**Rolls up to:** `.ed_planning/dynaclr/batch_correction/per_microscope_classifier/PLAN.md`
-
-A witness→GMM label **is an annotation**: its meaning is named by the modality it
-is computed from — a witness over `viral_sensor` produces `infection_state`
-(infected/uninfected); over an organelle marker, `organelle_remodeling_state`
-(remodel/noremodel). So Stage A writes a **named biological-state column** with the
-real class vocabulary, a file indistinguishable from a hand annotation, and the
-**existing annotation training path** (`run-linear-classifiers`,
-`label_source: annotations`) consumes it unchanged.
-
-## End-to-end DAG (two stages, one existing training path)
-
-```mermaid
-flowchart TD
-    Z["embeddings zarr<br/>obs: experiment, marker, fov_name, id, track_id, t,<br/>perturbation, hours_post_perturbation<br/><i>one microscope / marker per config — no LOT, no pooling</i>"]
-
-    subgraph A["STAGE A · dynaclr witness-gmm-labels (NEW)"]
-        direction TB
-        A1["references from wells/filters:<br/>X = control cells, Y = perturbed cells"]
-        A2["bandwidth = median_heuristic(X, Y)<br/><i>viscy_utils.evaluation.mmd</i>"]
-        A3["score every cell: w(z) = witness_function(z, X, Y, bw)<br/><i>mmd</i>"]
-        AG["per perturbed CONDITION: MMD permutation test (X vs cond)<br/><i>mmd.mmd_permutation_test</i><br/>run-wide Benjamini-Yekutieli FDR; adjusted p > mmd_pvalue_threshold → skip"]
-        A4["per perturbed CONDITION: 2-component GMM on w[cond]<br/><i>witness_gmm.fit_gmm_labels</i><br/>remod = argmin(means); posterior ≥ gmm_pos_threshold → positive<br/>negatives = ALL control-well cells; ambiguous → dropped<br/>unimodal GMM (separated=False) → condition skipped"]
-        A5["map GMM ±1 → class_map vocabulary<br/>(e.g. infected / uninfected)"]
-        A1 --> A2 --> A3 --> AG --> A4 --> A5
-    end
-
-    LBL["<b>ANNOTATION FILE</b> <label_column>.csv|parquet<br/>key: fov_name + id (or fov_name + t + track_id) + experiment<br/>named state column, e.g. infection_state ∈ {infected, uninfected}<br/><i>hand-annotation format — producer-agnostic</i>"]
-
-    subgraph B["STAGE B · dynaclr run-linear-classifiers (EXISTING, label_source: annotations)"]
-        direction TB
-        B1["_annotation_run_specs → load_annotation_anndata (join by key)"]
-        B2["train_linear_classifier → save joblib →<br/>metrics_summary.csv → publish → PDF"]
-        B1 --> B2
-    end
-
-    OUT["output_dir/<br/>metrics_summary.csv · {task}_summary.pdf<br/>pipelines/{task}_{marker}.joblib<br/>[publish_dir/vN + latest] → append-predictions"]
-
-    Z --> A --> LBL --> B --> OUT
-    LBL -. "teacher/student: SEC61 labels,<br/>train on a different modality's zarr" .-> B
-```
-
-
-
-
-
-## What's parallel vs sequential
-
-```mermaid
-flowchart TD
-    E["experiments<br/>(Stage A pools them per marker)"]
-    W["witness → per-condition GMM<br/>(one pass per marker)"]
-    L["labels.parquet<br/>(single annotation file)"]
-    R["run-linear-classifiers<br/>(one LC per (task, marker), existing loop)"]
-    O["metrics_summary.csv + pipelines/"]
-    E --> W --> L --> R --> O
-```
-
-
-
-## Reference construction & the GMM gate (why no time gate)
-
-The two witness references are built **asymmetrically**, and this is the crux of the
-method:
-
-- **Control cloud (X) = all cells in the control/uninfected wells, all timepoints.**
-  An uninfected cell looks uninfected at any hpi, so pooling every timepoint gives a
-  large, *clean* reference. No gating.
-- **Perturbed cloud (Y) = all cells in the perturbed wells, all timepoints.** A perturbed
-  well is a **mixture**: early cells have not remodeled yet, late cells have. Y is
-  therefore *dirty* by construction.
-
-The witness `w(z) = mean k(z, X) − mean k(z, Y)` is scored against both clouds. The
-**per-condition GMM is then fit on the perturbed cells' scores only** — it separates the
-remodeled mode from the not-yet-remodeled mode *inside* the dirty Y. Control cells are
-taken as negatives wholesale (well identity). This asymmetry is why the GMM is fit on one
-side but not the other.
-
-**No time gate by default.** A `hours_post_perturbation` window on the perturbed filter
-would pre-clean Y by hand — but that discards data and re-introduces a hand-tuned
-threshold, which is exactly what the GMM removes. The GMM is the principled replacement for
-the time gate: it finds the remodeled sub-population within the full mixture. Add a time
-gate only for a specific reason (e.g. debugging, or a marker with no clean late window).
-
-**Significance gate (before the GMM, FDR-controlled).** Per condition, an MMD permutation
-test (`mmd_permutation_test`, X vs the condition's cells) checks whether the two clouds are
-*actually distinct*. Because one Stage-A run tests many (marker × condition) pairs, the raw
-p-values are corrected with **Benjamini-Yekutieli FDR control**
-(`scipy.stats.false_discovery_control(method="by")`) across the whole run, and a condition
-is skipped when its **adjusted** p-value exceeds `mmd_pvalue_threshold` (the target FDR
-level, default 0.05). A condition contributes positives only if it is **both**
-FDR-significant **and** GMM-bimodal (`separated=True`); the two guard different failure
-modes (references differ vs. the perturbed cloud splits cleanly). This is a **two-pass**
-flow: score + p-value every condition (pass 1), BY-adjust run-wide, then GMM-label the
-survivors (pass 2). Set `mmd_pvalue_threshold: 1.0` to disable the gate.
+Use the MMD witness and a Gaussian mixture model (GMM) to create confident
+pseudo-labels, then train a linear classifier through the standard annotation
+path.
 
 ```mermaid
 flowchart LR
-    subgraph refs["reference clouds (per marker, all timepoints)"]
-        X["X = control wells<br/><b>clean</b> (uninfected at any hpi)"]
-        Y["Y = perturbed wells<br/><b>dirty mixture</b><br/>early: not remodeled · late: remodeled"]
-    end
-    W["witness score per cell<br/>w(z) = mean k(z,X) − mean k(z,Y)"]
-    G["2-component GMM on w over Y<br/>(separates the mixture)"]
-    POS["remodeled mode → positive<br/>(posterior ≥ threshold)"]
-    NEG["all X cells → negative<br/>(well identity, no gate)"]
-    X --> W
-    Y --> W
-    W --> G --> POS
-    X --> NEG
-    POS --> LAB["annotation file<br/>positive / negative"]
-    NEG --> LAB
+    A["Teacher embeddings"] --> B["MMD witness scores"]
+    B --> C["MMD significance gate"]
+    C --> D["Per-condition 2-component GMM"]
+    D --> E["Annotation file"]
+    E --> F["Target embeddings"]
+    F --> G["Scaled logistic-regression pipeline"]
 ```
 
-## Recipe / config
+The teacher and target embeddings may be the same modality. To transfer labels
+between modalities, generate labels from the teacher modality and train on the
+target modality using the shared cell identifiers.
 
-**Stage A** — `labels_config.yml`:
+## Label generation
+
+For each witness marker:
+
+1. Build the reference sets from all timepoints:
+   - \(X\): cells from clean control wells.
+   - \(Y\): cells from perturbed wells.
+2. Select the RBF bandwidth with the median heuristic and score every cell:
+
+   \[
+   w(z) = \operatorname{mean}_{x \in X} k(z, x)
+        - \operatorname{mean}_{y \in Y} k(z, y)
+   \]
+
+3. For each perturbed condition, test \(X\) against that condition with an MMD
+   permutation test. Apply Benjamini-Yekutieli correction across all
+   marker-condition tests in the run. Skip conditions whose adjusted
+   \(p\)-value is greater than `mmd_pvalue_threshold`.
+4. Fit a two-component GMM to the surviving condition's witness scores.
+   - The component with the lower mean is the positive, perturbed state.
+   - Label a cell positive when its posterior for that component is at least
+     `gmm_pos_threshold`.
+   - Skip the condition if the components are not separated.
+5. Label all control-reference cells negative. Drop perturbed cells that do not
+   pass the positive posterior threshold and cells outside both reference sets.
+
+Do not add a time gate by default: the GMM is intended to separate affected and
+unaffected cells within the perturbed population.
+
+The output is an annotation file with:
+
+- `experiment`, `fov_name`, and `id`; or `experiment`, `fov_name`, `t`, and
+  `track_id`;
+- the biological label column and class names, such as
+  `infection_state: infected | uninfected`;
+- available tracking and biological metadata.
+
+## Stage A configuration
+
+Use one configuration per witness marker and embedding domain.
 
 ```yaml
 witness_gmm_labels:
   experiments:
     - experiment: "2026_04_28_A549_SEC61B_DENV"
-      embeddings_zarr: ".../2-phenotyping/predictions/embeddings"
-      control_filter: {perturbation: uninfected}   # all uninfected cells, all timepoints
-      perturbed_filter: {perturbation: [DENV]}      # all DENV cells, all timepoints (no time gate)
-  marker_filters: [viral_sensor]          # from viral_sensor → infection_state
+      embeddings_zarr: "/path/to/teacher/embeddings.zarr"
+      control_filter: {perturbation: uninfected}
+      perturbed_filter: {perturbation: [DENV]}
+
+  marker_filters: [viral_sensor]
+  condition_column: perturbation
   label_column: infection_state
   class_map: {positive: infected, negative: uninfected}
-  gmm_pos_threshold: 0.8
-  mmd_pvalue_threshold: 0.05              # target FDR level (BY-adjusted p) for the MMD gate
-  mmd_n_permutations: 1000
-  bandwidth: null                         # median heuristic
+
+  bandwidth: null
   max_reference_cells: 5000
-  condition_column: perturbation
-  output_path: ".../infection_state_witness.csv"
+  mmd_n_permutations: 1000
+  mmd_pvalue_threshold: 0.05
+  gmm_pos_threshold: 0.8
+  random_seed: 42
+
+  output_dir: "/path/to/run"
+  annotation_format: csv
 ```
 
-For an organelle marker: `marker_filters: [SEC61B]`,
-`label_column: organelle_remodeling_state`,
-`class_map: {positive: remodel, negative: noremodel}`.
+This writes:
 
-**Stage B** — `train_config.yml` (the existing annotation path):
+```text
+/path/to/run/labels/viral_sensor_infection_state.csv
+/path/to/run/labels/plots/
+```
+
+For an organelle witness, change the marker and label vocabulary, for example:
 
 ```yaml
-linear_classifiers:
-  label_source: annotations
-  embeddings_path: ".../embeddings"       # same modality, or a phase zarr for SEC61→phase
-  annotations:
-    - experiment: "2026_04_28_A549_SEC61B_DENV"
-      path: ".../infection_state_witness.csv"
-  tasks: [{task: infection_state}]
-  use_scaling: true
-  split_train_data: 0.8
-  split_groups_by: [experiment, fov_name, track_id]
+marker_filters: [SEC61B]
+label_column: organelle_remodeling_state
+class_map: {positive: remodel, negative: noremodel}
 ```
 
-Invoke:
+Generate the labels:
 
 ```sh
 dynaclr witness-gmm-labels -c labels_config.yml
+```
+
+## Classifier training
+
+Train from the generated file with `label_source: annotations`. The
+`embeddings_path` is the target feature space: use the teacher embeddings for a
+same-modality classifier or another modality's embeddings for label transfer.
+`tasks[].marker_filters` must name the target marker.
+
+```yaml
+embeddings_path: "/path/to/target/embeddings.zarr"
+output_dir: "/path/to/run/classifiers"
+
+linear_classifiers:
+  label_source: annotations
+  annotations:
+    - experiment: "2026_04_28_A549_SEC61B_DENV"
+      path: "/path/to/run/labels/viral_sensor_infection_state.csv"
+  tasks:
+    - task: infection_state
+      marker_filters: [viral_sensor]
+
+  use_scaling: true
+  use_pca: false
+  class_weight: balanced
+  split_train_data: 0.8
+  split_groups_by: [experiment, fov_name, track_id]
+  random_seed: 42
+```
+
+Use a group-aware split so that a track cannot appear in both training and
+validation. Train the classifier:
+
+```sh
 dynaclr run-linear-classifiers -c train_config.yml
 ```
 
-## The deployable artifact (do NOT recompute the scaler / PCA)
+The command writes validation metrics, plots, and the fitted pipeline:
 
-> **Note:** each `pipelines/{task}_{marker}.joblib` is a `LinearClassifierPipeline`
-> holding the **fitted** `StandardScaler`, the **fitted** `PCA` (when `use_pca: true`),
-> and the logistic-regression weights — all frozen from training. Applying to a new
-> dataset (`apply-linear-classifier` / `append-predictions`) calls
-> `scaler.transform → pca.transform → classifier.predict_proba` — **`.transform`, never
-> `.fit`**. The scaler's mean/std and PCA's rotation are **not** recomputed on new data,
-> and must not be: re-fitting would re-center/re-rotate the new embeddings into a
-> different space than the classifier's `w·x+b` boundary was learned in, silently
-> corrupting predictions. The pipeline is embedding-only and self-contained — no witness
-> references or GMM are carried into it (those live only in Stage A).
->
-> **Validity condition:** reusing the frozen scaler/PCA is correct only when the new
-> embeddings share the training distribution — i.e. the **same microscope / domain**.
-> Under a batch shift (e.g. mantis v1 → v2) applying the frozen pipeline is mechanically
-> valid but biologically off; that is why the design is **one LC per microscope** rather
-> than cross-domain transfer.
+```text
+/path/to/run/classifiers/metrics_summary.csv
+/path/to/run/classifiers/infection_state_summary.pdf
+/path/to/run/classifiers/pipelines/infection_state_<target-marker>.joblib
+```
 
-## Related
+## Acceptance checks
 
-- Annotation training path: [evaluation.md](evaluation.md)
+- Review the MMD-null and witness-GMM plots for every accepted condition.
+- Confirm that both classes have enough cells and are distributed across
+  independent tracks and fields of view.
+- Use validation metrics from the group-aware split, not a cell-level split.
+- Apply the saved pipeline only to the same embedding feature space and domain.
+  Reuse its fitted scaler and PCA; do not refit preprocessing at inference.
+
+See [evaluation.md](evaluation.md) for the annotation training pipeline.
