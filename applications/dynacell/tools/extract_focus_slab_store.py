@@ -66,14 +66,17 @@ from pathlib import Path
 import numpy as np
 from iohub.ngff import TransformationMeta, open_ome_zarr
 
-from dynacell.evaluation.focus import MIDBAND_FRACTIONS, estimate_focus_plane
+from dynacell.evaluation.focus import (
+    DEFAULT_LAMBDA_ILL,
+    DEFAULT_NA_DET,
+    MIDBAND_FRACTIONS,
+    estimate_focus_plane,
+)
 
 logger = logging.getLogger(__name__)
 
-# Estimator defaults mirroring ``dynacell.evaluation.focus.read_focus_compute_config``
-# (mantis acquisition), so the training slab and the eval slab share a focus plane.
-DEFAULT_NA_DET: float = 1.35
-DEFAULT_LAMBDA_ILL: float = 0.450
+# ``DEFAULT_NA_DET`` / ``DEFAULT_LAMBDA_ILL`` are imported from ``focus`` so the training
+# slab shares the eval estimator's acquisition constants (single source of truth).
 DEFAULT_HALFWIDTH: int = 2
 
 # zattrs key iohub manages itself (multiscales / axes / omero). Copied metadata

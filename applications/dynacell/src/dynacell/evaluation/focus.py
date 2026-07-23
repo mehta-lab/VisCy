@@ -36,6 +36,13 @@ from viscy_utils.meta_utils import write_meta_field
 FOCUS_FIELD = "focus_slice"
 MIDBAND_FRACTIONS: tuple[float, float] = (0.125, 0.25)
 
+# Mantis acquisition defaults for the transverse-band focus estimator, shared by the
+# eval-time compute path (``read_focus_compute_config``) and the offline focus-slab
+# extractor tool. Single source of truth so the training slab and the eval slab land
+# on the same in-focus plane (train/eval cannot diverge).
+DEFAULT_NA_DET: float = 1.35
+DEFAULT_LAMBDA_ILL: float = 0.450
+
 # Nucleus-area focus anchor (the default for 2D instance seg). Per-z nuclear foreground
 # fraction is a smooth, unimodal curve — zero at the stack caps, peaked at the nuclear
 # equator — so its argmax cannot be dragged to an out-of-focus cap by the high-frequency
@@ -142,8 +149,8 @@ def read_focus_compute_config(config: DictConfig, *, channel_name: str | None = 
         pixel_size = float(config.pixel_metrics.spacing[-1])
     return FocusComputeConfig(
         channel_name=channel_name or str(OmegaConf.select(config, "focus.channel_name", default="Phase3D")),
-        na_det=float(OmegaConf.select(config, "focus.na_det", default=1.35)),
-        lambda_ill=float(OmegaConf.select(config, "focus.lambda_ill", default=0.450)),
+        na_det=float(OmegaConf.select(config, "focus.na_det", default=DEFAULT_NA_DET)),
+        lambda_ill=float(OmegaConf.select(config, "focus.lambda_ill", default=DEFAULT_LAMBDA_ILL)),
         pixel_size=float(pixel_size),
         device=str(OmegaConf.select(config, "focus.device", default="cpu")),
     )
