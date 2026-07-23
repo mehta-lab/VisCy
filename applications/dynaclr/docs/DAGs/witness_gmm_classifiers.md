@@ -51,9 +51,9 @@ The output is an annotation file with:
 
 - `experiment`, `fov_name`, and `id`; or `experiment`, `fov_name`, `t`, and
   `track_id`;
-- the biological label column and class names, such as
+- the configured label column and class names, such as
   `infection_state: infected | uninfected`;
-- available tracking and biological metadata.
+- available tracking and condition metadata.
 
 ## Stage A configuration
 
