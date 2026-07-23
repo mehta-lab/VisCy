@@ -92,8 +92,6 @@ class ExtractionSummary:
     ----------
     output_store : str
         Absolute path of the written focus-slab store.
-    n_positions : int
-        Number of positions written.
     n_planes : int
         Slab depth (``2*halfwidth + 1``); uniform across all positions/timepoints.
     pixel_size : float
@@ -102,14 +100,20 @@ class ExtractionSummary:
         Per-position list of estimated focus z-planes (one per timepoint).
     slab_starts : dict of str to list of int
         Per-position list of clamp-shifted slab start z-indices (one per timepoint).
+    n_positions : int
+        Number of positions written (derived: ``len(focus_planes)``).
     """
 
     output_store: str
-    n_positions: int
     n_planes: int
     pixel_size: float
     focus_planes: dict[str, list[int]] = field(default_factory=dict)
     slab_starts: dict[str, list[int]] = field(default_factory=dict)
+
+    @property
+    def n_positions(self) -> int:
+        """Number of positions written (one entry per position in ``focus_planes``)."""
+        return len(self.focus_planes)
 
 
 def clamp_shift_slab(z_focus: int, z_total: int, halfwidth: int) -> slice:
@@ -155,14 +159,6 @@ def clamp_shift_slab(z_focus: int, z_total: int, halfwidth: int) -> slice:
 def _custom_zattrs(node) -> dict:
     """Return a node's custom zattrs (everything except the iohub-managed ``ome`` block)."""
     return {k: v for k, v in dict(node.zattrs).items() if k != _OME_METADATA_KEY}
-
-
-def _split_position_name(name: str) -> tuple[str, str, str]:
-    """Split an HCS position path ``row/col/fov`` into its three components."""
-    parts = name.split("/")
-    if len(parts) != 3:
-        raise ValueError(f"expected an HCS 'row/col/fov' position path, got {name!r} ({len(parts)} parts)")
-    return parts[0], parts[1], parts[2]
 
 
 def extract_focus_slab_store(
@@ -230,7 +226,6 @@ def extract_focus_slab_store(
         shutil.rmtree(output_path)
 
     width = 2 * halfwidth + 1
-    summary = ExtractionSummary(output_store=str(output_path), n_positions=0, n_planes=width, pixel_size=float("nan"))
 
     with open_ome_zarr(input_path, mode="r") as src:
         if phase_channel not in src.channel_names:
@@ -243,7 +238,7 @@ def extract_focus_slab_store(
             raise ValueError(f"{input_path} has no positions to extract")
 
         resolved_pixel_size = float(positions[0][1].scale[-1]) if pixel_size is None else float(pixel_size)
-        summary.pixel_size = resolved_pixel_size
+        summary = ExtractionSummary(output_store=str(output_path), n_planes=width, pixel_size=resolved_pixel_size)
         logger.info(
             "focus estimator: channel=%s pixel_size=%g (%s) na_det=%g lambda_ill=%g midband=%s device=%s",
             phase_channel,
@@ -280,7 +275,7 @@ def extract_focus_slab_store(
             norm_note_emitted = False
             for name, pos in positions:
                 data = pos.data
-                t_count, _, z_total = data.shape[0], data.shape[1], data.shape[2]
+                t_count, _, z_total = data.shape[:3]
                 if z_total < width:
                     raise ValueError(
                         f"{name}: stack has {z_total} planes but a halfwidth={halfwidth} slab needs {width}"
@@ -301,7 +296,7 @@ def extract_focus_slab_store(
                 if np.isnan(slab_stack).any():
                     raise ValueError(f"{name}: NaN encountered in extracted slab")
 
-                row, col, fov = _split_position_name(name)
+                row, col, fov = name.split("/")
                 new_pos = dst.create_position(row, col, fov)
                 chunks = (1, 1, width, slab_stack.shape[-2], slab_stack.shape[-1])
                 new_pos.create_image(
@@ -326,7 +321,6 @@ def extract_focus_slab_store(
 
                 summary.focus_planes[name] = planes
                 summary.slab_starts[name] = [s.start for s in slabs]
-                summary.n_positions += 1
                 logger.info("wrote %s: focus planes=%s slab starts=%s", name, planes, summary.slab_starts[name])
 
     logger.info(
