@@ -6,10 +6,48 @@ entry point. Loads manifest/split YAML only (no zarr access), so these run
 without HPC data stores.
 """
 
+import os
+from pathlib import Path
+
 import pytest
+import yaml
 
 from dynacell.data import get_manifest, get_splits, list_datasets
 from dynacell.data.manifests import DatasetManifest, SplitDefinition
+
+
+def _write_registry(root: Path, name: str, *, splits_exists: bool = True, marker: str = "m") -> None:
+    """Write a minimal valid ``<root>/<name>/manifest.yaml`` (+ splits) for tests."""
+    ds = root / name
+    (ds / "splits").mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "name": name,
+        "version": "1",
+        "description": marker,
+        "cell_type": "A549",
+        "imaging_modality": "test",
+        "spacing": {"z": 0.3, "y": 0.1, "x": 0.1},
+        "channels": {"source": "Phase3D"},
+        "targets": {
+            "t0": {
+                "gene": "G",
+                "organelle": "er",
+                "display_name": "T0",
+                "target_channel": "Structure",
+                "stores": {"train": "/tmp/train.zarr", "test": "/tmp/test.zarr"},
+                "splits": "splits/t0.yaml",
+            }
+        },
+    }
+    (ds / "manifest.yaml").write_text(yaml.safe_dump(manifest))
+    if splits_exists:
+        splits = {
+            "split_version": "1.0",
+            "random_seed": 0,
+            "train": {"count": 0, "fovs": []},
+            "test": {"count": 0, "fovs": []},
+        }
+        (ds / "splits" / "t0.yaml").write_text(yaml.safe_dump(splits))
 
 
 class TestListDatasets:
@@ -63,3 +101,37 @@ class TestGetSplits:
         """An absent target name raises KeyError naming the target."""
         with pytest.raises(KeyError, match="nonexistent"):
             get_splits("aics-hipsc", "nonexistent")
+
+    def test_missing_split_file_raises(self, tmp_path, monkeypatch):
+        """A present target whose split file is absent raises FileNotFoundError
+        naming the dataset/target, not a bare uncontextualized error."""
+        _write_registry(tmp_path, "zz-missing-split", splits_exists=False)
+        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(tmp_path))
+        with pytest.raises(FileNotFoundError, match="zz-missing-split"):
+            get_splits("zz-missing-split", "t0")
+
+
+class TestRegistryValidatesAll:
+    """Every committed manifest + its first target's splits load and validate."""
+
+    @pytest.mark.parametrize("name", list_datasets())
+    def test_manifest_and_first_split_load(self, name):
+        """get_manifest + get_splits(first target) succeed for each dataset."""
+        manifest = get_manifest(name)
+        assert isinstance(manifest, DatasetManifest)
+        first_target = sorted(manifest.targets)[0]
+        assert isinstance(get_splits(name, first_target), SplitDefinition)
+
+
+class TestListDatasetsPrecedence:
+    """Multi-root enumeration dedups by name and honors precedence order."""
+
+    def test_first_root_wins_and_dedups(self, tmp_path, monkeypatch):
+        """A name present in two roots appears once and resolves to the first."""
+        root1 = tmp_path / "r1"
+        root2 = tmp_path / "r2"
+        _write_registry(root1, "zz-shared", marker="root1")
+        _write_registry(root2, "zz-shared", marker="root2")
+        monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", f"{root1}{os.pathsep}{root2}")
+        assert list_datasets().count("zz-shared") == 1
+        assert get_manifest("zz-shared").description == "root1"
