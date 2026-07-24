@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
@@ -265,7 +266,7 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _read_position_channel0(plate_path: Path, pos_name: str, dtype) -> np.ndarray | None:
+def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLike) -> np.ndarray | None:
     """Read channel 0 of one position as ``(T, D, H, W)`` cast to *dtype*.
 
     Returns ``None`` when the plate file or the position is absent (a cache miss).
@@ -319,8 +320,13 @@ def _rewrite_inner_array(pos_dir: Path, data: np.ndarray) -> None:
     pos_group.create_array("0", data=data)
 
 
-def _write_position_channel0(plate_path: Path, pos_name: str, arr: np.ndarray, channel_name: str) -> None:
+def _write_position_channel0(
+    plate_path: Path, pos_name: str, arr: np.ndarray, dtype: npt.DTypeLike, channel_name: str
+) -> None:
     """Write ``arr`` ``(T, D, H, W)`` as channel 0 of one position, creating the plate if needed.
+
+    Casts to *dtype* only after the rank check, so the common mistake here — passing
+    a 5-D ``(T, C, D, H, W)`` array — raises without first copying it.
 
     Repairs the partial-write signature in place (see :func:`_is_position_malformed`)
     rather than through the plate API, which cannot recover from that state.
@@ -328,7 +334,7 @@ def _write_position_channel0(plate_path: Path, pos_name: str, arr: np.ndarray, c
     if arr.ndim != 4:
         raise ValueError(f"array must be 4-D (T, D, H, W); got shape {arr.shape}")
     plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = arr[:, None]  # (T, 1, D, H, W)
+    data = arr.astype(dtype)[:, None]  # (T, 1, D, H, W)
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return
@@ -378,7 +384,7 @@ def write_mask(
     backend
         Segmentation backend (selects the plate filename infix).
     """
-    _write_position_channel0(paths.mask_plate(target_name, backend), pos_name, masks.astype(bool), channel_name)
+    _write_position_channel0(paths.mask_plate(target_name, backend), pos_name, masks, bool, channel_name)
 
 
 _INSTANCE_MASK_CHANNEL = "instance_seg"
@@ -424,9 +430,7 @@ def write_instance_mask(
     backend
         Segmentation backend (selects the plate filename infix).
     """
-    _write_position_channel0(
-        paths.instance_mask_plate(target_name, backend), pos_name, labels.astype(np.uint16), channel_name
-    )
+    _write_position_channel0(paths.instance_mask_plate(target_name, backend), pos_name, labels, np.uint16, channel_name)
 
 
 def _features_group_path(
