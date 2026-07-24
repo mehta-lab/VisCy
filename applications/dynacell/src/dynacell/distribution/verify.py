@@ -70,8 +70,7 @@ def verify_public(croissant_path: Path) -> dict[str, str]:
         import botocore
     except ImportError as exc:
         raise RuntimeError(
-            "boto3 not installed; install the distribution extra "
-            "(pip install 'dynacell[distribution]') for verify_public"
+            "boto3 not installed; install the distribution extra (uv sync --extra distribution) for verify_public"
         ) from exc
 
     payload = json.loads(croissant_path.read_text())
@@ -98,5 +97,5 @@ def verify_public(croissant_path: Path) -> dict[str, str]:
             code = exc.response.get("Error", {}).get("Code", "unknown")
             statuses[url] = code
         except Exception as exc:  # pragma: no cover — surface unexpected
-            statuses[url] = type(exc).__name__
+            statuses[url] = f"{type(exc).__name__}: {exc}"
     return statuses
