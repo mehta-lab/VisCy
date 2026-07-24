@@ -319,8 +319,15 @@ def _compute_ssim_and_cs_bf16(
     # term rounds to 0), and ``sqrt`` has an infinite derivative there. Autograd then
     # produces ``0 * inf == nan`` for the clamp-inactive elements, which spreads
     # through the conv backward and NaNs most of the input gradient while the forward
-    # loss stays finite — measured at 41-48% of ``pred.grad`` on z-scored inputs with
-    # a flat background at a nonzero offset, i.e. an ordinary normalized VS batch.
+    # loss stays finite.
+    #
+    # Exposure depends on the per-window mean-to-variance ratio, so it is a latent
+    # trap rather than a constant hazard. Synthetic z-scored fields with a flat
+    # background at a nonzero offset reach 41-48% of ``pred.grad``; real z-scored
+    # iPSC FOVs measured 0% at depth=15 and 0-6484 NaN entries at depth=1, and a
+    # 60-step run of the real FCMAE-2D model on a real batch did not trip
+    # ``GradScaler`` at all. Treat this as a correctness fix for a reachable
+    # gradient path, not as a diagnosis of any particular run.
     sigma_x = (mu_xx - mu_x * mu_x).clamp_min(0.0)
     sigma_y = (mu_yy - mu_y * mu_y).clamp_min(0.0)
     sigma_xy_bound = _safe_sqrt(sigma_x * sigma_y)
