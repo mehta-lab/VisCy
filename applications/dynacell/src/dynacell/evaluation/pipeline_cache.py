@@ -1126,7 +1126,7 @@ def _load_or_compute_feature_timepoints(
                 for t in range(t_count):
                     per_t[t] = read_features_from_group(group, pos_name, t)
 
-    pending = [t for t in range(t_count) if per_t[t] is None] if not force_recompute else list(range(t_count))
+    pending = list(range(t_count)) if force_recompute else [t for t in range(t_count) if per_t[t] is None]
     if not pending:
         return per_t, False  # type: ignore[return-value]
 
