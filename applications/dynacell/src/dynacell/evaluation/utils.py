@@ -442,12 +442,16 @@ def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
 
     metric_cols = [c for c in df.columns if c not in ("FOV", "Timepoint")]
 
-    # FOVs with more than one timepoint
-    multi_tp_fovs = df.groupby("FOV")["Timepoint"].nunique().pipe(lambda s: s[s > 1].index.tolist())
+    # Group / sort once: with ~100 feature-metric columns the per-column
+    # re-groupby and per-(column, FOV) boolean mask dominated this function.
+    by_fov = df.groupby("FOV")
+    all_fov_means = by_fov[metric_cols].mean()
+    multi_tp_fovs = by_fov["Timepoint"].nunique().pipe(lambda s: s[s > 1].index.tolist())
+    tp_frames = {fov: by_fov.get_group(fov).sort_values("Timepoint") for fov in multi_tp_fovs}
 
     for col in metric_cols:
         # --- Plot 1: mean per FOV ---
-        fov_means = df.groupby("FOV")[col].mean()
+        fov_means = all_fov_means[col]
         n_fovs = len(fov_means)
 
         fig, ax = plt.subplots(figsize=(max(6, n_fovs * 0.7), 5))
@@ -464,8 +468,7 @@ def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
         # --- Plot 2: metric over Timepoint for multi-timepoint FOVs ---
         if multi_tp_fovs:
             fig, ax = plt.subplots(figsize=(8, 5))
-            for fov in multi_tp_fovs:
-                fov_df = df[df["FOV"] == fov].sort_values("Timepoint")
+            for fov, fov_df in tp_frames.items():
                 ax.plot(fov_df["Timepoint"], fov_df[col], marker="o", label=fov)
             ax.set_xlabel("Timepoint")
             ax.set_ylabel(col)
