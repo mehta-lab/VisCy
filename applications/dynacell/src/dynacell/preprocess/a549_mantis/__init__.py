@@ -2,7 +2,8 @@
 
 Produces per-target train/test zarrs from per-plate dynacell zarrs by
 applying a 2-h odd-hpi grid, ±1.5-h tail snap, per-well channel rename,
-and train/test routing authored in ``configs/datasets/a549-mantis/``.
+and train/test routing authored in the packaged
+``dynacell/_configs/datasets/a549-mantis/authoring/`` YAMLs.
 """
 
 from dynacell.preprocess.a549_mantis.assemble import (
