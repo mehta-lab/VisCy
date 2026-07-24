@@ -173,11 +173,14 @@ def test_separate_nuclei_store_loaded_for_cpdino_membrane():
 
     Regression: the loader gated the separate-store open on backend=='cellpose_watershed',
     so cpdino membrane fell back to the CAAX plate (no Nuclei channel) and crashed.
+    ``target_name`` must be set: ``nuclei_gt_path`` is an inert ``io`` field for every
+    non-membrane target, so the helper returns None there.
     """
     from dynacell.evaluation.pipeline import _separate_nuclei_path
 
     a549 = OmegaConf.create(
         {
+            "target_name": "membrane",
             "segmentation": {"backend": "cpdino"},
             "compute_instance_ap": True,
             "io": {"nuclei_gt_path": "/x/H2B_mock.ozx", "gt_path": "/x/CAAX_mock.ozx"},
@@ -187,12 +190,23 @@ def test_separate_nuclei_store_loaded_for_cpdino_membrane():
     # iPSC single-store: nuclei live in the same cell.zarr -> no separate store.
     ipsc = OmegaConf.create(
         {
+            "target_name": "membrane",
             "segmentation": {"backend": "cpdino"},
             "compute_instance_ap": True,
             "io": {"nuclei_gt_path": None, "gt_path": "/x/cell.zarr"},
         }
     )
     assert _separate_nuclei_path(ipsc) is None
+    # Non-membrane target: nuclei_gt_path is inert, so no separate store is opened.
+    nucleus = OmegaConf.create(
+        {
+            "target_name": "nucleus",
+            "segmentation": {"backend": "cpdino"},
+            "compute_instance_ap": True,
+            "io": {"nuclei_gt_path": "/x/H2B_mock.ozx", "gt_path": "/x/H2B_mock.ozx"},
+        }
+    )
+    assert _separate_nuclei_path(nucleus) is None
 
 
 # ---------------------------------------------------------------------------
