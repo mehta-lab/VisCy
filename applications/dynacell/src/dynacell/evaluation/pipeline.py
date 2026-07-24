@@ -1184,6 +1184,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             "io.cell_segmentation_path is required when compute_feature_metrics=true or compute_cell_similarity=true"
         )
 
+    # Whether this call owns the model bundle (vs borrowing the grouped driver's
+    # shared one) — decides if the parent may release its seg_model copy below.
+    owns_models = models is None
     with region_timer("parent_load_models", "<parent>"):
         if models is None:
             models = load_eval_models(config)
@@ -1404,10 +1407,14 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             # pre-warming in the parent prevents N workers from racing on a
             # cold cache). After Phase 2 we know the final executor — if it's
             # process, drop the parent copy so we don't keep two seg model
-            # copies resident on the GPU.
+            # copies resident on the GPU. Clearing the bundle's field is what
+            # actually frees it — unbinding the local alone leaves
+            # ``models.seg_model`` holding the only other reference. Only safe
+            # when we own the bundle; the grouped driver reuses its own.
             if runtime.executor == "process" and seg_model is not None:
-                del seg_model
                 seg_model = None
+                if owns_models:
+                    models.seg_model = None
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
