@@ -265,6 +265,21 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _read_position_channel0(plate_path: Path, pos_name: str, dtype) -> np.ndarray | None:
+    """Read channel 0 of one position as ``(T, D, H, W)`` cast to *dtype*.
+
+    Returns ``None`` when the plate file or the position is absent (a cache miss).
+    """
+    if not plate_path.exists():
+        return None
+    with open_ome_zarr(plate_path, mode="r") as plate:
+        try:
+            position = plate[pos_name]
+        except KeyError:
+            return None
+        return np.asarray(position.data[:, 0]).astype(dtype)
+
+
 def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str = "supermodel") -> np.ndarray | None:
     """Read cached organelle masks for a single position.
 
@@ -274,16 +289,7 @@ def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str =
         Bool array of shape ``(T, D, H, W)``, or ``None`` if the plate or
         position is absent.
     """
-    plate_path = paths.mask_plate(target_name, backend)
-    if not plate_path.exists():
-        return None
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            return None
-        data = np.asarray(position.data[:, 0]).astype(bool)
-    return data
+    return _read_position_channel0(paths.mask_plate(target_name, backend), pos_name, bool)
 
 
 def _is_position_malformed(plate_path: Path, pos_name: str) -> bool:
@@ -313,35 +319,16 @@ def _rewrite_inner_array(pos_dir: Path, data: np.ndarray) -> None:
     pos_group.create_array("0", data=data)
 
 
-def write_mask(
-    paths: CachePaths,
-    target_name: str,
-    pos_name: str,
-    masks: np.ndarray,
-    *,
-    channel_name: str = _MASK_CHANNEL,
-    backend: str = "supermodel",
-) -> None:
-    """Append masks for a single position to the ``{target_name}.zarr`` plate.
+def _write_position_channel0(plate_path: Path, pos_name: str, arr: np.ndarray, channel_name: str) -> None:
+    """Write ``arr`` ``(T, D, H, W)`` as channel 0 of one position, creating the plate if needed.
 
-    Parameters
-    ----------
-    paths
-        Cache paths.
-    target_name
-        Organelle name (used as the mask plate's filename stem).
-    pos_name
-        HCS position name in ``row/col/fov`` form.
-    masks
-        Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
-    channel_name
-        OME-Zarr channel label to write for this mask plate.
+    Repairs the partial-write signature in place (see :func:`_is_position_malformed`)
+    rather than through the plate API, which cannot recover from that state.
     """
-    if masks.ndim != 4:
-        raise ValueError(f"masks must be 4-D (T, D, H, W); got shape {masks.shape}")
-    plate_path = paths.mask_plate(target_name, backend)
+    if arr.ndim != 4:
+        raise ValueError(f"array must be 4-D (T, D, H, W); got shape {arr.shape}")
     plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = masks.astype(bool)[:, None]  # (T, 1, D, H, W)
+    data = arr[:, None]  # (T, 1, D, H, W)
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return
@@ -365,6 +352,35 @@ def write_mask(
         position.create_image("0", data)
 
 
+def write_mask(
+    paths: CachePaths,
+    target_name: str,
+    pos_name: str,
+    masks: np.ndarray,
+    *,
+    channel_name: str = _MASK_CHANNEL,
+    backend: str = "supermodel",
+) -> None:
+    """Append masks for a single position to the ``{target_name}.zarr`` plate.
+
+    Parameters
+    ----------
+    paths
+        Cache paths.
+    target_name
+        Organelle name (used as the mask plate's filename stem).
+    pos_name
+        HCS position name in ``row/col/fov`` form.
+    masks
+        Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
+    channel_name
+        OME-Zarr channel label to write for this mask plate.
+    backend
+        Segmentation backend (selects the plate filename infix).
+    """
+    _write_position_channel0(paths.mask_plate(target_name, backend), pos_name, masks.astype(bool), channel_name)
+
+
 _INSTANCE_MASK_CHANNEL = "instance_seg"
 
 
@@ -377,16 +393,7 @@ def read_instance_mask(paths: CachePaths, target_name: str, pos_name: str, backe
         uint16 array of shape ``(T, D, H, W)`` (2-D runs are stored with
         ``D=1``), or ``None`` if the plate or position is absent.
     """
-    plate_path = paths.instance_mask_plate(target_name, backend)
-    if not plate_path.exists():
-        return None
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            return None
-        data = np.asarray(position.data[:, 0]).astype(np.uint16)
-    return data
+    return _read_position_channel0(paths.instance_mask_plate(target_name, backend), pos_name, np.uint16)
 
 
 def write_instance_mask(
@@ -417,32 +424,9 @@ def write_instance_mask(
     backend
         Segmentation backend (selects the plate filename infix).
     """
-    if labels.ndim != 4:
-        raise ValueError(f"labels must be 4-D (T, D, H, W); got shape {labels.shape}")
-    plate_path = paths.instance_mask_plate(target_name, backend)
-    plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = labels.astype(np.uint16)[:, None]  # (T, 1, D, H, W)
-    if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
-        _rewrite_inner_array(plate_path / pos_name, data)
-        return
-    mode = "r+" if plate_path.exists() else "w"
-    with open_ome_zarr(
-        plate_path,
-        mode=mode,
-        layout="hcs",
-        channel_names=[channel_name],
-        version="0.5",
-    ) as plate:
-        row, col, fov = pos_name.split("/")
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            position = plate.create_position(row, col, fov)
-        try:
-            del position["0"]
-        except KeyError:
-            pass
-        position.create_image("0", data)
+    _write_position_channel0(
+        paths.instance_mask_plate(target_name, backend), pos_name, labels.astype(np.uint16), channel_name
+    )
 
 
 def _features_group_path(
