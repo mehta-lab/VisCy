@@ -20,6 +20,9 @@ benchmark:
   predict_set: a549_mantis_caax_zikv
   model_name: fnet2d
   experiment_id: membrane__joint_ipsc_confocal_a549_mantis__fnet2d__a549_mantis_caax_zikv
+  # Override the iPSC-side `membrane` target with a549's gene-keyed `caax`.
+  dataset_ref:
+    target: caax
 
 model:
   init_args:

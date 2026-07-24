@@ -20,6 +20,9 @@ benchmark:
   predict_set: a549_mantis_h2b_denv
   model_name: fnet2d
   experiment_id: nucleus__a549_mantis__fnet2d__a549_mantis_h2b_denv
+  # Override the iPSC-side `nucleus` target with a549's gene-keyed `h2b`.
+  dataset_ref:
+    target: h2b
 
 model:
   init_args:
