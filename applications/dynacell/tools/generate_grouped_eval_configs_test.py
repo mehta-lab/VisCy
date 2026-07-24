@@ -4,18 +4,15 @@ Tests fall into three groups:
 
 1. Pure-Python filename grammar (no dependencies).
 2. Live-data checks (require the dynacell training tree on disk; marked
-   with ``@pytest.mark.requires_data``).
+   ``@pytest.mark.slow``, so the root ``addopts`` ``-m 'not slow'`` deselects
+   them by default — they assert on a shared tree that regen campaigns move).
 3. Real composition + resolver check per generated leaf (requires the
    composed eval base config + dynacell Hydra search path).
 
-Run all groups::
-
-    uv run pytest applications/dynacell/tools/generate_grouped_eval_configs_test.py -v
-
-Skip data tests::
+Run everything including the live-data checks::
 
     uv run pytest applications/dynacell/tools/generate_grouped_eval_configs_test.py \
-        -v -m 'not requires_data'
+        -v -m 'slow or not slow'
 """
 
 from __future__ import annotations
@@ -331,7 +328,7 @@ def test_pred_cache_dir_ipsc() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.requires_data
+@pytest.mark.slow
 @pytest.mark.skipif(
     not _DYNACELL_ROOT.exists(),
     reason=f"dynacell training root absent: {_DYNACELL_ROOT}",
@@ -349,7 +346,7 @@ def test_walk_predictions_yields_known_buckets() -> None:
     assert buckets == expected
 
 
-@pytest.mark.requires_data
+@pytest.mark.slow
 @pytest.mark.skipif(
     not _DYNACELL_ROOT.exists(),
     reason=f"dynacell training root absent: {_DYNACELL_ROOT}",
@@ -361,7 +358,7 @@ def test_all_pred_paths_exist_after_dedupe() -> None:
     assert not missing, f"missing pred_paths: {missing[:5]}"
 
 
-@pytest.mark.requires_data
+@pytest.mark.slow
 @pytest.mark.skipif(
     not _DYNACELL_ROOT.exists(),
     reason=f"dynacell training root absent: {_DYNACELL_ROOT}",
@@ -411,7 +408,7 @@ def base_eval_grouped_config():
     return cfg
 
 
-@pytest.mark.requires_data
+@pytest.mark.slow
 @pytest.mark.skipif(
     not (_LEAF_OUT_ROOT.exists() and any(_LEAF_OUT_ROOT.glob("*/eval_grouped.yaml"))),
     reason=f"grouped leaves not yet generated under {_LEAF_OUT_ROOT}",
