@@ -15,13 +15,7 @@ except ImportError:
 try:
     from aicssegmentation.structure_wrapper.seg_lamp1 import Workflow_lamp1
     from aicssegmentation.structure_wrapper.seg_npm1 import Workflow_npm1
-    from aicssegmentation.structure_wrapper.seg_npm1_SR import (
-        Workflow_npm1_SR,  # noqa: F401
-    )
     from aicssegmentation.structure_wrapper.seg_sec61b import Workflow_sec61b
-    from aicssegmentation.structure_wrapper.seg_sec61b_dual import (
-        Workflow_sec61b_dual,  # noqa: F401
-    )
     from aicssegmentation.structure_wrapper.seg_tomm20 import Workflow_tomm20
 except ImportError:
     Workflow_npm1 = None  # type: ignore[assignment, misc]
