@@ -1,0 +1,29 @@
+# A549 mantis splits — 2024_11_05_A549_TOMM20_ZIKV_DENV
+#
+# Plan: 3 mock + 4 DENV test.
+# Available positions after Airtable ∩ zarr:
+#   B/4 (mock, 6)
+#   C/4 (DENV, 4)  — C/4/000000 and C/4/000001 missing from zarr
+# Rule: lexicographic sort, take first N for test.
+
+experiment: 2024_11_05_A549_TOMM20_ZIKV_DENV
+targets:
+  tomm20:
+    train:
+    - B/3/000001
+    - B/3/001000
+    - B/3/002001
+    - B/4/001001
+    - C/3/000000
+    - C/3/001000
+    - C/3/001001
+    - C/3/002000
+    - C/3/002001
+    test:
+    - B/4/000000
+    - B/4/000001
+    - B/4/001000
+    - C/4/001000
+    - C/4/001001
+    - C/4/002000
+    - C/4/002001

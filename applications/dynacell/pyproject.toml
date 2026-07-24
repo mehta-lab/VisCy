@@ -86,9 +86,14 @@ optional-dependencies.eval_gpu = [
   "cucim-cu13",
   "cupy-cuda13x",
 ]
+# Dataset assembly / authoring library (dynacell.preprocess): assemble->cubic,
+# selection->waveorder, segmentation->cellpose (cellpose imported lazily).
 optional-dependencies.preprocess = [
+  "cellpose>=4.2",
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.8.0a2",
   "iohub>=0.3.6",
   "tqdm",
+  "waveorder",
 ]
 optional-dependencies.report = [
   "hydra-core>=1.2",

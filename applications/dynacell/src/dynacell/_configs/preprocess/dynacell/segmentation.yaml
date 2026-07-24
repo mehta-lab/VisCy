@@ -1,0 +1,20 @@
+# Cellpose parameters (consumed by run_cellpose.py, run_cellpose_2d.py,
+# and `dynacell preprocess segment`).
+# I/O paths: required via CLI overrides or argparse.
+data_dir: ???
+save_dir: ???
+input_channel_names: ???
+
+use_gpu: true
+inference_batch_size: 32
+
+# 3D-specific (run_cellpose.py)
+do_3d: true
+z_axis: 1
+flow_3d_smooth: 10
+
+# Output zarr settings
+output_channel_names: ["segmentation"]
+output_dtype: uint8
+zarr_layout: hcs
+zarr_version: "0.5"
