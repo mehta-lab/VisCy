@@ -76,9 +76,11 @@ trainer:
 launcher:
   job_name: FNet3DVSAug_iPSC_NUCL
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fnet3d_vscyto3daug
-  # 384x384x32 in precision 32-true needs a large-memory GPU; pin H200.
-  # cell.zarr-backed preload pushes MaxVMSize past the shared 256G cap;
-  # mem 512G matches the fnet3d iPSC headroom.
+  # 384x384x32 at bf16-mixed measured ~41GB GPU on the bigpatch arm, so an
+  # 80GB card (H100) fits with room; allow h100|h200 to schedule sooner. The
+  # vscyto3d aug stack (affine grid_sample + intensity) runs somewhat higher
+  # but still well under 80GB. cell.zarr-backed preload pushes MaxVMSize past
+  # the shared 256G cap; mem 512G matches the fnet3d iPSC headroom.
   sbatch:
-    constraint: h200
+    constraint: "h100|h200"
     mem: "512G"
