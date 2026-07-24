@@ -1,0 +1,84 @@
+# FNet3D "same-augmentations" OOD ablation on nucleus (Nuclei channel of
+# cell.zarr) — AICS iPSC confocal. Identical to the fnet3d_paper iPSC
+# nucleus fit except the augmentation stack: this leaf composes
+# data_overlays/fnet3d_vscyto3daug_fit.yml (VSCyto3D augmentations adapted
+# to FNet3D's Z=32 geometry) instead of fnet3d_paper_fit.yml. The data
+# overlay keys norm/aug/val on Structure; nucleus target_channel is Nuclei,
+# so we list-replace those three lists here to re-key them.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_vscyto3daug_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal
+  model_name: fnet3d_vscyto3daug
+  experiment_id: nucleus__ipsc_confocal__fnet3d_vscyto3daug
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Nuclei]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [32, 600, 600]
+          num_samples: 4
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          roi_size: [32, 384, 384]
+
+trainer:
+  # Switch off the fnet3d_paper 32-true default: bf16-mixed halves the
+  # 384x384x32 activation footprint. MSE loss is immune to the bf16-SSIM
+  # cancellation issue. Must match fnet3d_bigpatch (Arm A) for a clean
+  # augmentation-only comparison.
+  precision: bf16-mixed
+  logger:
+    init_args:
+      name: FNet3D_VSAug_iPSC_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fnet3d_vscyto3daug
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fnet3d_vscyto3daug/checkpoints
+
+launcher:
+  job_name: FNet3DVSAug_iPSC_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/fnet3d_vscyto3daug
+  # 384x384x32 in precision 32-true needs a large-memory GPU; pin H200.
+  # cell.zarr-backed preload pushes MaxVMSize past the shared 256G cap;
+  # mem 512G matches the fnet3d iPSC headroom.
+  sbatch:
+    constraint: h200
+    mem: "512G"
