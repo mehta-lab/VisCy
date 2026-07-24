@@ -45,7 +45,12 @@ from dynaclr.evaluation.linear_classifiers.witness_gmm_plots import (
 )
 from viscy_utils.cli_utils import load_config
 from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample, witness_function
-from viscy_utils.evaluation.witness_gmm import fit_gmm_labels
+from viscy_utils.evaluation.witness_gmm import (
+    ControlAnchoredResult,
+    _gaussian_pdf,
+    fit_control_anchored_labels,
+    fit_gmm_labels,
+)
 
 if TYPE_CHECKING:
     from dynaclr.evaluation.evaluate_config import WitnessGmmExperiment, WitnessGmmLabelsConfig
@@ -258,8 +263,16 @@ def compute_marker_scores(
 
     X_ref = subsample(X_all[control_mask], config.max_reference_cells, rng)
     Y_ref = subsample(X_all[perturbed_mask], config.max_reference_cells, rng)
+    # Global bandwidth from the pooled reference — kept even in time-matched mode
+    # so witness scores are on one comparable scale across timepoints.
     bandwidth = config.bandwidth if config.bandwidth is not None else median_heuristic(X_ref, Y_ref)
-    scores = witness_function(X_all, X_ref, Y_ref, bandwidth=bandwidth)
+
+    if config.witness_time_bin_hours is None:
+        scores = witness_function(X_all, X_ref, Y_ref, bandwidth=bandwidth)
+    else:
+        scores = _time_matched_witness_scores(
+            X_all, obs, control_mask, perturbed_mask, X_ref, Y_ref, bandwidth, config, rng
+        )
 
     # Per-condition MMD significance: is this condition's cloud distinct from the
     # control reference? Raw p-values here; FDR-corrected run-wide by the caller.
@@ -283,6 +296,61 @@ def compute_marker_scores(
         hpi_mmd = _compute_hpi_mmd(X_all, obs, control_mask, perturbed_mask, conditions, bandwidth, config, rng)
 
     return _MarkerScores(obs, control_mask, perturbed_mask, scores, conditions, cond_mmd, hpi_mmd)
+
+
+def _time_matched_witness_scores(
+    X_all: np.ndarray,
+    obs: pd.DataFrame,
+    control_mask: np.ndarray,
+    perturbed_mask: np.ndarray,
+    X_ref_pooled: np.ndarray,
+    Y_ref_pooled: np.ndarray,
+    bandwidth: float,
+    config: WitnessGmmLabelsConfig,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Witness score per cell using per-HPI-bin (time-matched) references.
+
+    For each ``witness_time_bin_hours``-wide window, cells in that window are
+    scored against control/perturbed reference cells **from the same window**, so
+    the witness axis reflects perturbation rather than culture-time (the embedding
+    has a strong time axis; see :func:`_compute_hpi_mmd`). Bins lacking enough
+    reference cells on either side fall back to the pooled reference, so every
+    cell is scored. The bandwidth is the shared global value for a comparable
+    scale across bins.
+    """
+    if "hours_post_perturbation" not in obs.columns:
+        _logger.warning("witness_time_bin_hours set but no hours_post_perturbation column; using pooled reference.")
+        return witness_function(X_all, X_ref_pooled, Y_ref_pooled, bandwidth=bandwidth)
+
+    hpi = obs["hours_post_perturbation"].to_numpy(dtype=float)
+    width = config.witness_time_bin_hours
+    scores = np.full(len(obs), np.nan, dtype=np.float64)
+    finite = np.isfinite(hpi)
+    lo0 = np.floor(hpi[finite].min() / width) * width if finite.any() else 0.0
+    edges = np.arange(lo0, (hpi[finite].max() if finite.any() else 0.0) + width, width)
+    min_ref = 5
+    n_fallback = 0
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        in_bin = finite & (hpi >= lo) & (hpi < hi)
+        if not in_bin.any():
+            continue
+        ctrl_bin = X_all[control_mask & in_bin]
+        pert_bin = X_all[perturbed_mask & in_bin]
+        if len(ctrl_bin) >= min_ref and len(pert_bin) >= min_ref:
+            xr = subsample(ctrl_bin, config.max_reference_cells, rng)
+            yr = subsample(pert_bin, config.max_reference_cells, rng)
+        else:
+            xr, yr = X_ref_pooled, Y_ref_pooled  # sparse bin → pooled fallback
+            n_fallback += int(in_bin.sum())
+        scores[in_bin] = witness_function(X_all[in_bin], xr, yr, bandwidth=bandwidth)
+    # Cells with non-finite HPI (never assigned) get the pooled score.
+    missing = np.isnan(scores)
+    if missing.any():
+        scores[missing] = witness_function(X_all[missing], X_ref_pooled, Y_ref_pooled, bandwidth=bandwidth)
+    if n_fallback:
+        _logger.info("Time-matched witness: %d cells in sparse bins used the pooled reference.", n_fallback)
+    return scores
 
 
 def _compute_hpi_mmd(
@@ -388,6 +456,7 @@ def label_marker(
     time_col = "hours_post_perturbation" if "hours_post_perturbation" in obs.columns else "t"
     time_values = obs[time_col].to_numpy() if time_col in obs.columns else None
 
+    control_scores_all = scores[control_mask]
     cond_gmm: dict = {}
     cond_scores: dict = {}
     cond_time: dict = {}
@@ -399,16 +468,27 @@ def label_marker(
         if cond not in significant_conditions:
             _logger.warning("MMD not significant (FDR) for condition %r; no positives labeled.", cond)
             continue
-        res = fit_gmm_labels(scores[cond_mask], pos_threshold=config.gmm_pos_threshold, random_state=config.random_seed)
-        cond_gmm[cond] = res
         cond_scores[cond] = scores[cond_mask]
         if time_values is not None:
             cond_time[cond] = time_values[cond_mask]
-        if not res.separated:
-            _logger.warning("GMM unimodal for condition %r; no positives labeled.", cond)
-            continue
-        any_separated = True
         cond_idx = np.flatnonzero(cond_mask)
+        if config.gate == "control_anchored":
+            # Baseline frozen to control; label the excess over baseline. Never
+            # abstains — right for graded, subtle shifts (weak channels).
+            res = fit_control_anchored_labels(
+                scores[cond_mask], control_scores_all, control_fp_target=config.control_fp_target
+            )
+            cond_gmm[cond] = res
+            any_separated = True
+        else:
+            res = fit_gmm_labels(
+                scores[cond_mask], pos_threshold=config.gmm_pos_threshold, random_state=config.random_seed
+            )
+            cond_gmm[cond] = res
+            if not res.separated:
+                _logger.warning("GMM unimodal for condition %r; no positives labeled.", cond)
+                continue
+            any_separated = True
         idx = cond_idx[res.hard_label == 1]
         labels[idx] = pos_label
         gmm_posterior[idx] = res.posterior[res.hard_label == 1]
@@ -433,13 +513,19 @@ def label_marker(
     # drives the remodeling-vs-time control line as an empirical FALSE-POSITIVE
     # rate, not a hardcoded zero. NaN posterior for controls when no GMM separated.
     control_pos = np.zeros(control_mask.sum(), dtype=bool)
-    control_post = np.full(control_mask.sum(), np.nan, dtype=float)
-    ctrl_X = scores[control_mask].reshape(-1, 1)
+    ctrl_s = scores[control_mask]
     for res in cond_gmm.values():
+        if isinstance(res, ControlAnchoredResult):
+            # Control-anchored: score controls under the fitted mixture, threshold
+            # at the calibrated cut (FP ≈ control_fp_target by construction).
+            base = res.pi_baseline * _gaussian_pdf(ctrl_s, res.mu_c, res.sigma_c)
+            rem = (1 - res.pi_baseline) * _gaussian_pdf(ctrl_s, res.mu_r, res.sigma_r)
+            post = rem / (base + rem + 1e-300)
+            control_pos |= post >= res.threshold
+            continue
         if not res.separated:
             continue
-        post = res.gmm.predict_proba(ctrl_X)[:, res.remod_component]
-        control_post = post if np.isnan(control_post).all() else np.maximum(control_post, post)
+        post = res.gmm.predict_proba(ctrl_s.reshape(-1, 1))[:, res.remod_component]
         control_pos |= post >= config.gmm_pos_threshold
     return _MarkerLabels(
         frame.reset_index(drop=True),
@@ -452,7 +538,7 @@ def label_marker(
     )
 
 
-def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
+def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path | None:
     """Run Stage A end to end and write the annotation file plus diagnostics.
 
     Loads each experiment's embeddings zarr, pools per marker, labels via
@@ -565,26 +651,40 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
         # Provenance row per tested (marker, condition): MMD gate + GMM summary.
         for cond, mmd in ms.cond_mmd.items():
             res = cond_gmm.get(cond)
-            mmd_rows.append(
-                {
-                    "marker": str(marker),
-                    "condition": str(cond),
-                    "n_perturbed": int((ms.perturbed_mask & (ms.conditions == cond)).sum()),
-                    "mmd2": mmd.mmd2,
-                    "p_raw": mmd.p_value,
-                    "p_adjusted": p_adj_by_key[(marker, cond)],
-                    "mmd_significant": cond in significant.get(marker, set()),
-                    "gmm_separated": bool(res.separated) if res is not None else False,
-                    "gmm_remodel_weight": float(res.gmm.weights_[res.remod_component]) if res is not None else np.nan,
-                    "n_confident_positive": int((res.hard_label == 1).sum()) if res is not None else 0,
-                    "gmm_bic": res.bic if res is not None else np.nan,
-                    "gmm_aic": res.aic if res is not None else np.nan,
-                    "gmm_bic_1comp": res.bic_1comp if res is not None else np.nan,
-                    "gmm_delta_bic": (res.bic_1comp - res.bic) if res is not None else np.nan,
-                }
-            )
-        # Witness-GMM diagnostic for every fitted condition (labeled or unimodal-skipped).
+            row = {
+                "marker": str(marker),
+                "condition": str(cond),
+                "n_perturbed": int((ms.perturbed_mask & (ms.conditions == cond)).sum()),
+                "mmd2": mmd.mmd2,
+                "p_raw": mmd.p_value,
+                "p_adjusted": p_adj_by_key[(marker, cond)],
+                "mmd_significant": cond in significant.get(marker, set()),
+                "gate": config.gate,
+                "n_confident_positive": int((res.hard_label == 1).sum()) if res is not None else 0,
+            }
+            if isinstance(res, ControlAnchoredResult):
+                row.update(
+                    {
+                        "remodel_fraction": 1.0 - res.pi_baseline,
+                        "control_fp": res.control_fp,
+                        "posterior_threshold": res.threshold,
+                    }
+                )
+            elif res is not None:
+                row.update(
+                    {
+                        "gmm_separated": bool(res.separated),
+                        "gmm_remodel_weight": float(res.gmm.weights_[res.remod_component]),
+                        "gmm_bic": res.bic,
+                        "gmm_aic": res.aic,
+                        "gmm_delta_bic": res.bic_1comp - res.bic,
+                    }
+                )
+            mmd_rows.append(row)
+        # Witness-GMM diagnostic (GMM gate only; control-anchored uses a different model).
         for cond, res in cond_gmm.items():
+            if isinstance(res, ControlAnchoredResult):
+                continue
             plot_witness_gmm(
                 result.cond_scores[cond],
                 result.control_scores,
@@ -614,28 +714,38 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
         )
         frames.append(frame)
 
-    if not frames:
-        raise RuntimeError("No markers produced labels — check references, thresholds, and condition_column.")
-
-    out = pd.concat(frames, ignore_index=True)
     # Disambiguate by marker: sibling single-marker configs often share a
     # label_column (e.g. three organelle markers → organelle_remodeling_state),
     # which would clobber a bare <label_column>.<fmt>. Prefix with the filtered
     # marker(s) so each config writes its own file.
     stem = f"{'_'.join(config.marker_filters)}_{config.label_column}" if config.marker_filters else config.label_column
-    output_path = labels_dir / f"{stem}.{config.annotation_format}"
     labels_dir.mkdir(parents=True, exist_ok=True)
+
+    # Population-level provenance sidecar always written — even when a marker
+    # abstains (no bimodal + significant condition), so the MMD/GMM evidence for
+    # the abstain decision is auditable.
+    mmd_path = labels_dir / f"{stem}_mmd.csv"
+    pd.DataFrame(mmd_rows).to_csv(mmd_path, index=False)
+    _logger.info("Wrote MMD/GMM provenance to %s", mmd_path)
+
+    if not frames:
+        # Legitimate abstain (e.g. time-matched witness leaves a weak channel
+        # unimodal): write no annotation, but do not crash — the diagnostics +
+        # sidecar above record why.
+        _logger.warning(
+            "No markers produced confident labels (no significant + bimodal condition). "
+            "Wrote diagnostics + %s but no annotation file.",
+            mmd_path.name,
+        )
+        return None
+
+    out = pd.concat(frames, ignore_index=True)
+    output_path = labels_dir / f"{stem}.{config.annotation_format}"
     if output_path.suffix == ".parquet":
         out.to_parquet(output_path, index=False)
     else:
         out.to_csv(output_path, index=False)
     _logger.info("Wrote %d annotations (%s) to %s", len(out), config.label_column, output_path)
-
-    # Population-level provenance sidecar: one row per (marker, condition) with the
-    # MMD gate (mmd2, raw/BY-adjusted p, significance) and the GMM summary.
-    mmd_path = labels_dir / f"{stem}_mmd.csv"
-    pd.DataFrame(mmd_rows).to_csv(mmd_path, index=False)
-    _logger.info("Wrote MMD/GMM provenance to %s", mmd_path)
     return output_path
 
 
@@ -656,7 +766,10 @@ def main(config_path: Path) -> None:
     raw = load_config(config_path)
     config = WitnessGmmLabelsConfig(**raw["witness_gmm_labels"])
     out = generate_witness_gmm_annotation(config)
-    click.echo(f"Wrote witness-GMM annotation to {out}")
+    if out is None:
+        click.echo("No confident labels produced (marker abstained); diagnostics written, no annotation file.")
+    else:
+        click.echo(f"Wrote witness-GMM annotation to {out}")
 
 
 if __name__ == "__main__":

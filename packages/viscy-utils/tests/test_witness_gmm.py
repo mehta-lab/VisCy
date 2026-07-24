@@ -52,3 +52,35 @@ def test_fit_gmm_labels_threshold_strictness():
     strict = fit_gmm_labels(scores, pos_threshold=0.99)
     # A stricter posterior bar yields no more confident positives than a lax one.
     assert (strict.hard_label == 1).sum() <= (lax.hard_label == 1).sum()
+
+
+def test_control_anchored_labels_calibrated_fp():
+    """Control-anchored gate: labels the excess over baseline and holds the
+    control false-positive rate near the target, without needing bimodality."""
+    from viscy_utils.evaluation.witness_gmm import fit_control_anchored_labels
+
+    rng = np.random.default_rng(0)
+    control = rng.normal(0.0, 1.0, 4000)
+    # Perturbed = mostly baseline + a shifted (remodel) minority (subtle, overlapping).
+    perturbed = np.concatenate([rng.normal(0.0, 1.0, 3000), rng.normal(-2.0, 1.0, 1000)])
+    res = fit_control_anchored_labels(perturbed, control, control_fp_target=0.05)
+    # FP rate is calibrated to the target.
+    assert abs(res.control_fp - 0.05) < 0.02
+    # Some perturbed cells are labeled remodel; remodel fraction is positive and < 1.
+    assert 0.0 < (1.0 - res.pi_baseline) < 1.0
+    assert (res.hard_label == 1).any()
+    # Remodel component sits below (more negative than) the control baseline.
+    assert res.mu_r < res.mu_c
+
+
+def test_control_anchored_no_shift_low_positives():
+    """When perturbed == control (no real shift), few cells clear the calibrated
+    threshold — the FP-calibrated cut keeps the positive rate near the target."""
+    from viscy_utils.evaluation.witness_gmm import fit_control_anchored_labels
+
+    rng = np.random.default_rng(1)
+    control = rng.normal(0.0, 1.0, 4000)
+    perturbed = rng.normal(0.0, 1.0, 4000)  # identical distribution
+    res = fit_control_anchored_labels(perturbed, control, control_fp_target=0.05)
+    # No real excess → perturbed positive rate stays near the target FP (~5%).
+    assert (res.hard_label == 1).mean() < 0.15

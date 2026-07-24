@@ -328,6 +328,18 @@ class WitnessGmmLabelsConfig(BaseModel):
         plot — the population divergence kinetics, plus a control-vs-control null
         band. Requires an ``hours_post_perturbation`` obs column. None disables
         the diagnostic. Default: None.
+    witness_time_bin_hours : float or None
+        If set, score the witness with **time-matched references**: each cell is
+        scored against control/perturbed reference cells drawn from its own
+        ``hours_post_perturbation`` bin of this width, rather than against a single
+        pooled all-timepoint reference. The DynaCLR embedding carries a strong
+        time/culture axis (uninfected cells drift over a long timelapse), so a
+        pooled reference leaks that axis into the witness score and the labels —
+        worst for weak channels. Time-matching cancels the shared time component
+        so the witness axis reflects perturbation, not culture-time. A single
+        global bandwidth (median heuristic on the pooled reference) is kept so
+        scores stay comparable across bins. None = pooled reference (original
+        behavior). Requires an ``hours_post_perturbation`` obs column. Default: None.
     """
 
     experiments: list[WitnessGmmExperiment]
@@ -342,6 +354,9 @@ class WitnessGmmLabelsConfig(BaseModel):
     mmd_n_permutations: int = 1000
     bandwidth: float | None = None
     max_reference_cells: int | None = 5000
+    witness_time_bin_hours: float | None = None
+    gate: str = "gmm"
+    control_fp_target: float = 0.05
     random_seed: int = 42
     mmd_hpi_bin_hours: float | None = None
 
@@ -354,6 +369,10 @@ class WitnessGmmLabelsConfig(BaseModel):
             raise ValueError(f"class_map must define {sorted(missing)} (got keys {sorted(self.class_map)})")
         if not 0.0 < self.gmm_pos_threshold <= 1.0:
             raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
+        if self.gate not in ("gmm", "control_anchored"):
+            raise ValueError(f"gate must be 'gmm' or 'control_anchored', got {self.gate!r}")
+        if not 0.0 < self.control_fp_target < 1.0:
+            raise ValueError(f"control_fp_target must be in (0, 1), got {self.control_fp_target}")
         if not 0.0 < self.mmd_pvalue_threshold <= 1.0:
             raise ValueError(f"mmd_pvalue_threshold must be in (0, 1], got {self.mmd_pvalue_threshold}")
         if self.annotation_format not in ("csv", "parquet"):
