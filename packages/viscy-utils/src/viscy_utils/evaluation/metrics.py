@@ -176,6 +176,37 @@ def mean_average_precision(
 _SSIM_DENOM_EPS: float = 1e-8
 
 
+def _safe_sqrt(x: torch.Tensor) -> torch.Tensor:
+    """Square root whose derivative at exactly zero is 0 rather than infinite.
+
+    ``torch.sqrt`` backward is ``grad_out * 0.5 / sqrt(x)``, which is ``inf`` at
+    ``x == 0``. For the elements whose incoming ``grad_out`` is *itself* zero that
+    evaluates to ``0 * inf == nan``, so a single zero entry poisons the gradient
+    of every element in its convolution window — the forward pass stays perfectly
+    finite while the backward pass silently fills with NaN.
+
+    Guarding with ``clamp_min(eps)`` or ``sqrt(x + eps)`` does not fix this: both
+    perturb the forward value and still leave a ``1 / (2 * sqrt(eps))`` gradient
+    spike. Instead substitute a dummy positive value *before* the square root and
+    restore the true zero after, so the ``sqrt`` node never sees zero and its
+    backward never divides by it. The forward result is bit-identical to
+    ``x.sqrt()`` and the gradient is bit-identical wherever ``x > 0``; only the
+    ``x == 0`` entries change, from NaN to 0.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Non-negative input tensor.
+
+    Returns
+    -------
+    torch.Tensor
+        ``sqrt(x)``, with a zero subgradient at the exact zeros of ``x``.
+    """
+    positive = x > 0
+    return torch.where(positive, torch.where(positive, x, torch.ones_like(x)).sqrt(), torch.zeros_like(x))
+
+
 def _compute_ssim_and_cs_bf16(
     y_pred: torch.Tensor,
     y: torch.Tensor,
@@ -282,9 +313,17 @@ def _compute_ssim_and_cs_bf16(
     # to >10 on background windows. With the bound a flat window gives
     # sigma_x=sigma_y=sigma_xy=0 -> cs = c2 / c2 = 1, matching exact fp32; on
     # well-conditioned windows the bound is slack and both clamps are no-ops.
+    #
+    # The bound goes through ``_safe_sqrt``, not ``sqrt``: the same cancellation that
+    # motivates the clamp also drives ``sigma_x * sigma_y`` to *exactly* zero (either
+    # term rounds to 0), and ``sqrt`` has an infinite derivative there. Autograd then
+    # produces ``0 * inf == nan`` for the clamp-inactive elements, which spreads
+    # through the conv backward and NaNs most of the input gradient while the forward
+    # loss stays finite — measured at 41-48% of ``pred.grad`` on z-scored inputs with
+    # a flat background at a nonzero offset, i.e. an ordinary normalized VS batch.
     sigma_x = (mu_xx - mu_x * mu_x).clamp_min(0.0)
     sigma_y = (mu_yy - mu_y * mu_y).clamp_min(0.0)
-    sigma_xy_bound = (sigma_x * sigma_y).sqrt()
+    sigma_xy_bound = _safe_sqrt(sigma_x * sigma_y)
     sigma_xy = torch.clamp(mu_xy - mu_x * mu_y, min=-sigma_xy_bound, max=sigma_xy_bound)
 
     # ``_SSIM_DENOM_EPS`` floors the denominators so a zero data_range (→ c1=c2=0) on a
