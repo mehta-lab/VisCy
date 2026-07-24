@@ -371,6 +371,11 @@ def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
         ("fcmae_vscyto3d_pretrained_randinit", "fcmae_vscyto3d_pretrained_randinit"),
         # longest-match: celldiff_r2_iterative wins over celldiff_r2 / celldiff
         ("celldiff_r2_iterative", "celldiff_r2_iterative"),
+        # in-focus 2D track: canonical run dirs must not fall back to their 3D
+        # namesakes (fcmae_vscyto2d_* is not a suffix-recipe of fcmae_vscyto3d_*).
+        ("fcmae_vscyto2d_scratch", "fcmae_vscyto2d_scratch"),
+        ("fcmae_vscyto2d_pretrained", "fcmae_vscyto2d_pretrained"),
+        ("fnet2d", "fnet2d"),
     ],
 )
 def test_canonical_model_name(run_dir_name: str, expected: str) -> None:
@@ -566,6 +571,21 @@ def test_paper_key_retained_entries() -> None:
     # Newly-added live path tokens.
     assert paper_key("celldiff_r2") == "celldiff_r2"
     assert paper_key("unext2_timm_scratch") == "unext2_timm_scratch"
+
+
+def test_paper_key_2d_track() -> None:
+    """The 2D track's display names must stay distinct from their 3D namesakes.
+
+    Pins the three in-focus 2D model keys: collapsing ``fcmae_vscyto2d_pretrained``
+    onto ``vscyto3d`` (or the scratch pair onto ``unext2``) would silently merge the
+    2D and 3D rows of the 2D-vs-3D comparison into one eval dir.
+    """
+    assert paper_key("fcmae_vscyto2d_scratch") == "unext2_2d"
+    assert paper_key("fcmae_vscyto2d_pretrained") == "vscyto2d"
+    assert paper_key("fnet2d") == "fnet2d"
+    assert paper_key("fcmae_vscyto3d_scratch") == "unext2"
+    assert paper_key("fcmae_vscyto3d_pretrained") == "vscyto3d"
+    assert paper_key("fnet3d_paper") == "fnet3d"
 
 
 def test_organelle_eval_target() -> None:

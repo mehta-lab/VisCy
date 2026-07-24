@@ -52,6 +52,10 @@ _CODE_TO_PAPER: dict[str, str] = {
     "pix2pix3d_unetvit": "pix2pix3d",
     "celldiff": "celldiff",
     "celldiff_r2": "celldiff_r2",
+    # In-focus 2D track (2D-vs-3D benchmark).
+    "fcmae_vscyto2d_scratch": "unext2_2d",
+    "fcmae_vscyto2d_pretrained": "vscyto2d",
+    "fnet2d": "fnet2d",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -87,6 +91,11 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet3d_paper",
     "unetvit3d",
     "pix2pix3d_unetvit",
+    # In-focus 2D track — deterministic like their 3D counterparts (no diffusion
+    # sampling), so the same single-pass zarr-name parser handles them.
+    "fcmae_vscyto2d_scratch",
+    "fcmae_vscyto2d_pretrained",
+    "fnet2d",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff")  # r2 first so longest match wins
 _TRAIN_SETS: tuple[str, ...] = ("ipsc_trained", "joint", "a549_trained")

@@ -150,6 +150,14 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_pretrained_infectionft": "vscyto3d_infectionft",
     "vscyto3d_cytolandft": "vscyto3d_cytolandft",
     "vscyto3d_infectionft_dynacellft": "vscyto3d_infectionft_dynacellft",
+    # In-focus 2D track (2D-vs-3D benchmark). Separate code keys AND paper keys
+    # from their 3D counterparts so the 2D rows land in their own eval dirs and
+    # never collapse onto the 3D display names: fcmae_vscyto2d_scratch is the
+    # from-scratch UNeXt2-2D, fcmae_vscyto2d_pretrained is VSCyto2D (encoder init
+    # from the public 2D FCMAE ckpt). These are live PATH tokens.
+    "fcmae_vscyto2d_scratch": "unext2_2d",
+    "fcmae_vscyto2d_pretrained": "vscyto2d",
+    "fnet2d": "fnet2d",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

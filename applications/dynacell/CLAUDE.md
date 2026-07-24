@@ -15,6 +15,13 @@ code/paper boundary. This table is the source of truth (referenced by
 | `pix2pix3d_unetvit` | **pix2pix3d** (GAN; same UNetViT3D generator, `DynacellGAN` engine) |
 | `fnet3d_paper` | **FNet3D** |
 | `celldiff` / `celldiff_r2` | **CELL-Diff** (variants: `iterative`, `sliding_window`, `denoise`/Mean Predictor) |
+| `fcmae_vscyto2d_scratch` | **UNeXt2-2D** (in-focus 2D track) |
+| `fcmae_vscyto2d_pretrained` | **VSCyto2D** (encoder init from the public 2D FCMAE ckpt) |
+| `fnet2d` | **FNet2D** |
+
+The three 2D keys are the in-focus 2D-vs-3D benchmark track. Their paper names are
+deliberately distinct from the 3D namesakes (`unext2_2d` vs `unext2`, `vscyto2d` vs
+`vscyto3d`) — collapsing them would merge the 2D and 3D rows into one eval dir.
 
 VSCyto3D ablations (in `vscyto3d-ablations`): `*_randinit` (untrained),
 `*_cytoland` (public ckpt, no FT), `*_infectionft` (cytoland→A549-infection-FT,
