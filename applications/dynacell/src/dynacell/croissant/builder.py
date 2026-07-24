@@ -95,6 +95,8 @@ def _scan_ozx_tree(
             with open_ome_zarr(str(ozx_path), mode="r") as ds:
                 root_attrs = dict(ds.zattrs)
                 positions = list(ds.positions())
+                if not positions:
+                    raise ValueError(f"OZX store has no positions: {ozx_path}")
                 first_pos_key = positions[0][0]
                 shape = list(ds[first_pos_key + "/0"].shape)
                 omero = ds[first_pos_key].zattrs["ome"]["omero"]
