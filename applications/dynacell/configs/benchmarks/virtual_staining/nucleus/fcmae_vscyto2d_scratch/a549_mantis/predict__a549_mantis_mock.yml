@@ -29,9 +29,17 @@ benchmark:
 
 model:
   init_args:
-    # Phase-F TODO: bake the trained best checkpoint after Phase-E
-    # training (campaign policy: predict with --ckpt best).
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fcmae_vscyto2d_scratch/checkpoints/last.ckpt
+    # Explicit epoch pin, not `last.ckpt` (which is a moving target across resumes).
+    # Byte-equivalent to the last.ckpt this leaf previously used (last.ckpt recorded
+    # epoch=4/global_step=1500; same size and mtime as this file).
+    #
+    # ⚠ These weights are NOT usable yet. This run's `loss/validate` was frozen at
+    # 2.7065 for all 200 epochs, so ModelCheckpoint filled save_top_k at epochs 0-4
+    # and never saved again — its own best_model_path is epoch=0 and
+    # best_score == current_score == 2.7065. Epoch 4 is effectively untrained.
+    # Do NOT run this predict until the FCMAE-2D validation bug is fixed and the
+    # fits are re-run; then re-pin to the real best checkpoint.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fcmae_vscyto2d_scratch/checkpoints/epoch=4-step=1500-loss=2.706.ckpt
 
 data:
   init_args:
