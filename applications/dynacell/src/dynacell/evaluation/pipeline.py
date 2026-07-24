@@ -286,6 +286,17 @@ class _BackboneLists:
 _BACKBONE_KEYS: tuple[FeatureKind, ...] = get_args(FeatureKind)
 _BB_FIELDS = fields(_BackboneLists)
 
+# Backbone key -> metric-column prefix. Keys must cover _BACKBONE_KEYS so the
+# dataset-metrics block can derive its tracks/prefixes/embedding groups from one
+# "which backbones are active" list instead of three hand-synced literals.
+_COLUMN_PREFIX: dict[FeatureKind, str] = {
+    "cp": "CP",
+    "dinov3": "DINOv3",
+    "dynaclr": "DynaCLR",
+    "celldino": "CellDINO",
+    "morphem": "MorphEm",
+}
+
 
 def _extend_backbone(
     bb: _BackboneLists,
@@ -1474,7 +1485,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 # rather than the full N×seg_array (~N × 440 MB).
                 from concurrent.futures import as_completed
 
-                pos_names_in_order = [p[0] for p, _, _ in zip(pred_positions, gt_positions, seg_positions)]
+                pos_names_in_order = [name for name, _ in pred_positions]
                 next_idx = 0
                 buffer: dict[str, FovResult] = {}
                 with make_fov_executor(runtime) as pool:
@@ -1512,6 +1523,18 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     if config.compute_feature_metrics and all_feature_metrics:
         with region_timer("dataset_metrics", "<parent>"):
             dataset_row: dict[str, float] = {}
+
+            # Backbones that actually produced features this run. CP is always on;
+            # celldino/morphem soft-skip when unconfigured. Everything below
+            # (metric tracks, NaN-fill prefixes, embedding groups) derives from
+            # this one list rather than repeating the None checks.
+            extractor_by_kind: dict[FeatureKind, Any] = {
+                "dinov3": dinov3_feature_extractor,
+                "dynaclr": dynaclr_feature_extractor,
+                "celldino": celldino_feature_extractor,
+                "morphem": morphem_feature_extractor,
+            }
+            active_kinds = [k for k in _BACKBONE_KEYS if k == "cp" or extractor_by_kind[k] is not None]
 
             # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
             # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
@@ -1553,19 +1576,16 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     )
                 )
 
-            deep_tracks = [("DINOv3", "dinov3"), ("DynaCLR", "dynaclr")]
-            if celldino_feature_extractor is not None:
-                deep_tracks.append(("CellDINO", "celldino"))
-            if morphem_feature_extractor is not None:
-                deep_tracks.append(("MorphEm", "morphem"))
-            for display_name, key in deep_tracks:
+            for key in active_kinds:
+                if key == "cp":
+                    continue  # handled above (pruning + z-score)
                 bb = parent_lists[key]
                 if bb.pred_feats:
                     pred_arr = np.concatenate(bb.pred_feats, axis=0)
                     target_arr = np.concatenate(bb.gt_feats, axis=0)
                     prefix_inputs.append(
                         (
-                            display_name,
+                            _COLUMN_PREFIX[key],
                             pred_arr,
                             target_arr,
                             pred_arr,
@@ -1606,12 +1626,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
             # NaN-fill any prefix that had no cells (parallel pool would
             # otherwise skip it). Cheap; runs on empty arrays.
-            expected_prefixes = ["CP", "DINOv3", "DynaCLR"]
-            if celldino_feature_extractor is not None:
-                expected_prefixes.append("CellDINO")
-            if morphem_feature_extractor is not None:
-                expected_prefixes.append("MorphEm")
-            for name in expected_prefixes:
+            for name in (_COLUMN_PREFIX[k] for k in active_kinds):
                 if f"Dataset_{name}_FID" not in dataset_row:
                     raw = {
                         **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
@@ -1622,11 +1637,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             for row in all_feature_metrics:
                 row.update(dataset_row)
             embedding_groups: dict[str, tuple] = {}
-            for key in _BACKBONE_KEYS:
-                if key == "celldino" and celldino_feature_extractor is None:
-                    continue
-                if key == "morphem" and morphem_feature_extractor is None:
-                    continue
+            for key in active_kinds:
                 bb = parent_lists[key]
                 embedding_groups[f"pred_{key}"] = (bb.pred_feats, bb.pred_fovs, bb.pred_ts)
                 embedding_groups[f"gt_{key}"] = (bb.gt_feats, bb.gt_fovs, bb.gt_ts)
