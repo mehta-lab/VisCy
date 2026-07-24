@@ -296,6 +296,12 @@ _COLUMN_PREFIX: dict[FeatureKind, str] = {
     "celldino": "CellDINO",
     "morphem": "MorphEm",
 }
+if set(_COLUMN_PREFIX) != set(_BACKBONE_KEYS):
+    raise RuntimeError(
+        f"_COLUMN_PREFIX must cover FeatureKind exactly; "
+        f"missing={sorted(set(_BACKBONE_KEYS) - set(_COLUMN_PREFIX))}, "
+        f"extra={sorted(set(_COLUMN_PREFIX) - set(_BACKBONE_KEYS))}"
+    )
 
 
 def _extend_backbone(
