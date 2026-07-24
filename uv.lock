@@ -1336,6 +1336,9 @@ dependencies = [
 croissant = [
     { name = "mlcroissant" },
 ]
+distribution = [
+    { name = "boto3" },
+]
 eval = [
     { name = "accelerate" },
     { name = "aicsmlsegment" },
@@ -1395,6 +1398,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'eval'", specifier = ">=1.13" },
     { name = "aicsmlsegment", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-ml-segmentation.git?branch=main" },
     { name = "aicssegmentation", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/aics-segmentation.git?branch=main" },
+    { name = "boto3", marker = "extra == 'distribution'" },
     { name = "cellpose", marker = "extra == 'eval'", specifier = ">=4.2" },
     { name = "cellpose", marker = "extra == 'preprocess'", specifier = ">=4.2" },
     { name = "cubic", marker = "extra == 'eval'", git = "https://github.com/alxndrkalinin/cubic.git?rev=v0.8.0a2" },
@@ -1434,7 +1438,7 @@ requires-dist = [
     { name = "waveorder", marker = "extra == 'eval'", git = "https://github.com/mehta-lab/waveorder.git?branch=main" },
     { name = "waveorder", marker = "extra == 'preprocess'", git = "https://github.com/mehta-lab/waveorder.git?branch=main" },
 ]
-provides-extras = ["croissant", "eval", "eval-gpu", "preprocess", "report", "wandb"]
+provides-extras = ["croissant", "distribution", "eval", "eval-gpu", "preprocess", "report", "wandb"]
 
 [package.metadata.requires-dev]
 dev = [

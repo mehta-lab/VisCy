@@ -43,6 +43,11 @@ dependencies = [
 optional-dependencies.croissant = [
   "mlcroissant>=1.1",
 ]
+# Open-data packaging/upload (dynacell.distribution): verify.py reads S3 via
+# boto3; sync.py shells out to the AWS CLI (installed out of band).
+optional-dependencies.distribution = [
+  "boto3",
+]
 optional-dependencies.eval = [
   "accelerate>=1.13",
   "aicsmlsegment",
