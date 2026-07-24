@@ -9,7 +9,10 @@ the full deterministic regen against source zarrs is an HPC/E2E concern.
 
 from pathlib import Path
 
-from dynacell.preprocess.a549_mantis.generate_pool_manifests import _manifest_yaml
+from dynacell.preprocess.a549_mantis.generate_pool_manifests import (
+    _dominant_spacing,
+    _manifest_yaml,
+)
 
 OUTPUT_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell/a549/mantis")
 
@@ -43,7 +46,24 @@ class TestManifestStores:
             output_root=OUTPUT_ROOT,
             splits_relpath="splits/caax_train_test.yaml",
         )
+        assert m["name"] == "a549-mantis-caax-zikv"
         stores = m["targets"]["caax"]["stores"]
         assert stores["test"] == str(OUTPUT_ROOT / "test" / "dual_nucl_memb_ZIKV.zarr")
         assert stores["cell_segmentation"] == str(OUTPUT_ROOT / "test" / "dual_nucl_memb_ZIKV_seg_cleaned.zarr")
         assert stores["gt_cache_dir"] == str(OUTPUT_ROOT.parent / "eval_cache" / "caax_zikv")
+
+
+class TestDominantSpacing:
+    """_dominant_spacing picks the modal per-pool spacing (Z is eval-critical)."""
+
+    def test_modal_selection(self):
+        """The most common spacing across contributing plates wins."""
+        common = (0.174, 0.1494, 0.1494)
+        spacings = [common, common, (0.29, 0.108, 0.108)]
+        assert _dominant_spacing(spacings) == common
+
+    def test_first_plate_tiebreak(self):
+        """On a count tie, the first-seen spacing wins (Counter.most_common)."""
+        first = (0.174, 0.1494, 0.1494)
+        second = (0.29, 0.108, 0.108)
+        assert _dominant_spacing([first, second]) == first
