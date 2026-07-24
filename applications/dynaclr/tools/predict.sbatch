@@ -41,9 +41,10 @@ fi
 
 MARKER_FLAG=()
 if [ -n "$MARKERS" ]; then
-  MARKER_FLAG=(--markers)
   IFS=',' read -ra _M <<< "$MARKERS"
-  MARKER_FLAG+=("${_M[@]}")
+  for _m in "${_M[@]}"; do
+    MARKER_FLAG+=(--markers "$_m")
+  done
 fi
 
 srun uv run --project "$WORKSPACE_DIR" dynaclr predict-batch \

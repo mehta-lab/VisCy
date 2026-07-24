@@ -1,5 +1,7 @@
 """Unit tests for submit_matrix: .sh parsing, defaults merge, chained commands."""
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -128,6 +130,39 @@ def test_predict_passes_markers(tmp_path):
     )
     predict_cmd = dict(submit_matrix.build_stage_cmds(model, ("predict",)))["predict"]
     assert predict_cmd[-1] == "SEC61B,Phase3D"
+
+
+def test_predict_sbatch_repeats_marker_option(tmp_path):
+    """Each marker must have its own Click ``--markers`` option."""
+    fake_srun = tmp_path / "srun"
+    fake_srun.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    fake_srun.chmod(0o755)
+
+    workspace = Path(__file__).parents[3]
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env['PATH']}"
+    env["WORKSPACE_DIR"] = str(workspace)
+    result = subprocess.run(
+        [
+            "bash",
+            str(workspace / "applications/dynaclr/tools/predict.sbatch"),
+            "collection.yml",
+            "family",
+            "run",
+            "last",
+            "/datasets",
+            "",
+            "SEC61B,TOMM20",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    args = result.stdout.splitlines()
+    marker_positions = [i for i, arg in enumerate(args) if arg == "--markers"]
+    assert [args[i + 1] for i in marker_positions] == ["SEC61B", "TOMM20"]
 
 
 # --- matrix-level preflight -------------------------------------------------
