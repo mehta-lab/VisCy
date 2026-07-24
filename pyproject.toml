@@ -99,10 +99,16 @@ lint.pydocstyle.convention = "numpy"
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests" ]
-addopts = [ "-ra", "-q", "--import-mode=importlib", "-m", "not slow" ]
+addopts = [ "-ra", "-q", "--import-mode=importlib", "--strict-markers", "-m", "not slow" ]
 pythonpath = [ "applications/dynacell/tools" ]
 markers = [
-  "slow: marks tests requiring GPU/HPC resources (deselect with -m 'not slow')",
+  # --strict-markers above turns an unregistered marker into a collection error.
+  # Without it a typo'd or invented marker silently decorates nothing, so the
+  # test it was meant to gate runs anyway (and asserts on whatever the shared
+  # HPC tree happens to hold). Register new markers here, or via
+  # addinivalue_line in the owning conftest (see applications/*/tests/conftest.py
+  # for hpc_integration).
+  "slow: marks tests requiring GPU/HPC resources or live HPC data (deselect with -m 'not slow')",
 ]
 
 [tool.uv-dynamic-versioning]
