@@ -32,6 +32,8 @@ TRAIN_LEAVES = [
     ("mito", "fcmae_vscyto3d_pretrained"),
     ("nucleus", "celldiff"),
     ("nucleus", "fnet3d_paper"),
+    ("nucleus", "fnet3d_bigpatch"),
+    ("nucleus", "fnet3d_vscyto3daug"),
     ("nucleus", "unetvit3d"),
     ("membrane", "celldiff"),
     ("membrane", "fnet3d_paper"),
@@ -187,6 +189,12 @@ _EXPECTED_DATA_HPARAMS = {
     "fcmae_vscyto3d_scratch": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 4},
     "fcmae_vscyto3d_pretrained": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 4},
     "fnet3d_paper": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
+    # FNet3D patch/augmentation ablation (nucleus, iPSC-trained, bf16-mixed).
+    # Arm A (bigpatch): larger 384^2 patch, FNet flip-only augs. Arm B
+    # (vscyto3daug): same 384^2 patch, full VSCyto3D augmentation stack.
+    # Identical geometry + batch so the pair isolates the augmentation effect.
+    "fnet3d_bigpatch": {"batch_size": 8, "z_window_size": 32, "yx_patch_size": [384, 384], "num_workers": 4},
+    "fnet3d_vscyto3daug": {"batch_size": 8, "z_window_size": 32, "yx_patch_size": [384, 384], "num_workers": 4},
     "unext2": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 8},
 }
 

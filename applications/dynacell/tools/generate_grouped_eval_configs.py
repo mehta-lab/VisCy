@@ -48,6 +48,8 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
+    "fnet3d_bigpatch": "fnet3d_bigpatch",
+    "fnet3d_vscyto3daug": "fnet3d_vscyto3daug",
     "unetvit3d": "unetvit3d",
     "pix2pix3d_unetvit": "pix2pix3d",
     "celldiff": "celldiff",
@@ -89,6 +91,8 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_scratch",
     "fcmae_vscyto3d_pretrained",
     "fnet3d_paper",
+    "fnet3d_bigpatch",
+    "fnet3d_vscyto3daug",
     "unetvit3d",
     "pix2pix3d_unetvit",
     # In-focus 2D track — deterministic like their 3D counterparts (no diffusion

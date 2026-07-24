@@ -133,6 +133,14 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
+    # FNet3D patch/augmentation ablation (Phase 15, nucleus + iPSC-trained):
+    # fnet3d_bigpatch = larger 384^2 patch with FNet's simple flip augs
+    # (isolates the patch-size effect); fnet3d_vscyto3daug = same larger
+    # patch with the full VSCyto3D augmentation stack (adds the aug effect).
+    # Distinct path tokens + paper keys from fnet3d_paper so eval dirs and
+    # displays don't collide.
+    "fnet3d_bigpatch": "fnet3d_bigpatch",
+    "fnet3d_vscyto3daug": "fnet3d_vscyto3daug",
     "unetvit3d": "unetvit3d",
     # pix2pix3d GAN (UNetViT3D generator, DynacellGAN engine). Distinct paper key
     # from the deterministic `unetvit3d` so eval dirs don't collide.
