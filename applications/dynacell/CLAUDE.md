@@ -5,7 +5,7 @@
 Config keys, prediction-zarr filenames, eval keys, and W&B run names use **code
 names**; figures/tables/manuscripts use **paper names**. Translate at any
 code/paper boundary. This table is the source of truth (referenced by
-`src/dynacell/evaluation/save_paths.py:PAPER_KEY`).
+`src/dynacell/evaluation/paths.py:PAPER_KEY`).
 
 | Code name | Paper name |
 | --- | --- |
@@ -73,10 +73,11 @@ Two exceptions to watch:
 
 ## Eval directory naming
 
-`src/dynacell/evaluation/save_paths.py:eval_save_dir` is the writer and the
-cross-repo contract (must match the paper's
-`compute_all_organelle_precision_recall.py:eval_dir_for`; pinned by
-`tests/test_save_paths.py`). Canonical focus-2D outputs under
+`src/dynacell/evaluation/paths.py` is the writer and the cross-repo contract
+(`eval_leaf` for the canonical model-centric layout, `normalize_legacy` for the
+pre-canonical `*_with_embeddings` forms; the paper repo vendor-copies it and
+asserts parity — must match `compute_all_organelle_precision_recall.py:eval_dir_for`;
+pinned by `tests/test_paths.py`). Canonical focus-2D outputs under
 `/hpc/projects/virtual_staining/training/dynacell/{ipsc,a549}/`:
 `evaluations_with_embeddings/` (ipsc-trained), `evaluations_a549trained_with_embeddings/`,
 `evaluations_jointtrained_with_embeddings/` (infix `jointtrained`). Dirs use the
