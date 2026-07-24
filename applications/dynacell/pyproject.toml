@@ -46,9 +46,10 @@ optional-dependencies.eval = [
   # cpdino (Cellpose-DINO ViT-L) instance segmentation requires cellpose>=4.2
   # (adds the DINO backbones + `pretrained_model="cpdino"`) and its dinov3 backbone.
   "cellpose>=4.2",
-  # cubic 0.8.0a2 (PR alxndrkalinin/cubic#51) adds device-resident segment_cellpose
-  # support for all Cellpose v4 models (SAM + DINO); the PyPI 0.7.0 predates it.
-  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@eb04eef",
+  # cubic 0.8.0a2 adds device-resident segment_cellpose support for all
+  # Cellpose v4 models (SAM + DINO); the PyPI 0.7.0 predates it. Pinned to the
+  # v0.8.0a2 tag (latest 0.8 alpha) rather than a bare PR commit.
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.8.0a2",
   "dinov3 @ git+https://github.com/facebookresearch/dinov3",
   "dynaclr",
   "hydra-core>=1.2",
