@@ -253,6 +253,20 @@ def build_predict_cmd(
     show_default=True,
     help="Base under which datasets live.",
 )
+@click.option("--z-range", nargs=2, type=int, default=None, help="Z window forwarded to predict-triplet.")
+@click.option(
+    "--z-reduction",
+    type=click.Choice(["mip", "center"]),
+    default=None,
+    help="Z reduction forwarded to predict-triplet.",
+)
+@click.option(
+    "--reference-pixel-size",
+    type=float,
+    default=None,
+    help="Reference pixel size forwarded to predict-triplet.",
+)
+@click.option("--batch-size", type=int, default=None, help="Batch size forwarded to predict-triplet.")
 @click.option("--markers", multiple=True, default=None, help="Marker subset (default: all channels).")
 @click.option("--no-labelfree", is_flag=True, help="Skip label-free (phase/brightfield) channels.")
 @click.option("--num-workers", type=int, default=0, help="Predict dataloader workers (must be 0).")
@@ -281,6 +295,10 @@ def main(
     checkpoint: Path | None,
     models_root: Path,
     datasets_root: Path,
+    z_range: tuple[int, int] | None,
+    z_reduction: str | None,
+    reference_pixel_size: float | None,
+    batch_size: int | None,
     markers: tuple[str, ...],
     no_labelfree: bool,
     num_workers: int,
@@ -298,6 +316,16 @@ def main(
         preflight(collection, workspace_dir, auto_normalize=auto_normalize)
 
     resolved_checkpoint = checkpoint or checkpoint_path(model_family, run, ckpt_name, models_root=models_root)
+    predict_flags = {}
+    if z_range is not None:
+        predict_flags["z_range"] = list(z_range)
+    if z_reduction is not None:
+        predict_flags["z_reduction"] = z_reduction
+    if reference_pixel_size is not None:
+        predict_flags["reference_pixel_size"] = reference_pixel_size
+    if batch_size is not None:
+        predict_flags["batch_size"] = batch_size
+
     cmd = build_predict_cmd(
         collection,
         resolved_checkpoint,
@@ -305,6 +333,7 @@ def main(
         run,
         ckpt_name,
         datasets_root,
+        predict_flags=predict_flags or None,
         markers=list(markers) if markers else None,
         no_labelfree=no_labelfree,
         num_workers=num_workers,

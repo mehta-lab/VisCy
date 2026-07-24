@@ -10,6 +10,12 @@
 #   $4 ckpt_name       checkpoint label (last | epochN-stepM)
 #   $5 datasets_root   base under which datasets live
 #   $6 checkpoint      (optional) explicit checkpoint path; empty = derive from run dir
+#   $7 markers         (optional) comma-separated marker subset
+#   $8 z_start         (optional) first --z-range value
+#   $9 z_end           (optional) second --z-range value
+#   $10 z_reduction    (optional) mip | center
+#   $11 reference_pixel_size (optional) microns per pixel
+#   $12 batch_size     (optional) prediction batch size
 #
 #SBATCH --job-name=dynaclr_predict
 #SBATCH --nodes=1
@@ -33,6 +39,11 @@ CKPT_NAME="$4"
 DATASETS_ROOT="$5"
 CHECKPOINT="${6:-}"
 MARKERS="${7:-}"
+Z_START="${8:-}"
+Z_END="${9:-}"
+Z_REDUCTION="${10:-}"
+REFERENCE_PIXEL_SIZE="${11:-}"
+BATCH_SIZE="${12:-}"
 
 CKPT_FLAG=()
 if [ -n "$CHECKPOINT" ]; then
@@ -47,6 +58,24 @@ if [ -n "$MARKERS" ]; then
   done
 fi
 
+PREDICT_FLAG=()
+if [ -n "$Z_START" ] || [ -n "$Z_END" ]; then
+  if [ -z "$Z_START" ] || [ -z "$Z_END" ]; then
+    echo "Both z_start and z_end are required." >&2
+    exit 2
+  fi
+  PREDICT_FLAG+=(--z-range "$Z_START" "$Z_END")
+fi
+if [ -n "$Z_REDUCTION" ]; then
+  PREDICT_FLAG+=(--z-reduction "$Z_REDUCTION")
+fi
+if [ -n "$REFERENCE_PIXEL_SIZE" ]; then
+  PREDICT_FLAG+=(--reference-pixel-size "$REFERENCE_PIXEL_SIZE")
+fi
+if [ -n "$BATCH_SIZE" ]; then
+  PREDICT_FLAG+=(--batch-size "$BATCH_SIZE")
+fi
+
 srun uv run --project "$WORKSPACE_DIR" dynaclr predict-batch \
   -c "$COLLECTION" \
   --model-family "$MODEL_FAMILY" \
@@ -55,4 +84,5 @@ srun uv run --project "$WORKSPACE_DIR" dynaclr predict-batch \
   --datasets-root "$DATASETS_ROOT" \
   "${CKPT_FLAG[@]}" \
   "${MARKER_FLAG[@]}" \
+  "${PREDICT_FLAG[@]}" \
   --num-workers 0

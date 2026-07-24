@@ -197,10 +197,15 @@ def build_train_cmd(model: dict) -> list[str]:
 def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]:
     """The predict sbatch command for one checkpoint of a model.
 
-    ``markers`` (optional list in the matrix row) is passed as a comma-joined 8th
-    positional; empty = all channels.
+    ``markers`` and ``predict_flags`` are forwarded as positional values to
+    the prediction wrapper.
     """
     markers = ",".join(model["markers"]) if model.get("markers") else ""
+    predict_flags = model.get("predict_flags", {})
+    z_range = predict_flags.get("z_range")
+    if z_range is not None and len(z_range) != 2:
+        raise ValueError("predict_flags.z_range must contain exactly two values.")
+    z_start, z_end = ("", "") if z_range is None else map(str, z_range)
     return [
         "sbatch",
         str(_PREDICT_SBATCH),
@@ -211,12 +216,25 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
         str(model["datasets_root"]),
         checkpoint,  # empty = derive from run dir
         markers,  # empty = all channels
+        z_start,
+        z_end,
+        str(predict_flags.get("z_reduction") or ""),
+        str(predict_flags.get("reference_pixel_size") or ""),
+        str(predict_flags.get("batch_size") or ""),
     ]
 
 
 def build_eval_cmd(model: dict, ckpt_name: str) -> list[str]:
     """The eval sbatch command for one checkpoint of a model."""
-    return ["sbatch", str(_EVAL_SBATCH), model["eval_config"], model["family"], model["run"], ckpt_name]
+    return [
+        "sbatch",
+        str(_EVAL_SBATCH),
+        model["eval_config"],
+        model["family"],
+        model["run"],
+        ckpt_name,
+        str(model["datasets_root"]),
+    ]
 
 
 def build_stage_cmds(model: dict, stages: tuple[str, ...]) -> list[tuple[str, list[str]]]:

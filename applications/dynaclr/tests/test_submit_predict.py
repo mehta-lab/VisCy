@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from click.testing import CliRunner
+
 from dynaclr.evaluation.orchestration import predict_batch as submit_predict
 
 MF = "DynaCLR-2D-MIP-BagOfChannels"
@@ -57,3 +59,42 @@ def test_predict_cmd_no_optional_flags():
     assert "--markers" not in cmd
     assert "--no-labelfree" not in cmd
     assert "--z-range" not in cmd
+
+
+def test_predict_batch_cli_forwards_prediction_flags():
+    result = CliRunner().invoke(
+        submit_predict.main,
+        [
+            "-c",
+            "c.yml",
+            "--model-family",
+            MF,
+            "--run",
+            RUN,
+            "--ckpt-name",
+            "last",
+            "--checkpoint",
+            "/c.ckpt",
+            "--datasets-root",
+            "/data",
+            "--z-range",
+            "15",
+            "45",
+            "--z-reduction",
+            "mip",
+            "--reference-pixel-size",
+            "0.1494",
+            "--batch-size",
+            "64",
+            "--skip-preflight",
+            "--print-cmd",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    args = result.output.splitlines()
+    z_range_index = args.index("--z-range")
+    assert args[z_range_index + 1 : z_range_index + 3] == ["15", "45"]
+    assert args[args.index("--z-reduction") + 1] == "mip"
+    assert args[args.index("--reference-pixel-size") + 1] == "0.1494"
+    assert args[args.index("--batch-size") + 1] == "64"

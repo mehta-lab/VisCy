@@ -116,9 +116,8 @@ def test_predict_empty_checkpoint_when_derived(tmp_path):
         {"ckpt_name": "last", "collection": "c.yml", "eval_config": "e.yaml", "datasets_root": "/d"},
     )
     predict_cmd = dict(submit_matrix.build_stage_cmds(model, ("predict",)))["predict"]
-    # positionals end with: … checkpoint(""), markers("")
-    assert predict_cmd[-2] == ""  # empty checkpoint positional
-    assert predict_cmd[-1] == ""  # empty markers positional
+    assert predict_cmd[7] == ""  # empty checkpoint positional
+    assert predict_cmd[8] == ""  # empty markers positional
 
 
 def test_predict_passes_markers(tmp_path):
@@ -129,7 +128,29 @@ def test_predict_passes_markers(tmp_path):
         {"ckpt_name": "last", "collection": "c.yml", "eval_config": "e.yaml", "datasets_root": "/d"},
     )
     predict_cmd = dict(submit_matrix.build_stage_cmds(model, ("predict",)))["predict"]
-    assert predict_cmd[-1] == "SEC61B,Phase3D"
+    assert predict_cmd[8] == "SEC61B,Phase3D"
+
+
+def test_matrix_forwards_predict_flags_and_eval_root():
+    model = {
+        "collection": "c.yml",
+        "family": "family",
+        "run": "run",
+        "datasets_root": "/datasets",
+        "eval_config": "e.yml",
+        "predict_flags": {
+            "z_range": [15, 45],
+            "z_reduction": "mip",
+            "reference_pixel_size": 0.1494,
+            "batch_size": 64,
+        },
+    }
+
+    predict_cmd = submit_matrix.build_predict_cmd(model, "last", "")
+    assert predict_cmd[-5:] == ["15", "45", "mip", "0.1494", "64"]
+
+    eval_cmd = submit_matrix.build_eval_cmd(model, "last")
+    assert eval_cmd[-1] == "/datasets"
 
 
 def test_predict_sbatch_repeats_marker_option(tmp_path):
@@ -153,6 +174,11 @@ def test_predict_sbatch_repeats_marker_option(tmp_path):
             "/datasets",
             "",
             "SEC61B,TOMM20",
+            "15",
+            "45",
+            "mip",
+            "0.1494",
+            "64",
         ],
         check=True,
         capture_output=True,
@@ -163,6 +189,42 @@ def test_predict_sbatch_repeats_marker_option(tmp_path):
     args = result.stdout.splitlines()
     marker_positions = [i for i, arg in enumerate(args) if arg == "--markers"]
     assert [args[i + 1] for i in marker_positions] == ["SEC61B", "TOMM20"]
+    z_range_index = args.index("--z-range")
+    assert args[z_range_index + 1 : z_range_index + 3] == ["15", "45"]
+    assert args[args.index("--z-reduction") + 1] == "mip"
+    assert args[args.index("--reference-pixel-size") + 1] == "0.1494"
+    assert args[args.index("--batch-size") + 1] == "64"
+
+
+def test_eval_sbatch_forwards_datasets_root(tmp_path):
+    fake_module = tmp_path / "module"
+    fake_module.write_text("#!/bin/bash\nexit 0\n")
+    fake_module.chmod(0o755)
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    fake_uv.chmod(0o755)
+
+    workspace = Path(__file__).parents[3]
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env['PATH']}"
+    env["WORKSPACE_DIR"] = str(workspace)
+    model = {
+        "eval_config": "e.yml",
+        "family": "family",
+        "run": "run",
+        "datasets_root": "/datasets",
+    }
+    cmd = submit_matrix.build_eval_cmd(model, "last")
+    result = subprocess.run(
+        ["bash", *cmd[1:]],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    args = result.stdout.splitlines()
+    assert args[args.index("--datasets-root") + 1] == "/datasets"
 
 
 # --- matrix-level preflight -------------------------------------------------

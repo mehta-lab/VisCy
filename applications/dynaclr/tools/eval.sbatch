@@ -10,6 +10,7 @@
 #   $2 model_family    embedding-tree key
 #   $3 run             embedding-tree key
 #   $4 ckpt_name       embedding-tree key
+#   $5 datasets_root   base under which datasets live
 #
 #SBATCH --job-name=dynaclr_eval
 #SBATCH --nodes=1
@@ -31,9 +32,11 @@ EVAL_CONFIG="$1"
 MODEL_FAMILY="$2"
 RUN="$3"
 CKPT_NAME="$4"
+DATASETS_ROOT="$5"
 
 uv run --project "$WORKSPACE_DIR" dynaclr eval \
   --eval-config "$EVAL_CONFIG" \
   --model-family "$MODEL_FAMILY" \
   --run "$RUN" \
-  --ckpt-name "$CKPT_NAME"
+  --ckpt-name "$CKPT_NAME" \
+  --datasets-root "$DATASETS_ROOT"
