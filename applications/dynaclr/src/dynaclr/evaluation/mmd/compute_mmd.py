@@ -46,6 +46,37 @@ def _extract_embeddings(adata: ad.AnnData, embedding_key: str | None) -> np.ndar
     return np.asarray(X)
 
 
+def _load_adatas_by_experiment(input_paths: list[str]) -> dict[str, ad.AnnData]:
+    """Load and concatenate every store belonging to the same experiment.
+
+    Prediction writes one store per experiment and marker. Grouping only by
+    experiment with a dict comprehension would silently retain the final marker.
+    """
+    grouped: dict[str, list[ad.AnnData]] = {}
+    for input_path in input_paths:
+        adata = ad.read_zarr(input_path)
+        if "experiment" not in adata.obs.columns:
+            raise KeyError(f"obs column 'experiment' not found in {input_path}.")
+        experiments = adata.obs["experiment"].dropna().unique()
+        if len(experiments) != 1:
+            raise ValueError(f"Expected exactly one experiment in {input_path}, found {list(experiments)}.")
+        grouped.setdefault(str(experiments[0]), []).append(adata)
+
+    return {
+        experiment: (parts[0] if len(parts) == 1 else ad.concat(parts, join="inner", merge="same", index_unique="-"))
+        for experiment, parts in grouped.items()
+    }
+
+
+def _experiment_marker_pairs(input_paths: list[str]) -> set[tuple[str, str]]:
+    pairs = set()
+    for experiment, adata in _load_adatas_by_experiment(input_paths).items():
+        if "marker" not in adata.obs:
+            raise KeyError(f"obs column 'marker' not found for {experiment}.")
+        pairs.update((experiment, str(marker)) for marker in adata.obs["marker"].unique())
+    return pairs
+
+
 def _run_one_comparison(
     emb_a: np.ndarray,
     emb_b: np.ndarray,
@@ -414,7 +445,7 @@ def run_mmd_combined(config: MMDCombinedConfig) -> pd.DataFrame:
     """
     from itertools import combinations
 
-    adatas = {ad.read_zarr(p).obs["experiment"].iloc[0]: ad.read_zarr(p) for p in config.input_paths}
+    adatas = _load_adatas_by_experiment(config.input_paths)
 
     if config.obs_filter:
         filtered = {}
@@ -521,32 +552,48 @@ def run_mmd_combined(config: MMDCombinedConfig) -> pd.DataFrame:
 
 
 def run_mmd_over_time(config: MMDOverTimeConfig) -> pd.DataFrame:
-    """Run combined cross-experiment MMD on pre- and post-correction embeddings.
+    """Compare pre- and post-LOT MMD in the same scaler/PCA space.
 
-    Runs :func:`run_mmd_combined` twice — once on ``input_paths`` (uncorrected,
-    ``correction="pre"``) and once on ``corrected_paths`` (LOT-corrected,
-    ``correction="post"``) — using identical settings, then concatenates the
-    results with a ``correction`` column so the batch effect before and after
-    correction can be compared over time in a single output.
-
-    Parameters
-    ----------
-    config : MMDOverTimeConfig
-        Over-time analysis configuration (combined config + ``corrected_paths``).
-
-    Returns
-    -------
-    pd.DataFrame
-        Same columns as :func:`run_mmd_combined` plus a ``correction`` column
-        (``"pre"`` / ``"post"``) and a ``pair_kind`` column (``"cross"`` for
-        source↔target pairs, ``"within"`` for source↔source pairs).
+    Corrected stores keep pre-LOT coordinates in ``obsm["X_pre_lot"]`` and
+    post-LOT coordinates in ``.X``.
     """
-    base = config.model_dump(exclude={"corrected_paths", "target_experiments"})
+    if config.embedding_key is not None:
+        raise ValueError("embedding_key must be unset for over-time LOT MMD.")
 
-    pre = run_mmd_combined(MMDCombinedConfig(**base))
+    raw_pairs = _experiment_marker_pairs(config.input_paths)
+    corrected_pairs = _experiment_marker_pairs(config.corrected_paths)
+    if raw_pairs != corrected_pairs:
+        raise ValueError("input_paths and corrected_paths contain different experiment-marker populations.")
+
+    pre_lot_key = "X_pre_lot"
+    for path in config.corrected_paths:
+        if pre_lot_key not in ad.read_zarr(path).obsm:
+            raise ValueError(f"{path} has no obsm['{pre_lot_key}']; re-run LOT correction first.")
+
+    base = config.model_dump(
+        exclude={
+            "input_paths",
+            "corrected_paths",
+            "target_experiments",
+            "embedding_key",
+        }
+    )
+    pre = run_mmd_combined(
+        MMDCombinedConfig(
+            **base,
+            input_paths=config.corrected_paths,
+            embedding_key=pre_lot_key,
+        )
+    )
     pre["correction"] = "pre"
 
-    post = run_mmd_combined(MMDCombinedConfig(**{**base, "input_paths": config.corrected_paths}))
+    post = run_mmd_combined(
+        MMDCombinedConfig(
+            **base,
+            input_paths=config.corrected_paths,
+            embedding_key=None,
+        )
+    )
     post["correction"] = "post"
 
     df = pd.concat([pre, post], ignore_index=True)

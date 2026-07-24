@@ -202,12 +202,10 @@ class MMDCombinedConfig(_MMDBaseConfig):
 class MMDOverTimeConfig(MMDCombinedConfig):
     """Pre/post batch-effect MMD over time in a single run.
 
-    Runs the combined cross-experiment MMD (per marker × condition × time bin)
-    on both the uncorrected embeddings (``input_paths``) and their LOT-corrected
-    counterparts (``corrected_paths``), tags each result set with a
-    ``correction`` column (``"pre"`` / ``"post"``), and returns one combined
-    DataFrame — so the batch effect before and after correction can be plotted
-    as two series over time instead of living in two separate output folders.
+    Runs combined cross-experiment MMD on the pre-LOT coordinates stored in
+    ``corrected_paths[*].obsm["X_pre_lot"]`` and post-LOT coordinates in
+    ``corrected_paths[*].X``. Both therefore use the same scaler/PCA space.
+    ``input_paths`` identify the expected experiment-marker populations.
 
     Parameters
     ----------

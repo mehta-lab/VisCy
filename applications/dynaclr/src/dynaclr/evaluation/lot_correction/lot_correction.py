@@ -221,11 +221,10 @@ def apply_lot_correction(
     """Apply a fitted LOT pipeline to an embedding zarr.
 
     Transforms all cells through StandardScaler → (optional PCA) → LOT and writes
-    an AnnData zarr whose ``.X`` contains the corrected embeddings. ``.obs`` and
-    the input ``.uns`` are preserved (plus a ``uns["lot_correction"]`` provenance
-    entry). ``obsm`` (e.g. ``X_backbone``, ``X_umap``, ``X_phate``, ``X_pca``),
-    ``varm``, ``obsp``, and ``layers`` are intentionally dropped: they were
-    computed in the *uncorrected* space and would contradict the corrected ``.X``.
+    an AnnData zarr whose ``.X`` contains the corrected embeddings. The matching
+    pre-LOT coordinates are stored in ``obsm["X_pre_lot"]`` for correction QC.
+    Input metadata are preserved; other arrays derived from the uncorrected space
+    are dropped.
 
     Parameters
     ----------
@@ -275,6 +274,7 @@ def apply_lot_correction(
         pass
 
     adata_out = ad.AnnData(X=Z_corrected.astype(np.float32), obs=obs, uns=dict(adata_in.uns))
+    adata_out.obsm["X_pre_lot"] = np.asarray(Z, dtype=np.float32)
     adata_out.var.index = adata_out.var.index.astype(object)
     adata_out.uns["lot_correction"] = {
         "source_zarr": str(input_zarr),

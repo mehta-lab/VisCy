@@ -7,8 +7,20 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dynaclr.evaluation.mmd.compute_mmd import run_mmd_analysis, run_mmd_pooled
-from dynaclr.evaluation.mmd.config import ComparisonSpec, MMDEvalConfig, MMDPooledConfig, MMDSettings
+from dynaclr.evaluation.mmd.compute_mmd import (
+    run_mmd_analysis,
+    run_mmd_combined,
+    run_mmd_over_time,
+    run_mmd_pooled,
+)
+from dynaclr.evaluation.mmd.config import (
+    ComparisonSpec,
+    MMDCombinedConfig,
+    MMDEvalConfig,
+    MMDOverTimeConfig,
+    MMDPooledConfig,
+    MMDSettings,
+)
 from viscy_utils.evaluation.mmd import (
     compute_mmd_unbiased,
     median_heuristic,
@@ -465,6 +477,80 @@ def _save_adata_zarr(adata: ad.AnnData, path: str) -> None:
     if os.path.exists(path):
         shutil.rmtree(path)
     adata.write_zarr(path)
+
+
+def test_run_mmd_combined_keeps_all_marker_stores(tmp_path):
+    """Separate marker stores for one experiment must not overwrite each other."""
+    paths = []
+    for exp_index, experiment in enumerate(["exp_a", "exp_b"]):
+        for marker_index, marker in enumerate(["SEC61B", "TOMM20"]):
+            rng = np.random.default_rng(exp_index * 10 + marker_index)
+            obs = pd.DataFrame(
+                {
+                    "experiment": [experiment] * 30,
+                    "marker": [marker] * 30,
+                    "perturbation": ["uninfected"] * 30,
+                }
+            )
+            adata = ad.AnnData(X=rng.normal(size=(30, 8)).astype(np.float32), obs=obs)
+            store = str(tmp_path / f"{experiment}_{marker}.zarr")
+            _save_adata_zarr(adata, store)
+            paths.append(store)
+
+    result = run_mmd_combined(
+        MMDCombinedConfig(
+            input_paths=paths,
+            output_dir=str(tmp_path / "out"),
+            mmd=MMDSettings(n_permutations=10, min_cells=10),
+        )
+    )
+
+    assert set(result["marker"]) == {"SEC61B", "TOMM20"}
+    assert len(result) == 2
+
+
+def test_run_mmd_over_time_uses_pre_lot_coordinates(tmp_path):
+    """Pre/post results must use matching scaler/PCA coordinates."""
+    raw_paths = []
+    corrected_paths = []
+    for index, experiment in enumerate(["exp_a", "exp_b"]):
+        rng = np.random.default_rng(index)
+        obs = pd.DataFrame(
+            {
+                "experiment": [experiment] * 30,
+                "marker": ["SEC61B"] * 30,
+                "perturbation": ["uninfected"] * 30,
+            }
+        )
+
+        raw_path = str(tmp_path / f"{experiment}_raw.zarr")
+        _save_adata_zarr(
+            ad.AnnData(X=rng.normal(size=(30, 7)).astype(np.float32), obs=obs.copy()),
+            raw_path,
+        )
+        raw_paths.append(raw_path)
+
+        corrected = ad.AnnData(
+            X=rng.normal(size=(30, 3)).astype(np.float32),
+            obs=obs.copy(),
+        )
+        corrected.obsm["X_pre_lot"] = rng.normal(size=(30, 3)).astype(np.float32)
+        corrected_path = str(tmp_path / f"{experiment}_corrected.zarr")
+        _save_adata_zarr(corrected, corrected_path)
+        corrected_paths.append(corrected_path)
+
+    result = run_mmd_over_time(
+        MMDOverTimeConfig(
+            input_paths=raw_paths,
+            corrected_paths=corrected_paths,
+            output_dir=str(tmp_path / "out"),
+            mmd=MMDSettings(n_permutations=10, min_cells=10),
+        )
+    )
+
+    assert set(result["correction"]) == {"pre", "post"}
+    assert set(result.loc[result["correction"] == "pre", "embedding_key"]) == {"X_pre_lot"}
+    assert set(result.loc[result["correction"] == "post", "embedding_key"]) == {"X"}
 
 
 def test_run_mmd_pooled_columns(tmp_path):

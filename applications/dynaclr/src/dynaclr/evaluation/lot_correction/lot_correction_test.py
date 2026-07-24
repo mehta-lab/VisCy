@@ -118,6 +118,11 @@ def test_fit_save_load_then_apply_to_many(tmp_path, n_pca):
         apply_lot_correction(input_zarr, loaded, output_zarr)
         out = ad.read_zarr(output_zarr)
         assert out.shape == (20, expected_dim)
+        assert out.obsm["X_pre_lot"].shape == (20, expected_dim)
+        expected_pre = loaded["scaler"].transform(input_adata.X)
+        if loaded["pca"] is not None:
+            expected_pre = loaded["pca"].transform(expected_pre)
+        np.testing.assert_allclose(out.obsm["X_pre_lot"], expected_pre, rtol=1e-5)
         assert out.uns["lot_correction"]["channel"] == "Phase3D"
 
 
