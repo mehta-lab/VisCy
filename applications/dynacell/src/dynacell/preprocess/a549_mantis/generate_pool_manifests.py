@@ -17,11 +17,13 @@ and within each plate positions are read in the order the authoring splits
 YAML lists them. Sequential indexing ``0/0/fov<NNNN>`` then maps onto the
 assembled HCS store.
 
-The manifest's top-level spacing is set per-pool by picking the dominant
+The manifest's top-level Z spacing is set per-pool from the dominant
 contributing plate's source spacing (read live from the source plate
-NGFF). For mixed-microscope pools this is an approximation; the
-per-position OME-NGFF transform inside the assembled store is the source of
-truth at metric-eval time.
+NGFF); XY is the assembly resample target ``TARGET_YX_PIXEL_SIZE_UM``, not
+the source pitch, because the assembled stores are resampled to it. For
+mixed-microscope pools the Z pick is an approximation; the per-position
+OME-NGFF transform inside the assembled store is the source of truth at
+metric-eval time.
 
 Usage::
 
