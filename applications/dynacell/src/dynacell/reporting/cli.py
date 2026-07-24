@@ -28,7 +28,7 @@ def generate_report(cfg: DictConfig) -> None:
     ----------
     cfg : DictConfig
         Hydra config with ``results_dirs``, ``output_dir``, ``metrics``,
-        and ``figure_format``.  See ``configs/report/base.yaml``.
+        and ``figure_format``. See ``reporting/_configs/base.yaml``.
     """
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
