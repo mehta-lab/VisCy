@@ -1,0 +1,24 @@
+# OZX packaging config — consumed by `dynacell-paper distribute pack`
+# (see preprocessing/dynacell-a549/4-pack-ozx/run_pack.slurm for the SLURM driver).
+#
+# Output layout:
+#   <output_root>/<dataset>/<split>/<store-name>.ozx
+#   <output_root>/<dataset>/MANIFEST.json
+#
+# Sample mode (reviewer subset, NeurIPS <4 GB requirement):
+#   `dynacell-paper distribute sample <dataset> --max-fovs N --max-t M`
+#   The `sample.fov_limit` / `sample.t_limit` keys below are
+#   recommended values for the NeurIPS reviewer sample. They are
+#   not auto-loaded by the CLI today — `--max-fovs` and `--max-t`
+#   are required positional flags. Wire-up to read from this config
+#   when the SLURM launcher needs the defaults.
+
+output_root: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1_ozx
+
+# Refuse to overwrite existing OZX archives by default; pass --overwrite
+# on the CLI to replace them after a re-assembly.
+overwrite: false
+
+sample:
+  fov_limit: 5
+  t_limit: 1

@@ -1,0 +1,47 @@
+# A549 mantis platemap — 2024_11_05_A549_TOMM20_ZIKV_DENV
+#
+# Cross-referenced from preprocessing/dynacell-a549/2024_11_05_A549_TOMM20_ZIKV_DENV_platemap.csv
+# and the dynacell zarr under run_20260403_014617.
+#
+# CSV plate plan:
+#   B/1, B/2 (TOMM20-GFP wildtype mock + DENV)
+#   C/2     (TOMM20-GFP wildtype ZIKV)
+#   B/3, C/3 (TOMM20-GFP pAL17 viral-sensor variants — mock + ZIKV)
+#   B/4, C/4 (TOMM20-GFP pAL40 viral-sensor variants — mock + DENV)
+# The dynacell zarr only carries B/3, B/4, C/3, C/4 — the four viral-sensor
+# wells. The earlier Airtable-only sync omitted B/3 and C/3 as biology-QC
+# failed; they are re-included here for the train pool. pAL17 and pAL40
+# both image TOMM20 on the same GFP cube as wildtype; the unused mCherry
+# sensor channel is dropped at assembly time via gene_channel_map, so
+# these FOVs are bytewise indistinguishable from wildtype FOVs at the
+# model's input.
+#
+# Target: TOMM20 (mitochondria) on GFP cube.
+
+experiment: 2024_11_05_A549_TOMM20_ZIKV_DENV
+run_dir: run_20260403_014617
+zarr_filename: 2024_11_05_A549_TOMM20_ZIKV_DENV.zarr
+
+native_delta_t_min: 30
+hpi_start: 4.5
+native_t: 43
+
+wells:
+  B/3:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  B/4:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  C/3:
+    condition: ZIKV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  C/4:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
