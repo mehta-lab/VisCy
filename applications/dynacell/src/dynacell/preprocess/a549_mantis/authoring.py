@@ -1,6 +1,7 @@
 """Pydantic models for A549 mantis authoring YAMLs.
 
-Two files per plate, both in ``configs/datasets/a549-mantis/authoring/``:
+Two files per plate, both packaged under
+``dynacell/_configs/datasets/a549-mantis/authoring/``:
 
 - ``platemaps/<plate>.yaml`` — per-well ``condition``, ``gene_channel_map``,
   plate-level ``hpi_start``, ``native_delta_t_min``.
@@ -8,9 +9,8 @@ Two files per plate, both in ``configs/datasets/a549-mantis/authoring/``:
   implicitly encode the biological-QC filter).
 
 The pipeline reads only these YAMLs plus the plate zarr. No Airtable or
-Confluence access at assembly time — the Airtable fixtures in
-``configs/datasets/a549-mantis/airtable/`` are the authoring reference
-only.
+Confluence access at assembly time — the Airtable fixtures (authoring
+reference, not packaged here) live in the dynacell-paper repo.
 """
 
 from pathlib import Path
