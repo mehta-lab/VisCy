@@ -413,11 +413,6 @@ class MorphEmFeatureExtractor:
         return torch.cat(out_chunks, dim=0)
 
 
-def _minmax_norm(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-    """Min-max normalize array to [0, 1]."""
-    return (x - x.min()) / (x.max() - x.min() + eps)
-
-
 def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
     """Plot metrics per FOV and, when applicable, over time.
 

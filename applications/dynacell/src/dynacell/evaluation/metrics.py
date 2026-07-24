@@ -309,11 +309,11 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
 def _robust_norm(x, p_lo: float = 1.0, p_hi: float = 99.0, eps: float = 1e-8):
     """Percentile-clip ``x`` to ``[p_lo, p_hi]`` then min-max to ``[0, 1]``.
 
-    Replaces the fragile raw min-max (:func:`_minmax_norm`, outlier-dominated)
-    for the CP feature track. Device-agnostic — ``np.percentile``/``np.clip``
-    dispatch on numpy or cupy. The clipped numerator is bounded by the span, so
-    the ``+ eps`` denominator keeps a constant/near-constant image finite
-    (output → 0) instead of NaN/inf (mirrors :func:`_minmax_norm`'s eps guard).
+    Replaces the raw min-max this track used to run on, which a single hot pixel
+    could dominate. Device-agnostic — ``np.percentile``/``np.clip`` dispatch on
+    numpy or cupy. The clipped numerator is bounded by the span, so the ``+ eps``
+    denominator keeps a constant/near-constant image finite (output → 0) instead
+    of NaN/inf.
     """
     lo, hi = np.percentile(x, (p_lo, p_hi))
     x = np.clip(x, lo, hi)
