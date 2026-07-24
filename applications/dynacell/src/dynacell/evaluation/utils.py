@@ -444,7 +444,8 @@ def plot_metrics(df: pd.DataFrame, save_dir: Path, metric_type: str) -> None:
 
     # Group / sort once: with ~100 feature-metric columns the per-column
     # re-groupby and per-(column, FOV) boolean mask dominated this function.
-    by_fov = df.groupby("FOV")
+    # ``tp_frames`` is held for the whole loop, so keep only the plotted columns.
+    by_fov = df[["FOV", "Timepoint", *metric_cols]].groupby("FOV")
     all_fov_means = by_fov[metric_cols].mean()
     multi_tp_fovs = by_fov["Timepoint"].nunique().pipe(lambda s: s[s > 1].index.tolist())
     tp_frames = {fov: by_fov.get_group(fov).sort_values("Timepoint") for fov in multi_tp_fovs}
