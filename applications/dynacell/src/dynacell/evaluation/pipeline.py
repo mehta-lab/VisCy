@@ -1533,6 +1533,18 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 "celldino": celldino_feature_extractor,
                 "morphem": morphem_feature_extractor,
             }
+            # DINOv3/DynaCLR have no soft-skip: LoadFlags.for_evaluate gates all four
+            # extractors on compute_feature_metrics (true here), and the grouped driver
+            # cannot skew that (compute_feature_metrics is a _MODEL_LOADING_FIELDS
+            # invariant). Assert it so a future per-extractor evaluate gate surfaces here
+            # instead of silently dropping the Dataset_DINOv3_* / Dataset_DynaCLR_*
+            # columns from feature_metrics.csv.
+            for required in ("dinov3", "dynaclr"):
+                if extractor_by_kind[required] is None:
+                    raise ValueError(
+                        f"compute_feature_metrics=true but the {required} extractor is None; "
+                        "its dataset-metric columns would be dropped instead of NaN-filled"
+                    )
             active_kinds = [k for k in _BACKBONE_KEYS if k == "cp" or extractor_by_kind[k] is not None]
 
             # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
