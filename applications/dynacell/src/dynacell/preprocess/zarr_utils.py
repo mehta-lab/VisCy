@@ -44,8 +44,8 @@ def rewrite_zarr(
             channel_names=old_dataset.channel_names,
             version=version,
         ) as new_dataset:
-            total_positions = sum(1 for _ in old_dataset.positions())
-            for name, old_position in tqdm(old_dataset.positions(), total=total_positions):
+            positions = list(old_dataset.positions())
+            for name, old_position in tqdm(positions, total=len(positions)):
                 row, col, fov = name.split("/")
                 new_position = new_dataset.create_position(row, col, fov)
                 old_image = old_position["0"]

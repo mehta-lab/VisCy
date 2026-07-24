@@ -722,7 +722,8 @@ def features_from_crops(crops, feature_extractor):
         out = batch_fn(crops)
         return np.asarray(out.detach().cpu()).reshape(len(crops), -1).astype(np.float32, copy=False)
     feats = [feature_extractor.extract_features(c).detach().cpu().numpy().reshape(-1) for c in crops]
-    return np.stack(feats, axis=0)
+    # float32 to match the batch path, so both write the same dtype to the cache.
+    return np.stack(feats, axis=0).astype(np.float32, copy=False)
 
 
 def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = None):

@@ -97,8 +97,7 @@ def aggregate_metrics(
     """
     if metrics is None:
         metrics = [c for c in df.columns if c not in ("FOV", "Timepoint")]
-    agg = df[metrics].agg(["mean", "std"])
-    return agg
+    return df[metrics].agg(["mean", "std"])
 
 
 def load_and_aggregate(
