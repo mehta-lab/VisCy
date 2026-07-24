@@ -322,6 +322,12 @@ class WitnessGmmLabelsConfig(BaseModel):
         the witness (bounds kernel cost). None = use all. Default: 5000.
     random_seed : int
         Seed for reference subsampling and the GMM. Default: 42.
+    mmd_hpi_bin_hours : float or None
+        If set, additionally compute MMD²(control, condition) **per time bin** of
+        this width (hours post perturbation) and write an MMD-vs-HPI diagnostic
+        plot — the population divergence kinetics, plus a control-vs-control null
+        band. Requires an ``hours_post_perturbation`` obs column. None disables
+        the diagnostic. Default: None.
     """
 
     experiments: list[WitnessGmmExperiment]
@@ -337,6 +343,7 @@ class WitnessGmmLabelsConfig(BaseModel):
     bandwidth: float | None = None
     max_reference_cells: int | None = 5000
     random_seed: int = 42
+    mmd_hpi_bin_hours: float | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "WitnessGmmLabelsConfig":

@@ -13,6 +13,9 @@ the MMD witness + per-condition GMM into an annotation file. These plots are the
 - :func:`plot_remodeling_vs_time` — per marker: the fraction of cells in the
   perturbed (remodeled/infected) class vs time, per condition — the biological
   kinetics the labels imply.
+- :func:`plot_mmd_vs_hpi` — per marker: MMD²(control, condition) per HPI bin —
+  the population-divergence kinetics (label-free), with a control-vs-control null
+  band. Answers "when, and how much, does the population diverge from control?"
 """
 
 from __future__ import annotations
@@ -318,6 +321,72 @@ def plot_remodeling_vs_time(
     ax.set_title(f"% cells in '{positive_class}' vs time — {marker}", fontsize=11, fontweight="bold")
     ax.set_xlabel("hours post perturbation" if time_is_hpp else "timepoint", fontsize=11)
     ax.set_ylabel(f"% cells '{positive_class}'", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.legend(frameon=True, fontsize=9)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_mmd_vs_hpi(
+    hpi_mmd: dict,
+    pvalue_threshold: float,
+    marker: str,
+    output_path: Path,
+) -> None:
+    """Plot MMD²(control, condition) per HPI bin — population-divergence kinetics.
+
+    Each condition curve traces how far its cell cloud sits from the control
+    reference at each time window (label-free — no GMM, no per-cell labels). The
+    ``__control_null__`` series (control split against itself) is drawn as a grey
+    band: the no-difference floor the condition curves must exceed to be real.
+    A condition curve that **grows** with HPI is the signature of a genuine,
+    progressive perturbation; one that sits flat near the null (or as a constant
+    offset that never grows) is weak/ambiguous — possibly a fixed well effect
+    rather than a time-developing response. Points failing the per-bin
+    significance test (raw p > ``pvalue_threshold``) are drawn hollow.
+
+    Parameters
+    ----------
+    hpi_mmd : dict
+        ``{condition: [(hpi_center, mmd2, p), ...]}`` from ``_compute_hpi_mmd``;
+        key ``"__control_null__"`` is the control-vs-control baseline.
+    pvalue_threshold : float
+        Per-bin raw-p threshold for the hollow/filled marker distinction.
+    marker : str
+        Marker name (title).
+    output_path : Path
+        Output file path.
+    """
+    if not hpi_mmd:
+        return
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    null = hpi_mmd.get("__control_null__")
+    if null:
+        arr = np.array(sorted(null))
+        ax.plot(arr[:, 0], arr[:, 1], color="0.5", ls="--", lw=1.2, label="control vs control (null)")
+        # Shade up to the max null MMD² as the no-difference band.
+        ax.axhspan(0, float(arr[:, 1].max()), color="0.85", alpha=0.5, zorder=0)
+
+    ci = 0
+    for cond, series in hpi_mmd.items():
+        if cond == "__control_null__":
+            continue
+        arr = np.array(sorted(series))
+        centers, mmd2, pvals = arr[:, 0], arr[:, 1], arr[:, 2]
+        color = colors[ci % len(colors)]
+        ci += 1
+        ax.plot(centers, mmd2, color=color, lw=1.8, label=f"control vs {cond}")
+        sig = pvals <= pvalue_threshold
+        ax.scatter(centers[sig], mmd2[sig], color=color, s=30, zorder=3)
+        ax.scatter(centers[~sig], mmd2[~sig], facecolors="none", edgecolors=color, s=30, zorder=3, label="_nolegend_")
+
+    ax.set_ylim(bottom=0)
+    ax.set_title(f"MMD² vs time — {marker}\n(population divergence from control; hollow = n.s.)", fontsize=11)
+    ax.set_xlabel("hours post perturbation", fontsize=11)
+    ax.set_ylabel("MMD²  (control vs condition)", fontsize=11)
     ax.grid(True, alpha=0.3)
     ax.legend(frameon=True, fontsize=9)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")

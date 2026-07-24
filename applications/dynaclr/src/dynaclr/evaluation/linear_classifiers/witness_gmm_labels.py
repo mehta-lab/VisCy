@@ -39,6 +39,7 @@ from scipy.stats import false_discovery_control
 
 from dynaclr.evaluation.linear_classifiers.witness_gmm_plots import (
     plot_mmd_null,
+    plot_mmd_vs_hpi,
     plot_remodeling_vs_time,
     plot_witness_gmm,
 )
@@ -192,6 +193,9 @@ class _MarkerScores:
     scores: np.ndarray  # witness score per cell
     conditions: np.ndarray  # obs[condition_column] as array
     cond_mmd: dict  # condition -> _MmdResult (raw MMD² + p-value + null)
+    # Optional MMD-vs-HPI kinetics: condition -> list of (hpi_bin_center, mmd2, p).
+    # Key "__control_null__" holds the control-vs-control baseline (should be ~0).
+    hpi_mmd: dict | None = None
 
     @property
     def cond_pvalues(self) -> dict:
@@ -274,7 +278,77 @@ def compute_marker_scores(
         )
         cond_mmd[cond] = _MmdResult(mmd2=float(mmd2), p_value=float(p_value), null=np.asarray(null))
 
-    return _MarkerScores(obs, control_mask, perturbed_mask, scores, conditions, cond_mmd)
+    hpi_mmd = None
+    if config.mmd_hpi_bin_hours is not None:
+        hpi_mmd = _compute_hpi_mmd(X_all, obs, control_mask, perturbed_mask, conditions, bandwidth, config, rng)
+
+    return _MarkerScores(obs, control_mask, perturbed_mask, scores, conditions, cond_mmd, hpi_mmd)
+
+
+def _compute_hpi_mmd(
+    X_all: np.ndarray,
+    obs: pd.DataFrame,
+    control_mask: np.ndarray,
+    perturbed_mask: np.ndarray,
+    conditions: np.ndarray,
+    bandwidth: float,
+    config: WitnessGmmLabelsConfig,
+    rng: np.random.Generator,
+) -> dict:
+    """Time-matched MMD²(control, condition) per HPI bin — infection kinetics.
+
+    For each ``mmd_hpi_bin_hours``-wide window of ``hours_post_perturbation``,
+    tests each condition's cells against the **control cells in the SAME window**
+    (not the pooled all-timepoint control reference). This time-matching is
+    essential: the DynaCLR embedding carries a strong time/culture axis (uninfected
+    cells drift substantially over a 36 h timelapse), so comparing a bin's
+    perturbed cells to a time-pooled control conflates infection with that time
+    axis. Matching control and perturbed within the bin cancels the shared time
+    component and isolates the infection difference. Also emits a
+    control-vs-control null (random half-split of the bin's control cells) under
+    ``"__control_null__"`` as the no-difference floor. Bins with too few cells on
+    either side are skipped. Returns ``{key: [(hpi_center, mmd2, p), ...]}``.
+    """
+    if "hours_post_perturbation" not in obs.columns:
+        _logger.warning("mmd_hpi_bin_hours set but no hours_post_perturbation column; skipping HPI-MMD.")
+        return {}
+    hpi = obs["hours_post_perturbation"].to_numpy(dtype=float)
+    width = config.mmd_hpi_bin_hours
+    finite = hpi[np.isfinite(hpi)]
+    if finite.size == 0:
+        return {}
+    edges = np.arange(np.floor(finite.min() / width) * width, finite.max() + width, width)
+
+    def _mmd(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+        mmd2, p, _null = mmd_permutation_test(
+            subsample(a, config.max_reference_cells, rng),
+            subsample(b, config.max_reference_cells, rng),
+            n_permutations=config.mmd_n_permutations,
+            bandwidth=bandwidth,
+            seed=config.random_seed,
+        )
+        return float(mmd2), float(p)
+
+    out: dict = {}
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        in_bin = (hpi >= lo) & (hpi < hi)
+        center = float(lo + width / 2)
+        ctrl_bin = X_all[control_mask & in_bin]
+        if len(ctrl_bin) < 5:
+            continue  # need a time-matched control reference for this bin
+        for cond in pd.unique(conditions[perturbed_mask]):
+            cells = X_all[perturbed_mask & (conditions == cond) & in_bin]
+            if len(cells) < 5:
+                continue
+            mmd2, p = _mmd(ctrl_bin, cells)
+            out.setdefault(str(cond), []).append((center, mmd2, p))
+        # Control-vs-control null: split this bin's control cells in half.
+        if len(ctrl_bin) >= 10:
+            perm = rng.permutation(len(ctrl_bin))
+            half = len(ctrl_bin) // 2
+            mmd2, p = _mmd(ctrl_bin[perm[:half]], ctrl_bin[perm[half:]])
+            out.setdefault("__control_null__", []).append((center, mmd2, p))
+    return out
 
 
 def label_marker(
@@ -472,6 +546,14 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path:
                 marker=str(marker),
                 condition=str(cond),
                 output_path=plots_dir / f"mmd_null_{marker}_{cond}.png",
+            )
+        # MMD-vs-HPI kinetics (population divergence over time) when enabled.
+        if ms.hpi_mmd:
+            plot_mmd_vs_hpi(
+                ms.hpi_mmd,
+                config.mmd_pvalue_threshold,
+                marker=str(marker),
+                output_path=plots_dir / f"mmd_vs_hpi_{marker}.png",
             )
 
     # Pass 2: GMM-label each marker using the FDR-significant conditions.
