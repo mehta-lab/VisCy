@@ -114,6 +114,8 @@ def get_splits(name: str, target: str) -> SplitDefinition:
     ------
     KeyError
         If the dataset name is unregistered or the target is absent.
+    FileNotFoundError
+        If the target's split file does not exist on disk.
     """
     manifest_path = _manifest_path(name)
     manifest = load_manifest(manifest_path)
@@ -121,4 +123,6 @@ def get_splits(name: str, target: str) -> SplitDefinition:
         available = ", ".join(sorted(manifest.targets)) or "(none)"
         raise KeyError(f"Target {target!r} not in {name!r}. Available: {available}")
     split_path = manifest_path.parent / manifest.targets[target].splits
+    if not split_path.is_file():
+        raise FileNotFoundError(f"Split file for {name!r}/{target!r} not found: {split_path}")
     return load_splits(split_path)
