@@ -39,6 +39,10 @@ dependencies = [
   "viscy-transforms",
   "viscy-utils",
 ]
+# Croissant 1.1 RAI metadata authoring/validation for the open-data release.
+optional-dependencies.croissant = [
+  "mlcroissant>=1.1",
+]
 optional-dependencies.eval = [
   "accelerate>=1.13",
   "aicsmlsegment",
