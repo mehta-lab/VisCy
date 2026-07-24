@@ -346,9 +346,8 @@ class FovResult:
     types (str, list[dict], list[np.ndarray], np.ndarray) — no iohub handles,
     no torch modules.
 
-    Microssim scores are merged into ``per_t_pixel_rows`` before return
-    (matching the existing serial path at ``pipeline.py:478-481``); no
-    separate microssim field.
+    Microssim scores are merged into ``per_t_pixel_rows`` before return; there is
+    no separate microssim field.
     """
 
     pos_name: str
@@ -1163,7 +1162,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     """
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
-    # Phase 2 once the position list is known (C4). threads_per_worker stays
+    # Phase 2 once the position list is known. threads_per_worker stays
     # frozen across phases for parent/worker BLAS-cap consistency.
     runtime = resolve_runtime(config)
     apply_thread_budget(runtime.threads_per_worker)
