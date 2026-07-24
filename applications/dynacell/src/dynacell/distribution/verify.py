@@ -70,8 +70,8 @@ def verify_public(croissant_path: Path) -> dict[str, str]:
         import botocore
     except ImportError as exc:
         raise RuntimeError(
-            "boto3 not installed; install via uv sync (boto3 is a "
-            "runtime dep of dynacell-paper for distribution.verify_public)"
+            "boto3 not installed; install the distribution extra "
+            "(pip install 'dynacell[distribution]') for verify_public"
         ) from exc
 
     payload = json.loads(croissant_path.read_text())
