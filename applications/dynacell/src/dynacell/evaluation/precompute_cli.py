@@ -11,6 +11,7 @@ Invoked as ``dynacell precompute-gt ...`` via the CLI router in
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 
 import hydra
@@ -217,9 +218,11 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
     gt_path = Path(config.io.gt_path)
     seg_path = Path(config.io.cell_segmentation_path) if config.io.cell_segmentation_path is not None else None
 
-    with open_ome_zarr(gt_path, mode="r") as gt_plate:
+    # ExitStack so the two optional auxiliary stores close even if opening the
+    # second one raises (mirrors pipeline.evaluate_predictions).
+    with open_ome_zarr(gt_path, mode="r") as gt_plate, ExitStack() as aux_stack:
         gt_positions = list(gt_plate.positions())
-        seg_plate = open_ome_zarr(seg_path, mode="r") if seg_path is not None else None
+        seg_plate = aux_stack.enter_context(open_ome_zarr(seg_path, mode="r")) if seg_path is not None else None
         # Whole-cell instance prewarm needs the GT nucleus channel for the carve seeds.
         # A separate store (A549 H2B_*.ozx) is opened here; when io.nuclei_gt_path is null
         # or equals io.gt_path (iPSC cell.zarr), _build_gt_instances reads it from pos_gt.
@@ -227,80 +230,74 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         if build_instances and config.target_name == "membrane":
             nuclei_gt_path = OmegaConf.select(config, "io.nuclei_gt_path", default=None)
             if nuclei_gt_path is not None and str(nuclei_gt_path) != str(gt_path):
-                nuclei_plate = open_ome_zarr(nuclei_gt_path, mode="r")
-        try:
-            if seg_plate is not None:
-                seg_positions = list(seg_plate.positions())
-                if len(seg_positions) != len(gt_positions):
-                    raise ValueError(f"Position count mismatch: gt={len(gt_positions)}, seg={len(seg_positions)}")
-            else:
-                seg_positions = [(name, None) for name, _ in gt_positions]
+                nuclei_plate = aux_stack.enter_context(open_ome_zarr(nuclei_gt_path, mode="r"))
+        if seg_plate is not None:
+            seg_positions = list(seg_plate.positions())
+            if len(seg_positions) != len(gt_positions):
+                raise ValueError(f"Position count mismatch: gt={len(gt_positions)}, seg={len(seg_positions)}")
+        else:
+            seg_positions = [(name, None) for name, _ in gt_positions]
 
-            limit = getattr(config, "limit_positions", None)
-            if limit is not None:
-                gt_positions = gt_positions[:limit]
-                seg_positions = seg_positions[:limit]
+        limit = getattr(config, "limit_positions", None)
+        if limit is not None:
+            gt_positions = gt_positions[:limit]
+            seg_positions = seg_positions[:limit]
 
-            deep_extractors = {}
-            if build.dinov3:
-                deep_extractors["dinov3"] = dinov3_feature_extractor
-            if build.dynaclr:
-                deep_extractors["dynaclr"] = dynaclr_feature_extractor
-            if build.celldino:
-                deep_extractors["celldino"] = celldino_feature_extractor
-            if build.morphem:
-                deep_extractors["morphem"] = morphem_feature_extractor
+        deep_extractors = {}
+        if build.dinov3:
+            deep_extractors["dinov3"] = dinov3_feature_extractor
+        if build.dynaclr:
+            deep_extractors["dynaclr"] = dynaclr_feature_extractor
+        if build.celldino:
+            deep_extractors["celldino"] = celldino_feature_extractor
+        if build.morphem:
+            deep_extractors["morphem"] = morphem_feature_extractor
 
-            flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
-            batcher = (
-                DeepFeatureBatcher(cache_ctx, deep_extractors, flush_threshold=flush_threshold)
-                if deep_extractors and cache_ctx.enabled
-                else None
-            )
+        flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
+        batcher = (
+            DeepFeatureBatcher(cache_ctx, deep_extractors, flush_threshold=flush_threshold)
+            if deep_extractors and cache_ctx.enabled
+            else None
+        )
 
-            for (pos_name_gt, pos_gt), (pos_name_seg, pos_seg) in tqdm(
-                zip(gt_positions, seg_positions),
-                total=len(gt_positions),
-                desc="Precomputing GT artifacts",
-            ):
-                if seg_plate is not None and pos_name_gt != pos_name_seg:
-                    raise ValueError(f"Position name mismatch: gt={pos_name_gt!r}, seg={pos_name_seg!r}")
+        for (pos_name_gt, pos_gt), (pos_name_seg, pos_seg) in tqdm(
+            zip(gt_positions, seg_positions),
+            total=len(gt_positions),
+            desc="Precomputing GT artifacts",
+        ):
+            if seg_plate is not None and pos_name_gt != pos_name_seg:
+                raise ValueError(f"Position name mismatch: gt={pos_name_gt!r}, seg={pos_name_seg!r}")
 
-                gt_channel_index = pos_gt.get_channel_index(config.io.gt_channel_name)
-                target = np.asarray(pos_gt.data[:, gt_channel_index])
-                cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
-                z_slabs = _focus_slabs(config, pos_gt, pos_name_gt, target.shape[0])
+            gt_channel_index = pos_gt.get_channel_index(config.io.gt_channel_name)
+            target = np.asarray(pos_gt.data[:, gt_channel_index])
+            cell_segmentation = np.asarray(pos_seg.data[:, 0]) if pos_seg is not None else None
+            z_slabs = _focus_slabs(config, pos_gt, pos_name_gt, target.shape[0])
 
-                if build.masks:
-                    fov_masks(cache_ctx, pos_name_gt, target, seg_model)
-                if build_instances:
-                    _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name_gt, target, nuclei_plate)
-                if build.cp:
-                    fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
+            if build.masks:
+                fov_masks(cache_ctx, pos_name_gt, target, seg_model)
+            if build_instances:
+                _build_gt_instances(config, cache_ctx, seg_model, pos_gt, pos_name_gt, target, nuclei_plate)
+            if build.cp:
+                fov_cp_features(cache_ctx, pos_name_gt, target, cell_segmentation)
 
-                # Deep features stream in-loop via the batcher — no second
-                # plate read. The batcher's pending_kinds_per_t reflects
-                # already-cached slots so warm-cache positions skip work.
-                if batcher is not None and cell_segmentation is not None:
-                    t_count = target.shape[0]
-                    needs = batcher.pending_kinds_per_t(pos_name_gt, t_count)
-                    for t in range(t_count):
-                        kinds_for_t = [k for k in deep_extractors if t in needs[k]]
-                        if not kinds_for_t:
-                            continue
-                        crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size, z_slab=z_slabs[t])
-                        batcher.push(pos_name_gt, t, crops, kinds_for_t)
+            # Deep features stream in-loop via the batcher — no second
+            # plate read. The batcher's pending_kinds_per_t reflects
+            # already-cached slots so warm-cache positions skip work.
+            if batcher is not None and cell_segmentation is not None:
+                t_count = target.shape[0]
+                needs = batcher.pending_kinds_per_t(pos_name_gt, t_count)
+                for t in range(t_count):
+                    kinds_for_t = [k for k in deep_extractors if t in needs[k]]
+                    if not kinds_for_t:
+                        continue
+                    crops = build_crops(target[t], cell_segmentation[t], cache_ctx.patch_size, z_slab=z_slabs[t])
+                    batcher.push(pos_name_gt, t, crops, kinds_for_t)
 
-                flush_manifest(cache_ctx)
+            flush_manifest(cache_ctx)
 
-            if batcher is not None:
-                batcher.drain()
-                flush_manifest(cache_ctx)
-        finally:
-            if seg_plate is not None:
-                seg_plate.close()
-            if nuclei_plate is not None:
-                nuclei_plate.close()
+        if batcher is not None:
+            batcher.drain()
+            flush_manifest(cache_ctx)
 
 
 @hydra.main(version_base="1.2", config_path="_configs", config_name="precompute")
