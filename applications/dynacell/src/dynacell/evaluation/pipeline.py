@@ -1569,17 +1569,17 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         with region_timer("dataset_metrics", "<parent>"):
             dataset_row: dict[str, float] = {}
 
-            # Backbones that actually produced features this run. CP is always on;
-            # celldino/morphem soft-skip when unconfigured. Everything below
-            # (metric tracks, NaN-fill prefixes, embedding groups) derives from
-            # this one list rather than repeating the None checks.
-            extractor_by_kind: dict[FeatureKind, Any] = {
-                "dinov3": dinov3_feature_extractor,
-                "dynaclr": dynaclr_feature_extractor,
-                "celldino": celldino_feature_extractor,
-                "morphem": morphem_feature_extractor,
-            }
-            active_kinds = [k for k in _BACKBONE_KEYS if k == "cp" or extractor_by_kind[k] is not None]
+            # Backbones that actually produced features this run. ``deep_extractors``
+            # is the map built for the precompute gate above, under this same
+            # compute_feature_metrics condition: dinov3/dynaclr are always present,
+            # celldino/morphem soft-skip when unconfigured. Everything below (metric
+            # tracks, NaN-fill prefixes, embedding groups) derives from these two lists
+            # rather than repeating the None checks.
+            #
+            # A None dinov3/dynaclr extractor cannot reach this point: it implies a None
+            # model name, which _deep_feature_cache_metadata rejects on the first FOV.
+            deep_kinds: list[FeatureKind] = [k for k in _BACKBONE_KEYS if k in deep_extractors]
+            active_kinds: list[FeatureKind] = ["cp", *deep_kinds]
 
             # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
             # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
@@ -1621,9 +1621,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     )
                 )
 
-            for key in active_kinds:
-                if key == "cp":
-                    continue  # handled above (pruning + z-score)
+            for key in deep_kinds:  # cp is handled above (pruning + z-score)
                 bb = parent_lists[key]
                 if bb.pred_feats:
                     pred_arr = np.concatenate(bb.pred_feats, axis=0)
