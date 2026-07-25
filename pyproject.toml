@@ -99,10 +99,15 @@ lint.pydocstyle.convention = "numpy"
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests" ]
-addopts = [ "-ra", "-q", "--import-mode=importlib", "--strict-markers", "-m", "not slow" ]
+addopts = [ "-ra", "-q", "--import-mode=importlib", "-m", "not slow" ]
 pythonpath = [ "applications/dynacell/tools" ]
+# Set as an ini option, NOT as --strict-markers in addopts. pytest >= 9 backs the
+# flag with this ini option and only honours the flag from the command line — in
+# addopts it parses (config.option.strict_markers reads True) but never enforces,
+# so an unregistered marker still merely warns. Verified on pytest 9.0.3.
+strict_markers = true
 markers = [
-  # --strict-markers above turns an unregistered marker into a collection error.
+  # strict_markers above turns an unregistered marker into a collection error.
   # Without it a typo'd or invented marker silently decorates nothing, so the
   # test it was meant to gate runs anyway (and asserts on whatever the shared
   # HPC tree happens to hold).
