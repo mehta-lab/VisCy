@@ -213,6 +213,38 @@ class TestPackDatasetValidation:
                     splits=["tran"],  # typo for "train"
                 )
 
+    def test_missing_core_split_raises(self, tmp_path):
+        """An evaluation-only manifest fails loudly on the default train,test request.
+
+        ``StoreLocations.train`` is optional so evaluation-only datasets can ship a
+        test store alone. Without an up-front check, the per-split loop's
+        ``src is None`` branch (written for the auxiliary fields) would silently
+        emit a manifest missing the requested train split.
+        """
+        from dynacell.distribution import pack_dataset
+
+        manifest = self._stub_manifest(tmp_path)
+        manifest.targets["x"].stores.train = None
+        with patch(
+            "dynacell.distribution.ozx.get_manifest",
+            return_value=manifest,
+        ):
+            with pytest.raises(ValueError, match="no store for requested split"):
+                pack_dataset("t", output_root=tmp_path / "out")  # defaults to train,test
+
+    def test_missing_core_split_is_fine_when_not_requested(self, tmp_path):
+        """Explicitly requesting only `test` on a train-less manifest still packs."""
+        from dynacell.distribution import pack_dataset
+
+        manifest = self._stub_manifest(tmp_path)
+        manifest.targets["x"].stores.train = None
+        with patch(
+            "dynacell.distribution.ozx.get_manifest",
+            return_value=manifest,
+        ):
+            results = pack_dataset("t", output_root=tmp_path / "out", splits=["test"])
+        assert [r.split for r in results] == ["test"]
+
 
 class TestSampleMode:
     """Sample mode writes a bounded subset zarr before packing."""

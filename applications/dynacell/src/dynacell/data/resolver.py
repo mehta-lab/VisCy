@@ -48,7 +48,7 @@ class ResolvedDataset(BaseModel):
     """Flat view of the manifest fields a composed config needs."""
 
     manifest_path: Path
-    data_path_train: Path
+    data_path_train: Path | None = None
     data_path_test: Path
     source_channel: str
     target_channel: str

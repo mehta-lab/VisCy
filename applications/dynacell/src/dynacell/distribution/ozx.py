@@ -42,6 +42,11 @@ __all__ = [
 
 _BUF_SIZE = 1 << 20  # 1 MiB chunks for sha256 streaming.
 
+# `StoreLocations` fields that are data splits rather than auxiliary artifacts.
+# A requested core split with no store is an error; the auxiliary fields
+# (`cell_segmentation`, `gt_cache_dir`) are legitimately unset per target.
+_CORE_SPLITS: frozenset[str] = frozenset({"train", "test"})
+
 
 @dataclasses.dataclass(frozen=True)
 class PackResult:
@@ -137,6 +142,24 @@ def pack_dataset(
     unknown_splits = [s for s in requested_splits if s not in valid_split_fields]
     if unknown_splits:
         raise ValueError(f"Unknown splits {unknown_splits!r}; available: {sorted(valid_split_fields)}")
+
+    # `train` / `test` are the data splits a pack request means literally, and
+    # `train` is optional on evaluation-only manifests (hek-mantis-*). Without
+    # this check the per-split loop below would hit its `src is None` branch --
+    # written for the auxiliary fields -- and silently emit a manifest missing
+    # the split the caller asked for (the CLI requests train,test by default).
+    missing_core = [
+        f"{target_key}/{split}"
+        for split in requested_splits
+        if split in _CORE_SPLITS
+        for target_key in requested_targets
+        if getattr(manifest.targets[target_key].stores, split) is None
+    ]
+    if missing_core:
+        raise ValueError(
+            f"Dataset {name!r} has no store for requested split(s) {missing_core!r}. "
+            "Evaluation-only datasets define no train store — pass --splits test."
+        )
 
     seen_sources: dict[Path, PackResult] = {}
     results: list[PackResult] = []

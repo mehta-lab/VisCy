@@ -183,3 +183,44 @@ def test_resolver_hook_noop_when_no_dataset_ref():
     composed = {"benchmark": {"target": "er"}, "data": {"init_args": {}}}
     result = _dynacell_ref_resolver(composed)
     assert result == composed
+
+
+def _write_eval_only_manifest(monkeypatch, tmp_path) -> None:
+    """Register a train-less (evaluation-only) manifest as the sole manifest root."""
+    content = _make_manifest_dict(name="eval-only")
+    del content["targets"]["sec61b"]["stores"]["train"]
+    _write_manifest(tmp_path, "eval-only", content)
+    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(tmp_path))
+
+
+def test_train_less_manifest_resolves_with_none_train(monkeypatch, tmp_path):
+    """An evaluation-only manifest (no train store) resolves, leaving train as None."""
+    _write_eval_only_manifest(monkeypatch, tmp_path)
+    resolved = resolve_dataset_ref(DatasetRef(dataset="eval-only", target="sec61b"))
+    assert resolved.data_path_train is None
+    assert str(resolved.data_path_test) == "/tmp/test.zarr"
+
+
+def test_resolver_hook_predict_accepts_train_less_dataset(monkeypatch, tmp_path):
+    """Predict mode reads the test store, so a missing train store is fine."""
+    _write_eval_only_manifest(monkeypatch, tmp_path)
+    composed = {
+        "launcher": {"mode": "predict"},
+        "benchmark": {"dataset_ref": {"dataset": "eval-only", "target": "sec61b"}},
+        "data": {"init_args": {}},
+    }
+    result = _dynacell_ref_resolver(composed)
+    assert result["data"]["init_args"]["data_path"] == "/tmp/test.zarr"
+
+
+@pytest.mark.parametrize("mode", ["fit", "validate"])
+def test_resolver_hook_rejects_train_less_dataset_outside_predict(monkeypatch, tmp_path, mode):
+    """Fit/validate against a train-less dataset raises instead of stringifying None."""
+    _write_eval_only_manifest(monkeypatch, tmp_path)
+    composed = {
+        "launcher": {"mode": mode},
+        "benchmark": {"dataset_ref": {"dataset": "eval-only", "target": "sec61b"}},
+        "data": {"init_args": {}},
+    }
+    with pytest.raises(ValueError, match="evaluation-only"):
+        _dynacell_ref_resolver(composed)

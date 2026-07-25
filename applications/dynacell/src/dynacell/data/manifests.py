@@ -40,9 +40,16 @@ class VoxelSpacing(BaseModel):
 
 
 class StoreLocations(BaseModel):
-    """Zarr store paths for a single organelle target."""
+    """Zarr store paths for a single organelle target.
 
-    train: Path
+    ``train`` is optional: evaluation-only datasets (e.g. the ``hek-mantis-*``
+    third-cell-type probe) ship a test store and no training data. Callers that
+    need a train store must check for ``None`` — :func:`resolve_dataset_ref`
+    propagates it as ``ResolvedDataset.data_path_train`` and the composition hook
+    raises for any non-predict Lightning mode.
+    """
+
+    train: Path | None = None
     test: Path
     cell_segmentation: Path | None = None
     gt_cache_dir: Path | None = None

@@ -43,7 +43,18 @@ def _splice_resolved(composed: dict, resolved: ResolvedDataset, mode: str, ref: 
     the resolved data fields. A full ``dataset_ref`` is the single
     source of truth — composed fragments must not co-declare
     ``data_path``, ``source_channel``, or ``target_channel``.
+
+    Also raises for a train-less (evaluation-only) dataset in any mode but
+    ``predict``: ``resolved_values`` is built eagerly, so a ``None`` train
+    store would be stringified to ``"None"`` and fail deep inside iohub
+    instead of here.
     """
+    if mode != "predict" and resolved.data_path_train is None:
+        raise ValueError(
+            f"benchmark.dataset_ref={{dataset: {ref.dataset}, target: {ref.target}}} resolves to a "
+            f"dataset with no train store, but the Lightning mode is {mode!r}; this dataset is "
+            "evaluation-only."
+        )
     out = copy.deepcopy(composed)
     data = out.setdefault("data", {})
     init_args = data.setdefault("init_args", {})
