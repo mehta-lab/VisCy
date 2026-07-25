@@ -10,8 +10,8 @@ from lightning.pytorch import Trainer, seed_everything
 from monai.data import MetaTensor
 from torch import nn
 
-from dynacell.celldiff_wrapper import window_starts
 from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
+from dynacell.tiling import window_starts
 
 # Small model configs for tests (not production sizes).
 VIT_TEST_CONFIG = {

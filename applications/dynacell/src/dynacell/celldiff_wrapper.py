@@ -14,53 +14,9 @@ import itertools
 import torch
 from torch import Tensor, nn
 
+from dynacell.tiling import window_starts
 from viscy_models.celldiff import CELLDiffNet
 from viscy_models.celldiff.modules.transport import Sampler, create_transport
-
-
-def window_starts(spatial: tuple[int, ...], patch: tuple[int, ...], overlap: tuple[int, ...]) -> list[list[int]]:
-    """Per-dimension tile start indices covering ``spatial`` with ``patch`` windows.
-
-    Windows step by ``patch - overlap``; the last start in each dimension is
-    snapped to the edge (``size - patch``) so coverage is complete, which means it
-    may overlap its predecessor by more than ``overlap`` when the extent is not a
-    multiple of the stride. ``overlap=0`` gives the non-overlapping partition.
-
-    Shared by every tiled-inference path (``engine._sliding_window_inference`` and
-    the three ``CELLDiff3DVS.*sliding_window`` / ``generate_iterative`` methods) so
-    they cannot drift apart.
-
-    Raises
-    ------
-    ValueError
-        If any dimension is smaller than its patch, or an overlap is outside
-        ``[0, patch)``.
-    """
-    starts_per_dim: list[list[int]] = []
-    for i, (size, p, ov) in enumerate(zip(spatial, patch, overlap, strict=True)):
-        if size < p:
-            raise ValueError(f"spatial dim {i} size {size} must be >= patch size {p}")
-        if not 0 <= ov < p:
-            raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {p})")
-        stride = p - ov
-        last = size - p
-        starts = [0]
-        while starts[-1] + stride < last:
-            starts.append(starts[-1] + stride)
-        if starts[-1] != last:
-            starts.append(last)
-        starts_per_dim.append(starts)
-    return starts_per_dim
-
-
-def _as_overlap_triple(overlap_size: int | tuple[int, ...]) -> tuple[int, ...]:
-    """Normalize an int-or-3-tuple overlap into a 3-tuple."""
-    if isinstance(overlap_size, int):
-        return (overlap_size,) * 3
-    overlap = tuple(overlap_size)
-    if len(overlap) != 3:
-        raise ValueError("overlap_size must be int or a 3-tuple")
-    return overlap
 
 
 class CELLDiff3DVS(nn.Module):
@@ -292,7 +248,7 @@ class CELLDiff3DVS(nn.Module):
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
-        start_lists = window_starts(spatial, patch_spatial, _as_overlap_triple(overlap_size))
+        start_lists = window_starts(spatial, patch_spatial, overlap_size)
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
@@ -365,7 +321,7 @@ class CELLDiff3DVS(nn.Module):
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
-        start_lists = window_starts(spatial, patch_spatial, _as_overlap_triple(overlap_size))
+        start_lists = window_starts(spatial, patch_spatial, overlap_size)
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])

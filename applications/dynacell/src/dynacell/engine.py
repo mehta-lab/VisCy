@@ -19,7 +19,8 @@ from lightning.pytorch import LightningModule
 from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
-from dynacell.celldiff_wrapper import CELLDiff3DVS, window_starts
+from dynacell.celldiff_wrapper import CELLDiff3DVS
+from dynacell.tiling import window_starts
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
@@ -160,7 +161,7 @@ def _sliding_window_inference(
     """
     n_spatial = 3
     patch = tuple(patch_spatial)
-    start_lists = window_starts(tuple(source.shape[-3:]), patch, tuple(overlap_size))
+    start_lists = window_starts(tuple(source.shape[-3:]), patch, overlap_size)
 
     # Accumulators are allocated lazily from the first patch output so their
     # channel dimension matches the model's out_channels (which can differ
