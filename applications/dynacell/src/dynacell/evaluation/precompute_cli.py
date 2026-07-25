@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
+from typing import get_args
 
 import hydra
 import numpy as np
@@ -21,6 +22,7 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
+from dynacell.evaluation.cache import FeatureKind
 from dynacell.evaluation.focus import (
     build_focus_slabs,
     read_focus_compute_config,
@@ -42,6 +44,9 @@ from dynacell.evaluation.pipeline_cache import (
 )
 from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
 from dynacell.evaluation.segmentation_whole_cell import slice_index
+
+# Deep-feature backbones in FeatureKind order; "cp" is regionprops, not an extractor.
+_DEEP_KINDS: tuple[FeatureKind, ...] = tuple(k for k in get_args(FeatureKind) if k != "cp")
 
 
 def _focus_slabs(config: DictConfig, pos_gt, pos_name: str, t_count: int) -> list[slice | None]:
@@ -208,10 +213,6 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
         ),
     )
     seg_model = models.seg_model
-    dinov3_feature_extractor = models.dinov3
-    dynaclr_feature_extractor = models.dynaclr
-    celldino_feature_extractor = models.celldino
-    morphem_feature_extractor = models.morphem
 
     cache_ctx = init_gt_cache_context(config, models)
 
@@ -243,15 +244,10 @@ def precompute_gt_artifacts(config: DictConfig) -> None:
             gt_positions = gt_positions[:limit]
             seg_positions = seg_positions[:limit]
 
-        deep_extractors = {}
-        if build.dinov3:
-            deep_extractors["dinov3"] = dinov3_feature_extractor
-        if build.dynaclr:
-            deep_extractors["dynaclr"] = dynaclr_feature_extractor
-        if build.celldino:
-            deep_extractors["celldino"] = celldino_feature_extractor
-        if build.morphem:
-            deep_extractors["morphem"] = morphem_feature_extractor
+        # build.<kind> and EvalModels.<kind> share the FeatureKind name, so the
+        # requested extractors are a filter over the deep kinds rather than four
+        # hand-written branches.
+        deep_extractors = {k: getattr(models, k) for k in _DEEP_KINDS if build[k]}
 
         flush_threshold = int(OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256))
         batcher = (
