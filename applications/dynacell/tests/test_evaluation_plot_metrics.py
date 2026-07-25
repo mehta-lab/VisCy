@@ -52,7 +52,7 @@ def _multi_timepoint_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_plot_metrics_writes_both_plots_per_metric(tmp_path, bar_spy, line_spy):
+def test_plot_metrics_writes_both_plots_per_metric(tmp_path):
     """Multi-timepoint input produces a mean-per-FOV and a per-timepoint plot per metric."""
     plot_metrics(_multi_timepoint_frame(), tmp_path, "pixel_metrics")
 
@@ -65,7 +65,7 @@ def test_plot_metrics_writes_both_plots_per_metric(tmp_path, bar_spy, line_spy):
     }
 
 
-def test_plot_metrics_bars_are_per_fov_means(tmp_path, bar_spy, line_spy):
+def test_plot_metrics_bars_are_per_fov_means(tmp_path, bar_spy):
     """Bar heights are the mean over each FOV's timepoints, in sorted FOV order."""
     plot_metrics(_multi_timepoint_frame(), tmp_path, "pixel_metrics")
 
@@ -76,7 +76,7 @@ def test_plot_metrics_bars_are_per_fov_means(tmp_path, bar_spy, line_spy):
     assert bar_spy[1] == pytest.approx([10.1, 10.5])
 
 
-def test_plot_metrics_timepoint_series_are_sorted(tmp_path, bar_spy, line_spy):
+def test_plot_metrics_timepoint_series_are_sorted(tmp_path, line_spy):
     """Each FOV's timepoint series is sorted by Timepoint, not left in row order."""
     plot_metrics(_multi_timepoint_frame(), tmp_path, "pixel_metrics")
 
