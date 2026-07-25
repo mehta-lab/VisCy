@@ -56,6 +56,7 @@ from dynacell.evaluation.pipeline_cache import (
     fov_whole_cell_instances,
     instance_cache_hit,
     precompute_deep_features,
+    seg_spacing,
 )
 from dynacell.evaluation.runtime import (
     apply_thread_budget,
@@ -651,7 +652,6 @@ def _process_one_fov(
 
     if instance_mode:
         is3d = cache_ctx.dimension == "3d"
-        seg_spacing = tuple(cache_ctx.spacing) if is3d else tuple(cache_ctx.spacing[-2:])
         # Separate working arrays — never rebind predict/target (the 3D pixel
         # metrics + MicroMS3IM below keep using the full native arrays).
         if is3d:
@@ -676,24 +676,41 @@ def _process_one_fov(
             target_cells = slab_mip(target, z_idx, slab_hw)  # (T, Y, X)
             predict_cells = slab_mip(predict, z_idx, slab_hw)
 
-        def _nuclei_seeds(segment_fn, nuclei_cells, **infer) -> np.ndarray | None:
+        nuclei_cells_vol: np.ndarray | None = None
+
+        def _gt_nuclei_cells() -> np.ndarray:
+            """GT nuclei in the working geometry: full volume in 3-D, the same slab MIP in 2-D.
+
+            Must track the ``target_cells`` / ``predict_cells`` projection above, or the
+            seeds land on a different z than the cells they seed.
+            """
+            nonlocal nuclei_cells_vol
+            if nuclei_cells_vol is None:
+                nuclei = _gt_nuclei()
+                nuclei_cells_vol = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
+            return nuclei_cells_vol
+
+        def _nuclei_seeds(segment_fn, **infer) -> np.ndarray | None:
             """GT-nuclei instance seeds, or ``None`` when both sides' caches already hit.
 
             Only the compute path of ``fov_*_whole_cell_instances`` reads the seeds (a
-            disabled cache or a forced/invalidated slot counts as a miss), so
-            segmenting them on a warm run is pure waste.
+            disabled cache or a forced/invalidated slot counts as a miss), so on a warm
+            run this skips the nuclei read and MIP as well as the segmentation.
             """
             if instance_cache_hit(cache_ctx, pos_name_pred) and instance_cache_hit(pred_cache_ctx, pos_name_pred):
                 return None
+            nuclei_cells = _gt_nuclei_cells()
+            spacing = seg_spacing(cache_ctx)
             with region_timer("nucleus_seeds", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 return np.stack(
-                    [segment_fn(nuclei_cells[t], seg_spacing, seg_model, do_3d=is3d, **infer) for t in range(T)]
+                    [segment_fn(nuclei_cells[t], spacing, seg_model, do_3d=is3d, **infer) for t in range(T)]
                 )
 
         if backend == "cellpose_watershed":
-            nuclei = _gt_nuclei()
-            nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
-            seed_stack = _nuclei_seeds(segment_nucleus_instances, nuclei_cells, **cache_ctx.cellpose_params)
+            # Unlike cpdino below, the watershed needs the nuclei channel itself (not just
+            # the seeds), so this read happens even on a cache hit.
+            nuclei_cells = _gt_nuclei_cells()
+            seed_stack = _nuclei_seeds(segment_nucleus_instances, **cache_ctx.cellpose_params)
             with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                 gt_cells = fov_whole_cell_instances(cache_ctx, pos_name_pred, target_cells, nuclei_cells, seed_stack)
             with region_timer("mask_pred", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
@@ -706,9 +723,7 @@ def _process_one_fov(
                 # (replacing the nuclei-seed + EDT watershed), then carves the nucleus.
                 # Both GT and pred cells carve the same GT-nucleus footprint, so the carve
                 # stays byte-consistent with the watershed backend.
-                nuclei = _gt_nuclei()
-                nuclei_cells = nuclei if is3d else slab_mip(nuclei, z_idx, slab_hw)
-                seed_stack = _nuclei_seeds(segment_cpdino_instances, nuclei_cells, **cpdino_infer_kwargs(cache_ctx))
+                seed_stack = _nuclei_seeds(segment_cpdino_instances, **cpdino_infer_kwargs(cache_ctx))
                 with region_timer("mask_gt", pos_name_pred), gpu_serialization_lock(gate=use_gpu):
                     gt_cells = fov_cpdino_whole_cell_instances(
                         cache_ctx, pos_name_pred, target_cells, seed_stack, seg_model

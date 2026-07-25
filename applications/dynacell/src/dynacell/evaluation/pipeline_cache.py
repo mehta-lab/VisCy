@@ -955,7 +955,7 @@ def instance_cache_hit(ctx: _CacheContext, pos_name: str) -> bool:
     return read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) is not None
 
 
-def _seg_spacing(ctx: _CacheContext) -> tuple[float, ...]:
+def seg_spacing(ctx: _CacheContext) -> tuple[float, ...]:
     """Spacing tuple for the segmentation call: ``(z, y, x)`` in 3-D, ``(y, x)`` in 2-D."""
     return tuple(ctx.spacing) if ctx.dimension == "3d" else tuple(ctx.spacing[-2:])
 
@@ -975,7 +975,7 @@ def fov_nucleus_instances(
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
 
     is3d = ctx.dimension == "3d"
-    spacing = _seg_spacing(ctx)
+    spacing = seg_spacing(ctx)
 
     def compute_t(t: int) -> np.ndarray:
         return segment_nucleus_instances(nuc_stack[t], spacing, model, do_3d=is3d, **ctx.cellpose_params)
@@ -1001,7 +1001,7 @@ def fov_whole_cell_instances(
     """
     from dynacell.evaluation.segmentation_whole_cell import segment_whole_cell
 
-    spacing = _seg_spacing(ctx)
+    spacing = seg_spacing(ctx)
 
     def compute_t(t: int) -> np.ndarray:
         return segment_whole_cell(memb_stack[t], nuc_stack[t], seed_stack[t], spacing, **ctx.watershed_params)
@@ -1037,7 +1037,7 @@ def fov_cpdino_nucleus_instances(
     from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
 
     is3d = ctx.dimension == "3d"
-    spacing = _seg_spacing(ctx)
+    spacing = seg_spacing(ctx)
     infer = cpdino_infer_kwargs(ctx)
 
     def compute_t(t: int) -> np.ndarray:
@@ -1065,7 +1065,7 @@ def fov_cpdino_whole_cell_instances(
     from dynacell.evaluation.segmentation_cpdino import segment_whole_cell_cpdino
 
     is3d = ctx.dimension == "3d"
-    spacing = _seg_spacing(ctx)
+    spacing = seg_spacing(ctx)
     infer = cpdino_infer_kwargs(ctx)
     subtract = bool(ctx.cpdino_params.get("subtract_nuclei", True))
 
