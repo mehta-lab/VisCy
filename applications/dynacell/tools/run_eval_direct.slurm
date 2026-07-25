@@ -57,6 +57,17 @@ cd "${REPO}"
 
 ml uv
 
+# ``segmentation.backend: cpdino`` is the eval.yaml default, and the cpdino stack
+# (cubic 0.8.0a2 + cellpose 4.2.x) does not co-install with the workspace .venv —
+# there cubic is 0.7.0 and ``segmentation_cpdino`` dies on
+# ``ImportError: cannot import name 'segment_cellpose' from 'cubic.segmentation'``.
+# Route uv at the dedicated eval venv and read it read-only (``--no-sync``), the
+# same pattern as build_cpdino_seg_cleaned.slurm. Point DYNACELL_EVAL_VENV
+# elsewhere to use a different environment.
+export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache}"
+export PYTHONUNBUFFERED=1
+
 # Decide single vs grouped from leaf basename. Grouped leaves carry a
 # ``conditions:`` list: ``eval_grouped`` (current convention, incl. the
 # instance-AP buckets) and ``eval__a549_mantis`` (legacy ablations).
@@ -67,6 +78,7 @@ case "${LEAF_BASENAME}" in
 esac
 
 echo "[run_eval_direct] subcmd=${SUBCMD} leaf=${LEAF} overrides=${EXTRA_OVERRIDES[*]:-<none>}"
+echo "[run_eval_direct] venv=${UV_PROJECT_ENVIRONMENT}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-uv run dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"
+uv run --no-sync dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"
