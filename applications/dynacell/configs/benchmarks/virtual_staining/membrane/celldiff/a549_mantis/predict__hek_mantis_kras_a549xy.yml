@@ -4,6 +4,8 @@
 # membrane/celldiff/a549_mantis/predict__a549_mantis_mock.yml — checkpoint lifted verbatim.
 # Fit verified to train against a raw (non-deconvolved) GT channel.
 # Evaluation-only: no HEK training. Path token is 'celldiff_r2' (config dir 'celldiff').
+# z_window_size rescaled 48 -> 64 (the HEK stack depth): this model
+# predicts one full-depth window per FOV, not a sliding window.
 base:
 - ../../../_internal/shared/model/predict_sets/hek_mantis_kras_a549xy.yml
 - ../../../_internal/shared/model/targets/membrane.yml
@@ -34,6 +36,7 @@ data:
         subtrahend: mean
         divisor: std
     augmentations: []
+    z_window_size: 64
 trainer:
   callbacks:
   - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter

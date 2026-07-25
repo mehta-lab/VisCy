@@ -55,6 +55,18 @@ _ORGANELLES: dict[str, tuple[str, str]] = {
 _ARM = "a549xy"
 # Marker of a deconvolved GT channel in a fit config (e.g. Structure_deconvolved).
 DECONV_SUFFIX = "_deconvolved"
+
+# Z depth of the A549 assembly and of the HEK a549xy stores. CELL-Diff is the only
+# model in the roster that pins ``z_window_size`` in its leaf, and it pins it to the
+# store's FULL depth (48 on A549, and the celldiff_predict overlay default of 40 is
+# likewise the full iPSC depth) so each FOV is predicted in a single window. Carrying
+# 48 (or falling through to the overlay's 40) onto the 64-plane HEK stack instead
+# slides the window: 64-40+1 = 25 windows per FOV, measured at ~1.6 h/window on an
+# H200, i.e. ~160 h/leaf versus ~10 h for four full-depth windows. FNet3D and
+# VSCyto3D set no z_window_size and genuinely slide their 15-plane window, which
+# already yields the full Z=64 output; they must not be rescaled.
+_A549_Z = 48
+_HEK_Z = 64
 # Job-name stems, kept short enough to stay readable in squeue.
 _JOB_STEM: dict[str, str] = {
     "fnet3d_paper": "FNET3D",
@@ -125,6 +137,26 @@ def _model_overlay(base: list[str]) -> str:
     raise ValueError(f"no model_overlays/ entry in base list {base!r}")
 
 
+def _hek_z_window(sibling: dict, sibling_path: Path) -> int | None:
+    """Rescale a full-depth ``z_window_size`` from the A549 depth to the HEK depth.
+
+    Returns ``None`` when the sibling pins no window (FNet3D, VSCyto3D — they
+    slide and need no override). Raises when the sibling pins a window that is
+    not the A549 full depth, since then the full-depth assumption behind the
+    rescale no longer holds and the intended HEK window is not derivable.
+    """
+    window = sibling.get("data", {}).get("init_args", {}).get("z_window_size")
+    if window is None:
+        return None
+    if window != _A549_Z:
+        raise ValueError(
+            f"{sibling_path.name} pins z_window_size={window}, which is not the A549 full depth "
+            f"{_A549_Z}; the full-depth rescale to the HEK depth {_HEK_Z} does not apply — set the "
+            "HEK window explicitly"
+        )
+    return _HEK_Z
+
+
 def build_leaf(organelle: str, model_dir: str, train_dir: str) -> tuple[Path, str]:
     """Return (output leaf path, YAML text) for one roster tuple."""
     sibling_path = _sibling(organelle, model_dir, train_dir)
@@ -150,6 +182,24 @@ def build_leaf(organelle: str, model_dir: str, train_dir: str) -> tuple[Path, st
     run_root = out_store.parent
     predict_set = f"hek_mantis_{target_key}_{_ARM}"
     job = f"{_JOB_STEM[model_dir]}_PRED_{organelle.upper()}_{_train_stem(train_set)}_HEK"
+    z_window = _hek_z_window(sibling, sibling_path)
+
+    data_init: dict = {
+        "normalizations": [
+            {
+                "class_path": "viscy_transforms.NormalizeSampled",
+                "init_args": {
+                    "keys": ["Phase3D"],
+                    "level": "fov_statistics",
+                    "subtrahend": "mean",
+                    "divisor": "std",
+                },
+            }
+        ],
+        "augmentations": [],
+    }
+    if z_window is not None:
+        data_init["z_window_size"] = z_window
 
     body = {
         "base": [
@@ -170,22 +220,7 @@ def build_leaf(organelle: str, model_dir: str, train_dir: str) -> tuple[Path, st
             "dataset_ref": {"target": target_key},
         },
         "model": {"init_args": {"ckpt_path": ckpt}},
-        "data": {
-            "init_args": {
-                "normalizations": [
-                    {
-                        "class_path": "viscy_transforms.NormalizeSampled",
-                        "init_args": {
-                            "keys": ["Phase3D"],
-                            "level": "fov_statistics",
-                            "subtrahend": "mean",
-                            "divisor": "std",
-                        },
-                    }
-                ],
-                "augmentations": [],
-            }
-        },
+        "data": {"init_args": data_init},
         "trainer": {
             "callbacks": [
                 {
@@ -209,6 +244,11 @@ def build_leaf(organelle: str, model_dir: str, train_dir: str) -> tuple[Path, st
         f"# Fit verified to train against a raw (non-deconvolved) GT channel.\n"
         f"# Evaluation-only: no HEK training. Path token is {key.model!r} (config dir {model_dir!r}).\n"
     )
+    if z_window is not None:
+        header += (
+            f"# z_window_size rescaled {_A549_Z} -> {_HEK_Z} (the HEK stack depth): this model\n"
+            f"# predicts one full-depth window per FOV, not a sliding window.\n"
+        )
     leaf_path = _CONFIG_ROOT / organelle / model_dir / train_dir / f"predict__{predict_set}.yml"
     return leaf_path, header + yaml.safe_dump(body, sort_keys=False, default_flow_style=False)
 
