@@ -913,18 +913,25 @@ def _process_one_fov(
                     pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
                 else:
                     pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
+                # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
+                # columns must match the dataset-level ones the parent derives from the
+                # same map, or the two halves of a <prefix>_* family drift apart.
                 pairwise_metrics = {
-                    **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, "CP"),
-                    **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], "DINOv3"),
-                    **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], "DynaCLR"),
+                    **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, _COLUMN_PREFIX["cp"]),
+                    **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], _COLUMN_PREFIX["dinov3"]),
+                    **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], _COLUMN_PREFIX["dynaclr"]),
                 }
                 if pred_celldino is not None:
                     pairwise_metrics.update(
-                        compute_feature_similarity_pairwise(pred_celldino, gt_celldino_per_t[t], "CellDINO")
+                        compute_feature_similarity_pairwise(
+                            pred_celldino, gt_celldino_per_t[t], _COLUMN_PREFIX["celldino"]
+                        )
                     )
                 if pred_morphem is not None:
                     pairwise_metrics.update(
-                        compute_feature_similarity_pairwise(pred_morphem, gt_morphem_per_t[t], "MorphEm")
+                        compute_feature_similarity_pairwise(
+                            pred_morphem, gt_morphem_per_t[t], _COLUMN_PREFIX["morphem"]
+                        )
                     )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
                 _extend_backbone(cp, pred_cp, gt_cp_t, pos_name_pred, t)
