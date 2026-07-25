@@ -278,7 +278,10 @@ def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLik
             position = plate[pos_name]
         except KeyError:
             return None
-        return np.asarray(position.data[:, 0]).astype(dtype)
+        # copy=False: the read already materialized a fresh array and the on-disk
+        # dtype normally matches, so the cast is a no-op the caller shouldn't pay
+        # a second full-array copy for.
+        return np.asarray(position.data[:, 0]).astype(dtype, copy=False)
 
 
 def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str = "supermodel") -> np.ndarray | None:
@@ -334,7 +337,7 @@ def _write_position_channel0(
     if arr.ndim != 4:
         raise ValueError(f"array must be 4-D (T, D, H, W); got shape {arr.shape}")
     plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = arr.astype(dtype)[:, None]  # (T, 1, D, H, W)
+    data = arr.astype(dtype, copy=False)[:, None]  # (T, 1, D, H, W); write-only, so a view is fine
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return
