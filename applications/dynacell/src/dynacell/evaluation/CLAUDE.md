@@ -20,6 +20,52 @@ Below is the same guidance the upstream cubic repository ships in its
 adding GPU-aware code here.** It is also fine to read `cubic/AGENTS.md`
 directly at `../cubic/` for the canonical version.
 
+## ⚠️ Always verify data format + normalization for pretrained models
+
+Every pretrained model used at eval time — segmentors (Cellpose /
+CELL-DINO / cpsam) and deep feature extractors (DINOv3, DynaCLR,
+CELL-DINO, MorphEm) — has a **specific input contract**: expected value
+range, dtype, channel count, and normalization recipe. These are *not*
+interchangeable, and getting one wrong fails silently (plausible-looking
+but meaningless features / masks), not loudly. Before wiring or editing
+any model call, confirm all of the following against the model's own
+docs/source — do not assume:
+
+- **Value range and normalization.** Look up what the model was *trained*
+  on and match it. Common recipes here: robust percentile clip
+  (`_robust_norm`, the shared `build_crops` recipe), per-image spatial
+  z-score (DynaCLR's `NormalizeSampled`, MorphEm's `PerImageNormalize` /
+  InstanceNorm2d), ImageNet mean/std (DINOv3). A train/test normalization
+  mismatch (e.g. feeding bounded [0,1] to a z-score-trained encoder) is a
+  real bug even when nothing crashes.
+- **No double-normalization.** If crops are already normalized upstream
+  in `build_crops`, a processor/transform that *also* rescales (e.g. the
+  HF `AutoImageProcessor`'s default `do_rescale=True` → ÷255, or a second
+  z-score) silently destroys the signal. Trace the full path from raw
+  array to model input and count every rescale exactly once. Pass
+  `do_rescale=False` when the input is already float-normalized.
+- **GT vs prediction parity.** GT and predicted intensities live in
+  **different value ranges**. The normalization must be applied
+  identically to both so their features are comparable — a min/max or
+  raw-range recipe makes GT and pred asymmetric; a shared robust/affine
+  recipe keeps them aligned.
+- **dtype.** `np.percentile` upcasts to float64; model weights are
+  float32. Cast crops back to float32 before the model (`.astype(
+  np.float32, copy=False)`) or conv/linear layers raise `Input type
+  (double) and bias type (float) should be the same`.
+- **Cache invalidation.** Any change to a recipe must bump that
+  extractor's `PREPROCESS_VERSION` (see
+  `_auto_invalidate_on_preprocess_version_mismatch` in
+  `pipeline_cache.py`), or stale caches from the old recipe silently
+  survive.
+
+When adding a new pretrained model, read its published preprocessing
+(model card / training repo) and add a regression test that asserts the
+tensor reaching the model has the expected range/dtype — see the
+`test_dinov3_*` / `test_dynaclr_*` / `test_morphem_*` tests in
+`tests/test_evaluation_extractors.py` and the hot-pixel test in
+`tests/test_evaluation_metrics.py`.
+
 ## Device management (`cubic.cuda`)
 
 Core utilities for device-agnostic computation:
