@@ -1252,6 +1252,23 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         deep_extractors["celldino"] = celldino_feature_extractor
     if morphem_feature_extractor is not None:
         deep_extractors["morphem"] = morphem_feature_extractor
+    if config.compute_feature_metrics:
+        # DINOv3/DynaCLR have no soft-skip: their Dataset_* columns are expected in
+        # every feature_metrics.csv, NaN-filled when a run produced no cells. This
+        # cannot fire today — LoadFlags.for_evaluate gates all four extractors on
+        # compute_feature_metrics and the grouped driver cannot skew that, since
+        # compute_feature_metrics is a _MODEL_LOADING_FIELDS invariant. Assert it
+        # anyway: ``active_kinds`` derives from this map's *keys*, so a variant that
+        # omits absent backbones instead of storing None — which precompute_gt_artifacts
+        # already does via ``if build[k]`` — would drop Dataset_DINOv3_* /
+        # Dataset_DynaCLR_* from the CSV rather than NaN-fill them. ``.get`` catches
+        # both a missing key and a None value.
+        for required in ("dinov3", "dynaclr"):
+            if deep_extractors.get(required) is None:
+                raise ValueError(
+                    f"compute_feature_metrics=true but the {required} extractor is missing; "
+                    "its dataset-metric columns would be dropped instead of NaN-filled"
+                )
 
     channel_names = ["prediction_seg", "target_seg"]
     with (
