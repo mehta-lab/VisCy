@@ -1145,6 +1145,11 @@ def test_window_starts_is_per_dimension():
     assert window_starts((10, 8, 8), (4, 4, 4), (0, 0, 0)) == [[0, 4, 6], [0, 4], [0, 4]]
 
 
+def test_window_starts_broadcasts_scalar_overlap():
+    """A bare int overlap applies to every dimension (``ensure_tuple_rep``)."""
+    assert window_starts((10, 8, 8), (4, 4, 4), 2) == window_starts((10, 8, 8), (4, 4, 4), (2, 2, 2))
+
+
 @pytest.mark.parametrize("patch", [1, 3, 4, 7, 16])
 @pytest.mark.parametrize("size_offset", [0, 1, 5, 13, 40])
 def test_window_starts_covers_extent_in_bounds(patch, size_offset):
@@ -1180,7 +1185,15 @@ def test_window_starts_rejects_overlap_outside_patch(overlap):
         window_starts((16,), (4,), (overlap,))
 
 
-def test_window_starts_rejects_rank_mismatch():
+@pytest.mark.parametrize(
+    ("spatial", "patch", "overlap"),
+    [
+        ((16, 16), (4, 4), (0,)),  # overlap rank short of spatial
+        ((16, 16), (4,), (0, 0)),  # patch rank short of spatial
+        ((16, 16), (4, 4, 4), (0, 0)),  # patch rank over spatial
+    ],
+)
+def test_window_starts_rejects_rank_mismatch(spatial, patch, overlap):
     """Mismatched ranks are a caller bug, not something to zip-truncate."""
     with pytest.raises(ValueError):
-        window_starts((16, 16), (4, 4), (0,))
+        window_starts(spatial, patch, overlap)
