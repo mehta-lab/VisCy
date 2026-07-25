@@ -11,17 +11,10 @@ Run::
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
-
-# tools/ is not a package; make the module importable by short name.
-_TOOLS_DIR = Path(__file__).resolve().parent
-if str(_TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_DIR))
-
-from retokenize_deconv_predictions import (  # noqa: E402
+from retokenize_deconv_predictions import (
     RETOKENIZE,
     ConfigEdit,
     DirMove,
