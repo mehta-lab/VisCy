@@ -54,10 +54,13 @@ def _ckpt_state_dict(ckpt_path: str) -> dict[str, Tensor]:
     return torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
 
 
-def _append_dataloader_slot(losses: list[list[tuple[Tensor, int]]], dataloader_idx: int) -> None:
-    """Grow ``losses`` so ``losses[dataloader_idx]`` exists."""
+def _record_val_loss(
+    losses: list[list[tuple[Tensor, int]]], dataloader_idx: int, loss: Tensor, batch_size: int
+) -> None:
+    """Append ``(loss, batch_size)`` to ``losses[dataloader_idx]``, growing the list first."""
     while len(losses) <= dataloader_idx:
         losses.append([])
+    losses[dataloader_idx].append((loss, batch_size))
 
 
 def _aggregate_validation_losses(
@@ -375,8 +378,7 @@ class DynacellUNet(LightningModule):
         target: Tensor = batch["target"]
         pred = self.forward(source)
         loss = self._compute_loss(pred, target, batch)
-        _append_dataloader_slot(self.validation_losses, dataloader_idx)
-        self.validation_losses[dataloader_idx].append((loss.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -608,8 +610,7 @@ class DynacellFlowMatching(LightningModule):
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
         loss = self.model(phase, target)
-        _append_dataloader_slot(self._validation_losses, dataloader_idx)
-        self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
+        _record_val_loss(self._validation_losses, dataloader_idx, loss.detach(), phase.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -1258,8 +1259,7 @@ class DynacellGAN(LightningModule):
         # Raw generator pass (always).
         pred_raw = self.generator(source)
         l1_raw = F.l1_loss(pred_raw, target)
-        _append_dataloader_slot(self.validation_losses_raw, dataloader_idx)
-        self.validation_losses_raw[dataloader_idx].append((l1_raw.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses_raw, dataloader_idx, l1_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             l1_raw,
@@ -1272,8 +1272,7 @@ class DynacellGAN(LightningModule):
             with torch.no_grad():
                 pred_ema = self.generator_ema(source)
             l1_ema = F.l1_loss(pred_ema, target)
-            _append_dataloader_slot(self.validation_losses_ema, dataloader_idx)
-            self.validation_losses_ema[dataloader_idx].append((l1_ema.detach(), source.shape[0]))
+            _record_val_loss(self.validation_losses_ema, dataloader_idx, l1_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
                 l1_ema,
