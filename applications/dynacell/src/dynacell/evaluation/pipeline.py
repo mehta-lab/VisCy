@@ -1240,6 +1240,19 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
     parent_lists: dict[str, _BackboneLists] = {name: _BackboneLists() for name in _BACKBONE_KEYS}
 
+    # Deep-feature extractors by backbone key. Bound at function scope because the
+    # precompute gate and the dataset-metrics block both derive from it and sit in
+    # different ``with`` scopes — building it inside the first would leave the second
+    # reading a name bound three blocks deeper.
+    deep_extractors: dict[FeatureKind, Any] = {
+        "dinov3": dinov3_feature_extractor,
+        "dynaclr": dynaclr_feature_extractor,
+    }
+    if celldino_feature_extractor is not None:
+        deep_extractors["celldino"] = celldino_feature_extractor
+    if morphem_feature_extractor is not None:
+        deep_extractors["morphem"] = morphem_feature_extractor
+
     channel_names = ["prediction_seg", "target_seg"]
     with (
         open_ome_zarr(
@@ -1386,14 +1399,6 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     microssim_read_cache = {}
 
             if config.compute_feature_metrics:
-                deep_extractors = {
-                    "dinov3": dinov3_feature_extractor,
-                    "dynaclr": dynaclr_feature_extractor,
-                }
-                if celldino_feature_extractor is not None:
-                    deep_extractors["celldino"] = celldino_feature_extractor
-                if morphem_feature_extractor is not None:
-                    deep_extractors["morphem"] = morphem_feature_extractor
                 flush_threshold = int(
                     OmegaConf.select(config, "feature_metrics.deep_feature_batch_threshold", default=256)
                 )
@@ -1569,15 +1574,11 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         with region_timer("dataset_metrics", "<parent>"):
             dataset_row: dict[str, float] = {}
 
-            # Backbones that actually produced features this run. ``deep_extractors``
-            # is the map built for the precompute gate above, under this same
-            # compute_feature_metrics condition: dinov3/dynaclr are always present,
+            # Backbones that actually produced features this run, keyed off the
+            # function-scope ``deep_extractors``: dinov3/dynaclr are always present,
             # celldino/morphem soft-skip when unconfigured. Everything below (metric
             # tracks, NaN-fill prefixes, embedding groups) derives from these two lists
             # rather than repeating the None checks.
-            #
-            # A None dinov3/dynaclr extractor cannot reach this point: it implies a None
-            # model name, which _deep_feature_cache_metadata rejects on the first FOV.
             deep_kinds: list[FeatureKind] = [k for k in _BACKBONE_KEYS if k in deep_extractors]
             active_kinds: list[FeatureKind] = ["cp", *deep_kinds]
 
