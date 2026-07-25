@@ -1,10 +1,10 @@
 """Cross-condition linear-probe CLI.
 
 Post-hoc diagnostic that runs FOV-stratified logistic-regression probes
-between two infection conditions for each of the three feature spaces
-(CP regionprops, DINOv3, DynaCLR), separately for GT and predicted
-embeddings, on the per-cell ``*_single_cell_embeddings.npz`` artifacts
-emitted by ``dynacell.evaluation.pipeline._save_embeddings``.
+between two infection conditions for every feature space in
+``cache.FeatureKind``, separately for GT and predicted embeddings, on the
+per-cell ``*_single_cell_embeddings.npz`` artifacts emitted by
+``dynacell.evaluation.pipeline._save_embeddings``.
 
 Run from the repository root, after at least two per-plate evals have
 finished::
@@ -161,8 +161,8 @@ def _probe_pair(
         raise ValueError(f"feature dim mismatch for {feature} {source}: {c0}={x0.shape[1]} vs {c1}={x1.shape[1]}")
 
     # CP regionprops: variance + correlation prune on the pooled cohort
-    # to drop near-constant or redundant columns. Skipped for deep
-    # embeddings (DINOv3/DynaCLR), which are dense learned features.
+    # to drop near-constant or redundant columns. Skipped for the deep
+    # embeddings, which are dense learned features.
     if feature == "cp":
         x0, x1, _ = select_features(x0, x1)
         if x0.size == 0 or x1.size == 0:

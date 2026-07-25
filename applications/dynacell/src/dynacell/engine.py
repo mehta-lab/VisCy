@@ -20,6 +20,7 @@ from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
+from dynacell.tiling import window_starts
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
@@ -46,6 +47,20 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNeXt2": UNeXt2,
     "fcmae": FullyConvolutionalMAE,
 }
+
+
+def _ckpt_state_dict(ckpt_path: str) -> dict[str, Tensor]:
+    """Load only the ``state_dict`` of a Lightning checkpoint onto CPU."""
+    return torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+
+
+def _record_val_loss(
+    losses: list[list[tuple[Tensor, int]]], dataloader_idx: int, loss: Tensor, batch_size: int
+) -> None:
+    """Append ``(loss, batch_size)`` to ``losses[dataloader_idx]``, growing the list first."""
+    while len(losses) <= dataloader_idx:
+        losses.append([])
+    losses[dataloader_idx].append((loss, batch_size))
 
 
 def _aggregate_validation_losses(
@@ -147,29 +162,9 @@ def _sliding_window_inference(
     Tensor
         Prediction with the same spatial shape as ``source``.
     """
-    spatial = source.shape[-3:]
     n_spatial = 3
     patch = tuple(patch_spatial)
-    overlap = tuple(overlap_size)
-
-    for i in range(n_spatial):
-        S, P, ov = spatial[i], patch[i], overlap[i]
-        if S < P:
-            raise ValueError(f"spatial dim {i} size {S} must be >= patch size {P}")
-        if not (0 <= ov < P):
-            raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {P})")
-
-    start_lists = []
-    for i in range(n_spatial):
-        S, P, ov = spatial[i], patch[i], overlap[i]
-        stride = P - ov
-        last = S - P
-        starts = [0]
-        while starts[-1] + stride < last:
-            starts.append(starts[-1] + stride)
-        if starts[-1] != last:
-            starts.append(last)
-        start_lists.append(starts)
+    start_lists = window_starts(tuple(source.shape[-3:]), patch, overlap_size)
 
     # Accumulators are allocated lazily from the first patch output so their
     # channel dimension matches the model's out_channels (which can differ
@@ -300,13 +295,13 @@ class DynacellUNet(LightningModule):
                 raise ValueError("DynacellUNet(encoder_only=True) requires ckpt_path to be set")
             if not isinstance(self.model, FullyConvolutionalMAE):
                 raise ValueError(f"encoder_only is only supported for architecture='fcmae', got {architecture!r}")
-            state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            state_dict = _ckpt_state_dict(ckpt_path)
             prefix = "model.encoder."
             encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
             self.model.encoder.load_state_dict(encoder_weights, strict=True)
             _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
         elif ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+            self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
@@ -383,9 +378,7 @@ class DynacellUNet(LightningModule):
         target: Tensor = batch["target"]
         pred = self.forward(source)
         loss = self._compute_loss(pred, target, batch)
-        if dataloader_idx + 1 > len(self.validation_losses):
-            self.validation_losses.append([])
-        self.validation_losses[dataloader_idx].append((loss.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -570,7 +563,7 @@ class DynacellFlowMatching(LightningModule):
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+            self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
     def training_step(self, batch: dict, batch_idx: int) -> Tensor:
         """Compute flow-matching training loss for one batch.
@@ -617,9 +610,7 @@ class DynacellFlowMatching(LightningModule):
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
         loss = self.model(phase, target)
-        if dataloader_idx + 1 > len(self._validation_losses):
-            self._validation_losses.append([])
-        self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
+        _record_val_loss(self._validation_losses, dataloader_idx, loss.detach(), phase.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -948,7 +939,7 @@ class DynacellGAN(LightningModule):
         self.example_input_array = torch.rand(1, in_channels, d, h, w)
 
         if ckpt_path is not None:
-            state = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            state = _ckpt_state_dict(ckpt_path)
             # strict=False: pre-modernization checkpoints don't carry
             # generator_ema.* / _lecam_ema_* keys. Filter missing-key warnings
             # to expected-missing prefixes; anything else is a genuine
@@ -1268,9 +1259,7 @@ class DynacellGAN(LightningModule):
         # Raw generator pass (always).
         pred_raw = self.generator(source)
         l1_raw = F.l1_loss(pred_raw, target)
-        if dataloader_idx + 1 > len(self.validation_losses_raw):
-            self.validation_losses_raw.append([])
-        self.validation_losses_raw[dataloader_idx].append((l1_raw.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses_raw, dataloader_idx, l1_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             l1_raw,
@@ -1283,9 +1272,7 @@ class DynacellGAN(LightningModule):
             with torch.no_grad():
                 pred_ema = self.generator_ema(source)
             l1_ema = F.l1_loss(pred_ema, target)
-            if dataloader_idx + 1 > len(self.validation_losses_ema):
-                self.validation_losses_ema.append([])
-            self.validation_losses_ema[dataloader_idx].append((l1_ema.detach(), source.shape[0]))
+            _record_val_loss(self.validation_losses_ema, dataloader_idx, l1_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
                 l1_ema,

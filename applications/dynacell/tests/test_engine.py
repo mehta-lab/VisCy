@@ -11,6 +11,7 @@ from monai.data import MetaTensor
 from torch import nn
 
 from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
+from dynacell.tiling import window_starts
 
 # Small model configs for tests (not production sizes).
 VIT_TEST_CONFIG = {
@@ -1114,3 +1115,85 @@ def test_dynacell_gan_ckpt_unexpected_missing_raises(tmp_path):
             discriminator_config=GAN_DISC_TEST_CONFIG,
             ckpt_path=str(ckpt_path),
         )
+
+
+# ---------------------------------------------------------------------------
+# window_starts: the single tiler behind _sliding_window_inference and all
+# three CELLDiff3DVS tiled paths. Pins the properties the callers rely on.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("size", "patch", "overlap", "expected"),
+    [
+        (8, 4, 0, [0, 4]),  # exact multiple
+        (10, 4, 0, [0, 4, 6]),  # last window snaps back to the edge
+        (4, 4, 0, [0]),  # single window
+        (13, 4, 0, [0, 4, 8, 9]),
+        (10, 4, 2, [0, 2, 4, 6]),
+        (9, 4, 2, [0, 2, 4, 5]),
+        (10, 4, 3, [0, 1, 2, 3, 4, 5, 6]),
+    ],
+)
+def test_window_starts_known_layouts(size, patch, overlap, expected):
+    """Start indices for hand-checked (size, patch, overlap) triples."""
+    assert window_starts((size,), (patch,), (overlap,)) == [expected]
+
+
+def test_window_starts_is_per_dimension():
+    """Each dimension is tiled independently."""
+    assert window_starts((10, 8, 8), (4, 4, 4), (0, 0, 0)) == [[0, 4, 6], [0, 4], [0, 4]]
+
+
+def test_window_starts_broadcasts_scalar_overlap():
+    """A bare int overlap applies to every dimension (``ensure_tuple_rep``)."""
+    assert window_starts((10, 8, 8), (4, 4, 4), 2) == window_starts((10, 8, 8), (4, 4, 4), (2, 2, 2))
+
+
+@pytest.mark.parametrize("patch", [1, 3, 4, 7, 16])
+@pytest.mark.parametrize("size_offset", [0, 1, 5, 13, 40])
+def test_window_starts_covers_extent_in_bounds(patch, size_offset):
+    """Windows tile the full extent without ever running past the edge.
+
+    This is what the callers depend on: ``_sliding_window_inference`` and
+    ``denoise_sliding_window`` divide by an accumulated per-voxel count, so an
+    uncovered voxel is a divide-by-zero, and an out-of-bounds start silently
+    truncates the last patch.
+    """
+    size = patch + size_offset
+    for overlap in range(patch):
+        starts = window_starts((size,), (patch,), (overlap,))[0]
+        assert starts[0] == 0
+        assert all(0 <= s <= size - patch for s in starts)
+        assert starts == sorted(set(starts))
+        covered = set()
+        for s in starts:
+            covered |= set(range(s, s + patch))
+        assert covered == set(range(size))
+
+
+def test_window_starts_rejects_patch_larger_than_extent():
+    """A patch wider than the extent cannot be tiled."""
+    with pytest.raises(ValueError, match="must be >= patch size"):
+        window_starts((3,), (4,), (0,))
+
+
+@pytest.mark.parametrize("overlap", [-1, 4, 5])
+def test_window_starts_rejects_overlap_outside_patch(overlap):
+    """Overlap must satisfy ``0 <= overlap < patch`` (else the stride is <= 0)."""
+    with pytest.raises(ValueError, match="0 <= overlap < patch"):
+        window_starts((16,), (4,), (overlap,))
+
+
+@pytest.mark.parametrize(
+    ("spatial", "patch", "overlap"),
+    [
+        ((16, 16), (4, 4), (0,)),  # overlap rank short of spatial
+        ((16, 16), (4,), (0, 0)),  # patch rank short of spatial
+        ((16, 16), (4, 4, 4), (0, 0)),  # patch rank over spatial
+    ],
+)
+def test_window_starts_rejects_rank_mismatch(spatial, patch, overlap):
+    """Mismatched ranks are a caller bug, not something to zip-truncate."""
+    with pytest.raises(ValueError):
+        window_starts(spatial, patch, overlap)

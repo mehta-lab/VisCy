@@ -11,7 +11,7 @@ code/paper boundary. This table is the source of truth (referenced by
 | --- | --- |
 | `fcmae_vscyto3d_scratch` | **UNeXt2** |
 | `fcmae_vscyto3d_pretrained` | **VSCyto3D** (FCMAE-pretrained UNeXt2) |
-| `unetvit3d` | **UNetViT3D** (deterministic; iPSC-trained only) |
+| `unetvit3d` | **UNetViT3D** (deterministic; iPSC-trained for nucleus/membrane; ER/mito also have a549/joint checkpoints from the A549 raw-regen campaign gap-fill) |
 | `pix2pix3d_unetvit` | **pix2pix3d** (GAN; same UNetViT3D generator, `DynacellGAN` engine) |
 | `fnet3d_paper` | **FNet3D** |
 | `celldiff` / `celldiff_r2` | **CELL-Diff** (variants: `iterative`, `sliding_window`, `denoise`/Mean Predictor) |
@@ -80,10 +80,11 @@ Two exceptions to watch:
 
 ## Eval directory naming
 
-`src/dynacell/evaluation/paths.py:eval_leaf` is the writer and the
-cross-repo contract (must match the paper's
-`compute_all_organelle_precision_recall.py:eval_dir_for`; pinned by
-`tests/test_paths.py`). Canonical focus-2D outputs under
+`src/dynacell/evaluation/paths.py` is the writer and the cross-repo contract
+(`eval_leaf` for the canonical model-centric layout, `normalize_legacy` for the
+pre-canonical `*_with_embeddings` forms; the paper repo vendor-copies it and
+asserts parity — must match `compute_all_organelle_precision_recall.py:eval_dir_for`;
+pinned by `tests/test_paths.py`). Canonical focus-2D outputs under
 `/hpc/projects/virtual_staining/training/dynacell/{ipsc,a549}/`:
 `evaluations_with_embeddings/` (ipsc-trained), `evaluations_a549trained_with_embeddings/`,
 `evaluations_jointtrained_with_embeddings/` (infix `jointtrained`). Dirs use the

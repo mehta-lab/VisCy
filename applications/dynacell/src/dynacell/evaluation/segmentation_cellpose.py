@@ -55,18 +55,15 @@ FLOW_THRESHOLD = 0.4
 
 MIN_OBJECT_SIZE = 500
 """Drop Cellpose instances smaller than this many voxels (at the downscaled
-isotropic grid) as spurious — the one cleanup step we keep from fnet's
+isotropic grid) as spurious — the one cleanup step kept from fnet's
 ``postprocessing.yaml``.
 
-We deliberately do **not** call ``cubic.cleanup_segmentation``: its
-``clear_xy_borders`` uses ``np.in1d`` (removed in numpy>=2.2) and its
-``remove_large_objects`` asserts a non-constant label image mid-pipeline, which
-crashes on empty/near-empty FOVs. fnet's ``max_obj_size=7500`` /
-``max_hole_size=50`` filters are also dropped for now: those thresholds were
-tuned for fnet's legacy ``nuclei`` model on its grid and would wrongly remove
-real whole nuclei at Cellpose-SAM's ``TARGET_VOXEL_UM`` resolution — re-tune in
-Phase 0 before reinstating. Border-touching nuclei are kept (consistent on GT
-and prediction sides for binary Dice)."""
+``cubic.cleanup_segmentation`` is deliberately not used: its ``clear_xy_borders``
+calls ``np.in1d`` (removed in numpy>=2.2) and its ``remove_large_objects`` asserts
+a non-constant label image, which crashes on empty FOVs. fnet's
+``max_obj_size``/``max_hole_size`` filters are dropped too — tuned for fnet's
+legacy ``nuclei`` model, they remove real nuclei at ``TARGET_VOXEL_UM``. Border-
+touching nuclei are kept (consistently on both sides, so binary Dice is fair)."""
 
 
 def load_cellpose_model(use_gpu: bool = True, model_name: str = "cpsam") -> "models.CellposeModel":

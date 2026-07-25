@@ -1,9 +1,8 @@
 """GPU whole-cell instance segmentation: nuclei seeds + membrane EDT watershed.
 
-Productionizes the ``.tmp/wholecell_*_cellgrid.py`` prototypes. Given a membrane
-fluorescence image, the matching nucleus fluorescence, and pre-computed nucleus
-instance labels (the watershed seeds), it segments whole cells and returns
-cytoplasm-only instance labels:
+Given a membrane fluorescence image, the matching nucleus fluorescence, and
+pre-computed nucleus instance labels (the watershed seeds), it segments whole
+cells and returns cytoplasm-only instance labels:
 
 1. robust-clip + CLAHE the membrane and nucleus channels (GPU, via ``cubic``);
 2. (optional) downscale both to an isotropic ``cell_voxel_um`` working grid and

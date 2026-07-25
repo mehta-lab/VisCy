@@ -158,3 +158,32 @@ so the GPU path is what runs.
   operations.
 - Don't gate cubic imports with `try/except ImportError: None`. Cubic is
   a hard dep here. If it's missing, the pipeline is broken — fail loud.
+
+## Eval runtime parallelism — grouped eval is serial-amortized; `--parallel` is a predict lever
+
+`dynacell evaluate-grouped` loads the model stack (SuperModel + DINOv3 +
+DynaCLR + CELL-DINO, ~60 s, ~15 GB) **once** and reuses it across every
+condition in the bucket. That amortization is the whole point of the grouped
+path — **do not parallelize conditions or FOVs inside it.** `--parallel` and
+`runtime.executor=process` are *predict* levers, not eval ones: on a grouped
+bucket each condition's worker pool independently reloads the full stack
+(`evaluate_predictions_grouped` prints a `!!! WARNING !!!` — `~30-90 s ×
+N_workers × N_conditions` of redundant cold-start), and the deep-feature
+forwards still serialize on the one GPU under the fcntl lock, so there is no
+compute win to offset the reloads.
+
+- **Predicts are the opposite** (cheap load, ~10 GB, GPU-light): `--parallel 2`
+  is a confirmed win there (2-up on A40). See `applications/dynacell/CLAUDE.md`
+  "Predict submission modes".
+- `submit_evaluation_batch.py` **cannot** drive cpdino grouped buckets: it emits
+  `uv run dynacell evaluate` through the shared `.venv` (broken for cpdino —
+  needs the `cpdino-eval` venv) and requires one `(organelle, model, train_set)`
+  per call, while a bucket spans many models.
+- **The real eval-side parallelism lever is bucket-level:** run independent
+  grouped buckets on separate GPUs. When buckets share a GT cache
+  (`sec61b`/`tomm20`, keyed by `(gene_cond, halfwidth)`), a warm-first `afterok`
+  chain (one bucket warms, the rest read) is a *true* dependency only while the
+  cache is cold — once it is warm at the target halfwidth, that afterok is a
+  **false sync point** and the buckets can run concurrently (all read-only).
+  Drop it only after confirming warm-state, else concurrent buckets race the
+  drop-and-recompute write.
