@@ -593,3 +593,80 @@ def test_organelle_eval_target() -> None:
     assert ORGANELLE_EVAL_TARGET["mito"] == "mito_tomm20"
     assert ORGANELLE_EVAL_TARGET["nucleus"] == "nucleus"
     assert ORGANELLE_EVAL_TARGET["membrane"] == "membrane"
+
+
+# ---------------------------------------------------------------------------
+# HEK third-cell-type probe (NeurIPS response item O)
+# ---------------------------------------------------------------------------
+
+_HEK_ORGS = ("membrane", "mito")
+_HEK_MODELS = ("fnet3d_paper", "fcmae_vscyto3d_pretrained", "celldiff_r2", "celldiff_r2_iterative")
+
+
+@pytest.mark.parametrize("org", _HEK_ORGS)
+@pytest.mark.parametrize("model", _HEK_MODELS)
+@pytest.mark.parametrize("train", ("ipsc", "a549", "joint"))
+def test_hek_roundtrip(org: str, model: str, train: str) -> None:
+    """HEK tuples survive prediction_store -> key_from_prediction_store."""
+    pred = prediction_store(org, model, train, "hek", "a549xy", data_root=_DATA_ROOT)
+    leaf = eval_leaf(org, model, train, "hek", "a549xy", data_root=_DATA_ROOT)
+    assert pred.parent == leaf
+    assert leaf.relative_to(_DATA_ROOT).parts == (org, model, train, "hek__a549xy")
+    key = key_from_prediction_store(pred, data_root=_DATA_ROOT)
+    assert key == CanonicalKey(organelle=org, model=model, train_set=train, test_set="hek", condition="a549xy")
+
+
+def test_hek_arm_is_required_and_validated() -> None:
+    """The HEK condition slot carries the geometry arm, and only a known arm."""
+    with pytest.raises(ValueError, match="geometry arm"):
+        prediction_store("membrane", "fnet3d_paper", "a549", "hek", None, data_root=_DATA_ROOT)
+    # An A549 treatment token is not a HEK arm.
+    with pytest.raises(ValueError, match="unknown HEK arm"):
+        prediction_store("membrane", "fnet3d_paper", "a549", "hek", "mock", data_root=_DATA_ROOT)
+    with pytest.raises(ValueError, match="unknown HEK arm"):
+        key_from_prediction_store(
+            Path(_DATA_ROOT) / "membrane/fnet3d_paper/a549/hek__native/prediction.zarr",
+            data_root=_DATA_ROOT,
+        )
+
+
+def test_hek_pred_cache_dir_lands_under_its_own_test_root() -> None:
+    """HEK pred caches must not share a root with the a549/ipsc caches."""
+    d = pred_cache_dir("mito", "fnet3d_paper", "joint", "hek", "a549xy", data_root=_DATA_ROOT)
+    assert d == Path(_DATA_ROOT) / "hek/eval_cache_pred/mito/fnet3d_paper/joint/hek__a549xy"
+
+
+def test_hek_gt_cache_dir_is_marker_and_arm_keyed() -> None:
+    root = Path(_DATA_ROOT)
+    assert gt_cache_dir("membrane", "hek", "a549xy", data_root=_DATA_ROOT) == root / "hek/eval_cache/kras_a549xy"
+    assert gt_cache_dir("mito", "hek", "a549xy", data_root=_DATA_ROOT) == root / "hek/eval_cache/tomm70a_a549xy"
+
+
+@pytest.mark.parametrize("organelle", ("nucleus", "er"))
+def test_hek_gt_cache_dir_rejects_qc_failed_organelles(organelle: str) -> None:
+    """Nucleus (HIST2H2BE) and ER (SEC61B) failed QC, so they have no HEK GT.
+
+    Must be a ValueError like every other invalid tuple in this module, not the
+    bare KeyError a raw dict lookup would raise.
+    """
+    with pytest.raises(ValueError, match="no HEK GT for organelle"):
+        gt_cache_dir(organelle, "hek", "a549xy", data_root=_DATA_ROOT)
+
+
+def test_hek_gt_cache_dir_requires_an_arm() -> None:
+    with pytest.raises(ValueError, match="requires a geometry arm"):
+        gt_cache_dir("membrane", "hek", None, data_root=_DATA_ROOT)
+
+
+def test_hek_leaves_do_not_collide_with_a549_or_ipsc() -> None:
+    """A HEK leaf is distinct from the same model's a549/ipsc leaves."""
+    args = ("membrane", "fcmae_vscyto3d_pretrained", "a549")
+    hek = eval_leaf(*args, "hek", "a549xy", data_root=_DATA_ROOT)
+    ipsc = eval_leaf(*args, "ipsc", None, data_root=_DATA_ROOT)
+    a549 = eval_leaf(*args, "a549", "mock", data_root=_DATA_ROOT)
+    assert len({hek, ipsc, a549}) == 3
+
+
+def test_normalize_legacy_ignores_hek() -> None:
+    """There are no legacy HEK artifacts; the legacy mapper must not invent one."""
+    assert normalize_legacy(Path(_DATA_ROOT) / "hek/eval_cache/kras_a549xy") is None

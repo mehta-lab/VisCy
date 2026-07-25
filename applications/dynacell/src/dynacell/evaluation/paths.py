@@ -64,8 +64,16 @@ _MULTI_COMPONENTS: dict[str, tuple[str, ...]] = {
 _ALL_ORGANELLES: frozenset[str] = _SINGLE_ORGANELLES | _MULTI_ORGANELLES
 
 # Test sets and A549 conditions.
-_TEST_SETS: frozenset[str] = frozenset({"ipsc", "a549"})
+_TEST_SETS: frozenset[str] = frozenset({"ipsc", "a549", "hek"})
 _CONDITIONS: frozenset[str] = frozenset({"mock", "denv", "zikv"})
+# HEK293T third-cell-type probe (NeurIPS response item O): evaluation-only, no HEK
+# training. The ``condition`` slot carries the voxel-geometry arm instead of a
+# treatment, so the two axes never collide and each arm gets its own eval dirs and
+# GT caches. ``a549xy`` = XY resampled 0.116 -> 0.1494 um to the A549 assembly pitch
+# (assemble._resample_yx_to_pixel_size, the same downsample the A549 pools took),
+# with Z left at the native mantis 0.205 um. Add a token here only when the store
+# for it exists.
+_HEK_ARMS: frozenset[str] = frozenset({"a549xy"})
 
 # Forward-emittable structured train_set tokens. ``__deconv`` is valid only for
 # ER/mito (see _tuple_is_valid); ``__bf`` / ``__bf__deconv`` are grammar-ready
@@ -185,6 +193,13 @@ POOLS: tuple[str, ...] = ("iPSC", "A549", "Joint")
 # condition <-> cell_type (paper display).
 CONDITION_DISPLAY: dict[str, str] = {"mock": "Mock", "denv": "DENV", "zikv": "ZIKV"}
 
+# HEK geometry arm -> paper/table display. The label names the resampling because
+# HEK was acquired on the same instrument under a different configuration
+# (0.205/0.116/0.116 um, NA_det 1.35, lambda 0.5) than the A549 stores
+# (0.174/0.1494/0.1494 um): the arm matches lateral sampling, not axial sampling
+# or PSF.
+HEK_ARM_DISPLAY: dict[str, str] = {"a549xy": "HEK (A549 XY)"}
+
 # ===========================================================================
 # Map (a): config-token -> canonical alias
 # ===========================================================================
@@ -251,6 +266,13 @@ _A549_GENE: dict[str, str] = {
     "mito": "tomm20",
     "nucleus": "h2b",
     "membrane": "caax",
+}
+# HEK GT caches are keyed by lowercase marker + geometry arm (kras_a549xy, ...).
+# Only the two QC-passing organelles exist: HIST2H2BE (nucleus) and SEC61B (ER)
+# failed QC on the figure_3 subset, so there is deliberately no key for them.
+_HEK_GENE: dict[str, str] = {
+    "membrane": "kras",
+    "mito": "tomm70a",
 }
 
 # ===========================================================================
@@ -363,7 +385,11 @@ def _norm_train_set(token: str) -> str:
 
 
 def _leaf_suffix(test_set: str, condition: str | None) -> str:
-    """Return the ``<test>[__<condition>]`` leaf segment."""
+    """Return the ``<test>[__<condition>]`` leaf segment.
+
+    For ``hek`` the condition slot carries the voxel-geometry arm
+    (:data:`_HEK_ARMS`), not a treatment.
+    """
     if test_set == "a549":
         if condition is None:
             raise ValueError("A549 test set requires a condition (mock|denv|zikv)")
@@ -374,6 +400,12 @@ def _leaf_suffix(test_set: str, condition: str | None) -> str:
         if condition is not None:
             raise ValueError("iPSC test set takes no condition")
         return "ipsc"
+    if test_set == "hek":
+        if condition is None:
+            raise ValueError(f"HEK test set requires a geometry arm ({'|'.join(sorted(_HEK_ARMS))})")
+        if condition not in _HEK_ARMS:
+            raise ValueError(f"unknown HEK arm {condition!r}; expected one of {sorted(_HEK_ARMS)}")
+        return f"hek__{condition}"
     raise ValueError(f"unknown test_set {test_set!r}; expected one of {sorted(_TEST_SETS)}")
 
 
@@ -383,12 +415,13 @@ def _parse_leaf_suffix(leaf: str) -> tuple[str, str | None]:
     Parameters
     ----------
     leaf : str
-        Leaf segment: ``ipsc`` or ``a549__<condition>``.
+        Leaf segment: ``ipsc``, ``a549__<condition>``, or ``hek__<arm>``.
 
     Returns
     -------
     tuple[str, str | None]
-        ``(test_set, condition)``; ``condition`` is ``None`` for iPSC.
+        ``(test_set, condition)``; ``condition`` is ``None`` for iPSC and the
+        geometry arm for HEK.
     """
     if leaf == "ipsc":
         return "ipsc", None
@@ -398,7 +431,13 @@ def _parse_leaf_suffix(leaf: str) -> tuple[str, str | None]:
         if condition not in _CONDITIONS:
             raise ValueError(f"unknown condition {condition!r} in leaf {leaf!r}; expected one of {sorted(_CONDITIONS)}")
         return "a549", condition
-    raise ValueError(f"cannot parse leaf segment {leaf!r}; expected 'ipsc' or 'a549__<condition>'")
+    hek_prefix = "hek__"
+    if leaf.startswith(hek_prefix):
+        arm = leaf[len(hek_prefix) :]
+        if arm not in _HEK_ARMS:
+            raise ValueError(f"unknown HEK arm {arm!r} in leaf {leaf!r}; expected one of {sorted(_HEK_ARMS)}")
+        return "hek", arm
+    raise ValueError(f"cannot parse leaf segment {leaf!r}; expected 'ipsc', 'a549__<condition>' or 'hek__<arm>'")
 
 
 # ===========================================================================
@@ -741,6 +780,7 @@ def gt_cache_dir(
 
     - iPSC: ``ipsc/eval_cache/<SEC61B|TOMM20|nucleus|membrane>``
     - A549: ``a549/eval_cache/<gene>_<cond>`` (gene lowercase).
+    - HEK: ``hek/eval_cache/<marker>_<arm>`` (marker lowercase).
 
     Single- and multi-target models share these caches (target-keyed).
     """
@@ -757,6 +797,17 @@ def gt_cache_dir(
             raise ValueError(f"A549 GT cache requires a condition in {sorted(_CONDITIONS)}, got {condition!r}")
         gene = _A549_GENE[organelle]
         return root / "a549" / "eval_cache" / f"{gene}_{condition}"
+    if test_set == "hek":
+        if condition is None or condition not in _HEK_ARMS:
+            raise ValueError(f"HEK GT cache requires a geometry arm in {sorted(_HEK_ARMS)}, got {condition!r}")
+        # Explicit raise rather than a bare KeyError: this module reports every
+        # invalid tuple as ValueError, and nucleus/ER have no HEK GT (QC-failed).
+        if organelle not in _HEK_GENE:
+            raise ValueError(
+                f"no HEK GT for organelle {organelle!r}; the QC-passing HEK targets are "
+                f"{sorted(_HEK_GENE)} (nucleus/ER failed QC on the figure_3 subset)"
+            )
+        return root / "hek" / "eval_cache" / f"{_HEK_GENE[organelle]}_{condition}"
     raise ValueError(f"unknown test_set {test_set!r}; expected one of {sorted(_TEST_SETS)}")
 
 
