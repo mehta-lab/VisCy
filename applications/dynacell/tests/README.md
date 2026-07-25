@@ -11,8 +11,8 @@ code paths (config composition, resolver, eval pipeline, reporting) rather than 
 - **Data layer** — `test_data_manifests.py`, `test_dataset_ref.py`, `test_manifest_sync.py` (enforces
   [`_manifests/`](../src/dynacell/README.md) ↔ `dynacell-paper` parity), `test_paths.py`.
 - **Engine / training** — `test_engine.py`, `test_training_integration.py`, `test_lazy_init.py`.
-- **Evaluation pipeline** — `test_evaluation_pipeline*.py` (serial + parallel CPU/GPU), `test_evaluation_io.py`,
-  `test_evaluation_metrics.py`, `test_evaluation_cache.py`, `test_pipeline_cache.py`,
+- **Evaluation pipeline** — `test_evaluation_pipeline*.py` (serial + parallel CPU/GPU),
+  `test_evaluation_metrics.py`, `test_evaluation_plot_metrics.py`, `test_evaluation_cache.py`, `test_pipeline_cache.py`,
   `test_evaluation_extractors.py`, `test_evaluation_grouped.py`, `test_evaluation_cross_store_nuclei.py`,
   `test_evaluation_precompute_cli.py`, `test_focus.py`, `test_runtime.py`, `test_cross_condition_probe.py`,
   `test_pixel_metrics_parity.py`.
