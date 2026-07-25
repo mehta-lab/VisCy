@@ -34,6 +34,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     benchmark_dataset_ref,
     build_leaf_yaml,
+    leaf_test_set,
     parse_zarr_name,
     pred_cache_dir_for,
     save_dir_for,
@@ -297,6 +298,50 @@ def test_pred_cache_dir_ipsc() -> None:
     parsed = _make("mito/fnet3d_paper/ipsc/ipsc/prediction.zarr")
     pc = pred_cache_dir_for(parsed, dynacell_root=Path("/X"))
     assert pc == Path("/X/ipsc/eval_cache_pred/mito/fnet3d_paper/ipsc/ipsc")
+
+
+# ---------------------------------------------------------------------------
+# 2b. Test-set scoping of the shared canonical tree
+# ---------------------------------------------------------------------------
+
+
+def _touch_prediction(root: Path, organelle: str, model: str, train_set: str, leaf: str) -> Path:
+    """Create an empty canonical prediction dir on a tmp tree."""
+    pred = root / organelle / model / train_set / leaf / "prediction.zarr"
+    pred.mkdir(parents=True)
+    return pred
+
+
+def test_walk_predictions_skips_out_of_scope_test_sets(tmp_path: Path) -> None:
+    """A hek__<arm> prediction in the shared tree must not enter the campaign pool.
+
+    The canonical tree is shared across branches, so an out-of-scope probe would
+    otherwise be bucketed by (organelle, train_set) into the 12 committed campaign
+    leaves and then fed to benchmark_dataset_ref, which keys off the A549 condition
+    vocabulary.
+    """
+    _touch_prediction(tmp_path, "membrane", "fnet3d_paper", "a549", "a549__mock")
+    _touch_prediction(tmp_path, "membrane", "fnet3d_paper", "a549", "hek__a549xy")
+
+    pool = walk_predictions(tmp_path)
+    assert [p.test_set for p in pool] == ["a549"]
+
+
+def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:
+    """Explicitly requesting a test set includes it (and excludes the others)."""
+    _touch_prediction(tmp_path, "membrane", "fnet3d_paper", "a549", "a549__mock")
+    _touch_prediction(tmp_path, "membrane", "fnet3d_paper", "a549", "hek__a549xy")
+
+    pool = walk_predictions(tmp_path, test_sets=frozenset({"hek"}))
+    assert [(p.test_set, p.condition) for p in pool] == [("hek", "a549xy")]
+
+
+def test_leaf_test_set_prefix_read() -> None:
+    """leaf_test_set must not raise on an unknown segment -- it must be filterable."""
+    assert leaf_test_set("ipsc") == "ipsc"
+    assert leaf_test_set("a549__mock") == "a549"
+    assert leaf_test_set("hek__a549xy") == "hek"
+    assert leaf_test_set("somethingnew__v2") == "somethingnew"
 
 
 # ---------------------------------------------------------------------------

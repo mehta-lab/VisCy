@@ -107,6 +107,13 @@ _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 _CANONICAL_ORGANELLE_ROOTS: tuple[str, ...] = ("er", "mito", "nucleus", "membrane")
 _CANONICAL_ORG_TO_INTERNAL: dict[str, str] = {"mito": "mitochondria"}
 
+# Test sets this campaign buckets. `paths.py` knows more of them (the `hek`
+# third-cell-type probe), and the canonical prediction tree is shared across
+# branches, so the walk filters on this rather than taking whatever appears on
+# disk. Everything downstream — bucket keys, benchmark_dataset_ref,
+# _gt_cache_dir_for — assumes ipsc/a549, so widening it needs those too.
+_DEFAULT_TEST_SETS: frozenset[str] = frozenset({"ipsc", "a549"})
+
 # Canonical train_set token -> generator bucket label. The FULL canonical token
 # (carrying deconv provenance: a549__deconv, joint__legacy_deconvgt) drives the
 # on-disk save_dir/pred_cache paths; the bucket label groups leaves and builds
@@ -281,7 +288,21 @@ _SKIP_MODELS: frozenset[str] = frozenset(
 )
 
 
-def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
+def leaf_test_set(leaf: str) -> str:
+    """Return the test-set token of a ``<test>[__<cond>]`` leaf segment.
+
+    A deliberate cheap prefix read rather than ``paths._parse_leaf_suffix``: this
+    runs BEFORE :func:`parse_zarr_name`, so an out-of-scope test set must be
+    *filterable* rather than raise. An unrecognized segment returns itself, which
+    no test-set filter accepts, so it is skipped like any other out-of-scope leaf.
+    """
+    return leaf.split("__", 1)[0]
+
+
+def walk_predictions(
+    dynacell_root: Path = _DYNACELL_ROOT,
+    test_sets: frozenset[str] = _DEFAULT_TEST_SETS,
+) -> list[ParsedZarr]:
     """Discover every canonical prediction zarr under the 4 organelle roots.
 
     Iterates ``<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr``
@@ -291,6 +312,16 @@ def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
     ``canonical_identity`` is a layout violation and raises (never silently
     prefers one). The legacy ``{predictions,joint_predictions}`` dirs are NOT
     read.
+
+    ``test_sets`` gates which leaves are considered, defaulting to the campaign's
+    :data:`_DEFAULT_TEST_SETS`. This is a load-bearing guard, not a convenience:
+    the canonical tree is SHARED across branches and campaigns, so a prediction
+    written for a probe on another test set (the ``hek__<arm>`` third-cell-type
+    leaves) would otherwise be picked up here, bucketed by ``(organelle,
+    train_set)`` into the 12 committed campaign leaves, and fed to
+    ``benchmark_dataset_ref`` / ``_gt_cache_dir_for``, which key off the A549
+    condition vocabulary and would fail the whole generation run. Opt such a probe
+    in explicitly instead.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
     for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
@@ -301,6 +332,8 @@ def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
         # every zarr's chunk tree (minutes per organelle); the canonical layout is
         # exactly <model>/<train_set>/<test>/prediction.zarr.
         for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
+            if leaf_test_set(zarr_path.parent.name) not in test_sets:
+                continue
             parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
             if parsed.model in _SKIP_MODELS:
                 continue
@@ -613,9 +646,17 @@ def main(argv: list[str] | None = None) -> int:
         help="suppress emission of conditions whose canonical save_dir already has "
         "a 74-col feature_metrics.csv (saves wall but leaves canonical paths empty)",
     )
+    ap.add_argument(
+        "--test-sets",
+        default=",".join(sorted(_DEFAULT_TEST_SETS)),
+        help="comma-separated test sets to bucket (default: %(default)s). Predictions on "
+        "any other test set in the shared canonical tree are skipped; widening this "
+        "also needs benchmark_dataset_ref and _gt_cache_dir_for to handle them",
+    )
     args = ap.parse_args(argv)
 
-    parsed_pool = walk_predictions(args.dynacell_root)
+    test_sets = frozenset(t.strip() for t in args.test_sets.split(",") if t.strip())
+    parsed_pool = walk_predictions(args.dynacell_root, test_sets=test_sets)
     print(f"[gen] parsed {len(parsed_pool)} prediction zarrs after dedupe")
 
     # Group by (organelle, train_set).

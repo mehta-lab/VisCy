@@ -53,6 +53,7 @@ if str(_TOOLS_DIR) not in sys.path:
 from generate_grouped_eval_configs import (  # noqa: E402
     _CANONICAL_ORGANELLE_ROOTS,
     _CODE_TO_PAPER,
+    _DEFAULT_TEST_SETS,
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
@@ -60,6 +61,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     ParsedZarr,
     benchmark_dataset_ref,
     condition_name,
+    leaf_test_set,
     parse_zarr_name,
     walk_predictions,
 )
@@ -208,6 +210,12 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
         # Bounded 3-level glob mirroring walk_predictions (the canonical layout is
         # <model>/<train_set>/<test>/prediction.zarr); rglob would descend chunk trees.
         for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
+            if leaf_test_set(zarr_path.parent.name) not in _DEFAULT_TEST_SETS:
+                # Out-of-scope test set (e.g. the hek__<arm> third-cell-type probe
+                # sharing this tree): skipped by walk_predictions too, so reporting
+                # it as "unregistered" here would fail main() on a prediction the
+                # campaign never intended to fold in.
+                continue
             try:
                 parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
             except ValueError as exc:
