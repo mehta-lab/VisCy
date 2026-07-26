@@ -188,7 +188,9 @@ def main() -> None:
         "--vs-store",
         type=Path,
         required=True,
-        help="Path to a VSCyto3D _vs.zarr store (membrane_prediction channel).",
+        help="Store holding a whole-cell membrane channel. Normally a VSCyto3D _vs.zarr "
+        "(membrane_prediction); any store works via --membrane-channel, e.g. the HEK GT "
+        "stores' experimental Membrane_label. Output is <stem>_seg_cleaned.zarr alongside it.",
     )
     parser.add_argument(
         "--membrane-channel",
