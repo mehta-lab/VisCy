@@ -223,6 +223,51 @@ def build_store(well: Well, source: Path, dry_run: bool = False) -> Path:
     return out_path
 
 
+def _verify_channel_identity(well: Well, source: Path) -> list[str]:
+    """Check each output channel really holds the SOURCE channel it is named for.
+
+    The read in :func:`build_store` is ``oindex[:, indices]`` with ``indices``
+    unsorted (``[0, 3, 1, 2]``), while ``channel_names`` is set independently from
+    ``out_names``. zarr does honour the requested order, but nothing in the write
+    path enforces it: were a selection ever returned in ascending order instead,
+    the mito store's ``Structure`` would silently hold the release's ``Membrane``
+    label and ``Brightfield`` would hold the mNG target -- with no error, and
+    passing every other check here. So compare identity, not just names.
+
+    Mean and std are compared rather than pixels because the output is laterally
+    resampled; interpolation preserves both to well within this tolerance, while
+    the source channels differ from each other by orders of magnitude (phase
+    ~1e-3, fluorescence ~1e2, brightfield ~2e3), so any mix-up is unmissable.
+
+    Tolerance is scaled by the source channel's own std, NOT by the statistic's
+    magnitude. Phase is zero-centred (mean ~1e-6), so a relative test on its mean
+    compares two rounding-noise values and always fails; its std is the only
+    meaningful scale it has.
+    """
+    errors: list[str] = []
+    indices, out_names = _channel_plan(well)
+    with (
+        open_ome_zarr(source, mode="r", layout="hcs") as src,
+        open_ome_zarr(well.out_path, mode="r", layout="hcs") as out,
+    ):
+        src_pos = next(p for n, p in src.positions() if n.split("/")[1] == well.name)
+        out_pos = next(p for _, p in out.positions())
+        z = _EXPECTED_FOCUS_PLANE
+        for out_idx, (src_idx, out_name) in enumerate(zip(indices, out_names, strict=True)):
+            a = np.asarray(src_pos["0"][0, src_idx, z])
+            b = np.asarray(out_pos["0"][0, out_idx, z])
+            scale = max(abs(float(np.mean(a))), float(np.std(a)), 1e-12)
+            for stat, fn in (("mean", np.mean), ("std", np.std)):
+                want, got = float(fn(a)), float(fn(b))
+                if abs(got - want) / scale > 0.05:
+                    errors.append(
+                        f"{well.out_path.name}: channel {out_name!r} (out index {out_idx}) {stat} {got:.6g} "
+                        f"does not match source {_SOURCE_CHANNELS[src_idx]!r} {stat} {want:.6g} -- the "
+                        f"channel selection did not preserve the requested order"
+                    )
+    return errors
+
+
 def verify_store(well: Well) -> list[str]:
     """Re-open a built store and check every contract the manifests rely on."""
     errors: list[str] = []
@@ -283,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
         build_store(well, args.source, dry_run=args.dry_run)
         if not args.dry_run:
             errors.extend(verify_store(well))
+            errors.extend(_verify_channel_identity(well, args.source))
 
     if errors:
         print("\n[FAIL] store verification found problems:", file=sys.stderr)
