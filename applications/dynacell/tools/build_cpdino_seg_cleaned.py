@@ -34,6 +34,9 @@ from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
 
 MEMBRANE_CHANNEL = "membrane_prediction"
 
+# Channel whose focus_slice zattrs drive --focus-slab-halfwidth.
+FOCUS_CHANNEL = "Phase3D"
+
 # Whole-cell fragment cut, in voxels. Identical to the legacy
 # ``clean_up_seg.py::MIN_SIZE_3D`` so the cpdino masks keep the same size floor as
 # the cellpose-v3 ``_seg_cleaned`` they replace (a 2-D footprint repeated over
@@ -68,22 +71,48 @@ def remove_small_instances_3d(label_vol: np.ndarray, min_size: int) -> np.ndarra
 
     label_vol = label_vol.astype(np.int64, copy=False)
 
+    # Single-pass LUT: drop-and-relabel in one gather instead of a full-volume
+    # boolean comparison per surviving instance. The original loop was
+    # O(n_instances * n_voxels) — on a 64x960x1184 HEK volume with a few hundred
+    # cells that dominated the entire segmentation run. Semantics are unchanged:
+    # labels under min_size go to background, survivors are numbered 1..N in
+    # ascending original-label order (what np.unique gave).
     counts = np.bincount(label_vol.ravel())
-    small_labels = np.where(counts < min_size)[0]
-    small_labels = small_labels[small_labels != 0]
+    # `counts > 0` is load-bearing, not redundant: bincount yields a zero count
+    # for every label id absent from the volume, and those must stay background.
+    # Without it, min_size=0 would resurrect absent ids as instances, whereas the
+    # original walked np.unique and only ever saw present labels.
+    keep = np.where((counts >= min_size) & (counts > 0))[0]
+    keep = keep[keep != 0]
+    lut = np.zeros(counts.size, dtype=np.int64)
+    lut[keep] = np.arange(1, keep.size + 1, dtype=np.int64)
+    return lut[label_vol]
 
-    cleaned = label_vol.copy()
-    if len(small_labels) > 0:
-        cleaned[np.isin(cleaned, small_labels)] = 0
 
-    unique_labels = np.unique(cleaned)
-    unique_labels = unique_labels[unique_labels != 0]
+def _membrane_projection(memb: np.ndarray, position, t: int, halfwidth: int | None) -> np.ndarray:
+    """Max-project the membrane volume for 2-D whole-cell segmentation.
 
-    relabeled = np.zeros_like(cleaned, dtype=np.int64)
-    for new_label, old_label in enumerate(unique_labels, start=1):
-        relabeled[cleaned == old_label] = new_label
-
-    return relabeled
+    ``halfwidth=None`` projects the whole stack — the A549 behaviour, where 48
+    planes at 0.174 um is a ~8.4 um slab and the walls stay crisp. On a deeper
+    stack that projection superimposes basal and apical membranes of different
+    cells and cpdino under-segments badly (HEK: 64 planes at 0.205 um is ~13.1 um,
+    and HEK cells grow in 3-D, which is why the release ships >48 planes). Passing
+    a halfwidth restricts the projection to ``focus_plane +/- halfwidth``, read
+    from the store's ``focus_slice`` zattrs — the same in-focus-slab idea the eval
+    itself uses for its 2-D instance path and deep-feature crops.
+    """
+    if halfwidth is None:
+        return np.max(memb, axis=0)
+    focus = position.zattrs.get("focus_slice", {}).get(FOCUS_CHANNEL, {}).get("per_timepoint", {})
+    if str(t) not in focus:
+        raise ValueError(
+            f"--focus-slab-halfwidth needs focus_slice.{FOCUS_CHANNEL}.per_timepoint[{t}] zattrs; "
+            "write them with dynacell.evaluation.focus.write_focus_slice_metadata first"
+        )
+    plane = int(focus[str(t)])
+    lo = max(0, plane - halfwidth)
+    hi = min(memb.shape[0], plane + halfwidth + 1)
+    return np.max(memb[lo:hi], axis=0)
 
 
 def _seg_cleaned_path(vs_store: Path) -> Path:
@@ -93,15 +122,34 @@ def _seg_cleaned_path(vs_store: Path) -> Path:
     return vs_store.parent / f"{base}_seg_cleaned.zarr"
 
 
-def build_one(vs_store: Path, model) -> Path:
-    """Segment one ``_vs.zarr`` into a cpdino ``_seg_cleaned.zarr``.
+def build_one(
+    vs_store: Path,
+    model,
+    membrane_channel: str = MEMBRANE_CHANNEL,
+    min_size_3d: int = MIN_SIZE_3D,
+    focus_slab_halfwidth: int | None = None,
+) -> Path:
+    """Segment one store's membrane channel into a cpdino ``_seg_cleaned.zarr``.
 
     Parameters
     ----------
     vs_store : pathlib.Path
-        Input VSCyto3D prediction store with a ``membrane_prediction`` channel.
+        Input store carrying a whole-cell membrane channel. Normally a VSCyto3D
+        ``_vs.zarr`` (virtually stained ``membrane_prediction``); the HEK
+        third-cell-type probe instead points this at an experimental membrane
+        label (``Membrane_label``) in its GT store, since it has no VS store.
     model : cellpose.models.CellposeModel
         Pre-loaded Cellpose-DINO model.
+    membrane_channel : str
+        Channel to segment whole cells from.
+    min_size_3d : int
+        Instance size floor in voxels. Scales with Z and pixel size: the A549
+        floor of 100000 is ~2083 px^2 over Z=48 at 0.1494 um/px (~46.5 um^2), so
+        a store with a different depth needs that area x its own Z.
+    focus_slab_halfwidth : int or None
+        ``None`` (default) max-projects the full stack, preserving the A549
+        behaviour. An int restricts the projection to ``focus_plane +/- hw``; see
+        :func:`_membrane_projection`.
 
     Returns
     -------
@@ -115,15 +163,15 @@ def build_one(vs_store: Path, model) -> Path:
     ):
         n_pos = sum(1 for _ in vs.positions())
         for i, (pos_name, pos) in enumerate(vs.positions()):
-            memb_idx = pos.get_channel_index(MEMBRANE_CHANNEL)
+            memb_idx = pos.get_channel_index(membrane_channel)
             t_len, _, d_len, h_len, w_len = pos.data.shape
             out_vol = np.zeros((t_len, 1, d_len, h_len, w_len), dtype=np.uint16)
             for t in range(t_len):
                 memb = np.asarray(pos.data[t, memb_idx])  # (Z, Y, X)
-                memb_2d = np.max(memb, axis=0)  # whole-cell max projection
+                memb_2d = _membrane_projection(memb, pos, t, focus_slab_halfwidth)
                 labels_2d = segment_cpdino_instances(memb_2d, (LATERAL_UM, LATERAL_UM), model, do_3d=False)
                 vol = np.repeat(labels_2d[None, ...], d_len, axis=0)
-                vol = remove_small_instances_3d(vol, MIN_SIZE_3D)
+                vol = remove_small_instances_3d(vol, min_size_3d)
                 out_vol[t, 0] = vol.astype(np.uint16)
             row, col, fov = pos_name.split("/")
             seg_pos = out.create_position(row, col, fov)
@@ -140,7 +188,30 @@ def main() -> None:
         "--vs-store",
         type=Path,
         required=True,
-        help="Path to a VSCyto3D _vs.zarr store (membrane_prediction channel).",
+        help="Store holding a whole-cell membrane channel. Normally a VSCyto3D _vs.zarr "
+        "(membrane_prediction); any store works via --membrane-channel, e.g. the HEK GT "
+        "stores' experimental Membrane_label. Output is <stem>_seg_cleaned.zarr alongside it.",
+    )
+    parser.add_argument(
+        "--membrane-channel",
+        default=MEMBRANE_CHANNEL,
+        help="Channel to segment whole cells from (default: %(default)s). The HEK probe "
+        "uses Membrane_label, its experimental membrane label, having no _vs store.",
+    )
+    parser.add_argument(
+        "--min-size-3d",
+        type=int,
+        default=MIN_SIZE_3D,
+        help="Instance size floor in voxels (default: %(default)s, the A549 floor at Z=48 "
+        "and 0.1494 um/px). Scale by the store's own Z to keep the physical area equal.",
+    )
+    parser.add_argument(
+        "--focus-slab-halfwidth",
+        type=int,
+        default=None,
+        help="Max-project only focus_plane +/- N instead of the whole stack (default: whole "
+        "stack, the A549 behaviour). Needed on deep stacks where a full projection "
+        "superimposes membranes from different cells; requires focus_slice zattrs.",
     )
     parser.add_argument(
         "--no-gpu",
@@ -150,10 +221,16 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.vs_store.exists():
-        raise FileNotFoundError(f"_vs store not found: {args.vs_store}")
+        raise FileNotFoundError(f"store not found: {args.vs_store}")
 
     model = load_cellpose_model(use_gpu=not args.no_gpu, model_name="cpdino")
-    out_path = build_one(args.vs_store, model)
+    out_path = build_one(
+        args.vs_store,
+        model,
+        membrane_channel=args.membrane_channel,
+        min_size_3d=args.min_size_3d,
+        focus_slab_halfwidth=args.focus_slab_halfwidth,
+    )
     print(f"Wrote {out_path}", flush=True)
 
 
