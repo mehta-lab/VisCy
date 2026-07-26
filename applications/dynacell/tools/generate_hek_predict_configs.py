@@ -41,12 +41,28 @@ from dynacell.evaluation import paths
 
 _CONFIG_ROOT = Path(__file__).resolve().parents[1] / "configs/benchmarks/virtual_staining"
 
-# Roster: the paper's focus trio (main.tex:279 / :1118) x 3 training pools x the
-# two QC-passing HEK organelles. Excludes UNeXt2, UNetViT3D and pix2pix3d — the
-# GAN in particular is absent from the submitted baseline suite, and three
-# response drafts rest on "one generative family".
-_MODEL_DIRS: tuple[str, ...] = ("fnet3d_paper", "fcmae_vscyto3d_pretrained", "celldiff")
+# Roster: the paper's focus trio (main.tex:279 / :1118) plus pix2pix3d, x 3
+# training pools x the two QC-passing HEK organelles. Still excludes UNeXt2 and
+# bare UNetViT3D. pix2pix3d was added on request: it is the second *generative*
+# family in the suite (CELL-Diff being the first), so the cross-cell-type result
+# no longer rests on a single generative model.
+_MODEL_DIRS: tuple[str, ...] = (
+    "fnet3d_paper",
+    "fcmae_vscyto3d_pretrained",
+    "celldiff",
+    "pix2pix3d_unetvit",
+)
 _TRAIN_DIRS: tuple[str, ...] = ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
+
+# Roster holes: tuples with no trained model to point at. Recorded explicitly so a
+# short run is a stated 5-of-6 rather than a generic failure — the REPLACE_ME guard
+# in build_leaf would otherwise report this as an error every single run.
+_NO_TRAINED_MODEL: dict[tuple[str, str, str], str] = {
+    ("mito", "pix2pix3d_unetvit", "ipsc_confocal"): (
+        "no iPSC-trained mito GAN exists: the leaf's ckpt_path is still REPLACE_ME and "
+        "models/dynacell/ipsc/mito/pix2pix3d_unetvit is absent (iPSC has er/membrane/nucleus only)"
+    ),
+}
 
 # organelle config dir -> (manifest target key, eval-side target fragment)
 _ORGANELLES: dict[str, tuple[str, str]] = {
@@ -66,6 +82,13 @@ DECONV_SUFFIX = "_deconvolved"
 # H200, i.e. ~160 h/leaf versus ~10 h for four full-depth windows. FNet3D and
 # VSCyto3D set no z_window_size and genuinely slide their 15-plane window, which
 # already yields the full Z=64 output; they must not be rescaled.
+#
+# pix2pix3d also pins z_window_size, but in its OVERLAY (=8) rather than its leaf,
+# and 8 is a genuinely sliding window like FNet3D's 15, not a full-depth one. The
+# rescale is keyed on the leaf precisely so that distinction survives: the leaf
+# carries no window, _hek_z_window returns None, and the overlay's 8 composes
+# through untouched. Rescaling it would be wrong twice over — the ViT generator is
+# fixed at 512x512xZ and cannot take a 64-plane input at all.
 _A549_Z = 48
 _HEK_Z = 64
 # Job-name stems, kept short enough to stay readable in squeue.
@@ -73,6 +96,7 @@ _JOB_STEM: dict[str, str] = {
     "fnet3d_paper": "FNET3D",
     "fcmae_vscyto3d_pretrained": "VSCYTO3D",
     "celldiff": "CELLDIFF",
+    "pix2pix3d_unetvit": "PIX2PIX3D",
 }
 _TRAIN_STEM: dict[str, str] = {"ipsc": "IPSCTR", "a549": "A549TR", "joint": "JOINTTR"}
 
@@ -257,10 +281,16 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     written = 0
+    skipped = 0
     errors: list[str] = []
     for organelle in _ORGANELLES:
         for model_dir in _MODEL_DIRS:
             for train_dir in _TRAIN_DIRS:
+                hole = _NO_TRAINED_MODEL.get((organelle, model_dir, train_dir))
+                if hole is not None:
+                    print(f"[skip] {organelle}/{model_dir}/{train_dir}: {hole}")
+                    skipped += 1
+                    continue
                 try:
                     leaf_path, text = build_leaf(organelle, model_dir, train_dir)
                 except (FileNotFoundError, ValueError) as exc:
@@ -279,7 +309,8 @@ def main(argv: list[str] | None = None) -> int:
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    print(f"\n[ok] {written} leaves {'planned' if args.dry_run else 'written'}")
+    tail = f" ({skipped} skipped: no trained model)" if skipped else ""
+    print(f"\n[ok] {written} leaves {'planned' if args.dry_run else 'written'}{tail}")
     return 0
 
 
