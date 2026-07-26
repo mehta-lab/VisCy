@@ -13,6 +13,7 @@ from dynacell.collections import (
     list_collections,
 )
 from dynacell.collections import freezer as freezer_mod
+from dynacell.collections import registry as registry_mod
 
 
 class TestRegistry:
@@ -54,6 +55,17 @@ class TestRegistry:
         """Unknown collection name raises KeyError."""
         with pytest.raises(KeyError, match="nonexistent"):
             get_collection("nonexistent")
+
+    def test_get_collection_raises_on_missing_yaml(self, monkeypatch, tmp_path):
+        """A registered name whose YAML is absent raises at call time, not import time."""
+        monkeypatch.setitem(registry_mod._REGISTRY, "sec61b_ipsc_v1", tmp_path / "gone.yaml")
+        with pytest.raises(FileNotFoundError, match="reinstall dynacell"):
+            get_collection("sec61b_ipsc_v1")
+
+    def test_list_collections_survives_missing_yamls(self, monkeypatch, tmp_path):
+        """Enumeration is pure dict access, so a broken install can still list names."""
+        monkeypatch.setitem(registry_mod._REGISTRY, "sec61b_ipsc_v1", tmp_path / "gone.yaml")
+        assert "sec61b_ipsc_v1" in list_collections()
 
 
 _A2_1_COLLECTIONS = [

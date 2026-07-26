@@ -3,6 +3,13 @@
 Mirrors :mod:`dynacell.data.registry`. Uses a hardcoded dict
 instead of a filesystem walk so a duplicate or malformed YAML does
 not break every consumer at import time.
+
+Import is side-effect-free for the same reason: the packaged YAMLs are
+only touched by :func:`get_collection`, so an incomplete install cannot
+make this module — or the sibling :mod:`dynacell.collections.freezer`,
+re-exported from the same package — unimportable. The freezer is what
+regenerates missing collection YAMLs, so it must stay reachable when
+they are absent.
 """
 
 from importlib.resources import files
@@ -11,9 +18,6 @@ from pathlib import Path
 from dynacell.data import BenchmarkCollection, load_collection
 
 _CONFIGS_ROOT = Path(str(files("dynacell") / "_configs" / "collections"))
-
-if not _CONFIGS_ROOT.is_dir():
-    raise RuntimeError(f"Collection configs not found at {_CONFIGS_ROOT}.\nReinstall dynacell: uv sync")
 
 _REGISTRY: dict[str, Path] = {
     "sec61b_ipsc_v1": _CONFIGS_ROOT / "virtual_staining" / "sec61b_ipsc_v1.yaml",
@@ -53,8 +57,15 @@ def get_collection(name: str) -> BenchmarkCollection:
     KeyError
         If the collection name is not registered.
     FileNotFoundError
-        If the YAML file does not exist.
+        If the collection is registered but its packaged YAML is absent,
+        which means the install is incomplete.
     """
     if name not in _REGISTRY:
         raise KeyError(f"Unknown collection {name!r}. Available: {list_collections()}")
-    return load_collection(_REGISTRY[name])
+    path = _REGISTRY[name]
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Collection {name!r} is registered but its YAML is missing at {path}. "
+            "The packaged configs are incomplete — reinstall dynacell: uv sync"
+        )
+    return load_collection(path)
