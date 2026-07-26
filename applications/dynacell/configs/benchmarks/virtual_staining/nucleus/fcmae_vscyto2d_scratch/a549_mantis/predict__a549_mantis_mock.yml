@@ -1,0 +1,63 @@
+# FCMAE-2D scratch (UNeXt2-2D) predict: nucleus trained on a549_mantis
+# (dual_nucl_memb in-focus slab), predicting against a549-mantis-h2b-mock
+# test. Runs the 2D model over the full-Z 3D test store (z_window_size=1 ->
+# one window per z-plane; writer stacks per-z into a full-Z prediction
+# store). Mirror of the 3D
+# nucleus/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_mock.yml.
+#
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
+# `nucleus` target_id from targets/nucleus.yml so the resolver finds the
+# h2b target on a549-mantis-h2b-mock.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_mock.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: a549_mantis
+  predict_set: a549_mantis_h2b_mock
+  model_name: fcmae_vscyto2d_scratch
+  experiment_id: nucleus__a549_mantis__fcmae_vscyto2d_scratch__a549_mantis_h2b_mock
+  # Override the iPSC-side `nucleus` target to a549's gene-keyed `h2b`.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    # Explicit epoch pin, not `last.ckpt` (which is a moving target across resumes).
+    # Byte-equivalent to the last.ckpt this leaf previously used (last.ckpt recorded
+    # epoch=4/global_step=1500; same size and mtime as this file).
+    #
+    # ⚠ These weights are NOT usable yet. This run's `loss/validate` was frozen at
+    # 2.7065 for all 200 epochs, so ModelCheckpoint filled save_top_k at epochs 0-4
+    # and never saved again — its own best_model_path is epoch=0 and
+    # best_score == current_score == 2.7065. Epoch 4 is effectively untrained.
+    # Do NOT run this predict until the FCMAE-2D validation bug is fixed and the
+    # fits are re-run; then re-pin to the real best checkpoint.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fcmae_vscyto2d_scratch/checkpoints/epoch=4-step=1500-loss=2.706.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/a549/a549__mock/prediction.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto2D_Scratch_PRED_NUCL_A549TR_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/a549/a549__mock

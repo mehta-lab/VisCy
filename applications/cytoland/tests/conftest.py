@@ -54,11 +54,6 @@ requires_hpc_and_gpu = pytest.mark.skipif(
 )
 
 
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line("markers", "hpc_integration: requires HPC paths and GPU")
-
-
 @pytest.fixture
 def checkpoint_path():
     """Return path to vscyto3d checkpoint."""

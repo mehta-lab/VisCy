@@ -9,6 +9,7 @@ import copy
 import inspect
 import itertools
 import logging
+from collections.abc import Callable
 from typing import Literal, Sequence
 
 import numpy as np
@@ -19,6 +20,7 @@ from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
+from dynacell.tiling import window_starts
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
@@ -45,6 +47,20 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNeXt2": UNeXt2,
     "fcmae": FullyConvolutionalMAE,
 }
+
+
+def _ckpt_state_dict(ckpt_path: str) -> dict[str, Tensor]:
+    """Load only the ``state_dict`` of a Lightning checkpoint onto CPU."""
+    return torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+
+
+def _record_val_loss(
+    losses: list[list[tuple[Tensor, int]]], dataloader_idx: int, loss: Tensor, batch_size: int
+) -> None:
+    """Append ``(loss, batch_size)`` to ``losses[dataloader_idx]``, growing the list first."""
+    while len(losses) <= dataloader_idx:
+        losses.append([])
+    losses[dataloader_idx].append((loss, batch_size))
 
 
 def _aggregate_validation_losses(
@@ -113,6 +129,68 @@ def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Ten
         start = (current - size) // 2
         slices[dim] = slice(start, start + size)
     return tensor[tuple(slices)]
+
+
+def _sliding_window_inference(
+    forward_fn: Callable[[Tensor], Tensor],
+    source: Tensor,
+    patch_spatial: tuple[int, ...],
+    overlap_size: tuple[int, int, int] = (4, 256, 256),
+) -> Tensor:
+    """Tile ``source`` into ``patch_spatial`` windows, run ``forward_fn`` per tile, average overlaps.
+
+    Fixed-input-size generators (the ViT ``UNetViT3D``) cannot run a forward
+    pass on a volume larger than their trained spatial size. This slides
+    ``patch_spatial`` windows over the ``(D, H, W)`` extent of ``source`` and
+    averages predictions in overlapping regions, yielding a prediction with the
+    same spatial shape as ``source``. The channel dimension is taken from the
+    forward output (``out_channels`` may differ from ``source``'s in_channels).
+
+    Parameters
+    ----------
+    forward_fn : Callable
+        Maps one ``(B, C, *patch_spatial)`` tile to ``(B, out_channels, *patch_spatial)``.
+    source : Tensor
+        Input tensor of shape ``(B, C, D, H, W)``.
+    patch_spatial : tuple of int
+        Per-dimension window size ``(pd, ph, pw)`` (the model's ``input_spatial_size``).
+    overlap_size : tuple of int
+        Overlap in ``(D, H, W)`` between adjacent windows.
+
+    Returns
+    -------
+    Tensor
+        Prediction with the same spatial shape as ``source``.
+    """
+    n_spatial = 3
+    patch = tuple(patch_spatial)
+    start_lists = window_starts(tuple(source.shape[-3:]), patch, overlap_size)
+
+    # Accumulators are allocated lazily from the first patch output so their
+    # channel dimension matches the model's out_channels (which can differ
+    # from source's in_channels, e.g. 1 phase in -> 2 target out).
+    prediction_sum: Tensor | None = None
+    prediction_count: Tensor | None = None
+
+    with torch.no_grad():
+        for starts in itertools.product(*start_lists):
+            slicer: list = [slice(None)] * source.ndim
+            for i, st in enumerate(starts):
+                slicer[-(n_spatial - i)] = slice(st, st + patch[i])
+            patch_out = forward_fn(source[tuple(slicer)])
+            if prediction_sum is None:
+                out_shape = list(source.shape)
+                out_shape[1] = patch_out.shape[1]
+                prediction_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
+                prediction_count = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
+            prediction_sum[tuple(slicer)] += patch_out
+            prediction_count[tuple(slicer)] += 1
+
+    if prediction_sum is None:
+        raise RuntimeError("sliding window produced no patches")
+    if not torch.all(prediction_count > 0):
+        raise RuntimeError("sliding window left uncovered voxels")
+    return prediction_sum / prediction_count
 
 
 class DynacellUNet(LightningModule):
@@ -217,13 +295,13 @@ class DynacellUNet(LightningModule):
                 raise ValueError("DynacellUNet(encoder_only=True) requires ckpt_path to be set")
             if not isinstance(self.model, FullyConvolutionalMAE):
                 raise ValueError(f"encoder_only is only supported for architecture='fcmae', got {architecture!r}")
-            state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            state_dict = _ckpt_state_dict(ckpt_path)
             prefix = "model.encoder."
             encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
             self.model.encoder.load_state_dict(encoder_weights, strict=True)
             _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
         elif ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+            self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
@@ -300,9 +378,7 @@ class DynacellUNet(LightningModule):
         target: Tensor = batch["target"]
         pred = self.forward(source)
         loss = self._compute_loss(pred, target, batch)
-        if dataloader_idx + 1 > len(self.validation_losses):
-            self.validation_losses.append([])
-        self.validation_losses[dataloader_idx].append((loss.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -391,55 +467,7 @@ class DynacellUNet(LightningModule):
         Tensor
             Prediction with the same spatial shape as ``source``.
         """
-        spatial = source.shape[-3:]
-        patch_spatial = tuple(self.model.input_spatial_size)
-        n_spatial = 3
-        overlap = tuple(overlap_size)
-
-        for i in range(n_spatial):
-            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
-            if S < P:
-                raise ValueError(f"spatial dim {i} size {S} must be >= patch size {P}")
-            if not (0 <= ov < P):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {P})")
-
-        # Accumulators are allocated lazily from the first patch output so
-        # their channel dimension matches the model's out_channels (which can
-        # differ from source's in_channels, e.g. 1 phase in -> 2 target out).
-        prediction_sum: Tensor | None = None
-        prediction_count: Tensor | None = None
-
-        start_lists = []
-        for i in range(n_spatial):
-            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
-            stride = P - ov
-            last = S - P
-            starts = [0]
-            while starts[-1] + stride < last:
-                starts.append(starts[-1] + stride)
-            if starts[-1] != last:
-                starts.append(last)
-            start_lists.append(starts)
-
-        with torch.no_grad():
-            for starts in itertools.product(*start_lists):
-                slicer: list = [slice(None)] * source.ndim
-                for i, st in enumerate(starts):
-                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
-                patch_out = self.forward(source[tuple(slicer)])
-                if prediction_sum is None:
-                    out_shape = list(source.shape)
-                    out_shape[1] = patch_out.shape[1]
-                    prediction_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
-                    prediction_count = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
-                prediction_sum[tuple(slicer)] += patch_out
-                prediction_count[tuple(slicer)] += 1
-
-        if prediction_sum is None:
-            raise RuntimeError("sliding window produced no patches")
-        if not torch.all(prediction_count > 0):
-            raise RuntimeError("sliding window left uncovered voxels")
-        return prediction_sum / prediction_count
+        return _sliding_window_inference(self.forward, source, tuple(self.model.input_spatial_size), overlap_size)
 
 
 class DynacellFlowMatching(LightningModule):
@@ -535,7 +563,7 @@ class DynacellFlowMatching(LightningModule):
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+            self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
     def training_step(self, batch: dict, batch_idx: int) -> Tensor:
         """Compute flow-matching training loss for one batch.
@@ -582,9 +610,7 @@ class DynacellFlowMatching(LightningModule):
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
         loss = self.model(phase, target)
-        if dataloader_idx + 1 > len(self._validation_losses):
-            self._validation_losses.append([])
-        self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
+        _record_val_loss(self._validation_losses, dataloader_idx, loss.detach(), phase.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -775,10 +801,16 @@ class DynacellGAN(LightningModule):
     example_input_yx_shape : Sequence of int
         YX shape used to build ``example_input_array`` for graph logging
         when the generator does not advertise an ``input_spatial_size``.
-    predict_method : {"full_image"}
-        Prediction method. Only ``"full_image"`` is supported.
+    predict_method : {"full_image", "sliding_window"}
+        Prediction method. ``"full_image"`` runs the generator on the whole
+        input (requires the input to match the generator's ``input_spatial_size``).
+        ``"sliding_window"`` tiles inputs larger than ``input_spatial_size`` into
+        overlapping windows and averages them — needed for the fixed-size ViT
+        generator on test volumes larger than its trained crop (e.g. the
+        640x960 A549 test set vs the 512x512 training crop).
     predict_overlap : tuple of int
-        Reserved for future tiled inference; currently unused at predict.
+        Overlap in ``(D, H, W)`` between adjacent windows when
+        ``predict_method='sliding_window'``; ignored for ``'full_image'``.
     ckpt_path : str or None
         Optional path to a Lightning checkpoint to load weights from at
         construction time. Loaded with ``strict=False`` so pre-modernization
@@ -814,7 +846,7 @@ class DynacellGAN(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (512, 512),
-        predict_method: Literal["full_image"] = "full_image",
+        predict_method: Literal["full_image", "sliding_window"] = "full_image",
         predict_overlap: tuple[int, int, int] = (4, 256, 256),
         ckpt_path: str | None = None,
     ) -> None:
@@ -907,7 +939,7 @@ class DynacellGAN(LightningModule):
         self.example_input_array = torch.rand(1, in_channels, d, h, w)
 
         if ckpt_path is not None:
-            state = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            state = _ckpt_state_dict(ckpt_path)
             # strict=False: pre-modernization checkpoints don't carry
             # generator_ema.* / _lecam_ema_* keys. Filter missing-key warnings
             # to expected-missing prefixes; anything else is a genuine
@@ -1227,9 +1259,7 @@ class DynacellGAN(LightningModule):
         # Raw generator pass (always).
         pred_raw = self.generator(source)
         l1_raw = F.l1_loss(pred_raw, target)
-        if dataloader_idx + 1 > len(self.validation_losses_raw):
-            self.validation_losses_raw.append([])
-        self.validation_losses_raw[dataloader_idx].append((l1_raw.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses_raw, dataloader_idx, l1_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             l1_raw,
@@ -1242,9 +1272,7 @@ class DynacellGAN(LightningModule):
             with torch.no_grad():
                 pred_ema = self.generator_ema(source)
             l1_ema = F.l1_loss(pred_ema, target)
-            if dataloader_idx + 1 > len(self.validation_losses_ema):
-                self.validation_losses_ema.append([])
-            self.validation_losses_ema[dataloader_idx].append((l1_ema.detach(), source.shape[0]))
+            _record_val_loss(self.validation_losses_ema, dataloader_idx, l1_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
                 l1_ema,
@@ -1355,9 +1383,18 @@ class DynacellGAN(LightningModule):
         source = batch["source"]
         original_shape = source.shape[2:]
         source = self._predict_pad(source)
+        # Inference uses EMA generator when available (and use_ema_at_predict=True).
+        generator = self._inference_generator()
         if self.predict_method == "full_image":
-            # Inference uses EMA generator when available (and use_ema_at_predict=True).
-            prediction = self._inference_generator()(source)
+            prediction = generator(source)
+        elif self.predict_method == "sliding_window":
+            # The ViT generator is fixed at input_spatial_size; tile larger
+            # inputs (e.g. the 640x960 A549 test) into overlapping windows.
+            prediction = _sliding_window_inference(
+                generator, source, tuple(generator.input_spatial_size), self.predict_overlap
+            )
         else:
-            raise ValueError(f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image'.")
+            raise ValueError(
+                f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image' or 'sliding_window'."
+            )
         return _center_crop_to_shape(prediction, original_shape)

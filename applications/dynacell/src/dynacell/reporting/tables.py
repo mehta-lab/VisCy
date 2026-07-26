@@ -16,9 +16,13 @@ FEATURE_METRICS = [
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
     "CP_FID",
     "DINOv3_FID",
     "DynaCLR_FID",
+    "CellDINO_FID",
+    "MorphEm_FID",
 ]
 
 HIGHER_IS_BETTER = {
@@ -35,6 +39,8 @@ HIGHER_IS_BETTER = {
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
 }
 
 
@@ -91,8 +97,7 @@ def aggregate_metrics(
     """
     if metrics is None:
         metrics = [c for c in df.columns if c not in ("FOV", "Timepoint")]
-    agg = df[metrics].agg(["mean", "std"])
-    return agg
+    return df[metrics].agg(["mean", "std"])
 
 
 def load_and_aggregate(

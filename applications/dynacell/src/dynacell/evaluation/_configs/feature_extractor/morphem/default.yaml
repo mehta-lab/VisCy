@@ -1,0 +1,3 @@
+# MorphEm DINO ViT-S/16 microscopy embedder. Hub id resolves from the shared
+# HF_HUB_CACHE (warmed once per team); offline nodes read it from there.
+pretrained_model_name: CaicedoLab/MorphEm

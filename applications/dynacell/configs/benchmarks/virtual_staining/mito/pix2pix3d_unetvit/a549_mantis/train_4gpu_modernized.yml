@@ -1,0 +1,59 @@
+# pix2pix3d_unetvit MODERNIZED fit on mito (Structure channel of TOMM20 store) — A549 mantis-lightsheet pooled (mock + DENV + ZIKV), 4-GPU DDP.
+#
+# Finalized "Run D" recipe: modernized overlay (nonsat + R1 + G-EMA, equal LR)
+# + lambda_l1=10 + LeCam gamma=0.3 + 40 epochs. Mirrors the completed nucleus
+# modernized runs (same recipe, Structure channel / TOMM20 store). Submit with NO overrides.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/data_overlays/unetvit3d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix3d_unetvit_fit_ddp_modernized.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: a549_mantis
+  model_name: pix2pix3d_unetvit
+  experiment_id: mito__a549_mantis__pix2pix3d_unetvit_modernized
+
+model:
+  init_args:
+    lambda_l1: 10.0
+    lecam_gamma: 0.3
+
+trainer:
+  max_epochs: 40
+  logger:
+    init_args:
+      name: pix2pix3d_unetvit_A549_TOMM20_4gpu_modernized_lambdaL1_10_lecam_40ep
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/pix2pix3d_unetvit
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        filename: "epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/pix2pix3d_unetvit/checkpoints
+
+data:
+  init_args:
+    # A549 pooled store + target_channel — no resolver in this train_set.
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/TOMM20_all.zarr
+
+launcher:
+  job_name: pix2pix3d_unetvit_A549_TOMM20_4gpu_modernized_lambdaL1_10_lecam_40ep
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/pix2pix3d_unetvit
+  # pix2pix3d GAN (UNetViT3D G + multiscale-patch D, large 3D crops) OOMs on
+  # 80 GB h100; needs h200 (141 GB). Narrow the hardware_4gpu h100|h200 default.
+  sbatch:
+    constraint: h200

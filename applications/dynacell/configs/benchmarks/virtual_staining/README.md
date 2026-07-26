@@ -296,3 +296,9 @@ Eval leaves follow the same split on the Hydra side:
   `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`,
   `io.pred_channel_name`, `io.gt_cache_dir`, and
   `pixel_metrics.spacing` from the manifest.
+
+## Navigation
+
+- Up: [benchmarks](../README.md)
+- See also: `_internal/leaf/grouped/` [bucket summary](_internal/leaf/grouped/README.md) ·
+  eval-pipeline internals in [dynacell.evaluation](../../../src/dynacell/evaluation/README.md)

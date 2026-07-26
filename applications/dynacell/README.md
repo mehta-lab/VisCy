@@ -33,6 +33,18 @@ population-level phenotype distributions.
 This directory is the DynaCell application of the [VisCy](../../README.md)
 monorepo. See the paper for the full benchmark description.
 
+## Directory map
+
+- **[configs/](configs/README.md)** — Hydra/LightningCLI configs: reusable recipes, generic examples, and the
+  runnable benchmark leaves (`configs/benchmarks/virtual_staining/`).
+- **[src/](src/README.md)** — the installable `dynacell` package: engines, data/manifest layer, evaluation
+  pipeline, reporting, preprocessing, and the bundled dataset registry.
+- **[tools/](tools/README.md)** — operational scripts: leaf submission, config generation, data/artifact builders.
+- **[tests/](tests/README.md)** — the pytest suite (integration-first) for the package and tools.
+- **[examples/](examples/README.md)** — the dataset notebook and the Hugging Face virtual-staining demo.
+- **[CLAUDE.md](./CLAUDE.md)** — conventions reference: code↔paper names, prediction/eval-dir naming, batch
+  semantics, eval runtime.
+
 ## Installation
 
 DynaCell is part of the VisCy `uv` workspace. From the repository root:
@@ -183,3 +195,9 @@ a bare invocation writes **and** submits.
   Institute Terms of Use.
 - **Demo** — a small reviewer sample is at
   [dynacell_a549_demo.zip](https://dynacell.s3.us-west-2.amazonaws.com/v1/demo/dynacell_a549_demo.zip).
+
+## Navigation
+
+- Up: [VisCy monorepo](../../README.md)
+- Subdirectories: [configs/](configs/README.md) · [src/](src/README.md) · [tools/](tools/README.md) ·
+  [tests/](tests/README.md) · [examples/](examples/README.md)

@@ -9,7 +9,7 @@ try:
     from cubic.cuda import ascupy, asnumpy
     from cubic.feature import glcm_features
     from cubic.feature.voxel import regionprops_table
-    from cubic.metrics import fsc_resolution, nrmse, pcc, psnr
+    from cubic.metrics import frc_resolution, fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
     from cubic.scipy import ndimage as _cubic_ndimage
@@ -18,6 +18,7 @@ except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
     cubic_ssim = None  # type: ignore[assignment]
+    frc_resolution = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
     glcm_features = None  # type: ignore[assignment]
     nrmse = None  # type: ignore[assignment]
@@ -27,8 +28,6 @@ except ImportError:
     spectral_pcc = None  # type: ignore[assignment]
     _cubic_filters = None  # type: ignore[assignment]
     _cubic_ndimage = None  # type: ignore[assignment]
-
-from dynacell.evaluation.utils import _minmax_norm
 
 
 def _require_cubic():
@@ -60,26 +59,35 @@ def _min_max_normalize(
 
 @torch.inference_mode()
 def ssim(img1: torch.Tensor, img2: torch.Tensor, eps: float = 1e-8) -> float:
-    """Compute mean structural similarity index (SSIM) for 3D volumetric inputs.
+    """Compute mean structural similarity index (SSIM) for 2D or 3D inputs.
+
+    ``spatial_dims`` is dispatched from the input rank (cubic convention): a 2-D
+    ``(H, W)`` input scores an in-plane SSIM, a 3-D ``(D, H, W)`` input scores a
+    volumetric SSIM. Both are min-max normalized per input before scoring.
 
     Parameters
     ----------
     img1, img2 : torch.Tensor
-        3-D tensors of shape ``(D, H, W)``.
+        2-D ``(H, W)`` or 3-D ``(D, H, W)`` tensors of the same shape.
     eps : float
         Small constant for min-max normalization stability.
     """
     if cubic_ssim is None:
         raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
-    if img1.ndim != 3:
-        raise ValueError(f"ssim expects 3-D (D, H, W) input, got {img1.ndim}-D tensor of shape {tuple(img1.shape)}")
+    if img1.ndim not in (2, 3):
+        raise ValueError(
+            f"ssim expects 2-D (H, W) or 3-D (D, H, W) input, got {img1.ndim}-D tensor of shape {tuple(img1.shape)}"
+        )
+    spatial_dims = img1.ndim
     img1 = _min_max_normalize(img1, eps=eps)
     img2 = _min_max_normalize(img2, eps=eps)
 
-    img1 = img1.unsqueeze(0).unsqueeze(0)  # (D,H,W) → (1,1,D,H,W) — cubic's 5D contract
+    # cubic's batched dispatch expects [N, C, (D,) H, W] (ndim = spatial_dims + 2):
+    # (H,W) → (1,1,H,W); (D,H,W) → (1,1,D,H,W).
+    img1 = img1.unsqueeze(0).unsqueeze(0)
     img2 = img2.unsqueeze(0).unsqueeze(0)
 
-    return cubic_ssim(img1, img2, spatial_dims=3, data_range=1.0, gaussian_weights=True)
+    return cubic_ssim(img1, img2, spatial_dims=spatial_dims, data_range=1.0, gaussian_weights=True)
 
 
 def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
@@ -169,13 +177,23 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     if spectral_pcc_kwargs is None and fsc_kwargs is None:
         return metrics
 
+    # Match the frequency-domain metrics to the input rank (cubic convention):
+    # the in-focus 2D path passes (H, W) arrays → trailing YX spacing + the
+    # ring-based FRC; the full-3D path keeps the (Z, Y, X) spacing + shell-based
+    # FSC. The 3D path is byte-identical to before (ndim==3 → full spacing, FSC).
+    ndim = pred_xp.ndim
+    freq_spacing = list(spacing)[-ndim:]
+
     if spectral_pcc_kwargs is not None:
-        metrics["Spectral_PCC"] = spectral_pcc(pred_xp, target_xp, spacing=spacing, **spectral_pcc_kwargs)
+        metrics["Spectral_PCC"] = spectral_pcc(pred_xp, target_xp, spacing=freq_spacing, **spectral_pcc_kwargs)
     if fsc_kwargs is not None:
-        # cubic.fsc_resolution mean-centers internally before every FFT,
+        # cubic.{fsc,frc}_resolution mean-center internally before every FFT,
         # so we pass the raw arrays.
-        resolutions = fsc_resolution(target_xp, pred_xp, spacing=spacing, **fsc_kwargs)
-        metrics.update({f"{k.upper()}_FSC_Resolution": float(v) for k, v in resolutions.items()})
+        if ndim == 2:
+            metrics["FRC_Resolution"] = float(frc_resolution(target_xp, pred_xp, spacing=freq_spacing, **fsc_kwargs))
+        else:
+            resolutions = fsc_resolution(target_xp, pred_xp, spacing=freq_spacing, **fsc_kwargs)
+            metrics.update({f"{k.upper()}_FSC_Resolution": float(v) for k, v in resolutions.items()})
 
     return metrics
 
@@ -291,11 +309,11 @@ def score_microssim(microssim_data, sim, use_gpu: bool = True):
 def _robust_norm(x, p_lo: float = 1.0, p_hi: float = 99.0, eps: float = 1e-8):
     """Percentile-clip ``x`` to ``[p_lo, p_hi]`` then min-max to ``[0, 1]``.
 
-    Replaces the fragile raw min-max (:func:`_minmax_norm`, outlier-dominated)
-    for the CP feature track. Device-agnostic — ``np.percentile``/``np.clip``
-    dispatch on numpy or cupy. The clipped numerator is bounded by the span, so
-    the ``+ eps`` denominator keeps a constant/near-constant image finite
-    (output → 0) instead of NaN/inf (mirrors :func:`_minmax_norm`'s eps guard).
+    Replaces the raw min-max this track used to run on, which a single hot pixel
+    could dominate. Device-agnostic — ``np.percentile``/``np.clip`` dispatch on
+    numpy or cupy. The clipped numerator is bounded by the span, so the ``+ eps``
+    denominator keeps a constant/near-constant image finite (output → 0) instead
+    of NaN/inf.
     """
     lo, hi = np.percentile(x, (p_lo, p_hi))
     x = np.clip(x, lo, hi)
@@ -704,7 +722,8 @@ def features_from_crops(crops, feature_extractor):
         out = batch_fn(crops)
         return np.asarray(out.detach().cpu()).reshape(len(crops), -1).astype(np.float32, copy=False)
     feats = [feature_extractor.extract_features(c).detach().cpu().numpy().reshape(-1) for c in crops]
-    return np.stack(feats, axis=0)
+    # float32 to match the batch path, so both write the same dtype to the cache.
+    return np.stack(feats, axis=0).astype(np.float32, copy=False)
 
 
 def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = None):
@@ -713,6 +732,18 @@ def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = 
     Shared by every deep-feature extractor in the eval pipeline so the
     max-projection, cell iteration, and crop construction run once per
     (FOV, timepoint) instead of once per backbone.
+
+    The projection is robust-normalized per image (percentile-clip
+    ``[1, 99]`` then min-max to ``[0, 1]`` via :func:`_robust_norm`) — the
+    same recipe :func:`cp_regionprops` uses — so GT and prediction crops
+    land on comparable, outlier-robust ranges before the backbones. Raw
+    min-max (the previous recipe) let a single hot/saturated pixel anywhere
+    in the max-projection set the scale and compress every cell crop toward
+    black, and did so asymmetrically for GT vs prediction (real fluorescence
+    carries hot pixels/debris that model outputs rarely reproduce) — a
+    GT↔pred intensity-range mismatch injected straight into the features.
+    The clip is not affine, so it changes even the z-score-based backbones'
+    (CELL-DINO, MorphEm) inputs, not just DINOv3's.
 
     Parameters
     ----------
@@ -729,7 +760,12 @@ def build_crops(image, cell_segmentation, patch_size, *, z_slab: slice | None = 
     if z_slab is not None:
         image = image[z_slab]
         cell_segmentation = cell_segmentation[z_slab]
-    image_2d = _minmax_norm(np.max(image, axis=0))
+    # ``_robust_norm`` upcasts to float64 (``np.percentile`` returns float64);
+    # cast back to float32 so crops match the float32 model weights. DINOv3's
+    # HF processor and DynaCLR (no explicit dtype) would otherwise feed float64
+    # into float32 conv/linear layers → "Input type (double) and bias type
+    # (float) should be the same". CELL-DINO/MorphEm are already dtype-guarded.
+    image_2d = _robust_norm(np.max(image, axis=0)).astype(np.float32, copy=False)
     return _build_per_cell_crops_2d(image_2d, cell_segmentation, patch_size)
 
 

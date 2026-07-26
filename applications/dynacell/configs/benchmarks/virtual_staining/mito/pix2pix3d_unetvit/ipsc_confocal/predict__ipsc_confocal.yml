@@ -36,8 +36,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/tomm20_pix2pix3d_unetvit.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/ipsc/prediction.zarr
 
 launcher:
   job_name: pix2pix3d_unetvit_PRED_TOMM20
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/ipsc

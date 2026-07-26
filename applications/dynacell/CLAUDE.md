@@ -5,22 +5,50 @@
 Config keys, prediction-zarr filenames, eval keys, and W&B run names use **code
 names**; figures/tables/manuscripts use **paper names**. Translate at any
 code/paper boundary. This table is the source of truth (referenced by
-`src/dynacell/evaluation/save_paths.py:PAPER_KEY`).
+`src/dynacell/evaluation/paths.py:PAPER_KEY`).
 
 | Code name | Paper name |
 | --- | --- |
 | `fcmae_vscyto3d_scratch` | **UNeXt2** |
 | `fcmae_vscyto3d_pretrained` | **VSCyto3D** (FCMAE-pretrained UNeXt2) |
-| `unetvit3d` | **UNetViT3D** (deterministic; iPSC-trained only) |
+| `unetvit3d` | **UNetViT3D** (deterministic; iPSC-trained for nucleus/membrane; ER/mito also have a549/joint checkpoints from the A549 raw-regen campaign gap-fill) |
 | `pix2pix3d_unetvit` | **pix2pix3d** (GAN; same UNetViT3D generator, `DynacellGAN` engine) |
 | `fnet3d_paper` | **FNet3D** |
 | `celldiff` / `celldiff_r2` | **CELL-Diff** (variants: `iterative`, `sliding_window`, `denoise`/Mean Predictor) |
+| `fcmae_vscyto2d_scratch` | **UNeXt2-2D** (in-focus 2D track) |
+| `fcmae_vscyto2d_pretrained` | **VSCyto2D** (encoder init from the public 2D FCMAE ckpt) |
+| `fnet2d` | **FNet2D** |
+
+The three 2D keys are the in-focus 2D-vs-3D benchmark track. Their paper names are
+deliberately distinct from the 3D namesakes (`unext2_2d` vs `unext2`, `vscyto2d` vs
+`vscyto3d`) — collapsing them would merge the 2D and 3D rows into one eval dir.
 
 VSCyto3D ablations (in `vscyto3d-ablations`): `*_randinit` (untrained),
 `*_cytoland` (public ckpt, no FT), `*_infectionft` (cytoland→A549-infection-FT,
 no FT), `vscyto3d_cytolandft` / `vscyto3d_infectionft_dynacellft` (+ dynacell FT,
 dual nucleus+membrane). The same suffixes appear as zarr-filename infixes;
 `_cytolandft` / `_infectionft_dynacellft` combine with `_a549trained`.
+
+## Training data: A549 condition pooling
+
+A549 training data is **condition-pooled**: both joint (iPSC+A549) and A549-only fits
+read a single `<TARGET>_all.zarr` per target combining **mock + ZIKV + DENV** (not
+mock-only), at
+`/hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/{H2B,CAAX,SEC61B,TOMM20}_all.zarr`.
+Built by `assemble.py` (paper repo `dynacell_paper/preprocess/a549_mantis/`) with
+`condition=None`, so its per-condition position filter drops nothing — it walks every
+train-split position across all three conditions.
+
+- The pooled store is a single flattened well (`0/0`) with sequential FOV names
+  (`fov0000…`); the **condition is dropped from the FOV name**, so you cannot read the
+  conditions off the on-disk layout — only from the build script / config comment.
+- There is **no `*joint*` train-set fragment** — joint train leaves compose
+  `_internal/shared/model/train_sets/{a549_mantis,ipsc_confocal}.yml` and author the two
+  `HCSDataModule` children of `BatchedConcatDataModule` inline (A549 child →
+  `<TARGET>_all.zarr`, iPSC child → `ipsc/dataset_v4/train/cell.zarr`).
+- Deliberate asymmetry: **train pools conditions; predict/eval stays per-condition**
+  (canonical per-treatment `.ozx` in the manifest registry) — hence test sets and the
+  paper tables break out mock/denv/zikv.
 
 ## Prediction zarr naming
 
@@ -52,10 +80,11 @@ Two exceptions to watch:
 
 ## Eval directory naming
 
-`src/dynacell/evaluation/save_paths.py:eval_save_dir` is the writer and the
-cross-repo contract (must match the paper's
-`compute_all_organelle_precision_recall.py:eval_dir_for`; pinned by
-`tests/test_save_paths.py`). Canonical focus-2D outputs under
+`src/dynacell/evaluation/paths.py` is the writer and the cross-repo contract
+(`eval_leaf` for the canonical model-centric layout, `normalize_legacy` for the
+pre-canonical `*_with_embeddings` forms; the paper repo vendor-copies it and
+asserts parity — must match `compute_all_organelle_precision_recall.py:eval_dir_for`;
+pinned by `tests/test_paths.py`). Canonical focus-2D outputs under
 `/hpc/projects/virtual_staining/training/dynacell/{ipsc,a549}/`:
 `evaluations_with_embeddings/` (ipsc-trained), `evaluations_a549trained_with_embeddings/`,
 `evaluations_jointtrained_with_embeddings/` (infix `jointtrained`). Dirs use the

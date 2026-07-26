@@ -14,6 +14,7 @@ import itertools
 import torch
 from torch import Tensor, nn
 
+from dynacell.tiling import window_starts
 from viscy_models.celldiff import CELLDiffNet
 from viscy_models.celldiff.modules.transport import Sampler, create_transport
 
@@ -170,23 +171,12 @@ class CELLDiff3DVS(nn.Module):
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
-
-        for i in range(n_spatial):
-            if spatial[i] < patch_spatial[i]:
-                raise ValueError(f"spatial dim {i} ({spatial[i]}) must be >= patch dim ({patch_spatial[i]})")
+        start_lists = window_starts(spatial, patch_spatial, (0, 0, 0))
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
         out = torch.empty(out_shape, device=phase.device, dtype=phase.dtype)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
-
-        start_lists: list[list[int]] = []
-        for i in range(n_spatial):
-            S, P = spatial[i], patch_spatial[i]
-            starts = list(range(0, S - P + 1, P))
-            if starts[-1] != S - P:
-                starts.append(S - P)
-            start_lists.append(starts)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):
@@ -313,49 +303,21 @@ class CELLDiff3DVS(nn.Module):
             If ``path_type`` is not ``"Linear"`` or ``prediction`` is not
             ``"velocity"``, since the anchoring formula is path-specific.
         """
-        spatial = tuple(phase.shape[-3:])
-        patch_spatial = tuple(self.net.input_spatial_size)
-        n_spatial = 3
-
-        if isinstance(overlap_size, int):
-            overlap = (overlap_size,) * n_spatial
-        else:
-            overlap = tuple(overlap_size)
-            if len(overlap) != n_spatial:
-                raise ValueError("overlap_size must be int or a 3-tuple")
-
-        for i in range(n_spatial):
-            s_i, p_i, ov = spatial[i], patch_spatial[i], overlap[i]
-            if s_i < p_i:
-                raise ValueError(f"spatial dim {i} ({s_i}) must be >= patch dim ({p_i})")
-            if not (0 <= ov < p_i):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs patch {p_i})")
-
         if self.path_type != "Linear" or self.prediction != "velocity":
             raise NotImplementedError(
                 "generate_iterative only supports Linear path with velocity prediction, "
                 f"got path_type={self.path_type!r}, prediction={self.prediction!r}"
             )
 
+        spatial = tuple(phase.shape[-3:])
+        patch_spatial = tuple(self.net.input_spatial_size)
+        n_spatial = 3
+        start_lists = window_starts(spatial, patch_spatial, overlap_size)
+
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
         out = torch.full(out_shape, float("nan"), device=phase.device, dtype=phase.dtype)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
-
-        start_lists: list[list[int]] = []
-        for i in range(n_spatial):
-            s_i, p_i, ov = spatial[i], patch_spatial[i], overlap[i]
-            stride = p_i - ov
-            last = s_i - p_i
-            starts = [0]
-            while True:
-                nxt = starts[-1] + stride
-                if nxt >= last:
-                    break
-                starts.append(nxt)
-            if starts[-1] != last:
-                starts.append(last)
-            start_lists.append(starts)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):
@@ -688,37 +650,12 @@ class CELLDiff3DVS(nn.Module):
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
-
-        if isinstance(overlap_size, int):
-            overlap = (overlap_size,) * n_spatial
-        else:
-            overlap = tuple(overlap_size)
-            if len(overlap) != n_spatial:
-                raise ValueError("overlap_size must be int or a 3-tuple")
-
-        for i in range(n_spatial):
-            S, P, Ov = spatial[i], patch_spatial[i], overlap[i]
-            if S < P:
-                raise ValueError(f"spatial dim {i} ({S}) must be >= patch dim ({P})")
-            if not (0 <= Ov < P):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {Ov} vs {P})")
+        start_lists = window_starts(spatial, patch_spatial, overlap_size)
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
         prediction_sum = torch.zeros(out_shape, device=phase.device, dtype=phase.dtype)
         prediction_count = torch.zeros(out_shape, device=phase.device, dtype=phase.dtype)
-
-        start_lists: list[list[int]] = []
-        for i in range(n_spatial):
-            S, P, Ov = spatial[i], patch_spatial[i], overlap[i]
-            stride = P - Ov
-            last = S - P
-            starts = [0]
-            while starts[-1] + stride < last:
-                starts.append(starts[-1] + stride)
-            if starts[-1] != last:
-                starts.append(last)
-            start_lists.append(starts)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):

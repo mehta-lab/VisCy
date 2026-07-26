@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 
 try:
     from segmenter_model_zoo.zoo import SegModel, SuperModel
@@ -14,13 +15,7 @@ except ImportError:
 try:
     from aicssegmentation.structure_wrapper.seg_lamp1 import Workflow_lamp1
     from aicssegmentation.structure_wrapper.seg_npm1 import Workflow_npm1
-    from aicssegmentation.structure_wrapper.seg_npm1_SR import (
-        Workflow_npm1_SR,  # noqa: F401
-    )
     from aicssegmentation.structure_wrapper.seg_sec61b import Workflow_sec61b
-    from aicssegmentation.structure_wrapper.seg_sec61b_dual import (
-        Workflow_sec61b_dual,  # noqa: F401
-    )
     from aicssegmentation.structure_wrapper.seg_tomm20 import Workflow_tomm20
 except ImportError:
     Workflow_npm1 = None  # type: ignore[assignment, misc]
@@ -179,25 +174,33 @@ def prepare_segmentation_model(config):
     if config.target_name in ["nucleus", "membrane"]:
         seg_cfg = getattr(config, "segmentation", None)
         backend = getattr(seg_cfg, "backend", "supermodel") if seg_cfg is not None else "supermodel"
-        if backend in ("cellpose", "cellpose_watershed"):
+        if backend in ("cellpose", "cellpose_watershed", "cpdino"):
             if backend == "cellpose" and config.target_name != "nucleus":
                 raise NotImplementedError("segmentation.backend='cellpose' supports nucleus only")
             if backend == "cellpose_watershed" and config.target_name != "membrane":
                 raise NotImplementedError("segmentation.backend='cellpose_watershed' supports membrane only")
+            # cpdino serves both nucleus (direct) and membrane (whole-cell + nucleus carve),
+            # so it is valid for either target — no target restriction.
             use_gpu = bool(getattr(config, "use_gpu", True))
             if not (use_gpu and torch.cuda.is_available()):
                 # The cellpose backends run inference through
-                # ``cubic.segmentation.segment_cpsam``, which is GPU-only by
+                # ``cubic.segmentation.segment_cellpose``, which is GPU-only by
                 # contract (raises in its CUDA precondition). Fail here with a
                 # clear message instead of building a CPU CellposeModel that
                 # would die deeper in the per-FOV segmentation loop.
                 raise RuntimeError(
-                    f"segmentation.backend={backend!r} requires CUDA (cubic.segment_cpsam "
+                    f"segmentation.backend={backend!r} requires CUDA (cubic.segment_cellpose "
                     f"is GPU-only), but use_gpu={use_gpu} and "
                     f"torch.cuda.is_available()={torch.cuda.is_available()}. "
                     "Run on a CUDA device with use_gpu=true."
                 )
-            return load_cellpose_model(use_gpu=use_gpu)
+            # cpdino loads the Cellpose-DINO ViT-L weights; cellpose/cellpose_watershed
+            # load Cellpose-SAM. The model name comes from segmentation.cpdino.model_name
+            # for cpdino (default "cpdino"), else the built-in "cpsam".
+            model_name = "cpsam"
+            if backend == "cpdino":
+                model_name = str(OmegaConf.select(config, "segmentation.cpdino.model_name", default="cpdino"))
+            return load_cellpose_model(use_gpu=use_gpu, model_name=model_name)
         _require_segmenter_model_zoo()
         if config.target_name == "nucleus":
             checkpoint_name = "structure_H2B_100x_hipsc"

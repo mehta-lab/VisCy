@@ -69,6 +69,104 @@ def _configure_wandb_logger(
         init_args["group"] = base_name
 
 
+_MODEL_CHECKPOINT_CLASS_PATH = "lightning.pytorch.callbacks.ModelCheckpoint"
+_MONITOR_HEALTH_CLASS_PATH = "viscy_utils.callbacks.MonitorHealthCheck"
+_LATEST_CKPT_FILENAME = "latest-epoch={epoch}-step={step}"
+
+
+def _callback_field(callback, key: str):
+    """Return ``key`` from a callback config entry (Namespace or dict), else None."""
+    if isinstance(callback, Namespace):
+        return callback.get(key)
+    if isinstance(callback, dict):
+        return callback.get(key)
+    return None
+
+
+def _init_args_of(callback) -> Namespace | dict | None:
+    """Return the mutable ``init_args`` mapping of a callback config entry."""
+    init_args = _callback_field(callback, "init_args")
+    return init_args if isinstance(init_args, (Namespace, dict)) else None
+
+
+def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> None:
+    """Guarantee latest-weights checkpoints and fail loud on a dead monitor.
+
+    A monitored ``ModelCheckpoint`` writes nothing once ``save_top_k`` is filled
+    and the metric stops improving — ``last.ckpt`` included, because Lightning
+    writes it on the same cadence. A frozen or non-finite monitor therefore ends
+    a run with no weights newer than the first few epochs.
+
+    For ``fit`` only, this appends two callbacks to the resolved config:
+
+    1. an **unmonitored** ``ModelCheckpoint`` sharing the monitored callback's
+       ``dirpath``, which saves on an epoch cadence unconditionally and owns
+       ``save_last``; and
+    2. a :class:`~viscy_utils.callbacks.MonitorHealthCheck` on the same metric.
+
+    ``save_last`` is turned off on the monitored callback so exactly one callback
+    writes ``last.ckpt`` and that file means "latest weights" rather than "weights
+    at the last improvement".
+
+    The monitored callback's ``monitor``, ``mode``, ``save_top_k`` and ``filename``
+    are deliberately left untouched: those determine which checkpoint a run calls
+    "best", so changing them would alter model selection and invalidate
+    comparisons against already-published results.
+
+    This runs on the resolved config rather than the shared trainer recipe because
+    leaves override ``trainer.callbacks`` wholesale to set their own ``dirpath`` —
+    a recipe-level default would be silently dropped by every real leaf.
+    """
+    if subcommand != "fit":
+        return
+    root = config.get(subcommand) if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return
+    callbacks = trainer.get("callbacks")
+    if not isinstance(callbacks, list):
+        return
+
+    # Idempotent: a config that already carries the guardrails is left alone.
+    for callback in callbacks:
+        if _callback_field(callback, "class_path") == _MONITOR_HEALTH_CLASS_PATH:
+            return
+
+    monitored = None
+    for callback in callbacks:
+        if _callback_field(callback, "class_path") != _MODEL_CHECKPOINT_CLASS_PATH:
+            continue
+        init_args = _init_args_of(callback)
+        if init_args is not None and init_args.get("monitor"):
+            monitored = callback
+            break
+    if monitored is None:
+        return
+
+    monitored_args = _init_args_of(monitored)
+    monitor = monitored_args.get("monitor")
+    dirpath = monitored_args.get("dirpath")
+    # Hand `last.ckpt` to the unconditional callback so it tracks the newest epoch.
+    monitored_args["save_last"] = False
+
+    latest_args = {
+        "monitor": None,
+        "filename": _LATEST_CKPT_FILENAME,
+        "auto_insert_metric_name": False,
+        "every_n_epochs": 1,
+        "save_top_k": 1,
+        "save_last": True,
+    }
+    if dirpath is not None:
+        latest_args["dirpath"] = dirpath
+    callbacks.append(Namespace(class_path=_MODEL_CHECKPOINT_CLASS_PATH, init_args=Namespace(**latest_args)))
+    callbacks.append(
+        Namespace(class_path=_MONITOR_HEALTH_CLASS_PATH, init_args=Namespace(monitor=monitor, patience=10))
+    )
+
+
 class VisCyCLI(LightningCLI):
     """Extending lightning CLI arguments and defaults."""
 
@@ -127,6 +225,7 @@ class VisCyCLI(LightningCLI):
     def before_instantiate_classes(self) -> None:
         """Apply shared config rewrites before Lightning object creation."""
         _configure_wandb_logger(self.config, self.subcommand)
+        _inject_checkpoint_guardrails(self.config, self.subcommand)
 
 
 def _setup_environment() -> None:

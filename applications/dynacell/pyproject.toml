@@ -39,12 +39,27 @@ dependencies = [
   "viscy-transforms",
   "viscy-utils",
 ]
+# Croissant 1.1 RAI metadata authoring/validation for the open-data release.
+optional-dependencies.croissant = [
+  "mlcroissant>=1.1",
+]
+# Open-data packaging/upload (dynacell.distribution): verify.py reads S3 via
+# boto3; sync.py shells out to the AWS CLI (installed out of band).
+optional-dependencies.distribution = [
+  "boto3",
+]
 optional-dependencies.eval = [
   "accelerate>=1.13",
   "aicsmlsegment",
   "aicssegmentation",
-  "cellpose",
-  "cubic==0.7",
+  # cpdino (Cellpose-DINO ViT-L) instance segmentation requires cellpose>=4.2
+  # (adds the DINO backbones + `pretrained_model="cpdino"`) and its dinov3 backbone.
+  "cellpose>=4.2",
+  # cubic 0.8.0a2 adds device-resident segment_cellpose support for all
+  # Cellpose v4 models (SAM + DINO); the PyPI 0.7.0 predates it. Pinned to the
+  # v0.8.0a2 tag (latest 0.8 alpha) rather than a bare PR commit.
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.8.0a2",
+  "dinov3 @ git+https://github.com/facebookresearch/dinov3",
   "dynaclr",
   "hydra-core>=1.2",
   "iohub>=0.3.6",
@@ -76,9 +91,14 @@ optional-dependencies.eval_gpu = [
   "cucim-cu13",
   "cupy-cuda13x",
 ]
+# Dataset assembly / authoring library (dynacell.preprocess): assemble->cubic,
+# selection->waveorder, segmentation->cellpose (cellpose imported lazily).
 optional-dependencies.preprocess = [
+  "cellpose>=4.2",
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.8.0a2",
   "iohub>=0.3.6",
   "tqdm",
+  "waveorder",
 ]
 optional-dependencies.report = [
   "hydra-core>=1.2",

@@ -1,0 +1,6 @@
+input_zarr: ???
+output_zarr: ???
+
+chunks: [1, 1, 8, 64, 64]
+shards_ratio: [2, 1, 8, 8, 8]
+zarr_version: "0.5"

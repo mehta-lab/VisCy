@@ -1,0 +1,50 @@
+# FNet2D predict: membrane (MEMB) trained on a549_mantis, tested on A549 mantis mock.
+# In-focus 2D track (Phase F). The 2D checkpoint predicts over the FULL-Z 3D test
+# store with z_window_size=1 (fnet2d_predict overlay), emitting one window per
+# z-plane -> a full-Z prediction store the existing focus-aware eval consumes
+# unchanged. Source normalization (Phase3D fov_statistics mean/std) reproduces the
+# fnet2d fit overlay exactly; a mismatch here would silently degrade predictions.
+# Best val-loss checkpoint: epoch=963-step=192800-loss=0.811.ckpt (loss/validate=0.811).
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_caax_mock.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: a549_mantis
+  predict_set: a549_mantis_caax_mock
+  model_name: fnet2d
+  experiment_id: membrane__a549_mantis__fnet2d__a549_mantis_caax_mock
+  # Override the iPSC-side `membrane` target with a549's gene-keyed `caax`.
+  dataset_ref:
+    target: caax
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/membrane/fnet2d/checkpoints/epoch=963-step=192800-loss=0.811.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/a549/a549__mock/prediction.zarr
+
+launcher:
+  job_name: FNet2D_PRED_MEMB_A549TR_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/a549/a549__mock

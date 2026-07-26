@@ -16,7 +16,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 | `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, `CellDinoFeatureExtractor`, plot helpers. |
 | `_configs/*.yaml` | Hydra schemas: `eval.yaml`, `precompute.yaml`, `eval_grouped.yaml`. |
 
-Other files (`io.py`, `formatting.py`, `spectral_pcc/`) house readers and bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are now backed by `cubic.metrics`.
+`paths.py` is the canonical artifact-path grammar (checkpoints, prediction stores, eval leaves); `spectral_pcc/` holds bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are backed by `cubic.metrics`.
 
 ## Inputs
 
@@ -305,3 +305,9 @@ uv pip install -e "applications/dynacell[eval]"
 `dynacell evaluate` and `dynacell precompute-gt` default `HF_HUB_CACHE` to a team-shared directory on project storage when they detect a repo checkout, so gated HF models (DINOv3) download once per team. The default path is set in `dynacell/__main__.py` (`_DEFAULT_SHARED_HF_CACHE`); other sites override it via the `DYNACELL_SHARED_HF_CACHE` env var. Pre-set `HF_HUB_CACHE` and the auto-setter backs off.
 
 We use `HF_HUB_CACHE` (not `HF_HOME`) because `HF_HOME` relocates the auth token file too, breaking per-user gated-repo ACLs. `HF_HUB_CACHE` only relocates weights/datasets; tokens stay per-user. First-time setup: one team member with gated-repo access (see [DINOv3 on HF](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)) runs any eval command to trigger the download; everyone else reuses the shared weights afterward — those reads don't hit HF and don't need a token.
+
+## Navigation
+
+- Up: [dynacell](../README.md)
+- See also: GPU-dispatch (`cubic`) conventions in [CLAUDE.md](CLAUDE.md) · eval-leaf composition in the
+  [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md).

@@ -17,7 +17,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/pix2pix3d_unetvit/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/pix2pix3d_unetvit/checkpoints/epoch=27-step=136192.ckpt
 
 data:
   init_args:
@@ -36,8 +36,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/tomm20_pix2pix3d_unetvit.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/joint__legacy_deconvgt/ipsc/prediction.zarr
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_PRED_TOMM20_ON_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/joint__legacy_deconvgt/ipsc

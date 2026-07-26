@@ -24,11 +24,14 @@ def _import_pipeline_with_stubs(monkeypatch):
 
     metrics_module = types.ModuleType("dynacell.evaluation.metrics")
     metrics_module.ascupy = None
+    metrics_module.CP_FEATURE_VERSION = "v2_dist_texture"
     metrics_module.fit_microssim = lambda *args, **kwargs: None
     metrics_module.score_microssim = lambda *args, **kwargs: []
     metrics_module.compute_pixel_metrics = lambda *args, **kwargs: {}
     metrics_module.evaluate_segmentations = lambda *args, **kwargs: {}
     metrics_module.cp_regionprops = lambda *args, **kwargs: None
+    metrics_module.active_cp_feature_names = lambda *args, **kwargs: ()
+    metrics_module.per_cell_similarity = lambda *args, **kwargs: []
     metrics_module.deep_features = lambda *args, **kwargs: None
     metrics_module.build_crops = lambda *args, **kwargs: []
     metrics_module.features_from_crops = lambda *args, **kwargs: np.empty((0, 0), dtype=np.float32)
@@ -53,6 +56,10 @@ def _import_pipeline_with_stubs(monkeypatch):
     linear_probe_module.fov_stratified_auroc = lambda *a, **kw: _nan_auroc
     linear_probe_module.paired_auroc = lambda *a, **kw: _nan_auroc
     linear_probe_module.indistinguishability = lambda auroc: float("nan")
+    # ``pipeline`` imports ``cross_condition_probe`` at module top, which imports
+    # ``MADScaler`` from ``linear_probe`` — stub the name so the import resolves
+    # (the cross-condition probe is not exercised by these cache-reuse tests).
+    linear_probe_module.MADScaler = object
 
     segmentation_module = types.ModuleType("dynacell.evaluation.segmentation")
     segmentation_module.segment = lambda *args, **kwargs: None

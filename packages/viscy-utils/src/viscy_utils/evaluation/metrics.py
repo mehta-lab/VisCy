@@ -171,6 +171,42 @@ def mean_average_precision(
     return map_metric.compute()
 
 
+# Floors the SSIM/CS denominators so a zero data_range (c1=c2=0) on a flat window
+# cannot produce 0/0; negligible relative to the c1/c2 stability constants otherwise.
+_SSIM_DENOM_EPS: float = 1e-8
+
+
+def _safe_sqrt(x: torch.Tensor) -> torch.Tensor:
+    """Square root whose derivative at exactly zero is 0 rather than infinite.
+
+    ``torch.sqrt`` backward is ``grad_out * 0.5 / sqrt(x)``, which is ``inf`` at
+    ``x == 0``. For the elements whose incoming ``grad_out`` is *itself* zero that
+    evaluates to ``0 * inf == nan``, so a single zero entry poisons the gradient
+    of every element in its convolution window — the forward pass stays perfectly
+    finite while the backward pass silently fills with NaN.
+
+    Guarding with ``clamp_min(eps)`` or ``sqrt(x + eps)`` does not fix this: both
+    perturb the forward value and still leave a ``1 / (2 * sqrt(eps))`` gradient
+    spike. Instead substitute a dummy positive value *before* the square root and
+    restore the true zero after, so the ``sqrt`` node never sees zero and its
+    backward never divides by it. The forward result is bit-identical to
+    ``x.sqrt()`` and the gradient is bit-identical wherever ``x > 0``; only the
+    ``x == 0`` entries change, from NaN to 0.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Non-negative input tensor.
+
+    Returns
+    -------
+    torch.Tensor
+        ``sqrt(x)``, with a zero subgradient at the exact zeros of ``x``.
+    """
+    positive = x > 0
+    return torch.where(positive, torch.where(positive, x, torch.ones_like(x)).sqrt(), torch.zeros_like(x))
+
+
 def _compute_ssim_and_cs_bf16(
     y_pred: torch.Tensor,
     y: torch.Tensor,
@@ -259,12 +295,48 @@ def _compute_ssim_and_cs_bf16(
     c1 = (k1 * data_range) ** 2
     c2 = (k2 * data_range) ** 2
 
-    sigma_x = mu_xx - mu_x * mu_x
-    sigma_y = mu_yy - mu_y * mu_y
-    sigma_xy = mu_xy - mu_x * mu_y
+    # Repair bf16 catastrophic cancellation in the second moments. With bf16
+    # mean / mean-of-squares convolutions, ``mu_xx - mu_x**2`` cancels badly for
+    # windows over large-magnitude inputs (e.g. z-scored FCMAE targets with a tiny
+    # iqr → normalized values in the hundreds) and can round to a slightly *negative*
+    # variance. At depth=1 (2D) each window has only ``1*H_k*W_k`` samples, so the
+    # cancellation is far more likely than at depth=15 (3D, where the extra Z samples
+    # keep the estimate stable) — a near-flat window then drives the SSIM denominator
+    # to ~0 and produces intermittent NaN loss that trains fine for a while then
+    # diverges.
+    #
+    # A variance is non-negative by definition, so clamp both diagonal terms to >=0.
+    # The covariance must then be bounded by Cauchy-Schwarz (|sigma_xy| <=
+    # sqrt(sigma_x*sigma_y)): exact fp32 recovers cs=1 on a flat window because the
+    # equally-negative sigma_x/sigma_y/sigma_xy cancel in the ratio, so clamping only
+    # the diagonal terms would leave an unbalanced negative sigma_xy and inflate |cs|
+    # to >10 on background windows. With the bound a flat window gives
+    # sigma_x=sigma_y=sigma_xy=0 -> cs = c2 / c2 = 1, matching exact fp32; on
+    # well-conditioned windows the bound is slack and both clamps are no-ops.
+    #
+    # The bound goes through ``_safe_sqrt``, not ``sqrt``: the same cancellation that
+    # motivates the clamp also drives ``sigma_x * sigma_y`` to *exactly* zero (either
+    # term rounds to 0), and ``sqrt`` has an infinite derivative there. Autograd then
+    # produces ``0 * inf == nan`` for the clamp-inactive elements, which spreads
+    # through the conv backward and NaNs most of the input gradient while the forward
+    # loss stays finite.
+    #
+    # Exposure depends on the per-window mean-to-variance ratio, so it is a latent
+    # trap rather than a constant hazard. Synthetic z-scored fields with a flat
+    # background at a nonzero offset reach 41-48% of ``pred.grad``; real z-scored
+    # iPSC FOVs measured 0% at depth=15 and 0-6484 NaN entries at depth=1, and a
+    # 60-step run of the real FCMAE-2D model on a real batch did not trip
+    # ``GradScaler`` at all. Treat this as a correctness fix for a reachable
+    # gradient path, not as a diagnosis of any particular run.
+    sigma_x = (mu_xx - mu_x * mu_x).clamp_min(0.0)
+    sigma_y = (mu_yy - mu_y * mu_y).clamp_min(0.0)
+    sigma_xy_bound = _safe_sqrt(sigma_x * sigma_y)
+    sigma_xy = torch.clamp(mu_xy - mu_x * mu_y, min=-sigma_xy_bound, max=sigma_xy_bound)
 
-    contrast_sensitivity = (2 * sigma_xy + c2) / (sigma_x + sigma_y + c2)
-    ssim_full = ((2 * mu_x * mu_y + c1) / (mu_x * mu_x + mu_y * mu_y + c1)) * contrast_sensitivity
+    # ``_SSIM_DENOM_EPS`` floors the denominators so a zero data_range (→ c1=c2=0) on a
+    # flat window cannot yield 0/0; negligible vs the c1/c2 stability constants otherwise.
+    contrast_sensitivity = (2 * sigma_xy + c2) / (sigma_x + sigma_y + c2 + _SSIM_DENOM_EPS)
+    ssim_full = ((2 * mu_x * mu_y + c1) / (mu_x * mu_x + mu_y * mu_y + c1 + _SSIM_DENOM_EPS)) * contrast_sensitivity
 
     return ssim_full, contrast_sensitivity
 
