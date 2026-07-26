@@ -1,0 +1,45 @@
+# @package _global_
+# Grouped leaf: pix2pix3d arm of the HEK293T mitochondria (TOMM70A) probe, a549xy
+# geometry. Split out of mitochondria_hek_a549xy for the same reason as the
+# membrane pair — see membrane_hek_a549xy_pix2pix. Options match the siblings
+# exactly so the rows stay comparable.
+#
+# TWO conditions, not three: there is no iPSC-trained mito GAN. The leaf
+# mito/pix2pix3d_unetvit/ipsc_confocal/ still carries a REPLACE_ME ckpt_path and
+# models/dynacell/ipsc/mito/pix2pix3d_unetvit does not exist (the iPSC GANs cover
+# er/membrane/nucleus only), so that row is absent rather than pending. The HEK
+# mito table therefore reads pix2pix3d only in the A549 and joint pools.
+target_name: mitochondria
+compute_feature_metrics: true
+use_gpu: true
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: pix2pix3d__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/pix2pix3d_unetvit/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/a549/hek__a549xy
+- name: pix2pix3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/pix2pix3d_unetvit/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/joint/hek__a549xy
