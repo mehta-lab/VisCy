@@ -17,10 +17,19 @@
 # Deliberate departures from the ipsc/a549 membrane buckets:
 #   * compute_instance_ap: false and no cpdino backend. Whole-cell instance AP
 #     needs a GT nucleus channel to carve (segmentation.nuclei_channel_name);
-#     the HEK release ships none, and its nucleus target failed QC. Semantic
-#     Dice is unaffected: evaluation/segmentation.py::segment routes membrane to
-#     SuperModel for every backend value except "cellpose", so the mask tier is
-#     the same method here as in the ipsc/a549 rows.
+#     the HEK release ships none, and its nucleus target failed QC.
+#
+#     CONSEQUENCE, and it is not cosmetic: compute_instance_ap IS pipeline.py's
+#     ``instance_mode``, and that flag also switches what Dice/IoU/Precision/
+#     Recall are computed ON. With it true (the ipsc/a549 membrane buckets) they
+#     are the overlap of binarized carved cpdino WHOLE-CELL labels -- filled
+#     cells, ~30-50% foreground, Dice ~0.85. With it false (here) they are the
+#     overlap of SuperModel semantic membrane masks -- thin shells at ~2-5%
+#     foreground, where a 1-2 voxel displacement alone drops Dice near zero.
+#     So this bucket's Dice is NOT comparable to the membrane Dice in the paper's
+#     tables, and must never be placed beside it as a cross-cell-type delta. The
+#     mito bucket has no such problem: mito is never instance_mode, so both HEK
+#     and A549/iPSC score the same classical Workflow_tomm20 masks.
 #   * cross_condition_probe disabled: it classifies infected-vs-mock, and HEK
 #     has a single (uninfected) condition. It is default-on whenever feature
 #     metrics run, and would otherwise log a skip every time.
