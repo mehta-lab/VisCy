@@ -4,9 +4,9 @@ Bundled dataset registry — the **default** manifest roots the [resolver](../da
 `dynacell.manifest_roots` entry point (declared in `pyproject.toml`), so path resolution works out-of-the-box
 on any clone. Override at runtime with `DYNACELL_MANIFEST_ROOTS=/path/to/other/registry`.
 
-VisCy is the source of truth for manifest *content* (this directory); `dynacell-paper` is the source of truth
-for manifest *authoring*. New datasets preprocessed there are mirrored back here, and
-[`tests/test_manifest_sync.py`](../../../tests/README.md) enforces the parity.
+**This directory is the source of truth for dataset manifests.** There is no longer a mirrored copy to stay in
+sync with: `dynacell-paper` consumed the migrated preprocessing/registry code in its Phase-13 consolidation and
+deleted its own `_configs/datasets/` tree, so authoring and content both live here. Edit these YAMLs directly.
 
 ## Layout
 
