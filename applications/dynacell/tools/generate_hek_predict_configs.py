@@ -77,19 +77,18 @@ _TRAIN_STEM: dict[str, str] = {"ipsc": "IPSCTR", "a549": "A549TR", "joint": "JOI
 
 
 def _train_stem(train_set: str) -> str:
-    """Job-name stem for a canonical train_set token, including deconv provenance.
+    """Job-name stem for a canonical train_set token.
 
-    ER/mito A549- and joint-trained checkpoints carry their GT provenance in the
-    token (``a549__deconv``, ``joint__legacy_deconvgt``), which the HEK path
-    inherits: the token describes what the MODEL was trained against, and that
-    does not change because it now predicts on HEK. Keeping it also keeps the HEK
-    row comparable to the A549 row for the same checkpoint.
+    No deconv-provenance suffix: ``_assert_raw_trained`` rejects any
+    deconvolution-trained fit before this is reached, and ``train_set`` comes from
+    ``paths._norm_train_set`` over the three roster training dirs, none of which
+    normalize to a deconv token. Every stem reaching this function is therefore
+    plain ``ipsc`` / ``a549`` / ``joint``.
     """
     base = train_set.split("__", 1)[0]
     if base not in _TRAIN_STEM:
         raise ValueError(f"unknown train_set base {base!r} from token {train_set!r}")
-    suffix = "_DECONVGT" if "deconv" in train_set else ""
-    return _TRAIN_STEM[base] + suffix
+    return _TRAIN_STEM[base]
 
 
 # FCMAE predicts full_image at fp32: ~7 GB on A549 640x960x15, ~13 GB on the HEK
