@@ -1,0 +1,103 @@
+# @package _global_
+# Grouped leaf: HEK293T mitochondria (TOMM70A) third-cell-type probe, a549xy
+# geometry. NeurIPS response item O — see the membrane_hek_a549xy sibling for the
+# full rationale and for why this is hand-written rather than generated.
+#
+# Six model conditions: the paper's regression pair (FNet3D, VSCyto3D) x three
+# training pools. CELL-Diff lives in mitochondria_hek_a549xy_celldiff.
+#
+# The marker differs from the A549/iPSC rows (TOMM70A here vs TOMM20 there) —
+# both are outer-mitochondrial-membrane tags, so the morphology being predicted is
+# the same, but the row is a marker shift on top of the cell-type shift.
+#
+# This bucket's mask tier is like-for-like with the A549/iPSC mito rows: mito
+# routes to the classical aicssegmentation Workflow_tomm20 in
+# evaluation/segmentation.py::segment, which has no training domain at all, so
+# unlike membrane there is no segmenter-domain caveat on Dice.
+#
+# focus.* stays at the eval.yaml defaults (lambda_ill 0.450) to match the zattrs
+# the HEK stores were built with — see the membrane sibling.
+target_name: mitochondria
+compute_feature_metrics: true
+use_gpu: true
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: fnet3d__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fnet3d_paper/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/ipsc/hek__a549xy
+- name: fnet3d__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fnet3d_paper/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/a549/hek__a549xy
+- name: fnet3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fnet3d_paper/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint/hek__a549xy
+- name: vscyto3d__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fcmae_vscyto3d_pretrained/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/ipsc/hek__a549xy
+- name: vscyto3d__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fcmae_vscyto3d_pretrained/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/a549/hek__a549xy
+- name: vscyto3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+# No-model floor, last — see the membrane sibling.
+- name: phase__no_model__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_is_source: true
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/hek/evaluations_with_embeddings/eval_phase_mito_a549xy
