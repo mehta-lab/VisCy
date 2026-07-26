@@ -109,9 +109,11 @@ def freeze_collection(
     ------
     ValueError
         If ``experiments`` is empty, contains exact duplicate selectors,
-        contains a no-op selector with both include flags disabled, or
+        contains a no-op selector with both include flags disabled,
         would emit the same ``(dataset, target, role)`` from more than
-        one selector (which would produce duplicate experiment names).
+        one selector (which would produce duplicate experiment names),
+        or contributes no experiments at all because every requested
+        role resolved to a missing store.
     """
     if not experiments:
         raise ValueError("experiments must be non-empty")
@@ -167,6 +169,16 @@ def freeze_collection(
                 train_fovs.extend(fovs)
             else:
                 test_fovs.extend(fovs)
+
+    if not collection_experiments:
+        pairs = ", ".join(f"({sel.dataset!r}, {sel.target!r})" for sel in experiments)
+        raise ValueError(
+            f"selectors [{pairs}] contributed no experiments: every requested role was either disabled by an "
+            "include flag or absent from the manifest. Eval-only datasets (e.g. 'hek-mantis-*') carry "
+            "stores.train=None, so a selector with include_test=False leaves nothing to snapshot. An empty "
+            "collection would pass validation and then break downstream FOV lookup, which indexes experiments "
+            "by name."
+        )
 
     names = [exp.name for exp in collection_experiments]
     if len(set(names)) != len(names):

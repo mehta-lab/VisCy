@@ -461,6 +461,38 @@ class TestFreezerMultiSelector:
                 created_by="tester",
             )
 
+    def test_raises_when_every_requested_role_has_no_store(self, monkeypatch, tmp_path):
+        """Eval-only dataset (stores.train=None) + include_test=False writes nothing.
+
+        Reproduces the real registered case: both ``hek-mantis-*`` manifests
+        ship a test store and no train store, so this selector skipped train
+        for a missing store and test for the include flag, then wrote a YAML
+        with ``experiments: []``.
+        """
+        spacing = _make_spacing()
+        stores = _FakeStores(train=None, test=Path("/fake/eval-only/test.zarr"))
+        target_cfg = _FakeTargetCfg(
+            gene="KRAS",
+            organelle="membrane",
+            target_channel="Structure",
+            stores=stores,
+        )
+        _install_fake_manifest(
+            monkeypatch,
+            {"eval-only": _FakeManifest(targets={"kras": target_cfg}, spacing=spacing)},
+        )
+        calls = _make_snapshot_stub(monkeypatch)
+
+        out = tmp_path / "empty.yaml"
+        with pytest.raises(ValueError, match="contributed no experiments"):
+            freeze_collection(
+                [ExperimentSelector("eval-only", "kras", include_test=False)],
+                out,
+                created_by="tester",
+            )
+        assert calls == []
+        assert not out.exists()
+
     def test_condition_reaches_snapshot_store(self, monkeypatch, tmp_path):
         """Per-selector condition is forwarded to ``_snapshot_store``."""
         datasets = self._build_fake_registry(["ds-ipsc", "ds-a549"])
