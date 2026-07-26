@@ -13,12 +13,16 @@ experiments:
   channels:
   - name: Brightfield
     marker: Brightfield
+    wells: []
   - name: Nuclei
     marker: Nuclei
+    wells: []
   - name: Membrane
     marker: Membrane
+    wells: []
   - name: Phase3D
     marker: Phase3D
+    wells: []
   perturbation_wells: null
   interval_minutes: null
   start_hpi: null
@@ -32,12 +36,16 @@ experiments:
   channels:
   - name: Brightfield
     marker: Brightfield
+    wells: []
   - name: Nuclei
     marker: Nuclei
+    wells: []
   - name: Membrane
     marker: Membrane
+    wells: []
   - name: Phase3D
     marker: Phase3D
+    wells: []
   perturbation_wells: null
   interval_minutes: null
   start_hpi: null
