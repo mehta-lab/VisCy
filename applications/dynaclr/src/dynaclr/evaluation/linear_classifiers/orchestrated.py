@@ -28,11 +28,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
-from viscy_utils.evaluation.linear_classifier import train_linear_classifier
+from viscy_utils.evaluation.linear_classifier import (
+    group_ids_from_obs,
+    group_val_split,
+    train_linear_classifier,
+)
 
 matplotlib.use("Agg")
 
@@ -202,15 +205,8 @@ def run_linear_classifiers(
         # in both train and val. This kills track-level temporal
         # leakage that inflates val AUROC for temporal-contrastive
         # SSL embeddings.
-        groups: np.ndarray | None = None
-        if config.split_groups_by:
-            missing = [c for c in config.split_groups_by if c not in combined.obs.columns]
-            if missing:
-                raise ValueError(f"split_groups_by columns missing from obs: {missing}")
-            group_series = combined.obs[config.split_groups_by[0]].astype(str)
-            for col in config.split_groups_by[1:]:
-                group_series = group_series + "::" + combined.obs[col].astype(str)
-            groups = group_series.to_numpy()
+        groups = group_ids_from_obs(combined.obs, config.split_groups_by)
+        if groups is not None:
             click.echo(f"  Group-aware split keyed on {config.split_groups_by}: {pd.unique(groups).size} unique groups")
 
         classifier_params = {
@@ -254,22 +250,7 @@ def run_linear_classifiers(
         val_hours: np.ndarray | None = None
         if config.split_train_data < 1.0:
             try:
-                idx = np.arange(len(combined))
-                if groups is not None:
-                    gss = GroupShuffleSplit(
-                        n_splits=1,
-                        train_size=config.split_train_data,
-                        random_state=config.random_seed,
-                    )
-                    _, idx_val = next(gss.split(idx, y_full, groups=groups))
-                else:
-                    _, idx_val = train_test_split(
-                        idx,
-                        train_size=config.split_train_data,
-                        random_state=config.random_seed,
-                        stratify=y_full,
-                        shuffle=True,
-                    )
+                _, idx_val = group_val_split(len(combined), y_full, groups, config.split_train_data, config.random_seed)
                 if "hours_post_perturbation" in combined.obs.columns:
                     val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
             except ValueError:
