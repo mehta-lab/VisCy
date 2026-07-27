@@ -13,6 +13,16 @@ model:
     # into overlapping 512x512 windows (single tile on the 512x512 iPSC test).
     predict_method: sliding_window
     predict_overlap: [4, 256, 256]
+    # predict_blend defaults to "cosine", which cross-fades the overlaps. The
+    # old plain-average behaviour ("uniform") left step discontinuities where
+    # the window count changes -- on a 640x960 FOV the y=128 edge measured 7.4x
+    # its local median step, vs 1.0x for ground truth. Predictions written
+    # before that default landed carry those seams.
+    #
+    # Not set here: predict_phase_shifts, which additionally suppresses the
+    # decoder's ConvTranspose checkerboard (4/8 px) and the ViT token lattice
+    # (32 px) at len(offsets)**2 the cost. Both are worst out of distribution.
+    # Use [0, 5, 11, 22] when they dominate; see engine._phase_shift_average.
 data:
   init_args:
     z_window_size: 8

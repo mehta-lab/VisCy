@@ -10,7 +10,14 @@ from lightning.pytorch import Trainer, seed_everything
 from monai.data import MetaTensor
 from torch import nn
 
-from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
+from dynacell.engine import (
+    DynacellFlowMatching,
+    DynacellGAN,
+    DynacellUNet,
+    _blend_weight,
+    _phase_shift_average,
+    _sliding_window_inference,
+)
 from dynacell.tiling import window_starts
 
 # Small model configs for tests (not production sizes).
@@ -1197,3 +1204,207 @@ def test_window_starts_rejects_rank_mismatch(spatial, patch, overlap):
     """Mismatched ranks are a caller bug, not something to zip-truncate."""
     with pytest.raises(ValueError):
         window_starts(spatial, patch, overlap)
+
+
+# ---------------------------------------------------------------------------
+# _sliding_window_inference overlap blending. The behavioural claim under test
+# is that the cosine cross-fade removes the step discontinuities that uniform
+# averaging prints at window faces, without changing single-window results.
+# ---------------------------------------------------------------------------
+
+
+def test_blend_weight_is_positive_and_peaks_at_centre():
+    """The taper must never reach zero, or normalization divides by zero."""
+    w = _blend_weight((4, 8, 8), torch.device("cpu"), torch.float32)
+    assert w.shape == (1, 1, 4, 8, 8)
+    assert torch.all(w > 0)
+    # centre voxel is the maximum
+    assert w[0, 0, 2, 4, 4] == pytest.approx(w.max().item())
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_sliding_window_reproduces_constant_field(blend):
+    """Both modes are a partition of unity: a constant-output model must come
+    back as that exact constant, everywhere, including at window faces."""
+    source = torch.zeros(1, 1, 4, 24, 40)
+    out = _sliding_window_inference(
+        lambda x: torch.full((x.shape[0], 1, *x.shape[2:]), 3.5),
+        source,
+        (4, 16, 16),
+        (2, 8, 8),
+        blend=blend,
+    )
+    assert out.shape == (1, 1, 4, 24, 40)
+    assert torch.allclose(out, torch.full_like(out, 3.5), atol=1e-5)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_sliding_window_single_window_is_exact(blend):
+    """When one window covers the input the weighted mean cancels the weight,
+    so blending cannot alter the result (the 512x512 iPSC test case)."""
+    torch.manual_seed(0)
+    source = torch.randn(1, 1, 4, 16, 16)
+    expected = source * 2.0
+    out = _sliding_window_inference(lambda x: x * 2.0, source, (4, 16, 16), (2, 8, 8), blend=blend)
+    assert torch.allclose(out, expected, atol=1e-6)
+
+
+def test_cosine_blend_suppresses_window_seams():
+    """A model whose output depends on its window's identity produces a step at
+    every window face under uniform averaging; the cosine cross-fade must
+    reduce it by a wide margin.
+
+    ``forward_fn`` returns a constant that differs per call, which is the
+    worst case of "adjacent windows disagree" and isolates the seam from any
+    image content.
+    """
+    calls = {"n": 0}
+
+    def forward_fn(x):
+        calls["n"] += 1
+        return torch.full((x.shape[0], 1, *x.shape[2:]), float(calls["n"]))
+
+    source = torch.zeros(1, 1, 4, 16, 96)
+    patch, overlap = (4, 16, 32), (2, 8, 16)
+    starts = window_starts(tuple(source.shape[-3:]), patch, overlap)[2]
+    assert len(starts) > 1, "test needs multiple windows along x"
+
+    def max_step(vol):
+        prof = (vol[0, 0, 2, 8, 1:] - vol[0, 0, 2, 8, :-1]).abs()
+        return prof.max().item()
+
+    calls["n"] = 0
+    uni = _sliding_window_inference(forward_fn, source, patch, overlap, blend="uniform")
+    calls["n"] = 0
+    cos = _sliding_window_inference(forward_fn, source, patch, overlap, blend="cosine")
+
+    assert max_step(cos) < max_step(uni) / 4, (
+        f"cosine blend should flatten the seam: uniform={max_step(uni):.3f} cosine={max_step(cos):.3f}"
+    )
+
+
+def test_sliding_window_rejects_unknown_blend():
+    """An unknown blend is a config typo; fail loudly rather than silently
+    falling back to uniform."""
+    with pytest.raises(ValueError, match="Unknown blend"):
+        _sliding_window_inference(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), blend="gaussian")
+
+
+def test_gan_predict_blend_default_is_cosine():
+    """The GAN engine must default to the seam-free blend, and pass it through."""
+    model = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        predict_method="sliding_window",
+        predict_overlap=(2, 16, 16),
+    )
+    assert model.predict_blend == "cosine"
+    model.eval()
+    model.on_predict_start()
+    source = MetaTensor(torch.randn(1, 1, 8, 96, 128))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 1, 8, 96, 128)
+
+
+# ---------------------------------------------------------------------------
+# _phase_shift_average: shift-and-average suppression of the decoder
+# checkerboard and the ViT token lattice.
+# ---------------------------------------------------------------------------
+
+
+def test_phase_shift_average_preserves_shape_and_constant():
+    """Shifting uses reflect padding and must crop back to the input extent,
+    and a constant field must survive it exactly."""
+    source = torch.zeros(1, 1, 4, 24, 40)
+    out = _phase_shift_average(
+        lambda x: torch.full((x.shape[0], 1, *x.shape[2:]), 2.0),
+        source,
+        (4, 16, 16),
+        (2, 8, 8),
+        offsets=(0, 3, 5),
+    )
+    assert out.shape == (1, 1, 4, 24, 40)
+    assert torch.allclose(out, torch.full_like(out, 2.0), atol=1e-5)
+
+
+def test_phase_shift_average_single_zero_offset_is_plain_tiling():
+    """A lone zero offset must short-circuit to the un-shifted path, so
+    enabling the knob with one offset costs nothing and changes nothing."""
+    torch.manual_seed(0)
+    source = torch.randn(1, 1, 4, 16, 32)
+    plain = _sliding_window_inference(lambda x: x * 3.0, source, (4, 16, 16), (2, 8, 8))
+    shifted = _phase_shift_average(lambda x: x * 3.0, source, (4, 16, 16), (2, 8, 8), offsets=(0,))
+    assert torch.allclose(plain, shifted, atol=1e-6)
+
+
+def test_phase_shift_average_cancels_a_grid_locked_artifact():
+    """A model that stamps a fixed 4-px lattice onto its own window (standing
+    in for the ConvTranspose checkerboard) must be suppressed by offsets that
+    span the residues mod 4, and left alone by offsets that do not.
+
+    This is the property the offset choice rests on, so it is tested directly
+    rather than inferred.
+    """
+
+    def forward_fn(x):
+        # lattice locked to the window origin, independent of input content
+        w = x.shape[-1]
+        lattice = ((torch.arange(w) % 4) == 0).float()
+        return x * 0 + lattice.reshape(1, 1, 1, 1, w)
+
+    # YX extent must exceed the largest offset (reflect-padding constraint).
+    source = torch.zeros(1, 1, 4, 64, 64)
+    patch, overlap = (4, 64, 64), (2, 0, 0)
+
+    def lattice_energy(vol):
+        row = vol[0, 0, 2, 32]
+        return (row[::4].mean() - row.mean()).abs().item()
+
+    base = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0,))
+    congruent = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0, 4, 8, 12))
+    spanning = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0, 5, 11, 22))
+
+    assert lattice_energy(congruent) == pytest.approx(lattice_energy(base), rel=1e-3), (
+        "offsets that are all 0 mod 4 cannot cancel a 4-px lattice"
+    )
+    assert lattice_energy(spanning) < lattice_energy(base) / 3, (
+        f"offsets spanning residues mod 4 should cancel it: "
+        f"base={lattice_energy(base):.4f} spanning={lattice_energy(spanning):.4f}"
+    )
+
+
+def test_phase_shift_average_rejects_offset_larger_than_extent():
+    """Reflect padding needs pad < extent; say so instead of surfacing a
+    RuntimeError from deep inside torch."""
+    with pytest.raises(ValueError, match="smaller than the input YX extent"):
+        _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), offsets=(0, 27))
+
+
+@pytest.mark.parametrize("offsets", [(), (-1, 2)])
+def test_phase_shift_average_rejects_bad_offsets(offsets):
+    """Empty or negative offsets are caller bugs, not something to clamp."""
+    with pytest.raises(ValueError):
+        _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), offsets=offsets)
+
+
+def test_gan_phase_shifts_off_by_default_and_routes_when_set():
+    """Default must stay off (it costs len(offsets)**2 passes); when set, the
+    GAN predict path must route through it and keep the output shape."""
+    kwargs = dict(
+        architecture="UNetViT3D",
+        generator_config=GAN_GEN_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        predict_method="sliding_window",
+        predict_overlap=(2, 16, 16),
+    )
+    assert DynacellGAN(**kwargs).predict_phase_shifts is None
+
+    model = DynacellGAN(**kwargs, predict_phase_shifts=(0, 3))
+    model.eval()
+    model.on_predict_start()
+    source = MetaTensor(torch.randn(1, 1, 8, 96, 128))
+    with torch.no_grad():
+        prediction = model.predict_step({"source": source}, batch_idx=0)
+    assert prediction.shape == (1, 1, 8, 96, 128)
