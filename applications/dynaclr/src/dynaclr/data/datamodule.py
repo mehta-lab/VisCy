@@ -11,7 +11,9 @@ train/val split.
 
 from __future__ import annotations
 
+import copy
 import logging
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -145,6 +147,12 @@ class MultiExperimentDataModule(LightningDataModule):
         Mapping from ``batch_key`` (used by classification heads) to
         dataframe column name.  E.g. ``{"gene_label": "condition"}``.
         Default: ``None``.
+    sequence_augment : {"consistent", "independent", "none"}
+        How training transforms are applied to emitted temporal sequences.
+        ``"consistent"`` (default) reuses one random transform realization
+        across all frames of each track. ``"independent"`` transforms the
+        flattened frames independently, and ``"none"`` applies normalization
+        and the final crop without stochastic augmentation.
     """
 
     def __init__(
@@ -193,6 +201,7 @@ class MultiExperimentDataModule(LightningDataModule):
         emit_sequence: bool = False,
         sequence_length: int = 3,
         sequence_tau_frames: int = 1,
+        sequence_augment: Literal["consistent", "independent", "none"] = "consistent",
         max_border_shift: int = -1,
         shuffle_val: bool = False,
         pin_memory: bool = True,
@@ -258,6 +267,11 @@ class MultiExperimentDataModule(LightningDataModule):
         self.emit_sequence = emit_sequence
         self.sequence_length = sequence_length
         self.sequence_tau_frames = sequence_tau_frames
+        if sequence_augment not in {"consistent", "independent", "none"}:
+            raise ValueError(
+                f"sequence_augment must be one of {{'consistent', 'independent', 'none'}}, got {sequence_augment!r}."
+            )
+        self.sequence_augment = sequence_augment
         self.max_border_shift = max_border_shift
         self.shuffle_val = shuffle_val
         self.pin_memory = pin_memory
@@ -324,6 +338,12 @@ class MultiExperimentDataModule(LightningDataModule):
             self._augmentation_transform = Compose(
                 self.normalizations + self.augmentations + [self._train_final_crop()]
             )
+            sequence_transforms = self.normalizations + [self._train_final_crop()]
+            if self.sequence_augment != "none":
+                sequence_transforms = self.normalizations + self.augmentations + [self._train_final_crop()]
+            # This transform has independent random state so resetting it for
+            # temporal consistency cannot perturb anchor/positive augmentation.
+            self._sequence_transform = Compose(copy.deepcopy(sequence_transforms))
 
             _logger.info(
                 "MultiExperimentDataModule setup: %d train anchors, %d val anchors",
@@ -747,6 +767,54 @@ class MultiExperimentDataModule(LightningDataModule):
             ),
         )
 
+    def _transform_sequence_consistently(
+        self,
+        patch: Tensor,
+        norm_meta: list | None,
+        extra: dict[str, Tensor] | None,
+    ) -> Tensor:
+        """Apply one stochastic transform realization per temporal track.
+
+        The dataset flattens sequences row-major as ``B * K``. Transforming
+        each temporal slot as a batch of ``B`` and restoring the same random
+        state before every slot gives sample ``i`` identical random parameters
+        at all ``K`` timepoints while retaining independent choices across
+        samples.
+        """
+        k = self.sequence_length
+        if patch.shape[0] % k:
+            raise ValueError(f"Sequence batch size {patch.shape[0]} is not divisible by sequence_length={k}.")
+
+        seed = int(torch.randint(0, torch.iinfo(torch.int32).max, ()).item())
+        slot_outputs: list[Tensor] = []
+        for slot in range(k):
+            slot_indices = torch.arange(slot, patch.shape[0], k, device=patch.device)
+            slot_norm_meta = norm_meta[slot::k] if norm_meta is not None else None
+            slot_extra = None
+            if extra is not None:
+                slot_extra = {
+                    name: value.index_select(0, slot_indices)
+                    if isinstance(value, Tensor) and value.shape[0] == patch.shape[0]
+                    else value
+                    for name, value in extra.items()
+                }
+
+            devices = [patch.device] if patch.is_cuda else []
+            with torch.random.fork_rng(devices=devices):
+                torch.manual_seed(seed)
+                self._sequence_transform.set_random_state(seed=seed)
+                slot_outputs.append(
+                    _transform_channel_wise(
+                        transform=self._sequence_transform,
+                        channel_names=self._channel_names,
+                        patch=patch.index_select(0, slot_indices),
+                        norm_meta=slot_norm_meta,
+                        extra=slot_extra,
+                    )
+                )
+
+        return torch.stack(slot_outputs, dim=1).reshape(-1, *slot_outputs[0].shape[1:])
+
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
         """Apply normalizations, augmentations, final crop, and ChannelDropout.
 
@@ -796,8 +864,6 @@ class MultiExperimentDataModule(LightningDataModule):
             batch.pop("anchor_meta", None)
             return batch
 
-        transform = self._augmentation_transform
-
         for key in ["anchor", "positive", "negative", "sequence"]:
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
@@ -823,13 +889,21 @@ class MultiExperimentDataModule(LightningDataModule):
                                 device=batch[key].device,
                             )
                         }
-                transformed = _transform_channel_wise(
-                    transform=transform,
-                    channel_names=self._channel_names,
-                    patch=batch[key],
-                    norm_meta=norm_meta,
-                    extra=extra,
-                )
+                if key == "sequence" and self.sequence_augment == "consistent":
+                    transformed = self._transform_sequence_consistently(
+                        patch=batch[key],
+                        norm_meta=norm_meta,
+                        extra=extra,
+                    )
+                else:
+                    transform = self._sequence_transform if key == "sequence" else self._augmentation_transform
+                    transformed = _transform_channel_wise(
+                        transform=transform,
+                        channel_names=self._channel_names,
+                        patch=batch[key],
+                        norm_meta=norm_meta,
+                        extra=extra,
+                    )
                 batch[key] = transformed
                 if norm_meta_key in batch:
                     del batch[norm_meta_key]

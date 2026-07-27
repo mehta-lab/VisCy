@@ -5,6 +5,7 @@ exposure for Lightning CLI configurability."""
 from __future__ import annotations
 
 import pytest
+import torch
 
 from viscy_data.cell_index import build_timelapse_cell_index
 
@@ -146,6 +147,43 @@ class TestInitExposesAllHyperparameters:
         assert dm.channel_dropout_prob == 0.8
         assert dm.cache_pool_bytes == 1024
         assert dm.seed == 42
+
+    def test_rejects_unknown_sequence_augmentation_mode(self, two_experiments):
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        parquet_path, _ = two_experiments
+        with pytest.raises(ValueError, match="sequence_augment"):
+            MultiExperimentDataModule(
+                cell_index_path=str(parquet_path),
+                z_window=1,
+                sequence_augment="per_frame",
+            )
+
+
+class TestSequenceAugmentation:
+    def test_consistent_mode_reuses_transform_per_track(self, two_experiments):
+        from monai.transforms import Compose
+
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+        from viscy_transforms import BatchedRandFlipd
+
+        parquet_path, _ = two_experiments
+        dm = MultiExperimentDataModule(
+            cell_index_path=str(parquet_path),
+            z_window=1,
+            sequence_length=3,
+            sequence_augment="consistent",
+        )
+        dm._channel_names = ["Phase"]
+        dm._sequence_transform = Compose([BatchedRandFlipd(keys=["Phase"], spatial_axes=[2], prob=0.5)])
+
+        tracks = torch.arange(8 * 15, dtype=torch.float32).reshape(8, 1, 1, 3, 5)
+        sequence = tracks.repeat_interleave(dm.sequence_length, dim=0)
+        transformed = dm._transform_sequence_consistently(sequence, None, None)
+        transformed = transformed.reshape(8, dm.sequence_length, 1, 1, 3, 5)
+
+        assert torch.equal(transformed[:, 0], transformed[:, 1])
+        assert torch.equal(transformed[:, 1], transformed[:, 2])
 
 
 class TestTrainValSplitByExperiment:

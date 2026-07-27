@@ -290,7 +290,8 @@ class MultiExperimentTripletDataset(Dataset):
     def _build_match_lookup(self) -> None:
         """Build lookup structures for O(1) positive candidate lookup.
 
-        For ``positive_cell_source="self"``, no lookup is needed.
+        For ``positive_cell_source="self"``, no positive lookup is needed, but
+        sequence emission still needs the lineage/timepoint lookup.
 
         For temporal mode (``"lineage_id"`` in ``positive_match_columns``),
         builds ``_lineage_timepoints``:
@@ -299,7 +300,7 @@ class MultiExperimentTripletDataset(Dataset):
         For generic column-match mode, builds ``_match_lookup``:
         ``{match_key_tuple: [row_indices_in_tracks]}``.
         """
-        if self.positive_cell_source == "self":
+        if self.positive_cell_source == "self" and not self.emit_sequence:
             return
 
         tracks = self.index.tracks
@@ -374,6 +375,7 @@ class MultiExperimentTripletDataset(Dataset):
         hot_cols: set[str] = {
             "channel_name",
             "experiment",
+            "global_track_id",
             "lineage_id",
             "t",
             "marker",
@@ -679,10 +681,12 @@ class MultiExperimentTripletDataset(Dataset):
         """Sample K consecutive same-lineage same-marker frames per anchor.
 
         Builds a fixed stencil ``[t0, t0+tau, ..., t0+(K-1)*tau]`` (frames) for
-        each anchor's lineage. When every stencil timepoint has a same-marker
-        candidate, the sequence is valid; otherwise it is marked invalid and
-        filled with the anchor's own tracks-index K times (placeholder, keeps
-        the batch tensor rectangular — the loss drops it via ``valid``).
+        the anchor's exact ``global_track_id`` and marker. Sequences never cross
+        a division boundary or switch between sibling tracks. When every
+        stencil timepoint has an exact-track candidate, the sequence is valid;
+        otherwise it is marked invalid and filled with the first available
+        exact-track row K times (placeholder, keeping the tensor rectangular;
+        the loss drops it via ``valid``).
 
         Frames are grouped row-major per sample: ``[s0_t0, s0_t1, ..., s0_t(K-1),
         s1_t0, ...]`` so the engine can ``view(B, K, D)`` to recover grouping.
@@ -703,7 +707,9 @@ class MultiExperimentTripletDataset(Dataset):
         lid_arr = self._va_arrays["lineage_id"]
         t_arr = self._va_arrays["t"]
         anchor_marker_arr = self._va_arrays["marker"]
+        anchor_track_arr = self._va_arrays["global_track_id"]
         tr_marker_arr = self._tr_arrays["marker"]
+        tr_track_arr = self._tr_arrays["global_track_id"]
         lt_map = self._lineage_timepoints
         k = self.sequence_length
         tau = self.sequence_tau_frames
@@ -717,18 +723,19 @@ class MultiExperimentTripletDataset(Dataset):
             lineage_id = str(lid_arr[ai])
             anchor_t = int(t_arr[ai])
             anchor_marker = anchor_marker_arr[ai]
+            anchor_track = anchor_track_arr[ai]
             timepoints = lt_map.get((exp_name, lineage_id))
 
             rows: list[int] | None = None
+            picked: list[int] = []
             if timepoints is not None:
                 wanted = [anchor_t + j * tau for j in range(k)]
-                picked: list[int] = []
                 for wt in wanted:
                     cands = timepoints.get(wt)
                     if not cands:
                         break
                     idx_arr = np.asarray(cands, dtype=np.int64)
-                    mask = tr_marker_arr[idx_arr] == anchor_marker
+                    mask = (tr_marker_arr[idx_arr] == anchor_marker) & (tr_track_arr[idx_arr] == anchor_track)
                     filtered = idx_arr[mask]
                     if len(filtered) == 0:
                         break
@@ -737,12 +744,11 @@ class MultiExperimentTripletDataset(Dataset):
                     rows = picked
 
             if rows is None:
-                # Placeholder: a valid tracks-index (row 0) repeated K times so
-                # patch reads succeed and shapes stay rectangular. The sample is
-                # dropped by ``seq_valid`` so its patches never affect the loss.
-                # NOTE: ``ai`` is a valid_anchors position, a different index
-                # space than tracks — never reuse it as a tracks-index here.
-                rows = [0] * k
+                # Reuse the anchor-time exact-track row when it was found;
+                # otherwise row 0 is only a shape-preserving fallback. The
+                # invalid sample is masked from both temporal losses.
+                placeholder = picked[0] if picked else 0
+                rows = [placeholder] * k
             else:
                 seq_valid[i] = True
             seq_track_indices[i * k : (i + 1) * k] = rows

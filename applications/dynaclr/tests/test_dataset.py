@@ -538,6 +538,72 @@ class TestSelfPositive:
             "Self-positive: anchor and positive tensors must be identical before augmentation"
         )
 
+    def test_self_positive_can_emit_sequence(self, single_experiment_index):
+        """Self positives still build the temporal lookup used by sequences."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            positive_cell_source="self",
+            channels_per_sample=1,
+            emit_sequence=True,
+            sequence_length=3,
+        )
+
+        assert ds._lineage_timepoints
+        batch = ds.__getitems__([0])
+        assert batch["sequence"].shape[0] == 3
+        assert batch["sequence_valid"].shape == (1,)
+
+
+class TestSequenceSampling:
+    """Temporal stencils must preserve exact track identity."""
+
+    @staticmethod
+    def _sampler_dataset(track_ids, timepoints):
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = object.__new__(MultiExperimentTripletDataset)
+        ds._va_arrays = {
+            "experiment": np.asarray(["exp"]),
+            "lineage_id": np.asarray(["lineage"]),
+            "t": np.asarray([0]),
+            "marker": np.asarray(["GFP"]),
+            "global_track_id": np.asarray([track_ids[0]]),
+        }
+        ds._tr_arrays = {
+            "marker": np.asarray(["GFP"] * len(track_ids)),
+            "global_track_id": np.asarray(track_ids),
+        }
+        ds._lineage_timepoints = {("exp", "lineage"): timepoints}
+        ds.sequence_length = 3
+        ds.sequence_tau_frames = 1
+        ds._rng = np.random.default_rng(0)
+        return ds
+
+    def test_selects_same_track_when_siblings_share_lineage(self):
+        ds = self._sampler_dataset(
+            ["track-a", "track-b", "track-a", "track-b", "track-a", "track-b"],
+            {0: [0, 1], 1: [2, 3], 2: [4, 5]},
+        )
+
+        rows, valid = ds._sample_sequence_indices(np.asarray([0]))
+
+        assert valid.tolist() == [True]
+        assert rows.tolist() == [0, 2, 4]
+
+    def test_invalidates_stencil_at_division_boundary(self):
+        ds = self._sampler_dataset(
+            ["parent", "daughter-a", "daughter-b", "daughter-a", "daughter-b"],
+            {0: [0], 1: [1, 2], 2: [3, 4]},
+        )
+
+        rows, valid = ds._sample_sequence_indices(np.asarray([0]))
+
+        assert valid.tolist() == [False]
+        assert rows.tolist() == [0, 0, 0]
+
 
 class TestTimepointStatisticsResolution:
     """Verify that timepoint_statistics norm_meta resolves the correct timepoint."""
