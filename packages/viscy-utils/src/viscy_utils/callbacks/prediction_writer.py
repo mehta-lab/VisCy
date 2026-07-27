@@ -126,6 +126,31 @@ class HCSPredictionWriter(BasePredictionWriter):
         (must be writing to a new store), by default False.
     write_interval : {'batch', 'epoch', 'batch_and_epoch'}, optional
         When to write, by default "batch".
+    z_reduction : {'blend', 'center'}, optional
+        How to combine the depth windows that cover one output plane, by
+        default "blend".
+
+        ``'blend'`` feathers each window in with :func:`_blend_in`. With the
+        usual stride-1 depth windows that recurrence is the incremental mean,
+        so every plane ends up the *unweighted mean of ``z_window_size``
+        forward passes*. That is a real sharpness cost for a generative model:
+        on an iPSC-trained pix2pix3d membrane prediction the mean over 8
+        windows halves the mid-band power relative to a single pass
+        (0.045 -> 0.021 of ground truth), and because all 8 share one XY grid
+        it cancels none of the decoder's XY lattice.
+
+        ``'center'`` writes each window from its center plane onward, so a
+        later window overwrites everything but that center plane and the
+        volume is assembled one plane per forward pass with no averaging.
+        The leading ``z_window_size // 2`` planes come from the first window
+        and the trailing ``z_window_size // 2 - 1`` from the last, since no
+        window is centered on them.
+
+        Both modes assume windows arrive in increasing ``z`` order within a
+        ``(position, timepoint)`` -- ``'blend'`` because its factors are
+        derived from ``z_slice.start``, ``'center'`` because it relies on
+        last-write-wins. The predict dataloader is sequential and iterates
+        ``z`` innermost, which is what makes that hold.
     """
 
     def __init__(
@@ -134,11 +159,15 @@ class HCSPredictionWriter(BasePredictionWriter):
         overwrite: bool = False,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
+        z_reduction: Literal["blend", "center"] = "blend",
     ) -> None:
         super().__init__(write_interval)
+        if z_reduction not in ("blend", "center"):
+            raise ValueError(f"z_reduction must be 'blend' or 'center', got {z_reduction!r}")
         self.output_store = output_store
         self.overwrite = overwrite
         self.write_input = write_input
+        self.z_reduction = z_reduction
         self._dataset_scale = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
@@ -316,8 +345,16 @@ class HCSPredictionWriter(BasePredictionWriter):
                 image[t_index, self.target_index, z_index] = batch["target"][sample_index][:, center_slice_index].cpu()
         # write CZYX
         if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
-            old_stack = image.oindex[t_index, self.prediction_index, z_slice]
-            sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
+            if self.z_reduction == "blend":
+                old_stack = image.oindex[t_index, self.prediction_index, z_slice]
+                sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
+            else:
+                # Drop the planes before this window's center: the window centered on
+                # each of them writes it later and wins. The first window keeps all of
+                # them because nothing is centered on the leading planes.
+                keep = 0 if z_index == 0 else sample_prediction.shape[-3] // 2
+                sample_prediction = sample_prediction[..., keep:, :, :]
+                z_slice = slice(z_slice.start + keep, z_slice.stop)
         image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
