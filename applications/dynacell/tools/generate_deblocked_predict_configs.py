@@ -54,12 +54,14 @@ from dynacell.evaluation import paths
 _CONFIG_ROOT = Path(__file__).resolve().parents[1] / "configs/benchmarks/virtual_staining"
 _MODEL_DIR = "pix2pix3d_unetvit"
 
-# Offsets, in pixels, averaged over as the outer product on both YX axes: 16 tiled
-# passes. Zeroes the period-2 and period-4 phasors exactly and holds 8/16/32 at
-# ~0.21-0.27, which measured best of every four-offset set tried -- see
-# engine._phase_shift_average for why the sets that cancel period 32 exactly come
-# out two to three times worse.
-_PHASE_SHIFTS = [0, 5, 11, 22]
+# Four explicit (dy, dx) shifts, so this costs four tiled passes rather than the
+# sixteen a flat [0, 5, 11, 22] would (that list is expanded to its outer product).
+# Each axis still sees all four residues, which is what does the work; measured on
+# an in-domain iPSC membrane FOV the pair set matches the 16-pass product
+# (depth@32 0.2338 vs 0.2402, depth@4 0.0172 vs 0.0184, PCC 0.5414 vs 0.5406,
+# ground-truth floor 0.0705 / 0.0041). See engine._phase_shift_average for why
+# {0, 5, 11, 22} and not a set that cancels period 32 exactly.
+_PHASE_SHIFTS = [[0, 0], [5, 11], [11, 22], [22, 5]]
 
 # (organelle config dir, predict-set stem, canonical test token, condition, FOV)
 # from the figure's own pick_crop; timepoint and focus plane are recorded for

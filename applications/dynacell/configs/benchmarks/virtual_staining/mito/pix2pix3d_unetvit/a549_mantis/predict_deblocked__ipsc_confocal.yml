@@ -13,10 +13,14 @@ benchmark:
 model:
   init_args:
     predict_phase_shifts:
-    - 0
-    - 5
-    - 11
-    - 22
+    - - 0
+      - 0
+    - - 5
+      - 11
+    - - 11
+      - 22
+    - - 22
+      - 5
 data:
   init_args:
     include_fov_names:
