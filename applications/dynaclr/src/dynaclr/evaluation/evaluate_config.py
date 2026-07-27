@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, model_validator
@@ -377,6 +378,10 @@ class WitnessGmmLabelsConfig(BaseModel):
             raise ValueError(f"mmd_pvalue_threshold must be in (0, 1], got {self.mmd_pvalue_threshold}")
         if self.annotation_format not in ("csv", "parquet"):
             raise ValueError(f"annotation_format must be 'csv' or 'parquet', got {self.annotation_format!r}")
+        for field in ("witness_time_bin_hours", "mmd_hpi_bin_hours"):
+            width = getattr(self, field)
+            if width is not None and (not math.isfinite(width) or width <= 0):
+                raise ValueError(f"{field} must be a finite positive number, got {width}")
         return self
 
 
