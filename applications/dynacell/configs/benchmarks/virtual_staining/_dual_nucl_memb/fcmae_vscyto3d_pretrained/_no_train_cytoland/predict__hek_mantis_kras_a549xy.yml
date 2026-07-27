@@ -1,0 +1,57 @@
+# VSCyto3D-Cytoland predict: dual nucleus+membrane (no FT) on the HEK293T probe.
+#
+# Sole consumer is the HEK carved whole-cell membrane eval: the HEK release has
+# no nucleus channel, so `Nuclei_prediction` here supplies the carve seeds that
+# leaf/grouped/membrane_hek_a549xy/eval_grouped.yaml cpdino-segments and
+# subtracts from the cpdino whole-cell membrane labels. `Membrane_prediction` is
+# a by-product of the 2-channel head and is not scored anywhere — the benchmarked
+# HEK membrane predictions come from the membrane/* leaves.
+#
+# Public cytoland weights on purpose: this model never saw HEK or any dynacell
+# fine-tuning, so the seeds do not leak a benchmarked checkpoint into the eval of
+# that same checkpoint. Every model condition in the HEK bucket carves the same
+# seed stack, so the carve stays a constant across the arms being compared.
+#
+# ckpt / data init_args lifted verbatim from the sibling predict__a549_mantis_mock.yml.
+base:
+  - ../../../_internal/shared/model/predict_sets/hek_mantis_dual_a549xy.yml
+  - ../../../_internal/shared/model/targets/dual_nucl_memb.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_2chan_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: dual_nucl_memb
+  trained_on: cytoland
+  predict_set: hek_mantis_dual_a549xy
+  model_name: fcmae_vscyto3d_pretrained_cytoland
+  experiment_id: dual_nucl_memb__cytoland__fcmae_vscyto3d_pretrained__hek_mantis_kras_a549xy
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSCyto3D/epoch=83-step=14532-loss=0.492.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Cytoland_PRED_DUAL_ON_HEK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/hek/predictions
+  sbatch:
+    constraint: a40|l40s|a6000|a100|h100|h200
