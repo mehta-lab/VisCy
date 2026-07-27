@@ -36,8 +36,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint__legacy_deconvgt/a549__mock/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint/a549__mock/prediction.zarr
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_PRED_SEC61B_ON_A549_sec61b_mock
-  run_root: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint__legacy_deconvgt/a549__mock
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint/a549__mock

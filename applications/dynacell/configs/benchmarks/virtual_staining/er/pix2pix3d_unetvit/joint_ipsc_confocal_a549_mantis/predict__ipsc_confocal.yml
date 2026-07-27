@@ -36,8 +36,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint__legacy_deconvgt/ipsc/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint/ipsc/prediction.zarr
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_PRED_SEC61B_ON_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint__legacy_deconvgt/ipsc
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint/ipsc
