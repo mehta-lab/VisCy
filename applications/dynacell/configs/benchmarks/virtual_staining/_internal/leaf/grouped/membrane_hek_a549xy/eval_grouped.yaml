@@ -14,22 +14,38 @@
 # leaf — its predicts are ~25x slower, and splitting keeps this bucket off that
 # tail while both share one warm GT cache.
 #
-# Deliberate departures from the ipsc/a549 membrane buckets:
-#   * compute_instance_ap: false and no cpdino backend. Whole-cell instance AP
-#     needs a GT nucleus channel to carve (segmentation.nuclei_channel_name);
-#     the HEK release ships none, and its nucleus target failed QC.
+# Carve seeds are PREDICTED, not ground truth, and that is the one real
+# departure from the ipsc/a549 membrane buckets. Those carve a GT nucleus
+# channel (iPSC cell.zarr Nuclei; A549 the sibling H2B_*.ozx). The HEK release
+# ships no nucleus channel -- its nucleus target failed QC -- so the seeds come
+# from `Nuclei_prediction` in
+# hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr,
+# a Phase3D->nucleus prediction from the public VSCyto3D (cytoland) checkpoint
+# (_dual_nucl_memb/fcmae_vscyto3d_pretrained/_no_train_cytoland/predict__hek_mantis_kras_a549xy.yml).
+# Consequences to keep in view when reading this bucket's Dice/IoU/AP:
+#   * The carve inherits the seed model's error, so HEK whole-cell numbers carry
+#     one error source the ipsc/a549 rows do not. Treat a HEK-vs-A549 delta as
+#     including it; do not read it as a pure cell-type effect.
+#   * The seeds enter twice, not once: the resolved base sets
+#     slice_selection=focus with focus_anchor=nucleus_area, so the predicted
+#     nuclei also pick the 2-D instance plane (pipeline.py `_gt_nuclei` feeds
+#     resolve_focus_instance_planes for a membrane target). Self-consistent --
+#     GT, prediction and seeds all land on the same z -- but it means a seed-model
+#     failure shifts the plane as well as the carve.
+#   * The seed model is public cytoland weights -- never fine-tuned on dynacell
+#     and never exposed to HEK -- so it cannot leak a benchmarked checkpoint into
+#     its own evaluation. Every condition below carves the SAME seed stack, so
+#     the carve is a constant across the arms being compared.
+# What this buys: compute_instance_ap IS pipeline.py's ``instance_mode``, and
+# that flag switches what Dice/IoU/Precision/Recall are computed ON. True (here,
+# and in the ipsc/a549 membrane buckets) means binarized carved cpdino
+# WHOLE-CELL labels -- filled cells, ~30-50% foreground. False (this bucket
+# until now) meant SuperModel semantic membrane shells at ~2-5% foreground,
+# where a 1-2 voxel displacement alone drops Dice near zero. Those two are not
+# comparable, which is why this bucket previously had to omit membrane Dice from
+# every cross-cell-type table. It is now on the same footing as the paper's.
 #
-#     CONSEQUENCE, and it is not cosmetic: compute_instance_ap IS pipeline.py's
-#     ``instance_mode``, and that flag also switches what Dice/IoU/Precision/
-#     Recall are computed ON. With it true (the ipsc/a549 membrane buckets) they
-#     are the overlap of binarized carved cpdino WHOLE-CELL labels -- filled
-#     cells, ~30-50% foreground, Dice ~0.85. With it false (here) they are the
-#     overlap of SuperModel semantic membrane masks -- thin shells at ~2-5%
-#     foreground, where a 1-2 voxel displacement alone drops Dice near zero.
-#     So this bucket's Dice is NOT comparable to the membrane Dice in the paper's
-#     tables, and must never be placed beside it as a cross-cell-type delta. The
-#     mito bucket has no such problem: mito is never instance_mode, so both HEK
-#     and A549/iPSC score the same classical Workflow_tomm20 masks.
+# Other deliberate departure:
 #   * cross_condition_probe disabled: it classifies infected-vs-mock, and HEK
 #     has a single (uninfected) condition. It is default-on whenever feature
 #     metrics run, and would otherwise log a skip every time.
@@ -43,11 +59,17 @@
 target_name: membrane
 compute_feature_metrics: true
 use_gpu: true
-compute_instance_ap: false
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei_prediction
 cross_condition_probe:
   enabled: false
 io:
   require_complete_cache: false
+  # Shared across every condition (unlike the A549 buckets, whose H2B seed store
+  # varies per plate condition) -- HEK is a single uninfected condition.
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr
 runtime:
   executor: serial
   fov_workers: 1
