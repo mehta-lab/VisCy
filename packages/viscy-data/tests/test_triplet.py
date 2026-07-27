@@ -346,13 +346,9 @@ def test_timepoint_statistics_resolved_in_triplet_dataset(
 def test_reference_pixel_size_rescale_output_shape(preprocessed_hcs_dataset, tracks_hcs_dataset, reference_pixel_size):
     """reference_pixel_size rescale must land exactly on final_yx_patch_size.
 
-    The fixture pixel size is 1.0 µm/px, so a reference of 1.08 makes the naive
-    ``initial = round(final * scale)`` land on an odd number (35). The dataset
-    extracts a centered window of width ``2 * (initial // 2)`` = 34, one pixel
-    short, so a scale-factor resize would undershoot to 31 rather than 32 and the
-    datamodule's spatial-shape check would raise. Rounding the extraction size to
-    an even number keeps the resize exact. 1.3186 mirrors the SEC61B_DENV run
-    (0.1494 / 0.1133).
+    The extraction size is kept even for centered crops, while interpolation
+    receives ``final_yx_patch_size`` explicitly to avoid scale-factor flooring.
+    1.3186 mirrors the SEC61B_DENV run (0.1494 / 0.1133).
     """
     z_range = (4, 9)
     final_yx = (32, 32)

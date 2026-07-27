@@ -602,14 +602,11 @@ class TripletDataModule(HCSDataModule):
                 f"Extracting {self.initial_yx_patch_size} px patches "
                 f"and resizing to {final_yx_patch_size} px."
             )
-            scale_yx = (
-                final_yx_patch_size[0] / self.initial_yx_patch_size[0],
-                final_yx_patch_size[1] / self.initial_yx_patch_size[1],
-            )
             extra_transforms.append(
                 BatchedZoomd(
                     keys=list(self.source_channel),
-                    scale_factor=(1.0, *scale_yx),
+                    scale_factor=None,
+                    size=(extraction_width, *final_yx_patch_size),
                     mode="nearest-exact",
                 )
             )
