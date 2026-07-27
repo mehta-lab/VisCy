@@ -190,6 +190,9 @@ class MultiExperimentDataModule(LightningDataModule):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
+        emit_sequence: bool = False,
+        sequence_length: int = 3,
+        sequence_tau_frames: int = 1,
         max_border_shift: int = -1,
         shuffle_val: bool = False,
         pin_memory: bool = True,
@@ -252,6 +255,9 @@ class MultiExperimentDataModule(LightningDataModule):
         self.positive_match_columns = positive_match_columns
         self.positive_channel_source = positive_channel_source
         self.label_columns = label_columns
+        self.emit_sequence = emit_sequence
+        self.sequence_length = sequence_length
+        self.sequence_tau_frames = sequence_tau_frames
         self.max_border_shift = max_border_shift
         self.shuffle_val = shuffle_val
         self.pin_memory = pin_memory
@@ -419,6 +425,9 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
+            emit_sequence=self.emit_sequence,
+            sequence_length=self.sequence_length,
+            sequence_tau_frames=self.sequence_tau_frames,
         )
 
         if val_names:
@@ -445,6 +454,9 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
+                emit_sequence=self.emit_sequence,
+                sequence_length=self.sequence_length,
+                sequence_tau_frames=self.sequence_tau_frames,
             )
 
     def _setup_fov_split(self, registry: ExperimentRegistry, cell_index_df: pd.DataFrame) -> None:
@@ -583,6 +595,9 @@ class MultiExperimentDataModule(LightningDataModule):
             positive_match_columns=self.positive_match_columns,
             positive_channel_source=self.positive_channel_source,
             label_columns=self.label_columns,
+            emit_sequence=self.emit_sequence,
+            sequence_length=self.sequence_length,
+            sequence_tau_frames=self.sequence_tau_frames,
         )
 
         if not val_tracks.empty:
@@ -602,6 +617,9 @@ class MultiExperimentDataModule(LightningDataModule):
                 positive_match_columns=self.positive_match_columns,
                 positive_channel_source=self.positive_channel_source,
                 label_columns=self.label_columns,
+                emit_sequence=self.emit_sequence,
+                sequence_length=self.sequence_length,
+                sequence_tau_frames=self.sequence_tau_frames,
             )
 
     # ------------------------------------------------------------------
@@ -780,7 +798,7 @@ class MultiExperimentDataModule(LightningDataModule):
 
         transform = self._augmentation_transform
 
-        for key in ["anchor", "positive", "negative"]:
+        for key in ["anchor", "positive", "negative", "sequence"]:
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
                 norm_meta = batch.get(norm_meta_key)

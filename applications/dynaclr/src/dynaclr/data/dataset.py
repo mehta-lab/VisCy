@@ -199,6 +199,9 @@ class MultiExperimentTripletDataset(Dataset):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
+        emit_sequence: bool = False,
+        sequence_length: int = 3,
+        sequence_tau_frames: int = 1,
     ) -> None:
         if ts is None:
             raise ImportError(
@@ -240,6 +243,28 @@ class MultiExperimentTripletDataset(Dataset):
         self.positive_cell_source = positive_cell_source
         self.positive_match_columns = positive_match_columns if positive_match_columns is not None else ["lineage_id"]
         self.positive_channel_source = positive_channel_source
+
+        # Temporal sequence emission (for straightening / predictor losses):
+        # emit K consecutive same-track same-marker frames at fixed frame stride.
+        self.emit_sequence = emit_sequence
+        self.sequence_length = sequence_length
+        self.sequence_tau_frames = sequence_tau_frames
+        if emit_sequence:
+            if sequence_length < 3:
+                raise ValueError(f"sequence_length must be >= 3 for curvature, got {sequence_length}")
+            if sequence_tau_frames < 1:
+                raise ValueError(f"sequence_tau_frames must be >= 1, got {sequence_tau_frames}")
+            if self._channel_mode != "from_index":
+                raise ValueError(
+                    "emit_sequence requires bag-of-channels mode (channels_per_sample=1); "
+                    f"got channel_mode={self._channel_mode!r}. Per-marker sequences need one "
+                    "channel per sample for a well-defined marker filter."
+                )
+            if "lineage_id" not in self.positive_match_columns:
+                raise ValueError(
+                    "emit_sequence requires 'lineage_id' in positive_match_columns "
+                    "so the lineage-timepoint lookup is built."
+                )
 
         self._label_encoders: dict[str, tuple[str, dict[str, int]]] = {}
         if label_columns:
@@ -456,6 +481,20 @@ class MultiExperimentTripletDataset(Dataset):
                 sample["positive"] = positive_patches
                 sample["positive_norm_meta"] = positive_norms
                 sample["positive_meta"] = self._extract_meta(positive_rows)
+
+            if self.emit_sequence:
+                seq_track_indices, seq_valid = self._sample_sequence_indices(anchor_positions=indices)
+                tr_chan_arr = self._tr_arrays["channel_name"]
+                seq_forced_channel_names = [[tr_chan_arr[i]] for i in seq_track_indices]
+                seq_patches, seq_norms = self._slice_patches(
+                    self._tr_arrays, seq_track_indices, seq_forced_channel_names
+                )
+                seq_rows = self.index.tracks.iloc[seq_track_indices].reset_index(drop=True)
+                sample["sequence"] = seq_patches  # (B*K, C, Z, Y, X), row-major over (B, K)
+                sample["sequence_norm_meta"] = seq_norms
+                sample["sequence_meta"] = self._extract_meta(seq_rows)
+                sample["sequence_valid"] = torch.from_numpy(seq_valid)
+                sample["sequence_length"] = self.sequence_length
         else:
             # Build per-sample index dicts via NumPy column arrays (no .iterrows).
             all_cols = list(ULTRACK_INDEX_COLUMNS) + [
@@ -632,6 +671,83 @@ class MultiExperimentTripletDataset(Dataset):
             pos_track_indices[i] = chosen
 
         return pos_track_indices
+
+    def _sample_sequence_indices(
+        self,
+        anchor_positions: list[int],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sample K consecutive same-lineage same-marker frames per anchor.
+
+        Builds a fixed stencil ``[t0, t0+tau, ..., t0+(K-1)*tau]`` (frames) for
+        each anchor's lineage. When every stencil timepoint has a same-marker
+        candidate, the sequence is valid; otherwise it is marked invalid and
+        filled with the anchor's own tracks-index K times (placeholder, keeps
+        the batch tensor rectangular — the loss drops it via ``valid``).
+
+        Frames are grouped row-major per sample: ``[s0_t0, s0_t1, ..., s0_t(K-1),
+        s1_t0, ...]`` so the engine can ``view(B, K, D)`` to recover grouping.
+
+        Parameters
+        ----------
+        anchor_positions : list[int]
+            Positional indices into ``valid_anchors`` for the batch.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            ``seq_track_indices`` of shape ``(B * K,)`` (positional indices into
+            ``self.index.tracks``) and ``seq_valid`` of shape ``(B,)`` (bool).
+        """
+        rng = self._rng
+        exp_arr = self._va_arrays["experiment"]
+        lid_arr = self._va_arrays["lineage_id"]
+        t_arr = self._va_arrays["t"]
+        anchor_marker_arr = self._va_arrays["marker"]
+        tr_marker_arr = self._tr_arrays["marker"]
+        lt_map = self._lineage_timepoints
+        k = self.sequence_length
+        tau = self.sequence_tau_frames
+
+        b = len(anchor_positions)
+        seq_track_indices = np.empty(b * k, dtype=np.int64)
+        seq_valid = np.zeros(b, dtype=bool)
+
+        for i, ai in enumerate(anchor_positions):
+            exp_name = str(exp_arr[ai])
+            lineage_id = str(lid_arr[ai])
+            anchor_t = int(t_arr[ai])
+            anchor_marker = anchor_marker_arr[ai]
+            timepoints = lt_map.get((exp_name, lineage_id))
+
+            rows: list[int] | None = None
+            if timepoints is not None:
+                wanted = [anchor_t + j * tau for j in range(k)]
+                picked: list[int] = []
+                for wt in wanted:
+                    cands = timepoints.get(wt)
+                    if not cands:
+                        break
+                    idx_arr = np.asarray(cands, dtype=np.int64)
+                    mask = tr_marker_arr[idx_arr] == anchor_marker
+                    filtered = idx_arr[mask]
+                    if len(filtered) == 0:
+                        break
+                    picked.append(int(filtered[rng.integers(len(filtered))]))
+                if len(picked) == k:
+                    rows = picked
+
+            if rows is None:
+                # Placeholder: a valid tracks-index (row 0) repeated K times so
+                # patch reads succeed and shapes stay rectangular. The sample is
+                # dropped by ``seq_valid`` so its patches never affect the loss.
+                # NOTE: ``ai`` is a valid_anchors position, a different index
+                # space than tracks — never reuse it as a tracks-index here.
+                rows = [0] * k
+            else:
+                seq_valid[i] = True
+            seq_track_indices[i * k : (i + 1) * k] = rows
+
+        return seq_track_indices, seq_valid
 
     # ------------------------------------------------------------------
     # Patch extraction (tensorstore I/O)

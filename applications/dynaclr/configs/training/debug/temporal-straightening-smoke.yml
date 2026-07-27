@@ -1,0 +1,82 @@
+# Smoke test: predictor + straightening temporal terms wired into DynaCLR.
+# Fast-dev run on the 2-FOV test parquet to confirm the sequence sampler emits
+# (B*K, C, Z, Y, X), the engine encodes it in one forward, and both temporal
+# losses (loss/curv, loss/pred) are computed without NaN/shape/DDP errors.
+#
+# Run:
+#   uv run --no-sync python -m dynaclr.cli fit -c \
+#     applications/dynaclr/configs/training/debug/temporal-straightening-smoke.yml
+
+seed_everything: 42
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  fast_dev_run: 4
+  logger: false
+  enable_checkpointing: false
+  enable_model_summary: false
+  use_distributed_sampler: false
+
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        embedding_dim: 768
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        projection_dim: 32
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentLoss
+      init_args:
+        temperature: 0.2
+    lr: 0.00002
+    example_input_array_shape: [1, 1, 1, 160, 160]
+    straightening_loss:
+      class_path: viscy_models.contrastive.loss.TemporalStraighteningLoss
+    predictor:
+      class_path: viscy_models.contrastive.predictor.Predictor
+      init_args:
+        dim: 768
+    lambda_curv: 0.01
+    lambda_pred: 0.1
+
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    cell_index_path: /hpc/projects/organelle_phenotyping/models/collections/DynaCLR-2D-MIP-BagOfChannels-v3.parquet
+    z_window: 1
+    yx_patch_size: [192, 192]
+    final_yx_patch_size: [160, 160]
+    channels_per_sample: 1
+    positive_cell_source: lookup
+    positive_match_columns: [lineage_id]
+    tau_range: [0.5, 2.0]
+    tau_decay_rate: 2.0
+    emit_sequence: true
+    sequence_length: 3
+    sequence_tau_frames: 1
+    stratify_by: [perturbation, marker]
+    split_ratio: 0.8
+    batch_size: 16
+    num_workers: 1
+    seed: 42
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel_0]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel_0]
+          spatial_axes: [1, 2]
+          prob: 0.5

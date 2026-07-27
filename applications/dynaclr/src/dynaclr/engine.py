@@ -51,12 +51,32 @@ class ContrastiveModule(LightningModule):
         freeze_backbone: bool = False,
         projection: nn.Module | None = None,
         auxiliary_heads: dict[str, BaseHead] | None = None,
+        straightening_loss: nn.Module | None = None,
+        predictor: nn.Module | None = None,
+        lambda_curv: float = 0.0,
+        lambda_pred: float = 0.0,
+        curv_schedule: Literal["cosine", "constant"] = "constant",
+        pred_schedule: Literal["cosine", "constant"] = "constant",
+        curv_weight_start: float = 0.0,
+        pred_weight_start: float = 0.0,
+        temporal_warmup_epochs: int = 50,
     ) -> None:
         super().__init__()
         self.model = encoder
         if projection is not None:
             self.model.projection = projection
         self.loss_function = loss_function
+        self.straightening_loss = straightening_loss
+        self.predictor = predictor
+        self.lambda_curv = lambda_curv
+        self.lambda_pred = lambda_pred
+        self.curv_schedule = curv_schedule
+        self.pred_schedule = pred_schedule
+        self.curv_weight_start = curv_weight_start
+        self.pred_weight_start = pred_weight_start
+        self.temporal_warmup_epochs = temporal_warmup_epochs
+        self._curv_weight = curv_weight_start if curv_schedule == "cosine" else lambda_curv
+        self._pred_weight = pred_weight_start if pred_schedule == "cosine" else lambda_pred
         self.lr = lr
         self.schedule = schedule
         self.log_batches_per_epoch = log_batches_per_epoch
@@ -93,6 +113,54 @@ class ContrastiveModule(LightningModule):
         for head in self.auxiliary_heads.values():
             head.step(self.current_epoch)
             self.log(f"hparams/loss_weight/{head.head_name}", head.get_weight())
+        if self.straightening_loss is not None:
+            if self.curv_schedule == "cosine":
+                self._curv_weight = cosine_anneal(
+                    self.curv_weight_start, self.lambda_curv, self.current_epoch, self.temporal_warmup_epochs
+                )
+            self.log("hparams/loss_weight/curv", self._curv_weight)
+        if self.predictor is not None:
+            if self.pred_schedule == "cosine":
+                self._pred_weight = cosine_anneal(
+                    self.pred_weight_start, self.lambda_pred, self.current_epoch, self.temporal_warmup_epochs
+                )
+            self.log("hparams/loss_weight/pred", self._pred_weight)
+
+    def _temporal_losses(self, batch: TripletSample, stage: Literal["train", "val"]) -> Tensor:
+        """Compute weighted straightening + predictor losses on the sequence batch.
+
+        Encodes the ``(B*K, C, Z, Y, X)`` sequence in ONE forward, reshapes to
+        ``(B, K, 768)``, and applies both temporal terms directly to the encoder
+        features ``z`` (no head). Returns the weighted sum (zero tensor when no
+        sequence / no temporal modules are configured).
+        """
+        if "sequence" not in batch or (self.straightening_loss is None and self.predictor is None):
+            return torch.zeros((), device=self.device)
+        seq = batch["sequence"]  # (B*K, C, Z, Y, X)
+        k = int(batch["sequence_length"])
+        b = seq.size(0) // k
+        z, _ = self(seq)  # ONE forward -> (B*K, 768)
+        z = z.view(b, k, -1)  # (B, K, 768)
+        valid = batch.get("sequence_valid")
+        on_step = stage == "train"
+        total = torch.zeros((), device=self.device)
+        if self.straightening_loss is not None:
+            curv = self.straightening_loss(z, valid=valid)
+            total = total + self._curv_weight * curv
+            self.log(f"loss/curv/{stage}", curv, on_step=on_step, on_epoch=not on_step, sync_dist=True, batch_size=b)
+        if self.predictor is not None:
+            src = z[:, :-1, :].reshape(-1, z.size(-1))  # (B*(K-1), 768) z_t
+            tgt = z[:, 1:, :].reshape(-1, z.size(-1)).detach()  # sg(z_{t+1})
+            if valid is not None:
+                mask = valid.view(b, 1).expand(b, k - 1).reshape(-1)
+                src, tgt = src[mask], tgt[mask]
+            if src.numel() == 0:
+                l_pred = (z * 0.0).sum()  # DDP-safe graph-connected zero
+            else:
+                l_pred = F.mse_loss(self.predictor(src), tgt)
+            total = total + self._pred_weight * l_pred
+            self.log(f"loss/pred/{stage}", l_pred, on_step=on_step, on_epoch=not on_step, sync_dist=True, batch_size=b)
+        return total
 
     def on_fit_start(self) -> None:  # noqa: D102
         if self.freeze_backbone:
@@ -284,6 +352,7 @@ class ContrastiveModule(LightningModule):
             stage="train",
         )
         loss = loss + self._run_auxiliary_heads(anchor_features, batch, "train")
+        loss = loss + self._temporal_losses(batch, "train")
         return loss
 
     def on_train_epoch_end(self) -> None:  # noqa: D102
@@ -316,6 +385,7 @@ class ContrastiveModule(LightningModule):
             stage="val",
         )
         loss = loss + self._run_auxiliary_heads(anchor_features, batch, "val")
+        loss = loss + self._temporal_losses(batch, "val")
         n = self.log_embeddings_every_n_epochs
         if n is not None and self.current_epoch % n == 0 and not self.trainer.sanity_checking:
             self._embedding_outputs.append((anchor_features.detach().cpu(), batch.get("anchor_meta", [])))
