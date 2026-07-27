@@ -3,6 +3,7 @@
 Provides:
 - ``NTXentLoss``: re-exported with a ``step()`` method for temperature scheduling.
 - ``NTXentHCL``: adds hard-negative concentration on top.
+- ``TemporalStraighteningLoss``: curvature loss on consecutive track embeddings.
 """
 
 from __future__ import annotations
@@ -10,9 +11,10 @@ from __future__ import annotations
 from typing import Literal
 
 import torch
+import torch.nn.functional as F
 from pytorch_metric_learning.losses import NTXentLoss as _NTXentLossBase
 from pytorch_metric_learning.utils import common_functions as c_f
-from torch import Tensor
+from torch import Tensor, nn
 
 from viscy_models.schedule import cosine_anneal
 
@@ -184,3 +186,62 @@ class NTXentHCL(NTXentLoss):
                 }
             }
         return self.zero_losses()
+
+
+class TemporalStraighteningLoss(nn.Module):
+    """Curvature loss straightening latent trajectories (Wang et al. 2026).
+
+    Penalizes turning between consecutive latent velocity vectors along a track,
+    ``L_curv = mean_t (1 - cos(v_t, v_{t+1}))`` with ``v_t = z_{t+1} - z_t``.
+    Minimizing it makes successive velocities parallel, so the trajectory
+    approaches a straight line and Euclidean distance tracks progression.
+
+    Acts directly on the encoder embedding ``z`` (no projection head): cosine is
+    scale-invariant, so no normalization is applied inside the loss. Composes
+    additively with any anti-collapse objective (e.g. NT-Xent).
+
+    Parameters
+    ----------
+    eps : float
+        Numerical floor for the cosine similarity denominator. Default: 1e-8.
+    """
+
+    def __init__(self, eps: float = 1e-8) -> None:
+        super().__init__()
+        self.eps = eps
+
+    def step(self, epoch: int) -> None:
+        """No-op; the loss weight schedule lives on the LightningModule."""
+
+    def forward(self, z_seq: Tensor, valid: Tensor | None = None) -> Tensor:
+        """Compute mean curvature over a batch of consecutive-frame sequences.
+
+        Parameters
+        ----------
+        z_seq : Tensor
+            Embeddings of shape ``(B, K, D)`` with ``K >= 3`` consecutive frames
+            of the same track in time order.
+        valid : Tensor or None
+            Boolean mask of shape ``(B,)`` selecting samples with a real
+            (non-placeholder) sequence. Invalid samples are dropped. When every
+            sample is invalid, a graph-connected zero (``(z_seq * 0).sum()``) is
+            returned so DDP all-reduce stays balanced. Default: None (all used).
+
+        Returns
+        -------
+        Tensor
+            Scalar curvature loss in ``[0, 2]``.
+        """
+        if z_seq.size(1) < 3:
+            raise ValueError(f"z_seq must have K >= 3 frames, got K={z_seq.size(1)}")
+        v = z_seq[:, 1:, :] - z_seq[:, :-1, :]  # (B, K-1, D) velocities
+        v1, v2 = v[:, :-1, :], v[:, 1:, :]  # (B, K-2, D) consecutive pairs
+        cos = F.cosine_similarity(v1, v2, dim=-1, eps=self.eps)  # (B, K-2)
+        per_sample = (1.0 - cos).mean(dim=1)  # (B,)
+        if valid is not None:
+            per_sample = per_sample[valid]
+            if per_sample.numel() == 0:
+                # Graph-connected zero: keeps every DDP rank producing a
+                # gradient-tracked scalar so all-reduce stays balanced.
+                return (z_seq * 0.0).sum()
+        return per_sample.mean()
