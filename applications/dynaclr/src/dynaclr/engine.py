@@ -154,10 +154,14 @@ class ContrastiveModule(LightningModule):
             if valid is not None:
                 mask = valid.view(b, 1).expand(b, k - 1).reshape(-1)
                 src, tgt = src[mask], tgt[mask]
-            if src.numel() == 0:
-                l_pred = (z * 0.0).sum()  # DDP-safe graph-connected zero
+            pred = self.predictor(src)
+            if pred.numel() == 0:
+                # Keep predictor parameters in the graph on ranks whose batch
+                # contains no valid sequence, avoiding DDP unused-parameter
+                # failures on the following iteration.
+                l_pred = pred.sum() * 0.0
             else:
-                l_pred = F.mse_loss(self.predictor(src), tgt)
+                l_pred = F.mse_loss(pred, tgt)
             total = total + self._pred_weight * l_pred
             self.log(f"loss/pred/{stage}", l_pred, on_step=on_step, on_epoch=not on_step, sync_dist=True, batch_size=b)
         return total
