@@ -347,13 +347,34 @@ def _phase_shift_average(
     Prefer it, and re-measure before trusting any replacement: the phasor
     factor ranks candidates, it does not rank outcomes.
 
-    Cost is ``len(offsets) ** 2`` sliding-window passes, which is the only
-    reason this is opt-in rather than the default: it improved PCC in every
-    case measured (in-domain membrane 0.5378 -> 0.5406, out-of-distribution ER
-    0.246 -> 0.272), and the one case where it slightly *lowered* it was
-    in-domain A549 TOMM20 (0.533 -> 0.528), where the mean over correlated
-    predictions costs a little sharpness. Turn it on for any figure panel
-    where the token grid is visible.
+    Pass the offsets as explicit ``(dy, dx)`` PAIRS to avoid paying for the
+    outer product. The lattice is separable to first order -- a component that
+    depends on ``y mod P``, one on ``x mod P``, and a smaller cross term -- so
+    four pairs whose ``dy`` values and ``dx`` values are each the full offset
+    set give every axis the same four residues the 16-combination product does,
+    at a quarter of the cost. Measured on the same FOV and plane:
+
+    ==============================  ======  ========  =======  ======
+    offsets                         passes  depth@32  depth@4     PCC
+    ==============================  ======  ========  =======  ======
+    (none)                               1    0.9866   0.5304  0.5378
+    outer product of (0,5,11,22)        16    0.2402   0.0184  0.5406
+    (0,0) (5,11) (11,22) (22,5)          4    0.2338   0.0172  0.5414
+    (0,11) (5,22) (11,0) (22,5)          4    0.2239   0.0190  0.5407
+    (0,0) (5,5) (11,11) (22,22)          4    0.2495   0.0174  0.5391
+    ==============================  ======  ========  =======  ======
+
+    Every 4-pass set matches the 16-pass product within measurement noise, and
+    the two off-diagonal ones edge it out -- the diagonal set is marginally the
+    weakest at period 32, which is the cross term it fails to decorrelate.
+
+    Cost is ``len(offsets) ** 2`` passes for a flat offset list and
+    ``len(offsets)`` for pairs, which is the only reason this is opt-in rather
+    than the default: it improved PCC in every case measured (in-domain
+    membrane 0.5378 -> 0.5406, out-of-distribution ER 0.246 -> 0.272), and the
+    one case where it slightly *lowered* it was in-domain A549 TOMM20
+    (0.533 -> 0.528), where the mean over correlated predictions costs a little
+    sharpness. Turn it on for any figure panel where the token grid is visible.
 
     Parameters
     ----------
@@ -365,9 +386,10 @@ def _phase_shift_average(
         Per-dimension window size ``(pd, ph, pw)``.
     overlap_size : tuple of int
         Overlap in ``(D, H, W)`` between adjacent windows.
-    offsets : Sequence of int
-        Non-negative YX shifts in pixels, applied as the outer product over
-        both axes. A single offset reduces to a plain tiled prediction.
+    offsets : Sequence of int or Sequence of (int, int)
+        Non-negative YX shifts in pixels. Plain ints are expanded to the outer
+        product over both axes; ``(dy, dx)`` pairs are used as given. A single
+        zero offset reduces to a plain tiled prediction.
     blend : {"cosine", "uniform"}
         Overlap weighting passed to :func:`_sliding_window_inference`.
 
@@ -379,14 +401,25 @@ def _phase_shift_average(
     Raises
     ------
     ValueError
-        If ``offsets`` is empty, contains a negative value, or its largest
-        shift is too big for reflect padding of this input.
+        If ``offsets`` is empty, mixes scalars with pairs, contains a negative
+        value, or its largest shift is too big for reflect padding of this
+        input.
     """
     if not len(offsets):
         raise ValueError("offsets must contain at least one shift")
-    if min(offsets) < 0:
+    scalars = [isinstance(o, (int, np.integer)) for o in offsets]
+    if not all(scalars) and any(scalars):
+        raise ValueError(f"offsets must be all scalars or all (dy, dx) pairs, got {tuple(offsets)}")
+    if all(scalars):
+        shifts = list(itertools.product(offsets, offsets))
+    else:
+        shifts = [tuple(o) for o in offsets]  # type: ignore[misc]
+        if any(len(o) != 2 for o in shifts):
+            raise ValueError(f"paired offsets must each be (dy, dx), got {tuple(offsets)}")
+    flat = [c for pair in shifts for c in pair]
+    if min(flat) < 0:
         raise ValueError(f"offsets must be non-negative, got {tuple(offsets)}")
-    margin = max(offsets)
+    margin = max(flat)
     if margin == 0:
         return _sliding_window_inference(forward_fn, source, patch_spatial, overlap_size, blend=blend)
 
@@ -402,7 +435,7 @@ def _phase_shift_average(
     padded = F.pad(source, (margin, margin, margin, margin, 0, 0), mode="reflect")
 
     total: Tensor | None = None
-    for offset_y, offset_x in itertools.product(offsets, offsets):
+    for offset_y, offset_x in shifts:
         # `sub` starts at `offset` in padded coordinates, so the original FOV
         # sits at `margin - offset` within it, and each window origin lands at
         # a different phase relative to the specimen.
@@ -414,7 +447,7 @@ def _phase_shift_average(
             margin - offset_x : margin - offset_x + width,
         ]
         total = crop if total is None else total + crop
-    return total / (len(offsets) ** 2)
+    return total / len(shifts)
 
 
 class DynacellUNet(LightningModule):
@@ -446,13 +479,14 @@ class DynacellUNet(LightningModule):
         takes a plain average and leaves visible seams where the number of
         covering windows changes. See :func:`_sliding_window_inference`.
         Has no effect when a single window covers the input.
-    predict_phase_shifts : Sequence[int] | None
+    predict_phase_shifts : Sequence[int] | Sequence[tuple[int, int]] | None
         When set, average the prediction over these YX grid shifts to
         suppress the decoder's checkerboard and (for ``UNetViT3D``) the ViT
         token lattice; see :func:`_phase_shift_average` for which offsets
         cancel which period and for the accuracy trade-off.
-        ``(0, 9, 18, 27)`` suppresses both. Costs ``len(offsets) ** 2``
-        passes, so it is off by default.
+        ``((0, 0), (5, 11), (11, 22), (22, 5))`` suppresses both at four
+        passes; a flat ``(0, 5, 11, 22)`` measures the same but costs the
+        outer product, sixteen. Off by default.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -486,7 +520,7 @@ class DynacellUNet(LightningModule):
         predict_method: Literal["full_image", "sliding_window"] = "full_image",
         predict_overlap: tuple[int, int, int] = (4, 256, 256),
         predict_blend: Literal["cosine", "uniform"] = "cosine",
-        predict_phase_shifts: Sequence[int] | None = None,
+        predict_phase_shifts: Sequence[int] | Sequence[tuple[int, int]] | None = None,
         ckpt_path: str | None = None,
         encoder_only: bool = False,
     ) -> None:
@@ -1076,12 +1110,14 @@ class DynacellGAN(LightningModule):
         takes a plain average and leaves visible seams where the number of
         covering windows changes. See :func:`_sliding_window_inference`.
         Has no effect when a single window covers the input.
-    predict_phase_shifts : Sequence of int or None
+    predict_phase_shifts : Sequence of int or Sequence of (int, int) or None
         When set, average the prediction over these YX grid shifts to
         suppress the decoder's checkerboard and the ViT token lattice; see
         :func:`_phase_shift_average` for which offsets cancel which period
-        and for the accuracy trade-off. ``(0, 9, 18, 27)`` suppresses both.
-        Costs ``len(offsets) ** 2`` passes, so it is off by default.
+        and for the accuracy trade-off.
+        ``((0, 0), (5, 11), (11, 22), (22, 5))`` suppresses both at four
+        passes; a flat ``(0, 5, 11, 22)`` measures the same but costs the
+        outer product, sixteen. Off by default.
     ckpt_path : str or None
         Optional path to a Lightning checkpoint to load weights from at
         construction time. Loaded with ``strict=False`` so pre-modernization
@@ -1120,7 +1156,7 @@ class DynacellGAN(LightningModule):
         predict_method: Literal["full_image", "sliding_window"] = "full_image",
         predict_overlap: tuple[int, int, int] = (4, 256, 256),
         predict_blend: Literal["cosine", "uniform"] = "cosine",
-        predict_phase_shifts: Sequence[int] | None = None,
+        predict_phase_shifts: Sequence[int] | Sequence[tuple[int, int]] | None = None,
         ckpt_path: str | None = None,
     ) -> None:
         super().__init__()

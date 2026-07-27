@@ -1382,6 +1382,49 @@ def test_phase_shift_average_rejects_offset_larger_than_extent():
         _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 16, 16), (4, 16, 16), (2, 8, 8), offsets=(0, 27))
 
 
+def test_phase_shift_average_pairs_cancel_a_two_axis_lattice_at_a_quarter_the_cost():
+    """Explicit ``(dy, dx)`` pairs must suppress a lattice on BOTH axes.
+
+    The saving over the outer product is only sound if each axis still sees
+    every residue, so the stand-in lattice here is stamped on y and x at once
+    and the pair set is checked against the full product it replaces.
+    """
+    calls = []
+
+    def forward_fn(x):
+        calls.append(1)
+        h, w = x.shape[-2], x.shape[-1]
+        row = ((torch.arange(w) % 4) == 0).float().reshape(1, 1, 1, 1, w)
+        col = ((torch.arange(h) % 4) == 0).float().reshape(1, 1, 1, h, 1)
+        return x * 0 + row + col
+
+    source = torch.zeros(1, 1, 4, 64, 64)
+    patch, overlap = (4, 64, 64), (2, 0, 0)
+
+    def lattice_energy(vol):
+        plane = vol[0, 0, 2]
+        return (plane[::4, ::4].mean() - plane.mean()).abs().item()
+
+    base = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0,))
+    n_base = len(calls)
+    product = _phase_shift_average(forward_fn, source, patch, overlap, offsets=(0, 5, 11, 22))
+    n_product = len(calls) - n_base
+    pairs = _phase_shift_average(forward_fn, source, patch, overlap, offsets=((0, 0), (5, 11), (11, 22), (22, 5)))
+    n_pairs = len(calls) - n_base - n_product
+
+    assert n_pairs * 4 == n_product, f"pairs should cost a quarter of the product: {n_pairs} vs {n_product}"
+    assert lattice_energy(pairs) < lattice_energy(base) / 3
+    assert lattice_energy(pairs) == pytest.approx(lattice_energy(product), abs=0.02), (
+        f"pairs={lattice_energy(pairs):.4f} product={lattice_energy(product):.4f}"
+    )
+
+
+def test_phase_shift_average_rejects_mixed_scalar_and_pair_offsets():
+    """A half-converted offset list is a config error, not something to guess at."""
+    with pytest.raises(ValueError, match="all scalars or all"):
+        _phase_shift_average(lambda x: x, torch.zeros(1, 1, 4, 64, 64), (4, 64, 64), (2, 0, 0), offsets=(0, (5, 11)))
+
+
 @pytest.mark.parametrize("offsets", [(), (-1, 2)])
 def test_phase_shift_average_rejects_bad_offsets(offsets):
     """Empty or negative offsets are caller bugs, not something to clamp."""
