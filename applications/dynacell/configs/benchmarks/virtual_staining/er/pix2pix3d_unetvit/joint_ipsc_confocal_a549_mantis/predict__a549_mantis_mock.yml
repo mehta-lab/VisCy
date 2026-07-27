@@ -37,6 +37,11 @@ trainer:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
         output_store: /hpc/projects/virtual_staining/training/dynacell/er/pix2pix3d_unetvit/joint/a549__mock/prediction.zarr
+        # Take each plane from the depth window centred on it instead of the mean
+        # of all 8 covering windows: that mean halves mid-band power (0.045 ->
+        # 0.021 of ground truth on an in-domain membrane FOV) and cancels none of
+        # the XY lattice, since all 8 share one XY grid.
+        z_reduction: center
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_PRED_SEC61B_ON_A549_sec61b_mock

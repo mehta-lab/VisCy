@@ -21,16 +21,22 @@ model:
     # its local median step, vs 1.0x for ground truth. Predictions written
     # before that default landed carry those seams.
     #
-    # Not set here: predict_phase_shifts, which additionally suppresses the
-    # decoder's ConvTranspose checkerboard (2/4/8 px) and the ViT token lattice
-    # (32 px) at len(offsets)**2 the cost. Both are present IN distribution on
+    # Shift averaging suppresses the two lattices the cosine blend does not
+    # touch: the decoder's ConvTranspose checkerboard (2/4/8 px) and the ViT
+    # bottleneck's token grid (32 px). Both are present IN distribution on
     # every organelle, not only in the A549-trained-on-iPSC panels -- the 32 px
-    # token grid is the block structure visible in figure panels, because it
-    # survives the downsampling a figure applies to a 512 px field while the
-    # short periods average away. [0, 5, 11, 22] takes its modulation depth
-    # 0.99 -> 0.24 in-domain (ground-truth floor 0.07). Do NOT swap in offsets
-    # that merely zero the period-32 phasor; they reinstate the short periods
-    # and measure worse. See engine._phase_shift_average.
+    # grid is the block structure visible in figure panels, because it survives
+    # the downsampling a figure applies to a 512 px field while the short
+    # periods average away. In-domain modulation depth (iPSC-trained membrane on
+    # iPSC, ground-truth floor 0.0705 at P32 and 0.0041 at P4):
+    #   none            depth@32 0.9866  depth@4 0.5304  PCC 0.5378
+    #   these 4 shifts  depth@32 0.2338  depth@4 0.0172  PCC 0.5414
+    # Written as (dy, dx) PAIRS, which costs 4 tiled passes; a flat
+    # [0, 5, 11, 22] is expanded to its outer product and costs 16 for the same
+    # result. Do NOT swap in offsets that merely zero the period-32 phasor --
+    # those are congruent mod 8 and reinstate the short periods, measuring two
+    # to three times worse. See engine._phase_shift_average.
+    predict_phase_shifts: [[0, 0], [5, 11], [11, 22], [22, 5]]
 data:
   init_args:
     z_window_size: 8
