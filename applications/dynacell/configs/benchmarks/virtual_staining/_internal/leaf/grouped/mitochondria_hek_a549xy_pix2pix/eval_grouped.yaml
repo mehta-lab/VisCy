@@ -4,11 +4,13 @@
 # membrane pair — see membrane_hek_a549xy_pix2pix. Options match the siblings
 # exactly so the rows stay comparable.
 #
-# TWO conditions, not three: there is no iPSC-trained mito GAN. The leaf
-# mito/pix2pix3d_unetvit/ipsc_confocal/ still carries a REPLACE_ME ckpt_path and
-# models/dynacell/ipsc/mito/pix2pix3d_unetvit does not exist (the iPSC GANs cover
-# er/membrane/nucleus only), so that row is absent rather than pending. The HEK
-# mito table therefore reads pix2pix3d only in the A549 and joint pools.
+# TWO conditions for now, not three: the iPSC-trained mito GAN was never trained.
+# That is a missed submission rather than a structural absence -- its
+# train_4gpu_modernized.yml was the only gap in the 12-cell pix2pix (4 organelles x
+# 3 pools) grid, and wandb holds A549_TOMM20 and JOINT_TOMM20 fits from 2026-07-07/08
+# with no iPSC_TOMM20 run in any state. The backfill fit is in flight (job 35053575);
+# add the third condition once it produces a checkpoint and the HEK predict runs.
+# Until then the HEK mito table reads pix2pix3d in the A549 and joint pools only.
 target_name: mitochondria
 compute_feature_metrics: true
 use_gpu: true
