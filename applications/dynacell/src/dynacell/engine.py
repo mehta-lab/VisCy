@@ -293,39 +293,67 @@ def _phase_shift_average(
     energy at 2, 4 and 8 px (Odena et al., "Deconvolution and Checkerboard
     Artifacts", 2016). ``UNetViT3D`` adds a second lattice at 32 px, where the
     ViT bottleneck's ``unpatchify`` lays independently projected token blocks
-    side by side. Training largely absorbs both in-distribution; out of
-    distribution they reappear and can dominate the image.
+    side by side.
+
+    Both are present IN distribution, not only out of it. On an iPSC-trained
+    membrane prediction of an iPSC FOV -- fully in-domain -- folding the mean
+    ``|gradient|`` profile by index mod 32 and splitting it into harmonics
+    gives these relative amplitudes, with ground truth as the floor:
+
+    ================  ======  ======  ======  ======  ======
+    pure component      P32     P16      P8      P4      P2
+    ================  ======  ======  ======  ======  ======
+    prediction        0.063   0.100   0.076   0.134   0.330
+    ground truth      0.025   0.011   0.004   0.002   0.002
+    excess             2.5x    8.9x   19.9x   66.8x  215.7x
+    ================  ======  ======  ======  ======  ======
+
+    Most of the lattice *energy* sits at the short periods, but the 32 px
+    component is what a reader sees as blocks: it is a coherent step between
+    adjacent token cells, and it survives the downsampling any figure applies
+    to a 512 px field, while the 2-8 px components average away. Out of
+    distribution all of it grows.
 
     Both lattices are fixed relative to the *window* origin, not to the
     specimen, so predicting on a shifted grid moves them relative to the image
-    while real structure stays put. Averaging over offsets that hit different
-    residues modulo a lattice's period cancels that lattice; offsets congruent
-    modulo the period cannot, and in fact reinforce it.
+    while real structure stays put. Averaging shifts ``o_k`` scales a
+    period-``P`` lattice by ``|sum_k exp(2*pi*i*o_k/P)| / len(o)``: zero is
+    exact cancellation, one means the offsets are all congruent mod ``P`` and
+    the lattice is fully *reinforced*.
 
-    Measured on an A549-trained ER prediction of an iPSC FOV (prominence of
-    the gradient-profile peak at each period; 16 passes for each offset set):
+    It is tempting to pick offsets that zero that factor at 32, since 32 px is
+    the visible period. Do not -- it is the wrong objective, because the
+    offsets must serve every period at once and the short ones carry the
+    energy. Measured in-domain (iPSC-trained membrane on iPSC; modulation
+    depth of the 32-bin fold, ground-truth floor 0.0705 at P32 and 0.0041 at
+    P4; 16 passes each):
 
-    ==================  ======  ======  ======  ======
-    offsets                 P4      P8     P32     PCC
-    ==================  ======  ======  ======  ======
-    (none)               15.87    9.96   13.24  0.2457
-    (0, 8, 16, 24)       18.33   12.34    2.42  0.2763
-    (0, 9, 18, 27)        2.14    9.75    2.14  0.2751
-    (0, 1, 2, 3)          4.16    8.24    8.54  0.2483
-    (0, 5, 11, 22)        2.40    4.51    2.12  0.2722
-    ==================  ======  ======  ======  ======
+    ==================  ===========  ==========  ========  =======  ======
+    offsets             phasor @32   phasor @4   depth@32  depth@4     PCC
+    ==================  ===========  ==========  ========  =======  ======
+    (none)                        -           -    0.9866   0.5304  0.5378
+    (0, 8, 16, 24)            0.000       1.000    0.6412   0.4966  0.5423
+    (0, 10, 16, 26)           0.000       0.000    0.5911   0.3787  0.5423
+    (0, 5, 11, 22)            0.241       0.000    0.2402   0.0184  0.5406
+    ==================  ===========  ==========  ========  =======  ======
 
-    ``(0, 8, 16, 24)`` is all zeros mod 4, so it clears the 32 px grid but
-    makes the checkerboard *worse*. ``(0, 5, 11, 22)`` covers every residue
-    mod 4, spreads mod 8 and mod 32, and is the only set here that suppresses
-    all three periods -- prefer it.
+    The two sets that cancel P32 *exactly* come out two to three times worse
+    than the one that does not, because both are congruent mod 8 (and
+    ``(0, 8, 16, 24)`` mod 4 and mod 2 as well), so they reinstate the
+    high-amplitude short-period components while removing the low-amplitude
+    32 px one. ``(0, 5, 11, 22)`` zeroes P2 and P4 exactly and holds P8/P16/P32
+    at ~0.21-0.27, which is the best available compromise at four offsets --
+    no four-offset set gets the worst case over {4, 8, 16, 32} below 0.27.
+    Prefer it, and re-measure before trusting any replacement: the phasor
+    factor ranks candidates, it does not rank outcomes.
 
-    Cost is ``len(offsets) ** 2`` sliding-window passes, so this is opt-in.
-    It is also a mean over correlated predictions, which mildly smooths: on an
-    in-distribution A549 TOMM20 FOV it slightly *lowered* agreement with
-    ground truth (PCC 0.533 -> 0.528), while out of distribution it raised it
-    (0.246 -> 0.272 above). Reach for it when artifacts dominate, not by
-    default.
+    Cost is ``len(offsets) ** 2`` sliding-window passes, which is the only
+    reason this is opt-in rather than the default: it improved PCC in every
+    case measured (in-domain membrane 0.5378 -> 0.5406, out-of-distribution ER
+    0.246 -> 0.272), and the one case where it slightly *lowered* it was
+    in-domain A549 TOMM20 (0.533 -> 0.528), where the mean over correlated
+    predictions costs a little sharpness. Turn it on for any figure panel
+    where the token grid is visible.
 
     Parameters
     ----------

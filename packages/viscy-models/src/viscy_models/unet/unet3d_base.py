@@ -97,10 +97,12 @@ class UNet3DBase(nn.Module):
         # (Odena et al., "Deconvolution and Checkerboard Artifacts", 2016).
         # 3 is not divisible by 2, so kernel placements overlap unevenly and
         # each ConvTranspose imprints a 2-periodic modulation; three stacked
-        # upsamples put energy at 2, 4 and 8 px. Training absorbs most of it
-        # in-distribution, but it reappears out of distribution and can
-        # dominate: on an A549-trained ER prediction of an iPSC FOV the 4 px
-        # peak measured 16x its spectral background. It is visible in every
+        # upsamples put energy at 2, 4 and 8 px. It is present IN distribution,
+        # not only out of it: on an iPSC-trained membrane prediction of an iPSC
+        # FOV the period-2 component measured 216x its ground-truth amplitude
+        # and period-4 67x. Out of distribution it grows further -- on an
+        # A549-trained ER prediction of an iPSC FOV the 4 px peak reached 16x
+        # its spectral background. It is visible in every
         # model built on this base (UNetViT3D and FNet3D alike), which is how
         # it was traced here -- a shared artifact across two otherwise
         # unrelated architectures.
