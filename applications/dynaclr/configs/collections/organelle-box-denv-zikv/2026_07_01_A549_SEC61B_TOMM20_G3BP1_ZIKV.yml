@@ -35,6 +35,9 @@ experiments:
       - name: raw mCherry EX561 EM600-37
         marker: pAL17
         wells: [A/2, A/3, A/4, B/2, B/3, B/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [A/2, A/3, A/4, B/2, B/3, B/4]
     perturbation_wells:
       uninfected:
         - A/2

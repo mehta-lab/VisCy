@@ -1,0 +1,211 @@
+name: organelle_remodeling
+description: "Merged organelle-remodeling collection: SEC61B (ER), TOMM20 (mitochondria),
+  G3BP1 (stress granules) reporters under ZIKV/DENV infection. One experiment per dataset,
+  all prepared on VAST (normalization + focus_slice). mCherry viral sensor marker matches
+  Airtable channel_2_marker: pAL17 for ZIKV, pAL40 for DENV. GFP reporter per Airtable.
+  2026_04_21_A549_G3BP1_DENV is DEFERRED (odd 5-assemble layout, not on VAST yet).
+  Used by the organelle_remodeling model matrix (DynaCLR + MorphEm), which fans out
+  predict per experiment and skips already-embedded datasets."
+datasets_root: /hpc/projects/organelle_phenotyping/datasets
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  created_by: "eduardo.hirata"
+
+experiments:
+  # --- DENV, SEC61B (ER) ---
+  - name: 2024_11_07_A549_SEC61_DENV
+    data_path: ${datasets_root}/2024_11_07_A549_SEC61_DENV/2024_11_07_A549_SEC61_DENV.zarr
+    tracks_path: ${datasets_root}/2024_11_07_A549_SEC61_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      mock: [B/1, B/3]
+      DENV: [B/2, C/2]
+    exclude_fovs: [C/1/000000]
+    interval_minutes: 10.0
+    start_hpi: 4.0
+    moi: 5.0
+    organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+
+  - name: 2026_04_14_A549_SEC61B_DENV
+    data_path: ${datasets_root}/2026_04_14_A549_SEC61B_DENV/2026_04_14_A549_SEC61B_DENV.zarr
+    tracks_path: ${datasets_root}/2026_04_14_A549_SEC61B_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [C/2]
+      DENV: [C/3, C/4, D/2, D/3, D/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  - name: 2026_04_28_A549_SEC61B_DENV
+    data_path: ${datasets_root}/2026_04_28_A549_SEC61B_DENV/2026_04_28_A549_SEC61B_DENV.zarr
+    tracks_path: ${datasets_root}/2026_04_28_A549_SEC61B_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [A/2]
+      DENV: [A/3, A/4, B/2, B/3, B/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  # --- ZIKV, SEC61B (ER) ---
+  - name: 2026_03_24_A549_SEC61_ZIKV
+    data_path: ${datasets_root}/2026_03_24_A549_SEC61_ZIKV/2026_03_24_A549_SEC61_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_03_24_A549_SEC61_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [A/2]
+      ZIKV: [A/3, A/4, B/2, B/3, B/4]
+    interval_minutes: 30.0
+    start_hpi: 5.0
+    moi: 5.0
+    organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  # --- ZIKV, G3BP1 (stress granules) ---
+  - name: 2026_04_08_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/2026_04_08_A549_G3BP1_ZIKV/2026_04_08_A549_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_04_08_A549_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [D/6]
+      ZIKV: [B/5, B/6, C/5, C/6, D/5]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: stress_granules
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  # --- DENV, G3BP1 (stress granules) ---
+  # zarr stem is 2026_04_21_G3BP1_DENV (no A549), unlike the dir name.
+  - name: 2026_04_21_A549_G3BP1_DENV
+    data_path: ${datasets_root}/2026_04_21_A549_G3BP1_DENV/2026_04_21_G3BP1_DENV.zarr
+    tracks_path: ${datasets_root}/2026_04_21_A549_G3BP1_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [A/1]
+      DENV: [A/2, A/3, B/1, B/2, B/3]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: stress_granules
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  # --- ZIKV, TOMM20 (mitochondria) ---
+  - name: 2026_04_10_A549_TOMM20_ZIKV
+    data_path: ${datasets_root}/2026_04_10_A549_TOMM20_ZIKV/2026_04_10_A549_TOMM20_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_04_10_A549_TOMM20_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [A/2]
+      ZIKV: [A/3, A/4, B/2, B/3, B/4]
+    interval_minutes: 30.0
+    start_hpi: 5.0
+    moi: 5.0
+    organelle: mitochondria
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  # --- DENV, TOMM20 (mitochondria) ---
+  - name: 2026_04_30_A549_TOMM20_DENV
+    data_path: ${datasets_root}/2026_04_30_A549_TOMM20_DENV/2026_04_30_A549_TOMM20_DENV.zarr
+    tracks_path: ${datasets_root}/2026_04_30_A549_TOMM20_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [A/2]
+      DENV: [A/3, A/4, B/2, B/3, B/4]
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    moi: 5.0
+    organelle: mitochondria
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+
+  # --- ZIKV, multi-organelle box (GFP reporter varies per column) ---
+  - name: 2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV
+    data_path: ${datasets_root}/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+        wells: [A/2, B/2]
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+        wells: [A/3, B/3]
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+        wells: [A/4, B/4]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+        wells: [A/2, A/3, A/4, B/2, B/3, B/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [A/2, A/3, A/4, B/2, B/3, B/4]
+    perturbation_wells:
+      uninfected: [A/2, A/3, A/4]
+      ZIKV: [B/2, B/3, B/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
