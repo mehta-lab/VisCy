@@ -176,7 +176,7 @@ def checkpoint_path(
 
 def build_predict_cmd(
     collection: Path,
-    checkpoint: Path,
+    checkpoint: Path | None,
     model_family: str,
     run: str,
     ckpt_name: str,
@@ -185,15 +185,22 @@ def build_predict_cmd(
     markers: list[str] | None = None,
     no_labelfree: bool = False,
     num_workers: int = 0,
+    model_type: str = "dynaclr",
+    training_config: str | Path | None = None,
 ) -> list[str]:
-    """Build the ``dynaclr predict-triplet`` command."""
+    """Build the ``dynaclr predict-triplet`` command.
+
+    ``model_type="foundation"`` forwards ``--training-config`` (the LightningCLI
+    model config that builds the frozen foundation module) and omits
+    ``--checkpoint``; ``model_type="dynaclr"`` forwards ``--checkpoint``.
+    """
     cmd = [
         "dynaclr",
         "predict-triplet",
         "-c",
         str(collection),
-        "--checkpoint",
-        str(checkpoint),
+        "--model-type",
+        model_type,
         "--model-family",
         model_family,
         "--run",
@@ -205,6 +212,10 @@ def build_predict_cmd(
         "--num-workers",
         str(num_workers),
     ]
+    if model_type == "foundation":
+        cmd += ["--training-config", str(training_config)]
+    else:
+        cmd += ["--checkpoint", str(checkpoint)]
     flags = predict_flags or {}
     if "z_range" in flags:
         cmd += ["--z-range", str(flags["z_range"][0]), str(flags["z_range"][1])]
@@ -212,8 +223,16 @@ def build_predict_cmd(
         cmd += ["--z-reduction", str(flags["z_reduction"])]
     if "reference_pixel_size" in flags:
         cmd += ["--reference-pixel-size", str(flags["reference_pixel_size"])]
+    if "reference_pixel_size_z_um" in flags:
+        cmd += ["--reference-pixel-size-z-um", str(flags["reference_pixel_size_z_um"])]
     if "batch_size" in flags:
         cmd += ["--batch-size", str(flags["batch_size"])]
+    if "z_window" in flags:
+        cmd += ["--z-window", str(flags["z_window"])]
+    if "focus_channel" in flags:
+        cmd += ["--focus-channel", str(flags["focus_channel"])]
+    if "z_focus_offset" in flags:
+        cmd += ["--z-focus-offset", str(flags["z_focus_offset"])]
     if markers:
         cmd += ["--markers", ",".join(markers)]
     if no_labelfree:
@@ -228,6 +247,19 @@ def build_predict_cmd(
     type=click.Path(path_type=Path),
     required=True,
     help="Collection YAML (predict-triplet input).",
+)
+@click.option(
+    "--model-type",
+    type=click.Choice(["dynaclr", "foundation"]),
+    default="dynaclr",
+    show_default=True,
+    help="'foundation' forwards --training-config and skips checkpoint derivation.",
+)
+@click.option(
+    "--training-config",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="LightningCLI training_config YAML for --model-type foundation.",
 )
 @click.option("--model-family", required=True, help="Model family (PROJECT / embedding-tree key).")
 @click.option("--run", required=True, help="Training run/version (RUN_NAME / embedding-tree key).")
@@ -253,7 +285,10 @@ def build_predict_cmd(
     show_default=True,
     help="Base under which datasets live.",
 )
-@click.option("--z-range", nargs=2, type=int, default=None, help="Z window forwarded to predict-triplet.")
+@click.option("--z-range", nargs=2, type=int, default=None, help="Fixed Z window forwarded to predict-triplet.")
+@click.option("--z-window", type=int, default=None, help="Focus-centered Z window WIDTH forwarded to predict-triplet.")
+@click.option("--focus-channel", default=None, help="Focus channel for --z-window, forwarded to predict-triplet.")
+@click.option("--z-focus-offset", type=float, default=None, help="Focus offset for --z-window, forwarded.")
 @click.option(
     "--z-reduction",
     type=click.Choice(["mip", "center"]),
@@ -265,6 +300,12 @@ def build_predict_cmd(
     type=float,
     default=None,
     help="Reference pixel size forwarded to predict-triplet.",
+)
+@click.option(
+    "--reference-pixel-size-z-um",
+    type=float,
+    default=None,
+    help="Reference Z sampling forwarded to predict-triplet.",
 )
 @click.option("--batch-size", type=int, default=None, help="Batch size forwarded to predict-triplet.")
 @click.option("--markers", multiple=True, default=None, help="Marker subset (default: all channels).")
@@ -289,6 +330,8 @@ def build_predict_cmd(
 )
 def main(
     collection: Path,
+    model_type: str,
+    training_config: Path | None,
     model_family: str,
     run: str,
     ckpt_name: str,
@@ -298,7 +341,11 @@ def main(
     z_range: tuple[int, int] | None,
     z_reduction: str | None,
     reference_pixel_size: float | None,
+    reference_pixel_size_z_um: float | None,
     batch_size: int | None,
+    z_window: int | None,
+    focus_channel: str | None,
+    z_focus_offset: float | None,
     markers: tuple[str, ...],
     no_labelfree: bool,
     num_workers: int,
@@ -310,12 +357,18 @@ def main(
     """Batch predict embeddings for one model over a collection (+ AI-ready preflight).
 
     ``--markers`` runs exactly the named markers (extras in the collection are
-    ignored); omit it to embed all channels.
+    ignored); omit it to embed all channels. ``--model-type foundation`` forwards
+    ``--training-config`` and needs no checkpoint.
     """
     if not print_cmd and not skip_preflight:
         preflight(collection, workspace_dir, auto_normalize=auto_normalize)
 
-    resolved_checkpoint = checkpoint or checkpoint_path(model_family, run, ckpt_name, models_root=models_root)
+    if model_type == "foundation":
+        if training_config is None:
+            raise click.UsageError("--training-config is required for --model-type foundation.")
+        resolved_checkpoint = None
+    else:
+        resolved_checkpoint = checkpoint or checkpoint_path(model_family, run, ckpt_name, models_root=models_root)
     predict_flags = {}
     if z_range is not None:
         predict_flags["z_range"] = list(z_range)
@@ -323,8 +376,16 @@ def main(
         predict_flags["z_reduction"] = z_reduction
     if reference_pixel_size is not None:
         predict_flags["reference_pixel_size"] = reference_pixel_size
+    if reference_pixel_size_z_um is not None:
+        predict_flags["reference_pixel_size_z_um"] = reference_pixel_size_z_um
     if batch_size is not None:
         predict_flags["batch_size"] = batch_size
+    if z_window is not None:
+        predict_flags["z_window"] = z_window
+    if focus_channel is not None:
+        predict_flags["focus_channel"] = focus_channel
+    if z_focus_offset is not None:
+        predict_flags["z_focus_offset"] = z_focus_offset
 
     cmd = build_predict_cmd(
         collection,
@@ -337,13 +398,18 @@ def main(
         markers=list(markers) if markers else None,
         no_labelfree=no_labelfree,
         num_workers=num_workers,
+        model_type=model_type,
+        training_config=training_config,
     )
 
     if print_cmd:
         print("\n".join(cmd))
         return
 
-    print(f"checkpoint: {resolved_checkpoint}", file=sys.stderr)
+    if model_type == "foundation":
+        print(f"training_config: {training_config}", file=sys.stderr)
+    else:
+        print(f"checkpoint: {resolved_checkpoint}", file=sys.stderr)
     print(f"launching: {' '.join(cmd)}", file=sys.stderr)
     subprocess.run(cmd, check=True)
 

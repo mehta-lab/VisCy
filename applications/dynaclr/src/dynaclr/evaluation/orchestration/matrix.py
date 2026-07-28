@@ -44,6 +44,7 @@ import click
 import yaml
 
 from dynaclr.evaluation.orchestration.predict_batch import check_ai_ready
+from dynaclr.evaluation.paths import DATASETS_ROOT
 
 # Wrapper sbatch scripts the launcher submits for the predict / eval links.
 _PREDICT_SBATCH = Path("applications/dynaclr/tools/predict.sbatch")
@@ -91,6 +92,105 @@ def matrix_preflight(models: list[dict]) -> None:
             "`viscy preprocess --data_path <zarr> --channel_names=-1` for each, then retry."
         )
     print("[preflight] all datasets AI-ready.", file=sys.stderr)
+
+
+def _embedding_complete(output_path: Path) -> bool:
+    """Whether a per-marker embedding zarr exists and looks fully written.
+
+    Metadata-only (no array load): the dir must exist and carry a top-level
+    ``zarr.json`` (v3) or ``.zgroup`` (v2). A bare directory left by a
+    crash mid-write (no group metadata) counts as NOT complete, so it re-runs.
+    """
+    return output_path.exists() and ((output_path / "zarr.json").exists() or (output_path / ".zgroup").exists())
+
+
+def resolve_datasets_to_run(models: list[dict], overwrite: bool) -> list[dict]:
+    """Prune already-embedded datasets so predict runs only what's missing.
+
+    Progressive-collection pre-step (login node, before any submit). For each
+    model row and each of its checkpoints, computes the expected per-reporter
+    output zarrs via :func:`plan_predict_runs` and marks an experiment DONE
+    when all of its expected zarrs are complete. Fully-done rows are dropped;
+    partially-done rows get a pruned temp collection (only the missing
+    experiments) and their ``collection`` repointed to it. ``overwrite`` skips
+    the check entirely (whole collection runs).
+
+    Read-only w.r.t. the datasets (only checks existence); the only writes are
+    pruned collection YAMLs next to the original collection.
+
+    Parameters
+    ----------
+    models : list[dict]
+        Resolved model rows (from :func:`load_matrix`).
+    overwrite : bool
+        If ``True``, return ``models`` unchanged (run everything).
+
+    Returns
+    -------
+    list[dict]
+        Filtered rows: fully-done rows removed; survivors may have their
+        ``collection`` set to a pruned temp YAML.
+    """
+    from dynaclr.evaluation.predict_triplet import plan_predict_runs
+    from viscy_data.collection import load_collection, save_collection
+
+    if overwrite:
+        print("[skip-existing] --overwrite: running the full collection for every row.", file=sys.stderr)
+        return models
+
+    survivors: list[dict] = []
+    for model in models:
+        family, run = model["family"], model["run"]
+        collection = load_collection(Path(model["collection"]))
+        markers = model.get("markers")
+        datasets_root = model.get("datasets_root", DATASETS_ROOT)
+
+        # An experiment is done only when done for EVERY checkpoint this row sweeps.
+        done_names: set[str] = None  # type: ignore[assignment]
+        for ckpt_name, _ in resolve_checkpoints(model):
+            runs = plan_predict_runs(
+                collection,
+                model_family=family,
+                run=run,
+                ckpt_name=ckpt_name,
+                datasets_root=datasets_root,
+                markers=markers,
+            )
+            paths_by_exp: dict[str, list[Path]] = {}
+            for r in runs:
+                paths_by_exp.setdefault(r.experiment, []).append(r.output_path)
+            ckpt_done = {exp for exp, paths in paths_by_exp.items() if all(_embedding_complete(p) for p in paths)}
+            done_names = ckpt_done if done_names is None else (done_names & ckpt_done)
+
+        done_names = done_names or set()
+        all_names = [exp.name for exp in collection.experiments]
+        missing_names = [n for n in all_names if n not in done_names]
+        label = f"{family}/{run}"
+
+        if not missing_names:
+            print(f"[skip-existing] {label}: all {len(all_names)} dataset(s) done → skipping row.", file=sys.stderr)
+            continue
+        if not done_names:
+            print(f"[skip-existing] {label}: {len(missing_names)} dataset(s) to run (none done).", file=sys.stderr)
+            survivors.append(model)
+            continue
+
+        # Partial: write a pruned collection with only the missing experiments.
+        pruned = collection.model_copy(
+            update={"experiments": [e for e in collection.experiments if e.name in missing_names]}
+        )
+        src = Path(model["collection"])
+        pruned_path = src.with_name(f"{src.stem}.pending-{family}-{run}{src.suffix}")
+        save_collection(pruned, pruned_path)
+        model = {**model, "collection": str(pruned_path)}
+        print(
+            f"[skip-existing] {label}: {len(done_names)} done (skipped: {sorted(done_names)}), "
+            f"{len(missing_names)} to run: {missing_names} → pruned collection {pruned_path}",
+            file=sys.stderr,
+        )
+        survivors.append(model)
+
+    return survivors
 
 
 # `export NAME="value"` or `export NAME=value` (value may be quoted).
@@ -142,6 +242,15 @@ def resolve_model(model: dict, defaults: dict) -> dict:
     """
     merged = {**defaults, **model}
     merged["predict_flags"] = {**defaults.get("predict_flags", {}), **model.get("predict_flags", {})}
+    merged.setdefault("model_type", "dynaclr")
+
+    if merged["model_type"] == "foundation":
+        for required in ("family", "run", "ckpt_name", "training_config"):
+            if required not in merged:
+                raise ValueError(
+                    f"foundation model entry needs explicit '{required}' (no train_sbatch parsing): {model}"
+                )
+        return merged
 
     if "train_sbatch" not in merged:
         raise ValueError(f"model entry has no 'train_sbatch' (and no explicit identity): {model}")
@@ -198,15 +307,24 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
     """The predict sbatch command for one checkpoint of a model.
 
     ``markers`` and ``predict_flags`` are forwarded as positional values to
-    the prediction wrapper.
+    the prediction wrapper. ``model_type`` (dynaclr | foundation) and
+    ``training_config`` (foundation only) are the last two positionals; for
+    dynaclr rows ``training_config`` is empty and ``checkpoint`` is forwarded.
     """
     markers = ",".join(model["markers"]) if model.get("markers") else ""
     predict_flags = model.get("predict_flags", {})
     z_range = predict_flags.get("z_range")
+    z_window = predict_flags.get("z_window")
+    if z_range is not None and z_window is not None:
+        raise ValueError("predict_flags: z_range and z_window are mutually exclusive; set only one.")
+    if predict_flags.get("reference_pixel_size_z_um") is not None and z_window is None:
+        raise ValueError("predict_flags.reference_pixel_size_z_um requires predict_flags.z_window.")
     if z_range is not None and len(z_range) != 2:
         raise ValueError("predict_flags.z_range must contain exactly two values.")
     z_start, z_end = ("", "") if z_range is None else map(str, z_range)
-    return [
+    model_type = model.get("model_type", "dynaclr")
+    training_config = str(model["training_config"]) if model_type == "foundation" else ""
+    args = [
         "sbatch",
         str(_PREDICT_SBATCH),
         model["collection"],
@@ -214,14 +332,22 @@ def build_predict_cmd(model: dict, ckpt_name: str, checkpoint: str) -> list[str]
         model["run"],
         ckpt_name,
         str(model["datasets_root"]),
-        checkpoint,  # empty = derive from run dir
+        checkpoint,  # empty = derive from run dir (foundation: unused)
         markers,  # empty = all channels
         z_start,
         z_end,
         str(predict_flags.get("z_reduction") or ""),
         str(predict_flags.get("reference_pixel_size") or ""),
         str(predict_flags.get("batch_size") or ""),
+        model_type,  # dynaclr | foundation
+        training_config,  # foundation only; empty for dynaclr
+        str(z_window or ""),  # focus-centered Z window WIDTH (excl. with z_range)
+        str(predict_flags.get("focus_channel") or ""),
+        str(predict_flags.get("z_focus_offset") or ""),
     ]
+    if predict_flags.get("reference_pixel_size_z_um") is not None:
+        args.append(str(predict_flags["reference_pixel_size_z_um"]))
+    return args
 
 
 def build_eval_cmd(model: dict, ckpt_name: str) -> list[str]:
@@ -246,8 +372,9 @@ def build_stage_cmds(model: dict, stages: tuple[str, ...]) -> list[tuple[str, li
     """
     ckpt_name, checkpoint = resolve_checkpoints(model)[0]
     m = {**model, "ckpt_name": ckpt_name, "checkpoint": checkpoint}
+    is_foundation = model.get("model_type", "dynaclr") == "foundation"
     cmds: list[tuple[str, list[str]]] = []
-    if "train" in stages:
+    if "train" in stages and not is_foundation:
         cmds.append(("train", build_train_cmd(m)))
     if "predict" in stages:
         cmds.append(("predict", build_predict_cmd(m, ckpt_name, checkpoint)))
@@ -288,8 +415,9 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
     chains otherwise run in parallel via normal SLURM scheduling).
     """
     base = f"{model['family']}/{model['run']}"
+    is_foundation = model.get("model_type", "dynaclr") == "foundation"
     train_jid: str | None = None
-    if "train" in stages:
+    if "train" in stages and not is_foundation:
         train_jid = _emit("train", base, build_train_cmd(model), None, print_only)
 
     for ckpt_name, checkpoint in resolve_checkpoints(model):
@@ -312,8 +440,10 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
 )
 @click.option(
     "--stages",
-    default=",".join(_ALL_STAGES),
-    help=f"Comma-separated subset of {_ALL_STAGES} to run (default: all).",
+    default="predict,eval",
+    help=f"Comma-separated subset of {_ALL_STAGES} to run (default: predict,eval). "
+    "Pass 'train,predict,eval' to also submit the DynaCLR training job "
+    "(foundation rows never train).",
 )
 @click.option("--dry-run", is_flag=True, help="Print the chained commands, submit nothing.")
 @click.option("--print-cmd", is_flag=True, help="Alias for --dry-run.")
@@ -322,7 +452,13 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
     is_flag=True,
     help="Skip the upfront AI-ready (normalization/focus_slice) check across all datasets.",
 )
-def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflight: bool) -> None:
+@click.option(
+    "--overwrite/--no-overwrite",
+    default=False,
+    help="Re-embed the whole collection. Default (--no-overwrite): skip datasets whose embeddings "
+    "already exist and predict only the newly-added ones (progressive collections).",
+)
+def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflight: bool, overwrite: bool) -> None:
     """Run many models through train→predict→eval in parallel (SLURM afterok chain)."""
     stage_tuple = tuple(s.strip() for s in stages.split(",") if s.strip())
     bad = [s for s in stage_tuple if s not in _ALL_STAGES]
@@ -331,6 +467,12 @@ def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflig
 
     models = load_matrix(matrix)
     print_only = dry_run or print_cmd
+
+    # Skip-existing pre-step: prune already-embedded datasets so predict runs only the
+    # missing ones (login node, read-only w.r.t. datasets — safe in dry-run too). Only
+    # meaningful when predicting.
+    if "predict" in stage_tuple:
+        models = resolve_datasets_to_run(models, overwrite)
 
     # Upfront preflight: only meaningful when we will predict, and only on a real
     # submission (dry-run must stay side-effect-free / offline).
