@@ -328,6 +328,14 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="enrich-obs-from-collection",
+        import_path="dynaclr.evaluation.predict_triplet.enrich_main",
+        short_help="Backfill collection metadata (perturbation/hpi/marker/...) onto embedding obs",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI.

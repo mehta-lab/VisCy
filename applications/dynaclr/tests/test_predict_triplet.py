@@ -8,9 +8,14 @@ real zarr required; the predict execution itself is exercised by
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from dynaclr.evaluation.predict_triplet import plan_predict_runs
+from dynaclr.evaluation.predict_triplet import (
+    COLLECTION_OBS_COLUMNS,
+    build_obs_metadata,
+    plan_predict_runs,
+)
 from viscy_data.collection import ChannelEntry, Collection, ExperimentEntry
 
 MODEL_FAMILY = "DynaCLR-2D-MIP-BagOfChannels"
@@ -63,11 +68,11 @@ def test_per_reporter_well_subset():
 
 
 def test_output_path_is_dataset_centric():
-    """Output tree is <dataset>/2-phenotyping/predictions/{model}/{run}/{ckpt}/{marker}.zarr."""
+    """Output tree is <dataset>/2-phenotyping/predictions/{model}/{run}/{ckpt}/embeddings/{marker}.zarr."""
     run = next(r for r in _plan() if r.marker == "SEC61B")
     assert run.output_path == Path(
         "/data/2026_07_01_ZIKV/2-phenotyping/predictions/"
-        "DynaCLR-2D-MIP-BagOfChannels/2d-mip-fix-shuffler/epoch105-step84800/SEC61B.zarr"
+        "DynaCLR-2D-MIP-BagOfChannels/2d-mip-fix-shuffler/epoch105-step84800/embeddings/SEC61B.zarr"
     )
 
 
@@ -103,3 +108,65 @@ def test_empty_plan_raises():
     """A filter that matches nothing is an error, not a silent no-op."""
     with pytest.raises(ValueError, match="No reporter runs planned"):
         _plan(markers=["does-not-exist"])
+
+
+# ---------------------------------------------------------------------------
+# obs enrichment (build_obs_metadata) — the fix for triplet obs lacking
+# perturbation / hpi / experiment / marker that the parquet path carries.
+# ---------------------------------------------------------------------------
+
+
+def _ultrack_obs() -> pd.DataFrame:
+    """Ultrack-only obs like the triplet EmbeddingWriter writes (A row + B row)."""
+    return pd.DataFrame(
+        {
+            "fov_name": ["A/2/000000", "A/2/000001", "B/2/000000", "B/2/001003"],
+            "track_id": [3, 4, 3, 9],
+            "t": [0, 10, 5, 66],
+        }
+    )
+
+
+def _exp_for_enrich() -> ExperimentEntry:
+    return ExperimentEntry(
+        name="2026_07_01_ZIKV",
+        data_path="/data/2026_07_01_ZIKV/2026_07_01_ZIKV.zarr",
+        tracks_path="/data/2026_07_01_ZIKV/tracking.zarr",
+        channels=[ChannelEntry(name="raw GFP EX488 EM525-45", marker="SEC61B", wells=["A/2", "B/2"])],
+        perturbation_wells={"uninfected": ["A/2", "A/3", "A/4"], "ZIKV": ["B/2", "B/3", "B/4"]},
+        organelle="endoplasmic_reticulum",
+        microscope="mantis",
+        interval_minutes=30.0,
+        start_hpi=3.0,
+    )
+
+
+def test_build_obs_metadata_columns_and_index():
+    """Returns exactly the parquet-schema columns, aligned to obs index."""
+    obs = _ultrack_obs()
+    meta = build_obs_metadata(obs, _exp_for_enrich(), marker="SEC61B")
+    assert list(meta.columns) == list(COLLECTION_OBS_COLUMNS)
+    assert meta.index.equals(obs.index)
+    assert (meta["experiment"] == "2026_07_01_ZIKV").all()
+    assert (meta["marker"] == "SEC61B").all()
+    assert (meta["organelle"] == "endoplasmic_reticulum").all()
+
+
+def test_build_obs_metadata_perturbation_per_well():
+    """perturbation resolves from fov_name well: A row uninfected, B row ZIKV."""
+    meta = build_obs_metadata(_ultrack_obs(), _exp_for_enrich(), marker="SEC61B")
+    assert meta["perturbation"].tolist() == ["uninfected", "uninfected", "ZIKV", "ZIKV"]
+
+
+def test_build_obs_metadata_hpi_formula():
+    """hours_post_perturbation = start_hpi + t * interval_minutes / 60."""
+    meta = build_obs_metadata(_ultrack_obs(), _exp_for_enrich(), marker="SEC61B")
+    # start_hpi=3, interval=30min=0.5h: t=0->3.0, t=10->8.0, t=5->5.5, t=66->36.0
+    assert meta["hours_post_perturbation"].tolist() == [3.0, 8.0, 5.5, 36.0]
+
+
+def test_build_obs_metadata_unknown_well():
+    """A well absent from perturbation_wells resolves to 'unknown' (not an error)."""
+    obs = pd.DataFrame({"fov_name": ["C/9/000000"], "track_id": [1], "t": [0]})
+    meta = build_obs_metadata(obs, _exp_for_enrich(), marker="SEC61B")
+    assert meta["perturbation"].tolist() == ["unknown"]

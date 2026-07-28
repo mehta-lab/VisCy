@@ -45,6 +45,7 @@ experiments:
       perturbed: [A/2, B/2]
     interval_minutes: 30.0
     pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
 ```
 
 ## Run
@@ -57,9 +58,12 @@ uv run dynaclr predict-triplet \
   --run <run-name> \
   --ckpt-name <checkpoint-name> \
   --datasets-root /hpc/projects/intracellular_dashboard/organelle_dynamics \
-  --z-range 15 45 \
+  --z-window 10 \
+  --focus-channel Phase3D \
+  --z-focus-offset 0.3 \
   --z-reduction mip \
   --reference-pixel-size 0.1494 \
+  --reference-pixel-size-z-um 0.174 \
   --yx-patch-size 160 160 \
   --batch-size 32 \
   --num-workers 0
@@ -71,9 +75,20 @@ Important options:
 | --- | --- |
 | `--markers SEC61B,TOMM20` | Predict only the listed markers. |
 | `--no-labelfree` | Skip phase and brightfield channels. |
+| `--z-window` | Focus-centered window width in reference-grid slices. |
 | `--z-reduction mip|center` | Collapse the selected z window for a 2D model. |
 | `--reference-pixel-size` | Rescale crops to the model's training pixel size. |
+| `--reference-pixel-size-z-um` | Convert `--z-window` to the native slice count covering the same physical depth. |
 | `--no-enrich-obs` | Do not append collection metadata to output `obs`. |
+
+For example, `--z-window 10 --reference-pixel-size-z-um 0.174`
+defines a 1.74 µm slab. A dataset sampled at 0.288 µm/slice reads 6 native
+slices rather than 10, then resizes those 6 slices back to the 10-slice
+reference grid with nearest-neighbor interpolation before augmentation and
+MIP. The native count is rounded to the nearest whole slice. Triplet and
+MultiExperiment use this same sequence.
+Physical Z normalization requires the focus-centered `--z-window` form;
+absolute `--z-range` indices retain their literal native-slice meaning.
 
 Keep `--num-workers 0`; multiprocessing can deadlock while reading zarr during
 prediction. Prediction is deterministic and does not apply training

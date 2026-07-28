@@ -39,6 +39,29 @@ def test_predict_cmd_core_flags():
     assert cmd[cmd.index("--reference-pixel-size") + 1] == "0.1494"
 
 
+def test_predict_cmd_focus_centered_z_window():
+    cmd = submit_predict.build_predict_cmd(
+        Path("coll.yml"),
+        Path("/models/x/last.ckpt"),
+        MF,
+        RUN,
+        "last",
+        "/data",
+        predict_flags={
+            "z_window": 30,
+            "focus_channel": "Phase3D",
+            "z_focus_offset": 0.3,
+            "z_reduction": "mip",
+            "reference_pixel_size_z_um": 0.174,
+        },
+    )
+    assert cmd[cmd.index("--z-window") + 1] == "30"
+    assert cmd[cmd.index("--focus-channel") + 1] == "Phase3D"
+    assert cmd[cmd.index("--z-focus-offset") + 1] == "0.3"
+    assert cmd[cmd.index("--reference-pixel-size-z-um") + 1] == "0.174"
+    assert "--z-range" not in cmd  # focus-centered, not fixed window
+
+
 def test_predict_cmd_markers_and_labelfree():
     cmd = submit_predict.build_predict_cmd(
         Path("coll.yml"),
@@ -77,13 +100,14 @@ def test_predict_batch_cli_forwards_prediction_flags():
             "/c.ckpt",
             "--datasets-root",
             "/data",
-            "--z-range",
-            "15",
-            "45",
+            "--z-window",
+            "30",
             "--z-reduction",
             "mip",
             "--reference-pixel-size",
             "0.1494",
+            "--reference-pixel-size-z-um",
+            "0.174",
             "--batch-size",
             "64",
             "--skip-preflight",
@@ -93,8 +117,8 @@ def test_predict_batch_cli_forwards_prediction_flags():
 
     assert result.exit_code == 0, result.output
     args = result.output.splitlines()
-    z_range_index = args.index("--z-range")
-    assert args[z_range_index + 1 : z_range_index + 3] == ["15", "45"]
+    assert args[args.index("--z-window") + 1] == "30"
     assert args[args.index("--z-reduction") + 1] == "mip"
     assert args[args.index("--reference-pixel-size") + 1] == "0.1494"
+    assert args[args.index("--reference-pixel-size-z-um") + 1] == "0.174"
     assert args[args.index("--batch-size") + 1] == "64"
