@@ -3,7 +3,8 @@ description: "Merged organelle-remodeling collection: SEC61B (ER), TOMM20 (mitoc
   G3BP1 (stress granules) reporters under ZIKV/DENV infection. One experiment per dataset,
   all prepared on VAST (normalization + focus_slice). mCherry viral sensor marker matches
   Airtable channel_2_marker: pAL17 for ZIKV, pAL40 for DENV. GFP reporter per Airtable.
-  2026_04_21_A549_G3BP1_DENV is DEFERRED (odd 5-assemble layout, not on VAST yet).
+  2026_04_21_A549_G3BP1_DENV re-concatenated to a flat store on VAST (odd 5-assemble
+  layout resolved); focus_slice has a few z_focus=0 frames on 12/54 FOVs (mean 2.4 t each).
   Used by the organelle_remodeling model matrix (DynaCLR + MorphEm), which fans out
   predict per experiment and skips already-embedded datasets."
 datasets_root: /hpc/projects/organelle_phenotyping/datasets
