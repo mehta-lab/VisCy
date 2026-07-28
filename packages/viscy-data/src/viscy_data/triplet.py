@@ -64,6 +64,22 @@ def _read_pixel_size(data_path: str | Path) -> float:
     raise ValueError(f"No positions found in {data_path}")
 
 
+def _read_pixel_size_z(data_path: str | Path) -> float:
+    """Read the Z pixel size (µm/slice) from the first FOV in an OME-Zarr dataset."""
+    with open_ome_zarr(data_path, mode="r") as store:
+        for _, pos in store.positions():
+            pixel_size_z = float(pos.scale[-3])
+            if not pixel_size_z > 0:
+                raise ValueError(f"Non-positive Z pixel size {pixel_size_z} in {data_path}; check OME-Zarr scale.")
+            return pixel_size_z
+    raise ValueError(f"No positions found in {data_path}")
+
+
+def _native_z_window(reference_window: int, reference_pixel_size_z_um: float, pixel_size_z_um: float) -> int:
+    """Convert a window measured in reference-grid slices to native Z slices."""
+    return max(1, round(reference_window * reference_pixel_size_z_um / pixel_size_z_um))
+
+
 def _focus_window(z_focus_mean: float | None, z_total: int, z_extraction_window: int, z_focus_offset: float) -> slice:
     """Compute a fixed-width Z window centered on a focus plane.
 
@@ -437,6 +453,7 @@ class TripletDataModule(HCSDataModule):
         z_window_size: int | None = None,
         cache_pool_bytes: int = 0,
         reference_pixel_size: float | None = None,
+        reference_pixel_size_z_um: float | None = None,
         z_reduction: Literal["mip", "center"] | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
@@ -479,6 +496,18 @@ class TripletDataModule(HCSDataModule):
             physical area is covered. The extracted patch is then rescaled to
             ``final_yx_patch_size`` with bilinear interpolation. By default
             ``None`` (no rescaling).
+        reference_pixel_size_z_um : float | None, optional
+            Z sampling (µm/slice) of the dataset used to train the model. When
+            provided, ``z_extraction_window`` is interpreted as a number of
+            slices on that reference grid and converted to the number of native
+            slices that covers the same physical depth. The native stack is
+            then resized back to ``z_extraction_window`` reference-grid slices
+            with nearest-neighbor interpolation before augmentations and Z
+            reduction, matching ``MultiExperimentDataModule``. For example, a
+            10-slice window at 0.174 µm/slice becomes 6 native slices at
+            0.288 µm/slice. This option requires ``z_extraction_window`` and
+            ``z_reduction`` because the native slice count can differ from the
+            reference-grid count. By default ``None`` (slice-count semantics).
         z_reduction : {"mip", "center"} or None, optional
             Collapse the extracted ``z_range`` window to a single Z-slice so a
             3D dataset can feed a 2D model without materializing a separate
@@ -544,11 +573,39 @@ class TripletDataModule(HCSDataModule):
             raise ValueError("'z_extraction_window' must be a positive integer.")
         if z_extraction_window is not None and not (0.0 <= z_focus_offset <= 1.0):
             raise ValueError("'z_focus_offset' must be between 0.0 and 1.0 (inclusive).")
+        if reference_pixel_size_z_um is not None:
+            if reference_pixel_size_z_um <= 0:
+                raise ValueError("'reference_pixel_size_z_um' must be positive.")
+            if z_extraction_window is None:
+                raise ValueError("'reference_pixel_size_z_um' requires 'z_extraction_window', not 'z_range'.")
+            if z_reduction is None:
+                raise ValueError("'reference_pixel_size_z_um' requires 'z_reduction' to produce a uniform Z shape.")
         # Extraction window width is known without opening the zarr: it is the
         # explicit z_range span or z_extraction_window. Per-FOV focus centering
         # (when z_extraction_window is set) is resolved at setup() time, where
         # the positions are open.
         extraction_width = (z_range[1] - z_range[0]) if z_range is not None else z_extraction_window
+        native_z_extraction_window = z_extraction_window
+        if reference_pixel_size_z_um is not None:
+            pixel_size_z_um = _read_pixel_size_z(data_path)
+            native_z_extraction_window = _native_z_window(
+                z_extraction_window,
+                reference_pixel_size_z_um,
+                pixel_size_z_um,
+            )
+            extraction_width = native_z_extraction_window
+            _logger.info(
+                "Physical Z normalization enabled: reference=%.4f µm/slice, "
+                "inference=%.4f µm/slice. Converting z_extraction_window=%d "
+                "reference slices (%.4f µm) to %d native slices (%.4f µm), then resizing "
+                "to the reference grid before augmentations and Z reduction.",
+                reference_pixel_size_z_um,
+                pixel_size_z_um,
+                z_extraction_window,
+                z_extraction_window * reference_pixel_size_z_um,
+                native_z_extraction_window,
+                native_z_extraction_window * pixel_size_z_um,
+            )
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
@@ -566,7 +623,7 @@ class TripletDataModule(HCSDataModule):
             pin_memory=pin_memory,
         )
         self.z_range = slice(*z_range) if z_range is not None else None
-        self._z_extraction_window = z_extraction_window
+        self._z_extraction_window = native_z_extraction_window
         self._z_focus_offset = z_focus_offset
         self._focus_channel = focus_channel or self.source_channel[0]
         self.tracks_path = Path(tracks_path)
@@ -580,14 +637,16 @@ class TripletDataModule(HCSDataModule):
         self.return_negative = return_negative
         self.augment_validation = augment_validation
         self._cache_pool_bytes = cache_pool_bytes
+        self.reference_pixel_size_z_um = reference_pixel_size_z_um
         self.z_reduction = z_reduction
 
-        # Transforms appended after normalization and augmentation, in order.
-        extra_transforms: list[MapTransform] = []
+        # Physical Z normalization must happen before slice-based augmentations
+        # and MIP, as it does in MultiExperimentTripletDataset. Keep the legacy
+        # XY-only resize after augmentations to avoid changing that path.
+        pre_augmentation_transforms: list[MapTransform] = []
+        post_augmentation_transforms: list[MapTransform] = []
 
         if reference_pixel_size is not None:
-            from viscy_transforms import BatchedZoomd
-
             inference_pixel_size = _read_pixel_size(data_path)
             scale = reference_pixel_size / inference_pixel_size
             # Round the extraction size up to an even number: the dataset extracts a
@@ -602,7 +661,29 @@ class TripletDataModule(HCSDataModule):
                 f"Extracting {self.initial_yx_patch_size} px patches "
                 f"and resizing to {final_yx_patch_size} px."
             )
-            extra_transforms.append(
+        if reference_pixel_size_z_um is not None:
+            from viscy_transforms import BatchedZoomd
+
+            # TripletDataset extracts an even-width centered YX window. Preserve
+            # that native shape for a Z-only resize; when XY normalization is
+            # also enabled, combine both operations into one exact resize.
+            target_yx = (
+                final_yx_patch_size
+                if reference_pixel_size is not None
+                else tuple(2 * (size // 2) for size in self.initial_yx_patch_size)
+            )
+            pre_augmentation_transforms.append(
+                BatchedZoomd(
+                    keys=list(self.source_channel),
+                    scale_factor=None,
+                    size=(z_extraction_window, *target_yx),
+                    mode="nearest-exact",
+                )
+            )
+        elif reference_pixel_size is not None:
+            from viscy_transforms import BatchedZoomd
+
+            post_augmentation_transforms.append(
                 BatchedZoomd(
                     keys=list(self.source_channel),
                     scale_factor=None,
@@ -620,7 +701,7 @@ class TripletDataModule(HCSDataModule):
                 f"Z-reduction enabled (default_strategy={z_reduction}): collapsing z_range to 1 slice. "
                 f"MIP channels={mip_keys}, center-slice channels={labelfree_keys}."
             )
-            extra_transforms.append(
+            post_augmentation_transforms.append(
                 BatchedChannelWiseZReductiond(
                     keys=list(self.source_channel),
                     labelfree_keys=labelfree_keys,
@@ -629,8 +710,12 @@ class TripletDataModule(HCSDataModule):
                 )
             )
 
-        self._augmentation_transform = Compose(self.normalizations + self.augmentations + extra_transforms)
-        self._no_augmentation_transform = Compose(self.normalizations + extra_transforms)
+        self._augmentation_transform = Compose(
+            self.normalizations + pre_augmentation_transforms + self.augmentations + post_augmentation_transforms
+        )
+        self._no_augmentation_transform = Compose(
+            self.normalizations + pre_augmentation_transforms + post_augmentation_transforms
+        )
 
     def _align_tracks_tables_with_positions(
         self,

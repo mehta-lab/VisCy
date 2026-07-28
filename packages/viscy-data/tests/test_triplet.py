@@ -125,6 +125,71 @@ def test_z_range_xor_extraction_window(preprocessed_hcs_dataset, tracks_hcs_data
         TripletDataModule(z_range=(4, 9), z_extraction_window=8, **common)
 
 
+def test_reference_z_sampling_requires_focus_window_and_reduction(preprocessed_hcs_dataset, tracks_hcs_dataset):
+    """Physical Z normalization is only valid for a focus window collapsed to 2D."""
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+    common = dict(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        num_workers=0,
+        reference_pixel_size_z_um=0.5,
+    )
+    with raises(ValueError, match="requires 'z_extraction_window'"):
+        TripletDataModule(z_range=(4, 9), z_reduction="mip", **common)
+    with raises(ValueError, match="requires 'z_reduction'"):
+        TripletDataModule(z_extraction_window=5, **common)
+
+
+def test_reference_z_sampling_converts_mip_window(preprocessed_hcs_dataset, tracks_hcs_dataset):
+    """A reference-grid MIP window covers the same depth at another native Z sampling."""
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+        pixel_scale = next(iter(dataset.positions()))[1].scale
+        native_pixel_size_z_um = float(pixel_scale[-3])
+        native_pixel_size_xy_um = float(pixel_scale[-1])
+
+    reference_window = 3
+    reference_pixel_size_z_um = native_pixel_size_z_um * 2
+    expected_native_window = 6
+
+    class RecordZ:
+        def __init__(self):
+            self.seen: list[int] = []
+
+        def __call__(self, data):
+            self.seen.append(int(data[channel_names[0]].shape[-3]))
+            return data
+
+    record_z = RecordZ()
+    dm = TripletDataModule(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_extraction_window=reference_window,
+        reference_pixel_size=native_pixel_size_xy_um,
+        reference_pixel_size_z_um=reference_pixel_size_z_um,
+        z_reduction="mip",
+        augmentations=[record_z],
+        initial_yx_patch_size=(32, 32),
+        final_yx_patch_size=(32, 32),
+        num_workers=0,
+        batch_size=4,
+    )
+    assert dm._z_extraction_window == expected_native_window
+
+    dm.setup(stage="fit")
+    resolved = dm.train_dataset.z_range
+    assert isinstance(resolved, dict)
+    assert {z.stop - z.start for z in resolved.values()} == {expected_native_window}
+
+    batch = next(iter(dm.train_dataloader()))
+    dm.on_after_batch_transfer(batch, 0)
+    assert set(record_z.seen) == {reference_window}
+    assert batch["anchor"].shape[2] == 1
+
+
 @mark.parametrize("z_focus_offset", [0.5, 0.3])
 def test_focus_centered_z_range(tmp_path_factory, preprocessed_hcs_dataset, tracks_hcs_dataset, z_focus_offset):
     """z_extraction_window resolves a per-FOV focus-centered z_range from zattrs.
