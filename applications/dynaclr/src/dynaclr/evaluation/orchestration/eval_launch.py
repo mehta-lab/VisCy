@@ -35,7 +35,7 @@ from pathlib import Path
 
 import click
 
-from dynaclr.evaluation.paths import DATASETS_ROOT, PHENOTYPING_DIR, PREDICTIONS_DIR
+from dynaclr.evaluation.paths import DATASETS_ROOT, EMBEDDINGS_DIR, PHENOTYPING_DIR, PREDICTIONS_DIR
 
 # Repo-relative path to the Nextflow router.
 _MAIN_NF = Path("applications/dynaclr/nextflow/main.nf")
@@ -76,7 +76,15 @@ def build_embeddings_glob(
         ds_slot = "*"
     marker_slot = f"{marker}.zarr" if marker else "*.zarr"
     return str(
-        Path(datasets_root) / ds_slot / PHENOTYPING_DIR / PREDICTIONS_DIR / model_family / run / ckpt_name / marker_slot
+        Path(datasets_root)
+        / ds_slot
+        / PHENOTYPING_DIR
+        / PREDICTIONS_DIR
+        / model_family
+        / run
+        / ckpt_name
+        / EMBEDDINGS_DIR
+        / marker_slot
     )
 
 

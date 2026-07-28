@@ -34,8 +34,14 @@ DATASETS_ROOT = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics")
 #: Per-dataset phenotyping subfolder (stage 2 of the dataset pipeline).
 PHENOTYPING_DIR = "2-phenotyping"
 
-#: Prediction artifacts subfolder under the phenotyping dir.
+#: Prediction artifacts subfolder under the phenotyping dir. Holds one
+#: ``{family}/{run}/{ckpt}`` container per model, under which ``embeddings/``
+#: keeps the raw per-marker zarrs alongside downstream analysis (umap/, pca/, ...).
 PREDICTIONS_DIR = "predictions"
+
+#: Subfolder (under ``{ckpt}``) holding the raw per-marker embedding zarrs,
+#: kept separate from downstream analysis of those embeddings.
+EMBEDDINGS_DIR = "embeddings"
 
 
 def dataset_name_from_data_path(data_path: str | Path) -> str:
@@ -143,9 +149,11 @@ def embedding_store(
     Returns
     -------
     Path
-        ``{prediction_dir}/{marker}.zarr``.
+        ``{prediction_dir}/embeddings/{marker}.zarr`` — the raw zarrs live in an
+        ``embeddings/`` subfolder so downstream analysis (umap/, pca/, ...) can
+        sit beside them under the shared ``{ckpt}`` container.
     """
-    return prediction_dir(dataset, model_family, run, ckpt_name, datasets_root) / f"{marker}.zarr"
+    return prediction_dir(dataset, model_family, run, ckpt_name, datasets_root) / EMBEDDINGS_DIR / f"{marker}.zarr"
 
 
 def iter_embeddings(
