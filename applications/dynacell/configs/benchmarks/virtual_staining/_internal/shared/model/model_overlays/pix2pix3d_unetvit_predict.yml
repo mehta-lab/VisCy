@@ -11,6 +11,22 @@ base:
   - ../../../../../../recipes/topology/single_gpu.yml
 model:
   init_args:
+    # Every modernized (Run-D) checkpoint carries 201 generator_ema.* tensors and
+    # picked its best epoch on loss/validate_ema. DynacellGAN only builds the EMA
+    # shadow when ema_kimg is set, so an overlay that omits it made strict=False
+    # drop all 201 at load and inference fell back to the raw generator -- 149
+    # predict runs logged exactly that:
+    #   DynacellGAN predict: using raw generator
+    #   (ema_kimg=None, use_ema_at_predict=True, generator_ema=absent)
+    # Every published Pix2Pix3D number was produced that way, so the raw
+    # generator is pinned here DELIBERATELY rather than left to a missing key:
+    # ema_kimg builds the shadow (which engine.py now requires, refusing to drop
+    # a checkpoint's EMA weights silently) and use_ema_at_predict=false records
+    # the choice. Flip use_ema_at_predict to true to switch every arm to the EMA
+    # weights the recipe selected on -- which changes the numbers, so it must be
+    # paired with a full re-predict + re-eval, not a config-only edit.
+    ema_kimg: 10.0
+    use_ema_at_predict: false
     # ViT generator is fixed at 512x512; the A549 test set is 640x960, so tile
     # into overlapping 512x512 windows (single tile on the 512x512 iPSC test).
     predict_method: sliding_window
