@@ -4,13 +4,11 @@
 # membrane pair — see membrane_hek_a549xy_pix2pix. Options match the siblings
 # exactly so the rows stay comparable.
 #
-# TWO conditions for now, not three: the iPSC-trained mito GAN was never trained.
-# That is a missed submission rather than a structural absence -- its
-# train_4gpu_modernized.yml was the only gap in the 12-cell pix2pix (4 organelles x
-# 3 pools) grid, and wandb holds A549_TOMM20 and JOINT_TOMM20 fits from 2026-07-07/08
-# with no iPSC_TOMM20 run in any state. The backfill fit is in flight (job 35053575);
-# add the third condition once it produces a checkpoint and the HEK predict runs.
-# Until then the HEK mito table reads pix2pix3d in the A549 and joint pools only.
+# All three pools, as of 2026-07-28. The iPSC-trained arm was absent because that
+# fit had never been submitted -- its train_4gpu_modernized.yml was the only gap in
+# the 12-cell pix2pix (4 organelles x 3 pools) grid, and wandb held A549_TOMM20 and
+# JOINT_TOMM20 with no iPSC_TOMM20 run in any state. The backfill fit (job 35053575)
+# finished COMPLETED 0:0 at wandb epoch 39/40, so the third condition is now live.
 target_name: mitochondria
 compute_feature_metrics: true
 use_gpu: true
@@ -25,6 +23,16 @@ runtime:
 force_recompute:
   final_metrics: true
 conditions:
+- name: pix2pix3d__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/pix2pix3d_unetvit/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/hek__a549xy
 - name: pix2pix3d__a549_trained__hek
   benchmark:
     dataset_ref:
