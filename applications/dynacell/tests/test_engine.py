@@ -877,6 +877,38 @@ def test_dynacell_gan_ema_seed_on_legacy_load(tmp_path):
         assert torch.equal(p_ema, p_loaded)
 
 
+def test_dynacell_gan_ema_ckpt_into_non_ema_model_raises(tmp_path):
+    """A ckpt's EMA shadow must not be silently dropped by a non-EMA model.
+
+    ``generator_ema`` is built only when ``ema_kimg`` is set -- a *training*
+    hyperparameter that predict configs have no reason to carry. Without this
+    guard, loading an EMA checkpoint from such a config discarded all
+    ``generator_ema.*`` tensors under ``strict=False`` and inference fell through
+    to the raw generator with only a warning. That is how the whole pix2pix3d
+    benchmark came to be predicted with non-EMA weights from checkpoints selected
+    on ``loss/validate_ema``.
+    """
+    trained = _build_modernized_gan()
+    ckpt = tmp_path / "with_ema.ckpt"
+    torch.save({"state_dict": trained.state_dict()}, ckpt)
+    assert any(k.startswith("generator_ema.") for k in trained.state_dict())
+
+    with pytest.raises(RuntimeError, match="generator_ema"):
+        DynacellGAN(
+            architecture="UNetViT3D",
+            generator_config=GAN_GEN_TEST_CONFIG,
+            discriminator_config={**GAN_DISC_TEST_CONFIG, "use_spectral_norm": False},
+            ckpt_path=str(ckpt),
+        )
+
+    # Declaring ema_kimg loads the shadow and inference selects it; the explicit
+    # opt-out keeps the raw generator without relying on a missing key.
+    with_ema = _build_modernized_gan(ckpt_path=str(ckpt))
+    assert with_ema._inference_generator() is with_ema.generator_ema
+    opted_out = _build_modernized_gan(ckpt_path=str(ckpt), use_ema_at_predict=False)
+    assert opted_out._inference_generator() is opted_out.generator
+
+
 def test_dynacell_gan_d_step_count_checkpoint_roundtrip():
     """_d_step_count survives an on_save/on_load_checkpoint round-trip."""
     model = _build_modernized_gan()

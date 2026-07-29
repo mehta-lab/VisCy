@@ -1269,6 +1269,30 @@ class DynacellGAN(LightningModule):
                     "with partially random weights. If this is intentional, drop those "
                     "submodules from the model config or use an explicit migration step."
                 )
+            # A checkpoint carrying an EMA shadow that this instance did not build
+            # is the one unexpected-key case that must NOT be a warning. EMA
+            # construction is gated on ``ema_kimg``, a *training* hyperparameter
+            # that a predict config has no reason to carry, so a predict run that
+            # omits it silently discards every generator_ema.* tensor and falls
+            # through to the raw generator in ``_predict_generator``. That is
+            # exactly what happened to the pix2pix3d benchmark: the checkpoints
+            # were selected on ``loss/validate_ema`` (see the ModelCheckpoint
+            # monitor in the train_4gpu_modernized leaves) and then evaluated with
+            # the non-EMA weights, with only a warning in the job's stderr to say
+            # so. Refuse to load instead, and name both explicit resolutions.
+            dropped_ema = [k for k in incompat.unexpected_keys if k.startswith("generator_ema.")]
+            if dropped_ema and self.generator_ema is None:
+                raise RuntimeError(
+                    f"Checkpoint {ckpt_path!r} carries {len(dropped_ema)} generator_ema.* "
+                    "tensors but this DynacellGAN was built without an EMA shadow "
+                    "(ema_kimg=None), so strict=False would drop them and inference "
+                    "would silently use the raw generator. If the EMA weights are the "
+                    "ones you want (they are, if the run selected checkpoints on "
+                    "loss/validate_ema), set ema_kimg in the model init_args of this "
+                    "config so the shadow is built and loaded. To deliberately use the "
+                    "raw generator, set ema_kimg and use_ema_at_predict=false, which "
+                    "records the choice instead of leaving it to a missing key."
+                )
             if incompat.unexpected_keys:
                 _logger.warning(
                     "Checkpoint %s has unexpected keys ignored by strict=False load: %s",
