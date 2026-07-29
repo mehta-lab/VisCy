@@ -54,24 +54,6 @@ _MODEL_DIRS: tuple[str, ...] = (
 )
 _TRAIN_DIRS: tuple[str, ...] = ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
 
-# Roster holes: tuples with no trained model to point at *yet*. Recorded explicitly so
-# a short run is a stated 5-of-6 rather than a generic failure — the placeholder-ckpt
-# guard in build_leaf would otherwise report this as an error every single run.
-#
-# TEMPORARY. This is a missed training submission, not a structural absence, and the
-# backfill fit is in flight (job 35053575, authored as
-# mito/pix2pix3d_unetvit/ipsc_confocal/train_4gpu_modernized.yml). Delete this entry
-# once that fit produces a checkpoint and the A549-mock predict sibling this generator
-# reads has a real ckpt_path; the tuple then generates like any other.
-_NO_TRAINED_MODEL: dict[tuple[str, str, str], str] = {
-    ("mito", "pix2pix3d_unetvit", "ipsc_confocal"): (
-        "iPSC-trained mito GAN not trained yet — backfill fit in flight (job 35053575). "
-        "Its train_4gpu_modernized.yml was the only gap in the 12-cell pix2pix grid, so the "
-        "fit was never submitted; wandb has A549_TOMM20 and JOINT_TOMM20 but no iPSC_TOMM20 "
-        "run in any state. Remove this entry once the checkpoint exists"
-    ),
-}
-
 # organelle config dir -> (manifest target key, eval-side target fragment)
 _ORGANELLES: dict[str, tuple[str, str]] = {
     "membrane": ("kras", "membrane"),
@@ -309,16 +291,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     written = 0
-    skipped = 0
     errors: list[str] = []
     for organelle in _ORGANELLES:
         for model_dir in _MODEL_DIRS:
             for train_dir in _TRAIN_DIRS:
-                hole = _NO_TRAINED_MODEL.get((organelle, model_dir, train_dir))
-                if hole is not None:
-                    print(f"[skip] {organelle}/{model_dir}/{train_dir}: {hole}")
-                    skipped += 1
-                    continue
                 try:
                     leaf_path, text = build_leaf(organelle, model_dir, train_dir)
                 except (FileNotFoundError, ValueError) as exc:
@@ -337,8 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    tail = f" ({skipped} skipped: no trained model)" if skipped else ""
-    print(f"\n[ok] {written} leaves {'planned' if args.dry_run else 'written'}{tail}")
+    print(f"\n[ok] {written} leaves {'planned' if args.dry_run else 'written'}")
     return 0
 
 
