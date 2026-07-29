@@ -4,19 +4,7 @@
 
 VisCy is a **uv workspace monorepo** for virtual staining and computational microscopy. Sub-packages live under `packages/`.
 
-## Repo Layout
-
-```
-pyproject.toml              # Root config (ruff, pytest, uv workspace)
-packages/
-  viscy-data/               # Data loading and Lightning DataModules
-  viscy-models/             # Neural network architectures
-  viscy-transforms/         # Image transforms
-src/viscy/                  # Umbrella package (re-exports)
-applications/               # Self-contained research applications
-```
-
-### Packages vs Applications
+## Packages vs Applications
 
 - **Shared code belongs in `packages/`**, not in applications.
 - **Applications must not import from each other.** If two applications need the same logic, move it to an existing package or create a new one.
@@ -29,16 +17,6 @@ applications/               # Self-contained research applications
 ### Environment Setup
 
 Use `uv` package manager. Run commands with `uv run <command>`. Edit `pyproject.toml` to modify dependencies and sync to update `uv.lock`.
-
-```sh
-uv venv -p 3.13
-uv sync --all-packages --all-extras
-```
-
-If `uv` is not installed:
-```sh
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
 On HPC, symlink the uv cache out of your home directory first:
 ```sh
@@ -98,22 +76,7 @@ Examples (verified against the `applications/dynacell/configs/benchmarks/virtual
 
 When in doubt, read both `train_dataloader` overrides directly — they are short. Don't infer from comments alone.
 
-### Common Commands
-
-```sh
-uvx ruff check packages/        # lint
-uvx ruff check --fix packages/  # lint + auto-fix
-uvx ruff format packages/       # format
-uv run pytest                    # all tests
-```
-
 ### Testing
-
-```sh
-uv run pytest                          # all tests
-uv run pytest packages/viscy-data/     # single package (data)
-uv run pytest packages/viscy-models/   # single package (models)
-```
 
 Prefer `{file}_test.py` in the same directory as `{file}.py`, unless there are import issues, in which case use `tests/`.
 
@@ -137,10 +100,6 @@ Prefer `{file}_test.py` in the same directory as `{file}.py`, unless there are i
 
 ### Code Style
 
-- Docstrings use **numpy style** (`convention = "numpy"`).
-- Lint rules: `D, E, F, I, NPY, PD, W`.
-- `D` rules are ignored in `**/tests/**` and notebooks.
-- Format: double quotes, spaces, 120 char line length.
 - Use a subagent to run tests and complex bash commands, especially those expected to return complex output.
 - Run independent tasks (multi-file edits across separate concerns, cross-cutting verifications, distinct review angles) in parallel via concurrent subagents in a single message. Subagent startup overhead is negligible relative to sequential blocking. Only sequence subagents when a later task needs an earlier task's output.
 
@@ -187,17 +146,7 @@ Ask yourself if your test is actually covering the true function.
 
 ### Coding Philosophy
 
-#### 1. Think Before Coding
-
-Don't assume. Don't hide confusion. Surface tradeoffs.
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-#### 2. Simplicity First
+#### 1. Simplicity First
 
 Minimum code that solves the problem. Nothing speculative.
 
@@ -208,7 +157,7 @@ Minimum code that solves the problem. Nothing speculative.
 - If you write 200 lines and it could be 50, rewrite it.
 - Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-#### 3. Surgical Changes
+#### 2. Surgical Changes
 
 Touch only what you must. Clean up only your own mess.
 
@@ -223,18 +172,3 @@ When your changes create orphans:
 - Don't remove pre-existing dead code unless asked.
 
 The test: every changed line should trace directly to the user's request.
-
-#### 4. Goal-Driven Execution
-
-Define success criteria. Loop until verified.
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
