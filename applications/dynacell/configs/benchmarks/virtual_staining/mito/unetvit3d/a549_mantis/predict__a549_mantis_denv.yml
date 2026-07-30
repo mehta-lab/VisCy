@@ -36,8 +36,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/unetvit3d/a549__deconv/a549__denv/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/unetvit3d/a549/a549__denv/prediction.zarr
 
 launcher:
   job_name: UNetViT3D_PRED_TOMM20_A549TR_DENV
-  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/unetvit3d/a549__deconv/a549__denv
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/unetvit3d/a549/a549__denv

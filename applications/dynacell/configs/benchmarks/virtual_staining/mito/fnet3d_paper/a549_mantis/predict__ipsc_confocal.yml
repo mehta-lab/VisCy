@@ -40,8 +40,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/a549__deconv/ipsc/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/a549/ipsc/prediction.zarr
 
 launcher:
   job_name: FNet3DPaper_PRED_TOMM20_A549TR_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/a549__deconv/ipsc
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/a549/ipsc

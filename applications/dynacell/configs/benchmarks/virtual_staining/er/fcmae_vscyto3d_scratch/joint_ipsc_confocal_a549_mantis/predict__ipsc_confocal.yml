@@ -40,8 +40,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_scratch/joint__legacy_deconvgt/ipsc/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_scratch/joint/ipsc/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_PRED_SEC61B_JOINTTR_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_scratch/joint__legacy_deconvgt/ipsc
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto3d_scratch/joint/ipsc

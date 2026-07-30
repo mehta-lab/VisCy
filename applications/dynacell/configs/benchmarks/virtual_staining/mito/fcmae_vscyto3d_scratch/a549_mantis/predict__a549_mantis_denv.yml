@@ -41,8 +41,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_scratch/a549__deconv/a549__denv/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_scratch/a549/a549__denv/prediction.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_PRED_TOMM20_A549TR_DENV
-  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_scratch/a549__deconv/a549__denv
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_scratch/a549/a549__denv

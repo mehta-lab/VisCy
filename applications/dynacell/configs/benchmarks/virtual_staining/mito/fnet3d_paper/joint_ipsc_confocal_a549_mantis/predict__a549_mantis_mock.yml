@@ -39,8 +39,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint__legacy_deconvgt/a549__mock/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint/a549__mock/prediction.zarr
 
 launcher:
   job_name: FNet3DPaper_PRED_TOMM20_JOINTTR_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint__legacy_deconvgt/a549__mock
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint/a549__mock

@@ -34,8 +34,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/a549__deconv/a549__mock/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/a549/a549__mock/prediction.zarr
 
 launcher:
   job_name: FNet3DPaper_PRED_SEC61B_A549TR_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/a549__deconv/a549__mock
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/a549/a549__mock

@@ -35,8 +35,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_r2/a549__deconv/ipsc/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_r2/a549/ipsc/prediction.zarr
 
 launcher:
   job_name: CELLDiff_A549_PRED_SEC61B_ON_IPSC
-  run_root: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_r2/a549__deconv/ipsc
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_r2/a549/ipsc
