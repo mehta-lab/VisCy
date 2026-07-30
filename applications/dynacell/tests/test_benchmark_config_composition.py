@@ -40,6 +40,30 @@ TRAIN_LEAVES = [
     ("membrane", "unetvit3d"),
 ]
 
+# A549-trained train leaves. Kept separate from TRAIN_LEAVES because that list's
+# tests hardcode the ``ipsc_confocal`` train-set directory. The Phase 17
+# temporal-sampling arms exist only for a549_mantis: they read timepoint-subset
+# copies of the A549 pooled stores, which have no iPSC counterpart.
+A549_TRAIN_LEAVES = [
+    ("nucleus", "fnet3d_paper"),
+    ("nucleus", "fnet3d_t01"),
+    ("nucleus", "fnet3d_tspread"),
+    ("er", "fnet3d_paper"),
+    ("er", "fnet3d_t01"),
+    ("er", "fnet3d_tspread"),
+]
+
+# Phase 17 arm -> the timepoint-subset store it must read. The whole ablation rests
+# on the two arms differing in nothing but this path, so a copy-paste slip here
+# (both arms pointing at the same store, or at the full pooled store) would silently
+# turn the comparison into a no-op.
+_TEMPORAL_ARM_STORE = {
+    ("nucleus", "fnet3d_t01"): "/mantis_v1/train/H2B_t01.zarr",
+    ("nucleus", "fnet3d_tspread"): "/mantis_v1/train/H2B_tspread.zarr",
+    ("er", "fnet3d_t01"): "/mantis/train/SEC61B_t01.zarr",
+    ("er", "fnet3d_tspread"): "/mantis/train/SEC61B_tspread.zarr",
+}
+
 PREDICT_LEAVES = [
     (organelle, model) for organelle in ("er", "mito", "nucleus", "membrane") for model in ("celldiff", "unetvit3d")
 ]
@@ -195,6 +219,11 @@ _EXPECTED_DATA_HPARAMS = {
     # Identical geometry + batch so the pair isolates the augmentation effect.
     "fnet3d_bigpatch": {"batch_size": 8, "z_window_size": 32, "yx_patch_size": [384, 384], "num_workers": 4},
     "fnet3d_vscyto3daug": {"batch_size": 8, "z_window_size": 32, "yx_patch_size": [384, 384], "num_workers": 4},
+    # FNet3D temporal-sampling ablation (Phase 17): the arms reuse the fnet3d_paper
+    # data overlay untouched, so they MUST compose its hparams exactly — the only
+    # intended delta between them and the baseline is data_path.
+    "fnet3d_t01": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
+    "fnet3d_tspread": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
     "unext2": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 8},
 }
 
@@ -220,6 +249,38 @@ def test_data_overlay_split_preserves_hparams(organelle: str, model: str) -> Non
     # BatchedRandFlipd pair (no val_gpu_augmentations); the others have a
     # longer affine+intensity stack.
     assert ia["gpu_augmentations"], f"{organelle}/{model}: gpu_augmentations missing after split"
+
+
+@pytest.mark.parametrize("organelle,model", A549_TRAIN_LEAVES)
+def test_a549_train_leaf_composes_with_expected_hparams(organelle: str, model: str) -> None:
+    """A549-trained fit leaves compose and keep their model's data hparams."""
+    leaf = BENCHMARKS / organelle / model / "a549_mantis" / "train.yml"
+    cfg = load_composed_config(leaf)
+    t = cfg["trainer"]
+    assert t["accelerator"] == "gpu"
+    assert t["devices"] in (1, 4)
+    assert t["logger"]["init_args"]["project"] == "dynacell"
+    ia = cfg["data"]["init_args"]
+    for key, value in _EXPECTED_DATA_HPARAMS[model].items():
+        assert ia[key] == value, f"{organelle}/{model}: data.init_args.{key} = {ia[key]!r}, expected {value!r}"
+
+
+@pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
+def test_temporal_arm_reads_its_own_subset_store(organelle: str, model: str) -> None:
+    """Each Phase 17 arm points at its own timepoint-subset store, not the pool.
+
+    The ablation's entire signal is the difference between the two arms' training
+    frames. If both arms resolved to the same ``data_path`` — or to the full
+    ``*_all.zarr`` — the fits would be duplicates and the comparison meaningless,
+    with nothing else in the config to reveal it.
+    """
+    leaf = BENCHMARKS / organelle / model / "a549_mantis" / "train.yml"
+    cfg = load_composed_config(leaf)
+    data_path = cfg["data"]["init_args"]["data_path"]
+    assert data_path.endswith(_TEMPORAL_ARM_STORE[(organelle, model)]), (
+        f"{organelle}/{model}: data_path {data_path!r} does not end with {_TEMPORAL_ARM_STORE[(organelle, model)]!r}"
+    )
+    assert cfg["benchmark"]["model_name"] == model
 
 
 # -- dataset_ref resolver integration tests -------------------------------
