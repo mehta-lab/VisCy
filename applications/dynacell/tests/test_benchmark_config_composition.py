@@ -321,6 +321,76 @@ def test_temporal_arm_reads_its_own_subset_store(organelle: str, model: str) -> 
     assert cfg["benchmark"]["model_name"] == model
 
 
+@pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
+def test_temporal_arm_predicts_compose_against_the_three_a549_conditions(organelle: str, model: str) -> None:
+    """Each Phase 17 arm has one predict leaf per A549 condition, wired to its own arm.
+
+    The 12 leaves are the ablation's only valid cross-arm comparison (the arms
+    validate on different frames, so ``loss/validate`` cannot arbitrate), so a
+    mis-wired ``output_store`` or a leaf pointing at a sibling arm's checkpoint would
+    quietly compare a model against itself.
+
+    ER predictions must land under ``a549__deconv``, not plain ``a549``: the grouped
+    eval generator maps BOTH tokens to the ``a549_trained`` bucket and carries a
+    collision guard, and every other ER a549-trained model already uses the deconv
+    token — so a plain ``a549`` here would split this arm off from its siblings.
+    """
+    gene = {"nucleus": "h2b", "er": "sec61b"}[organelle]
+    train_seg = {"nucleus": "a549", "er": "a549__deconv"}[organelle]
+    leaves = sorted((BENCHMARKS / organelle / model / "a549_mantis").glob("predict__a549_mantis_*.yml"))
+    assert len(leaves) == 3, f"{organelle}/{model}: expected 3 A549 predict leaves, got {[p.name for p in leaves]}"
+    for leaf in leaves:
+        cond = leaf.stem.rsplit("_", 1)[1]
+        cfg = load_composed_config(leaf)
+        assert cfg["benchmark"]["model_name"] == model
+        assert cfg["benchmark"]["predict_set"] == f"a549_mantis_{gene}_{cond}"
+        store = cfg["trainer"]["callbacks"][0]["init_args"]["output_store"]
+        assert store == (
+            f"/hpc/projects/virtual_staining/training/dynacell/{organelle}/{model}/"
+            f"{train_seg}/a549__{cond}/prediction.zarr"
+        ), f"{organelle}/{model}/{leaf.name}: unexpected output_store {store!r}"
+
+
+@pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
+def test_temporal_arm_predicts_pin_a_monitored_checkpoint(organelle: str, model: str) -> None:
+    """Phase 17 predict leaves pin a monitored checkpoint in their OWN arm's dir.
+
+    Unlike the Phase 15 arms (which overfit), these arms' val curves are merely
+    noisy — epoch-to-epoch IQR 0.066-0.237, larger than the entire second-half
+    trend — so ``last.ckpt`` lands at an arbitrary point in the jitter rather than at
+    a worse model per se. nucleus/fnet3d_t01's ``last`` sat at val 0.166 against a
+    retained best of 0.078. Either way, pinning ``last`` is wrong.
+
+    Existence on disk is deliberately NOT asserted: the pins are provisional while
+    the fits run and ``save_top_k: 4`` rotates files out, and submission passes
+    ``--ckpt best``, which uses only the parent directory from this path.
+    """
+    leaves = sorted((BENCHMARKS / organelle / model / "a549_mantis").glob("predict__*.yml"))
+    assert leaves, f"{organelle}/{model}: no predict leaves found"
+    pinned = set()
+    for leaf in leaves:
+        ckpt = yaml.safe_load(leaf.read_text())["model"]["init_args"]["ckpt_path"]
+        assert "last" not in Path(ckpt).name, f"{organelle}/{model}/{leaf.name}: pins {Path(ckpt).name}"
+        assert f"/{organelle}/{model}/checkpoints/" in ckpt, (
+            f"{organelle}/{model}/{leaf.name}: ckpt is not this arm's: {ckpt}"
+        )
+        pinned.add(ckpt)
+    assert len(pinned) == 1, f"{organelle}/{model}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
+
+
+def test_temporal_arms_do_not_share_a_checkpoint() -> None:
+    """Within an organelle, the two temporal arms predict from different checkpoints."""
+    for organelle in ("nucleus", "er"):
+        gene = {"nucleus": "h2b", "er": "sec61b"}[organelle]
+        pinned = {
+            model: yaml.safe_load(
+                (BENCHMARKS / organelle / model / "a549_mantis" / f"predict__a549_mantis_{gene}_mock.yml").read_text()
+            )["model"]["init_args"]["ckpt_path"]
+            for model in ("fnet3d_t01", "fnet3d_tspread")
+        }
+        assert len(set(pinned.values())) == 2, f"{organelle}: arms share a checkpoint: {pinned}"
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 
