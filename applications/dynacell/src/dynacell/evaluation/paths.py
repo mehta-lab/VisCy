@@ -141,6 +141,12 @@ PAPER_KEY: dict[str, str] = {
     # displays don't collide.
     "fnet3d_bigpatch": "fnet3d_bigpatch",
     "fnet3d_vscyto3daug": "fnet3d_vscyto3daug",
+    # FNet3D temporal-sampling ablation (Phase 17, nucleus + ER, A549-trained):
+    # fnet3d_t01 trains on timepoints {0,1} of every position (hpi 5 and 7);
+    # fnet3d_tspread trains on the SAME number of frames spread over the whole
+    # time course. Equal frame budgets, so the pair isolates temporal diversity.
+    "fnet3d_t01": "fnet3d_t01",
+    "fnet3d_tspread": "fnet3d_tspread",
     "unetvit3d": "unetvit3d",
     # pix2pix3d GAN (UNetViT3D generator, DynacellGAN engine). Distinct paper key
     # from the deterministic `unetvit3d` so eval dirs don't collide.

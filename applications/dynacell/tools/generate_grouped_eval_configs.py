@@ -50,6 +50,10 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fnet3d_paper": "fnet3d",
     "fnet3d_bigpatch": "fnet3d_bigpatch",
     "fnet3d_vscyto3daug": "fnet3d_vscyto3daug",
+    # FNet3D temporal-sampling ablation (Phase 17): equal frame budgets, early
+    # window vs spread over the whole time course.
+    "fnet3d_t01": "fnet3d_t01",
+    "fnet3d_tspread": "fnet3d_tspread",
     "unetvit3d": "unetvit3d",
     "pix2pix3d_unetvit": "pix2pix3d",
     "celldiff": "celldiff",
@@ -93,6 +97,8 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet3d_paper",
     "fnet3d_bigpatch",
     "fnet3d_vscyto3daug",
+    "fnet3d_t01",
+    "fnet3d_tspread",
     "unetvit3d",
     "pix2pix3d_unetvit",
     # In-focus 2D track — deterministic like their 3D counterparts (no diffusion
