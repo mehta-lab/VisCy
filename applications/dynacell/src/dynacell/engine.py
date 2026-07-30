@@ -1251,6 +1251,39 @@ class DynacellGAN(LightningModule):
 
         if ckpt_path is not None:
             state = _ckpt_state_dict(ckpt_path)
+            # A checkpoint carrying an EMA shadow that this instance did not build
+            # must not lose it. EMA construction above is gated on ``ema_kimg``, a
+            # *training* hyperparameter a predict config has no reason to carry, so
+            # a predict run that omitted it silently discarded every
+            # generator_ema.* tensor under strict=False and fell through to the raw
+            # generator in ``_inference_generator``. That is exactly what happened
+            # to the pix2pix3d benchmark: checkpoints were selected on
+            # ``loss/validate_ema`` (the ModelCheckpoint monitor in the
+            # train_4gpu_modernized leaves) and then evaluated with the non-EMA
+            # weights, with only a warning in the job's stderr to say so.
+            #
+            # Build the shadow from the checkpoint's own keys, before the load, so
+            # the EMA tensors land in it on the single pass. At inference only the
+            # shadow's *existence* matters; requiring every predict config to
+            # restate a decay constant the checkpoint already records is what made
+            # the silent drop possible.
+            #
+            # Deliberately NOT adopted from the checkpoint: ``use_ema_at_predict``.
+            # Which generator runs stays an explicit config decision — inferring it
+            # here would flip every existing predict arm on its next run, the same
+            # class of silent change this guard exists to end.
+            ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
+            if ema_keys_in_ckpt and self.generator_ema is None:
+                self.generator_ema = copy.deepcopy(self.generator)
+                self.generator_ema.requires_grad_(False)
+                _logger.info(
+                    "Checkpoint %s carries %d generator_ema.* tensors; built the EMA "
+                    "shadow from them (ema_kimg absent from this config). "
+                    "use_ema_at_predict=%s selects which generator runs.",
+                    ckpt_path,
+                    ema_keys_in_ckpt,
+                    self.use_ema_at_predict,
+                )
             # strict=False: pre-modernization checkpoints don't carry
             # generator_ema.* / _lecam_ema_* keys. Filter missing-key warnings
             # to expected-missing prefixes; anything else is a genuine
@@ -1268,30 +1301,6 @@ class DynacellGAN(LightningModule):
                     f"modernization additions: {unexpected_missing}. The model would load "
                     "with partially random weights. If this is intentional, drop those "
                     "submodules from the model config or use an explicit migration step."
-                )
-            # A checkpoint carrying an EMA shadow that this instance did not build
-            # is the one unexpected-key case that must NOT be a warning. EMA
-            # construction is gated on ``ema_kimg``, a *training* hyperparameter
-            # that a predict config has no reason to carry, so a predict run that
-            # omits it silently discards every generator_ema.* tensor and falls
-            # through to the raw generator in ``_predict_generator``. That is
-            # exactly what happened to the pix2pix3d benchmark: the checkpoints
-            # were selected on ``loss/validate_ema`` (see the ModelCheckpoint
-            # monitor in the train_4gpu_modernized leaves) and then evaluated with
-            # the non-EMA weights, with only a warning in the job's stderr to say
-            # so. Refuse to load instead, and name both explicit resolutions.
-            ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
-            if ema_keys_in_ckpt and self.generator_ema is None:
-                raise RuntimeError(
-                    f"Checkpoint {ckpt_path!r} carries {ema_keys_in_ckpt} generator_ema.* "
-                    "tensors but this DynacellGAN was built without an EMA shadow "
-                    "(ema_kimg=None), so strict=False would drop them and inference "
-                    "would silently use the raw generator. If the EMA weights are the "
-                    "ones you want (they are, if the run selected checkpoints on "
-                    "loss/validate_ema), set ema_kimg in the model init_args of this "
-                    "config so the shadow is built and loaded. To deliberately use the "
-                    "raw generator, set ema_kimg and use_ema_at_predict=false, which "
-                    "records the choice instead of leaving it to a missing key."
                 )
             if incompat.unexpected_keys:
                 _logger.warning(
