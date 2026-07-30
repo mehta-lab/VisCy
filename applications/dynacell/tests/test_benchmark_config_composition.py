@@ -53,6 +53,12 @@ A549_TRAIN_LEAVES = [
     ("er", "fnet3d_tspread"),
 ]
 
+# Phase 15 FNet3D patch-vs-augmentation arms. Both overfit after an early val-loss
+# minimum, so their predict leaves must pin a monitored checkpoint rather than
+# `last.ckpt` — which is neither their best nor (checkpoint writes stopped hours
+# before both jobs ended) their final state.
+_PATCH_AUG_ARMS = ("fnet3d_bigpatch", "fnet3d_vscyto3daug")
+
 # Phase 17 arm -> the timepoint-subset store it must read. The whole ablation rests
 # on the two arms differing in nothing but this path, so a copy-paste slip here
 # (both arms pointing at the same store, or at the full pooled store) would silently
@@ -263,6 +269,38 @@ def test_a549_train_leaf_composes_with_expected_hparams(organelle: str, model: s
     ia = cfg["data"]["init_args"]
     for key, value in _EXPECTED_DATA_HPARAMS[model].items():
         assert ia[key] == value, f"{organelle}/{model}: data.init_args.{key} = {ia[key]!r}, expected {value!r}"
+
+
+@pytest.mark.parametrize("model", _PATCH_AUG_ARMS)
+def test_patch_aug_arm_predicts_pin_a_monitored_checkpoint(model: str) -> None:
+    """The Phase 15 arms' predict leaves pin a best-val checkpoint, never `last.ckpt`.
+
+    Both arms' validation loss rises after an early minimum, so `last.ckpt` would
+    silently predict from a worse model — and their checkpoint writes stopped hours
+    before the jobs ended, so it is not even the final state. Every predict leaf for
+    an arm must also agree on one checkpoint, so the four test sets are scored
+    against the same model.
+    """
+    leaves = sorted((BENCHMARKS / "nucleus" / model / "ipsc_confocal").glob("predict__*.yml"))
+    assert leaves, f"{model}: no predict leaves found"
+    pinned = set()
+    for leaf in leaves:
+        ckpt = yaml.safe_load(leaf.read_text())["model"]["init_args"]["ckpt_path"]
+        assert "last" not in Path(ckpt).name, f"{model}/{leaf.name}: pins {Path(ckpt).name}"
+        assert f"/{model}/checkpoints/" in ckpt, f"{model}/{leaf.name}: ckpt is not this arm's: {ckpt}"
+        pinned.add(ckpt)
+    assert len(pinned) == 1, f"{model}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
+
+
+def test_patch_aug_arms_do_not_share_a_checkpoint() -> None:
+    """Arm A and Arm B predict from different checkpoints (the aug comparison is real)."""
+    pinned = {
+        model: yaml.safe_load(
+            (BENCHMARKS / "nucleus" / model / "ipsc_confocal" / "predict__ipsc_confocal.yml").read_text()
+        )["model"]["init_args"]["ckpt_path"]
+        for model in _PATCH_AUG_ARMS
+    }
+    assert len(set(pinned.values())) == len(_PATCH_AUG_ARMS), f"arms share a checkpoint: {pinned}"
 
 
 @pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
