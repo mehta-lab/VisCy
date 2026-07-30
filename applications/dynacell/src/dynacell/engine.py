@@ -1280,10 +1280,10 @@ class DynacellGAN(LightningModule):
             # monitor in the train_4gpu_modernized leaves) and then evaluated with
             # the non-EMA weights, with only a warning in the job's stderr to say
             # so. Refuse to load instead, and name both explicit resolutions.
-            dropped_ema = [k for k in incompat.unexpected_keys if k.startswith("generator_ema.")]
-            if dropped_ema and self.generator_ema is None:
+            ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
+            if ema_keys_in_ckpt and self.generator_ema is None:
                 raise RuntimeError(
-                    f"Checkpoint {ckpt_path!r} carries {len(dropped_ema)} generator_ema.* "
+                    f"Checkpoint {ckpt_path!r} carries {ema_keys_in_ckpt} generator_ema.* "
                     "tensors but this DynacellGAN was built without an EMA shadow "
                     "(ema_kimg=None), so strict=False would drop them and inference "
                     "would silently use the raw generator. If the EMA weights are the "
@@ -1306,7 +1306,6 @@ class DynacellGAN(LightningModule):
             # future buffer added to generator_ema that an old ckpt lacks) —
             # silently half-seeding would produce nonsense at the partial layers.
             if self.generator_ema is not None:
-                ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
                 ema_keys_expected = len(self.generator_ema.state_dict())
                 if ema_keys_in_ckpt == 0:
                     self.generator_ema.load_state_dict(self.generator.state_dict())
