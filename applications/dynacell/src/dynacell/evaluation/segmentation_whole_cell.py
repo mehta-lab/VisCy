@@ -28,8 +28,8 @@ stitches.
 import numpy as np
 from cubic.cuda import ascupy, asnumpy, get_array_module
 from cubic.image_utils import rescale_isotropic, rescale_xy
+from cubic.scipy import ndimage as _ndimage
 from cubic.segmentation.segment_utils import (
-    _binary_fill_holes,
     _remove_small_holes,
     _remove_small_objects,
     segment_watershed,
@@ -124,7 +124,7 @@ def _cells_on_grid(memb_g, nuc_g, seed_g, *, close_px, wall_sigma_px, wall_min_p
         thr0 = _filters.threshold_multiotsu(closed, classes=3, nbins=128)[0]
     except ValueError:
         thr0 = _filters.threshold_otsu(closed)
-    tissue = _binary_fill_holes(closed > thr0)
+    tissue = _ndimage.binary_fill_holes(closed > thr0)
     memb_s = _filters.gaussian(memb_g, sigma=wall_sigma_px, preserve_range=True)
     walls = memb_s > _filters.threshold_multiotsu(memb_s, classes=3, nbins=128)[1]
     walls = _remove_small_objects(walls, min_size=wall_min_px)
