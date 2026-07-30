@@ -32,16 +32,51 @@ def _import_metrics_with_stubs(monkeypatch):
 
     cubic_metrics_module.pcc = _stub_pcc
 
-    def _stub_nrmse(y_true, y_pred, normalization=None, normalize=None, data_range=None, mask=None):
-        a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
-        b = y_pred.numpy() if hasattr(y_pred, "numpy") else np.asarray(y_pred)
+    def _as_np(x):
+        return x.numpy() if hasattr(x, "numpy") else np.asarray(x)
+
+    def _scale_invariant_pair(y_true, y_pred):
+        """Mirror cubic's ``scale_invariant`` transform: z-score GT, LS-fit pred.
+
+        Kept in step with ``cubic.metrics.skimage_metrics.scale_invariant`` so the
+        stub tests the contract the production call relies on rather than an
+        invented one: the target is standardized, the prediction is centred and
+        rescaled by the least-squares gain, and ``data_range`` is derived from the
+        target alone.
+        """
+        a, b = _as_np(y_true).astype(np.float64), _as_np(y_pred).astype(np.float64)
+        gt_std = a.std()
+        gt_norm = (a - a.mean()) / gt_std
+        pred_zero = b - b.mean()
+        alpha = (gt_norm * pred_zero).sum() / (pred_zero * pred_zero).sum()
+        return gt_norm, pred_zero * alpha, float((a.max() - a.min()) / gt_std)
+
+    def _reject_conflict(scale_invariant, normalize, normalization=None):
+        # cubic raises when a normalization mode is combined with the
+        # scale-invariant path, because both choose the denominator. Mirroring it
+        # keeps a config that would fail in production from passing here.
+        if scale_invariant and (normalize is not None or normalization is not None):
+            raise ValueError("scale_invariant=True is incompatible with normalize/normalization")
+
+    def _stub_nrmse(
+        y_true, y_pred, normalization=None, normalize=None, data_range=None, mask=None, scale_invariant=False
+    ):
+        _reject_conflict(scale_invariant, normalize, normalization)
+        if scale_invariant:
+            a, b, _ = _scale_invariant_pair(y_true, y_pred)
+            return float(np.sqrt(np.mean((a - b) ** 2)) / np.sqrt(np.mean(a**2)))
+        a, b = _as_np(y_true), _as_np(y_pred)
         a = (a - a.min()) / max(float(a.max() - a.min()), 1e-8)
         b = (b - b.min()) / max(float(b.max() - b.min()), 1e-8)
         return float(np.sqrt(np.mean((a - b) ** 2)))
 
-    def _stub_psnr(y_true, y_pred, data_range=None, normalize=None, mask=None):
-        a = y_true.numpy() if hasattr(y_true, "numpy") else np.asarray(y_true)
-        b = y_pred.numpy() if hasattr(y_pred, "numpy") else np.asarray(y_pred)
+    def _stub_psnr(y_true, y_pred, data_range=None, normalize=None, mask=None, scale_invariant=False):
+        _reject_conflict(scale_invariant, normalize)
+        if scale_invariant:
+            a, b, rng = _scale_invariant_pair(y_true, y_pred)
+            mse = np.mean((a - b) ** 2)
+            return float("inf") if mse < 1e-12 else float(10 * np.log10(rng**2 / mse))
+        a, b = _as_np(y_true), _as_np(y_pred)
         a = (a - a.min()) / max(float(a.max() - a.min()), 1e-8)
         b = (b - b.min()) / max(float(b.max() - b.min()), 1e-8)
         mse = np.mean((a - b) ** 2)
@@ -50,7 +85,13 @@ def _import_metrics_with_stubs(monkeypatch):
     cubic_metrics_module.nrmse = _stub_nrmse
     cubic_metrics_module.psnr = _stub_psnr
 
-    def _stub_ssim(img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, **kwargs):
+    def _stub_ssim(
+        img1, img2, spatial_dims=None, data_range=None, gaussian_weights=None, scale_invariant=False, **kwargs
+    ):
+        _reject_conflict(scale_invariant, kwargs.get("normalize"))
+        if scale_invariant:
+            a, b, rng = _scale_invariant_pair(img1.squeeze(), img2.squeeze())
+            return float(structural_similarity(a, b, data_range=rng))
         a = img1.numpy().squeeze()
         b = img2.numpy().squeeze()
         return float(structural_similarity(a, b, data_range=float(data_range or 1.0)))
@@ -91,24 +132,47 @@ def _import_metrics_with_stubs(monkeypatch):
     return importlib.import_module("dynacell.evaluation.metrics")
 
 
-def test_per_input_normalization_absorbs_gain_and_offset(monkeypatch) -> None:
-    """cubic normalize='min_max' normalizes each input independently.
+def test_scale_invariant_absorbs_gain_and_offset(monkeypatch) -> None:
+    """An affine-transformed prediction must score as a perfect match.
 
-    Gain and offset errors disappear after per-input min-max normalization —
-    both target and prediction map to the same [0, 1] range.
+    This is the property ``scale_invariant=True`` guarantees, and the reason the
+    pipeline switched to it: the metric should report agreement with the target,
+    not the prediction's dynamic range. The previous per-input min-max recipe also
+    absorbed gain and offset, but it derived each array's scale from its own
+    extremes, so a single outlier voxel moved the denominator; the scale-invariant
+    form fits the prediction to the target by least squares instead.
     """
     metrics = _import_metrics_with_stubs(monkeypatch)
 
     target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
-    prediction = target * 2.0 + 0.25  # gain+offset — absorbed by per-input normalization
+    prediction = target * 2.0 + 0.25  # pure gain+offset — no information lost
 
-    assert metrics.nrmse(target, prediction) == pytest.approx(0.0, abs=1e-6)
-    assert metrics.psnr(target, prediction) == float("inf")
-    assert metrics.ssim(target, prediction) == pytest.approx(1.0, abs=5e-2)
+    assert metrics.nrmse(target, prediction, scale_invariant=True) == pytest.approx(0.0, abs=1e-6)
+    assert metrics.psnr(target, prediction, scale_invariant=True) == float("inf")
+    # metrics.ssim is the module's own wrapper, which already passes
+    # scale_invariant=True to cubic; it takes (H, W) / (D, H, W) input.
+    assert metrics.ssim(target.squeeze(0), prediction.squeeze(0)) == pytest.approx(1.0, abs=5e-2)
+
+
+def test_scale_invariant_rejects_a_normalization_mode(monkeypatch) -> None:
+    """Passing both a normalization mode and scale_invariant must raise.
+
+    Both pick the comparison's denominator, so combining them silently returned a
+    different number in cubic < 0.9.0a1 -- which is how ``normalize="min_max"``
+    went unnoticed on ``ssim`` (it vanished into ``**kwargs``) while quietly
+    corrupting psnr and nrmse. The pipeline must fail loudly instead.
+    """
+    metrics = _import_metrics_with_stubs(monkeypatch)
+
+    target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
+    with pytest.raises(ValueError, match="incompatible"):
+        metrics.nrmse(target, target, normalize="min_max", scale_invariant=True)
+    with pytest.raises(ValueError, match="incompatible"):
+        metrics.psnr(target, target, normalize="min_max", scale_invariant=True)
 
 
 def test_identical_images_still_score_perfectly(monkeypatch) -> None:
-    """Per-input normalization should preserve perfect self-similarity."""
+    """Scale-invariant scoring should preserve perfect self-similarity."""
     metrics = _import_metrics_with_stubs(monkeypatch)
 
     target = torch.linspace(0.0, 1.0, steps=16 * 16).reshape(1, 16, 16)
