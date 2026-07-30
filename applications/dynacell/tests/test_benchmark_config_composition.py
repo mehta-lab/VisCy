@@ -330,13 +330,16 @@ def test_temporal_arm_predicts_compose_against_the_three_a549_conditions(organel
     mis-wired ``output_store`` or a leaf pointing at a sibling arm's checkpoint would
     quietly compare a model against itself.
 
-    ER predictions must land under ``a549__deconv``, not plain ``a549``: the grouped
-    eval generator maps BOTH tokens to the ``a549_trained`` bucket and carries a
-    collision guard, and every other ER a549-trained model already uses the deconv
-    token — so a plain ``a549`` here would split this arm off from its siblings.
+    ER predictions land under plain ``a549``, NOT ``a549__deconv``. The deconv token
+    is a **retired mislabel**, not a convention: the raw-flip retrain produced raw
+    ``Structure`` checkpoints (there has never been a deconv ER checkpoint) while the
+    predict leaves kept a deconv-marked ``output_store``, so the 2026-07-20 audit
+    re-tokenized ``a549__deconv -> a549`` on disk. ER a549-trained predictions now
+    really do live at ``er/<model>/a549/``. Several older ER predict leaves still carry
+    the stale token in YAML and are out of sync with disk — do not copy them.
     """
     gene = {"nucleus": "h2b", "er": "sec61b"}[organelle]
-    train_seg = {"nucleus": "a549", "er": "a549__deconv"}[organelle]
+    train_seg = "a549"
     leaves = sorted((BENCHMARKS / organelle / model / "a549_mantis").glob("predict__a549_mantis_*.yml"))
     assert len(leaves) == 3, f"{organelle}/{model}: expected 3 A549 predict leaves, got {[p.name for p in leaves]}"
     for leaf in leaves:
