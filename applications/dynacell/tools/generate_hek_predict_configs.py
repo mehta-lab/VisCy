@@ -90,6 +90,18 @@ _JOB_STEM: dict[str, str] = {
 }
 _TRAIN_STEM: dict[str, str] = {"ipsc": "IPSCTR", "a549": "A549TR", "joint": "JOINTTR"}
 
+# Wall-clock profile per model family. CELL-Diff is iterative diffusion and needs
+# far more wall time than the single-pass families, which is why it has its own
+# profile rather than inflating the shared cap -- see the header comments in both
+# files. Keyed by every entry in _MODEL_DIRS so a new family fails loud here
+# instead of silently inheriting a limit that does not fit it.
+_HARDWARE_PROFILE: dict[str, str] = {
+    "fnet3d_paper": "hardware_predict_any_gpu.yml",
+    "fcmae_vscyto3d_pretrained": "hardware_predict_any_gpu.yml",
+    "celldiff": "hardware_predict_celldiff.yml",
+    "pix2pix3d_unetvit": "hardware_predict_any_gpu.yml",
+}
+
 
 def _train_stem(train_set: str) -> str:
     """Job-name stem for a canonical train_set token.
@@ -236,7 +248,7 @@ def build_leaf(organelle: str, model_dir: str, train_dir: str) -> tuple[Path, st
             f"../../../_internal/shared/model/targets/{target_fragment}.yml",
             f"../../../_internal/shared/model/model_overlays/{_model_overlay(sibling['base'])}",
             "../../../_internal/shared/model/launcher_profiles/mode_predict.yml",
-            "../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml",
+            f"../../../_internal/shared/model/launcher_profiles/{_HARDWARE_PROFILE[model_dir]}",
             "../../../_internal/shared/model/launcher_profiles/runtime_shared.yml",
         ],
         "benchmark": {

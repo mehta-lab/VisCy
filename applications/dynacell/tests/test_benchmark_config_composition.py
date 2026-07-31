@@ -741,3 +741,60 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
         f"and the <80 GB cards; narrowing to e.g. 'h200' is allowed). If this leaf must run "
         f"on A100, override with `--override launcher.sbatch.constraint=null`."
     )
+
+
+# Wall limit each hardware profile is expected to contribute, sized from measured
+# runtimes over Slurm's retention window. Keyed by profile rather than by leaf so
+# a leaf that composes the wrong profile fails loudly here.
+#
+# hardware_h200_single is shared with 40 *fit* leaves, so its 4-day value is not a
+# predict measurement and must not be re-tuned from one. The 41 predict leaves on
+# it are all FCMAE/VSCyto3D variants that complete in under an hour, so the loose
+# cap costs little -- a known gap, recorded rather than silently excluded.
+_PREDICT_PROFILE_TIME: dict[str, str] = {
+    "hardware_predict_any_gpu.yml": "2-00:00:00",
+    "hardware_predict_celldiff.yml": "7-00:00:00",
+    "hardware_h200_single.yml": "4-00:00:00",
+}
+
+
+def _all_predict_leaves() -> list[Path]:
+    """All ``predict*.yml`` leaves under benchmarks/virtual_staining/ except _internal/."""
+    return sorted(p for p in BENCHMARKS.rglob("predict*.yml") if "_internal" not in p.parts)
+
+
+def _composed_hardware_profile(leaf: Path) -> str:
+    """Return the single hardware profile filename a predict leaf composes."""
+    base = yaml.safe_load(leaf.read_text())["base"]
+    profiles = [Path(entry).name for entry in base if "launcher_profiles/hardware" in entry]
+    assert len(profiles) == 1, f"{leaf}: expected exactly one hardware profile, got {profiles}"
+    return profiles[0]
+
+
+@pytest.mark.parametrize("leaf", _all_predict_leaves(), ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
+    """Every predict leaf carries the wall limit sized for its model family.
+
+    CELL-Diff is iterative diffusion and runs 5.8-95.6 h; every other family tops
+    out at 21.9 h. One shared cap cannot serve both -- at 4 days CELL-Diff
+    TIMEOUTed eight times on 2026-07-19, and at 2 days it would fail always.
+
+    Data-driven so a new leaf cannot quietly inherit a limit that does not fit
+    it. A new slow family gets its own profile; do not raise a shared cap to
+    cover it, or the cap stops bounding anything.
+    """
+    profile = _composed_hardware_profile(leaf)
+    assert profile in _PREDICT_PROFILE_TIME, (
+        f"{leaf.relative_to(BENCHMARKS)}: unknown hardware profile {profile!r}. Add it to "
+        f"_PREDICT_PROFILE_TIME with a measured wall limit."
+    )
+    is_celldiff = "celldiff" in leaf.parts
+    assert is_celldiff == (profile == "hardware_predict_celldiff.yml"), (
+        f"{leaf.relative_to(BENCHMARKS)}: celldiff={is_celldiff} but profile={profile!r}. "
+        f"CELL-Diff predicts must use hardware_predict_celldiff.yml and nothing else may."
+    )
+    time_limit = load_composed_config(leaf)["launcher"]["sbatch"]["time"]
+    assert time_limit == _PREDICT_PROFILE_TIME[profile], (
+        f"{leaf.relative_to(BENCHMARKS)}: composed time={time_limit!r}, but {profile} is "
+        f"expected to contribute {_PREDICT_PROFILE_TIME[profile]!r}."
+    )
