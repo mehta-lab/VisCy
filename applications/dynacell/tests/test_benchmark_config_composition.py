@@ -394,6 +394,82 @@ def test_temporal_arms_do_not_share_a_checkpoint() -> None:
         assert len(set(pinned.values())) == 2, f"{organelle}: arms share a checkpoint: {pinned}"
 
 
+# Brightfield-input ablation: (organelle, model) arms that must differ from their
+# ipsc_confocal phase baseline in the INPUT CHANNEL AND NOTHING ELSE. `Phase3D` in
+# these stores is reconstructed from `Brightfield` by waveorder, so the arm measures
+# whether that reconstruction is load-bearing -- which only holds if every other
+# hyperparameter matches.
+_BRIGHTFIELD_ARMS = [(organelle, model) for organelle in ("nucleus", "er") for model in ("fnet3d_paper", "celldiff")]
+
+
+@pytest.mark.parametrize("organelle,model", _BRIGHTFIELD_ARMS)
+def test_brightfield_arm_differs_from_its_phase_baseline_only_in_the_input_channel(
+    organelle: str, model: str, monkeypatch
+) -> None:
+    """The bf arm's composed data config equals its baseline under Brightfield->Phase3D.
+
+    This is the ablation's validity check, and it catches a specific trap: for
+    ``er/fnet3d_paper`` the live transform values come from
+    ``data_overlays/fnet3d_paper_fit.yml``, which composes AFTER
+    ``targets/er_sec61b.yml`` and replaces all three lists wholesale. Re-deriving the
+    bf leaf's lists from the target fragment instead would silently switch Structure
+    from mean/std to median/iqr, the crop from 32x32x64x64 to 13x624x624 and
+    num_samples from 8 to 2 -- three confounds with nothing in the config to reveal
+    them. Any drift in batch_size, z_window_size, patch size, normalization stats or
+    augmentation stack fails here too.
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+    bf = load_composed_config(
+        BENCHMARKS / organelle / model / "ipsc_confocal_brightfield" / "train.yml",
+        resolver=_dynacell_ref_resolver,
+    )
+    phase = load_composed_config(
+        BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml",
+        resolver=_dynacell_ref_resolver,
+    )
+
+    assert bf["data"]["init_args"]["source_channel"] == "Brightfield", (
+        f"{organelle}/{model}: bf leaf resolved source_channel="
+        f"{bf['data']['init_args']['source_channel']!r} -- the ablation is a no-op"
+    )
+    assert phase["data"]["init_args"]["source_channel"] == "Phase3D"
+
+    def _rekey(obj: object) -> object:
+        """Substitute Brightfield -> Phase3D everywhere so the two become comparable."""
+        if isinstance(obj, dict):
+            return {k: _rekey(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_rekey(v) for v in obj]
+        return "Phase3D" if obj == "Brightfield" else obj
+
+    assert _rekey(bf["data"]) == phase["data"], (
+        f"{organelle}/{model}: bf and phase data configs differ by more than the input channel"
+    )
+    # Model and trainer halves must be untouched (same recipe, same schedule, same steps).
+    assert bf["model"] == phase["model"], f"{organelle}/{model}: model config drifted"
+    for key in ("precision", "max_steps", "max_epochs", "devices", "strategy"):
+        assert bf["trainer"].get(key) == phase["trainer"].get(key), f"{organelle}/{model}: trainer.{key} drifted"
+
+
+@pytest.mark.parametrize("organelle,model", _BRIGHTFIELD_ARMS)
+def test_brightfield_arm_writes_to_its_own_ipsc_bf_tree(organelle: str, model: str) -> None:
+    """Checkpoints land under ``ipsc__bf/``, never in the phase baseline's tree.
+
+    Sharing a ``dirpath`` with the baseline would have the two arms overwrite each
+    other's checkpoints -- the failure mode would be a corrupted comparison, not an error.
+    """
+    bf = load_composed_config(BENCHMARKS / organelle / model / "ipsc_confocal_brightfield" / "train.yml")
+    phase = load_composed_config(BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml")
+    ckpt = next(
+        c["init_args"]["dirpath"]
+        for c in bf["trainer"]["callbacks"]
+        if c["class_path"].endswith("ModelCheckpoint") and "dirpath" in c.get("init_args", {})
+    )
+    assert "/ipsc__bf/" in ckpt, f"{organelle}/{model}: checkpoint dirpath is not under ipsc__bf/: {ckpt}"
+    assert bf["launcher"]["run_root"] != phase["launcher"]["run_root"]
+    assert bf["trainer"]["logger"]["init_args"]["name"] != phase["trainer"]["logger"]["init_args"]["name"]
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 
