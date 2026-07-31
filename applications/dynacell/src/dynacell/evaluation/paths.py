@@ -76,11 +76,16 @@ _CONDITIONS: frozenset[str] = frozenset({"mock", "denv", "zikv"})
 _HEK_ARMS: frozenset[str] = frozenset({"a549xy"})
 
 # Forward-emittable structured train_set tokens. ``__deconv`` is valid only for
-# ER/mito (see _tuple_is_valid); ``__bf`` / ``__bf__deconv`` are grammar-ready
-# but data-side follow-ups. ``joint__deconv`` and ``ipsc__deconv`` are NOT valid.
+# ER/mito (see _tuple_is_valid). ``joint__deconv`` and ``ipsc__deconv`` are NOT valid.
+#
+# ``__bf`` marks a fit whose model INPUT is the raw ``Brightfield`` stack instead of
+# the ``Phase3D`` volume reconstructed from it — the brightfield-input ablation.
+# ``ipsc__bf`` is live (4 iPSC fits: fnet3d_paper and celldiff × nucleus/ER);
+# ``a549__bf`` / ``a549__bf__deconv`` remain grammar-ready data-side follow-ups.
 _FORWARD_TRAIN_SETS: frozenset[str] = frozenset(
     {
         "ipsc",
+        "ipsc__bf",
         "a549",
         "a549__deconv",
         "a549__bf",
@@ -240,6 +245,9 @@ _ORG_ALIAS: dict[str, str] = {
 _TRAIN_ALIAS: dict[str, str] = {
     "ipsc_confocal": "ipsc",
     "ipsc": "ipsc",
+    "ipsc_confocal_bf": "ipsc__bf",
+    "ipsc_confocal_brightfield": "ipsc__bf",
+    "ipsc__bf": "ipsc__bf",
     "a549_mantis": "a549",
     "a549": "a549",
     "a549_mantis_deconv": "a549__deconv",

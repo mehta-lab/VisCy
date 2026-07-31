@@ -47,7 +47,11 @@ _DATA_ROOT = "/hpc/projects/virtual_staining/training/dynacell"
 
 _SINGLE_ORGS = ("nucleus", "membrane", "er", "mito")
 _MODELS = ("fcmae_vscyto3d_scratch", "fnet3d_paper", "celldiff_r2", "pix2pix3d_unetvit")
-_FORWARD_TRAINS = ("ipsc", "a549", "joint")
+# ``ipsc__bf`` is the brightfield-input ablation (model input = raw Brightfield stack
+# instead of the Phase3D volume reconstructed from it). Listed here so it inherits the
+# uniqueness and inverse-round-trip guards below: its whole point is that it must never
+# collide with the plain ``ipsc`` phase arm it is compared against.
+_FORWARD_TRAINS = ("ipsc", "ipsc__bf", "a549", "joint")
 _TEST_CONDS = (("ipsc", None), ("a549", "mock"), ("a549", "denv"), ("a549", "zikv"))
 
 
@@ -212,6 +216,22 @@ def test_ipsc_and_joint_deconv_are_invalid_forward_tokens() -> None:
     for train in ("ipsc__deconv", "joint__deconv"):
         with pytest.raises(ValueError):
             prediction_store("er", "fnet3d_paper", train, "a549", "mock", data_root=_DATA_ROOT)
+
+
+def test_ipsc_brightfield_config_spellings_normalize_to_one_token() -> None:
+    """Every config-side spelling of the brightfield iPSC train set lands on ``ipsc__bf``.
+
+    The train leaves live in a directory named ``ipsc_confocal_brightfield`` while the
+    on-disk grammar uses ``ipsc__bf``; if the alias table missed a spelling, the eval-side
+    path builders would raise "unknown train_set token" only once predictions existed.
+    ``ipsc__bf`` must also stay distinct from plain ``ipsc`` — collapsing them would merge
+    the brightfield-input arm onto the phase baseline it is measured against.
+    """
+    canonical = checkpoint_dir("er", "fnet3d_paper", "ipsc__bf")
+    for spelling in ("ipsc_confocal_bf", "ipsc_confocal_brightfield", "ipsc__bf"):
+        assert checkpoint_dir("er", "fnet3d_paper", spelling) == canonical
+    assert canonical == MODELS_ROOT / "ipsc__bf" / "er" / "fnet3d_paper" / "checkpoints"
+    assert checkpoint_dir("er", "fnet3d_paper", "ipsc_confocal") != canonical
 
 
 def test_legacy_joint_deconvgt_valid_only_for_er_mito() -> None:
