@@ -432,7 +432,7 @@ def plot_frechet_matrix(matrix: pd.DataFrame, marker: str, output_path: Path) ->
     plt.close(fig)
 
 
-def plot_corr_matrix(matrix: pd.DataFrame, marker: str, output_path: Path) -> None:
+def plot_corr_matrix(matrix: pd.DataFrame, marker: str, output_path: Path, vmin: float = 0.8) -> None:
     """Plot one symmetric dataset x dataset Pearson-correlation heatmap for a marker.
 
     Parameters
@@ -443,13 +443,12 @@ def plot_corr_matrix(matrix: pd.DataFrame, marker: str, output_path: Path) -> No
         Marker name, used in the title.
     output_path : Path
         Output file path.
+    vmin : float
+        Fixed lower bound of the colour scale, shared across all markers so the
+        heatmaps are visually comparable (default 0.8). Correlations here cluster
+        near 1, so a fixed [-1, 1] scale washes the structure out.
     """
     n = len(matrix)
-    # Correlations here cluster near 1; a fixed [-1, 1] scale washes the structure
-    # out. Anchor vmin at the off-diagonal minimum (floored a touch) so real
-    # differences are visible, and annotate the cells with the r values.
-    off = matrix.to_numpy()[~np.eye(n, dtype=bool)]
-    vmin = float(np.floor(off.min() * 20) / 20) if off.size else -1.0  # nearest 0.05 below
     fig, ax = plt.subplots(figsize=(max(6, n * 1.3), max(5, n * 1.1)))
     sns.heatmap(
         matrix,
@@ -465,8 +464,8 @@ def plot_corr_matrix(matrix: pd.DataFrame, marker: str, output_path: Path) -> No
         cbar_kws={"label": "Pearson r", "shrink": 0.7},
     )
     ax.set_title(
-        f"Embedding consistency — {marker}\ncontrol cells, mean-embedding correlation "
-        f"(similarity; color scaled from {vmin:.2f})",
+        f"Embedding consistency — {marker}\ncontrol-cell summary correlation "
+        f"(Pearson r similarity; color scaled from {vmin:.2f})",
         pad=12,
     )
     ax.set_xlabel("Dataset")
