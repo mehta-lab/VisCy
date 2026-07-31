@@ -59,7 +59,35 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 
 **A job can finish its work and never exit.** Job `35083019_0` (a `pix2pix3d` predict) wrote its last chunk at 2026-07-30 19:20, then held an A6000 + 32 CPUs + 256 GB for **17.5 h** doing nothing. `squeue` shows `RUNNING` with a climbing wall clock — indistinguishable from healthy compute — and the rich progress bar only reaches `.out` at exit, so the log looks normal too. Measured rate: 1 in 509 allocations over 26 days.
 
-**The discriminator is CPU time, and only its derivative.** Across those 509 allocations every healthy job spent CPU at >= 0.93x wall; the hung one sat at 0.561 with a *zero* incremental rate. Absolute ratio alone is useless (a 16-CPU fit runs at ~7.8x wall), so compare two samples: `sstat -j <id> -a -P --format=JobID,AveCPU` — `-P` is mandatory, the default width truncates to `10-15:41:+` and misparses. `applications/dynacell/tools/watch_stalled_jobs.py` does this on a 10-min poll and reports only; run it alongside any long campaign.
+**The discriminator is CPU time, and only its derivative.** Across those 509 allocations every healthy job spent CPU at >= 0.93x wall; the hung one sat at 0.561 with a *zero* incremental rate. Absolute ratio alone is useless (a 16-CPU fit runs at ~7.8x wall), so compare two samples: `sstat -j <id> -a -P --format=JobID,AveCPU` — `-P` is mandatory, the default width truncates to `10-15:41:+` and misparses.
+
+**Using the stall watchdog.** `applications/dynacell/tools/watch_stalled_jobs.py` automates exactly that comparison. Start it whenever a campaign has long jobs in flight and leave it running:
+
+```sh
+# one-shot check: exit 0 = all healthy, exit 1 = something is stalled
+uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --once
+
+# continuous, 10-min poll (launch in the background; it runs until killed)
+uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
+```
+
+Quiet polls print `ok, tracking N: <jobid>(<samples>) ...`; a stalled job prints one `STALLED <jobid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
+
+- It **only reports — it never cancels.** Cancelling a job with `afterok` dependents strands them, so follow the kill order above by hand.
+- **Interactive sessions are excluded by name** (`nomachine`, `gpu-hold`, `interactive`, bare `bash`/`sh`/`srun`). A renamed interactive session would get flagged — it still would not be cancelled, but don't act on the alert without checking.
+- It needs **two samples >= 15 min apart** and a job **>= 30 min old**, so expect no verdict on a fresh job for the first couple of polls.
+- A job that has never burned CPU is never flagged: startup NFS staging is legitimately ~0% CPU, so the check requires the job to have previously demonstrated CPU progress.
+- `--user` defaults to `alex.kalinin`; `sstat` only works on your own running jobs, so it cannot watch someone else's.
+
+**Predict wall limits are per family, sized from measurement** (`launcher_profiles/`):
+
+| Profile | `time` | Basis |
+|---|---|---|
+| `hardware_predict_any_gpu.yml` | 2 days | longest single-pass predict measured 21.9 h |
+| `hardware_predict_celldiff.yml` | 7 days | CELL-Diff runs 5.8-95.6 h; 8 predicts TIMEOUTed at the old 4-day cap on 2026-07-19 |
+| `hardware_h200_single.yml` | 4 days | **shared with 40 fit leaves** — do not re-tune from predict data |
+
+A new slow family gets its **own profile**; raising a shared cap to cover it makes the cap meaningless. `test_predict_leaf_wall_limit_matches_its_family` pins all 421 predict leaves to this table, and `generate_hek_predict_configs.py` picks the profile from `_HARDWARE_PROFILE` so regeneration cannot revert it. Fits time out at 4 days too (4 FCMAE joint fits on 2026-07-10/12) — a separate, still-open issue.
 
 **Two traps when killing one:**
 - **Lightning swallows SIGTERM.** `signal_connector.py` installs a handler that logs `Received SIGTERM` / `Bypassing SIGTERM` and sets a flag — it does not exit. `scancel` alone cannot stop a Lightning process outside its training loop; it dies on the KILL escalation (`ExitCode 0:9`), which took ~6 min here.
@@ -71,8 +99,6 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 3. **Do not rely on SIGABRT + `PYTHONFAULTHANDLER=1`** — verified to produce no dump once the interpreter is finalizing.
 
 **Known unbounded wait in the predict teardown path:** zarr 3.2.1 `core/sync.py:89` registers `cleanup_resources` via `atexit`, which calls `_executor.shutdown(wait=True)` with no timeout — one stuck `zarr_pool` thread blocks interpreter exit forever at 0% CPU. (The same function caps its io-thread join at `timeout=0.2` "to avoid hanging"; the executor shutdown was left unbounded.) That is the proximate frame, but not the whole story here: a pure Python join still lets the SIGTERM handler run and log, and job `35083019_0` never logged it, so the terminal block was a C-level uninterruptible call underneath.
-
-**Predict wall limits are one shared profile.** `launcher_profiles/hardware_predict_any_gpu.yml` sets `time: "4-00:00:00"` for every predict. Do not lower it globally: measured maxima are ~22 h for every family *except* CellDiff, whose predicts run 5.8-**95.6 h** against that 96 h cap. CellDiff predicts are effectively at their wall limit — any slower run TIMEOUTs and loses the lot.
 
 ### Joint vs single-set training batch semantics
 
