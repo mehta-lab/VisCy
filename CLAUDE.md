@@ -87,7 +87,11 @@ Quiet polls print `ok, tracking N: <jobid>(<samples>) ...`; a stalled job prints
 | `hardware_predict_celldiff.yml` | 7 days | CELL-Diff runs 5.8-95.6 h; 8 predicts TIMEOUTed at the old 4-day cap on 2026-07-19 |
 | `hardware_h200_single.yml` | 4 days | **shared with 40 fit leaves** — do not re-tune from predict data |
 
-A new slow family gets its **own profile**; raising a shared cap to cover it makes the cap meaningless. `test_predict_leaf_wall_limit_matches_its_family` pins all 421 predict leaves to this table, and `generate_hek_predict_configs.py` picks the profile from `_HARDWARE_PROFILE` so regeneration cannot revert it. Fits time out at 4 days too (4 FCMAE joint fits on 2026-07-10/12) — a separate, still-open issue.
+A new slow family gets its **own profile**; raising a shared cap to cover it makes the cap meaningless. `test_predict_leaf_wall_limit_matches_its_family` pins all 421 predict leaves to this table, and `generate_hek_predict_configs.py` picks the profile from `_HARDWARE_PROFILE` so regeneration cannot revert it.
+
+**Fit wall limits, same rule.** `hardware_4gpu.yml` is 4 days; `hardware_4gpu_long.yml` is 7 days and carries **only** the four joint ER/mito FCMAE leaves, which each TIMEOUTed twice at 4 days. Measured 1.58-1.82 epochs/h ⇒ 110-126 h for `max_epochs: 200`. Joint fits are the slow case because they pool iPSC + A549, roughly doubling steps per epoch. A 7-day 4-GPU H100/H200 request backfills materially worse, so `test_only_measured_slow_fits_get_the_long_wall` guards both directions — add a leaf only with a measured epochs/h rate.
+
+**Measure epochs/h from consecutive retained checkpoint mtimes**, not wall time ÷ steps. Each `epoch=N-step=M.ckpt` is an `(epoch, wall-clock)` pair, and two intervals inside one allocation cross-check each other (the ER-pretrained fit reproduced to three digits). Note `save_top_k` means the highest *retained* epoch is a best-by-monitor epoch, not progress — read `epoch` out of `last.ckpt` for that (`torch.load(..., mmap=True)`).
 
 **Two traps when killing one:**
 - **Lightning swallows SIGTERM.** `signal_connector.py` installs a handler that logs `Received SIGTERM` / `Bypassing SIGTERM` and sets a flag — it does not exit. `scancel` alone cannot stop a Lightning process outside its training loop; it dies on the KILL escalation (`ExitCode 0:9`), which took ~6 min here.
