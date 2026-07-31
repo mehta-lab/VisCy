@@ -399,12 +399,24 @@ def test_temporal_arms_do_not_share_a_checkpoint() -> None:
 # these stores is reconstructed from `Brightfield` by waveorder, so the arm measures
 # whether that reconstruction is load-bearing -- which only holds if every other
 # hyperparameter matches.
-_BRIGHTFIELD_ARMS = [(organelle, model) for organelle in ("nucleus", "er") for model in ("fnet3d_paper", "celldiff")]
+#
+# Two train sets, wired differently on purpose: the iPSC arms get Brightfield from
+# `dataset_ref.source_channel` (the aics-hipsc manifest owns the channel), while the
+# A549 arms set `source_channel` directly in their train-set fragment, because the
+# condition-pooled A549 train stores are not in the manifest registry and the
+# resolver hook is a partial-ref no-op there. Both paths are covered.
+_BRIGHTFIELD_TRAIN_SETS = [("ipsc_confocal", "ipsc_confocal_brightfield"), ("a549_mantis", "a549_mantis_brightfield")]
+_BRIGHTFIELD_ARMS = [
+    (organelle, model, phase_dir, bf_dir)
+    for organelle in ("nucleus", "er")
+    for model in ("fnet3d_paper", "celldiff")
+    for phase_dir, bf_dir in _BRIGHTFIELD_TRAIN_SETS
+]
 
 
-@pytest.mark.parametrize("organelle,model", _BRIGHTFIELD_ARMS)
+@pytest.mark.parametrize("organelle,model,phase_dir,bf_dir", _BRIGHTFIELD_ARMS)
 def test_brightfield_arm_differs_from_its_phase_baseline_only_in_the_input_channel(
-    organelle: str, model: str, monkeypatch
+    organelle: str, model: str, phase_dir: str, bf_dir: str, monkeypatch
 ) -> None:
     """The bf arm's composed data config equals its baseline under Brightfield->Phase3D.
 
@@ -420,19 +432,21 @@ def test_brightfield_arm_differs_from_its_phase_baseline_only_in_the_input_chann
     """
     monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
     bf = load_composed_config(
-        BENCHMARKS / organelle / model / "ipsc_confocal_brightfield" / "train.yml",
+        BENCHMARKS / organelle / model / bf_dir / "train.yml",
         resolver=_dynacell_ref_resolver,
     )
     phase = load_composed_config(
-        BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml",
+        BENCHMARKS / organelle / model / phase_dir / "train.yml",
         resolver=_dynacell_ref_resolver,
     )
 
     assert bf["data"]["init_args"]["source_channel"] == "Brightfield", (
-        f"{organelle}/{model}: bf leaf resolved source_channel="
+        f"{organelle}/{model}/{bf_dir}: resolved source_channel="
         f"{bf['data']['init_args']['source_channel']!r} -- the ablation is a no-op"
     )
     assert phase["data"]["init_args"]["source_channel"] == "Phase3D"
+    # Same store on both sides: only the channel read out of it changes.
+    assert bf["data"]["init_args"]["data_path"] == phase["data"]["init_args"]["data_path"]
 
     def _rekey(obj: object) -> object:
         """Substitute Brightfield -> Phase3D everywhere so the two become comparable."""
@@ -443,29 +457,42 @@ def test_brightfield_arm_differs_from_its_phase_baseline_only_in_the_input_chann
         return "Phase3D" if obj == "Brightfield" else obj
 
     assert _rekey(bf["data"]) == phase["data"], (
-        f"{organelle}/{model}: bf and phase data configs differ by more than the input channel"
+        f"{organelle}/{model}/{bf_dir}: bf and phase data configs differ by more than the input channel"
     )
     # Model and trainer halves must be untouched (same recipe, same schedule, same steps).
-    assert bf["model"] == phase["model"], f"{organelle}/{model}: model config drifted"
+    assert bf["model"] == phase["model"], f"{organelle}/{model}/{bf_dir}: model config drifted"
     for key in ("precision", "max_steps", "max_epochs", "devices", "strategy"):
-        assert bf["trainer"].get(key) == phase["trainer"].get(key), f"{organelle}/{model}: trainer.{key} drifted"
+        assert bf["trainer"].get(key) == phase["trainer"].get(key), (
+            f"{organelle}/{model}/{bf_dir}: trainer.{key} drifted"
+        )
+    # Resource overrides must carry over: the fnet3d arms need the baseline's 512G
+    # mmap_preload headroom, and losing it would OOM-kill the worker in validation.
+    assert bf["launcher"]["sbatch"].get("mem") == phase["launcher"]["sbatch"].get("mem")
+    assert bf["launcher"]["sbatch"]["time"] == phase["launcher"]["sbatch"]["time"]
 
 
-@pytest.mark.parametrize("organelle,model", _BRIGHTFIELD_ARMS)
-def test_brightfield_arm_writes_to_its_own_ipsc_bf_tree(organelle: str, model: str) -> None:
-    """Checkpoints land under ``ipsc__bf/``, never in the phase baseline's tree.
+# Brightfield train-set dir -> the canonical token its artifacts must live under.
+_BF_CKPT_TOKEN = {"ipsc_confocal_brightfield": "/ipsc__bf/", "a549_mantis_brightfield": "/a549__bf/"}
+
+
+@pytest.mark.parametrize("organelle,model,phase_dir,bf_dir", _BRIGHTFIELD_ARMS)
+def test_brightfield_arm_writes_to_its_own_canonical_tree(
+    organelle: str, model: str, phase_dir: str, bf_dir: str
+) -> None:
+    """Checkpoints land under the ``*__bf`` token, never in the phase baseline's tree.
 
     Sharing a ``dirpath`` with the baseline would have the two arms overwrite each
     other's checkpoints -- the failure mode would be a corrupted comparison, not an error.
     """
-    bf = load_composed_config(BENCHMARKS / organelle / model / "ipsc_confocal_brightfield" / "train.yml")
-    phase = load_composed_config(BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml")
+    bf = load_composed_config(BENCHMARKS / organelle / model / bf_dir / "train.yml")
+    phase = load_composed_config(BENCHMARKS / organelle / model / phase_dir / "train.yml")
     ckpt = next(
         c["init_args"]["dirpath"]
         for c in bf["trainer"]["callbacks"]
         if c["class_path"].endswith("ModelCheckpoint") and "dirpath" in c.get("init_args", {})
     )
-    assert "/ipsc__bf/" in ckpt, f"{organelle}/{model}: checkpoint dirpath is not under ipsc__bf/: {ckpt}"
+    token = _BF_CKPT_TOKEN[bf_dir]
+    assert token in ckpt, f"{organelle}/{model}/{bf_dir}: checkpoint dirpath is not under {token}: {ckpt}"
     assert bf["launcher"]["run_root"] != phase["launcher"]["run_root"]
     assert bf["trainer"]["logger"]["init_args"]["name"] != phase["trainer"]["logger"]["init_args"]["name"]
 

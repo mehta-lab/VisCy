@@ -47,11 +47,12 @@ _DATA_ROOT = "/hpc/projects/virtual_staining/training/dynacell"
 
 _SINGLE_ORGS = ("nucleus", "membrane", "er", "mito")
 _MODELS = ("fcmae_vscyto3d_scratch", "fnet3d_paper", "celldiff_r2", "pix2pix3d_unetvit")
-# ``ipsc__bf`` is the brightfield-input ablation (model input = raw Brightfield stack
-# instead of the Phase3D volume reconstructed from it). Listed here so it inherits the
-# uniqueness and inverse-round-trip guards below: its whole point is that it must never
-# collide with the plain ``ipsc`` phase arm it is compared against.
-_FORWARD_TRAINS = ("ipsc", "ipsc__bf", "a549", "joint")
+# ``ipsc__bf`` / ``a549__bf`` are the brightfield-input ablation (model input = raw
+# Brightfield stack instead of the Phase3D volume reconstructed from it). Listed here so
+# they inherit the uniqueness and inverse-round-trip guards below: their whole point is
+# that they must never collide with the plain ``ipsc``/``a549`` phase arms they are
+# compared against.
+_FORWARD_TRAINS = ("ipsc", "ipsc__bf", "a549", "a549__bf", "joint")
 _TEST_CONDS = (("ipsc", None), ("a549", "mock"), ("a549", "denv"), ("a549", "zikv"))
 
 
