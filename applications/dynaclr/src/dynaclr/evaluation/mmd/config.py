@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 from pydantic import BaseModel, model_validator
 
@@ -289,6 +291,14 @@ class EmbeddingConsistencyConfig(_MMDBaseConfig):
         Subtract each dataset's own mean embedding before computing MMD, so the
         matrix reports *residual* batch effects independent of a global offset.
         Default: True.
+    split_by : str or None
+        Per-dataset obs column (constant within a dataset, e.g. ``"microscope"``)
+        that partitions datasets into groups. When set, the QC emits, per group,
+        a within-group matrix, plus one cross-group matrix per pair of groups
+        (only the across-group dataset pairs). Blocks that are degenerate (a
+        within-group block with <2 datasets, or a cross block with an empty
+        side) are skipped with a log line. None (default) keeps the single
+        pooled matrix over all datasets.
 
     Notes
     -----
@@ -302,3 +312,16 @@ class EmbeddingConsistencyConfig(_MMDBaseConfig):
     ckpt_name: str
     datasets_root: str | None = None
     center_per_experiment: bool = True
+    split_by: str | None = None
+    metrics: list[Literal["pearson", "mmd", "frechet"]] = ["pearson", "mmd", "frechet"]
+    """Which per-marker matrices to compute/write. Default is all three; set to
+    e.g. ``["pearson"]`` to start with the cheap mean-only matrix and skip the
+    heavier MMD (permutation) and Fréchet (covariance) passes."""
+    pearson_hpi_bin_hours: float | None = None
+    """Time-pooling for the Pearson matrix. None (default): one grand mean over
+    all control cells per dataset. When set, take the mean embedding per
+    ``hours_post_perturbation`` bin of this width, then average the bin-means —
+    so each HPI bin contributes equally and uneven time sampling (different
+    intervals / frame counts across acquisitions) cannot masquerade as a batch
+    effect. Bins are anchored at 0 h and shared across datasets, so acquisitions
+    with different ``start_hpi`` still align on a common biological timeline."""
