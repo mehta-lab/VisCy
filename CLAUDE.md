@@ -55,6 +55,25 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 
 **Subagent prompts for job status:** ask for completeness vs config, not just liveness. A prompt like "check the liveness of wandb run X" returns `state: finished` for a SIGTERM'd run and reads as success. Phrase it as "is run X complete relative to its configured `max_epochs`, and what was the exit reason (clean finish, scancel, OOM, timeout, exception)?"
 
+### Hung-but-allocated jobs
+
+**A job can finish its work and never exit.** Job `35083019_0` (a `pix2pix3d` predict) wrote its last chunk at 2026-07-30 19:20, then held an A6000 + 32 CPUs + 256 GB for **17.5 h** doing nothing. `squeue` shows `RUNNING` with a climbing wall clock — indistinguishable from healthy compute — and the rich progress bar only reaches `.out` at exit, so the log looks normal too. Measured rate: 1 in 509 allocations over 26 days.
+
+**The discriminator is CPU time, and only its derivative.** Across those 509 allocations every healthy job spent CPU at >= 0.93x wall; the hung one sat at 0.561 with a *zero* incremental rate. Absolute ratio alone is useless (a 16-CPU fit runs at ~7.8x wall), so compare two samples: `sstat -j <id> -a -P --format=JobID,AveCPU` — `-P` is mandatory, the default width truncates to `10-15:41:+` and misparses. `applications/dynacell/tools/watch_stalled_jobs.py` does this on a 10-min poll and reports only; run it alongside any long campaign.
+
+**Two traps when killing one:**
+- **Lightning swallows SIGTERM.** `signal_connector.py` installs a handler that logs `Received SIGTERM` / `Bypassing SIGTERM` and sets a flag — it does not exit. `scancel` alone cannot stop a Lightning process outside its training loop; it dies on the KILL escalation (`ExitCode 0:9`), which took ~6 min here.
+- **Clear dependents' `Dependency=` BEFORE `scancel`**, or `afterok` chains land in `DependencyNeverSatisfied` permanently. `scontrol update JobId=<dep> Dependency=` to drop it, or `Dependency=afterok:<other>` to re-point the chain.
+
+**Forensics — capture this BEFORE cancelling, or the cause is unknowable:**
+1. `grep State /proc/<pid>/status` and `cat /proc/<pid>/task/*/wchan` (both readable without root, `ptrace_scope=0` here). `State: D` names an uninterruptible storage/driver call; `S` means a Python-level block.
+2. `py-spy dump --pid <pid>` (`uv tool install py-spy`) gives the full Python stack. If it errors `Failed to find python version from target process`, that is *itself* the answer: the process already reached interpreter finalization, so `trainer.predict()` returned and the writer's `plate.close()` completed.
+3. **Do not rely on SIGABRT + `PYTHONFAULTHANDLER=1`** — verified to produce no dump once the interpreter is finalizing.
+
+**Known unbounded wait in the predict teardown path:** zarr 3.2.1 `core/sync.py:89` registers `cleanup_resources` via `atexit`, which calls `_executor.shutdown(wait=True)` with no timeout — one stuck `zarr_pool` thread blocks interpreter exit forever at 0% CPU. (The same function caps its io-thread join at `timeout=0.2` "to avoid hanging"; the executor shutdown was left unbounded.) That is the proximate frame, but not the whole story here: a pure Python join still lets the SIGTERM handler run and log, and job `35083019_0` never logged it, so the terminal block was a C-level uninterruptible call underneath.
+
+**Predict wall limits are one shared profile.** `launcher_profiles/hardware_predict_any_gpu.yml` sets `time: "4-00:00:00"` for every predict. Do not lower it globally: measured maxima are ~22 h for every family *except* CellDiff, whose predicts run 5.8-**95.6 h** against that 96 h cap. CellDiff predicts are effectively at their wall limit — any slower run TIMEOUTs and loses the lot.
+
 ### Joint vs single-set training batch semantics
 
 `HCSDataModule` and `BatchedConcatDataModule` produce the same number of GPU samples per training step — but the YAML `batch_size` value that gets there is **different by a factor of `num_samples`**. Easy to misread either by skimming.
