@@ -26,7 +26,7 @@ experiments:
       - name: Phase3D
         marker: Phase3D
     perturbation_wells:
-      mock: [B/1, B/3]
+      uninfected: [B/1, B/3]
       DENV: [B/2, C/2]
     exclude_fovs: [C/1/000000]
     interval_minutes: 10.0
@@ -35,6 +35,7 @@ experiments:
     organelle: endoplasmic_reticulum
     pixel_size_xy_um: 0.1494
     pixel_size_z_um: 0.174
+    microscope: mantis_v1
 
   - name: 2026_04_14_A549_SEC61B_DENV
     data_path: ${datasets_root}/2026_04_14_A549_SEC61B_DENV/2026_04_14_A549_SEC61B_DENV.zarr
@@ -55,6 +56,7 @@ experiments:
     organelle: endoplasmic_reticulum
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   - name: 2026_04_28_A549_SEC61B_DENV
     data_path: ${datasets_root}/2026_04_28_A549_SEC61B_DENV/2026_04_28_A549_SEC61B_DENV.zarr
@@ -75,6 +77,7 @@ experiments:
     organelle: endoplasmic_reticulum
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   # --- ZIKV, SEC61B (ER) ---
   - name: 2026_03_24_A549_SEC61_ZIKV
@@ -96,6 +99,7 @@ experiments:
     organelle: endoplasmic_reticulum
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   # --- ZIKV, G3BP1 (stress granules) ---
   - name: 2026_04_08_A549_G3BP1_ZIKV
@@ -117,6 +121,7 @@ experiments:
     organelle: stress_granules
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   # --- DENV, G3BP1 (stress granules) ---
   # zarr stem is 2026_04_21_G3BP1_DENV (no A549), unlike the dir name.
@@ -139,6 +144,7 @@ experiments:
     organelle: stress_granules
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   # --- ZIKV, TOMM20 (mitochondria) ---
   - name: 2026_04_10_A549_TOMM20_ZIKV
@@ -160,6 +166,7 @@ experiments:
     organelle: mitochondria
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   # --- DENV, TOMM20 (mitochondria) ---
   - name: 2026_04_30_A549_TOMM20_DENV
@@ -181,6 +188,7 @@ experiments:
     organelle: mitochondria
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
 
   # --- ZIKV, multi-organelle box (GFP reporter varies per column) ---
   - name: 2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV
@@ -210,3 +218,28 @@ experiments:
     moi: 5.0
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # --- DENV + ZIKV on one plate, CAAX (membrane) + H2B (nuclear); NO viral sensor ---
+  # Distinct marker set: mCherry=CAAX, Cy5=H2B. B/2 uninfected, B/3 DENV, B/4 ZIKV.
+  - name: 2026_03_26_A549_CAAX_H2B_DENV_ZIKV
+    data_path: ${datasets_root}/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_03_26_A549_CAAX_H2B_DENV_ZIKV/tracking.zarr
+    channels:
+      - name: raw mCherry EX561 EM600-37
+        marker: CAAX
+      - name: raw Cy5 EX639 EM698-70
+        marker: H2B
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [B/2]
+      DENV: [B/3]
+      ZIKV: [B/4]
+    interval_minutes: 120.0
+    start_hpi: 5.0
+    moi: 5.0
+    organelle: membrane_nuclear
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.174
+    microscope: mantis_v2
