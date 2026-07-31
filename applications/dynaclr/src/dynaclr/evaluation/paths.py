@@ -184,5 +184,5 @@ def iter_embeddings(
         Sorted matching zarr paths (one per dataset x marker).
     """
     pattern = f"{marker}.zarr" if marker is not None else "*.zarr"
-    glob = f"*/{PHENOTYPING_DIR}/{PREDICTIONS_DIR}/{model_family}/{run}/{ckpt_name}/{pattern}"
+    glob = f"*/{PHENOTYPING_DIR}/{PREDICTIONS_DIR}/{model_family}/{run}/{ckpt_name}/{EMBEDDINGS_DIR}/{pattern}"
     return sorted(Path(datasets_root).glob(glob))

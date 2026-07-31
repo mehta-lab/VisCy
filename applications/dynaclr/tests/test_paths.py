@@ -43,12 +43,12 @@ def test_prediction_dir():
 
 def test_embedding_store():
     assert embedding_store("ds", MF, RUN, CKPT, "SEC61B", datasets_root="/base") == Path(
-        f"/base/ds/2-phenotyping/predictions/{MF}/{RUN}/{CKPT}/SEC61B.zarr"
+        f"/base/ds/2-phenotyping/predictions/{MF}/{RUN}/{CKPT}/embeddings/SEC61B.zarr"
     )
 
 
 def _make_tree(root: Path, dataset: str, markers: list[str]) -> None:
-    d = root / dataset / "2-phenotyping" / "predictions" / MF / RUN / CKPT
+    d = root / dataset / "2-phenotyping" / "predictions" / MF / RUN / CKPT / "embeddings"
     d.mkdir(parents=True, exist_ok=True)
     for m in markers:
         (d / f"{m}.zarr").mkdir()
@@ -60,7 +60,7 @@ def test_iter_embeddings_pools_across_datasets(tmp_path):
     _make_tree(tmp_path, "ds_b", ["SEC61B"])
     found = iter_embeddings(MF, RUN, CKPT, marker="SEC61B", datasets_root=tmp_path)
     assert [p.name for p in found] == ["SEC61B.zarr", "SEC61B.zarr"]
-    assert {p.parents[5].name for p in found} == {"ds_a", "ds_b"}
+    assert {p.parents[6].name for p in found} == {"ds_a", "ds_b"}
 
 
 def test_iter_embeddings_all_markers(tmp_path):
