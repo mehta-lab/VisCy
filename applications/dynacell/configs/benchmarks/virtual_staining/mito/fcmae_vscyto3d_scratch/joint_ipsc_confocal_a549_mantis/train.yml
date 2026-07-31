@@ -17,7 +17,7 @@
 base:
   - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu_long.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:

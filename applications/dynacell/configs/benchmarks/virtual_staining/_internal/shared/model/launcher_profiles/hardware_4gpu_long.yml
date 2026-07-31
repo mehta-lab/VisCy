@@ -1,0 +1,37 @@
+# Hardware profile: 4 GPU DDP on H100/H200, A100 excluded, 7-day wall.
+#
+# Identical to hardware_4gpu.yml except for `time`. For fits whose 200-epoch
+# budget does not fit in one 4-day allocation.
+#
+# Measured need (epochs/h from consecutive retained checkpoint mtimes within a
+# single steady allocation -- not wall-time divided by step count):
+#
+#   joint ER  fcmae_vscyto3d_pretrained  1.82 ep/h  -> 110 h to 200 ep  (4.6 d)
+#   joint ER  fcmae_vscyto3d_scratch     1.71 ep/h  -> 117 h            (4.9 d)
+#   joint mito fcmae_vscyto3d_scratch    1.65 ep/h  -> 121 h            (5.0 d)
+#   joint mito fcmae_vscyto3d_pretrained 1.58 ep/h  -> 126 h            (5.3 d)
+#
+# (The ER-pretrained rate reproduces across two independent intervals,
+# e117->e150 and e130->e149, to three digits.)
+#
+# All four of those fits TIMEOUTed **twice** at the 4-day cap and were never
+# resumed, leaving them at 150/200, 108/200, 81/200 and 70/200 epochs
+# respectively: jobs 31910331 + 34683420, 31910330 + 34694104,
+# 31910343 + 34694106, 31910345 + 34683424. They are the only 4-GPU fits that
+# have ever hit a wall limit -- every other leaf on hardware_4gpu.yml finishes
+# inside 4 days, which is why this is a separate profile rather than a raise of
+# the shared one. A 7-day 4-GPU H100/H200 allocation backfills far worse than a
+# 4-day one, so do not move leaves here without measuring first.
+#
+# 7 days is 1.33x the slowest measured requirement. Joint fits are the slow case
+# because they train on iPSC + A549 pooled, roughly doubling steps per epoch.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks_per_node: 4
+    cpus_per_task: 8
+    gpus: 4
+    mem: "512G"
+    constraint: "h100|h200"
+    time: "7-00:00:00"
