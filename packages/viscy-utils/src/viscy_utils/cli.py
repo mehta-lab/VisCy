@@ -100,8 +100,8 @@ def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> 
     For ``fit`` only, this appends two callbacks to the resolved config:
 
     1. an **unmonitored** ``ModelCheckpoint`` sharing the monitored callback's
-       ``dirpath``, which saves on an epoch cadence unconditionally and owns
-       ``save_last``; and
+       ``dirpath`` and **inheriting its ``every_n_epochs``**, which saves on that
+       cadence unconditionally and owns ``save_last``; and
     2. a :class:`~viscy_utils.callbacks.MonitorHealthCheck` on the same metric.
 
     ``save_last`` is turned off on the monitored callback so exactly one callback
@@ -151,11 +151,24 @@ def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> 
     # Hand `last.ckpt` to the unconditional callback so it tracks the newest epoch.
     monitored_args["save_last"] = False
 
+    # Inherit the leaf's write cadence instead of forcing every epoch. A leaf that
+    # sets `every_n_epochs` is making a deliberate write-amplification decision:
+    # the Phase 17 arms run ~1470 epochs, so `every_n_epochs: 10` is the difference
+    # between 147 and 1470 write cycles of a 424 MB checkpoint, and this callback
+    # writes *two* files (`latest-*` and `last.ckpt`) each time -- ~1.25 TB of NFS
+    # traffic per arm at cadence 1. Forcing 1 here silently overrode that choice.
+    #
+    # The guarantee is unaffected: an *unmonitored* callback writes on its cadence
+    # unconditionally, so the newest weights are always within `every_n_epochs`
+    # epochs of where the run stopped, however dead the monitor is. Defaults to 1
+    # when the leaf is silent, preserving the original behaviour.
+    every_n_epochs = monitored_args.get("every_n_epochs") or 1
+
     latest_args = {
         "monitor": None,
         "filename": _LATEST_CKPT_FILENAME,
         "auto_insert_metric_name": False,
-        "every_n_epochs": 1,
+        "every_n_epochs": every_n_epochs,
         "save_top_k": 1,
         "save_last": True,
     }

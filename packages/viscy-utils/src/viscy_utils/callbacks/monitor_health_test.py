@@ -201,3 +201,94 @@ def test_patience_below_two_rejected():
     """patience<2 cannot distinguish a frozen metric from a single sample."""
     with pytest.raises(ValueError, match="patience must be >= 2"):
         MonitorHealthCheck(patience=1)
+
+
+def test_injection_inherits_the_leaf_write_cadence():
+    """The latest-weights callback must not force ``every_n_epochs: 1``.
+
+    A leaf that sets ``every_n_epochs`` is making a deliberate write-amplification
+    decision. The Phase 17 arms run ~1470 epochs with a 424 MB checkpoint and set
+    cadence 10 for exactly that reason; forcing 1 here rewrote both ``latest-*``
+    and ``last.ckpt`` every epoch (~1.25 TB of NFS traffic per arm) and silently
+    overrode the leaf.
+    """
+    monitored = Namespace(
+        class_path="lightning.pytorch.callbacks.ModelCheckpoint",
+        init_args=Namespace(
+            monitor="loss/validate",
+            save_top_k=4,
+            every_n_epochs=10,
+            save_last=True,
+            dirpath="/models/run/checkpoints",
+        ),
+    )
+    config = Namespace(fit=Namespace(trainer=Namespace(callbacks=[monitored])))
+    _inject_checkpoint_guardrails(config, "fit")
+
+    latest = config["fit"]["trainer"]["callbacks"][1]
+    assert latest["init_args"]["every_n_epochs"] == 10
+    # The monitored callback's own cadence is still its own.
+    assert monitored["init_args"]["every_n_epochs"] == 10
+
+
+def test_injection_defaults_cadence_to_every_epoch():
+    """A leaf that sets no cadence keeps the original every-epoch behaviour."""
+    monitored = Namespace(
+        class_path="lightning.pytorch.callbacks.ModelCheckpoint",
+        init_args=Namespace(monitor="loss/validate", save_top_k=4, save_last=True, dirpath="/d"),
+    )
+    config = Namespace(fit=Namespace(trainer=Namespace(callbacks=[monitored])))
+    _inject_checkpoint_guardrails(config, "fit")
+
+    assert config["fit"]["trainer"]["callbacks"][1]["init_args"]["every_n_epochs"] == 1
+
+
+def test_inherited_cadence_still_saves_when_monitor_is_frozen(tmp_path):
+    """End-to-end: cadence 4 writes latest weights without writing every epoch.
+
+    Runs the real Trainer with a frozen monitor, which starves the monitored
+    callback after ``save_top_k`` fills. The unmonitored callback must still
+    produce weights from the run's final epochs -- the guardrail's whole purpose --
+    while writing 2 times over 8 epochs rather than 8.
+    """
+    train_dl, val_dl = _loaders()
+    ckpt_dir = tmp_path / "checkpoints"
+    monitored = Namespace(
+        class_path="lightning.pytorch.callbacks.ModelCheckpoint",
+        init_args=Namespace(
+            monitor="loss/validate",
+            filename="epoch={epoch}-step={step}",
+            auto_insert_metric_name=False,
+            save_top_k=2,
+            every_n_epochs=4,
+            save_last=True,
+            dirpath=str(ckpt_dir),
+        ),
+    )
+    config = Namespace(fit=Namespace(trainer=Namespace(callbacks=[monitored])))
+    _inject_checkpoint_guardrails(config, "fit")
+    specs = config["fit"]["trainer"]["callbacks"]
+
+    latest_cb = ModelCheckpoint(**{k: v for k, v in specs[1]["init_args"].items()})
+    monitored_cb = ModelCheckpoint(**{k: v for k, v in specs[0]["init_args"].items()})
+    trainer = Trainer(
+        max_epochs=8,
+        accelerator="cpu",
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+        callbacks=[monitored_cb, latest_cb],
+        default_root_dir=tmp_path,
+    )
+    trainer.fit(_ValLossModule([1.024275] * 8), train_dl, val_dl)
+
+    # Lightning fires every_n_epochs when (epoch + 1) % n == 0, so this writes at
+    # epochs 3 and 7 only -- 2 of 8 epochs -- and save_top_k=1 keeps just the last.
+    latest = sorted(p.name for p in ckpt_dir.glob("latest-*.ckpt"))
+    assert latest == ["latest-epoch=7-step=16.ckpt"], latest
+    assert (ckpt_dir / "last.ckpt").is_file()
+    # The point of the guardrail: weights exist from the END of the run (epoch 7 is
+    # the last of 8, zero-indexed), not just from where the frozen monitor stopped
+    # improving -- the monitored callback's top-k filled at epochs 3 and never moved.
+    assert torch.load(ckpt_dir / "last.ckpt", map_location="cpu", weights_only=False)["epoch"] == 7
