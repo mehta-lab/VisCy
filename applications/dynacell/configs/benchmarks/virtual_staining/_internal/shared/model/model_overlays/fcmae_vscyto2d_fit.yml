@@ -53,5 +53,16 @@ model:
     warmup_steps: 4000
     warmup_multiplier: 1e-3
 trainer:
-  precision: 16-mixed
+  # bf16, NOT fp16, and deliberately different from the 3D FCMAE overlay.
+  # fp16-mixed installs a GradScaler, which converts a NaN *gradient* into a
+  # silently skipped optimizer step: the forward and the logged loss stay finite
+  # while the scale halves, and once it reaches 0.0 every step is skipped for the
+  # rest of the run. That is exactly how the first 24 FCMAE-2D fits reached
+  # `epoch 199/200` with their weights still at initialization and `COMPLETED 0:0`.
+  # bf16 has no scaler and needs none (same ~8-bit exponent range as fp32), so a
+  # NaN gradient shows up as a non-finite loss instead of as silence.
+  # `OptimizerHealthCheck` (injected into every fit by viscy_utils.cli) catches
+  # both shapes; this makes the loud one the default. Depth=1 is the regime where
+  # the bf16 SSIM variance cancellation bites, so do NOT revert to 16-mixed.
+  precision: bf16-mixed
   max_epochs: 200
