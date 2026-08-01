@@ -11,10 +11,18 @@ have an instance interpretation:
 - **membrane** → ``segmentation.backend=cellpose_watershed``: GT-nuclei-seeded
   membrane EDT watershed → cytoplasm-only whole-cell instances.
 
-Buckets are keyed by ``(organelle, test_set)`` so the 2D slice fraction is uniform
-within a grouped run (iPSC mid-slice 0.5, A549 in-focus 0.3 — the GT decides the
-plane, applied identically to the prediction). Conditions fold every in-scope
-``(train_set, model[, plate])``.
+Buckets are keyed by ``(organelle, test_set)`` so the 2D plane rule is uniform
+within a grouped run — the GT decides the plane, applied identically to the
+prediction. Conditions fold every in-scope ``(train_set, model[, plate])``.
+
+⚠ The ``slice_fraction`` these leaves emit (iPSC 0.5, A549 0.3) is **inert** and
+kept only so the emitted leaves stay stable. ``eval.yaml`` defaults
+``segmentation.slice_selection: focus``, no leaf overrides it, and
+``pipeline.py`` reads ``slice_fraction`` only on the ``frac`` branch — so the
+plane is the focus plane (``focus_anchor: nucleus_area``, the max-nuclear-area
+cross-section), not a fractional depth. Do not "restore" the fraction by setting
+``slice_selection: frac``: focus anchoring is the canonical regime that produced
+the campaign's AP numbers.
 
 GT nuclei for the membrane watershed: on iPSC they live in the same ``cell.zarr``
 as the GT membrane; on A549 they live in the **separate** ``H2B_<cond>.ozx`` store
