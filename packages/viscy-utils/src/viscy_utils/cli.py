@@ -71,6 +71,7 @@ def _configure_wandb_logger(
 
 _MODEL_CHECKPOINT_CLASS_PATH = "lightning.pytorch.callbacks.ModelCheckpoint"
 _MONITOR_HEALTH_CLASS_PATH = "viscy_utils.callbacks.MonitorHealthCheck"
+_OPTIMIZER_HEALTH_CLASS_PATH = "viscy_utils.callbacks.OptimizerHealthCheck"
 _LATEST_CKPT_FILENAME = "latest-epoch={epoch}-step={step}"
 
 
@@ -180,6 +181,42 @@ def _inject_checkpoint_guardrails(config: Namespace, subcommand: str | None) -> 
     )
 
 
+def _inject_optimizer_health_guard(config: Namespace, subcommand: str | None) -> None:
+    """Attach the step-level optimizer guard to every ``fit`` run.
+
+    A NaN *gradient* is invisible to loss-based monitoring. Under ``16-mixed``,
+    ``GradScaler`` skips the step and halves its scale while the forward — and the
+    logged loss — stays finite; once the scale reaches ``0.0`` every step is
+    skipped for the rest of the run and the weights never move again. Under
+    ``bf16-mixed`` there is no scaler, so the NaN lands in the weights instead.
+    :class:`~viscy_utils.callbacks.OptimizerHealthCheck` covers both.
+
+    Injected here rather than in the shared trainer recipe for the same reason as
+    the checkpoint guardrails: leaves override ``trainer.callbacks`` wholesale to
+    set their own ``dirpath``, so a recipe-level default is silently dropped by
+    every real leaf. Injecting on the resolved config makes it unforgettable.
+
+    Unlike :func:`_inject_checkpoint_guardrails` this does not depend on the leaf
+    declaring a monitored ``ModelCheckpoint`` — a run with no checkpointing at all
+    can still stall — so it only requires a ``trainer.callbacks`` list to append to.
+    """
+    if subcommand != "fit":
+        return
+    root = config.get(subcommand) if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return
+    callbacks = trainer.get("callbacks")
+    if not isinstance(callbacks, list):
+        return
+    for callback in callbacks:
+        if _callback_field(callback, "class_path") == _OPTIMIZER_HEALTH_CLASS_PATH:
+            return
+    callbacks.append(Namespace(class_path=_OPTIMIZER_HEALTH_CLASS_PATH))
+
+
 class VisCyCLI(LightningCLI):
     """Extending lightning CLI arguments and defaults."""
 
@@ -239,6 +276,7 @@ class VisCyCLI(LightningCLI):
         """Apply shared config rewrites before Lightning object creation."""
         _configure_wandb_logger(self.config, self.subcommand)
         _inject_checkpoint_guardrails(self.config, self.subcommand)
+        _inject_optimizer_health_guard(self.config, self.subcommand)
 
 
 def _setup_environment() -> None:
