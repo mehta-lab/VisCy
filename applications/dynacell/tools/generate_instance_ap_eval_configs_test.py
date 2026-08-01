@@ -107,7 +107,7 @@ def test_a549_nuclei_store_resolves_h2b_per_condition() -> None:
 
 
 def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
-    """Membrane × a549 → cpdino backend, slice 0.3, per-condition dual-store nuclei_gt_path."""
+    """Membrane × a549 → cpdino backend, no slice_fraction, per-condition dual-store nuclei_gt_path."""
     conds = [
         _pz("membrane", "fnet3d_paper", "a549_trained", "a549", "mock"),
         _pz("membrane", "fcmae_vscyto3d_scratch", "joint", "a549", "zikv"),
@@ -117,7 +117,7 @@ def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
     assert leaf["compute_instance_ap"] is True
     assert leaf["compute_feature_metrics"] is False
     assert leaf["segmentation"]["backend"] == "cpdino"
-    assert leaf["segmentation"]["slice_fraction"] == 0.3
+    assert "slice_fraction" not in leaf["segmentation"]
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     for block in leaf["conditions"]:
         assert "dual_nucl_memb" in block["io"]["nuclei_gt_path"]
@@ -127,7 +127,7 @@ def test_membrane_a549_leaf_wires_cross_store_nuclei() -> None:
 def test_membrane_ipsc_leaf_has_no_nuclei_gt_path() -> None:
     """Membrane × ipsc reads nuclei from the same cell.zarr → no nuclei_gt_path."""
     leaf = build_leaf("membrane", "ipsc", [_pz("membrane", "fnet3d_paper", "ipsc_trained", "ipsc")])
-    assert leaf["segmentation"]["slice_fraction"] == 0.5
+    assert "slice_fraction" not in leaf["segmentation"]
     assert leaf["segmentation"]["nuclei_channel_name"] == "Nuclei"
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
@@ -136,7 +136,7 @@ def test_nucleus_leaf_is_cpdino_without_nuclei_channel() -> None:
     """Nucleus → backend cpdino, no nuclei_channel_name, no nuclei_gt_path."""
     leaf = build_leaf("nucleus", "ipsc", [_pz("nucleus", "fnet3d_paper", "ipsc_trained", "ipsc")])
     assert leaf["segmentation"]["backend"] == "cpdino"
-    assert leaf["segmentation"]["slice_fraction"] == 0.5
+    assert "slice_fraction" not in leaf["segmentation"]
     assert "nuclei_channel_name" not in leaf["segmentation"]
     assert "nuclei_gt_path" not in leaf["conditions"][0]["io"]
 
