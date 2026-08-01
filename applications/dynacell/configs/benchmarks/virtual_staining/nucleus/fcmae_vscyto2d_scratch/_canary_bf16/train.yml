@@ -1,0 +1,82 @@
+# TEMPORARY canary leaf — the gate for reviving the 24 FCMAE-2D fits.
+#
+# Identical composition to ../ipsc_confocal/train.yml (same overlays, same real
+# focus store, same augmentations) with only four differences, all of them about
+# making the run short and keeping it away from production paths:
+#   - run_root / logger save_dir / ModelCheckpoint dirpath -> a SCRATCH tree, so
+#     the resulting checkpoints survive as evidence either way;
+#   - limit_train_batches/limit_val_batches + max_epochs 3, to get three real
+#     epochs (and therefore three checkpoints) in minutes;
+#   - warmup_steps 4000 -> 10, so the LR is actually meaningful within 60 steps
+#     and "did the weights move" is a real question rather than a rounding one;
+#   - sbatch time 20 days -> 1 hour.
+#
+# What it must prove before 24 GPU-days are committed (loss curves are NOT
+# sufficient -- they looked healthy through the entire original failure):
+#   1. the state_dict CHANGES between two checkpoints;
+#   2. loss/validate is finite and varies;
+#   3. no `MixedPrecision` scaler state in the checkpoint (bf16 has none);
+#   4. OptimizerHealthCheck state appears under the checkpoint's `callbacks`,
+#      proving viscy_utils.cli injected it into a real dynacell fit.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal
+  model_name: fcmae_vscyto2d_scratch
+  experiment_id: canary__bf16__nucleus__ipsc_confocal__fcmae_vscyto2d_scratch
+  dataset_ref: null
+
+model:
+  init_args:
+    warmup_steps: 10
+
+data:
+  init_args:
+    source_channel: Phase3D
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [1, 600, 600]
+          num_samples: 4
+
+trainer:
+  max_epochs: 3
+  limit_train_batches: 20
+  limit_val_batches: 5
+  logger:
+    init_args:
+      name: CANARY_BF16_FCMAE_VSCyto2D_Scratch_iPSC_Nucleus
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/_smoke_fcmae2d_bf16/nucleus_ipsc_scratch
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/_smoke_fcmae2d_bf16/nucleus_ipsc_scratch/checkpoints
+
+launcher:
+  job_name: CANARY_BF16_FCMAE2D
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/_smoke_fcmae2d_bf16/nucleus_ipsc_scratch
+  sbatch:
+    mem: "128G"
+    time: "1:00:00"

@@ -74,3 +74,10 @@ trainer:
 launcher:
   job_name: FCMAE_VSCyto2D_Scratch_Membrane
   run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fcmae_vscyto2d_scratch
+  # 5-plane focus stores put the dense mmap buffer at ~5-11 GiB, so the 256G in
+  # hardware_gpu_any_long.yml is inherited 3D scale and just queues slower. Set
+  # here, not in the model overlay: the hardware profile composes AFTER the
+  # overlay and would override it. (Applied live via scontrol 2026-07-23; a
+  # resubmit silently re-requested 256G until this was baked.)
+  sbatch:
+    mem: "128G"
