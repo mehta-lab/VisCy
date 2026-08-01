@@ -562,6 +562,36 @@ def test_nucleus_area_anchor_identity_omits_phase_params() -> None:
     assert ident["focus_anchor"] != ident_phase["focus_anchor"]
 
 
+def test_slice_fraction_only_keys_the_identity_when_selection_is_frac() -> None:
+    """slice_fraction belongs to the identity only on the branch that reads it.
+
+    ``pipeline.py`` passes ``slice_fraction`` to ``slice_index`` solely when
+    ``slice_selection == 'frac'``; under ``focus`` the plane comes from the focus
+    estimate and under ``sharpest`` from the image, so in those modes the value cannot
+    change the masks. Recording it unconditionally made the instance-AP leaves'
+    vestigial ``slice_fraction: 0.5/0.3`` key separate caches for byte-identical
+    artifacts — and made removing that dead key look like a cache invalidation.
+    """
+
+    def _ident(selection: str, fraction: float) -> dict:
+        cfg = _make_config(**{"segmentation": {"slice_selection": selection, "slice_fraction": fraction}})
+        ctx = init_cache_context(cfg, side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1")
+        return _instance_identity(ctx)
+
+    # focus: the fraction is inert, so it must not appear or perturb the identity.
+    focus_a, focus_b = _ident("focus", 0.5), _ident("focus", 0.30)
+    assert "slice_fraction" not in focus_a
+    assert focus_a == focus_b
+
+    # sharpest: same reasoning.
+    assert "slice_fraction" not in _ident("sharpest", 0.5)
+
+    # frac: the fraction genuinely selects the plane, so it must key the identity.
+    frac_a, frac_b = _ident("frac", 0.5), _ident("frac", 0.30)
+    assert frac_a["slice_fraction"] == 0.5
+    assert frac_a != frac_b
+
+
 def test_focus_off_leaves_tag_and_identity_untagged() -> None:
     """With focus disabled (the default), no focus tag or focus keys appear anywhere."""
     ctx = init_cache_context(

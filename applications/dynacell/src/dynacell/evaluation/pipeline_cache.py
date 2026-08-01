@@ -788,9 +788,18 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
         **seg_params,
         "dimension": ctx.dimension,
         "slice_selection": ctx.slice_selection,
-        "slice_fraction": ctx.slice_fraction,
         **ctx.source_tag,
     }
+    # Only ``slice_selection='frac'`` reads slice_fraction (pipeline.py passes it to
+    # slice_index solely on that branch; 'focus' resolves the plane from the focus
+    # estimate and 'sharpest' from the image). Recording it unconditionally made every
+    # focus-mode identity depend on a value that cannot change the masks — so the
+    # instance-AP leaves' vestigial ``slice_fraction: 0.5/0.3`` silently keyed separate
+    # caches for identical artifacts, and dropping that dead key would have "invalidated"
+    # caches that were never actually stale. Same convention as the focus block below:
+    # record a param only where it is active, leaving the other modes' identities stable.
+    if ctx.slice_selection == "frac":
+        identity["slice_fraction"] = ctx.slice_fraction
     # slice_selection='focus' picks the 2D plane from this channel's focus estimate,
     # so it must be part of the identity (only when active, to leave frac/sharpest
     # identities byte-stable). Analog of the backend fix in #445. The plane also
