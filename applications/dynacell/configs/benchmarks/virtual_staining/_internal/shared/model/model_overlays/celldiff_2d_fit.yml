@@ -1,0 +1,38 @@
+# CellDiff-2D fit overlay — model + trainer only — for the in-focus 2D
+# benchmark track. HCS data hparams live in
+# data_overlays/celldiff_2d_fit.yml; single-store train leaves compose
+# both, joint (BatchedConcatDataModule) leaves compose only this one and
+# author data: themselves.
+#
+# Mirrors model_overlays/celldiff_fit.yml but binds the celldiff_fm_2d
+# recipe (input_spatial_size [1,512,512], patch_size [1,4,4]). CellDiff was
+# already single-GPU, so topology is unchanged. lr / schedule / transport /
+# num_log_steps all match the 3D CellDiff baseline so the 2D-vs-3D
+# comparison isolates geometry.
+#
+# warmup_steps: 8500 is inherited from the 3D overlay deliberately —
+# steps/epoch differ at z_window_size=1, so this is a fraction-of-run knob
+# that was tuned for the 3D leaf, not a "~1 epoch" target. Same open
+# question flagged in model_overlays/fcmae_vscyto2d_fit.yml; left aligned
+# with 3D rather than silently re-tuned.
+base:
+  - ../../../../../../recipes/models/celldiff_fm_2d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+seed_everything: 0
+model:
+  init_args:
+    net_config:
+      input_spatial_size: [1, 512, 512]
+    lr: 0.0003
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+    num_log_steps: 10
+trainer:
+  # bf16-mixed, matching the 3D CellDiff overlay. No GradScaler, so a NaN
+  # gradient surfaces as a non-finite loss instead of a silently skipped
+  # step — the failure mode that froze the first 24 FCMAE-2D fits at
+  # initialization. Do NOT switch to 16-mixed.
+  precision: bf16-mixed
+  max_epochs: 20

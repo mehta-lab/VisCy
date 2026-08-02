@@ -185,6 +185,7 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto2d_scratch": "unext2_2d",
     "fcmae_vscyto2d_pretrained": "vscyto2d",
     "fnet2d": "fnet2d",
+    "celldiff_2d": "celldiff_2d",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
