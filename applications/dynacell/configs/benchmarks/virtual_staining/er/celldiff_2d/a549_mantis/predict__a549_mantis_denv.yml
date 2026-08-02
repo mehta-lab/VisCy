@@ -1,0 +1,50 @@
+# CellDiff-2D predict: er trained on a549_mantis, tested on a549-mantis-sec61b-denv.
+# In-focus 2D track. The Z=1 checkpoint predicts over the FULL-Z 3D test
+# store with z_window_size=1 (celldiff_2d_predict overlay), emitting one
+# window per z-plane -> a full-Z prediction store the existing focus-aware
+# eval consumes unchanged.
+#
+# Source normalization is MinMaxSampled(timepoint_statistics), reproducing
+# the CellDiff-2D fit exactly — CellDiff trains on p1/p99 -> [-1,1], and a
+# mean/std source here would silently degrade every prediction.
+#
+# predict_overlap Z is 0 (see the overlay): the Z patch is 1, and
+# window_starts requires 0 <= overlap < patch.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_denv.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_celldiff.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: a549_mantis
+  predict_set: a549_mantis_sec61b_denv
+  model_name: celldiff_2d
+  experiment_id: er__a549_mantis__celldiff_2d__a549_mantis_sec61b_denv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/er/celldiff_2d/checkpoints/epoch=19-step=9340.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__denv/prediction.zarr
+
+launcher:
+  job_name: CELLDiff2D_PRED_A549_SEC61B_ON_A549_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__denv
