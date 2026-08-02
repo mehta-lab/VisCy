@@ -1,5 +1,5 @@
-# FCMAE-2D Scratch (UNeXt2-2D) predict: nucleus trained on a549_mantis,
-# tested on a549-mantis-h2b-mock. In-focus 2D track. Runs the 2D model over the
+# FCMAE-2D Pretrained (VSCyto2D) predict: nucleus trained on a549_mantis,
+# tested on a549-mantis-h2b-zikv. In-focus 2D track. Runs the 2D model over the
 # full-Z 3D test store (z_window_size=1 -> one window per z-plane;
 # the writer keys each output to its z-index) so the existing
 # focus-aware eval consumes the result unchanged.
@@ -13,7 +13,7 @@
 # 16-mixed and its checkpoints are NOT usable). Submit with
 # `--ckpt best` to re-resolve against the live best at submit time.
 base:
-  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_mock.yml
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_zikv.yml
   - ../../../_internal/shared/model/targets/nucleus.yml
   - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
@@ -24,17 +24,17 @@ benchmark:
   task: virtual_staining
   organelle: nucleus
   trained_on: a549_mantis
-  predict_set: a549_mantis_h2b_mock
-  model_name: fcmae_vscyto2d_scratch
-  experiment_id: nucleus__a549_mantis__fcmae_vscyto2d_scratch__a549_mantis_h2b_mock
+  predict_set: a549_mantis_h2b_zikv
+  model_name: fcmae_vscyto2d_pretrained
+  experiment_id: nucleus__a549_mantis__fcmae_vscyto2d_pretrained__a549_mantis_h2b_zikv
   # A549 keys nucleus by gene (`h2b`); override the iPSC-side
-  # target_id so the resolver finds it on a549_mantis_h2b_mock.
+  # target_id so the resolver finds it on a549_mantis_h2b_zikv.
   dataset_ref:
     target: h2b
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fcmae_vscyto2d_scratch/checkpoints/epoch=157-step=47400-loss=1.220.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fcmae_vscyto2d_pretrained/checkpoints/epoch=127-step=38400-loss=1.203.ckpt
 
 data:
   init_args:
@@ -51,8 +51,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/a549/a549__mock/prediction.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/a549/a549__zikv/prediction.zarr
 
 launcher:
-  job_name: FCMAE2D_Scratch_PRED_A549TR_NUCL_ON_A549_MOCK
-  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/a549/a549__mock
+  job_name: FCMAE2D_Pretrained_PRED_A549TR_NUCL_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/a549/a549__zikv
