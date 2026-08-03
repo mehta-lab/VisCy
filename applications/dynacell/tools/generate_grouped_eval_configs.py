@@ -131,10 +131,19 @@ _DEFAULT_TEST_SETS: frozenset[str] = frozenset({"ipsc", "a549"})
 # (carrying deconv provenance: a549__deconv, joint__legacy_deconvgt) drives the
 # on-disk save_dir/pred_cache paths; the bucket label groups leaves and builds
 # condition_name.
+# The ``__bf`` tokens get their OWN buckets, unlike ``a549__deconv`` above. That
+# entry is a misleading precedent: deconv provenance marks how the *target* was
+# produced from the same ``Phase3D`` input, so folding it into ``a549_trained``
+# groups like with like. ``__bf`` is a different *input channel* (raw Brightfield
+# instead of the waveorder Phase3D reconstruction it is derived from), so folding
+# it in would collide a brightfield and a phase prediction on the same
+# ``canonical_identity`` and make one silently shadow the other.
 _CANONICAL_TRAIN_SET_TO_BUCKET: dict[str, str] = {
     "ipsc": "ipsc_trained",
     "a549": "a549_trained",
     "a549__deconv": "a549_trained",
+    "ipsc__bf": "ipsc_bf_trained",
+    "a549__bf": "a549_bf_trained",
     "joint": "joint",
     "joint__legacy_deconvgt": "joint",
 }

@@ -29,6 +29,7 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 from generate_grouped_eval_configs import (  # noqa: E402
+    _CANONICAL_TRAIN_SET_TO_BUCKET,
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
     ParsedZarr,
@@ -179,10 +180,19 @@ def test_parse_zarr_name_unknown_organelle_raises() -> None:
 
 
 def test_parse_zarr_name_out_of_scope_train_set_raises() -> None:
-    """A paths-valid but out-of-scope train_set (e.g. ``a549__bf``) raises ValueError, not KeyError."""
+    """A paths-valid but out-of-scope train_set raises ValueError, not KeyError.
+
+    Uses ``a549__bf__deconv``, which ``paths.py`` calls a "grammar-ready follow-up"
+    with no fits behind it yet. This test previously used ``a549__bf``; that token
+    was registered as its own bucket once the 8 brightfield fits completed, so it no
+    longer exercises the out-of-scope path.
+    """
     fake_root = Path("/fake/root")
     with pytest.raises(ValueError, match="grouped-campaign bucket"):
-        parse_zarr_name(fake_root / "er/fnet3d_paper/a549__bf/a549__mock/prediction.zarr", dynacell_root=fake_root)
+        parse_zarr_name(
+            fake_root / "er/fnet3d_paper/a549__bf__deconv/a549__mock/prediction.zarr",
+            dynacell_root=fake_root,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -355,16 +365,42 @@ def test_leaf_test_set_prefix_read() -> None:
     reason=f"dynacell training root absent: {_DYNACELL_ROOT}",
 )
 def test_walk_predictions_yields_known_buckets() -> None:
-    """Smoke check that all 4 organelles × 3 train_sets buckets are populated."""
+    """The 4x3 core grid is complete, and nothing outside the bucket table appears.
+
+    Asserted as "core is present" plus "no bucket outside the registered labels"
+    rather than as equality against a hardcoded 12. The brightfield-input ablation
+    adds ``{ipsc,a549}_bf_trained`` for nucleus and ER only, and its predictions land
+    incrementally, so an equality check would fail for as long as the arms are
+    partially predicted -- without that ever indicating a real problem.
+    """
     pool = walk_predictions(_DYNACELL_ROOT)
     assert len(pool) > 100
     buckets = {(p.organelle, p.train_set) for p in pool}
-    expected = {
+    core = {
         (org, ts)
         for org in ("er", "mitochondria", "nucleus", "membrane")
         for ts in ("ipsc_trained", "joint", "a549_trained")
     }
-    assert buckets == expected
+    assert core <= buckets, f"core grid incomplete: missing {sorted(core - buckets)}"
+    unregistered = {ts for _, ts in buckets} - set(_CANONICAL_TRAIN_SET_TO_BUCKET.values())
+    assert not unregistered, f"bucket labels not in the table: {sorted(unregistered)}"
+
+
+def test_brightfield_tokens_get_their_own_buckets() -> None:
+    """``__bf`` must not fold into the phase buckets -- it is a different input.
+
+    ``a549__deconv`` folding into ``a549_trained`` is a misleading precedent: it
+    marks target provenance on the same ``Phase3D`` input. ``__bf`` swaps the input
+    channel, so sharing a bucket would collide a brightfield and a phase prediction
+    on one ``canonical_identity`` and let one silently shadow the other.
+    """
+    table = _CANONICAL_TRAIN_SET_TO_BUCKET
+    assert table["ipsc__bf"] == "ipsc_bf_trained"
+    assert table["a549__bf"] == "a549_bf_trained"
+    assert table["ipsc__bf"] != table["ipsc"]
+    assert table["a549__bf"] != table["a549"]
+    # And the phase buckets stay exactly as they were.
+    assert table["a549__deconv"] == table["a549"] == "a549_trained"
 
 
 @pytest.mark.slow
