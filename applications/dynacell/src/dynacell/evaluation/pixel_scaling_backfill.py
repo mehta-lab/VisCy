@@ -212,6 +212,12 @@ def _conditions_of(config: DictConfig) -> list[DictConfig]:
 
     conditions = OmegaConf.select(config, "conditions", default=None)
     if not conditions:
+        # A single-condition leaf still needs its manifest splice: ``io.*`` and
+        # ``pixel_metrics.spacing`` come from ``benchmark.dataset_ref``, not from the
+        # leaf. Applying it here rather than in the caller keeps the helper
+        # self-contained -- a caller that only invoked _conditions_of would
+        # otherwise hit MissingMandatoryValue on spacing.
+        apply_dataset_ref(config)
         return [config]
     merged = []
     for idx, cond in enumerate(conditions):
@@ -239,8 +245,6 @@ def backfill_pixel_scalings(config: DictConfig) -> None:
         with ``+`` because the eval schema has no ``backfill`` block -- this is a
         backfill-only knob and does not belong in the eval contract.
     """
-    if OmegaConf.select(config, "conditions", default=None) is None:
-        apply_dataset_ref(config)
     force = bool(OmegaConf.select(config, "backfill.force", default=False))
 
     reports: list[ConditionReport] = []
