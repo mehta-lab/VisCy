@@ -27,6 +27,14 @@ classified ``scale_sensitive`` (pre-switch cache), ``scale_invariant``
 (post-switch cache) or ``mismatch`` -- the last meaning the cached numbers
 reproduce neither, i.e. the arrays on disk are no longer the ones that were
 scored (a stale cache against a re-predicted store).
+
+``PCC`` is the control and the write gate: it is affine-invariant, so a scaling
+relabel cannot move it. When the cached PCC fails to reproduce, the cache was
+produced from arrays other than the ones on disk now, and the condition is
+reported ``stale_cache`` with **nothing written** -- adding recomputed pixel
+columns there would leave them consistent with the current store while
+``Spectral_PCC`` / ``MicroMS3IM`` and the mask/feature CSVs stayed consistent with
+the old one. That leaf needs a real re-eval, not a column add.
 """
 
 from __future__ import annotations
@@ -130,8 +138,9 @@ def backfill_condition(config: DictConfig, *, force: bool = False, use_gpu: bool
     Returns
     -------
     ConditionReport
-        ``status`` is ``written``, ``skipped`` (already backfilled) or ``absent``
-        (no pixel cache to add columns to).
+        ``status`` is ``written``, ``skipped`` (already backfilled), ``absent``
+        (no pixel cache to add columns to), or ``stale_cache`` (the cached PCC does
+        not reproduce, so nothing was written -- see the fail-closed note below).
     """
     name = str(OmegaConf.select(config, "name", default=Path(config.save.save_dir).name))
     save_dir = Path(config.save.save_dir)
@@ -197,6 +206,23 @@ def backfill_condition(config: DictConfig, *, force: bool = False, use_gpu: bool
         if ok.any() and np.allclose(cached_pcc[ok], fresh_pcc[ok], rtol=MATCH_RTOL, atol=MATCH_ATOL)
         else "MOVED"
     )
+    if provenance["PCC"] == "MOVED":
+        # Fail CLOSED. PCC is affine-invariant, so it cannot move under a scaling
+        # relabel: the cache was produced from arrays other than the ones on disk
+        # now. Writing the recomputed pixel columns would leave them consistent with
+        # the current store while ``Spectral_PCC`` / ``MicroMS3IM`` / the mask and
+        # feature CSVs stay consistent with the old one -- a mixed-provenance row,
+        # which is the exact failure this module exists to prevent. Such a condition
+        # needs a real re-eval (force_recompute.final_metrics=true), not a column add.
+        worst = float(np.nanmax(np.abs(cached_pcc[ok] - fresh_pcc[ok]))) if ok.any() else float("nan")
+        return ConditionReport(
+            name,
+            save_dir,
+            "stale_cache",
+            n_rows=len(rows),
+            provenance=provenance,
+            detail=f"cached PCC differs by up to {worst:.3g}; NOT written -- re-evaluate this leaf",
+        )
 
     for row in rows:
         row.update({col: float(fresh[(str(row["FOV"]), int(row["Timepoint"]))][col]) for col in BACKFILL_COLUMNS})
@@ -262,11 +288,12 @@ def backfill_pixel_scalings(config: DictConfig) -> None:
             counts[f"{column}:{verdict}"] += 1
     print("[backfill] summary " + " ".join(f"{k}={v}" for k, v in sorted(counts.items())), flush=True)
 
-    moved = [r for r in reports if r.provenance.get("PCC") == "MOVED"]
-    if moved:
+    stale = [r for r in reports if r.status == "stale_cache"]
+    if stale:
         raise SystemExit(
-            "PCC moved for "
-            + ", ".join(str(r.save_dir) for r in moved)
-            + " -- PCC is affine-invariant, so the switch cannot have changed it. "
-            "The prediction store no longer matches the cached rows; re-evaluate those leaves."
+            "cached PCC does not reproduce for "
+            + ", ".join(str(r.save_dir) for r in stale)
+            + " -- PCC is affine-invariant, so a scaling relabel cannot have moved it. Those caches "
+            "were produced from other arrays than the stores hold now; nothing was written for them. "
+            "Re-evaluate those leaves with force_recompute.final_metrics=true instead."
         )
