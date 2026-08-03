@@ -1548,13 +1548,28 @@ def test_validate_instance_ap_config_accepts() -> None:
     )
 
 
+#: A pixel row that satisfies the dual-scaling gate. Both families must be present
+#: for the cache to be reusable — see
+#: :func:`test_final_metrics_cache_gate_requires_both_pixel_scalings`.
+_DUAL_SCALING_PIXEL_ROW = {
+    "FOV": "A/1/0",
+    "Timepoint": 0,
+    "PSNR": 20.3,
+    "SSIM": 0.36,
+    "NRMSE": 0.096,
+    "SI_PSNR": 21.5,
+    "SI_SSIM": 0.22,
+    "SI_NRMSE": 0.084,
+}
+
+
 def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
     """A cached AP-less mask npy must not satisfy a compute_instance_ap run."""
     from dynacell.evaluation.pipeline import _final_metrics_cache_valid
 
     save_dir = tmp_path / "out"
     save_dir.mkdir()
-    np.save(save_dir / "pixel_metrics.npy", np.array([{"FOV": "A/1/0", "Timepoint": 0}], dtype=object))
+    np.save(save_dir / "pixel_metrics.npy", np.array([dict(_DUAL_SCALING_PIXEL_ROW)], dtype=object))
     cfg = _make_config(
         **{
             "compute_instance_ap": True,
@@ -1576,3 +1591,44 @@ def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
         np.array([{"FOV": "A/1/0", "DICE": 0.8, "mAP": 0.5, "instance_dice": 0.7}], dtype=object),
     )
     assert _final_metrics_cache_valid(cfg) is True  # AP + instance_dice present -> reuse
+
+
+def test_final_metrics_cache_gate_requires_both_pixel_scalings(tmp_path: Path) -> None:
+    """A pixel cache without the SI_* columns must be recomputed, not reused.
+
+    This gate is about mislabeling, not incompleteness. Between the 2026-07-29
+    scale-invariant switch and the dual-reporting change, ``PSNR``/``SSIM``/
+    ``NRMSE`` held scale-INVARIANT values under the names now reserved for the
+    scale-sensitive ones, and nothing on disk tells those rows apart from a
+    genuinely pre-switch cache. Reusing either would publish one scaling under the
+    other's name, so the absence of ``SI_*`` has to force a recompute.
+    """
+    from dynacell.evaluation.pipeline import _final_metrics_cache_valid
+
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+    cfg = _make_config(
+        **{
+            "compute_instance_ap": False,
+            "compute_feature_metrics": False,
+            "save": {
+                "save_dir": str(save_dir),
+                "pixel_metrics_filename": "pixel_metrics.npy",
+                "mask_metrics_filename": "mask_metrics.npy",
+                "feature_metrics_filename": "feature_metrics.npy",
+            },
+        }
+    )
+    np.save(save_dir / "mask_metrics.npy", np.array([{"FOV": "A/1/0", "Dice": 0.8}], dtype=object))
+
+    single_scaling = {k: v for k, v in _DUAL_SCALING_PIXEL_ROW.items() if not k.startswith("SI_")}
+    np.save(save_dir / "pixel_metrics.npy", np.array([single_scaling], dtype=object))
+    assert _final_metrics_cache_valid(cfg) is False  # one scaling of unknown identity -> recompute
+
+    # A partial backfill is no better than none: the row must carry every SI_ column.
+    partial = {**single_scaling, "SI_PSNR": 21.5}
+    np.save(save_dir / "pixel_metrics.npy", np.array([partial], dtype=object))
+    assert _final_metrics_cache_valid(cfg) is False
+
+    np.save(save_dir / "pixel_metrics.npy", np.array([dict(_DUAL_SCALING_PIXEL_ROW)], dtype=object))
+    assert _final_metrics_cache_valid(cfg) is True

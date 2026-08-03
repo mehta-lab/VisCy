@@ -1730,6 +1730,12 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
             print(f"Saved {plot_dir} plots to {save_dir / plot_dir}")
 
 
+#: Pixel columns that only a dual-scaling run writes. Their absence marks a pixel
+#: cache whose bare ``PSNR``/``SSIM``/``NRMSE`` cannot be trusted to be the
+#: scale-sensitive form — see :func:`_final_metrics_cache_valid`.
+_SCALED_PIXEL_COLUMNS = frozenset({"SI_PSNR", "SI_SSIM", "SI_NRMSE"})
+
+
 def _final_metrics_cache_valid(config: DictConfig) -> bool:
     """Return True when the saved CSV/NPY caches can be reused.
 
@@ -1754,6 +1760,17 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     if mask_ok and bool(getattr(config, "compute_instance_ap", False)):
         rows = np.load(mask_path, allow_pickle=True).tolist()
         if not rows or "mAP" not in rows[0] or "instance_dice" not in rows[0]:
+            return False
+    # A pixel cache without the SI_* columns is not merely incomplete, it is
+    # MISLABELED: between the scale-invariant switch (2026-07-29) and the
+    # dual-reporting change, ``PSNR``/``SSIM``/``NRMSE`` held scale-INVARIANT
+    # values under the names now reserved for the scale-sensitive ones, and
+    # nothing on disk distinguishes those rows from a pre-switch (genuinely
+    # scale-sensitive) cache. Reusing either would publish one scaling under the
+    # other's name, so require the SI_* columns and recompute both otherwise.
+    if pixel_ok:
+        pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
+        if not pixel_rows or not _SCALED_PIXEL_COLUMNS.issubset(pixel_rows[0]):
             return False
     # Same guard for per-cell similarity, keyed to the exact requested columns:
     # a prior run with a different metrics/reduce set (e.g. PCC-only) must not
