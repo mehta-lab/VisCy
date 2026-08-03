@@ -10,7 +10,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PIXEL_METRICS = ["PCC", "SSIM", "NRMSE", "PSNR", "Spectral_PCC", "MicroMS3IM"]
+# SSIM / NRMSE / PSNR are each reported in both scalings, adjacent so the pair
+# reads as one comparison: the bare column is scale-sensitive (per-input min-max)
+# and ``SI_*`` is scale-invariant (least-squares affine fit to the target). Listing
+# only one would show a scaling without naming it.
+PIXEL_METRICS = [
+    "PCC",
+    "SSIM",
+    "SI_SSIM",
+    "NRMSE",
+    "SI_NRMSE",
+    "PSNR",
+    "SI_PSNR",
+    "Spectral_PCC",
+    "MicroMS3IM",
+]
 MASK_METRICS = ["Dice", "IoU", "Precision", "Recall"]
 FEATURE_METRICS = [
     "CP_Median_Cosine_Similarity",
@@ -28,7 +42,9 @@ FEATURE_METRICS = [
 HIGHER_IS_BETTER = {
     "PCC",
     "SSIM",
+    "SI_SSIM",
     "PSNR",
+    "SI_PSNR",
     "Spectral_PCC",
     "MicroMS3IM",
     "Dice",
