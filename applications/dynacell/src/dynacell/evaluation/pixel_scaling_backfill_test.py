@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from dynacell.evaluation.pixel_scaling_backfill import MATCH_RTOL, _classify, _needed_timepoints
+from dynacell.evaluation.pixel_scaling_backfill import (
+    MATCH_RTOL,
+    _classify,
+    _classify_pcc,
+    _needed_timepoints,
+)
 
 # Representative of a real OOD case: the two families sit ~0.28 SSIM apart, which
 # is why one tolerance can separate them without being brittle.
@@ -62,3 +67,22 @@ def test_needed_timepoints_groups_the_cached_rows_by_fov() -> None:
         {"FOV": "0/0/fov0000", "Timepoint": 0},
     ]
     assert _needed_timepoints(rows) == {"0/0/fov0000": [0, 1], "0/0/fov0001": [2]}
+
+
+def test_pcc_gate_tolerates_float32_cancellation_but_not_a_moved_mean() -> None:
+    """Per-row PCC noise is not a stale cache; a moved mean is.
+
+    Both arms are transcribed from the 2026-08-03 backfill. The near-degenerate arm
+    is FNet3D on HEK mito, where PCC sits at 0.003 -- no correlation at all -- so a
+    single row moves by 8.6e-4 on identical arrays purely from float32
+    cancellation. The moved arm is pix2pix3d mito A549-trained on HEK, whose mean
+    shifted 2.9e-3, past the 3-decimal rounding the tables publish.
+    """
+    degenerate_cached = np.array([0.002848, 0.003100, 0.002500, 0.003140])
+    degenerate_fresh = degenerate_cached + np.array([-8.6e-4, 8.3e-4, 5.0e-5, -2.0e-5])
+    assert _classify_pcc(degenerate_cached, degenerate_fresh) == "reproduced_mean"
+
+    moved_cached = np.array([0.533478, 0.540000, 0.520000, 0.540434])
+    assert _classify_pcc(moved_cached, moved_cached - 2.87e-3) == "MOVED"
+
+    assert _classify_pcc(moved_cached, moved_cached.copy()) == "reproduced"
