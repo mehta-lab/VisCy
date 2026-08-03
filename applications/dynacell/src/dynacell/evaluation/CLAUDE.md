@@ -233,3 +233,50 @@ compute win to offset the reloads.
   **false sync point** and the buckets can run concurrently (all read-only).
   Drop it only after confirming warm-state, else concurrent buckets race the
   drop-and-recompute write.
+
+## Cache-staleness checks: gate on the mean PCC, and prove staleness before recomputing
+
+`PCC` is the right **signal** for "was this eval cache produced from the arrays that
+are on disk now?" — it is affine-invariant, so a metric-definition change (e.g. the
+min-max → scale-invariant switch) cannot move it, and only a genuine array change
+can. `pixel_scaling_backfill.py` uses it as its write gate for exactly that reason.
+
+**But a per-row relative tolerance is the wrong test.** PCC's numerator is a
+difference of nearly-cancelling sums, so its float32 error is set by cancellation,
+not by magnitude. On a near-degenerate prediction the value itself is tiny — FNet3D
+on HEK mitochondria sits at **PCC 0.003**, no correlation at all — and cancellation
+alone moves one row by ~1e-3, i.e. **30% relative**. Any `rtol` check fires.
+Measured 2026-08-03: `rtol=1e-3, atol=1e-5` per row flagged **19 of 648** conditions
+as stale cache, and every one that fed a table was a false positive.
+
+Gate on the **mean** instead: `PCC_MEAN_ATOL = 5e-4`, tighter than the 3-decimal
+rounding the tables publish, so a mean inside it cannot change a published cell
+while a real re-predict moves it well outside. A per-row failure that clears the
+mean is reported `reproduced_mean` — written, but still visible in the audit. Do not
+collapse that into `reproduced`, and do not widen the per-row `rtol` instead.
+
+**A staleness verdict is a hypothesis, not a finding. Run these four before
+spending GPU on a re-eval** — all cheap, and together they settled all 19:
+
+1. **Compare the mean against an independent published artifact.** The one flagged
+   cell that fed a table reproduced its published `0.540` as `0.5396`. PCC is
+   affine-invariant, so identical PCC ⇒ identical arrays. That one check was
+   decisive.
+2. **Chunk-mtime prediction *and* GT against the eval CSV mtime**, full scan:
+   `find <store> -type f -not -name '*.json' -printf '%T@\n' | sort -rn | head -1`.
+   All three suspect dirs had both stores older than the eval and untouched since,
+   so no data change was possible. Never sample via `find | head | xargs stat` — a
+   truncated listing gives a wrong "newest chunk" and sends you down a false trail.
+3. **Check for a live writer.** Two flagged dirs were being rewritten at that moment
+   by a running eval; the gate was comparing against a cache mid-write. `squeue`
+   before concluding anything about a cache.
+4. **`git log` the config surface** against the eval date: the leaf YAML, the dataset
+   manifest under `_manifests/<name>/manifest.yaml`, and `_configs/eval.yaml`.
+
+Note that `focus.*` / `segmentation.slice_selection` affect **instance segmentation
+and the deep-feature slab only — not pixel metrics.** Don't reach for them to
+explain a moved pixel number.
+
+A gate that fails **closed** (refuses to write, reports `stale_cache`) is safe to
+leave over-sensitive, because its only cost is a line in a report. So prefer false
+positives in the gate — but never let a false positive drive a re-run.
