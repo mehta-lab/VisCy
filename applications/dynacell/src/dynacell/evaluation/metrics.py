@@ -45,27 +45,46 @@ def _require_cubic():
 
 
 @torch.inference_mode()
-def ssim(img1: torch.Tensor, img2: torch.Tensor) -> float:
+def _min_max_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Min-max normalize a tensor to [0, 1] range."""
+    x = x.float()
+    return (x - x.min()) / torch.clamp(x.max() - x.min(), min=eps)
+
+
+@torch.inference_mode()
+def ssim(img1: torch.Tensor, img2: torch.Tensor, *, scale_invariant: bool = True, eps: float = 1e-8) -> float:
     """Compute mean structural similarity index (SSIM) for 2D or 3D inputs.
 
     ``spatial_dims`` is dispatched from the input rank (cubic convention): a 2-D
     ``(H, W)`` input scores an in-plane SSIM, a 3-D ``(D, H, W)`` input scores a
     volumetric SSIM.
 
-    Scored under ``scale_invariant=True``: the prediction is fitted to the target
-    by the least-squares affine gain that best matches it, and ``data_range`` is
-    derived from the *target* alone. This replaces a per-input min-max rescale
-    that normalized each array by its own extremes, so two outlier voxels set the
-    two scales independently and a prediction whose dynamic range merely differed
-    from the target's was penalized as if it disagreed with it. That made the
-    metric a dynamic-range comparison rather than an agreement measure. Matches
-    ``compute_per_cell_similarity``, which has always scored this way.
+    Two scorings, both reported by :func:`compute_pixel_metrics`:
+
+    ``scale_invariant=True`` (default)
+        The prediction is fitted to the target by the least-squares affine gain
+        that best matches it, and ``data_range`` is derived from the *target*
+        alone. Reports agreement with the target rather than the prediction's
+        dynamic range, and matches ``per_cell_similarity``, which has always
+        scored this way. Reported as ``SI_SSIM``.
+    ``scale_invariant=False``
+        Each input is min-max rescaled to ``[0, 1]`` by *its own* extremes before
+        scoring against ``data_range=1.0``. Two outlier voxels set the two scales
+        independently, so a prediction whose dynamic range merely differs from the
+        target's is penalized as if it disagreed with it — the metric is partly a
+        dynamic-range comparison. Kept because it is the scale-*sensitive*
+        convention the published benchmark tables were built on, so both forms can
+        be reported side by side. Reported as ``SSIM``.
 
     Parameters
     ----------
     img1, img2 : torch.Tensor
         2-D ``(H, W)`` or 3-D ``(D, H, W)`` tensors of the same shape. ``img1``
         is the target: it sets the scale-invariant reference.
+    scale_invariant : bool
+        Select the scoring above.
+    eps : float
+        Min-max denominator floor; used only when ``scale_invariant=False``.
     """
     if cubic_ssim is None:
         raise ImportError("cubic is required for SSIM. Install via the `eval` extra: `uv sync --extra eval`.")
@@ -75,14 +94,20 @@ def ssim(img1: torch.Tensor, img2: torch.Tensor) -> float:
         )
     spatial_dims = img1.ndim
 
+    if not scale_invariant:
+        img1 = _min_max_normalize(img1, eps=eps)
+        img2 = _min_max_normalize(img2, eps=eps)
+
     # cubic's batched dispatch expects [N, C, (D,) H, W] (ndim = spatial_dims + 2):
     # (H,W) → (1,1,H,W); (D,H,W) → (1,1,D,H,W).
     img1 = img1.unsqueeze(0).unsqueeze(0)
     img2 = img2.unsqueeze(0).unsqueeze(0)
 
-    # No data_range here: the scale_invariant path derives its own, and cubic
-    # raises if both are supplied.
-    return cubic_ssim(img1, img2, spatial_dims=spatial_dims, gaussian_weights=True, scale_invariant=True)
+    if scale_invariant:
+        # No data_range here: the scale_invariant path derives its own, and cubic
+        # raises if both are supplied.
+        return cubic_ssim(img1, img2, spatial_dims=spatial_dims, gaussian_weights=True, scale_invariant=True)
+    return cubic_ssim(img1, img2, spatial_dims=spatial_dims, data_range=1.0, gaussian_weights=True)
 
 
 def evaluate_segmentations(segmented_pred, segmented_gt) -> dict[str, float]:
@@ -162,18 +187,30 @@ def compute_pixel_metrics(prediction, target, spacing, fsc_kwargs=None, spectral
     # ``.to(device)`` step provided: when ``target_xp`` is a non-contiguous
     # cupy view (e.g. a strided zarr slice), cubic_ssim → MONAI → conv3d's
     # CUDA backend can fail or silently re-materialize on recent torch.
-    # All four are scored scale-invariantly, so they measure agreement with the
-    # target rather than the prediction's dynamic range. ``normalize="min_max"``
-    # (what NRMSE/PSNR used before) rescaled each array by its own min/max, which
-    # two outlier voxels can set: on a hot-pixel probe it inflated NRMSE by 7048%
-    # against 2224% for the scale-invariant form. PCC needs no flag -- it is
-    # already affine-invariant, and is the fixed anchor that shows the switch did
-    # only what it was meant to.
+    #
+    # SSIM / NRMSE / PSNR are reported in BOTH scalings, from the same arrays in
+    # the same pass, so the two columns of a table row can never pair values from
+    # different predictions:
+    #   - bare ``SSIM``/``NRMSE``/``PSNR`` are scale-SENSITIVE (``normalize="min_max"``:
+    #     each array rescaled by its own extremes). This is the convention the
+    #     published benchmark tables were built on. Two outlier voxels can set the
+    #     denominator: on a hot-pixel probe min-max inflated NRMSE by 7048% against
+    #     2224% for the scale-invariant form.
+    #   - ``SI_*`` are scale-INVARIANT (least-squares affine fit of the prediction
+    #     to the target, ``data_range`` from the target alone), so they measure
+    #     agreement with the target rather than the prediction's dynamic range.
+    # PCC needs no pair -- it is already affine-invariant, and is the fixed anchor
+    # that shows the two scalings differ only in what they were meant to differ in.
+    target_pt = torch.as_tensor(target_xp).contiguous()
+    pred_pt = torch.as_tensor(pred_xp).contiguous()
     metrics = {
         "PCC": pcc(target_xp, pred_xp),
-        "SSIM": ssim(torch.as_tensor(target_xp).contiguous(), torch.as_tensor(pred_xp).contiguous()),
-        "NRMSE": nrmse(target_xp, pred_xp, scale_invariant=True),
-        "PSNR": psnr(target_xp, pred_xp, scale_invariant=True),
+        "SSIM": ssim(target_pt, pred_pt, scale_invariant=False),
+        "NRMSE": nrmse(target_xp, pred_xp, normalize="min_max"),
+        "PSNR": psnr(target_xp, pred_xp, normalize="min_max"),
+        "SI_SSIM": ssim(target_pt, pred_pt, scale_invariant=True),
+        "SI_NRMSE": nrmse(target_xp, pred_xp, scale_invariant=True),
+        "SI_PSNR": psnr(target_xp, pred_xp, scale_invariant=True),
     }
 
     if spectral_pcc_kwargs is None and fsc_kwargs is None:
