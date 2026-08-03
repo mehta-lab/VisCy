@@ -21,6 +21,11 @@ _HYDRA_COMMANDS: dict[str, tuple[str, str, str]] = {
     "evaluate": ("dynacell.evaluation.pipeline", "evaluate_model", "eval"),
     "evaluate-grouped": ("dynacell.evaluation.pipeline", "evaluate_model_grouped", "eval"),
     "precompute-gt": ("dynacell.evaluation.precompute_cli", "precompute_gt", "eval"),
+    "backfill-pixel-scalings": (
+        "dynacell.evaluation.pixel_scaling_backfill",
+        "backfill_pixel_scalings",
+        "eval",
+    ),
     "report": ("dynacell.reporting.cli", "generate_report", "report"),
 }
 
