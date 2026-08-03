@@ -1,10 +1,16 @@
 # @package _global_
-# Focused sibling of grouped/membrane_joint: ONLY the 4 Phase-14 in-focus 2D
-# conditions (fnet2d x {ipsc, a549 mock/denv/zikv}). Condition blocks are copied
-# verbatim from a generate_grouped_eval_configs.py run, so they stay byte-identical
-# to what the canonical bucket would emit -- only the selection is narrowed.
+# Focused sibling of grouped/membrane_joint: ONLY the in-focus 2D conditions --
+# fnet2d + FCMAE-2D (unext2_2d, vscyto2d) x {ipsc, a549 mock/denv/zikv} = 12.
+# Condition blocks are copied verbatim from a generate_grouped_eval_configs.py run,
+# so they stay byte-identical to what the canonical bucket would emit -- only the
+# selection is narrowed.
 #
-# Why a sibling instead of folding fnet2d into the canonical bucket:
+# celldiff_2d is the remaining 4 conditions, folded in once its A549 predicts
+# finish. It is EXCLUDED for now because the generator's only freshness gate is
+# pred_path.is_dir(), which passes on a partially-written store (measured 4813 of
+# 5787 chunk files on a live nucleus/celldiff_2d/ipsc/a549__denv).
+#
+# Why a sibling instead of folding the 2D models into the canonical bucket:
 #   1. The generator sets force_recompute.final_metrics: true, so the canonical
 #      bucket's already-evaluated 3D conditions would ALL recompute, not cache-skip.
 #   2. Fairness. The global pixel metrics (PCC/SSIM/FSC/PSNR/Spectral_PCC),
@@ -16,9 +22,12 @@
 #      targeted (2d-infocus-vs-models.md 1a). The full-3D columns are still
 #      computed here as diagnostics; they are NOT publishable as 2D-vs-3D.
 #
-# All 4 conditions are brand new, so nothing is cached and the cold deep-feature
-# extraction needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB
-# nodes and OOMs).
+# force_recompute.final_metrics is false here, unlike the generator's default of
+# true: the 4 fnet2d conditions were fully evaluated on 2026-07-31 (92-col
+# feature_metrics.csv + mask_metrics.csv all present), so they cache-skip and only
+# the 8 FCMAE-2D conditions pay the cold deep-feature extraction. That extraction
+# still needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB nodes
+# and OOMs).
 target_name: membrane
 compute_feature_metrics: true
 use_gpu: true
@@ -29,12 +38,34 @@ runtime:
   fov_workers: 1
   threads_per_worker: auto
 force_recompute:
-  final_metrics: true
+  final_metrics: false
 compute_instance_ap: true
 segmentation:
   backend: cpdino
   nuclei_channel_name: Nuclei
 conditions:
+- name: vscyto2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto2d_pretrained/joint/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/a549__denv
+- name: unext2_2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-denv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto2d_scratch/joint/a549__denv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/a549__denv
 - name: fnet2d__joint__a549_denv
   benchmark:
     dataset_ref:
@@ -46,6 +77,28 @@ conditions:
     nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/joint/a549__denv
+- name: vscyto2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto2d_pretrained/joint/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/a549__mock
+- name: unext2_2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto2d_scratch/joint/a549__mock
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/a549__mock
 - name: fnet2d__joint__a549_mock
   benchmark:
     dataset_ref:
@@ -57,6 +110,28 @@ conditions:
     nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/joint/a549__mock
+- name: vscyto2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto2d_pretrained/joint/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/a549__zikv
+- name: unext2_2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-zikv
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/membrane/fcmae_vscyto2d_scratch/joint/a549__zikv
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/a549__zikv
 - name: fnet2d__joint__a549_zikv
   benchmark:
     dataset_ref:
@@ -68,6 +143,26 @@ conditions:
     nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_ZIKV.zarr
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet2d/joint/a549__zikv
+- name: vscyto2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/fcmae_vscyto2d_pretrained/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_pretrained/joint/ipsc
+- name: unext2_2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: membrane
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/membrane/fcmae_vscyto2d_scratch/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto2d_scratch/joint/ipsc
 - name: fnet2d__joint__ipsc
   benchmark:
     dataset_ref:
