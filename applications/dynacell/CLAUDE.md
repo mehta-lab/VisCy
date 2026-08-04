@@ -19,13 +19,27 @@ code/paper boundary. This table is the source of truth (referenced by
 | `fcmae_vscyto2d_pretrained` | **VSCyto2D** (encoder init from the public 2D FCMAE ckpt) |
 | `fnet2d` | **FNet2D** |
 | `celldiff_2d` | **CellDiff-2D** (CELLDiffNet run Z-preserving at Z=1) |
+| `pix2pix2d_unetvit` | **pix2pix2d** (same GAN, UNetViT generator + PatchGAN both run Z-preserving at Z=1) |
 
-The four 2D keys are the in-focus 2D-vs-3D benchmark track. Their paper names are
+The five 2D keys are the in-focus 2D-vs-3D benchmark track. Their paper names are
 deliberately distinct from the 3D namesakes (`unext2_2d` vs `unext2`, `vscyto2d` vs
-`vscyto3d`, `celldiff_2d` vs `celldiff_r2`) — collapsing them would merge the 2D and 3D
-rows into one eval dir. `celldiff_2d` is in `_CELLDIFF_MODELS` (not
-`_DETERMINISTIC_MODELS`) because it is flow-matching like its 3D counterpart; the tuple
-is ordered longest-first so prefix matching cannot truncate it to bare `celldiff`.
+`vscyto3d`, `celldiff_2d` vs `celldiff_r2`, `pix2pix2d` vs `pix2pix3d`) — collapsing them
+would merge the 2D and 3D rows into one eval dir. `celldiff_2d` is in `_CELLDIFF_MODELS`
+(not `_DETERMINISTIC_MODELS`) because it is flow-matching like its 3D counterpart; the
+tuple is ordered longest-first so prefix matching cannot truncate it to bare `celldiff`.
+`pix2pix2d_unetvit` goes in `_DETERMINISTIC_MODELS` for the same reason
+`pix2pix3d_unetvit` does — a GAN generator is a single deterministic forward at
+inference, and the sampling variants that tuple guards against are CellDiff's.
+
+⚠ **The published pix2pix3d weights were NOT trained by the overlay its `train.yml`
+leaves compose.** `train.yml` binds the LSGAN baseline
+(`pix2pix3d_unetvit_fit.yml`); the weights came from the 12
+`train_4gpu_modernized.yml` leaves, i.e. Run D — checkpoint `hyper_parameters` read
+`loss_type='nonsat'`, `lr_g=lr_d=2e-4`, `r1_gamma=10`, `ema_kimg=10`,
+`lecam_gamma=0.3`, `lambda_l1=10`, plus 201 `generator_ema.*` tensors and
+`max_epochs: 40`. `pix2pix2d_unetvit_fit.yml` mirrors Run D so the 2D-vs-3D comparison
+isolates geometry, and bakes the three Run-D deltas instead of repeating them per leaf.
+Read a checkpoint's own hparams before assuming a leaf's overlay is what ran.
 
 VSCyto3D ablations (in `vscyto3d-ablations`): `*_randinit` (untrained),
 `*_cytoland` (public ckpt, no FT), `*_infectionft` (cytoland→A549-infection-FT,

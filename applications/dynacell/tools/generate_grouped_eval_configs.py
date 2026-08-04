@@ -63,6 +63,7 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto2d_pretrained": "vscyto2d",
     "fnet2d": "fnet2d",
     "celldiff_2d": "celldiff_2d",
+    "pix2pix2d_unetvit": "pix2pix2d",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -104,9 +105,13 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "pix2pix3d_unetvit",
     # In-focus 2D track — deterministic like their 3D counterparts (no diffusion
     # sampling), so the same single-pass zarr-name parser handles them.
+    # pix2pix2d_unetvit belongs here for the same reason pix2pix3d_unetvit does:
+    # a GAN generator is a single deterministic forward at inference, and the
+    # sampling variants this tuple guards against are CellDiff's.
     "fcmae_vscyto2d_scratch",
     "fcmae_vscyto2d_pretrained",
     "fnet2d",
+    "pix2pix2d_unetvit",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff_2d", "celldiff")
 """CellDiff-family model tokens, longest first so prefix matching does not
