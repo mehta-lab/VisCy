@@ -304,7 +304,11 @@ class WitnessGmmLabelsConfig(BaseModel):
         the biological condition (e.g. ``"perturbation"``). Default: ``"perturbation"``.
     gmm_pos_threshold : float
         GMM remodeled-component posterior at/above which a perturbed cell is a
-        confident positive. Default: 0.8.
+        confident positive. Symmetrically, ``1 - gmm_pos_threshold`` is the bar for
+        a confident **negative**: a perturbed cell at or below it is labeled the
+        negative class (the pre-onset and bystander cells), so a perturbed well
+        contributes both classes. Cells between the two bars are ambiguous and are
+        left unlabeled. Default: 0.8 (so negatives at ≤ 0.2).
     mmd_pvalue_threshold : float
         Target FDR level for the significance gate. Each perturbed condition is
         MMD-permutation-tested against the control reference; the raw p-values
@@ -340,6 +344,32 @@ class WitnessGmmLabelsConfig(BaseModel):
         global bandwidth (median heuristic on the pooled reference) is kept so
         scores stay comparable across bins. None = pooled reference (original
         behavior). Requires an ``hours_post_perturbation`` obs column. Default: None.
+    gate : str
+        How confident positives are chosen from the witness scores — pick by
+        whether the perturbed population is **bimodal** or merely **shifted**:
+
+        - ``"gmm"``: two-component GMM on the perturbed scores; positive when the
+          remodel-mode posterior ≥ ``gmm_pos_threshold``. Right when perturbation
+          creates a distinct second state. Abstains (labels nothing) when the fit
+          is not bimodal, so it cannot manufacture a split that is not there.
+        - ``"percentile"``: cut at the ``control_fp_target`` quantile of the
+          **control** scores. Fits nothing and assumes nothing, so it works when
+          the perturbation shifts a unimodal population — the case where a GMM has
+          no honest split to find. Never abstains. Its parameter is an error rate,
+          which means the same thing across markers/plates/timepoints; a posterior
+          cut does not.
+
+        Default: ``"gmm"``.
+    control_fp_target : float
+        For ``gate="percentile"``: the fraction of control cells called positive,
+        fixed **by construction** (the gate is a quantile of the control scores).
+        Default: 0.05.
+    negative_quantile : float
+        For ``gate="percentile"``: the control quantile above which a cell is
+        called negative — where the control distribution begins. Deliberately NOT
+        ``1 - control_fp_target``: perturbed scores usually die out before the
+        control's upper tail, so a mirrored cut labels almost nothing. Must exceed
+        ``control_fp_target``. Default: 0.10.
     """
 
     experiments: list[WitnessGmmExperiment]
@@ -357,6 +387,7 @@ class WitnessGmmLabelsConfig(BaseModel):
     witness_time_bin_hours: float | None = None
     gate: str = "gmm"
     control_fp_target: float = 0.05
+    negative_quantile: float = 0.10
     random_seed: int = 42
     mmd_hpi_bin_hours: float | None = None
 
@@ -369,10 +400,12 @@ class WitnessGmmLabelsConfig(BaseModel):
             raise ValueError(f"class_map must define {sorted(missing)} (got keys {sorted(self.class_map)})")
         if not 0.0 < self.gmm_pos_threshold <= 1.0:
             raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
-        if self.gate not in ("gmm", "control_anchored"):
-            raise ValueError(f"gate must be 'gmm' or 'control_anchored', got {self.gate!r}")
+        if self.gate not in ("gmm", "percentile"):
+            raise ValueError(f"gate must be 'gmm' or 'percentile', got {self.gate!r}")
         if not 0.0 < self.control_fp_target < 1.0:
             raise ValueError(f"control_fp_target must be in (0, 1), got {self.control_fp_target}")
+        if not self.control_fp_target < self.negative_quantile < 1.0:
+            raise ValueError(f"negative_quantile must be in (control_fp_target, 1), got {self.negative_quantile}")
         if not 0.0 < self.mmd_pvalue_threshold <= 1.0:
             raise ValueError(f"mmd_pvalue_threshold must be in (0, 1], got {self.mmd_pvalue_threshold}")
         if self.annotation_format not in ("csv", "parquet"):
@@ -482,6 +515,12 @@ class LinearClassifiersStepConfig(BaseModel):
         leakage for SSL embeddings that pull same-track cells together
         (DynaCLR's positive pairs). When None, behavior is the legacy
         cell-level stratified ``train_test_split``. Default: None.
+    control_normalize : bool
+        Robust control-reference normalization of the embeddings before
+        training/scoring: per experiment, per HPI bin, ``(x - control_median) /
+        control_IQR`` referenced against ``uninfected`` cells. Default: False.
+    control_normalize_bin_hours : float
+        HPI bin width for control-reference normalization. Default: 2.0.
     """
 
     label_source: Literal["annotations"] = "annotations"
@@ -497,11 +536,16 @@ class LinearClassifiersStepConfig(BaseModel):
     split_train_data: float = 0.8
     random_seed: int = 42
     split_groups_by: list[str] | None = None
+    control_normalize: bool = False
+    control_normalize_bin_hours: float = 2.0
 
     @model_validator(mode="after")
     def _validate_label_source(self) -> "LinearClassifiersStepConfig":
-        if not self.annotations or not self.tasks:
-            raise ValueError("label_source='annotations' requires non-empty annotations and tasks")
+        # tasks are always required. annotations may be empty here when the
+        # witness_gmm step auto-fills them at config-generation time; that
+        # invariant is enforced by EvaluationConfig, which sees both steps.
+        if not self.tasks:
+            raise ValueError("label_source='annotations' requires non-empty tasks")
         return self
 
 
@@ -540,6 +584,119 @@ class AppendAnnotationsStepConfig(BaseModel):
     annotations: list[AnnotationSource] = []
 
 
+class WitnessGmmLabelSource(BaseModel):
+    """One witness-GMM label to generate: a marker mapped to a named state column.
+
+    Each marker needs its own ``label_column``/``class_map`` because the label's
+    meaning is set by the modality it is computed from (a viral-sensor witness →
+    ``infection_state``, an organelle-marker witness → ``organelle_remodeling_state``).
+
+    Parameters
+    ----------
+    marker : str
+        obs["marker"] value to label (one annotation column per source).
+    label_column : str
+        Name of the biological-state column written to the annotation file
+        (e.g. ``"infection_state"``). This is the ``task`` Stage B trains on.
+    class_map : dict[str, str]
+        Maps the GMM gate outcome to the class vocabulary. Must carry both a
+        ``"positive"`` (perturbed class) and ``"negative"`` (control class) key,
+        e.g. ``{"positive": "infected", "negative": "uninfected"}``.
+    """
+
+    marker: str
+    label_column: str
+    class_map: dict[str, str]
+
+    @model_validator(mode="after")
+    def _validate_class_map(self) -> "WitnessGmmLabelSource":
+        missing = {"positive", "negative"} - set(self.class_map)
+        if missing:
+            raise ValueError(
+                f"{self.marker}: class_map must have 'positive' and 'negative' keys; missing {sorted(missing)}"
+            )
+        return self
+
+
+class WitnessGmmStepConfig(BaseModel):
+    """Config-driven witness-GMM labeling step for the eval orchestrator.
+
+    One block generates one Stage-A YAML per ``label_sources`` entry
+    (``{output_dir}/configs/witness_gmm_{marker}.yaml``), each run by
+    ``dynaclr witness-gmm-labels`` to write ``{output_dir}/labels/{marker}_{label_column}.csv``.
+    The existing ``linear_classifiers`` step then consumes those CSVs as its
+    ``annotations`` (the eval-config author points ``linear_classifiers.annotations[].path``
+    at the generated label CSVs).
+
+    The control/perturbed reference filters are shared across all label sources;
+    each source scores its own marker's embeddings zarr
+    (``{output_dir}/embeddings/{marker}.zarr``).
+
+    Parameters
+    ----------
+    label_sources : list[WitnessGmmLabelSource]
+        One entry per marker to label; each carries its ``label_column`` and
+        ``class_map``.
+    experiments : list[str]
+        Experiment names present in ``obs["experiment"]`` of the embeddings
+        zarrs. The witness masks references by ``obs["experiment"] == name``
+        (see ``compute_marker_scores``), so the reference filters only apply
+        within these experiments. One ``WitnessGmmExperiment`` is emitted per
+        name, all sharing the control/perturbed filters below.
+    control_filter : dict
+        obs filter selecting the control reference (e.g.
+        ``{"perturbation": "uninfected"}``). A value may be a scalar, a list, or
+        a range-dict (``{lt, le, gt, ge}``).
+    perturbed_filter : dict
+        obs filter selecting the perturbed reference (e.g.
+        ``{"perturbation": ["DENV"]}``).
+    gate : str
+        Gating method for confident positives: ``"gmm"`` (two-component mixture on
+        the perturbed scores; abstains when not bimodal) or ``"percentile"`` (cut at
+        the ``control_fp_target`` quantile of the control scores; fits nothing, so it
+        handles a shifted-but-unimodal perturbed population). Default: ``"gmm"``.
+    gmm_pos_threshold : float
+        GMM remodeled-component posterior at/above which a perturbed cell is a
+        confident positive. Symmetrically, ``1 - gmm_pos_threshold`` is the bar for
+        a confident **negative**: a perturbed cell at or below it is labeled the
+        negative class (the pre-onset and bystander cells), so a perturbed well
+        contributes both classes. Cells between the two bars are ambiguous and are
+        left unlabeled. Default: 0.8 (so negatives at ≤ 0.2).
+    mmd_pvalue_threshold : float
+        Adjusted-p-value ceiling for the MMD significance gate. Default: 0.05.
+    mmd_n_permutations : int
+        Number of permutations for the MMD significance test. Default: 1000.
+    bandwidth : float or None
+        Gaussian RBF bandwidth for the witness kernel. None = median heuristic.
+        Default: None.
+    max_reference_cells : int or None
+        Subsample each reference group to at most this many cells. Default: 5000.
+    condition_column : str
+        obs column whose distinct values define per-condition GMM fits.
+        Default: ``"perturbation"``.
+    annotation_format : str
+        Annotation-file format, ``"csv"`` or ``"parquet"``. Default: ``"csv"``.
+    """
+
+    label_sources: list[WitnessGmmLabelSource]
+    experiments: list[str]
+    control_filter: dict
+    perturbed_filter: dict
+    gate: str = "gmm"
+    gmm_pos_threshold: float = 0.8
+    control_fp_target: float = 0.05
+    negative_quantile: float = 0.10
+    mmd_pvalue_threshold: float = 0.05
+    mmd_n_permutations: int = 1000
+    bandwidth: float | None = None
+    max_reference_cells: int | None = 5000
+    condition_column: str = "perturbation"
+    annotation_format: str = "csv"
+    witness_time_bin_hours: float | None = None
+    mmd_hpi_bin_hours: float | None = None
+    random_seed: int = 42
+
+
 class EvaluationConfig(BaseModel):
     """Top-level configuration for the DynaCLR evaluation orchestrator.
 
@@ -558,7 +715,7 @@ class EvaluationConfig(BaseModel):
     steps : list[str]
         Ordered list of steps to generate configs for.
         Valid values: predict, split, reduce_dimensionality, reduce_combined,
-        plot, plot_combined, smoothness, mmd, linear_classifiers,
+        plot, plot_combined, smoothness, mmd, witness_gmm, linear_classifiers,
         append_annotations, append_predictions.
         ``plot`` emits per-experiment scatter plots (fans out one job per
         experiment). ``plot_combined`` emits the joint cross-experiment
@@ -573,6 +730,9 @@ class EvaluationConfig(BaseModel):
         Smoothness evaluation configuration.
     plot : PlotStepConfig
         Embedding visualization configuration.
+    witness_gmm : WitnessGmmStepConfig or None
+        Config-driven witness-GMM labeling. Generates annotation CSVs the
+        ``linear_classifiers`` step then consumes. None disables this step.
     linear_classifiers : LinearClassifiersStepConfig or None
         Linear classifier configuration. None disables this step.
     append_predictions : AppendPredictionsStepConfig or None
@@ -597,10 +757,32 @@ class EvaluationConfig(BaseModel):
     reduce_combined: ReduceCombinedStepConfig = ReduceCombinedStepConfig()
     smoothness: SmoothnessStepConfig = SmoothnessStepConfig()
     plot: PlotStepConfig = PlotStepConfig()
+    witness_gmm: WitnessGmmStepConfig | None = None
     linear_classifiers: LinearClassifiersStepConfig | None = None
     append_annotations: AppendAnnotationsStepConfig | None = None
     append_predictions: AppendPredictionsStepConfig | None = None
     mmd: list[MMDStepConfig] = []
+
+    @model_validator(mode="after")
+    def _validate_lc_annotation_source(self) -> "EvaluationConfig":
+        """LC needs annotations either explicitly or from an active witness step.
+
+        When ``linear_classifiers`` is a step, its labels must come from
+        somewhere: explicit ``linear_classifiers.annotations``, or the
+        ``witness_gmm`` step (which writes the annotation CSVs the LC generator
+        auto-fills). Fail fast if neither is present rather than emitting an LC
+        config with an empty annotation list.
+        """
+        if "linear_classifiers" in self.steps and self.linear_classifiers is not None:
+            has_explicit = bool(self.linear_classifiers.annotations)
+            has_witness = "witness_gmm" in self.steps and self.witness_gmm is not None
+            if not (has_explicit or has_witness):
+                raise ValueError(
+                    "linear_classifiers step needs annotations: set "
+                    "linear_classifiers.annotations, or add 'witness_gmm' to steps "
+                    "with a witness_gmm block to generate them."
+                )
+        return self
 
     @property
     def model_name(self) -> str:

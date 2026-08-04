@@ -122,6 +122,28 @@ def _build_labeled_adata(
     return annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
 
 
+def _apply_control_normalization(adata, bin_hours: float) -> None:
+    """Robustly z-score ``adata.X`` in place against per-plate, per-HPI-bin controls.
+
+    Uses ``uninfected`` cells of each ``experiment`` as the reference. Requires
+    ``perturbation`` and ``hours_post_perturbation`` in obs.
+    """
+    from viscy_utils.evaluation.control_normalization import control_reference_stats
+
+    for col in ("perturbation", "hours_post_perturbation"):
+        if col not in adata.obs.columns:
+            raise ValueError(f"control_normalize requires obs column {col!r}, not found.")
+
+    refs = control_reference_stats(adata, bin_hours=bin_hours)
+    hpi = adata.obs["hours_post_perturbation"].to_numpy()
+    x = np.asarray(adata.X, dtype=np.float32)
+    for plate, ref in refs.items():
+        m = (adata.obs["experiment"] == plate).to_numpy()
+        x[m] = ref.apply(x[m], hpi[m])
+    adata.X = x
+    click.echo(f"  Control-normalized {len(refs)} plate(s) at {bin_hours:g}h HPI bins")
+
+
 def run_linear_classifiers(
     embeddings_path: Path,
     config: LinearClassifiersStepConfig,
@@ -165,6 +187,9 @@ def run_linear_classifiers(
             f"embeddings.zarr obs is missing columns: {missing}. "
             "Re-run the predict step with the updated pipeline to include metadata."
         )
+
+    if config.control_normalize:
+        _apply_control_normalization(adata, config.control_normalize_bin_hours)
 
     all_metrics: list[dict] = []
     # val_outputs_by_task: task → list of per-marker dicts for plotting
