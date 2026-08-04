@@ -10,9 +10,9 @@
 # prediction. The target-inherited RandWeightedCropd is cleared: predict has no
 # CPU augmentations.
 #
-# The overlay sets predict_method=sliding_window because the ViT generator is
-# fixed at 512x512 by its positional embeddings while the A549 test set is
-# 640x960, and predict_overlap Z is 0 because the Z patch is 1.
+# predict_method=sliding_window and predict_overlap Z=0 are overlay-owned; see
+# model_overlays/pix2pix2d_unetvit_predict.yml for why (the lateral ViT 512x512
+# limit, and Z patch 1) -- it states the per-test-set caveat this leaf cannot.
 #
 # No z_reduction: at z_window_size=1 each plane comes from exactly one window, so
 # there is nothing to reduce across (the 3D pix2pix leaves need `center` only
