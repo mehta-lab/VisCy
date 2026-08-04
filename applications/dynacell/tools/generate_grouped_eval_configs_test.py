@@ -32,6 +32,7 @@ from generate_grouped_eval_configs import (  # noqa: E402
     _CANONICAL_TRAIN_SET_TO_BUCKET,
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
+    _TRAIN_SETS,
     ParsedZarr,
     benchmark_dataset_ref,
     build_leaf_yaml,
@@ -401,6 +402,23 @@ def test_brightfield_tokens_get_their_own_buckets() -> None:
     assert table["a549__bf"] != table["a549"]
     # And the phase buckets stay exactly as they were.
     assert table["a549__deconv"] == table["a549"] == "a549_trained"
+
+
+def test_every_registered_bucket_label_is_emittable() -> None:
+    """Parse-side registration is worthless unless the emit loops visit the label.
+
+    ``main`` and ``emit_readme`` iterate ``_ORGANELLES x _TRAIN_SETS``, so a bucket
+    label present only in ``_CANONICAL_TRAIN_SET_TO_BUCKET`` parses fine, lands in
+    ``buckets``, and is then never written -- no error, no empty-bucket message,
+    just a silently absent leaf. That is exactly what happened to the brightfield
+    ablation between 5a25142e (parse registration) and this tuple growing.
+
+    Asserted as a subset relation over the table rather than a hardcoded list so a
+    future bucket cannot be half-registered.
+    """
+    registered = set(_CANONICAL_TRAIN_SET_TO_BUCKET.values())
+    missing = registered - set(_TRAIN_SETS)
+    assert not missing, f"registered but never emitted: {sorted(missing)}"
 
 
 @pytest.mark.slow

@@ -116,7 +116,19 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff_2d", "celldiff")
 """CellDiff-family model tokens, longest first so prefix matching does not
 truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``."""
-_TRAIN_SETS: tuple[str, ...] = ("ipsc_trained", "joint", "a549_trained")
+# Emission order. MUST cover every label in _CANONICAL_TRAIN_SET_TO_BUCKET: parsing a
+# bucket the emit loops never visit registers it and then silently drops it (the
+# brightfield ablation was parse-registered by 5a25142e but unemittable until this
+# tuple grew). Pinned by test_every_registered_bucket_label_is_emittable. The phase
+# labels stay first so existing bucket/README ordering is unchanged, and the bf
+# buckets only exist for nucleus/ER, so the other two are skipped as empty.
+_TRAIN_SETS: tuple[str, ...] = (
+    "ipsc_trained",
+    "joint",
+    "a549_trained",
+    "ipsc_bf_trained",
+    "a549_bf_trained",
+)
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 
 # Canonical on-disk organelle roots to walk. The generator keeps ``mitochondria``
@@ -243,7 +255,8 @@ def parse_zarr_name(zarr_path: Path, dynacell_root: Path = _DYNACELL_ROOT) -> Pa
     grammar) — never from a zarr filename. Raises ``ValueError`` on a
     non-canonical/legacy path, an unknown model dir, an unknown CellDiff
     variant, or a train_set that is valid in ``paths.py`` but out of scope for
-    the grouped campaign (e.g. the ablation tokens or ``a549__bf``).
+    the grouped campaign (e.g. the ablation tokens). The ``__bf`` tokens ARE in
+    scope — they map to their own ``{ipsc,a549}_bf_trained`` buckets.
     """
     key = paths.key_from_prediction_store(zarr_path, dynacell_root)
     organelle = _CANONICAL_ORG_TO_INTERNAL.get(key.organelle, key.organelle)
