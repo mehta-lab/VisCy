@@ -816,6 +816,25 @@ def test_joint_train_smoke_leaf_composes() -> None:
 _HARDWARE_4GPU_CONSTRAINT = "h100|h200"
 _HARDWARE_4GPU_GPUS = frozenset(_HARDWARE_4GPU_CONSTRAINT.split("|"))
 
+# A100 is the hard exclusion (NCCL); the >=80 GB floor is a proxy for "cannot
+# OOM", so a leaf that has MEASURED its per-rank peak may widen below it. Only
+# these leaves may, and only onto these cards.
+#
+# pix2pix2d_unetvit: 13.3 GiB/rank at batch_size 4, measured on the interactive
+# A40 (44.7 GiB usable) -- 3.4x headroom on the smallest card admitted. Each fit
+# is ~35 min wall (verified: job 35148927 COMPLETED 0:0 in 34:38 at 40/40
+# epochs), so the point of widening is backfill: 12 short 4-GPU jobs queueing
+# only for Hopper serialize behind the 4-day and 7-day fits that also want it.
+# All three added cards can satisfy --nodes=1 --gpus=4 in the gpu partition
+# (gpu-c-1 8xa40, gpu-b-[1-6] 4xa6000, gpu-g-2 4xl40s; gpu-g-1 has 3 l40s and is
+# simply never selected).
+_WIDE_GPU_TRAIN_LEAVES = frozenset(
+    f"{organelle}/pix2pix2d_unetvit/{pool}/train.yml"
+    for organelle in ("nucleus", "membrane", "er", "mito")
+    for pool in ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
+)
+_WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})
+
 
 def _all_train_leaves() -> list[Path]:
     """All ``train*.yml`` leaves under benchmarks/virtual_staining/ except _internal/."""
@@ -832,16 +851,30 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
     big-memory GAN but must not re-admit A100 (or the <80 GB cards) or unset
     it. Adding a new 4-GPU leaf that loosens the constraint picks this up
     automatically.
+
+    Leaves in ``_WIDE_GPU_TRAIN_LEAVES`` may additionally admit the <80 GB cards
+    named in ``_WIDE_GPU_EXTRA``, having measured a per-rank peak that fits them.
+    A100 stays excluded for those too: its exclusion is about NCCL, not memory,
+    so no measurement can license it.
     """
     cfg = load_composed_config(leaf)
     if cfg["trainer"]["devices"] != 4:
         pytest.skip(f"single-GPU leaf: {leaf.relative_to(BENCHMARKS)}")
+    rel = str(leaf.relative_to(BENCHMARKS))
     constraint = cfg["launcher"]["sbatch"].get("constraint")
     selected = frozenset(constraint.split("|")) if constraint else frozenset()
-    assert selected and selected <= _HARDWARE_4GPU_GPUS, (
+    allowed = _HARDWARE_4GPU_GPUS
+    if rel in _WIDE_GPU_TRAIN_LEAVES:
+        allowed = allowed | _WIDE_GPU_EXTRA
+        assert selected & _HARDWARE_4GPU_GPUS, (
+            f"{rel}: widened to {constraint!r} but dropped every Hopper card. A measured "
+            f"widening adds cards, it does not trade Hopper away."
+        )
+    assert selected and selected <= allowed, (
         f"{leaf.relative_to(BENCHMARKS)}: 4-GPU leaf has constraint={constraint!r}, "
-        f"expected a non-empty subset of {_HARDWARE_4GPU_CONSTRAINT!r} (must exclude A100 "
-        f"and the <80 GB cards; narrowing to e.g. 'h200' is allowed). If this leaf must run "
+        f"expected a non-empty subset of {sorted(allowed)} (must exclude A100 "
+        f"and, unless the leaf is in _WIDE_GPU_TRAIN_LEAVES with a measured per-rank peak, "
+        f"the <80 GB cards; narrowing to e.g. 'h200' is allowed). If this leaf must run "
         f"on A100, override with `--override launcher.sbatch.constraint=null`."
     )
 
