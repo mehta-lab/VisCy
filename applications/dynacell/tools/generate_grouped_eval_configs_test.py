@@ -405,20 +405,27 @@ def test_brightfield_tokens_get_their_own_buckets() -> None:
 
 
 def test_every_registered_bucket_label_is_emittable() -> None:
-    """Parse-side registration is worthless unless the emit loops visit the label.
+    """Guard that ``_TRAIN_SETS`` stays DERIVED from the bucket table.
 
     ``main`` and ``emit_readme`` iterate ``_ORGANELLES x _TRAIN_SETS``, so a bucket
-    label present only in ``_CANONICAL_TRAIN_SET_TO_BUCKET`` parses fine, lands in
+    label the table registers but that tuple omits parses fine, lands in
     ``buckets``, and is then never written -- no error, no empty-bucket message,
-    just a silently absent leaf. That is exactly what happened to the brightfield
-    ablation between 5a25142e (parse registration) and this tuple growing.
+    just a silently absent leaf. That is exactly how the brightfield buckets stayed
+    invisible after 5a25142e registered them.
 
-    Asserted as a subset relation over the table rather than a hardcoded list so a
-    future bucket cannot be half-registered.
+    ``_TRAIN_SETS`` is now built with ``dict.fromkeys`` over the table's values, so
+    this holds by construction. The test is kept to fail loudly if anyone
+    re-hardcodes the tuple, which is what reintroduces the whole bug class. Order is
+    asserted too: the tuple drives README row order, so the table's literal order is
+    load-bearing and a reorder there should be a deliberate choice, not a surprise.
     """
     registered = set(_CANONICAL_TRAIN_SET_TO_BUCKET.values())
     missing = registered - set(_TRAIN_SETS)
     assert not missing, f"registered but never emitted: {sorted(missing)}"
+    assert _TRAIN_SETS == tuple(dict.fromkeys(_CANONICAL_TRAIN_SET_TO_BUCKET.values())), (
+        f"_TRAIN_SETS is no longer derived from the bucket table: {_TRAIN_SETS}. "
+        f"Re-hardcoding it lets a registered bucket go silently unemitted."
+    )
 
 
 @pytest.mark.slow

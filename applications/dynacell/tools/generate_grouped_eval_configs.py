@@ -116,19 +116,6 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff_2d", "celldiff")
 """CellDiff-family model tokens, longest first so prefix matching does not
 truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``."""
-# Emission order. MUST cover every label in _CANONICAL_TRAIN_SET_TO_BUCKET: parsing a
-# bucket the emit loops never visit registers it and then silently drops it (the
-# brightfield ablation was parse-registered by 5a25142e but unemittable until this
-# tuple grew). Pinned by test_every_registered_bucket_label_is_emittable. The phase
-# labels stay first so existing bucket/README ordering is unchanged, and the bf
-# buckets only exist for nucleus/ER, so the other two are skipped as empty.
-_TRAIN_SETS: tuple[str, ...] = (
-    "ipsc_trained",
-    "joint",
-    "a549_trained",
-    "ipsc_bf_trained",
-    "a549_bf_trained",
-)
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 
 # Canonical on-disk organelle roots to walk. The generator keeps ``mitochondria``
@@ -155,15 +142,30 @@ _DEFAULT_TEST_SETS: frozenset[str] = frozenset({"ipsc", "a549"})
 # instead of the waveorder Phase3D reconstruction it is derived from), so folding
 # it in would collide a brightfield and a phase prediction on the same
 # ``canonical_identity`` and make one silently shadow the other.
+# ⚠ Literal order is load-bearing: it is the ONLY source of bucket emission and
+# README row order (see _TRAIN_SETS below). Reordering these entries is safe for
+# every lookup — the table is read only via .get(), .values() and sorted() — but it
+# reshuffles the generated README.
 _CANONICAL_TRAIN_SET_TO_BUCKET: dict[str, str] = {
     "ipsc": "ipsc_trained",
+    "joint": "joint",
+    "joint__legacy_deconvgt": "joint",
     "a549": "a549_trained",
     "a549__deconv": "a549_trained",
     "ipsc__bf": "ipsc_bf_trained",
     "a549__bf": "a549_bf_trained",
-    "joint": "joint",
-    "joint__legacy_deconvgt": "joint",
 }
+
+# Bucket labels to emit, DERIVED so the set cannot drift from the table above.
+# ``main`` and ``emit_readme`` iterate _ORGANELLES x _TRAIN_SETS, so a label the
+# table registers but this tuple omits parses fine, lands in ``buckets``, and is
+# then never written — no error, not even the "skipping empty bucket" line. That is
+# exactly how the brightfield buckets stayed invisible after 5a25142e registered
+# them. Deriving makes the omission unrepresentable rather than merely tested for.
+# ``dict.fromkeys`` dedupes the many-to-one labels while preserving first-occurrence
+# order. Empty buckets are normal and skipped by ``main`` (the bf buckets only exist
+# for nucleus/ER, so mitochondria/membrane emit nothing).
+_TRAIN_SETS: tuple[str, ...] = tuple(dict.fromkeys(_CANONICAL_TRAIN_SET_TO_BUCKET.values()))
 
 # Instance average-precision (AP_0.50..0.95 / mAP / instance_dice) is defined only
 # for the two organelles with a cell-instance interpretation, and it is computed in
