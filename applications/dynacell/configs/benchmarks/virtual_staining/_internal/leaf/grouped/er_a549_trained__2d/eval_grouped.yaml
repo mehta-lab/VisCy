@@ -1,14 +1,23 @@
 # @package _global_
 # Focused sibling of grouped/er_a549_trained: ONLY the in-focus 2D conditions --
-# fnet2d + FCMAE-2D (unext2_2d, vscyto2d) x {ipsc, a549 mock/denv/zikv} = 12.
+# fnet2d + FCMAE-2D (unext2_2d, vscyto2d) + celldiff_2d
+# x {ipsc, a549 mock/denv/zikv} = 16.
 # Condition blocks are copied verbatim from a generate_grouped_eval_configs.py run,
 # so they stay byte-identical to what the canonical bucket would emit -- only the
 # selection is narrowed.
 #
-# celldiff_2d is the remaining 4 conditions, folded in once its A549 predicts
-# finish. It is EXCLUDED for now because the generator's only freshness gate is
-# pred_path.is_dir(), which passes on a partially-written store (measured 4813 of
-# 5787 chunk files on a live nucleus/celldiff_2d/ipsc/a549__denv).
+# celldiff_2d was folded in on 2026-08-04, once its predicts finished. It was held
+# out until then because the generator's only freshness gate is pred_path.is_dir(),
+# which passes on a partially-written store (measured 4813 of 5787 chunk files on a
+# live nucleus/celldiff_2d/ipsc/a549__denv). The gate applied by hand instead was a
+# per-store chunk count against the fnet2d store for the same organelle/pool/bucket,
+# required to match exactly. The complete size is a property of (organelle, bucket),
+# not a constant: 4270-4300 on the iPSC buckets and 5211-5787 on the A549 ones, and
+# er/a549__denv is the low outlier at 5211 in EVERY pool. That one was confirmed
+# against two further fully-evaluated models (both FCMAE-2D arms, also 5211, same 12
+# FOVs) so it is the true size and not a shortfall shared with the reference -- which
+# a fnet2d-relative gate cannot see by itself. Plus sacct COMPLETED 0:0 on all 48
+# CELLDiff2D_PRED jobs.
 #
 # Why a sibling instead of folding the 2D models into the canonical bucket:
 #   1. The generator sets force_recompute.final_metrics: true, so the canonical
@@ -23,9 +32,10 @@
 #      computed here as diagnostics; they are NOT publishable as 2D-vs-3D.
 #
 # force_recompute.final_metrics is false here, unlike the generator's default of
-# true: the 4 fnet2d conditions were fully evaluated on 2026-07-31 (92-col
-# feature_metrics.csv + mask_metrics.csv all present), so they cache-skip and only
-# the 8 FCMAE-2D conditions pay the cold deep-feature extraction. That extraction
+# true: fnet2d and both FCMAE-2D arms are already fully evaluated (pixel and
+# feature metrics present in all 48 of each arm's organelle x pool x bucket save
+# dirs), so those 12 conditions cache-skip and only the 4 celldiff_2d ones pay the
+# cold deep-feature extraction. That extraction
 # still needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB nodes
 # and OOMs).
 target_name: er
@@ -40,6 +50,16 @@ runtime:
 force_recompute:
   final_metrics: false
 conditions:
+- name: celldiff_2d__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/celldiff_2d/a549/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__denv
 - name: vscyto2d__a549_trained__a549_denv
   benchmark:
     dataset_ref:
@@ -70,6 +90,16 @@ conditions:
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet2d/a549/a549__denv
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d/a549/a549__denv
+- name: celldiff_2d__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-mock
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/celldiff_2d/a549/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__mock
 - name: vscyto2d__a549_trained__a549_mock
   benchmark:
     dataset_ref:
@@ -100,6 +130,16 @@ conditions:
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet2d/a549/a549__mock
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d/a549/a549__mock
+- name: celldiff_2d__a549_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-zikv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/celldiff_2d/a549/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/a549__zikv
 - name: vscyto2d__a549_trained__a549_zikv
   benchmark:
     dataset_ref:
@@ -130,6 +170,16 @@ conditions:
     pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet2d/a549/a549__zikv
   save:
     save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d/a549/a549__zikv
+- name: celldiff_2d__a549_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/er/celldiff_2d/a549/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/celldiff_2d/a549/ipsc
 - name: vscyto2d__a549_trained__ipsc
   benchmark:
     dataset_ref:
