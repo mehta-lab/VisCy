@@ -909,14 +909,17 @@ def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
     )
 
 
-# The only fits that have ever hit a wall limit: joint ER/mito FCMAE, each
-# TIMEOUTed twice at hardware_4gpu.yml's 4 days. Measured need is 110-126 h to
-# reach max_epochs=200, so they sit on hardware_4gpu_long.yml (7 days) instead.
-# Every other 4-GPU leaf finishes inside 4 days; a 7-day 4-GPU H100/H200
-# allocation backfills far worse, so this list should grow only on evidence.
+# The only fits that have ever hit a wall limit: all eight joint FCMAE leaves, at
+# hardware_4gpu.yml's 4 days. ER/mito TIMEOUTed twice each (measured 1.58-1.82
+# ep/h, 110-126 h to reach max_epochs=200); nucleus/membrane TIMEOUTed once each
+# (1.22-1.40 ep/h, 143-164 h), jobs 31822521, 33631899, 31822536 and 31822529,
+# every one with elapsed 4-00:00:11 to 4-00:00:29 against a 4-00:00:00 limit. So
+# all eight sit on hardware_4gpu_long.yml (7 days) instead. Every other 4-GPU
+# leaf finishes inside 4 days; a 7-day 4-GPU H100/H200 allocation backfills far
+# worse, so this list should grow only on evidence.
 _LONG_WALL_TRAIN_LEAVES = frozenset(
     f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
-    for organelle in ("er", "mito")
+    for organelle in ("er", "mito", "nucleus", "membrane")
     for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
 )
 _LONG_WALL_TIME = "7-00:00:00"
@@ -931,10 +934,10 @@ _DEFAULT_4GPU_TIME = "4-00:00:00"
 def test_only_measured_slow_fits_get_the_long_wall(leaf: Path) -> None:
     """The 7-day wall is reserved for fits measured to need more than 4 days.
 
-    Guards both directions: the four joint ER/mito FCMAE leaves must keep it (they
-    TIMEOUTed twice without it, ending at 150/200, 108/200, 81/200 and 70/200
-    epochs), and no other 4-GPU leaf may pick it up, since the longer request
-    schedules materially worse on the H100/H200 pool.
+    Guards both directions: the eight joint FCMAE leaves must keep it (all eight
+    TIMEOUTed without it, ending at 150/200, 108/200, 81/200, 70/200, 102/200,
+    86/200, 114/200 and 118/200 epochs), and no other 4-GPU leaf may pick it up,
+    since the longer request schedules materially worse on the H100/H200 pool.
 
     Smoke leaves are excluded: they override `time` via wall_smoke.yml.
     """
@@ -944,7 +947,7 @@ def test_only_measured_slow_fits_get_the_long_wall(leaf: Path) -> None:
     if rel in _LONG_WALL_TRAIN_LEAVES:
         assert time_limit == _LONG_WALL_TIME, (
             f"{rel}: time={time_limit!r}, expected {_LONG_WALL_TIME!r}. This fit needs "
-            f"~110-126 h for max_epochs=200 and TIMEOUTed twice at 4 days."
+            f"~110-164 h for max_epochs=200 and TIMEOUTed at 4 days."
         )
     elif cfg["trainer"]["devices"] == 4:
         assert time_limit == _DEFAULT_4GPU_TIME, (

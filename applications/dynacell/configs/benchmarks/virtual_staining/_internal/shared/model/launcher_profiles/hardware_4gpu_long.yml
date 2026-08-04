@@ -10,21 +10,36 @@
 #   joint ER  fcmae_vscyto3d_scratch     1.71 ep/h  -> 117 h            (4.9 d)
 #   joint mito fcmae_vscyto3d_scratch    1.65 ep/h  -> 121 h            (5.0 d)
 #   joint mito fcmae_vscyto3d_pretrained 1.58 ep/h  -> 126 h            (5.3 d)
+#   joint nucl fcmae_vscyto3d_pretrained 1.40 ep/h  -> 143 h            (6.0 d)
+#   joint memb fcmae_vscyto3d_scratch    1.25 ep/h  -> 160 h            (6.7 d)
+#   joint memb fcmae_vscyto3d_pretrained 1.24 ep/h  -> 161 h            (6.7 d)
+#   joint nucl fcmae_vscyto3d_scratch    1.22 ep/h  -> 164 h            (6.8 d)
 #
 # (The ER-pretrained rate reproduces across two independent intervals,
 # e117->e150 and e130->e149, to three digits.)
 #
-# All four of those fits TIMEOUTed **twice** at the 4-day cap and were never
-# resumed, leaving them at 150/200, 108/200, 81/200 and 70/200 epochs
-# respectively: jobs 31910331 + 34683420, 31910330 + 34694104,
-# 31910343 + 34694106, 31910345 + 34683424. They are the only 4-GPU fits that
-# have ever hit a wall limit -- every other leaf on hardware_4gpu.yml finishes
-# inside 4 days, which is why this is a separate profile rather than a raise of
-# the shared one. A 7-day 4-GPU H100/H200 allocation backfills far worse than a
-# 4-day one, so do not move leaves here without measuring first.
+# All eight joint FCMAE fits TIMEOUTed at the 4-day cap and were never resumed.
+# The ER/mito four hit it **twice** each, leaving them at 150/200, 108/200,
+# 81/200 and 70/200 epochs: jobs 31910331 + 34683420, 31910330 + 34694104,
+# 31910343 + 34694106, 31910345 + 34683424. The nucleus/membrane four hit it once
+# each, leaving 102/200, 86/200, 114/200 and 118/200: jobs 31822521 (nucl
+# scratch), 33631899 (nucl pretrained, its third attempt after 31822355
+# CANCELLED and 31822498/33557666 FAILED), 31822536 (memb scratch), 31822529
+# (memb pretrained) -- every one TIMEOUT with elapsed 4-00:00:11 to 4-00:00:29
+# against a 4-00:00:00 limit. They are the only 4-GPU fits that have ever hit a
+# wall limit -- every other leaf on hardware_4gpu.yml finishes inside 4 days,
+# which is why this is a separate profile rather than a raise of the shared one.
+# A 7-day 4-GPU H100/H200 allocation backfills far worse than a 4-day one, so do
+# not move leaves here without measuring first.
 #
-# 7 days is 1.33x the slowest measured requirement. Joint fits are the slow case
-# because they train on iPSC + A549 pooled, roughly doubling steps per epoch.
+# 7 days is 1.33x the slowest ER/mito requirement but only 1.02x the slowest
+# nucleus one (164 h), so a nucleus/membrane fit started from epoch 0 would have
+# ~4 h of margin. That is deliberate and safe here because these four are only
+# ever **resumed**: from 102/86/114/118 epochs they need 80/81/69/66 h, i.e. 2.8
+# to 3.4 days. A from-scratch nucleus/membrane joint fit needs a longer wall than
+# this profile provides -- size one from the rate above rather than assuming 7
+# days covers it. Joint fits are the slow case because they train on iPSC + A549
+# pooled, roughly doubling steps per epoch.
 launcher:
   sbatch:
     partition: gpu
