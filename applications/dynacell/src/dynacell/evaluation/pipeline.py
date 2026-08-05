@@ -58,6 +58,11 @@ from dynacell.evaluation.pipeline_cache import (
     precompute_deep_features,
     seg_spacing,
 )
+from dynacell.evaluation.provenance import (
+    check_cubic_pin,
+    metrics_provenance_matches,
+    write_metrics_provenance,
+)
 from dynacell.evaluation.runtime import (
     apply_thread_budget,
     dump_timings_csv,
@@ -1713,6 +1718,9 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
     """Save metrics to files."""
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
+    # Stamp the numeric stack that produced these rows, so a later run can tell
+    # whether the cache is comparable instead of assuming it is.
+    write_metrics_provenance(save_dir)
 
     for metrics, csv_name, npy_name, plot_dir in (
         (mask_metrics, config.save.mask_csv_filename, config.save.mask_metrics_filename, "mask_metrics"),
@@ -1750,6 +1758,11 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     if force.all or force.final_metrics:
         return False
     save_dir = Path(config.save.save_dir)
+    # Metric values are not comparable across cubic versions — FSC/FRC/Spectral_PCC
+    # move (see dynacell.evaluation.provenance). A cache with no stamp, or one
+    # stamped with a different cubic, is not reusable regardless of its columns.
+    if not metrics_provenance_matches(save_dir):
+        return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
     mask_ok = mask_path.exists()
@@ -2077,6 +2090,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval")
 def evaluate_model(config: DictConfig):
     """Evaluate model on test images."""
+    check_cubic_pin()
     apply_dataset_ref(config)
     if _final_metrics_cache_valid(config):
         print("Found existing metrics.")
@@ -2100,6 +2114,7 @@ def evaluate_model(config: DictConfig):
 @hydra.main(version_base="1.2", config_path="_configs", config_name="eval_grouped")
 def evaluate_model_grouped(config: DictConfig):
     """Run grouped multi-condition eval, amortizing model loads across conditions."""
+    check_cubic_pin()
     return evaluate_predictions_grouped(config)
 
 

@@ -35,6 +35,7 @@ from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     instance_cache_hit,
     precompute_deep_features,
 )
+from dynacell.evaluation.provenance import write_metrics_provenance  # noqa: E402
 
 
 def _make_config(**overrides: Any):
@@ -1569,6 +1570,8 @@ def test_final_metrics_cache_gate_requires_ap_columns(tmp_path: Path) -> None:
 
     save_dir = tmp_path / "out"
     save_dir.mkdir()
+    # Reuse also requires the numeric-provenance stamp save_metrics writes.
+    write_metrics_provenance(save_dir)
     np.save(save_dir / "pixel_metrics.npy", np.array([dict(_DUAL_SCALING_PIXEL_ROW)], dtype=object))
     cfg = _make_config(
         **{
@@ -1607,6 +1610,7 @@ def test_final_metrics_cache_gate_requires_both_pixel_scalings(tmp_path: Path) -
 
     save_dir = tmp_path / "out"
     save_dir.mkdir()
+    write_metrics_provenance(save_dir)
     cfg = _make_config(
         **{
             "compute_instance_ap": False,

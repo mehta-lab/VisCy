@@ -5,8 +5,24 @@ computing) for any GPU-accelerated numerical work — image preprocessing
 before / after model inference, metric calculations, cropping/resizing,
 percentile clips, Gaussian filters, etc. Cubic is a hard runtime
 dependency of the eval extras (`applications/dynacell/pyproject.toml`
-pins `cubic==0.7`, resolved from PyPI). Do not gate cubic imports behind `try/except`
+pins `cubic @ git+…@v0.9.0a1`). Do not gate cubic imports behind `try/except`
 or fall back to scipy/skimage paths.
+
+**The cubic version is part of the numeric contract, not just a dep.** Metric
+values move across pins — measured 0.8.0a2 → 0.9.0a1: `Z_FSC_Resolution`
++30.9%, `XY_FSC_Resolution` +16.7%, `Spectral_PCC` ≤0.57%, `FRC_Resolution`
++0.52%, with `PCC`/`SSIM`/`NRMSE`/`PSNR`/`SI_*`/`PerCell_*`/`AP_*`/`mAP`/
+`instance_dice`/`MicroMS3IM`/CP columns all bit-identical. So:
+
+- `dynacell.evaluation.provenance.REQUIRED_CUBIC_VERSION` is the single
+  declared version; `provenance_test.py` pins it to every pyproject pin.
+- `check_cubic_pin()` runs at both eval entry points and **fails the run**
+  when the environment disagrees. Do not downgrade it to a warning.
+- `save_metrics` stamps `metrics_provenance.json` beside the CSVs, and
+  `_final_metrics_cache_valid` refuses an unstamped or foreign-stamped cache.
+  Unstamped means "written before the stamp existed", i.e. an unknown pin —
+  it must recompute, unlike the per-extractor `preprocess_version` bootstrap
+  which treats an untagged entry as unconstrained.
 
 The GPU-resident Cellpose-SAM entry point is
 `cubic.segmentation.segment_cpsam` (single host→device upload, masks
