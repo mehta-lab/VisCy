@@ -108,7 +108,10 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
             },
         }
     )
-    expected_pixel_metrics = [{"metric": "pixel"}]
+    # The pixel row must carry both scalings: _final_metrics_cache_valid rejects a
+    # cache holding only one, since between the scale-invariant switch and the
+    # dual-reporting change the bare names held scale-INVARIANT values.
+    expected_pixel_metrics = [{"metric": "pixel", "SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}]
     expected_mask_metrics = [{"metric": "mask"}]
     _write_metrics(tmp_path / config.save.pixel_metrics_filename, expected_pixel_metrics)
     _write_metrics(tmp_path / config.save.mask_metrics_filename, expected_mask_metrics)
