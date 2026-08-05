@@ -58,13 +58,20 @@ cd "${REPO}"
 ml uv
 
 # ``segmentation.backend: cpdino`` is the eval.yaml default, and the cpdino stack
-# (cubic 0.8.0a2 + cellpose 4.2.x) does not co-install with the workspace .venv —
-# there cubic is 0.7.0 and ``segmentation_cpdino`` dies on
+# (cubic + cellpose 4.2.x) does not co-install with the workspace .venv, where
+# ``segmentation_cpdino`` dies on
 # ``ImportError: cannot import name 'segment_cellpose' from 'cubic.segmentation'``.
 # Route uv at the dedicated eval venv and read it read-only (``--no-sync``), the
 # same pattern as build_cpdino_seg_cleaned.slurm. Point DYNACELL_EVAL_VENV
 # elsewhere to use a different environment.
-export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval}"
+#
+# The default MUST hold the cubic version pyproject declares. The older
+# ``cpdino-eval`` (cubic 0.8.0a2) was this default through 2026-07-29 even after
+# the 0.9.0a1 venv existed, so jobs that did not export DYNACELL_EVAL_VENV kept
+# silently producing 0.8.0a2 FSC/FRC/Spectral_PCC values — 62 of the 121
+# surviving eval logs. ``check_cubic_pin`` now fails such a run loudly, but the
+# default still has to be right.
+export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a1}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache}"
 export PYTHONUNBUFFERED=1
 
