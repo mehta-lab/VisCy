@@ -321,6 +321,14 @@ def _compute_ssim_and_cs_bf16(
     # through the conv backward and NaNs most of the input gradient while the forward
     # loss stays finite.
     #
+    # That guards the fp32 path only. A NaN also reaches this line's ``MulBackward0``
+    # when an enclosing 16-mixed autocast is left enabled, which ``ssim_25d`` now
+    # prevents -- see the note at its call site. Do not "fix" that by detaching the
+    # bound: the clamp binds often enough on ordinary inputs that the bound carries
+    # real gradient, and detaching drops the helper's gradient agreement with the
+    # fp32 monai reference from cosine 0.99 to 0.79
+    # (``test_ssim_helper_gradient_flow``).
+    #
     # Exposure depends on the per-window mean-to-variance ratio, so it is a latent
     # trap rather than a constant hazard. Synthetic z-scored fields with a flat
     # background at a nonzero offset reach 41-48% of ``pred.grad``; real z-scored
@@ -363,12 +371,19 @@ def ssim_25d(
     depth = preds.shape[2]
     if depth > 15:
         warn(f"Input depth {depth} is potentially too large for 2.5D SSIM.")
-    ssim_img, cs_img = _compute_ssim_and_cs_bf16(
-        preds,
-        target,
-        kernel_size=(depth, *in_plane_window_size),
-        data_range=target.max(),
-    )
+    # Outside autocast: this helper picks its own precision on purpose (bf16 convs,
+    # fp32 for everything after), and letting an enclosing 16-mixed autocast re-enter
+    # it puts backward intermediates in fp16, where the ~1e8 gradients the floored
+    # SSIM denominator produces overflow to inf and a later multiply turns them into
+    # NaN. Measured on the captured failing batch: 0.02% NaN under autocast, 0.00% in
+    # fp32, with the forward differing by ~3e-6.
+    with torch.amp.autocast(device_type=preds.device.type, enabled=False):
+        ssim_img, cs_img = _compute_ssim_and_cs_bf16(
+            preds,
+            target,
+            kernel_size=(depth, *in_plane_window_size),
+            data_range=target.max(),
+        )
     # aggregate to one scalar per batch
     ssim = ssim_img.view(ssim_img.shape[0], -1).mean(1)
     if return_contrast_sensitivity:
