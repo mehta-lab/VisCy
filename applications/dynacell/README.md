@@ -18,16 +18,17 @@ three linked components:
   Zika/Dengue perturbations), plus a reprocessed, curated subset of the Allen
   Institute WTC-11 hiPSC dataset for cross-cell-type and cross-microscope
   evaluation.
-- **Baseline models** — four regression and one generative baseline, trained
-  under a shared protocol across nucleus, plasma membrane, endoplasmic reticulum
-  (ER), and mitochondria.
+- **Baseline models** — four regression baselines, a deterministic 3D Pix2Pix
+  GAN, and CELL-Diff under conditional-mean and sampled inference, trained under
+  a shared protocol across nucleus, plasma membrane, endoplasmic reticulum (ER),
+  and mitochondria.
 - **Metrics** — a three-tier panel measuring pixel-level fidelity, organelle
   segmentation utility, and single-cell phenotypic similarity.
 
-Across 2 cell types and microscopes, 4 organelles, and 3 perturbation states,
-DynaCell exposes trade-offs that single-metric evaluation obscures: regression
-baselines better predict organelle localization and are more robust to
-label-free input shifts, while the generative baseline better captures
+Across iPSC and A549 training/test domains, an evaluation-only HEK293T ablation,
+4 organelles, and 3 perturbation states, DynaCell exposes trade-offs that
+single-metric evaluation obscures. Deterministic point predictors preserve
+paired spatial structure, while sampled CELL-Diff better captures
 population-level phenotype distributions.
 
 This directory is the DynaCell application of the [VisCy](../../README.md)
@@ -103,17 +104,16 @@ references for localization, segmentation, and tracking.
 - **VSCyto3D** — UNeXt2 with a pretrained FCMAE encoder (Cytoland).
 - **UNetViT3D** — a hybrid CNN-Transformer adapted from the CELL-Diff backbone.
 
-### Generative baseline (`DynacellFlowMatching`)
+### Generative baselines
 
-- **CELL-Diff** — a 2D flow-matching virtual-staining model extended to 3D
+- **Pix2Pix3D** (`DynacellGAN`) — deterministic adversarial training with the
+  UNetViT3D generator and a multiscale 3D PatchGAN discriminator.
+
+- **CELL-Diff** (`DynacellFlowMatching`) — a 2D flow-matching virtual-staining model extended to 3D
   inputs and outputs. Samples plausible fluorescence volumes conditioned on
   phase; uses iterative flow-matching inpainting for large-volume inference, and
   a single-pass mean-prediction mode for point-estimate comparison. The
   flow-matching loss is computed internally — no external loss function needed.
-
-The engine module also provides an adversarial `DynacellGAN` (pix2pix3d) sharing
-the UNetViT3D generator backbone, used for controlled regression-vs-adversarial
-comparison; it is not a paper baseline.
 
 ## Evaluation metrics
 
@@ -122,12 +122,13 @@ Three tiers, each interrogating predicted stain quality differently:
 - **Pixel fidelity** — PSNR, SSIM, PCC, NRMSE, plus microscopy-aware Fourier
   shell correlation (FSC), MicroSSIM, and a frequency-aware Spectral PCC robust
   to photobleaching-driven noise in fluorescence targets.
-- **Segmentation utility** — predicted and experimental volumes pass through the
-  Allen Institute organelle segmenters; masks compared via Dice, IoU, precision,
-  recall, and accuracy.
-- **Phenotype similarity** — per-cell embeddings from CellProfiler, DINOv3, and
-  DynaCLR; median cosine similarity between matched cells plus FID and KID
-  between pooled predicted and experimental distributions.
+- **Segmentation utility** — Cellpose v4 cpdino instances for nucleus and
+  membrane, and Allen Institute semantic segmenters for ER and mitochondria;
+  masks are compared with overlap and instance-detection metrics.
+- **Phenotype similarity** — a 22-feature handcrafted GLCM+ space and learned
+  DINOv3, DynaCLR, CELL-DINO, and MorphEm embeddings; median cosine similarity
+  between matched cells plus FID and KID between pooled predicted and
+  experimental distributions.
 
 ## Config structure
 
