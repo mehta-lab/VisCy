@@ -327,8 +327,7 @@ def _time_matched_witness_scores(
     width = config.witness_time_bin_hours
     scores = np.full(len(obs), np.nan, dtype=np.float64)
     finite = np.isfinite(hpi)
-    lo0 = np.floor(hpi[finite].min() / width) * width if finite.any() else 0.0
-    edges = np.arange(lo0, (hpi[finite].max() if finite.any() else 0.0) + width, width)
+    edges = _hpi_bin_edges(hpi, width)
     min_ref = 5
     n_fallback = 0
     for lo, hi in zip(edges[:-1], edges[1:]):
@@ -351,6 +350,21 @@ def _time_matched_witness_scores(
     if n_fallback:
         _logger.info("Time-matched witness: %d cells in sparse bins used the pooled reference.", n_fallback)
     return scores
+
+
+def _hpi_bin_edges(hpi: np.ndarray, width: float) -> np.ndarray:
+    """Return half-open bin edges that include the maximum finite HPI.
+
+    An extra terminal edge is required when the maximum lies exactly on a bin
+    boundary; otherwise ``[lo, hi)`` loops silently omit those cells.
+    """
+    finite = np.asarray(hpi, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return np.empty(0, dtype=float)
+    start = np.floor(finite.min() / width) * width
+    n_bins = int(np.floor((finite.max() - start) / width)) + 1
+    return start + np.arange(n_bins + 1, dtype=float) * width
 
 
 def _compute_hpi_mmd(
@@ -382,10 +396,9 @@ def _compute_hpi_mmd(
         return {}
     hpi = obs["hours_post_perturbation"].to_numpy(dtype=float)
     width = config.mmd_hpi_bin_hours
-    finite = hpi[np.isfinite(hpi)]
-    if finite.size == 0:
+    edges = _hpi_bin_edges(hpi, width)
+    if edges.size == 0:
         return {}
-    edges = np.arange(np.floor(finite.min() / width) * width, finite.max() + width, width)
 
     def _mmd(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
         mmd2, p, _null = mmd_permutation_test(

@@ -6,6 +6,7 @@ from torch import nn
 
 from dynaclr.engine import ContrastiveModule
 from viscy_models.components.heads import ClassificationHead
+from viscy_models.contrastive.predictor import Predictor
 
 
 def test_contrastive_module_init(_SimpleEncoder, synth_dims):
@@ -46,6 +47,42 @@ def test_contrastive_module_forward(_SimpleEncoder, synth_dims):
     features, projections = module(x)
     assert features.shape == (2, 64)
     assert projections.shape == (2, 32)
+
+
+def test_all_invalid_sequences_keep_predictor_in_backward_graph(_SimpleEncoder, synth_dims):
+    """Empty masked inputs produce zero, non-None predictor gradients for DDP."""
+    predictor = Predictor(dim=64)
+    module = ContrastiveModule(
+        encoder=_SimpleEncoder(),
+        predictor=predictor,
+        lambda_pred=1.0,
+        example_input_array_shape=(
+            1,
+            synth_dims["c"],
+            synth_dims["d"],
+            synth_dims["h"],
+            synth_dims["w"],
+        ),
+    )
+    module.log = lambda *args, **kwargs: None
+    batch = {
+        "sequence": torch.randn(
+            6,
+            synth_dims["c"],
+            synth_dims["d"],
+            synth_dims["h"],
+            synth_dims["w"],
+        ),
+        "sequence_length": 3,
+        "sequence_valid": torch.zeros(2, dtype=torch.bool),
+    }
+
+    loss = module._temporal_losses(batch, "train")
+    loss.backward()
+
+    assert loss.item() == 0.0
+    assert all(parameter.grad is not None for parameter in predictor.parameters())
+    assert all(torch.count_nonzero(parameter.grad) == 0 for parameter in predictor.parameters())
 
 
 def test_embedding_pca_logged_every_n_epochs(_SimpleEncoder, _SyntheticTripletDataModule, synth_dims):
