@@ -1,16 +1,17 @@
 # Organelle-remodeling model matrix — persistent, iterated on over time.
 #
-# ONE merged collection (organelle_remodeling.yml = 7 datasets: SEC61B/TOMM20/G3BP1
-# under ZIKV/DENV) run through MULTIPLE models. One row per MODEL; run-matrix fans
-# out predict per experiment inside the collection and skips already-embedded ones.
+# ONE merged collection (organelle_remodeling.yml = 15 physical datasets spanning
+# SEC61B/TOMM20/G3BP1/CAAX/H2B under ZIKV/DENV) run through MULTIPLE models. One
+# row per MODEL; run-matrix fans out predict per experiment inside the collection
+# and skips already-embedded ones.
 #
-#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --dry-run
-#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml   # predict,eval
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --stages predict --dry-run
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --stages predict
 #
 # Progressive: skip-existing is the DEFAULT — datasets already embedded for a row's
 # (model_family, run, ckpt_name) are pruned; append a dataset to the collection and
 # re-run → only it embeds. --overwrite forces a full re-embed (e.g. after changing
-# predict_flags). NOTE: 2026_04_21_A549_G3BP1_DENV is deferred (not on VAST yet).
+# predict_flags).
 
 defaults:
   collection: applications/dynaclr/configs/collections/organelle_remodeling.yml
@@ -21,7 +22,8 @@ defaults:
   # Organelle reporters + label-free. Sensor markers differ by virus (pAL17 ZIKV /
   # pAL40 DENV); include both to embed the sensor across all datasets, or drop them
   # to embed only the organelle question.
-  markers: [SEC61B, TOMM20, G3BP1, Phase3D, pAL17, pAL40]
+  # (CAAX/H2B are the 2026_03_26 dual-virus markers; a marker only runs where present.)
+  markers: [SEC61B, TOMM20, G3BP1, Phase3D, pAL17, pAL40, CAAX, H2B]
   # Focus-centered Z: window WIDTH (slices) centered per-FOV on the focus plane
   # (from focus_slice zattrs). z_reduction mip → fluorescence max-projected,
   # label-free (Phase3D) center slice. z_focus_offset = fraction below focus.
@@ -49,3 +51,19 @@ models:
     ckpt_name: frozen
     training_config: applications/dynaclr/configs/evaluation/MorphEm-frozen/training_config_morphem_frozen.yaml
     eval_config: applications/dynaclr/configs/evaluation/MorphEm-frozen/infectomics-annotated.yaml
+
+  # --- CELL-DINO (frozen channel-adaptive ViT-L/16 foundation baseline) ---
+  - model_type: foundation
+    family: CELL-DINO-frozen
+    run: frozen
+    ckpt_name: frozen
+    training_config: applications/dynaclr/configs/evaluation/CELL-DINO-frozen/training_config_cell_dino_frozen.yaml
+    eval_config: applications/dynaclr/configs/evaluation/CELL-DINO-frozen/infectomics-annotated.yaml
+
+  # --- DINOv3 (frozen ConvNeXt-Tiny foundation baseline) ---
+  - model_type: foundation
+    family: DINOv3-frozen
+    run: frozen
+    ckpt_name: frozen
+    training_config: applications/dynaclr/configs/evaluation/DINOv3-frozen/training_config_dinov3_frozen.yaml
+    eval_config: applications/dynaclr/configs/evaluation/DINOv3-frozen/infectomics-annotated.yaml

@@ -1,12 +1,14 @@
 name: organelle_remodeling
 description: "Merged organelle-remodeling collection: SEC61B (ER), TOMM20 (mitochondria),
-  G3BP1 (stress granules) reporters under ZIKV/DENV infection. One experiment per dataset,
-  all prepared on VAST (normalization + focus_slice). mCherry viral sensor marker matches
-  Airtable channel_2_marker: pAL17 for ZIKV, pAL40 for DENV. GFP reporter per Airtable.
+  G3BP1 (stress granules), CAAX (membrane), and H2B (nuclear) reporters under
+  ZIKV/DENV infection. One experiment per physical dataset, including five annotated
+  Mantis v1 datasets from 2025. All are prepared on VAST (normalization + focus_slice).
+  mCherry viral sensor marker matches Airtable channel_2_marker: pAL17 for ZIKV,
+  pAL40 for DENV. GFP reporter per Airtable.
   2026_04_21_A549_G3BP1_DENV re-concatenated to a flat store on VAST (odd 5-assemble
   layout resolved); focus_slice has a few z_focus=0 frames on 12/54 FOVs (mean 2.4 t each).
-  Used by the organelle_remodeling model matrix (DynaCLR + MorphEm), which fans out
-  predict per experiment and skips already-embedded datasets."
+  Used by the organelle_remodeling model matrix (DynaCLR, MorphEm, CELL-DINO, and
+  DINOv3), which fans out predict per experiment and skips already-embedded datasets."
 datasets_root: /hpc/projects/organelle_phenotyping/datasets
 
 provenance:
@@ -243,3 +245,132 @@ experiments:
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.174
     microscope: mantis_v2
+
+  # --- Annotated Mantis v1 datasets from 2025 ---
+  # Wells are scoped to the marker/perturbation mappings already curated in the
+  # DynaCLR v3 and linear-classifier evaluation collections.
+  - name: 2025_01_24_A549_G3BP1_DENV
+    data_path: ${datasets_root}/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV.zarr
+    tracks_path: ${datasets_root}/2025_01_24_A549_G3BP1_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+        wells: [B/1, B/2, B/3, C/2]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+        wells: [B/3, C/2]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [B/1, B/2, B/3, C/2]
+    perturbation_wells:
+      uninfected: [B/1, B/3]
+      DENV: [B/2, C/2]
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    moi: 5.0
+    organelle: stress_granules
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+    microscope: mantis_v1
+
+  - name: 2025_01_28_A549_G3BP1_ZIKV_DENV
+    data_path: ${datasets_root}/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr
+    tracks_path: ${datasets_root}/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+        wells: [B/4, C/4]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+        wells: [B/4, C/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [B/4, C/4]
+    perturbation_wells:
+      uninfected: [B/4]
+      DENV: [C/4]
+    interval_minutes: 30.0
+    start_hpi: 4.0
+    moi: 5.0
+    organelle: stress_granules
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+    microscope: mantis_v1
+
+  - name: 2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV
+    data_path: ${datasets_root}/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+        wells: [C/1, C/2]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+        wells: [C/1, C/2]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [C/1, C/2]
+    perturbation_wells:
+      uninfected: [C/1]
+      ZIKV: [C/2]
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    moi: 5.0
+    organelle: stress_granules
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+    microscope: mantis_v1
+
+  - name: 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
+    data_path: ${datasets_root}/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+        wells: [A/1, A/2]
+      - name: raw GFP EX488 EM525-45
+        marker: TOMM20
+        wells: [B/1, B/2]
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+        wells: [C/1, C/2]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+        wells: [A/1, A/2, B/1, B/2, C/1, C/2]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [A/1, A/2, B/1, B/2, C/1, C/2]
+    perturbation_wells:
+      uninfected: [A/1, B/1, C/1]
+      ZIKV: [A/2, B/2, C/2]
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    moi: 5.0
+    organelle: multi_organelle
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+    microscope: mantis_v1
+
+  - name: 2025_08_26_A549_SEC61_TOMM20_ZIKV
+    data_path: ${datasets_root}/2025_08_26_A549_SEC61_TOMM20_ZIKV/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr
+    tracks_path: ${datasets_root}/2025_08_26_A549_SEC61_TOMM20_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+        wells: [A/1, B/1]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+        wells: [A/1, B/1]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [A/1, B/1]
+    perturbation_wells:
+      uninfected: [A/1]
+      ZIKV: [B/1]
+    interval_minutes: 30.0
+    start_hpi: 3.5
+    moi: 5.0
+    organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
+    microscope: mantis_v1
