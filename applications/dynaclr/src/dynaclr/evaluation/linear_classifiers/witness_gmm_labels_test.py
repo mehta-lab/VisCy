@@ -3,9 +3,11 @@
 import anndata as ad
 import numpy as np
 import pandas as pd
+import pytest
 
 from dynaclr.evaluation.evaluate_config import WitnessGmmExperiment, WitnessGmmLabelsConfig
 from dynaclr.evaluation.linear_classifiers.witness_gmm_labels import (
+    _hpi_bin_edges,
     _well_prefix_mask,
     compute_marker_scores,
     generate_witness_gmm_annotation,
@@ -75,7 +77,7 @@ def _make_separable_embeddings(
     return ad.AnnData(X=X, obs=obs, var=var)
 
 
-def _config(output_dir, experiment="exp_A", embeddings_zarr="unused.zarr", annotation_format="csv"):
+def _config(output_dir, experiment="exp_A", embeddings_zarr="unused.zarr", annotation_format="csv", **overrides):
     return WitnessGmmLabelsConfig(
         experiments=[
             WitnessGmmExperiment(
@@ -91,7 +93,24 @@ def _config(output_dir, experiment="exp_A", embeddings_zarr="unused.zarr", annot
         condition_column="perturbation",
         output_dir=str(output_dir),
         annotation_format=annotation_format,
+        **overrides,
     )
+
+
+def test_hpi_bin_edges_include_maximum_on_boundary():
+    hpi = np.asarray([0.0, 2.0, 4.0])
+
+    edges = _hpi_bin_edges(hpi, width=2.0)
+
+    assert edges.tolist() == [0.0, 2.0, 4.0, 6.0]
+    assert any(lo <= hpi.max() < hi for lo, hi in zip(edges[:-1], edges[1:]))
+
+
+@pytest.mark.parametrize("field", ["witness_time_bin_hours", "mmd_hpi_bin_hours"])
+@pytest.mark.parametrize("width", [0.0, -1.0, np.inf, np.nan])
+def test_hpi_bin_width_must_be_finite_and_positive(tmp_path, field, width):
+    with pytest.raises(ValueError, match=field):
+        _config(tmp_path, **{field: width})
 
 
 def test_well_prefix_mask_no_spurious_prefix_match():
