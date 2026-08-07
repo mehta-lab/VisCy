@@ -28,11 +28,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
-from viscy_utils.evaluation.linear_classifier import train_linear_classifier
+from viscy_utils.evaluation.linear_classifier import (
+    group_ids_from_obs,
+    group_val_split,
+    train_linear_classifier,
+)
 
 matplotlib.use("Agg")
 
@@ -119,6 +122,28 @@ def _build_labeled_adata(
     return annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
 
 
+def _apply_control_normalization(adata, bin_hours: float) -> None:
+    """Robustly z-score ``adata.X`` in place against per-plate, per-HPI-bin controls.
+
+    Uses ``uninfected`` cells of each ``experiment`` as the reference. Requires
+    ``perturbation`` and ``hours_post_perturbation`` in obs.
+    """
+    from viscy_utils.evaluation.control_normalization import control_reference_stats
+
+    for col in ("perturbation", "hours_post_perturbation"):
+        if col not in adata.obs.columns:
+            raise ValueError(f"control_normalize requires obs column {col!r}, not found.")
+
+    refs = control_reference_stats(adata, bin_hours=bin_hours)
+    hpi = adata.obs["hours_post_perturbation"].to_numpy()
+    x = np.asarray(adata.X, dtype=np.float32)
+    for plate, ref in refs.items():
+        m = (adata.obs["experiment"] == plate).to_numpy()
+        x[m] = ref.apply(x[m], hpi[m])
+    adata.X = x
+    click.echo(f"  Control-normalized {len(refs)} plate(s) at {bin_hours:g}h HPI bins")
+
+
 def run_linear_classifiers(
     embeddings_path: Path,
     config: LinearClassifiersStepConfig,
@@ -163,6 +188,9 @@ def run_linear_classifiers(
             "Re-run the predict step with the updated pipeline to include metadata."
         )
 
+    if config.control_normalize:
+        _apply_control_normalization(adata, config.control_normalize_bin_hours)
+
     all_metrics: list[dict] = []
     # val_outputs_by_task: task → list of per-marker dicts for plotting
     val_outputs_by_task: dict[str, list[dict[str, Any]]] = {}
@@ -202,15 +230,8 @@ def run_linear_classifiers(
         # in both train and val. This kills track-level temporal
         # leakage that inflates val AUROC for temporal-contrastive
         # SSL embeddings.
-        groups: np.ndarray | None = None
-        if config.split_groups_by:
-            missing = [c for c in config.split_groups_by if c not in combined.obs.columns]
-            if missing:
-                raise ValueError(f"split_groups_by columns missing from obs: {missing}")
-            group_series = combined.obs[config.split_groups_by[0]].astype(str)
-            for col in config.split_groups_by[1:]:
-                group_series = group_series + "::" + combined.obs[col].astype(str)
-            groups = group_series.to_numpy()
+        groups = group_ids_from_obs(combined.obs, config.split_groups_by)
+        if groups is not None:
             click.echo(f"  Group-aware split keyed on {config.split_groups_by}: {pd.unique(groups).size} unique groups")
 
         classifier_params = {
@@ -254,22 +275,7 @@ def run_linear_classifiers(
         val_hours: np.ndarray | None = None
         if config.split_train_data < 1.0:
             try:
-                idx = np.arange(len(combined))
-                if groups is not None:
-                    gss = GroupShuffleSplit(
-                        n_splits=1,
-                        train_size=config.split_train_data,
-                        random_state=config.random_seed,
-                    )
-                    _, idx_val = next(gss.split(idx, y_full, groups=groups))
-                else:
-                    _, idx_val = train_test_split(
-                        idx,
-                        train_size=config.split_train_data,
-                        random_state=config.random_seed,
-                        stratify=y_full,
-                        shuffle=True,
-                    )
+                _, idx_val = group_val_split(len(combined), y_full, groups, config.split_train_data, config.random_seed)
                 if "hours_post_perturbation" in combined.obs.columns:
                     val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
             except ValueError:

@@ -24,6 +24,92 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
+def group_ids_from_obs(obs, split_groups_by: list[str] | None) -> np.ndarray | None:
+    """Build a per-cell group id by joining ``split_groups_by`` obs columns.
+
+    The group id makes ``GroupShuffleSplit`` leakage-free: no group (e.g. a
+    track) can land in both train and val. Columns are joined with a ``::``
+    separator into one string per cell. Returns ``None`` when ``split_groups_by``
+    is falsy (caller then does a plain stratified split).
+
+    Parameters
+    ----------
+    obs : pandas.DataFrame
+        AnnData ``obs`` carrying the grouping columns.
+    split_groups_by : list[str] or None
+        obs columns whose combination identifies a group (e.g.
+        ``["experiment", "fov_name", "track_id"]``). None/empty → no grouping.
+
+    Returns
+    -------
+    np.ndarray or None
+        Per-cell group id (shape ``(n_obs,)``), or None when no grouping.
+    """
+    if not split_groups_by:
+        return None
+    missing = [c for c in split_groups_by if c not in obs.columns]
+    if missing:
+        raise ValueError(f"split_groups_by columns missing from obs: {missing}")
+    series = obs[split_groups_by[0]].astype(str)
+    for col in split_groups_by[1:]:
+        series = series + "::" + obs[col].astype(str)
+    return series.to_numpy()
+
+
+def group_val_split(
+    n: int,
+    y: np.ndarray,
+    groups: np.ndarray | None,
+    split_train_data: float,
+    random_seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(idx_train, idx_val)`` for the canonical LC train/val split.
+
+    The single source of truth for how linear classifiers split data: a
+    group-aware ``GroupShuffleSplit`` when ``groups`` is given (so no group lands
+    in both halves — kills track-level temporal leakage), otherwise a stratified
+    ``train_test_split(stratify=y)``. Deterministic under ``random_seed``: the
+    same ``(n, y, groups, split_train_data, random_seed)`` always yields the same
+    indices, so training, val-metric replay, and downstream analysis stay in
+    lock-step.
+
+    Parameters
+    ----------
+    n : int
+        Number of samples (the index space is ``np.arange(n)``).
+    y : np.ndarray
+        Per-sample labels, shape ``(n,)`` (used for stratification when
+        ``groups`` is None).
+    groups : np.ndarray or None
+        Per-sample group id (from :func:`group_ids_from_obs`). None → stratified
+        non-grouped split.
+    split_train_data : float
+        Train fraction in ``(0, 1]``.
+    random_seed : int
+        Seed for the splitter.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``(idx_train, idx_val)`` into ``np.arange(n)``.
+    """
+    idx = np.arange(n)
+    if groups is not None:
+        if len(groups) != n:
+            raise ValueError(f"groups length {len(groups)} != n {n}")
+        gss = GroupShuffleSplit(n_splits=1, train_size=split_train_data, random_state=random_seed)
+        idx_train, idx_val = next(gss.split(idx, y, groups=groups))
+    else:
+        idx_train, idx_val = train_test_split(
+            idx,
+            train_size=split_train_data,
+            random_state=random_seed,
+            stratify=y,
+            shuffle=True,
+        )
+    return idx_train, idx_val
+
+
 class LinearClassifierPipeline:
     """Encapsulates trained classifier with preprocessing transformations.
 
@@ -275,17 +361,10 @@ def train_linear_classifier(
         print("\n✓ Using full feature space (no PCA)")
 
     if split_train_data < 1.0:
+        idx_train, idx_val = group_val_split(len(y_full), y_full, groups, split_train_data, random_seed)
+        X_train, X_val = X_full_transformed[idx_train], X_full_transformed[idx_val]
+        y_train, y_val = y_full[idx_train], y_full[idx_val]
         if groups is not None:
-            if len(groups) != len(y_full):
-                raise ValueError(f"groups length {len(groups)} != n_cells {len(y_full)}")
-            gss = GroupShuffleSplit(
-                n_splits=1,
-                train_size=split_train_data,
-                random_state=random_seed,
-            )
-            idx_train, idx_val = next(gss.split(X_full_transformed, y_full, groups=groups))
-            X_train, X_val = X_full_transformed[idx_train], X_full_transformed[idx_val]
-            y_train, y_val = y_full[idx_train], y_full[idx_val]
             n_train_groups = len(np.unique(groups[idx_train]))
             n_val_groups = len(np.unique(groups[idx_val]))
             print(
@@ -293,14 +372,6 @@ def train_linear_classifier(
                 f"/ validation ({len(X_val)} cells / {n_val_groups} groups)"
             )
         else:
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_full_transformed,
-                y_full,
-                train_size=split_train_data,
-                random_state=random_seed,
-                stratify=y_full,
-                shuffle=True,
-            )
             print(f"\n✓ Split data: train ({len(X_train)}) / validation ({len(X_val)})")
     else:
         X_train = X_full_transformed

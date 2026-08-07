@@ -221,11 +221,10 @@ def apply_lot_correction(
     """Apply a fitted LOT pipeline to an embedding zarr.
 
     Transforms all cells through StandardScaler → (optional PCA) → LOT and writes
-    an AnnData zarr whose ``.X`` contains the corrected embeddings. ``.obs`` and
-    the input ``.uns`` are preserved (plus a ``uns["lot_correction"]`` provenance
-    entry). ``obsm`` (e.g. ``X_backbone``, ``X_umap``, ``X_phate``, ``X_pca``),
-    ``varm``, ``obsp``, and ``layers`` are intentionally dropped: they were
-    computed in the *uncorrected* space and would contradict the corrected ``.X``.
+    an AnnData zarr whose ``.X`` contains the corrected embeddings. The matching
+    pre-LOT coordinates are stored in ``obsm["X_pre_lot"]`` for correction QC.
+    Input metadata are preserved; other arrays derived from the uncorrected space
+    are dropped.
 
     Parameters
     ----------
@@ -237,14 +236,17 @@ def apply_lot_correction(
         Path to write the corrected AnnData zarr.
     overwrite : bool, optional
         If ``False`` (default) and *output_zarr* already exists, raise.
+        Existing output is replaced only after the new store is fully written.
     """
     import shutil
+    import tempfile
 
+    input_zarr = Path(input_zarr)
     output_zarr = Path(output_zarr)
-    if output_zarr.exists():
-        if not overwrite:
-            raise FileExistsError(f"Output path already exists: {output_zarr}. Set overwrite=true to overwrite.")
-        shutil.rmtree(output_zarr)
+    if input_zarr.resolve() == output_zarr.resolve():
+        raise ValueError("input_zarr and output_zarr must be different paths.")
+    if output_zarr.exists() and not overwrite:
+        raise FileExistsError(f"Output path already exists: {output_zarr}. Set overwrite=true to overwrite.")
 
     _logger.info("Loading input zarr: %s", input_zarr)
     adata_in = ad.read_zarr(input_zarr)
@@ -275,6 +277,7 @@ def apply_lot_correction(
         pass
 
     adata_out = ad.AnnData(X=Z_corrected.astype(np.float32), obs=obs, uns=dict(adata_in.uns))
+    adata_out.obsm["X_pre_lot"] = np.asarray(Z, dtype=np.float32)
     adata_out.var.index = adata_out.var.index.astype(object)
     adata_out.uns["lot_correction"] = {
         "source_zarr": str(input_zarr),
@@ -283,9 +286,31 @@ def apply_lot_correction(
         "pca_variance_explained": pipeline.get("pca_variance_explained"),
     }
 
-    _logger.info("Writing corrected zarr: %s", output_zarr)
-    adata_out.write_zarr(output_zarr, convert_strings_to_categoricals=False)
-    _logger.info("Done.")
+    output_zarr.parent.mkdir(parents=True, exist_ok=True)
+    temp_root = Path(tempfile.mkdtemp(prefix=f".{output_zarr.name}.", dir=output_zarr.parent))
+    temp_output = temp_root / "new.zarr"
+    backup_output = temp_root / "previous.zarr"
+    keep_temp = False
+    try:
+        _logger.info("Writing corrected zarr: %s", temp_output)
+        adata_out.write_zarr(temp_output, convert_strings_to_categoricals=False)
+        if output_zarr.exists():
+            output_zarr.rename(backup_output)
+        try:
+            temp_output.rename(output_zarr)
+        except Exception:
+            if backup_output.exists():
+                try:
+                    backup_output.rename(output_zarr)
+                except Exception:
+                    keep_temp = True
+                    _logger.exception("Could not restore previous output; backup retained at %s", backup_output)
+            raise
+    finally:
+        if not keep_temp:
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+    _logger.info("Done: %s", output_zarr)
 
 
 def save_lot_pipeline(pipeline: dict, path: Union[str, Path]) -> None:

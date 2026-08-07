@@ -30,6 +30,12 @@ def _make_adata(n: int, d: int, seed: int, shift: float = 0.0) -> ad.AnnData:
     return ad.AnnData(X=X, obs=obs)
 
 
+def _write_zarr(adata: ad.AnnData, path: Path) -> None:
+    ad.settings.allow_write_nullable_strings = True
+    adata.var.index = adata.var.index.astype(object)
+    adata.write_zarr(path, convert_strings_to_categoricals=False)
+
+
 def test_pool_embeddings_concatenates_rows():
     a = _make_adata(10, 8, seed=0)
     b = _make_adata(15, 8, seed=1)
@@ -118,7 +124,63 @@ def test_fit_save_load_then_apply_to_many(tmp_path, n_pca):
         apply_lot_correction(input_zarr, loaded, output_zarr)
         out = ad.read_zarr(output_zarr)
         assert out.shape == (20, expected_dim)
+        assert out.obsm["X_pre_lot"].shape == (20, expected_dim)
+        expected_pre = loaded["scaler"].transform(input_adata.X)
+        if loaded["pca"] is not None:
+            expected_pre = loaded["pca"].transform(expected_pre)
+        np.testing.assert_allclose(out.obsm["X_pre_lot"], expected_pre, rtol=1e-5)
         assert out.uns["lot_correction"]["channel"] == "Phase3D"
+
+
+def test_apply_rejects_same_input_and_output(tmp_path):
+    source = [_make_adata(40, 16, seed=1)]
+    target = [_make_adata(50, 16, seed=2)]
+    pipeline = fit_lot_correction(source, target, n_pca=5, ns_lot=50, random_seed=0)
+    input_zarr = tmp_path / "input.zarr"
+    _write_zarr(source[0], input_zarr)
+
+    with pytest.raises(ValueError, match="must be different"):
+        apply_lot_correction(input_zarr, pipeline, input_zarr, overwrite=True)
+
+    assert ad.read_zarr(input_zarr).shape == source[0].shape
+
+
+def test_apply_preserves_existing_output_on_failure(tmp_path):
+    source = [_make_adata(40, 16, seed=1)]
+    target = [_make_adata(50, 16, seed=2)]
+    pipeline = fit_lot_correction(source, target, n_pca=5, ns_lot=50, random_seed=0)
+
+    bad_input = _make_adata(20, 15, seed=3)
+    input_zarr = tmp_path / "bad_input.zarr"
+    _write_zarr(bad_input, input_zarr)
+
+    previous = _make_adata(7, 3, seed=4)
+    output_zarr = tmp_path / "output.zarr"
+    _write_zarr(previous, output_zarr)
+    previous_x = previous.X.copy()
+
+    with pytest.raises(ValueError):
+        apply_lot_correction(input_zarr, pipeline, output_zarr, overwrite=True)
+
+    preserved = ad.read_zarr(output_zarr)
+    assert preserved.shape == previous.shape
+    np.testing.assert_array_equal(preserved.X, previous_x)
+
+
+def test_apply_replaces_existing_output_after_success(tmp_path):
+    source = [_make_adata(40, 16, seed=1)]
+    target = [_make_adata(50, 16, seed=2)]
+    pipeline = fit_lot_correction(source, target, n_pca=5, ns_lot=50, random_seed=0)
+
+    input_zarr = tmp_path / "input.zarr"
+    _write_zarr(source[0], input_zarr)
+    output_zarr = tmp_path / "output.zarr"
+    _write_zarr(_make_adata(7, 3, seed=4), output_zarr)
+
+    apply_lot_correction(input_zarr, pipeline, output_zarr, overwrite=True)
+
+    assert ad.read_zarr(output_zarr).shape == (40, 5)
+    assert not list(tmp_path.glob(f".{output_zarr.name}.*"))
 
 
 def test_coerce_obs_for_zarr_handles_categorical_string():

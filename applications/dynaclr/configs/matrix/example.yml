@@ -1,0 +1,70 @@
+# Example model matrix — reference for every `dynaclr run-matrix` feature.
+#
+# One matrix sweeps many models through predict → eval in parallel (SLURM). Rows
+# run concurrently; stages chain within a row via --dependency=afterok.
+#
+#   uv run dynaclr run-matrix -c <this> --dry-run     # inspect the chained commands
+#   uv run dynaclr run-matrix -c <this>               # default --stages predict,eval
+#   uv run dynaclr run-matrix -c <this> --stages train,predict,eval   # also submit training
+#   uv run dynaclr run-matrix -c <this> --overwrite   # re-embed all (default skips existing)
+#
+# Skip-existing (DEFAULT): before submitting, the matrix prunes datasets whose
+# embeddings already exist for a row's (model_family, run, ckpt_name); fully-done
+# rows are dropped. Append a dataset to a collection and re-run → only it embeds.
+# `--overwrite` bypasses the check.
+#
+# `defaults:` holds fields shared across rows; each `models:` row overrides/adds.
+
+defaults:
+  ckpt_name: last # → checkpoints/last.ckpt (pin an epoch with e.g. epoch105-step84800)
+  collection: applications/dynaclr/configs/collections/organelle-box-denv-zikv/2026_04_14_A549_SEC61B_DENV.yml
+  eval_config: applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels/infectomics-annotated.yaml
+  datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+  markers: [SEC61B, Phase3D] # run exactly these markers (extras in the collection ignored)
+  # Z selection — EITHER focus-centered (window WIDTH, centered per-FOV on focus_slice)
+  # OR fixed (z_range absolute start/stop). Mutually exclusive. z_reduction mip →
+  # fluorescence max-projected, label-free (Phase3D) center slice.
+  predict_flags:
+    z_window: 16
+    focus_channel: Phase3D
+    z_focus_offset: 0.3
+    z_reduction: mip
+    reference_pixel_size: 0.1494
+    reference_pixel_size_z_um: 0.174
+    # z_range: [15, 45]   # (alternative) fixed absolute window instead of z_window
+
+models:
+  # --- DynaCLR rows (model_type defaults to "dynaclr"): identity from the training .sh ---
+  # family / run / train_configs are parsed from the .sh's export PROJECT / RUN_NAME / CONFIGS.
+
+  # (a) Train→predict→eval a NEW model (needs --stages train,predict,eval): last.ckpt derived.
+  - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels.sh
+
+  # (b) Predict/eval an ALREADY-trained model. Lightning nests checkpoints under a
+  #     {run}/{PROJECT}/{wandb_id}/checkpoints/ subdir (not derivable from identity) →
+  #     give the explicit `checkpoint:` path.
+  - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+    ckpt_name: epoch105-step84800
+    checkpoint: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/jbrwhzr3/checkpoints/epoch=105-step=84800.ckpt
+
+  # (c) Checkpoint sweep: one train, then a predict→eval chain per checkpoint.
+  # - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+  #   ckpt_names: [last, epoch105-step84800]
+
+  # --- Foundation rows (model_type: foundation): frozen encoders, no checkpoint ---
+  # No train_sbatch — give explicit identity + a LightningCLI training_config whose
+  # model: block builds the frozen encoder (weights load inside the wrapper). Foundation
+  # rows never train; they share the same predict output tree + eval link as DynaCLR.
+  - model_type: foundation
+    family: MorphEm-frozen
+    run: frozen
+    ckpt_name: frozen
+    training_config: applications/dynaclr/configs/evaluation/MorphEm-frozen/training_config_morphem_frozen.yaml
+    eval_config: applications/dynaclr/configs/evaluation/MorphEm-frozen/infectomics-annotated.yaml
+
+  # - model_type: foundation
+  #   family: CELL-DINO-frozen
+  #   run: frozen
+  #   ckpt_name: frozen
+  #   training_config: applications/dynaclr/configs/evaluation/CELL-DINO-frozen/training_config_cell_dino_frozen.yaml
+  #   eval_config: applications/dynaclr/configs/evaluation/CELL-DINO-frozen/infectomics-annotated.yaml

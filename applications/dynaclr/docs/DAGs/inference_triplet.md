@@ -1,187 +1,140 @@
-# Inference DAG (Triplet path)
+# Predict per-marker embeddings
 
-Embedding inference for a trained DynaCLR encoder using `TripletDataModule` —
-the **zarr + tracking** path (no parquet). Use this when you want to run a
-trained checkpoint directly over an OME-Zarr store and its `ultrack` tracking,
-rather than the parquet-first `MultiExperimentDataModule` path
-(see [evaluation.md](evaluation.md) for the parquet path).
+`dynaclr predict-triplet` runs a trained checkpoint directly against image and
+tracking zarrs defined by a collection. It writes one AnnData zarr per
+experiment and marker.
 
-The triplet path is the one that carries the patch-rescaling
-(`reference_pixel_size`) and on-the-fly Z-reduction (`z_reduction`) options, so
-a 3D zarr can feed a 2D model without materializing a separate MIP dataset.
-
-## Prerequisites
-
-- A trained checkpoint (`last.ckpt` or a selected epoch) for a
-  `dynaclr.engine.ContrastiveModule`.
-- The inference dataset as an OME-Zarr store with `normalization` metadata in
-  the FOV `zattrs` (so `NormalizeSampled` has per-FOV stats), plus a tracking
-  zarr/CSV directory with `track_id, t, y, x` columns.
-- The model's training pixel size (µm/px) if the inference dataset was acquired
-  at a different magnification — passed as `reference_pixel_size` to rescale
-  each patch to the physical area the model was trained on.
-
-## Step-by-step detail
-
-```
-dataset.zarr        (preprocessed: normalization in FOV zattrs)
-tracking.zarr/CSV   (track_id, t, y, x per cell)
-checkpoint.ckpt     (trained ContrastiveModule)
-  │
-  ├──► predict config (TripletDataModule + ContrastiveModule + EmbeddingWriter)
-  ▼
-viscy predict --config configs/prediction/predict_triplet.yml
-  │  TripletDataModule(fit=False): samples ONE anchor patch per (cell, timepoint)
-  │    - extracts z_range window, yx at initial_yx_patch_size
-  │    - reference_pixel_size → extract larger patch, BatchedZoomd to final_yx
-  │    - z_reduction → BatchedChannelWiseZReductiond collapses Z to 1 (2D model)
-  │  ContrastiveModule.predict_step → backbone features (+ projections)
-  │  EmbeddingWriter accumulates (features, index) and writes one combined store
-  ▼
-embeddings.zarr     (AnnData: .X = embedding_key array, mirrored to obsm["X_backbone"]
-                     /["X_projections"]; obs = fov_name/track_id/t/...)
-  │
-  ▼
-dynaclr split-embeddings --input embeddings.zarr --output-dir embeddings/
-  │  groups rows by obs["experiment"], writes one zarr per experiment
-  │  removes the combined store afterwards
-  ▼
-embeddings/{experiment}.zarr   (one per experiment, informatively named)
-  │
-  ▼
-downstream eval  (reduce-dimensionality, linear classifiers, MMD, pseudotime …)
-                 see evaluation.md / pseudotime.md
+```mermaid
+flowchart LR
+    A["Collection YAML"] --> D["predict-triplet"]
+    B["Checkpoint"] --> D
+    C["Image + tracking zarrs"] --> D
+    D --> E["Per-marker embedding zarrs"]
+    E --> F["Evaluation and analysis"]
 ```
 
-## Pipeline DAG (process dependency)
+Use this workflow for collection-driven inference. The parquet-first prediction
+path used by the full evaluation workflow is documented in
+[evaluation.md](evaluation.md).
 
-```
-predict config + checkpoint + zarr + tracking
-  │
-  ▼
-viscy predict  (GPU, minutes–hours by cell count)
-  │
-  ▼
-split-embeddings  (CPU, ~1 min, I/O bound)
-  │
-  ▼
-downstream eval  (CPU/GPU, per analysis)
-```
+## Inputs
 
-## Key commands
+- An AI-ready image zarr with normalization metadata.
+- A tracking zarr with `track_id`, `t`, `y`, and `x`.
+- A checkpoint compatible with the configured model family.
+- A collection YAML under
+  [`applications/dynaclr/configs/collections/`](../../configs/collections/).
 
-| Step             | Command                                                                     | Input                                   | Output                              |
-| ---------------- | --------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------- |
-| Predict          | `uv run viscy predict --config configs/prediction/predict_triplet.yml`      | predict config + ckpt + zarr + tracking | combined `embeddings.zarr`          |
-| Predict (SLURM)  | `sbatch configs/prediction/predict_triplet.sh`                              | same                                    | combined `embeddings.zarr`          |
-| Split embeddings | `dynaclr split-embeddings --input embeddings.zarr --output-dir embeddings/` | combined zarr with `obs["experiment"]`  | one `{experiment}.zarr` per dataset |
-
-## What lives where
-
-| Data                              | Location                                          | When written          |
-| --------------------------------- | ------------------------------------------------- | --------------------- |
-| Pixel data (TCZYX)                | dataset.zarr on VAST                               | data prep             |
-| Cell tracks (track_id, t, y, x)   | tracking.zarr / CSV on VAST                        | data prep             |
-| Normalization stats (per FOV)     | dataset.zarr FOV `zattrs["normalization"]`         | `viscy preprocess`    |
-| Backbone embeddings               | `embeddings.zarr` → `.X` (+ `obsm["X_backbone"]`)  | `viscy predict`       |
-| Cell index (fov_name/track_id/t)  | `embeddings.zarr` → `obs`                          | `viscy predict`       |
-| Per-experiment embeddings         | `embeddings/{experiment}.zarr`                     | `split-embeddings`    |
-
-## Predict config structure
-
-A ready-to-edit sample lives at
-[`configs/prediction/predict_triplet_2d_from_3d.yml`](../../configs/prediction/predict_triplet_2d_from_3d.yml)
-(the 2D-from-3D case, with `z_reduction` + `reference_pixel_size`). The skeleton
-below annotates the load-bearing fields:
+For each experiment, the collection must provide the data paths and channel to
+marker mapping. Optional `wells` restricts a channel entry to part of a plate.
 
 ```yaml
-seed_everything: 42
-
-trainer:
-  accelerator: gpu
-  devices: 1
-  precision: 32-true
-  inference_mode: true
-  logger: false
-  callbacks:
-    - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
-      init_args:
-        output_path: /path/to/embeddings/embeddings.zarr
-        embedding_key: features        # "projections" for frozen-backbone MLP heads
-        overwrite: true
-
-model:
-  class_path: dynaclr.engine.ContrastiveModule
-  init_args:
-    encoder:
-      class_path: viscy_models.contrastive.ContrastiveEncoder
-      init_args:
-        backbone: convnext_tiny
-        in_channels: 1
-        in_stack_depth: 1              # 2D model — pair with z_reduction below
-        # … must match the trained checkpoint's encoder args …
-
-data:
-  class_path: viscy_data.TripletDataModule
-  init_args:
+name: <collection-name>
+experiments:
+  - name: <experiment-name>
     data_path: /path/to/dataset.zarr
     tracks_path: /path/to/tracking.zarr
-    source_channel: [Phase3D]
-    z_range: [0, 16]                   # window collapsed by z_reduction
-    final_yx_patch_size: [160, 160]
-    reference_pixel_size: 0.1494       # rescale to the model's training pixel size (optional)
-    z_reduction: mip                   # collapse z_range to 1 slice for a 2D model (optional)
-    batch_size: 400
-    num_workers: 0                     # REQUIRED for predict (see Notes)
-    predict_cells: false               # true + include_fov_names/include_track_ids to subset
-    normalizations:
-      - class_path: viscy_transforms.NormalizeSampled
-        init_args:
-          keys: [Phase3D]
-          subtrahend: mean
-          divisor: std
-    augmentations: []                  # MUST be empty for deterministic predict
-
-ckpt_path: /path/to/checkpoint/last.ckpt
-return_predictions: false              # writer persists to zarr; don't hold in memory
+    channels:
+      - name: Phase3D
+        marker: Phase3D
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+        wells: [A/2, B/2]
+    perturbation_wells:
+      control: [A/1, B/1]
+      perturbed: [A/2, B/2]
+    interval_minutes: 30.0
+    pixel_size_xy_um: 0.1494
+    pixel_size_z_um: 0.174
 ```
 
-## Notes
+## Run
 
-- **`num_workers: 0` is required for the predict path.** `HCSDataModule`/
-  `TripletDataModule` predict does not use `mmap_preload`, and >0 workers risks a
-  zarr-fork deadlock. This matches the dynacell predict overlay.
-- **`augmentations: []`** — predict must be deterministic. The datamodule still
-  applies `normalizations` (and the `reference_pixel_size` rescale + `z_reduction`
-  collapse) at predict time via `_no_augmentation_transform`; only random
-  augmentations are dropped.
-- **2D from 3D without a MIP dataset.** Set `z_reduction: mip` (or `center`) to
-  collapse the extracted `z_range` window to a single slice. Label-free channels
-  (resolved by name via `parse_channel_name`) take the center slice; all other
-  channels are max-projected. Pair with `in_stack_depth: 1` on the encoder.
-  Center the `z_range` on the focus plane to control which planes are collapsed.
-- **Pixel-size rescaling.** When the inference dataset's pixel size differs from
-  the model's training pixel size, set `reference_pixel_size` (µm/px) so a larger
-  patch covering the same physical area is extracted and bilinearly resized to
-  `final_yx_patch_size`. Leave unset for same-resolution datasets.
-- **`embedding_key`.** Use `features` for the backbone output (most models) and
-  `projections` for frozen-backbone MLP-head models, which writes
-  `obsm["X_projections"]` instead.
-- **`split-embeddings` requires `obs["experiment"]`** on the combined store. For a
-  single-experiment predict run the split step is optional — the combined
-  `embeddings.zarr` is already per-experiment.
-- Downstream analyses (dimensionality reduction, linear classifiers, MMD,
-  pseudotime) consume the per-experiment zarrs and are documented in
-  [evaluation.md](evaluation.md) and [pseudotime.md](pseudotime.md).
+```sh
+uv run dynaclr predict-triplet \
+  -c applications/dynaclr/configs/collections/<collection>.yml \
+  --checkpoint /path/to/checkpoint.ckpt \
+  --model-family <model-family> \
+  --run <run-name> \
+  --ckpt-name <checkpoint-name> \
+  --datasets-root /hpc/projects/intracellular_dashboard/organelle_dynamics \
+  --z-window 10 \
+  --focus-channel Phase3D \
+  --z-focus-offset 0.3 \
+  --z-reduction mip \
+  --reference-pixel-size 0.1494 \
+  --reference-pixel-size-z-um 0.174 \
+  --yx-patch-size 160 160 \
+  --batch-size 32 \
+  --num-workers 0
+```
 
-## Triplet vs parquet (MultiExperimentDataModule)
+Important options:
 
-| Aspect              | Triplet path (this doc)                          | Parquet path (evaluation.md)                       |
-| ------------------- | ------------------------------------------------ | -------------------------------------------------- |
-| Aspect              | Triplet path (this doc)                                           | Parquet path (evaluation.md)                       |
-| ------------------- | ------------------------------------------------------------------ | -------------------------------------------------- |
-| Data entry point    | `data_path` zarr + `tracks_path`                                   | `cell_index.parquet` (built + preprocessed)        |
-| Setup cost          | reads tracking + zarr shape at init                                | reads parquet only at init                         |
-| Focus / z window    | explicit `z_range` or per-FOV `z_extraction_window` from `focus_slice`; `z_reduction` collapses | per-FOV `z_extraction_window` from `focus_slice`   |
-| Pixel rescaling     | `reference_pixel_size`                           | `reference_pixel_size_xy_um`                       |
-| Best for            | ad-hoc predict over a single zarr + tracking     | large multi-experiment runs, reproducible recipes  |
+| Option | Purpose |
+| --- | --- |
+| `--markers SEC61B,TOMM20` | Predict only the listed markers. |
+| `--no-labelfree` | Skip phase and brightfield channels. |
+| `--z-window` | Focus-centered window width in reference-grid slices. |
+| `--z-reduction mip|center` | Collapse the selected z window for a 2D model. |
+| `--reference-pixel-size` | Rescale crops to the model's training pixel size. |
+| `--reference-pixel-size-z-um` | Convert `--z-window` to the native slice count covering the same physical depth. |
+| `--no-enrich-obs` | Do not append collection metadata to output `obs`. |
+
+For example, `--z-window 10 --reference-pixel-size-z-um 0.174`
+defines a 1.74 µm slab. A dataset sampled at 0.288 µm/slice reads 6 native
+slices rather than 10, then resizes those 6 slices back to the 10-slice
+reference grid with nearest-neighbor interpolation before augmentation and
+MIP. The native count is rounded to the nearest whole slice. Triplet and
+MultiExperiment use this same sequence.
+Physical Z normalization requires the focus-centered `--z-window` form;
+absolute `--z-range` indices retain their literal native-slice meaning.
+
+Keep `--num-workers 0`; multiprocessing can deadlock while reading zarr during
+prediction. Prediction is deterministic and does not apply training
+augmentations.
+
+## Outputs
+
+```text
+<datasets-root>/<dataset>/2-phenotyping/predictions/
+└── <model-family>/
+    └── <run-name>/
+        └── <checkpoint-name>/
+            ├── Phase3D.zarr
+            ├── SEC61B.zarr
+            └── <marker>.zarr
+```
+
+Each output is an AnnData store:
+
+- `.X`: selected embedding representation;
+- `.obs`: cell identifiers, tracking fields, and collection metadata;
+- `.uns`: model, run, checkpoint, collection, marker, and channel provenance.
+
+The output path is derived from the collection and provenance flags. Use the
+same `model-family`, `run`, and `checkpoint-name` in downstream launchers.
+
+## Batch prediction
+
+For multiple collections or checkpoints, use the matrix runner instead of
+writing per-dataset shell loops:
+
+```sh
+uv run dynaclr run-matrix \
+  -c applications/dynaclr/configs/matrix/<matrix>.yml \
+  --stages predict \
+  --dry-run
+```
+
+Inspect the dry run, then rerun without `--dry-run`. See
+[evaluation_matrix.md](evaluation_matrix.md).
+
+## Validation
+
+- Confirm one zarr was written for every requested experiment-marker pair.
+- Run `uv run dynaclr info <marker>.zarr` and verify row count, feature count,
+  `obs` metadata, and provenance.
+- Treat embeddings from different checkpoints as different feature spaces.
+
+Continue with [evaluation.md](evaluation.md) to evaluate the frozen outputs.

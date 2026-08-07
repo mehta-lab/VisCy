@@ -7,11 +7,28 @@ import pandas as pd
 from dynaclr.evaluation.evaluate_config import WitnessGmmExperiment, WitnessGmmLabelsConfig
 from dynaclr.evaluation.linear_classifiers.witness_gmm_labels import (
     _well_prefix_mask,
-    build_marker_annotation,
+    compute_marker_scores,
     generate_witness_gmm_annotation,
+    label_marker,
     obs_filter_mask,
 )
 from viscy_utils.evaluation.annotation import load_annotation_anndata
+
+
+def build_marker_annotation(adata, experiments, config):
+    """Test helper: compose the two-pass Stage-A labeling (all conditions
+    treated as significant unless the raw MMD gate would exclude them).
+
+    Mirrors the run-level flow for a single marker: score → per-condition MMD
+    p-value → treat p ≤ threshold as significant → GMM-label. Returns None when
+    the marker has no references or no condition survives both gates.
+    """
+    ms = compute_marker_scores(adata, experiments, config)
+    if ms is None:
+        return None
+    significant = {c for c, p in ms.cond_pvalues.items() if p <= config.mmd_pvalue_threshold}
+    result = label_marker(ms, significant, config)
+    return result.frame if result is not None else None
 
 
 def _make_separable_embeddings(
@@ -58,7 +75,7 @@ def _make_separable_embeddings(
     return ad.AnnData(X=X, obs=obs, var=var)
 
 
-def _config(output_path, experiment="exp_A", embeddings_zarr="unused.zarr"):
+def _config(output_dir, experiment="exp_A", embeddings_zarr="unused.zarr", annotation_format="csv"):
     return WitnessGmmLabelsConfig(
         experiments=[
             WitnessGmmExperiment(
@@ -72,7 +89,8 @@ def _config(output_path, experiment="exp_A", embeddings_zarr="unused.zarr"):
         label_column="infection_state",
         class_map={"positive": "infected", "negative": "uninfected"},
         condition_column="perturbation",
-        output_path=str(output_path),
+        output_dir=str(output_dir),
+        annotation_format=annotation_format,
     )
 
 
@@ -132,11 +150,30 @@ def test_generate_writes_annotation_file(tmp_path):
     """generate_witness_gmm_annotation writes a parquet/csv annotation file."""
     zarr_path = tmp_path / "embeddings.zarr"
     _make_separable_embeddings().write_zarr(zarr_path)
-    out = generate_witness_gmm_annotation(_config(tmp_path / "labels.parquet", embeddings_zarr=str(zarr_path)))
+    out = generate_witness_gmm_annotation(
+        _config(tmp_path / "ckpt", embeddings_zarr=str(zarr_path), annotation_format="parquet")
+    )
     assert out.exists()
+    assert out == tmp_path / "ckpt" / "labels" / "viral_sensor_infection_state.parquet"
     df = pd.read_parquet(out)
     assert "infection_state" in df.columns
     assert set(df["infection_state"].unique()) == {"infected", "uninfected"}
+    # Full tracking metadata carried through (not just exp/fov/id/t/state).
+    assert {"track_id", "marker", "perturbation"}.issubset(df.columns)
+    # Per-cell provenance: raw witness score + GMM posterior (confidence weight).
+    assert {"witness_score", "gmm_posterior"}.issubset(df.columns)
+    # Control cells (uninfected) are the clean reference → posterior 1.0; positives ∈ (0, 1].
+    ctrl = df["infection_state"] == "uninfected"
+    assert (df.loc[ctrl, "gmm_posterior"] == 1.0).all()
+    assert (df.loc[~ctrl, "gmm_posterior"] > 0).all() and (df.loc[~ctrl, "gmm_posterior"] <= 1.0).all()
+    # Diagnostic plots written alongside the labels.
+    plots = tmp_path / "ckpt" / "labels" / "plots"
+    assert (plots / "witness_gmm_viral_sensor_DENV.png").exists()
+    assert (plots / "mmd_null_viral_sensor_DENV.png").exists()
+    assert (plots / "remodeling_vs_time_viral_sensor.png").exists()
+    # Population-level provenance sidecar.
+    mmd = pd.read_csv(tmp_path / "ckpt" / "labels" / "viral_sensor_infection_state_mmd.csv")
+    assert {"marker", "condition", "mmd2", "p_raw", "p_adjusted", "mmd_significant"}.issubset(mmd.columns)
 
 
 def test_annotation_joins_by_key_under_shuffle(tmp_path):
@@ -145,7 +182,7 @@ def test_annotation_joins_by_key_under_shuffle(tmp_path):
     adata = _make_separable_embeddings()
     zarr_path = tmp_path / "embeddings.zarr"
     adata.write_zarr(zarr_path)
-    out = generate_witness_gmm_annotation(_config(tmp_path / "labels.csv", embeddings_zarr=str(zarr_path)))
+    out = generate_witness_gmm_annotation(_config(tmp_path / "ckpt", embeddings_zarr=str(zarr_path)))
 
     # Shuffle the embedding rows, then join the annotation back by key.
     rng = np.random.default_rng(3)
@@ -176,6 +213,36 @@ def test_build_marker_annotation_none_when_reference_missing(tmp_path):
         marker_filters=["viral_sensor"],
         label_column="infection_state",
         class_map={"positive": "infected", "negative": "uninfected"},
-        output_path=str(tmp_path / "labels.csv"),
+        output_dir=str(tmp_path / "ckpt"),
     )
+    assert build_marker_annotation(adata, cfg.experiments, cfg) is None
+
+
+def test_build_marker_annotation_mmd_gate_skips_nonsignificant(tmp_path):
+    """When control and perturbed clouds are indistinguishable, the MMD
+    significance gate skips the condition (no positives → None)."""
+    rng = np.random.default_rng(0)
+    n = 120
+    wells = ["A/1"] * n + ["B/2"] * n
+    total = len(wells)
+    # Both wells drawn from the SAME distribution — no real separation.
+    X = rng.standard_normal((total, 16)).astype(np.float32)
+    well_to_pert = {"A/1": "uninfected", "B/2": "DENV"}
+    obs = pd.DataFrame(
+        {
+            "fov_name": [f"{w}/000000" for w in wells],
+            "id": list(range(total)),
+            "t": [i % 5 for i in range(total)],
+            "track_id": list(range(total)),
+            "experiment": ["exp_A"] * total,
+            "marker": ["viral_sensor"] * total,
+            "perturbation": [well_to_pert[w] for w in wells],
+        }
+    )
+    for col in obs.select_dtypes("string").columns:
+        obs[col] = obs[col].astype(object)
+    obs.index = pd.Index([str(i) for i in range(total)], dtype=object)
+    adata = ad.AnnData(X=X, obs=obs, var=pd.DataFrame(index=[str(i) for i in range(16)]))
+
+    cfg = _config(tmp_path / "labels.csv")
     assert build_marker_annotation(adata, cfg.experiments, cfg) is None

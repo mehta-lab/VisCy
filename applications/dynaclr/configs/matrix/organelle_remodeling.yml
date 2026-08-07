@@ -1,0 +1,51 @@
+# Organelle-remodeling model matrix — persistent, iterated on over time.
+#
+# ONE merged collection (organelle_remodeling.yml = 7 datasets: SEC61B/TOMM20/G3BP1
+# under ZIKV/DENV) run through MULTIPLE models. One row per MODEL; run-matrix fans
+# out predict per experiment inside the collection and skips already-embedded ones.
+#
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --dry-run
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml   # predict,eval
+#
+# Progressive: skip-existing is the DEFAULT — datasets already embedded for a row's
+# (model_family, run, ckpt_name) are pruned; append a dataset to the collection and
+# re-run → only it embeds. --overwrite forces a full re-embed (e.g. after changing
+# predict_flags). NOTE: 2026_04_21_A549_G3BP1_DENV is deferred (not on VAST yet).
+
+defaults:
+  collection: applications/dynaclr/configs/collections/organelle_remodeling.yml
+  # OUTPUT root: embeddings + 2-phenotyping/ land here (intracellular_dashboard).
+  # This is independent of the INPUT root — the collection's own datasets_root
+  # (VAST) still resolves each experiment's data_path/tracks_path for reading.
+  datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+  # Organelle reporters + label-free. Sensor markers differ by virus (pAL17 ZIKV /
+  # pAL40 DENV); include both to embed the sensor across all datasets, or drop them
+  # to embed only the organelle question.
+  markers: [SEC61B, TOMM20, G3BP1, Phase3D, pAL17, pAL40]
+  # Focus-centered Z: window WIDTH (slices) centered per-FOV on the focus plane
+  # (from focus_slice zattrs). z_reduction mip → fluorescence max-projected,
+  # label-free (Phase3D) center slice. z_focus_offset = fraction below focus.
+  predict_flags:
+    z_window: 16
+    focus_channel: Phase3D
+    z_focus_offset: 0.3
+    z_reduction: mip
+    reference_pixel_size: 0.1494
+    reference_pixel_size_z_um: 0.174
+
+models:
+  # --- DynaCLR-2D-MIP-BagOfChannels (single-marker), already trained ---
+  # Lightning nests the checkpoint under {run}/{PROJECT}/{wandb_id}/checkpoints/, so
+  # give the explicit path (the derived {run}/checkpoints/ default is empty).
+  - train_sbatch: applications/dynaclr/configs/training/DynaCLR-2D/DynaCLR-2D-MIP-BagOfChannels-single-marker.sh
+    ckpt_name: epoch105-step84800
+    checkpoint: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/DynaCLR-2D-MIP-BagOfChannels/jbrwhzr3/checkpoints/epoch=105-step=84800.ckpt
+    eval_config: applications/dynaclr/configs/evaluation/DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler/infectomics-annotated.yaml
+
+  # --- MorphEm (frozen ViT-S foundation baseline) over the SAME datasets ---
+  - model_type: foundation
+    family: MorphEm-frozen
+    run: frozen
+    ckpt_name: frozen
+    training_config: applications/dynaclr/configs/evaluation/MorphEm-frozen/training_config_morphem_frozen.yaml
+    eval_config: applications/dynaclr/configs/evaluation/MorphEm-frozen/infectomics-annotated.yaml

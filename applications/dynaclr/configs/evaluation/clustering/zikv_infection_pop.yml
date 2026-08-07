@@ -1,0 +1,73 @@
+# Proof-of-principle: recover uninfected-vs-infected cell state from DynaCLR
+# embeddings per marker, with little/no manual annotation.
+#
+# Two annotation-frugal arms per marker:
+#   - KNN (semi-supervised): train on the sparse human `infection_state` labels
+#     (GroupKFold by fov_name for honest metrics), then propagate to all cells.
+#   - HDBSCAN (unsupervised): sweep {raw X, X_pca, umap2d, phate2d}, score vs labels.
+# Plus time evidence (t / hours_post_perturbation) and qualitative image crops
+# split into infected/ vs uninfected/.
+#
+# See .ed_planning/dynaclr/clustering/PLAN.md
+
+title: "Infection-state clustering — proof of principle"
+# Ground-truth label column (human annotation, sparse) baked into embedding obs.
+label_column: infection_state
+positive_class: infected
+negative_class: uninfected
+# The existing linear-classifier column, used only as a baseline comparison.
+baseline_column: predicted_infection_state
+# Grouping column for leakage-free CV (no track spans train/val).
+group_column: fov_name
+
+# Supervised KNN arm.
+knn:
+  k_grid: [5, 15, 30]
+  n_splits: 5
+
+# Unsupervised HDBSCAN arm.
+hdbscan:
+  # Which representations to cluster. "X_pca" = precomputed 32-d obsm,
+  # "umap2d"/"phate2d" = computed here. Raw 768-d "X" is intentionally
+  # excluded: density clustering on 28k x 768 is O(n^2) and does not finish
+  # in reasonable time, and it yields only noise (see PLAN dead-ends).
+  spaces: [X_pca, umap2d, phate2d]
+  min_cluster_size: [50, 100, 200]
+  min_samples: [5, 25]
+  # The plotted/montaged clustering is picked by max well_separation (§5,
+  # control-vs-infected well enrichment) among configs that are DISPLAYABLE:
+  # noise fraction and cluster count capped so a 72-cluster / 80%-noise config
+  # can't win via many tiny pure clusters.
+  select_max_noise_frac: 0.5
+  select_max_clusters: 20
+
+# Qualitative single-cell image samples.
+samples:
+  n_samples: 24          # per class (infected / uninfected)
+  patch_size: 160        # y/x crop side length (pixels)
+  z_window: 5            # +/- slices MIP'd for fluorescence markers
+  # Show the viral-sensor (mCherry) channel beside each marker crop so the
+  # infection reporter is always visible. Skipped when marker == this channel.
+  pair_channel: "raw mCherry EX561 EM600-37"
+  pair_mip: true
+
+random_seed: 42
+
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/clustering_pop
+
+# One entry per marker. `image_zarr` is the source pixel store; `image_channel`
+# is the zarr channel to crop; `mip` = MIP over the z-window (fluorescence) vs
+# single focus slice (Phase3D).
+datasets:
+  - marker: viral_sensor
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/embeddings/2025_07_24_A549_viral_sensor_ZIKV.zarr
+    image_zarr: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    # viral_sensor is the mCherry channel (GFP is the organelle markers). This
+    # was previously mis-set to GFP, which cropped the wrong channel.
+    image_channel: "raw mCherry EX561 EM600-37"
+    mip: true
+  - marker: Phase3D
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated/embeddings/2025_07_24_A549_Phase3D_ZIKV.zarr
+    image_zarr: /hpc/projects/organelle_phenotyping/datasets/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+    image_channel: "Phase3D"
+    mip: false

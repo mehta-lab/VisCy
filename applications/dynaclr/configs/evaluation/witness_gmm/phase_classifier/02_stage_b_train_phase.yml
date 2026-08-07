@@ -1,0 +1,34 @@
+# Stage B — train the PHASE classifier from the SEC61B witness-GMM labels
+# (teacher/student: labels computed on SEC61B, classifier trained on Phase3D).
+#
+# The Stage-A annotation file is keyed by (fov_name, id); the Phase3D embeddings
+# share the same ultrack cell keys, so the SEC61B-derived organelle_remodeling_state
+# label joins onto the matching Phase3D cells. marker_filters: [Phase3D] restricts
+# training to the Phase3D embeddings. Only the SEC61B wells (A/2, B/2) carry labels,
+# so cells in the other wells drop out of training (NaN label) — as intended.
+#
+# The pipeline (StandardScaler + LogisticRegression C=1.0, class_weight=balanced)
+# matches Soorya's remodeling_state_Phase3D_ZIKV_Mantisv2 classifier.
+#
+# Run: dynaclr run-linear-classifiers -c 02_stage_b_train_phase.yml
+
+embeddings_path: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800/Phase3D.zarr"
+output_dir: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/witness_gmm_phase_classifier/stage_b_phase"
+
+label_source: annotations
+annotations:
+  - experiment: "2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV"
+    path: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/witness_gmm_phase_classifier/labels/SEC61B_organelle_remodeling_state.csv"
+tasks:
+  - task: organelle_remodeling_state
+    marker_filters: [Phase3D]
+use_scaling: true
+use_pca: false
+split_train_data: 0.8
+random_seed: 42
+# Track-level split — no track lands in both train/val (temporal-contrastive
+# SSL leaks on cell-level splits).
+split_groups_by:
+  - experiment
+  - fov_name
+  - track_id

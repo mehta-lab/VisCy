@@ -6,6 +6,9 @@
 #     (label-free channels -> center slice, others -> max projection).
 #   - reference_pixel_size: rescale each patch to the model's training pixel size
 #     when the inference dataset was acquired at a different magnification.
+#   - reference_pixel_size_z_um: convert the reference-grid Z window to the
+#     native slice count covering the same physical depth, then resize it back
+#     to the reference Z grid before projection.
 #
 # See docs/DAGs/inference_triplet.md for the full pipeline.
 #
@@ -57,13 +60,15 @@ data:
     tracks_path: #TODO point to the path to the tracks (e.g. /track_test.zarr)
     source_channel:
       - Phase3D
-    z_range: [15, 45]                # 3D window; collapsed to 1 slice by z_reduction.
-                                     # Center it on the focus plane to control which planes collapse.
+    z_extraction_window: 10          # Reference-grid slices, centered per FOV.
+    focus_channel: Phase3D
+    z_focus_offset: 0.3
     z_reduction: mip                 # "mip" (max projection) or "center" (center slice).
                                      # Label-free channels always take the center slice;
                                      # others are max-projected. This sets the fallback only.
     reference_pixel_size: 0.1494     # µm/px of the model's TRAINING dataset. Remove (or set
                                      # null) when the inference dataset is at the same resolution.
+    reference_pixel_size_z_um: 0.174 # µm/slice of the model's training reference grid.
     initial_yx_patch_size: [160, 160]  # ignored when reference_pixel_size is set (computed from ratio)
     final_yx_patch_size: [160, 160]  # patch size fed to the model after rescale + z_reduction
     batch_size: 32
