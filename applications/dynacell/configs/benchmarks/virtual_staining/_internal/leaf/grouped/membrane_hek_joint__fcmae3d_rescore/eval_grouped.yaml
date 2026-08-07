@@ -1,0 +1,42 @@
+# @package _global_
+# Narrowed sibling of grouped/membrane_hek_a549xy: ONLY the joint-trained
+# VSCyto3D condition, whose prediction store was rewritten by the Phase 18 W4
+# re-predict on 2026-08-07 (epoch=148-step=78970-loss=0.374). The other five
+# conditions in that leaf are unchanged.
+#
+# Every global below -- including the predicted-nuclei carve seeds, the disabled
+# cross_condition_probe and segmentation.nuclei_channel_name: Nuclei_prediction --
+# is copied from that parent and is why this condition cannot be folded into
+# membrane_joint__fcmae3d_rescore. See the parent for the full rationale on what
+# the predicted seeds mean for HEK Dice/IoU/AP.
+#
+# Submit with EVERY pred_* force_recompute flag, same reason as the sibling leaf.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei_prediction
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: vscyto3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/hek__a549xy
