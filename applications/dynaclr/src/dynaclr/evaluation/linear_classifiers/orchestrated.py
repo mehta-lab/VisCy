@@ -28,11 +28,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
 
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
-from viscy_utils.evaluation.linear_classifier import train_linear_classifier
+from viscy_utils.evaluation.linear_classifier import (
+    group_ids_from_obs,
+    group_val_split,
+    train_linear_classifier,
+)
 
 matplotlib.use("Agg")
 
@@ -40,6 +43,105 @@ if TYPE_CHECKING:
     import anndata as ad
 
     from dynaclr.evaluation.evaluate_config import LinearClassifiersStepConfig
+
+
+def _annotation_run_specs(
+    config: LinearClassifiersStepConfig,
+    adata: ad.AnnData,
+) -> list[tuple[str, str | None]]:
+    """Expand (task, marker_filter) runs for the annotation label source.
+
+    Mirrors the original behavior: for each task, ``marker_filters=None``
+    expands to every unique ``obs["marker"]``; a list runs one per marker.
+    """
+    specs: list[tuple[str, str | None]] = []
+    for task_spec in config.tasks:
+        runs = (
+            task_spec.marker_filters
+            if task_spec.marker_filters is not None
+            else sorted(adata.obs["marker"].unique().tolist())
+        )
+        specs.extend((task_spec.task, m) for m in runs)
+    return specs
+
+
+def _build_labeled_adata(
+    config: LinearClassifiersStepConfig,
+    adata: ad.AnnData,
+    task: str,
+    marker_filter: str | None,
+) -> ad.AnnData | None:
+    """Return the marker-filtered, labeled AnnData for one run, or None if empty.
+
+    Joins per-experiment annotation files (CSV or parquet) and keeps rows with a
+    valid (non-``unknown``) label. Witness→GMM pseudo-labels are just annotation
+    files produced upstream by the ``witness-gmm-labels`` command, so they flow
+    through this same path.
+    """
+    import anndata as ad
+
+    if marker_filter is not None:
+        adata_task = adata[adata.obs["marker"] == marker_filter]
+        click.echo(f"  Filtered to {adata_task.n_obs} cells with marker={marker_filter}")
+    else:
+        adata_task = adata
+    if adata_task.n_obs == 0:
+        return None
+
+    # Join annotation files per experiment and collect valid-labeled subsets.
+    annotated_parts: list[ad.AnnData] = []
+    for ann_src in config.annotations:
+        exp_mask = adata_task.obs["experiment"] == ann_src.experiment
+        n_exp = int(exp_mask.sum())
+        if n_exp == 0:
+            click.echo(f"  Experiment {ann_src.experiment!r}: no matching cells, skipping.")
+            continue
+
+        adata_exp = adata_task[exp_mask].copy()
+        ann_path = Path(ann_src.path)
+        if not ann_path.exists():
+            raise FileNotFoundError(f"Annotation CSV not found: {ann_src.path}")
+
+        try:
+            adata_exp = load_annotation_anndata(adata_exp, str(ann_path), task)
+        except KeyError:
+            click.echo(f"  Experiment {ann_src.experiment!r}: task {task!r} not in {ann_path.name}, skipping.")
+            continue
+
+        valid_mask = adata_exp.obs[task].notna() & (adata_exp.obs[task] != "unknown")
+        n_valid = int(valid_mask.sum())
+        if n_valid == 0:
+            click.echo(f"  Experiment {ann_src.experiment!r}: no valid labels for {task!r}, skipping.")
+            continue
+
+        annotated_parts.append(adata_exp[valid_mask])
+        click.echo(f"  Experiment {ann_src.experiment!r}: {n_valid}/{n_exp} labeled cells")
+
+    if not annotated_parts:
+        return None
+    return annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
+
+
+def _apply_control_normalization(adata, bin_hours: float) -> None:
+    """Robustly z-score ``adata.X`` in place against per-plate, per-HPI-bin controls.
+
+    Uses ``uninfected`` cells of each ``experiment`` as the reference. Requires
+    ``perturbation`` and ``hours_post_perturbation`` in obs.
+    """
+    from viscy_utils.evaluation.control_normalization import control_reference_stats
+
+    for col in ("perturbation", "hours_post_perturbation"):
+        if col not in adata.obs.columns:
+            raise ValueError(f"control_normalize requires obs column {col!r}, not found.")
+
+    refs = control_reference_stats(adata, bin_hours=bin_hours)
+    hpi = adata.obs["hours_post_perturbation"].to_numpy()
+    x = np.asarray(adata.X, dtype=np.float32)
+    for plate, ref in refs.items():
+        m = (adata.obs["experiment"] == plate).to_numpy()
+        x[m] = ref.apply(x[m], hpi[m])
+    adata.X = x
+    click.echo(f"  Control-normalized {len(refs)} plate(s) at {bin_hours:g}h HPI bins")
 
 
 def run_linear_classifiers(
@@ -86,6 +188,9 @@ def run_linear_classifiers(
             "Re-run the predict step with the updated pipeline to include metadata."
         )
 
+    if config.control_normalize:
+        _apply_control_normalization(adata, config.control_normalize_bin_hours)
+
     all_metrics: list[dict] = []
     # val_outputs_by_task: task → list of per-marker dicts for plotting
     val_outputs_by_task: dict[str, list[dict[str, Any]]] = {}
@@ -99,161 +204,98 @@ def run_linear_classifiers(
     # Collect trained (task, marker, pipeline) tuples for publish_dir promotion.
     trained_pipelines: list[tuple[str, str, Any]] = []
 
-    for task_spec in config.tasks:
-        task = task_spec.task
-        # Expand marker_filters: None → all unique markers; list → one run per specified marker
-        runs: list[str] = (
-            task_spec.marker_filters
-            if task_spec.marker_filters is not None
-            else sorted(adata.obs["marker"].unique().tolist())
-        )
+    # Build the list of (task, marker_filter) runs and, per run, resolve the
+    # labeled AnnData from the annotation files.
+    run_specs = _annotation_run_specs(config, adata)
+
+    for task in {t for t, _ in run_specs}:
         val_outputs_by_task[task] = []
 
-        for marker_filter in runs:
-            label = f"{task}" + (f" (marker={marker_filter})" if marker_filter else " (all markers)")
-            click.echo(f"\n{'=' * 60}")
-            click.echo(f"Task: {label}")
-            click.echo("=" * 60)
+    for task, marker_filter in run_specs:
+        label = f"{task}" + (f" (marker={marker_filter})" if marker_filter else " (all markers)")
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Task: {label}")
+        click.echo("=" * 60)
 
-            # Filter by marker if specified
-            if marker_filter is not None:
-                adata_task = adata[adata.obs["marker"] == marker_filter]
-                click.echo(f"  Filtered to {adata_task.n_obs} cells with marker={marker_filter}")
-            else:
-                adata_task = adata
+        combined = _build_labeled_adata(config, adata, task, marker_filter)
+        if combined is None or combined.n_obs == 0:
+            click.echo(f"  No labeled data for {label}, skipping.")
+            continue
 
-            if adata_task.n_obs == 0:
-                click.echo(f"  No cells found for marker_filter={marker_filter!r}, skipping.")
-                continue
+        class_dist = combined.obs[task].value_counts().to_dict()
+        click.echo(f"  Total: {combined.n_obs} cells, class distribution: {class_dist}")
 
-            # Join annotation CSVs per experiment and collect annotated subsets
-            annotated_parts: list[ad.AnnData] = []
-            for ann_src in config.annotations:
-                exp_mask = adata_task.obs["experiment"] == ann_src.experiment
-                n_exp = int(exp_mask.sum())
-                if n_exp == 0:
-                    click.echo(f"  Experiment {ann_src.experiment!r}: no matching cells, skipping.")
-                    continue
+        # Build the per-cell group id when split_groups_by is set, so
+        # GroupShuffleSplit can guarantee no group (e.g. track) lands
+        # in both train and val. This kills track-level temporal
+        # leakage that inflates val AUROC for temporal-contrastive
+        # SSL embeddings.
+        groups = group_ids_from_obs(combined.obs, config.split_groups_by)
+        if groups is not None:
+            click.echo(f"  Group-aware split keyed on {config.split_groups_by}: {pd.unique(groups).size} unique groups")
 
-                adata_exp = adata_task[exp_mask].copy()
-                ann_path = Path(ann_src.path)
-                if not ann_path.exists():
-                    raise FileNotFoundError(f"Annotation CSV not found: {ann_src.path}")
+        classifier_params = {
+            "max_iter": config.max_iter,
+            "class_weight": config.class_weight,
+            "solver": config.solver,
+            "random_state": config.random_seed,
+        }
 
-                try:
-                    adata_exp = load_annotation_anndata(adata_exp, str(ann_path), task)
-                except KeyError:
-                    click.echo(f"  Experiment {ann_src.experiment!r}: task {task!r} not in {ann_path.name}, skipping.")
-                    continue
-
-                valid_mask = adata_exp.obs[task].notna() & (adata_exp.obs[task] != "unknown")
-                n_valid = int(valid_mask.sum())
-                if n_valid == 0:
-                    click.echo(f"  Experiment {ann_src.experiment!r}: no valid labels for {task!r}, skipping.")
-                    continue
-
-                annotated_parts.append(adata_exp[valid_mask])
-                click.echo(f"  Experiment {ann_src.experiment!r}: {n_valid}/{n_exp} labeled cells")
-
-            if not annotated_parts:
-                click.echo(f"  No annotated data found for task {task!r}, skipping.")
-                continue
-
-            combined = annotated_parts[0] if len(annotated_parts) == 1 else ad.concat(annotated_parts, join="outer")
-            class_dist = combined.obs[task].value_counts().to_dict()
-            click.echo(f"  Total: {combined.n_obs} cells, class distribution: {class_dist}")
-
-            # Build the per-cell group id when split_groups_by is set, so
-            # GroupShuffleSplit can guarantee no group (e.g. track) lands
-            # in both train and val. This kills track-level temporal
-            # leakage that inflates val AUROC for temporal-contrastive
-            # SSL embeddings.
-            groups: np.ndarray | None = None
-            if config.split_groups_by:
-                missing = [c for c in config.split_groups_by if c not in combined.obs.columns]
-                if missing:
-                    raise ValueError(f"split_groups_by columns missing from obs: {missing}")
-                group_series = combined.obs[config.split_groups_by[0]].astype(str)
-                for col in config.split_groups_by[1:]:
-                    group_series = group_series + "::" + combined.obs[col].astype(str)
-                groups = group_series.to_numpy()
-                click.echo(
-                    f"  Group-aware split keyed on {config.split_groups_by}: {pd.unique(groups).size} unique groups"
-                )
-
-            classifier_params = {
-                "max_iter": config.max_iter,
-                "class_weight": config.class_weight,
-                "solver": config.solver,
-                "random_state": config.random_seed,
-            }
-
-            try:
-                pipeline, metrics, val_outputs = train_linear_classifier(
-                    adata=combined,
-                    task=task,
-                    use_scaling=config.use_scaling,
-                    use_pca=config.use_pca,
-                    n_pca_components=config.n_pca_components,
-                    classifier_params=classifier_params,
-                    split_train_data=config.split_train_data,
-                    random_seed=config.random_seed,
-                    groups=groups,
-                )
-            except ValueError as exc:
-                click.echo(f"  Skipping {label}: {exc}")
-                continue
-
-            # Save pipeline for append-predictions step. Always write to the
-            # local staging dir; promotion to publish_dir (if configured) happens
-            # atomically after all classifiers finish training.
-            pipeline_filename = f"{task}_{marker_filter}.joblib"
-            joblib.dump(pipeline, pipelines_dir / pipeline_filename)
-            pipeline_manifest.append({"task": task, "marker_filter": marker_filter, "path": pipeline_filename})
-            trained_pipelines.append((task, marker_filter, pipeline))
-            click.echo(f"  Pipeline saved: {pipeline_filename}")
-
-            # Replay the same split to recover val obs (hours_post_perturbation).
-            # Must mirror train_linear_classifier exactly — same seed, same
-            # splitter (Group-aware when groups is set, cell-level otherwise).
-            y_full = combined.obs[task].to_numpy(dtype=object)
-            val_hours: np.ndarray | None = None
-            if config.split_train_data < 1.0 and "hours_post_perturbation" in combined.obs.columns:
-                try:
-                    idx = np.arange(len(combined))
-                    if groups is not None:
-                        gss = GroupShuffleSplit(
-                            n_splits=1,
-                            train_size=config.split_train_data,
-                            random_state=config.random_seed,
-                        )
-                        _, idx_val = next(gss.split(idx, y_full, groups=groups))
-                    else:
-                        _, idx_val = train_test_split(
-                            idx,
-                            train_size=config.split_train_data,
-                            random_state=config.random_seed,
-                            stratify=y_full,
-                            shuffle=True,
-                        )
-                    val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
-                except ValueError:
-                    click.echo("  Could not replay stratified split for val_hours; F1-over-time plot skipped.")
-
-            row = {
-                "task": task,
-                "marker_filter": marker_filter,
-                "n_samples": combined.n_obs,
-                **metrics,
-            }
-            all_metrics.append(row)
-            val_outputs_by_task[task].append(
-                {
-                    "marker_filter": marker_filter,
-                    "val_hours": val_hours,
-                    **val_outputs,
-                }
+        try:
+            pipeline, metrics, val_outputs = train_linear_classifier(
+                adata=combined,
+                task=task,
+                use_scaling=config.use_scaling,
+                use_pca=config.use_pca,
+                n_pca_components=config.n_pca_components,
+                classifier_params=classifier_params,
+                split_train_data=config.split_train_data,
+                random_seed=config.random_seed,
+                groups=groups,
             )
+        except ValueError as exc:
+            click.echo(f"  Skipping {label}: {exc}")
+            continue
+
+        # Save pipeline for append-predictions step. Always write to the
+        # local staging dir; promotion to publish_dir (if configured) happens
+        # atomically after all classifiers finish training.
+        pipeline_filename = f"{task}_{marker_filter}.joblib"
+        joblib.dump(pipeline, pipelines_dir / pipeline_filename)
+        pipeline_manifest.append({"task": task, "marker_filter": marker_filter, "path": pipeline_filename})
+        trained_pipelines.append((task, marker_filter, pipeline))
+        click.echo(f"  Pipeline saved: {pipeline_filename}")
+
+        # Replay the same split to recover the val indices. Must mirror
+        # train_linear_classifier exactly — same seed, same splitter
+        # (Group-aware when groups is set, cell-level otherwise). Used for
+        # val_hours (the F1-over-time plot).
+        y_full = combined.obs[task].to_numpy(dtype=object)
+        idx_val: np.ndarray | None = None
+        val_hours: np.ndarray | None = None
+        if config.split_train_data < 1.0:
+            try:
+                _, idx_val = group_val_split(len(combined), y_full, groups, config.split_train_data, config.random_seed)
+                if "hours_post_perturbation" in combined.obs.columns:
+                    val_hours = combined.obs["hours_post_perturbation"].to_numpy()[idx_val]
+            except ValueError:
+                click.echo("  Could not replay split for val_hours; F1-over-time plot skipped.")
+
+        row = {
+            "task": task,
+            "marker_filter": marker_filter,
+            "n_samples": combined.n_obs,
+            "eval_source": "annotation",
+            **metrics,
+        }
+        all_metrics.append(row)
+        val_outputs_by_task[task].append(
+            {
+                "marker_filter": marker_filter,
+                "val_hours": val_hours,
+                **val_outputs,
+            }
+        )
 
     if not all_metrics:
         click.echo("\nNo classifiers trained — check annotations and marker filters.")

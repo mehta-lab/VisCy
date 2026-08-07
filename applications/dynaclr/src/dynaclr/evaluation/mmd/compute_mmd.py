@@ -13,12 +13,13 @@ from dynaclr.evaluation.mmd.config import (
     ComparisonSpec,
     MMDCombinedConfig,
     MMDEvalConfig,
+    MMDOverTimeConfig,
     MMDPooledConfig,
     MMDSettings,
     _resolve_bin_edges,
 )
 from viscy_utils.compose import load_composed_config
-from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test
+from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample
 
 
 def _extract_embeddings(adata: ad.AnnData, embedding_key: str | None) -> np.ndarray:
@@ -45,11 +46,35 @@ def _extract_embeddings(adata: ad.AnnData, embedding_key: str | None) -> np.ndar
     return np.asarray(X)
 
 
-def _subsample(X: np.ndarray, max_n: int | None, rng: np.random.Generator) -> np.ndarray:
-    if max_n is None or len(X) <= max_n:
-        return X
-    idx = rng.choice(len(X), max_n, replace=False)
-    return X[idx]
+def _load_adatas_by_experiment(input_paths: list[str]) -> dict[str, ad.AnnData]:
+    """Load and concatenate every store belonging to the same experiment.
+
+    Prediction writes one store per experiment and marker. Grouping only by
+    experiment with a dict comprehension would silently retain the final marker.
+    """
+    grouped: dict[str, list[ad.AnnData]] = {}
+    for input_path in input_paths:
+        adata = ad.read_zarr(input_path)
+        if "experiment" not in adata.obs.columns:
+            raise KeyError(f"obs column 'experiment' not found in {input_path}.")
+        experiments = adata.obs["experiment"].dropna().unique()
+        if len(experiments) != 1:
+            raise ValueError(f"Expected exactly one experiment in {input_path}, found {list(experiments)}.")
+        grouped.setdefault(str(experiments[0]), []).append(adata)
+
+    return {
+        experiment: (parts[0] if len(parts) == 1 else ad.concat(parts, join="inner", merge="same", index_unique="-"))
+        for experiment, parts in grouped.items()
+    }
+
+
+def _experiment_marker_pairs(input_paths: list[str]) -> set[tuple[str, str]]:
+    pairs = set()
+    for experiment, adata in _load_adatas_by_experiment(input_paths).items():
+        if "marker" not in adata.obs:
+            raise KeyError(f"obs column 'marker' not found for {experiment}.")
+        pairs.update((experiment, str(marker)) for marker in adata.obs["marker"].unique())
+    return pairs
 
 
 def _run_one_comparison(
@@ -89,12 +114,12 @@ def _run_one_comparison(
     All metric floats are NaN if fewer than min_cells cells in either group.
     """
     rng = np.random.default_rng(settings.seed)
-    emb_a = _subsample(emb_a, settings.max_cells, rng)
-    emb_b = _subsample(emb_b, settings.max_cells, rng)
+    emb_a = subsample(emb_a, settings.max_cells, rng)
+    emb_b = subsample(emb_b, settings.max_cells, rng)
     if settings.balance_samples:
         min_n = min(len(emb_a), len(emb_b))
-        emb_a = _subsample(emb_a, min_n, rng)
-        emb_b = _subsample(emb_b, min_n, rng)
+        emb_a = subsample(emb_a, min_n, rng)
+        emb_b = subsample(emb_b, min_n, rng)
     n_a_used = len(emb_a)
     n_b_used = len(emb_b)
     if n_a_used < settings.min_cells or n_b_used < settings.min_cells:
@@ -399,9 +424,12 @@ def run_mmd_combined(config: MMDCombinedConfig) -> pd.DataFrame:
     """Run pairwise cross-experiment MMD, faceted by marker and condition+time bin.
 
     For each marker, finds all experiments that share it, then for each pair
-    of those experiments runs MMD per (condition, time_bin) after centering
-    within that pair only. This measures batch effects between experiments
-    at matched biological states.
+    of those experiments runs MMD per (condition, time_bin). When
+    ``config.center_per_experiment`` is True (default) each experiment is
+    mean-centered first, measuring *residual* batch effects independent of a
+    global offset; set it False to keep the raw mean shift between experiments
+    (needed to validate a LOT correction that removes that offset). This
+    measures batch effects between experiments at matched biological states.
 
     Parameters
     ----------
@@ -417,7 +445,7 @@ def run_mmd_combined(config: MMDCombinedConfig) -> pd.DataFrame:
     """
     from itertools import combinations
 
-    adatas = {ad.read_zarr(p).obs["experiment"].iloc[0]: ad.read_zarr(p) for p in config.input_paths}
+    adatas = _load_adatas_by_experiment(config.input_paths)
 
     if config.obs_filter:
         filtered = {}
@@ -451,8 +479,9 @@ def run_mmd_combined(config: MMDCombinedConfig) -> pd.DataFrame:
             obs_a = adata_a.obs
             obs_b = adata_b.obs
 
-            emb_a_full = emb_a_full - emb_a_full.mean(axis=0)
-            emb_b_full = emb_b_full - emb_b_full.mean(axis=0)
+            if config.center_per_experiment:
+                emb_a_full = emb_a_full - emb_a_full.mean(axis=0)
+                emb_b_full = emb_b_full - emb_b_full.mean(axis=0)
 
             conditions = sorted(set(obs_a[config.group_by].unique()) & set(obs_b[config.group_by].unique()))
             for condition in conditions:
@@ -520,6 +549,63 @@ def run_mmd_combined(config: MMDCombinedConfig) -> pd.DataFrame:
                         )
 
     return pd.DataFrame(records)
+
+
+def run_mmd_over_time(config: MMDOverTimeConfig) -> pd.DataFrame:
+    """Compare pre- and post-LOT MMD in the same scaler/PCA space.
+
+    Corrected stores keep pre-LOT coordinates in ``obsm["X_pre_lot"]`` and
+    post-LOT coordinates in ``.X``.
+    """
+    if config.embedding_key is not None:
+        raise ValueError("embedding_key must be unset for over-time LOT MMD.")
+
+    raw_pairs = _experiment_marker_pairs(config.input_paths)
+    corrected_pairs = _experiment_marker_pairs(config.corrected_paths)
+    if raw_pairs != corrected_pairs:
+        raise ValueError("input_paths and corrected_paths contain different experiment-marker populations.")
+
+    pre_lot_key = "X_pre_lot"
+    for path in config.corrected_paths:
+        if pre_lot_key not in ad.read_zarr(path).obsm:
+            raise ValueError(f"{path} has no obsm['{pre_lot_key}']; re-run LOT correction first.")
+
+    base = config.model_dump(
+        exclude={
+            "input_paths",
+            "corrected_paths",
+            "target_experiments",
+            "embedding_key",
+        }
+    )
+    pre = run_mmd_combined(
+        MMDCombinedConfig(
+            **base,
+            input_paths=config.corrected_paths,
+            embedding_key=pre_lot_key,
+        )
+    )
+    pre["correction"] = "pre"
+
+    post = run_mmd_combined(
+        MMDCombinedConfig(
+            **base,
+            input_paths=config.corrected_paths,
+            embedding_key=None,
+        )
+    )
+    post["correction"] = "post"
+
+    df = pd.concat([pre, post], ignore_index=True)
+
+    targets = set(config.target_experiments or [])
+    if targets:
+        involves_target = df["exp_a"].isin(targets) | df["exp_b"].isin(targets)
+        df["pair_kind"] = np.where(involves_target, "cross", "within")
+    else:
+        df["pair_kind"] = "cross"
+
+    return df
 
 
 def _combined_record(
@@ -789,19 +875,35 @@ def plot_mmd_heatmap_cmd(mmd_dir: Path, output_dir: Path | None) -> None:
     default=False,
     help="Run pooled multi-experiment phenotypic analysis (config must have input_paths list)",
 )
-def main(config: Path, combined: bool, pooled: bool) -> None:
+@click.option(
+    "--over-time",
+    "over_time",
+    is_flag=True,
+    default=False,
+    help="Run pre/post-correction combined MMD over time (config needs input_paths + corrected_paths)",
+)
+def main(config: Path, combined: bool, pooled: bool, over_time: bool) -> None:
     """Compute MMD between explicit condition pairs in cell embeddings.
 
     Comparisons are defined as explicit (cond_a, cond_b, label) pairs.
     The analysis is always faceted by obs["marker"].
     """
-    if combined and pooled:
-        raise click.UsageError("--combined and --pooled are mutually exclusive")
+    if sum([combined, pooled, over_time]) > 1:
+        raise click.UsageError("--combined, --pooled, and --over-time are mutually exclusive")
     raw = load_composed_config(config)
     output_dir = Path(raw["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if combined:
+    if over_time:
+        cfg = MMDOverTimeConfig(**raw)
+        df = run_mmd_over_time(cfg)
+        out_csv = output_dir / "over_time_mmd_results.csv"
+        df.to_csv(out_csv, index=False)
+        click.echo(f"Saved: {out_csv}")
+        if cfg.save_plots and len(df):
+            _save_plots_over_time(df, output_dir, cfg.temporal_bin_size)
+        _print_summary(df, mode="over_time")
+    elif combined:
         cfg = MMDCombinedConfig(**raw)
         df = run_mmd_combined(cfg)
         out_csv = output_dir / "combined_mmd_results.csv"
@@ -869,6 +971,19 @@ def _save_plots_combined(df: pd.DataFrame, output_dir: Path, temporal_bin_size: 
         plot_mmd_combined_heatmap(df, output_dir / f"combined_heatmap.{fmt}")
 
 
+def _save_plots_over_time(df: pd.DataFrame, output_dir: Path, temporal_bin_size: float | None) -> None:
+    from dynaclr.evaluation.mmd.plotting import plot_mmd_pre_post_kinetics
+
+    has_bins = temporal_bin_size is not None and len(df) and not df["hours_bin_start"].isna().all()
+    if not has_bins:
+        return
+    for marker in df["marker"].unique():
+        sub = df[df["marker"] == marker]
+        safe = marker.replace(" ", "_").replace("/", "-")
+        for fmt in ("pdf", "png"):
+            plot_mmd_pre_post_kinetics(sub, output_dir / f"over_time_{safe}_kinetics.{fmt}")
+
+
 def _save_plots_pooled(df: pd.DataFrame, output_dir: Path) -> None:
     from dynaclr.evaluation.mmd.plotting import (
         plot_activity_heatmap,
@@ -897,7 +1012,24 @@ def _print_summary(df: pd.DataFrame, mode: str = "per_experiment") -> None:
         click.echo("No results.")
         return
     click.echo("\n## MMD Results Summary\n")
-    if mode == "combined":
+    if mode == "over_time":
+        keys = (
+            ["marker", "pair_kind", "condition", "correction"]
+            if "pair_kind" in df.columns
+            else [
+                "marker",
+                "condition",
+                "correction",
+            ]
+        )
+        summary = (
+            df.dropna(subset=["mmd2"])
+            .groupby(keys)[["mmd2", "p_value", "effect_size"]]
+            .agg({"mmd2": "mean", "p_value": "min", "effect_size": "mean"})
+            .round(4)
+            .reset_index()
+        )
+    elif mode == "combined":
         summary = (
             df.dropna(subset=["mmd2"])
             .groupby(["marker", "condition"])[["mmd2", "p_value", "effect_size"]]

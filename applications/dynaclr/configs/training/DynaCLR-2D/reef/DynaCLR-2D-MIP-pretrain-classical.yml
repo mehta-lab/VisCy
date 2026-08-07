@@ -1,0 +1,36 @@
+# Override: SimCLR-style "classical" DynaCLR-2D-MIP-pretrain.
+# Anchor and positive are the same crop; augmentation creates two views.
+# Same mock parquet as the base leaf; only the positive-sampling strategy
+# and batching differ from the (not-yet-written) temporal-positive variant.
+
+data:
+  init_args:
+    cell_index_path: /bio/projects/compimaging/models/collections/DynaCLR-2D-MIP-pretrain-mock.parquet
+    # Self-augmented positives (SimCLR-style). Fully self-supervised:
+    # no lineage/track lookup, no tau scheduling. Augmentation pipeline
+    # provides view diversity. Single-marker batches still supply
+    # same-marker different-cell negatives, preserving discrimination
+    # signal at the marker/perturbation level.
+    positive_cell_source: self
+    positive_match_columns: null
+    positive_channel_source: same
+    # Single-marker batches (OPS strategy) — every batch is one marker,
+    # forcing the model to learn cellular features instead of channel
+    # shortcuts.
+    batch_group_by: marker
+    # Within a marker's draw, balance across the experiments containing
+    # that marker.
+    stratify_by: experiment
+    # Marker-uniform weights, restricted to the 5 markers actually present
+    # in DynaCLR-2D-MIP-pretrain-mock.parquet (G3BP1/TOMM20/SEC61B/
+    # viral_sensor/Phase3D from the 5 mock 2026_* datasets). A marker key
+    # not present in the data is silently ignored; a marker present but
+    # missing from this dict gets sampling weight 0 (see
+    # viscy_data.sampler.FlexibleBatchSampler._precompute_groups) — so
+    # this list must be kept in sync with the collection's marker set.
+    group_weights:
+      Phase3D: 1.0
+      G3BP1: 1.0
+      SEC61B: 1.0
+      TOMM20: 1.0
+      viral_sensor: 1.0

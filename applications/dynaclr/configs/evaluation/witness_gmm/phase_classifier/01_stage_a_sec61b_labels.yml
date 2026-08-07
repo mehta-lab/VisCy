@@ -1,0 +1,34 @@
+# Stage A — witness-GMM labels on SEC61B organelle embeddings (ZIKV plate).
+#
+# Dataset: 2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV (mantis v2).
+#   SEC61B embeddings: A/2 = uninfected (5582), B/2 = ZIKV (23468), t=0-66 (hpi 3-36).
+# Reproduces Soorya's sec61b_timelapse_zikv_classifier.py labeling stage:
+#   control (X) = all uninfected cells, perturbed (Y) = all ZIKV cells (no time gate),
+#   2-component GMM on the ZIKV witness scores, posterior >= 0.8 = confident remodeled.
+#
+# Output: <output_dir>/labels/SEC61B_organelle_remodeling_state.csv
+#   keyed by (experiment, fov_name, id) — joins onto the Phase3D zarr in Stage B.
+#
+# Run: dynaclr witness-gmm-labels -c 01_stage_a_sec61b_labels.yml
+
+witness_gmm_labels:
+  experiments:
+    - experiment: "2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV"
+      embeddings_zarr: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800/SEC61B.zarr"
+      # Both references pooled by perturbation across all timepoints (gate-free).
+      control_filter: {perturbation: uninfected}
+      perturbed_filter: {perturbation: [ZIKV]}
+  # From the SEC61B organelle marker the witness axis means ER remodeling.
+  marker_filters: [SEC61B]
+  label_column: organelle_remodeling_state
+  class_map: {positive: remodel, negative: noremodel}
+  gate: gmm
+  gmm_pos_threshold: 0.8
+  # MMD significance gate (BY-FDR across the run's (marker, condition) family).
+  mmd_pvalue_threshold: 0.05
+  mmd_n_permutations: 1000
+  bandwidth: null                # median heuristic on pooled (control, perturbed)
+  max_reference_cells: 5000
+  condition_column: perturbation
+  annotation_format: csv
+  output_dir: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/witness_gmm_phase_classifier"

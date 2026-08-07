@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 from pydantic import BaseModel, model_validator
 
@@ -180,15 +182,55 @@ class MMDCombinedConfig(_MMDBaseConfig):
 
     Conditions are auto-discovered from the data intersection — no explicit
     comparisons needed. For each marker shared between a pair of experiments,
-    runs MMD per (condition, time_bin) after per-experiment mean centering.
+    runs MMD per (condition, time_bin).
 
     Parameters
     ----------
     input_paths : list[str]
         Paths to per-experiment AnnData zarr stores.
+    center_per_experiment : bool
+        Subtract each experiment's own mean embedding before computing MMD.
+        Default True detects *residual* batch effects independent of a global
+        offset. Set False to keep the raw mean shift between experiments — this
+        is required to validate a LOT correction whose main job is removing that
+        offset (centering would delete the very effect being measured, so a
+        genuine platform separation would collapse to a small MMD). Default: True.
     """
 
     input_paths: list[str]
+    center_per_experiment: bool = True
+
+
+class MMDOverTimeConfig(MMDCombinedConfig):
+    """Pre/post batch-effect MMD over time in a single run.
+
+    Runs combined cross-experiment MMD on the pre-LOT coordinates stored in
+    ``corrected_paths[*].obsm["X_pre_lot"]`` and post-LOT coordinates in
+    ``corrected_paths[*].X``. Both therefore use the same scaler/PCA space.
+    ``input_paths`` identify the expected experiment-marker populations.
+
+    Parameters
+    ----------
+    corrected_paths : list[str]
+        Paths to the LOT-corrected per-experiment AnnData zarr stores. Should
+        cover the same experiments as ``input_paths`` (matched by
+        ``obs["experiment"]``, not list order).
+    target_experiments : list[str] or None
+        ``obs["experiment"]`` value(s) of the target/reference platform (v2).
+        Used to tag each experiment pair as ``pair_kind="cross"`` (source↔target,
+        the batch effect being corrected) vs ``"within"`` (source↔source, the
+        within-platform baseline). When None, all pairs are ``"cross"``.
+        Default: None.
+    """
+
+    corrected_paths: list[str]
+    target_experiments: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_over_time(self) -> "MMDOverTimeConfig":
+        if not self.corrected_paths:
+            raise ValueError("corrected_paths must not be empty")
+        return self
 
 
 class MMDPooledConfig(_MMDBaseConfig):
@@ -220,3 +262,66 @@ class MMDPooledConfig(_MMDBaseConfig):
         if not self.comparisons:
             raise ValueError("comparisons must not be empty")
         return self
+
+
+class EmbeddingConsistencyConfig(_MMDBaseConfig):
+    """Per-marker dataset-to-dataset embedding-consistency QC.
+
+    Enumerates the input embedding zarrs for one model/run/checkpoint across
+    datasets via :func:`dynaclr.evaluation.paths.iter_embeddings`, runs pairwise
+    cross-dataset MMD on control cells only (``obs_filter``), and aggregates the
+    long-form output into a symmetric per-marker dataset x dataset MMD matrix.
+    A diagonal-dominant matrix (low off-diagonal MMD) means the embedding space
+    is comparable across acquisitions; large off-diagonal MMD flags a batch
+    effect that LOT correction must fix before downstream tasks trust the
+    embeddings. This QC only *detects and reports* — it does not correct.
+
+    Parameters
+    ----------
+    model_family : str
+        Model-family identity to pool over (path component).
+    run : str
+        Training-run identity to pool over (path component).
+    ckpt_name : str
+        Checkpoint identity to pool over (path component).
+    datasets_root : str or None
+        Base under which datasets live. None uses the canonical
+        :data:`dynaclr.evaluation.paths.DATASETS_ROOT`. Default: None.
+    center_per_experiment : bool
+        Subtract each dataset's own mean embedding before computing MMD, so the
+        matrix reports *residual* batch effects independent of a global offset.
+        Default: True.
+    split_by : str or None
+        Per-dataset obs column (constant within a dataset, e.g. ``"microscope"``)
+        that partitions datasets into groups. When set, the QC emits, per group,
+        a within-group matrix, plus one cross-group matrix per pair of groups
+        (only the across-group dataset pairs). Blocks that are degenerate (a
+        within-group block with <2 datasets, or a cross block with an empty
+        side) are skipped with a log line. None (default) keeps the single
+        pooled matrix over all datasets.
+
+    Notes
+    -----
+    ``obs_filter`` (inherited) selects the control cells, e.g.
+    ``{"perturbation": "uninfected"}`` — so perturbation biology cannot
+    masquerade as a batch effect.
+    """
+
+    model_family: str
+    run: str
+    ckpt_name: str
+    datasets_root: str | None = None
+    center_per_experiment: bool = True
+    split_by: str | None = None
+    metrics: list[Literal["pearson", "mmd", "frechet"]] = ["pearson", "mmd", "frechet"]
+    """Which per-marker matrices to compute/write. Default is all three; set to
+    e.g. ``["pearson"]`` to start with the cheap mean-only matrix and skip the
+    heavier MMD (permutation) and Fréchet (covariance) passes."""
+    pearson_hpi_bin_hours: float | None = None
+    """Time-pooling for the Pearson matrix. None (default): one grand mean over
+    all control cells per dataset. When set, take the mean embedding per
+    ``hours_post_perturbation`` bin of this width, then average the bin-means —
+    so each HPI bin contributes equally and uneven time sampling (different
+    intervals / frame counts across acquisitions) cannot masquerade as a batch
+    effect. Bins are anchored at 0 h and shared across datasets, so acquisitions
+    with different ``start_hpi`` still align on a common biological timeline."""

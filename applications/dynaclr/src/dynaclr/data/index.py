@@ -477,8 +477,25 @@ class MultiExperimentIndex:
         if tracks.empty:
             return tracks
 
-        y_half = self.yx_patch_size[0] // 2
-        x_half = self.yx_patch_size[1] // 2
+        # _slice_patch (dataset.py) reads each patch scaled by the experiment's
+        # (scale_y, scale_x) — the native-pixel half-width actually read from
+        # the store is yx_patch_size scaled, not yx_patch_size itself (see
+        # dataset.py's _slice_patch). The border margin here must match that
+        # scaled half-width, or cells within the scaled-but-outside-the
+        # -unscaled margin still produce out-of-range tensorstore slices for
+        # any experiment where pixel_size_xy_um != reference_pixel_size_xy_um.
+        # Dict mapping does not evaluate unused categorical levels retained
+        # after a train/val split, unlike ``map(callable)``.
+        scale_y_values = tracks["experiment"].map({k: v[1] for k, v in self.registry.scale_factors.items()})
+        scale_x_values = tracks["experiment"].map({k: v[2] for k, v in self.registry.scale_factors.items()})
+        if scale_y_values.isna().any() or scale_x_values.isna().any():
+            missing_mask = scale_y_values.isna() | scale_x_values.isna()
+            missing = sorted(set(tracks.loc[missing_mask, "experiment"]) - set(self.registry.scale_factors))
+            raise ValueError(f"Missing pixel-size scale factors for experiments: {missing}")
+        scale_y = scale_y_values.to_numpy(dtype=float)
+        scale_x = scale_x_values.to_numpy(dtype=float)
+        y_half = np.round((self.yx_patch_size[0] // 2) * scale_y)
+        x_half = np.round((self.yx_patch_size[1] // 2) * scale_x)
         max_shift = self.max_border_shift
 
         # Exclude cells completely outside image
@@ -489,19 +506,22 @@ class MultiExperimentIndex:
             & (tracks["x"] < tracks["_img_width"])
         )
         n_before = len(tracks)
+        valid_mask = valid.to_numpy()
         tracks = tracks[valid].copy()
+        y_half = y_half[valid_mask]
+        x_half = x_half[valid_mask]
 
         if max_shift > 0:
             # Clamp patch center inward so patch is fully within FOV
             tracks["y_clamp"] = np.clip(
                 tracks["y"].to_numpy(),
                 y_half,
-                (tracks["_img_height"] - y_half).to_numpy(),
+                tracks["_img_height"].to_numpy() - y_half,
             )
             tracks["x_clamp"] = np.clip(
                 tracks["x"].to_numpy(),
                 x_half,
-                (tracks["_img_width"] - x_half).to_numpy(),
+                tracks["_img_width"].to_numpy() - x_half,
             )
 
             # Drop cells where the shift exceeds max_border_shift
@@ -512,10 +532,10 @@ class MultiExperimentIndex:
         else:
             # No clamping — exclude any cell whose patch would go out of bounds
             in_bounds = (
-                (tracks["y"] >= y_half)
-                & (tracks["y"] <= tracks["_img_height"] - y_half)
-                & (tracks["x"] >= x_half)
-                & (tracks["x"] <= tracks["_img_width"] - x_half)
+                (tracks["y"].to_numpy() >= y_half)
+                & (tracks["y"].to_numpy() <= tracks["_img_height"].to_numpy() - y_half)
+                & (tracks["x"].to_numpy() >= x_half)
+                & (tracks["x"].to_numpy() <= tracks["_img_width"].to_numpy() - x_half)
             )
             tracks = tracks[in_bounds].copy()
             tracks["y_clamp"] = tracks["y"]

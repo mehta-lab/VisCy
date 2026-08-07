@@ -199,6 +199,9 @@ class MultiExperimentTripletDataset(Dataset):
         positive_match_columns: list[str] | None = None,
         positive_channel_source: str = "same",
         label_columns: dict[str, str] | None = None,
+        emit_sequence: bool = False,
+        sequence_length: int = 3,
+        sequence_tau_frames: int = 1,
     ) -> None:
         if ts is None:
             raise ImportError(
@@ -241,6 +244,28 @@ class MultiExperimentTripletDataset(Dataset):
         self.positive_match_columns = positive_match_columns if positive_match_columns is not None else ["lineage_id"]
         self.positive_channel_source = positive_channel_source
 
+        # Temporal sequence emission (for straightening / predictor losses):
+        # emit K consecutive same-track same-marker frames at fixed frame stride.
+        self.emit_sequence = emit_sequence
+        self.sequence_length = sequence_length
+        self.sequence_tau_frames = sequence_tau_frames
+        if emit_sequence:
+            if sequence_length < 3:
+                raise ValueError(f"sequence_length must be >= 3 for curvature, got {sequence_length}")
+            if sequence_tau_frames < 1:
+                raise ValueError(f"sequence_tau_frames must be >= 1, got {sequence_tau_frames}")
+            if self._channel_mode != "from_index":
+                raise ValueError(
+                    "emit_sequence requires bag-of-channels mode (channels_per_sample=1); "
+                    f"got channel_mode={self._channel_mode!r}. Per-marker sequences need one "
+                    "channel per sample for a well-defined marker filter."
+                )
+            if "lineage_id" not in self.positive_match_columns:
+                raise ValueError(
+                    "emit_sequence requires 'lineage_id' in positive_match_columns "
+                    "so the lineage-timepoint lookup is built."
+                )
+
         self._label_encoders: dict[str, tuple[str, dict[str, int]]] = {}
         if label_columns:
             for batch_key, col in label_columns.items():
@@ -265,7 +290,8 @@ class MultiExperimentTripletDataset(Dataset):
     def _build_match_lookup(self) -> None:
         """Build lookup structures for O(1) positive candidate lookup.
 
-        For ``positive_cell_source="self"``, no lookup is needed.
+        For ``positive_cell_source="self"``, no positive lookup is needed, but
+        sequence emission still needs the lineage/timepoint lookup.
 
         For temporal mode (``"lineage_id"`` in ``positive_match_columns``),
         builds ``_lineage_timepoints``:
@@ -274,7 +300,7 @@ class MultiExperimentTripletDataset(Dataset):
         For generic column-match mode, builds ``_match_lookup``:
         ``{match_key_tuple: [row_indices_in_tracks]}``.
         """
-        if self.positive_cell_source == "self":
+        if self.positive_cell_source == "self" and not self.emit_sequence:
             return
 
         tracks = self.index.tracks
@@ -349,6 +375,7 @@ class MultiExperimentTripletDataset(Dataset):
         hot_cols: set[str] = {
             "channel_name",
             "experiment",
+            "global_track_id",
             "lineage_id",
             "t",
             "marker",
@@ -456,6 +483,20 @@ class MultiExperimentTripletDataset(Dataset):
                 sample["positive"] = positive_patches
                 sample["positive_norm_meta"] = positive_norms
                 sample["positive_meta"] = self._extract_meta(positive_rows)
+
+            if self.emit_sequence:
+                seq_track_indices, seq_valid = self._sample_sequence_indices(anchor_positions=indices)
+                tr_chan_arr = self._tr_arrays["channel_name"]
+                seq_forced_channel_names = [[tr_chan_arr[i]] for i in seq_track_indices]
+                seq_patches, seq_norms = self._slice_patches(
+                    self._tr_arrays, seq_track_indices, seq_forced_channel_names
+                )
+                seq_rows = self.index.tracks.iloc[seq_track_indices].reset_index(drop=True)
+                sample["sequence"] = seq_patches  # (B*K, C, Z, Y, X), row-major over (B, K)
+                sample["sequence_norm_meta"] = seq_norms
+                sample["sequence_meta"] = self._extract_meta(seq_rows)
+                sample["sequence_valid"] = torch.from_numpy(seq_valid)
+                sample["sequence_length"] = self.sequence_length
         else:
             # Build per-sample index dicts via NumPy column arrays (no .iterrows).
             all_cols = list(ULTRACK_INDEX_COLUMNS) + [
@@ -632,6 +673,87 @@ class MultiExperimentTripletDataset(Dataset):
             pos_track_indices[i] = chosen
 
         return pos_track_indices
+
+    def _sample_sequence_indices(
+        self,
+        anchor_positions: list[int],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sample K consecutive same-lineage same-marker frames per anchor.
+
+        Builds a fixed stencil ``[t0, t0+tau, ..., t0+(K-1)*tau]`` (frames) for
+        the anchor's exact ``global_track_id`` and marker. Sequences never cross
+        a division boundary or switch between sibling tracks. When every
+        stencil timepoint has an exact-track candidate, the sequence is valid;
+        otherwise it is marked invalid and filled with the first available
+        exact-track row K times (placeholder, keeping the tensor rectangular;
+        the loss drops it via ``valid``).
+
+        Frames are grouped row-major per sample: ``[s0_t0, s0_t1, ..., s0_t(K-1),
+        s1_t0, ...]`` so the engine can ``view(B, K, D)`` to recover grouping.
+
+        Parameters
+        ----------
+        anchor_positions : list[int]
+            Positional indices into ``valid_anchors`` for the batch.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            ``seq_track_indices`` of shape ``(B * K,)`` (positional indices into
+            ``self.index.tracks``) and ``seq_valid`` of shape ``(B,)`` (bool).
+        """
+        rng = self._rng
+        exp_arr = self._va_arrays["experiment"]
+        lid_arr = self._va_arrays["lineage_id"]
+        t_arr = self._va_arrays["t"]
+        anchor_marker_arr = self._va_arrays["marker"]
+        anchor_track_arr = self._va_arrays["global_track_id"]
+        tr_marker_arr = self._tr_arrays["marker"]
+        tr_track_arr = self._tr_arrays["global_track_id"]
+        lt_map = self._lineage_timepoints
+        k = self.sequence_length
+        tau = self.sequence_tau_frames
+
+        b = len(anchor_positions)
+        seq_track_indices = np.empty(b * k, dtype=np.int64)
+        seq_valid = np.zeros(b, dtype=bool)
+
+        for i, ai in enumerate(anchor_positions):
+            exp_name = str(exp_arr[ai])
+            lineage_id = str(lid_arr[ai])
+            anchor_t = int(t_arr[ai])
+            anchor_marker = anchor_marker_arr[ai]
+            anchor_track = anchor_track_arr[ai]
+            timepoints = lt_map.get((exp_name, lineage_id))
+
+            rows: list[int] | None = None
+            picked: list[int] = []
+            if timepoints is not None:
+                wanted = [anchor_t + j * tau for j in range(k)]
+                for wt in wanted:
+                    cands = timepoints.get(wt)
+                    if not cands:
+                        break
+                    idx_arr = np.asarray(cands, dtype=np.int64)
+                    mask = (tr_marker_arr[idx_arr] == anchor_marker) & (tr_track_arr[idx_arr] == anchor_track)
+                    filtered = idx_arr[mask]
+                    if len(filtered) == 0:
+                        break
+                    picked.append(int(filtered[rng.integers(len(filtered))]))
+                if len(picked) == k:
+                    rows = picked
+
+            if rows is None:
+                # Reuse the anchor-time exact-track row when it was found;
+                # otherwise row 0 is only a shape-preserving fallback. The
+                # invalid sample is masked from both temporal losses.
+                placeholder = picked[0] if picked else 0
+                rows = [placeholder] * k
+            else:
+                seq_valid[i] = True
+            seq_track_indices[i * k : (i + 1) * k] = rows
+
+        return seq_track_indices, seq_valid
 
     # ------------------------------------------------------------------
     # Patch extraction (tensorstore I/O)
@@ -822,13 +944,12 @@ class MultiExperimentTripletDataset(Dataset):
             channel_names_to_read = exp.channel_names
         channel_indices = [exp.channel_names.index(name) for name in channel_names_to_read]
 
-        # Per-experiment z_range (scale-adjusted window size centered on z_range center)
-        z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
-        z_window_size = z_end_base - z_start_base
-        z_count = round(z_window_size * scale_z)
-        z_focus = (z_start_base + z_end_base) // 2
-        z_start = z_focus - z_count // 2
-        z_end = z_start + z_count
+        # Per-experiment z_range is already resolved in native slice coordinates
+        # by ExperimentRegistry. With a reference Z sampling, different
+        # experiments therefore read different native counts for the same
+        # physical depth and are resampled to a common reference grid below.
+        z_start, z_end = self.index.registry.z_ranges[exp_name]
+        z_window_size = z_end - z_start
         patch = image.oindex[
             t,
             [int(c) for c in channel_indices],
@@ -845,7 +966,7 @@ class MultiExperimentTripletDataset(Dataset):
         # in a mixed-experiment batch rescale to the same Z depth.
         # The random/center crop in on_after_batch_transfer then crops
         # to the final z_window.
-        z_target = self.index.registry.z_extraction_window or z_window_size
+        z_target = self.index.registry.z_extraction_window or self.index.registry.z_window or z_window_size
         target_size = (
             z_target,
             self.index.yx_patch_size[0],

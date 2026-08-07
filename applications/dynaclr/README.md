@@ -48,6 +48,18 @@ uv run --package dynaclr viscy predict -c examples/configs/predict.yml
 sbatch examples/configs/fit_slurm.sh
 ```
 
+### End-to-end pipeline (new dataset → embeddings → eval)
+
+For the full "dataset → per-marker embeddings → downstream evals" workflow — including the
+one-call `dynaclr predict-triplet` (writes the dataset-centric tree
+`<dataset>/2-phenotyping/predictions/{model}/{run}/{ckpt}/{marker}.zarr`), the decoupled
+Nextflow `eval_from_embeddings` entry, and the **model matrix** for running many models through
+train → predict → eval in parallel — see:
+
+- [`docs/DAGs/end_to_end.md`](docs/DAGs/end_to_end.md) — the pipeline overview + Quickstart runbook
+- [`nextflow/README.md`](nextflow/README.md) — the two Nextflow eval entries
+- [`tools/README.md`](tools/README.md) — the model matrix (`dynaclr run-matrix`) + launchers
+
 The YAML config determines which model and data module to use via `class_path`:
 
 ```yaml
@@ -78,12 +90,21 @@ DynaCLR also provides evaluation-specific commands via `dynaclr <command>`:
 
 | Command | Description |
 |---------|-------------|
+| `predict-triplet` | One-call per-marker embedding inference from a collection + checkpoint → dataset-centric tree |
+| `predict-batch` | Run `predict-triplet` for one model with AI-readiness preflight |
+| `eval` | Evaluate frozen embeddings selected by model/run/checkpoint |
+| `run-matrix` | Chain train → predict → eval for many models through SLURM dependencies |
+| `split-embeddings` | Split a combined embeddings zarr per experiment/marker (`--route-by-dataset` → the dataset tree) |
+| `embedding-consistency-qc` | Build per-marker cross-dataset MMD² and correlation matrices |
+| `run-linear-classifiers` | Train linear classifiers on embeddings (batch, CSV metrics) |
+| `append-annotations` / `append-predictions` | Join annotation / predicted-label columns onto per-experiment zarrs |
 | `train-linear-classifier` | Train a linear classifier on cell embeddings |
 | `apply-linear-classifier` | Apply a trained linear classifier to new embeddings |
 | `append-obs` | Append columns from a CSV to an AnnData zarr obs (with optional prefix, e.g. `annotated_`, `feature_`) |
 | `reduce-dimensionality` | Compute PCA, UMAP, and/or PHATE on saved embeddings |
 | `evaluate-smoothness` | Evaluate temporal smoothness of embedding models |
 | `compare-models` | Compare previously saved smoothness results |
+| `compute-mmd` | MMD between perturbation / experiment groups (cross-experiment consistency) |
 | `info` | Print summary of an AnnData zarr store |
 
 ```bash

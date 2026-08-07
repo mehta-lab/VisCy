@@ -1,0 +1,43 @@
+# Embedding-consistency QC — per-marker dataset x dataset consistency matrices.
+# =============================================================================
+# Pools every dataset's control-cell embeddings for one model/run/checkpoint
+# (globbed via dynaclr.evaluation.paths.iter_embeddings over
+#   {datasets_root}/*/2-phenotyping/predictions/{model_family}/{run}/{ckpt_name}/{marker}.zarr)
+# and reports two symmetric per-marker matrices + heatmaps:
+#   - MMD² (primary, distributional): low off-diagonal = comparable; large =
+#     batch effect to correct with LOT. Same statistic LOT validation uses.
+#   - Pearson correlation of per-dataset mean embeddings (companion, [-1,1],
+#     readable but centroid-only — a fast sanity check, blind to spread/shape).
+#
+# This step only detects and reports — it does not correct.
+#
+# Run:
+#   dynaclr embedding-consistency-qc -c recipes/embedding_consistency_qc.yml
+
+base:
+  - mmd_defaults.yml
+
+# Provenance tuple that identifies the embeddings to pool across datasets.
+model_family: DynaCLR-2D-MIP-BagOfChannels-single-marker-fix-shuffler
+run: run1
+ckpt_name: epoch146_step117600
+# datasets_root: null   # null uses the canonical DATASETS_ROOT
+
+output_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/_qc/embedding_consistency
+
+# Restrict to control cells so perturbation biology cannot look like a batch effect.
+obs_filter:
+  perturbation: uninfected
+
+# Measure residual batch effects independent of a global mean offset.
+center_per_experiment: true
+
+# Temporal binning (optional; unset here = all timepoints pooled).
+# WARNING: setting temporal_bin_size or temporal_bins changes ONLY the MMD
+# matrix — it computes one MMD² per (condition, bin) and the matrix cell becomes
+# the MEAN over bins (per-bin values kept in consistency_mmd_results.csv). The
+# Pearson matrix always pools all timepoints into one mean per dataset, so once
+# bins are on the two matrices describe different populations. Requires the obs
+# column 'hours_post_perturbation'.
+# temporal_bin_size: 6.0
+# temporal_bins: [0, 6, 12, 24]

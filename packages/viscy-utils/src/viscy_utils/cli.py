@@ -4,6 +4,7 @@ import atexit
 import logging
 import os
 import re
+import signal
 import sys
 import tempfile
 from collections.abc import Callable
@@ -12,15 +13,17 @@ from pathlib import Path
 
 import torch
 import yaml
-from jsonargparse import Namespace, lazy_instance
+from jsonargparse import Namespace, lazy_instance, namespace_to_dict
 from lightning.pytorch import LightningDataModule, LightningModule
-from lightning.pytorch.cli import LightningCLI
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.cli import LightningCLI, SaveConfigCallback
+from lightning.pytorch.loggers import Logger, WandbLogger
+from lightning.pytorch.plugins.environments import SLURMEnvironment
 
 from viscy_utils.compose import load_composed_config
 from viscy_utils.trainer import VisCyTrainer
 
 _WANDB_LOGGER_CLASS_PATH = "lightning.pytorch.loggers.WandbLogger"
+_MODEL_CHECKPOINT_CLASS_PATH = "lightning.pytorch.callbacks.ModelCheckpoint"
 _WANDB_RUN_NAME_PREFIX = re.compile(r"^\d{8}-\d{6}_")
 _WANDB_RUN_TIMESTAMP_FORMAT = r"%Y%m%d-%H%M%S"
 
@@ -69,6 +72,115 @@ def _configure_wandb_logger(
         init_args["group"] = base_name
 
 
+def _configure_slurm_requeue(config: Namespace, subcommand: str | None) -> None:
+    """Attach :class:`SLURMEnvironment` with auto-requeue under SLURM batch jobs.
+
+    On a preemptible cluster, SLURM sends ``SIGUSR1`` before killing the job.
+    With :class:`SLURMEnvironment` attached, Lightning catches that signal,
+    writes a checkpoint, and calls ``scontrol requeue`` so the job resumes
+    from the checkpoint when resources free up.
+
+    Opt in with ``--slurm_auto_requeue``; when the flag is absent, normal
+    Lightning behavior is kept. Even when set, the plugin is attached only if
+    ``SLURMEnvironment.detect()`` is true, so passing it off SLURM (or in an
+    interactive allocation without it) is a no-op.
+    """
+    root = config[subcommand] if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    if not root.get("slurm_auto_requeue", False):
+        return
+    if not SLURMEnvironment.detect():
+        return
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return
+    plugins = trainer.get("plugins")
+    if plugins is None:
+        plugins = []
+    elif not isinstance(plugins, list):
+        plugins = [plugins]
+    if any(isinstance(p, SLURMEnvironment) for p in plugins):
+        return
+    # NOTE: append an already-instantiated object, not a class_path/init_args
+    # spec. before_instantiate_classes() runs after jsonargparse has already
+    # resolved Union-typed slots like trainer.plugins from raw specs into
+    # concrete values, so a raw spec inserted here fails validation ("Expected
+    # a <class 'NoneType'>. Got value: [Namespace(...)]"). This does mean
+    # jsonargparse can't serialize the object back out when SaveConfigCallback
+    # dumps the config, and warns "Unable to serialize instance ..." -- cosmetic,
+    # but a real (harmless) side effect of this hook running where it does.
+    plugins.append(SLURMEnvironment(auto_requeue=True, requeue_signal=signal.SIGUSR1))
+    trainer["plugins"] = plugins
+
+
+def _configure_checkpoint_dirpath(config: Namespace, subcommand: str | None) -> None:
+    """Pin ``ModelCheckpoint.dirpath`` to ``default_root_dir``.
+
+    Without this, Lightning's default resolution (``ModelCheckpoint.
+    __resolve_ckpt_dir``) nests checkpoints under
+    ``{logger.save_dir}/{logger.name}/{logger.version}/checkpoints`` whenever
+    a logger is attached -- for ``WandbLogger`` that's the run's random hex
+    id, so checkpoints land in a differently-named subfolder every run while
+    ``default_root_dir`` itself stays empty.
+
+    This intentionally does NOT add its own "checkpoints" subfolder or any
+    SLURM_JOB_ID scoping -- `train.sh` already passes a ``default_root_dir``
+    that's exactly the intended checkpoint directory (see its ``CKPT_DIR``,
+    scoped by SLURM_JOB_ID so a fresh submission doesn't silently resume a
+    previous job's state, and matching where Lightning's own SLURMEnvironment
+    reads/writes its ``hpc_ckpt_*.ckpt`` -- that path is hardcoded to
+    ``default_root_dir`` with no separate config knob, so this hook and
+    `train.sh` must agree on what ``default_root_dir`` means). Any caller
+    that wants a nested "checkpoints" subfolder should pass that directly as
+    ``default_root_dir``.
+
+    A CLI override like ``--trainer.callbacks.1.init_args.dirpath=...`` isn't
+    supported by jsonargparse for typed ``list[Callback]`` unions, so this is
+    done as a config rewrite instead -- matching :func:`_configure_wandb_logger`
+    and :func:`_configure_slurm_requeue`.
+    """
+    root = config[subcommand] if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    trainer = root.get("trainer")
+    if not isinstance(trainer, Namespace):
+        return
+    default_root_dir = trainer.get("default_root_dir")
+    if not default_root_dir:
+        return
+    callbacks = trainer.get("callbacks")
+    if callbacks is None:
+        return
+    callback_list = callbacks if isinstance(callbacks, list) else [callbacks]
+    for callback in callback_list:
+        if not isinstance(callback, Namespace):
+            continue
+        if callback.get("class_path") != _MODEL_CHECKPOINT_CLASS_PATH:
+            continue
+        init_args = callback.get("init_args")
+        if not isinstance(init_args, Namespace):
+            init_args = Namespace()
+            callback["init_args"] = init_args
+        if init_args.get("dirpath") is None:
+            init_args["dirpath"] = default_root_dir
+
+
+class VisCySaveConfigCallback(SaveConfigCallback):
+    """Also push the full resolved config (trainer/model/data) to the logger.
+
+    The default ``SaveConfigCallback`` only writes ``config.yaml`` to the run
+    directory; ``save_config`` (its designated extension point, see the base
+    class's own docstring) is a no-op, so none of it reaches the logger's own
+    config UI -- e.g. wandb's run config panel only ever sees wandb's own
+    telemetry, not our trainer/model/data hyperparameters.
+    """
+
+    def save_config(self, trainer, pl_module, stage: str) -> None:  # noqa: D102
+        if isinstance(trainer.logger, Logger):
+            trainer.logger.log_hyperparams(namespace_to_dict(self.config))
+
+
 class VisCyCLI(LightningCLI):
     """Extending lightning CLI arguments and defaults."""
 
@@ -84,11 +196,21 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
-        """Set default logger."""
+        """Set default logger and SLURM auto-requeue toggle."""
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(WandbLogger),
             }
+        )
+        parser.add_argument(
+            "--slurm_auto_requeue",
+            action="store_true",
+            help=(
+                "Opt in to SLURMEnvironment(auto_requeue=True): when running "
+                "under SLURM, preempted jobs checkpoint and requeue "
+                "automatically. Absent (default) keeps normal Lightning "
+                "behavior. No effect off SLURM."
+            ),
         )
 
     def _parse_ckpt_path(self) -> None:
@@ -127,6 +249,8 @@ class VisCyCLI(LightningCLI):
     def before_instantiate_classes(self) -> None:
         """Apply shared config rewrites before Lightning object creation."""
         _configure_wandb_logger(self.config, self.subcommand)
+        _configure_slurm_requeue(self.config, self.subcommand)
+        _configure_checkpoint_dirpath(self.config, self.subcommand)
 
 
 def _setup_environment() -> None:
@@ -224,6 +348,7 @@ def main(*, resolver: Callable[[dict], dict] | None = None) -> None:
         seed_everything_default=42,
         subclass_mode_model=require_model,
         subclass_mode_data=require_data,
+        save_config_callback=VisCySaveConfigCallback,
         save_config_kwargs={"overwrite": True},
         parser_kwargs={"description": "Computer vision models for single-cell phenotyping."},
     )
