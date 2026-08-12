@@ -132,10 +132,36 @@ mmd:
     combined_temporal_bin_size: null
     combined_mode: true
     embedding_key: null
+    representation:
+      normalization: control_mad
+      control_values: [control]
+      smooth_sigma_timepoints: 2.0
+      mad_floor_quantile: 0.05
+      pca_variance: 0.80
     mmd:
       n_permutations: 1000
       max_cells: 5000
 ```
+
+For per-experiment and pooled biological comparisons, the representation
+defaults to a Gaussian-smoothed, time-matched control median; one fixed,
+normal-consistent control MAD per embedding dimension; and a pooled,
+marker-specific unwhitened PCA retaining at least 80% explained variance. The
+CLI records the selected component count separately for every marker under
+`<output_dir>/representation/`. Inputs must contain `experiment`, `marker`,
+`perturbation`, and `hours_post_perturbation` metadata.
+
+To reproduce the historical raw-embedding behavior, set:
+
+```yaml
+representation:
+  normalization: none
+  pca_variance: null
+```
+
+`--combined` and `--over-time` do not apply this self-normalization because
+their purpose is to measure cross-experiment batch effects in the supplied
+coordinate system.
 
 For standalone runs, use a generated MMD YAML:
 
@@ -144,6 +170,10 @@ uv run dynaclr compute-mmd -c mmd.yaml
 uv run dynaclr compute-mmd --combined -c mmd_cross_exp.yaml
 uv run dynaclr compute-mmd --pooled -c mmd_pooled.yaml
 ```
+
+Copyable standalone examples live at
+`applications/dynaclr/configs/evaluation/recipes/mmd.yaml` and
+`applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml`.
 
 ## Linear classifiers
 

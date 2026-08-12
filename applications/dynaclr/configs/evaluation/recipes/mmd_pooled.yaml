@@ -1,0 +1,42 @@
+# Standalone pooled multi-experiment biological MMD example.
+# Every input must use the same embedding dimensionality and metadata contract.
+input_paths:
+  - /path/to/dataset_1_marker_embeddings.zarr
+  - /path/to/dataset_2_marker_embeddings.zarr
+output_dir: /path/to/pooled_mmd_results
+
+group_by: perturbation
+comparisons:
+  - cond_a: uninfected
+    cond_b: DENV
+    label: uninfected_vs_DENV
+condition_aliases: null
+
+# Normalization is fit independently per experiment/marker. PCA is then fit
+# once per marker on balanced control/perturbed samples pooled across datasets.
+representation:
+  normalization: control_mad
+  control_key: perturbation
+  control_values: [uninfected]
+  experiment_key: experiment
+  marker_key: marker
+  hpi_key: hours_post_perturbation
+  smooth_sigma_timepoints: 2.0
+  mad_floor_quantile: 0.05
+  pca_variance: 0.80
+  pca_max_cells_per_dataset_class: 5000
+  random_seed: 42
+
+temporal_bin_size: 0.5
+save_plots: true
+
+mmd:
+  n_permutations: 1000
+  max_cells: 2000
+  min_cells: 20
+  seed: 42
+  balance_samples: true
+  share_bandwidth_from: null
+
+map_settings:
+  enabled: false

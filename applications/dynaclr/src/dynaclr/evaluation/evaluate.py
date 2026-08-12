@@ -351,6 +351,7 @@ def _generate_mmd_yaml(mmd: "MMDStepConfig", output_dir: Path, block_name: str) 
         "group_by": mmd.group_by,
         "obs_filter": mmd.obs_filter,
         "embedding_key": mmd.embedding_key,
+        "representation": mmd.representation.model_dump(),
         "mmd": mmd.mmd.model_dump(),
         "map_settings": mmd.map_settings.model_dump(),
         "temporal_bin_size": mmd.temporal_bin_size,

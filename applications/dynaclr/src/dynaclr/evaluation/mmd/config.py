@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class ComparisonSpec(BaseModel):
@@ -78,6 +78,27 @@ class MAPSettings(BaseModel):
     distance: str = "cosine"
     null_size: int = 10000
     seed: int = 0
+
+
+class MMDRepresentationConfig(BaseModel):
+    """Preprocessing used for biological-condition MMD comparisons.
+
+    Control normalization and PCA are configured independently: normalization
+    can be disabled while retaining PCA, and ``pca_variance=None`` keeps all
+    normalized dimensions. Defaults are control median/MAD plus marker PCA80.
+    """
+
+    normalization: Literal["control_mad", "none"] = "control_mad"
+    control_key: str = "perturbation"
+    control_values: list[str] = Field(default_factory=lambda: ["uninfected"])
+    experiment_key: str = "experiment"
+    marker_key: str = "marker"
+    hpi_key: str = "hours_post_perturbation"
+    smooth_sigma_timepoints: float = Field(default=2.0, ge=0.0)
+    mad_floor_quantile: float = Field(default=0.05, ge=0.0, le=1.0)
+    pca_variance: float | None = Field(default=0.80, gt=0.0, lt=1.0)
+    pca_max_cells_per_dataset_class: int = Field(default=5_000, ge=2)
+    random_seed: int = 42
 
 
 class _MMDBaseConfig(BaseModel):
@@ -169,6 +190,7 @@ class MMDEvalConfig(_MMDBaseConfig):
 
     input_path: str
     comparisons: list[ComparisonSpec]
+    representation: MMDRepresentationConfig = Field(default_factory=MMDRepresentationConfig)
 
     @model_validator(mode="after")
     def _validate(self) -> "MMDEvalConfig":
@@ -256,6 +278,7 @@ class MMDPooledConfig(_MMDBaseConfig):
     input_paths: list[str]
     comparisons: list[ComparisonSpec]
     condition_aliases: dict[str, list[str]] | None = None
+    representation: MMDRepresentationConfig = Field(default_factory=MMDRepresentationConfig)
 
     @model_validator(mode="after")
     def _validate(self) -> "MMDPooledConfig":

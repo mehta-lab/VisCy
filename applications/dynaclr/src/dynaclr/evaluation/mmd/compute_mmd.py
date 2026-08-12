@@ -18,6 +18,7 @@ from dynaclr.evaluation.mmd.config import (
     MMDSettings,
     _resolve_bin_edges,
 )
+from dynaclr.evaluation.mmd.representation import prepare_mmd_representation
 from viscy_utils.compose import load_composed_config
 from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample
 
@@ -44,6 +45,24 @@ def _extract_embeddings(adata: ad.AnnData, embedding_key: str | None) -> np.ndar
     if hasattr(X, "toarray"):
         return X.toarray()
     return np.asarray(X)
+
+
+def _prefilter_representation_rows(
+    x: np.ndarray,
+    obs: pd.DataFrame,
+    obs_filter: dict[str, str] | None,
+    protected_key: str,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Apply QC filters before fitting, while retaining the control axis."""
+    if not obs_filter:
+        return x, obs
+    keep = pd.Series(True, index=obs.index)
+    for column, value in obs_filter.items():
+        if column not in obs.columns:
+            raise KeyError(f"obs_filter column {column!r} not found. Available: {list(obs.columns)}")
+        if column != protected_key:
+            keep &= obs[column] == value
+    return x[keep.to_numpy()], obs.loc[keep].copy()
 
 
 def _load_adatas_by_experiment(input_paths: list[str]) -> dict[str, ad.AnnData]:
@@ -170,7 +189,11 @@ def _run_map_comparison(
     return result["mean_average_precision"], result["p_value"]
 
 
-def run_mmd_analysis(adata: ad.AnnData, config: MMDEvalConfig) -> pd.DataFrame:
+def run_mmd_analysis(
+    adata: ad.AnnData,
+    config: MMDEvalConfig,
+    representation_artifact_dir: Path | None = None,
+) -> pd.DataFrame:
     """Run per-experiment MMD analysis for explicit comparison pairs across all markers.
 
     Each comparison is an explicit ``(cond_a, cond_b)`` pair with a label.
@@ -192,20 +215,33 @@ def run_mmd_analysis(adata: ad.AnnData, config: MMDEvalConfig) -> pd.DataFrame:
         effect_size, activity_zscore, embedding_key, and optionally map_value,
         map_p_value.
     """
+    obs = adata.obs.copy()
+    source_emb, obs = _prefilter_representation_rows(
+        _extract_embeddings(adata, config.embedding_key),
+        obs,
+        config.obs_filter,
+        config.representation.control_key,
+    )
+    prepared = prepare_mmd_representation(
+        source_emb,
+        obs,
+        config.representation,
+        artifact_dir=representation_artifact_dir,
+    )
+    all_emb = prepared.features
     if config.obs_filter:
-        mask = pd.Series([True] * len(adata), index=adata.obs.index)
+        mask = pd.Series([True] * len(obs), index=obs.index)
         for col, val in config.obs_filter.items():
-            if col not in adata.obs.columns:
-                raise KeyError(f"obs_filter column '{col}' not found. Available: {list(adata.obs.columns)}")
-            mask &= adata.obs[col] == val
-        adata = adata[mask].copy()
+            if col not in obs.columns:
+                raise KeyError(f"obs_filter column '{col}' not found. Available: {list(obs.columns)}")
+            mask &= obs[col] == val
+        all_emb = all_emb[mask.to_numpy()]
+        obs = obs.loc[mask].copy()
 
-    obs = adata.obs
     if config.group_by not in obs.columns:
         raise KeyError(f"obs column '{config.group_by}' not found. Available: {list(obs.columns)}")
 
     emb_key_label = config.embedding_key if config.embedding_key is not None else "X"
-    all_emb = _extract_embeddings(adata, config.embedding_key)
     experiments = obs["experiment"].unique() if "experiment" in obs.columns else ["unknown"]
 
     records: list[dict] = []
@@ -307,7 +343,11 @@ def run_mmd_analysis(adata: ad.AnnData, config: MMDEvalConfig) -> pd.DataFrame:
                                 emb_key_label,
                             )
                         )
-    return pd.DataFrame(records)
+    result = pd.DataFrame(records)
+    if not result.empty:
+        result["representation"] = prepared.label
+        result["n_components"] = result["marker"].map(prepared.n_components_by_marker)
+    return result
 
 
 def _compute_shared_bandwidth(
@@ -642,7 +682,10 @@ def _combined_record(
     }
 
 
-def run_mmd_pooled(config: MMDPooledConfig) -> pd.DataFrame:
+def run_mmd_pooled(
+    config: MMDPooledConfig,
+    representation_artifact_dir: Path | None = None,
+) -> pd.DataFrame:
     """Run pooled multi-experiment MMD/mAP analysis.
 
     Concatenates cells from all input experiments into a single pool, then
@@ -669,14 +712,6 @@ def run_mmd_pooled(config: MMDPooledConfig) -> pd.DataFrame:
     combined = ad.concat(adatas, join="outer", label="source_experiment")
     combined.obs_names_make_unique()
 
-    if config.obs_filter:
-        mask = pd.Series([True] * len(combined), index=combined.obs.index)
-        for col, val in config.obs_filter.items():
-            if col not in combined.obs.columns:
-                raise KeyError(f"obs_filter column '{col}' not found. Available: {list(combined.obs.columns)}")
-            mask &= combined.obs[col] == val
-        combined = combined[mask].copy()
-
     if config.condition_aliases:
         alias_map: dict[str, str] = {}
         for canonical, variants in config.condition_aliases.items():
@@ -684,12 +719,32 @@ def run_mmd_pooled(config: MMDPooledConfig) -> pd.DataFrame:
                 alias_map[v] = canonical
         combined.obs[config.group_by] = combined.obs[config.group_by].map(lambda x: alias_map.get(x, x))
 
-    obs = combined.obs
+    obs = combined.obs.copy()
     if config.group_by not in obs.columns:
         raise KeyError(f"obs column '{config.group_by}' not found. Available: {list(obs.columns)}")
 
     emb_key_label = config.embedding_key if config.embedding_key is not None else "X"
-    all_emb = _extract_embeddings(combined, config.embedding_key)
+    source_emb, obs = _prefilter_representation_rows(
+        _extract_embeddings(combined, config.embedding_key),
+        obs,
+        config.obs_filter,
+        config.representation.control_key,
+    )
+    prepared = prepare_mmd_representation(
+        source_emb,
+        obs,
+        config.representation,
+        artifact_dir=representation_artifact_dir,
+    )
+    all_emb = prepared.features
+    if config.obs_filter:
+        mask = pd.Series([True] * len(obs), index=obs.index)
+        for col, val in config.obs_filter.items():
+            if col not in obs.columns:
+                raise KeyError(f"obs_filter column '{col}' not found. Available: {list(obs.columns)}")
+            mask &= obs[col] == val
+        all_emb = all_emb[mask.to_numpy()]
+        obs = obs.loc[mask].copy()
 
     records: list[dict] = []
     for marker in sorted(obs["marker"].unique()):
@@ -781,6 +836,9 @@ def run_mmd_pooled(config: MMDPooledConfig) -> pd.DataFrame:
                     )
 
     df = pd.DataFrame(records)
+    if not df.empty:
+        df["representation"] = prepared.label
+        df["n_components"] = df["marker"].map(prepared.n_components_by_marker)
     if not df.empty:
         valid_p = df["p_value"].dropna()
         if len(valid_p) > 0:
@@ -914,7 +972,10 @@ def main(config: Path, combined: bool, pooled: bool, over_time: bool) -> None:
         _print_summary(df, mode="combined")
     elif pooled:
         cfg = MMDPooledConfig(**raw)
-        df = run_mmd_pooled(cfg)
+        df = run_mmd_pooled(
+            cfg,
+            representation_artifact_dir=output_dir / "representation",
+        )
         out_csv = output_dir / "pooled_mmd_results.csv"
         df.to_csv(out_csv, index=False)
         click.echo(f"Saved: {out_csv}")
@@ -924,7 +985,12 @@ def main(config: Path, combined: bool, pooled: bool, over_time: bool) -> None:
     else:
         cfg = MMDEvalConfig(**raw)
         adata = ad.read_zarr(cfg.input_path)
-        df = run_mmd_analysis(adata, cfg)
+        source_name = Path(cfg.input_path).stem.replace(" ", "_").replace("/", "-")
+        df = run_mmd_analysis(
+            adata,
+            cfg,
+            representation_artifact_dir=output_dir / "representation" / source_name,
+        )
         experiment = df["experiment"].iloc[0] if len(df) else "unknown"
         out_csv = output_dir / f"{experiment}_mmd_results.csv"
         df.to_csv(out_csv, index=False)

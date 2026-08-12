@@ -73,6 +73,27 @@ Use the YAMLs generated under `<output_dir>/configs/`:
 | MMD | `uv run dynaclr compute-mmd -c <config>` |
 | Linear probes | `uv run dynaclr run-linear-classifiers -c <config>` |
 
+Biological `compute-mmd` and `compute-mmd --pooled` runs now default to
+time-matched control median/MAD normalization followed by one pooled PCA80
+basis per marker. The selected PC counts, scree curves, and fitted contracts
+are saved under `<output_dir>/representation/`. Required obs columns are
+`experiment`, `marker`, `perturbation`, and `hours_post_perturbation`.
+Disable both transforms only for an intentional raw sensitivity analysis:
+
+```yaml
+representation:
+  normalization: none
+  pca_variance: null
+```
+
+Cross-experiment `--combined` and correction `--over-time` modes remain in
+their supplied coordinates so the preprocessing cannot erase the batch effect
+being measured.
+
+Copyable standalone configurations are available at
+`applications/dynaclr/configs/evaluation/recipes/mmd.yaml` and
+`applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml`.
+
 Do not embed PCA, UMAP, or PHATE in prediction configs; reductions are separate,
 repeatable evaluation steps. For classifier inputs and outputs, see the
 [linear-classifier runbook](../linear_classifiers/README.md).

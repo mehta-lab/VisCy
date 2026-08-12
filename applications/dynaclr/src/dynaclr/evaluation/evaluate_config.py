@@ -7,7 +7,12 @@ from typing import Literal
 from pydantic import BaseModel, model_validator
 
 from dynaclr.evaluation.dimensionality_reduction.config import PCAConfig, PHATEConfig, UMAPConfig
-from dynaclr.evaluation.mmd.config import ComparisonSpec, MAPSettings, MMDSettings
+from dynaclr.evaluation.mmd.config import (
+    ComparisonSpec,
+    MAPSettings,
+    MMDRepresentationConfig,
+    MMDSettings,
+)
 
 
 class PredictStepConfig(BaseModel):
@@ -458,6 +463,7 @@ class MMDStepConfig(BaseModel):
     group_by: str = "perturbation"
     obs_filter: dict[str, str] | None = None
     embedding_key: str | None = None
+    representation: MMDRepresentationConfig = MMDRepresentationConfig()
     mmd: MMDSettings = MMDSettings()
     map_settings: MAPSettings = MAPSettings()
     temporal_bin_size: float | None = None

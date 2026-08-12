@@ -43,8 +43,9 @@ def test_reference_recovers_control_center():
     # Plate A drifts as 1.0 * hpi; bin 0 covers hpi in [0, 2), centered ~1.0.
     bin0 = ref_a.bin_indices.tolist().index(0)
     assert ref_a.median[bin0].mean() == pytest.approx(1.0, abs=0.5)
-    # IQR of a unit-scale normal ~1.35; positive and finite everywhere.
-    assert np.all(ref_a.iqr > 0)
+    # Scaled MAD of a unit-scale normal ~1.0; positive and finite everywhere.
+    assert np.all(ref_a.mad > 0)
+    assert float(np.median(ref_a.mad)) == pytest.approx(1.0, abs=0.2)
     assert ref_a.median.shape == (len(ref_a.bin_indices), adata.n_vars)
 
 
@@ -66,7 +67,7 @@ def test_nearest_bin_fallback():
         bin_hours=2.0,
         bin_indices=np.array([0, 3]),
         median=np.array([[0.0], [10.0]]),
-        iqr=np.array([[1.0], [1.0]]),
+        mad=np.array([[1.0], [1.0]]),
     )
     # hpi=5 -> bin 2, unoccupied; nearest occupied is bin 3 (dist 1) over bin 0 (dist 2).
     z = ref.apply(np.array([[10.0]]), np.array([5.0]))
@@ -76,7 +77,7 @@ def test_nearest_bin_fallback():
     assert z0[0, 0] == pytest.approx(0.0)
 
 
-def test_zero_iqr_is_floored():
+def test_zero_mad_is_floored():
     rng = np.random.default_rng(1)
     n = 60
     obs = pd.DataFrame(
@@ -87,9 +88,9 @@ def test_zero_iqr_is_floored():
         }
     )
     x = rng.normal(size=(n, 3)).astype(np.float32)
-    x[:, 0] = 7.0  # constant dimension -> IQR 0 -> must be floored to 1.0
+    x[:, 0] = 7.0  # constant dimension -> MAD 0 -> must be floored to 1.0
     refs = control_reference_stats(ad.AnnData(X=x, obs=obs), bin_hours=2.0, min_cells=10)
-    assert refs["P"].iqr[0, 0] == 1.0
+    assert refs["P"].mad[0, 0] == 1.0
     z = refs["P"].apply(np.array([[7.0, 0.0, 0.0]]), np.array([1.0]))
     assert np.isfinite(z).all()
 
@@ -118,15 +119,15 @@ def test_plate_without_control_raises():
         control_reference_stats(adata, bin_hours=2.0, min_cells=10)
 
 
-def test_apply_floors_zero_iqr():
-    # A hand-built reference with a zero-IQR dimension must not divide by zero.
+def test_apply_floors_zero_mad():
+    # A hand-built reference with a zero-MAD dimension must not divide by zero.
     ref = ControlReference(
         bin_hours=2.0,
         bin_indices=np.array([0]),
         median=np.array([[0.0, 0.0]]),
-        iqr=np.array([[0.0, 2.0]]),
+        mad=np.array([[0.0, 2.0]]),
     )
     z = ref.apply(np.array([[5.0, 4.0]]), np.array([1.0]))
     assert np.isfinite(z).all()
-    assert z[0, 0] == pytest.approx(5.0)  # floored IQR 1.0
+    assert z[0, 0] == pytest.approx(5.0)  # floored MAD 1.0
     assert z[0, 1] == pytest.approx(2.0)  # 4 / 2

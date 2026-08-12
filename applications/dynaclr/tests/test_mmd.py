@@ -19,7 +19,12 @@ from dynaclr.evaluation.mmd.config import (
     MMDEvalConfig,
     MMDOverTimeConfig,
     MMDPooledConfig,
+    MMDRepresentationConfig,
     MMDSettings,
+)
+from dynaclr.evaluation.mmd.representation import (
+    fit_pca_for_explained_variance,
+    prepare_mmd_representation,
 )
 from viscy_utils.evaluation.mmd import (
     compute_mmd_unbiased,
@@ -606,3 +611,87 @@ def test_run_mmd_pooled_condition_aliases(tmp_path):
     )
     df = run_mmd_pooled(cfg)
     assert not df["mmd2"].isna().all(), "Expected valid MMD after condition alias remapping"
+
+
+# ---------------------------------------------------------------------------
+# Biological MMD representation tests
+# ---------------------------------------------------------------------------
+
+
+def test_biological_mmd_representation_defaults():
+    cfg = _cfg()
+    assert cfg.representation.normalization == "control_mad"
+    assert cfg.representation.pca_variance == pytest.approx(0.80)
+    # Cross-dataset batch-effect MMD intentionally has no self-normalization.
+    assert not hasattr(MMDCombinedConfig(input_paths=["a", "b"], output_dir="/tmp"), "representation")
+
+
+def test_fit_pca_for_explained_variance_selects_minimum_components():
+    rng = np.random.default_rng(123)
+    latent = rng.normal(size=(500, 2))
+    mixing = rng.normal(size=(2, 12))
+    x = latent @ mixing + 0.01 * rng.normal(size=(500, 12))
+    fit = fit_pca_for_explained_variance(x, 0.80, marker="TOMM20")
+    selected = fit.components.shape[0]
+    assert fit.realized_variance >= 0.80
+    if selected > 1:
+        assert fit.cumulative_explained_variance[selected - 2] < 0.80
+    assert fit.transform(x).shape == (len(x), selected)
+
+
+def test_prepare_mmd_representation_defaults_and_artifacts(tmp_path):
+    adata = _make_adata(n_cells=400, n_features=12)
+    prepared = prepare_mmd_representation(
+        np.asarray(adata.X),
+        adata.obs,
+        MMDRepresentationConfig(),
+        artifact_dir=tmp_path,
+    )
+    assert prepared.label == "control_mad_pca80"
+    assert set(prepared.n_components_by_marker) == {"Phase3D", "TOMM20"}
+    assert prepared.features.shape[0] == adata.n_obs
+    assert prepared.features.shape[1] <= adata.n_vars
+    assert (tmp_path / "control_mad_summary.csv").exists()
+    assert (tmp_path / "marker_pca_summary.csv").exists()
+    assert (tmp_path / "marker_pca_scree.csv").exists()
+    assert (tmp_path / "run_info.json").exists()
+
+
+def test_prepare_mmd_representation_raw_opt_out():
+    adata = _make_adata(n_cells=200, n_features=8)
+    prepared = prepare_mmd_representation(
+        np.asarray(adata.X),
+        adata.obs,
+        MMDRepresentationConfig(normalization="none", pca_variance=None),
+    )
+    assert prepared.label == "none"
+    assert np.array_equal(prepared.features, np.asarray(adata.X))
+    assert set(prepared.n_components_by_marker.values()) == {adata.n_vars}
+
+
+def test_run_mmd_analysis_records_representation():
+    adata = _make_adata(n_cells=300, n_features=10)
+    normalized = run_mmd_analysis(adata, _cfg(mmd=_SETTINGS_FAST))
+    assert set(normalized["representation"]) == {"control_mad_pca80"}
+    assert normalized["n_components"].notna().all()
+
+    raw_cfg = _cfg(
+        mmd=_SETTINGS_FAST,
+        representation=MMDRepresentationConfig(
+            normalization="none",
+            pca_variance=None,
+        ),
+    )
+    raw = run_mmd_analysis(adata, raw_cfg)
+    assert set(raw["representation"]) == {"none"}
+    assert set(raw["n_components"]) == {adata.n_vars}
+
+
+def test_representation_fit_honors_noncondition_qc_filter(tmp_path):
+    adata = _make_adata(n_cells=240, n_features=8)
+    adata.obs["qc"] = "keep"
+    adata.obs.iloc[:20, adata.obs.columns.get_loc("qc")] = "drop"
+    cfg = _cfg(mmd=_SETTINGS_FAST, obs_filter={"qc": "keep"})
+    run_mmd_analysis(adata, cfg, representation_artifact_dir=tmp_path)
+    summary = pd.read_csv(tmp_path / "control_mad_summary.csv")
+    assert int(summary["n_cells"].sum()) == adata.n_obs - 20

@@ -4,10 +4,10 @@ Removes the plate (batch) and time-of-experiment component of an embedding by
 expressing every cell relative to the *control* (untreated) population of the
 same plate at the same hours-post-perturbation (HPI).
 
-The reference statistics are robust to outliers (median and interquartile
-range) and computed per ``experiment`` (plate), pooling all control wells, in
-fixed-width HPI bins. Only the small statistics table is stored; the robust
-z-score ``(x - median[bin]) / iqr[bin]`` is applied on the fly.
+The reference statistics are robust to outliers (median and scaled median
+absolute deviation, MAD) and computed per ``experiment`` (plate), pooling all
+control wells, in fixed-width HPI bins. Only the small statistics table is
+stored; the robust z-score ``(x - median[bin]) / mad[bin]`` is applied on the fly.
 """
 
 from dataclasses import dataclass
@@ -29,16 +29,17 @@ class ControlReference:
         (``bin = floor(hpi / bin_hours)``).
     median : np.ndarray
         ``(n_bins, D)`` per-dimension control median for each occupied bin.
-    iqr : np.ndarray
-        ``(n_bins, D)`` per-dimension control interquartile range
-        (75th - 25th percentile) for each occupied bin. Zero entries are
-        floored to 1.0 so the robust z-score never divides by zero.
+    mad : np.ndarray
+        ``(n_bins, D)`` per-dimension control scaled median absolute deviation
+        (``1.4826 * median(|x - median|)``, so it matches the standard deviation
+        for normal data) for each occupied bin. Zero entries are floored to 1.0
+        so the robust z-score never divides by zero.
     """
 
     bin_hours: float
     bin_indices: np.ndarray
     median: np.ndarray
-    iqr: np.ndarray
+    mad: np.ndarray
 
     def _reference_row(self, bins: np.ndarray) -> np.ndarray:
         """Map each requested bin to a row in ``bin_indices``, nearest occupied bin as fallback."""
@@ -69,8 +70,8 @@ class ControlReference:
         """
         bins = np.floor(np.asarray(hpi) / self.bin_hours).astype(int)
         rows = self._reference_row(bins)
-        iqr = np.where(self.iqr[rows] == 0, 1.0, self.iqr[rows])
-        return (x - self.median[rows]) / iqr
+        mad = np.where(self.mad[rows] == 0, 1.0, self.mad[rows])
+        return (x - self.median[rows]) / mad
 
 
 def control_reference_stats(
@@ -87,9 +88,9 @@ def control_reference_stats(
 
     For each plate (``experiment``), keeps only control cells
     (``perturbation == control_value``), bins them by HPI into fixed-width bins
-    anchored at 0 h, and records the per-dimension median and interquartile
-    range (IQR) of the embedding ``X`` in each bin. Bins with fewer than
-    ``min_cells`` control cells are dropped; :meth:`ControlReference.apply`
+    anchored at 0 h, and records the per-dimension median and scaled median
+    absolute deviation (MAD) of the embedding ``X`` in each bin. Bins with fewer
+    than ``min_cells`` control cells are dropped; :meth:`ControlReference.apply`
     borrows the nearest occupied bin for them.
 
     Parameters
@@ -144,17 +145,18 @@ def control_reference_stats(
 
         bin_indices = []
         medians = []
-        iqrs = []
+        mads = []
         for b in np.unique(plate_bins):
             bin_x = plate_x[plate_bins == b]
             if len(bin_x) < min_cells:
                 continue
-            q25, q50, q75 = np.percentile(bin_x, [25, 50, 75], axis=0)
-            iqr = q75 - q25
-            iqr[iqr == 0] = 1.0
+            med = np.median(bin_x, axis=0)
+            # Scaled MAD: 1.4826 * median(|x - median|) matches sigma for normal data.
+            mad = 1.4826 * np.median(np.abs(bin_x - med), axis=0)
+            mad[mad == 0] = 1.0
             bin_indices.append(int(b))
-            medians.append(q50)
-            iqrs.append(iqr)
+            medians.append(med)
+            mads.append(mad)
 
         if not bin_indices:
             raise ValueError(f"Plate {plate!r}: no HPI bin has >= {min_cells} control cells at bin_hours={bin_hours}.")
@@ -163,7 +165,7 @@ def control_reference_stats(
             bin_hours=bin_hours,
             bin_indices=np.array(bin_indices),
             median=np.stack(medians),
-            iqr=np.stack(iqrs),
+            mad=np.stack(mads),
         )
 
     return references
