@@ -94,6 +94,20 @@ Copyable standalone configurations are available at
 `applications/dynaclr/configs/evaluation/recipes/mmd.yaml` and
 `applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml`.
 
+To reuse the normalized PCA80 coordinates outside MMD, run the direct export
+script with the pooled YAML:
+
+```sh
+uv run python applications/dynaclr/scripts/evaluation/write_normalized_pca80.py \
+  --config applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml
+```
+
+It fits one pooled marker-specific representation and selectively replaces
+only `obsm["X_normalized_pca80"]` and `uns["X_normalized_pca80"]` in every
+listed input Zarr. The score matrix stays row-aligned to `obs`; markers with
+fewer retained PCs are zero-padded, and their valid dimensions are recorded
+in `uns["X_normalized_pca80"]["n_components_by_marker"]`.
+
 Do not embed PCA, UMAP, or PHATE in prediction configs; reductions are separate,
 repeatable evaluation steps. For classifier inputs and outputs, see the
 [linear-classifier runbook](../linear_classifiers/README.md).

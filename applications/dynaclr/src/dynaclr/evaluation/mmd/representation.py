@@ -83,6 +83,7 @@ def _control_mad_normalize(
     x: np.ndarray,
     obs: pd.DataFrame,
     config: MMDRepresentationConfig,
+    fit_mask: np.ndarray,
 ) -> tuple[np.ndarray, tuple[dict, ...], pd.DataFrame]:
     required = {config.control_key, config.hpi_key, config.marker_key}
     missing = required - set(obs.columns)
@@ -107,7 +108,8 @@ def _control_mad_normalize(
         exp_rows = experiments == experiment
         for marker in sorted(np.unique(markers[exp_rows])):
             group = exp_rows & (markers == marker)
-            group_control = control[group]
+            group_fit = fit_mask[group]
+            group_control = control[group] & group_fit
             if not group_control.any():
                 raise ValueError(
                     f"{experiment}/{marker}: no controls ({config.control_key} in {config.control_values!r})"
@@ -159,7 +161,7 @@ def _control_mad_normalize(
                 {
                     "experiment": experiment,
                     "marker": marker,
-                    "n_cells": int(group.sum()),
+                    "n_cells": int(group_fit.sum()),
                     "n_control_cells": int(group_control.sum()),
                     "n_hpi": int(len(grid)),
                     "mad_floor": floor,
@@ -174,6 +176,7 @@ def _balanced_pca_rows(
     marker_mask: np.ndarray,
     config: MMDRepresentationConfig,
     marker: str,
+    fit_mask: np.ndarray,
 ) -> np.ndarray:
     experiments = (
         obs[config.experiment_key].astype(str).to_numpy()
@@ -186,7 +189,7 @@ def _balanced_pca_rows(
     rng = np.random.default_rng(seed % (2**32))
     selected: list[np.ndarray] = []
     for experiment in sorted(np.unique(experiments[marker_mask])):
-        dataset_rows = np.flatnonzero(marker_mask & (experiments == experiment))
+        dataset_rows = np.flatnonzero(marker_mask & fit_mask & (experiments == experiment))
         control_rows = dataset_rows[is_control[dataset_rows]]
         perturbed_rows = dataset_rows[~is_control[dataset_rows]]
         if len(control_rows) and len(perturbed_rows):
@@ -213,14 +216,23 @@ def prepare_mmd_representation(
     config: MMDRepresentationConfig,
     *,
     artifact_dir: Path | None = None,
+    fit_mask: np.ndarray | None = None,
 ) -> PreparedMMDRepresentation:
     """Fit control-MAD/PCA once and return row-aligned MMD coordinates."""
     x = np.asarray(x, dtype=np.float32)
     obs = obs.copy()
     if config.marker_key not in obs:
         raise KeyError(f"representation marker column {config.marker_key!r} not found")
+    if fit_mask is None:
+        fit_mask = np.ones(len(obs), dtype=bool)
+    else:
+        fit_mask = np.asarray(fit_mask, dtype=bool)
+        if fit_mask.shape != (len(obs),):
+            raise ValueError(f"fit_mask must have shape ({len(obs)},), got {fit_mask.shape}")
+    if not fit_mask.any():
+        raise ValueError("fit_mask does not select any rows")
     if config.normalization == "control_mad":
-        normalized, contracts, normalization_summary = _control_mad_normalize(x, obs, config)
+        normalized, contracts, normalization_summary = _control_mad_normalize(x, obs, config, fit_mask)
     else:
         normalized, contracts, normalization_summary = x.copy(), (), pd.DataFrame()
 
@@ -234,7 +246,7 @@ def prepare_mmd_representation(
         outputs: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for marker in sorted(np.unique(markers)):
             marker_mask = markers == marker
-            fit_rows = _balanced_pca_rows(obs, marker_mask, config, marker)
+            fit_rows = _balanced_pca_rows(obs, marker_mask, config, marker, fit_mask)
             fit = fit_pca_for_explained_variance(normalized[fit_rows], config.pca_variance, marker=marker)
             indices = np.flatnonzero(marker_mask)
             outputs[marker] = (indices, fit.transform(normalized[indices]).astype(np.float32))
