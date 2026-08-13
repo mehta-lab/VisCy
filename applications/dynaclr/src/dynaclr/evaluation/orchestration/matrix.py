@@ -1,7 +1,7 @@
-r"""Run many DynaCLR models in parallel through train → predict → eval.
+r"""Run many DynaCLR models through train → predict → normalize → eval.
 
-Reads a matrix YAML and, per model, submits three SLURM jobs chained by
-``--dependency=afterok`` (train → predict → eval). Models run fully in parallel;
+Reads a matrix YAML and, per model, submits downstream SLURM jobs chained by
+``--dependency=afterok`` (train → predict → normalize → eval). Models run fully in parallel;
 within a model the stages chain. The eval side reuses ``dynaclr eval`` /
 the Nextflow ``eval_from_embeddings`` entry; predict reuses ``dynaclr predict-batch``.
 
@@ -30,7 +30,7 @@ Usage::
 
     dynaclr run-matrix \
         -c applications/dynaclr/configs/matrix/<name>.yml \
-        [--stages train,predict,eval] [--dry-run]
+        [--stages train,predict,normalize,eval] [--dry-run]
 """
 
 from __future__ import annotations
@@ -46,11 +46,15 @@ import yaml
 from dynaclr.evaluation.orchestration.predict_batch import check_ai_ready
 from dynaclr.evaluation.paths import DATASETS_ROOT
 
-# Wrapper sbatch scripts the launcher submits for the predict / eval links.
+# Wrapper sbatch scripts the launcher submits for the downstream links.
 _PREDICT_SBATCH = Path("applications/dynaclr/tools/predict.sbatch")
+_NORMALIZE_SBATCH = Path("applications/dynaclr/tools/normalize.sbatch")
 _EVAL_SBATCH = Path("applications/dynaclr/tools/eval.sbatch")
+_DEFAULT_NORMALIZATION_RECIPE = Path(
+    "applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml"
+)
 
-_ALL_STAGES = ("train", "predict", "eval")
+_ALL_STAGES = ("train", "predict", "normalize", "eval")
 
 
 def matrix_preflight(models: list[dict]) -> None:
@@ -104,7 +108,12 @@ def _embedding_complete(output_path: Path) -> bool:
     return output_path.exists() and ((output_path / "zarr.json").exists() or (output_path / ".zgroup").exists())
 
 
-def resolve_datasets_to_run(models: list[dict], overwrite: bool) -> list[dict]:
+def resolve_datasets_to_run(
+    models: list[dict],
+    overwrite: bool,
+    *,
+    preserve_complete_rows: bool = False,
+) -> list[dict]:
     """Prune already-embedded datasets so predict runs only what's missing.
 
     Progressive-collection pre-step (login node, before any submit). For each
@@ -112,8 +121,14 @@ def resolve_datasets_to_run(models: list[dict], overwrite: bool) -> list[dict]:
     output zarrs via :func:`plan_predict_runs` and marks an experiment DONE
     when all of its expected zarrs are complete. Fully-done rows are dropped;
     partially-done rows get a pruned temp collection (only the missing
-    experiments) and their ``collection`` repointed to it. ``overwrite`` skips
-    the check entirely (whole collection runs).
+    experiments) and their ``collection`` repointed to it. When
+    ``preserve_complete_rows`` is true, fully-done rows remain in the matrix
+    with prediction disabled so normalization/evaluation can still run.
+    ``overwrite`` skips the check entirely (whole collection runs).
+
+    Every survivor retains the original full collection in
+    ``_normalization_collection``. This matters because the pooled PCA basis
+    must be refit across all expected stores, not just newly predicted ones.
 
     Read-only w.r.t. the datasets (only checks existence); the only writes are
     pruned collection YAMLs next to the original collection.
@@ -123,13 +138,15 @@ def resolve_datasets_to_run(models: list[dict], overwrite: bool) -> list[dict]:
     models : list[dict]
         Resolved model rows (from :func:`load_matrix`).
     overwrite : bool
-        If ``True``, return ``models`` unchanged (run everything).
+        If ``True``, run the full collection for every row.
+    preserve_complete_rows : bool
+        Retain fully predicted rows for downstream stages.
 
     Returns
     -------
     list[dict]
-        Filtered rows: fully-done rows removed; survivors may have their
-        ``collection`` set to a pruned temp YAML.
+        Filtered rows; survivors may have ``collection`` set to a pruned
+        prediction YAML while ``_normalization_collection`` remains full.
     """
     from dynaclr.evaluation.predict_triplet import plan_predict_runs
     from viscy_data.collection import load_collection, save_collection
@@ -140,6 +157,7 @@ def resolve_datasets_to_run(models: list[dict], overwrite: bool) -> list[dict]:
 
     survivors: list[dict] = []
     for model in models:
+        model = {**model, "_normalization_collection": model["collection"]}
         family, run = model["family"], model["run"]
         collection = load_collection(Path(model["collection"]))
         markers = model.get("markers")
@@ -168,7 +186,18 @@ def resolve_datasets_to_run(models: list[dict], overwrite: bool) -> list[dict]:
         label = f"{family}/{run}"
 
         if not missing_names:
-            print(f"[skip-existing] {label}: all {len(all_names)} dataset(s) done → skipping row.", file=sys.stderr)
+            if preserve_complete_rows:
+                print(
+                    f"[skip-existing] {label}: all {len(all_names)} dataset(s) done → "
+                    "skip predict, retain downstream stages.",
+                    file=sys.stderr,
+                )
+                survivors.append({**model, "_skip_predict": True})
+            else:
+                print(
+                    f"[skip-existing] {label}: all {len(all_names)} dataset(s) done → skipping row.",
+                    file=sys.stderr,
+                )
             continue
         if not done_names:
             print(f"[skip-existing] {label}: {len(missing_names)} dataset(s) to run (none done).", file=sys.stderr)
@@ -363,10 +392,28 @@ def build_eval_cmd(model: dict, ckpt_name: str) -> list[str]:
     ]
 
 
+def build_normalize_cmd(model: dict, ckpt_name: str) -> list[str]:
+    """The pooled control-MAD/PCA80 export job for one checkpoint."""
+    markers = ",".join(model["markers"]) if model.get("markers") else ""
+    collection = model.get("_normalization_collection", model["collection"])
+    recipe = model.get("normalization_recipe", _DEFAULT_NORMALIZATION_RECIPE)
+    return [
+        "sbatch",
+        str(_NORMALIZE_SBATCH),
+        str(collection),
+        model["family"],
+        model["run"],
+        ckpt_name,
+        str(model["datasets_root"]),
+        markers,
+        str(recipe),
+    ]
+
+
 def build_stage_cmds(model: dict, stages: tuple[str, ...]) -> list[tuple[str, list[str]]]:
     """Flat (stage, command) list for the FIRST checkpoint — used by tests / simple linear view.
 
-    The full sweep fan-out (train once → predict→eval per checkpoint) is built in
+    The full sweep fan-out (train once → predict→normalize→eval per checkpoint) is built in
     :func:`run_model`. This helper keeps the single-checkpoint shape that unit
     tests assert against.
     """
@@ -376,8 +423,10 @@ def build_stage_cmds(model: dict, stages: tuple[str, ...]) -> list[tuple[str, li
     cmds: list[tuple[str, list[str]]] = []
     if "train" in stages and not is_foundation:
         cmds.append(("train", build_train_cmd(m)))
-    if "predict" in stages:
+    if "predict" in stages and not model.get("_skip_predict", False):
         cmds.append(("predict", build_predict_cmd(m, ckpt_name, checkpoint)))
+    if "normalize" in stages:
+        cmds.append(("normalize", build_normalize_cmd(m, ckpt_name)))
     if "eval" in stages:
         cmds.append(("eval", build_eval_cmd(m, ckpt_name)))
     return cmds
@@ -400,18 +449,18 @@ def _emit(stage: str, label: str, cmd: list[str], dep_jid: str | None, print_onl
     if print_only:
         print(f"# {label} [{stage}]")
         print(" ".join(full))
-        return None
+        return "<printed>"
     jid = _submit(full)
     print(f"{label} [{stage}] -> job {jid}", file=sys.stderr)
     return jid
 
 
 def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
-    """Submit/print a model's jobs: train ONCE, then predict→eval per checkpoint.
+    """Submit/print a model's jobs: train ONCE, then predict→normalize→eval per checkpoint.
 
     A model may sweep multiple checkpoints (``ckpt_names`` / ``checkpoints``).
-    Train runs once; each checkpoint gets its own predict→eval chain, both
-    ``--dependency=afterok`` on the shared train job (models and per-checkpoint
+    Train runs once; each checkpoint gets its own predict→normalize→eval chain,
+    with ``--dependency=afterok`` on the shared train job (models and per-checkpoint
     chains otherwise run in parallel via normal SLURM scheduling).
     """
     base = f"{model['family']}/{model['run']}"
@@ -423,8 +472,10 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
     for ckpt_name, checkpoint in resolve_checkpoints(model):
         label = f"{base}/{ckpt_name}"
         prev = train_jid  # predict depends on the shared train (if any)
-        if "predict" in stages:
+        if "predict" in stages and not model.get("_skip_predict", False):
             prev = _emit("predict", label, build_predict_cmd(model, ckpt_name, checkpoint), prev, print_only)
+        if "normalize" in stages:
+            prev = _emit("normalize", label, build_normalize_cmd(model, ckpt_name), prev, print_only)
         if "eval" in stages:
             _emit("eval", label, build_eval_cmd(model, ckpt_name), prev, print_only)
 
@@ -440,9 +491,9 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
 )
 @click.option(
     "--stages",
-    default="predict,eval",
-    help=f"Comma-separated subset of {_ALL_STAGES} to run (default: predict,eval). "
-    "Pass 'train,predict,eval' to also submit the DynaCLR training job "
+    default="predict,normalize,eval",
+    help=f"Comma-separated subset of {_ALL_STAGES} to run (default: predict,normalize,eval). "
+    "Pass 'train,predict,normalize,eval' to also submit the DynaCLR training job "
     "(foundation rows never train).",
 )
 @click.option("--dry-run", is_flag=True, help="Print the chained commands, submit nothing.")
@@ -459,7 +510,7 @@ def run_model(model: dict, stages: tuple[str, ...], print_only: bool) -> None:
     "already exist and predict only the newly-added ones (progressive collections).",
 )
 def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflight: bool, overwrite: bool) -> None:
-    """Run many models through train→predict→eval in parallel (SLURM afterok chain)."""
+    """Run models through train→predict→normalize→eval (SLURM afterok)."""
     stage_tuple = tuple(s.strip() for s in stages.split(",") if s.strip())
     bad = [s for s in stage_tuple if s not in _ALL_STAGES]
     if bad:
@@ -472,7 +523,11 @@ def main(matrix: Path, stages: str, dry_run: bool, print_cmd: bool, skip_preflig
     # missing ones (login node, read-only w.r.t. datasets — safe in dry-run too). Only
     # meaningful when predicting.
     if "predict" in stage_tuple:
-        models = resolve_datasets_to_run(models, overwrite)
+        models = resolve_datasets_to_run(
+            models,
+            overwrite,
+            preserve_complete_rows=any(stage in stage_tuple for stage in ("normalize", "eval")),
+        )
 
     # Upfront preflight: only meaningful when we will predict, and only on a real
     # submission (dry-run must stay side-effect-free / offline).

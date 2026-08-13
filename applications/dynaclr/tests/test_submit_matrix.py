@@ -564,3 +564,100 @@ def test_resolve_partial_zarr_counts_as_missing(tmp_path):
 
     pruned_coll = load_collection(Path(survivors[0]["collection"]))
     assert [e.name for e in pruned_coll.experiments] == ["DS_B"]  # DS_B still to run
+
+
+# --- pooled normalization stage --------------------------------------------------------
+
+
+def test_normalize_cmd_uses_full_collection_and_canonical_recipe(tmp_path):
+    model = _model(_two_exp_collection_yaml(tmp_path), tmp_path)
+    model["collection"] = "pending.yml"
+    model["_normalization_collection"] = "full.yml"
+    cmd = submit_matrix.build_normalize_cmd(model, _CKPT)
+    assert cmd[2] == "full.yml"
+    assert cmd[7] == "SEC61B,Phase3D"
+    assert cmd[8].endswith("witness_gmm_pooled_joint_pca80.yaml")
+
+
+def test_resolve_retains_complete_row_for_normalization(tmp_path):
+    coll = _two_exp_collection_yaml(tmp_path)
+    _mark_done(tmp_path, "DS_A")
+    _mark_done(tmp_path, "DS_B")
+    survivors = submit_matrix.resolve_datasets_to_run(
+        [_model(coll, tmp_path)], overwrite=False, preserve_complete_rows=True
+    )
+    assert len(survivors) == 1
+    assert survivors[0]["_skip_predict"] is True
+    assert survivors[0]["_normalization_collection"] == str(coll)
+    survivors[0]["eval_config"] = "eval.yml"
+    assert [stage for stage, _ in submit_matrix.build_stage_cmds(survivors[0], ("predict", "normalize", "eval"))] == [
+        "normalize",
+        "eval",
+    ]
+
+
+def test_resolve_partial_normalization_still_uses_full_collection(tmp_path):
+    coll = _two_exp_collection_yaml(tmp_path)
+    _mark_done(tmp_path, "DS_A")
+    survivor = submit_matrix.resolve_datasets_to_run(
+        [_model(coll, tmp_path)], overwrite=False, preserve_complete_rows=True
+    )[0]
+    assert survivor["collection"] != str(coll)
+    assert survivor["_normalization_collection"] == str(coll)
+    assert submit_matrix.build_normalize_cmd(survivor, _CKPT)[2] == str(coll)
+
+
+def test_normalize_sbatch_repeats_marker_option(tmp_path):
+    fake_srun = tmp_path / "srun"
+    fake_srun.write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    fake_srun.chmod(0o755)
+
+    workspace = Path(__file__).parents[3]
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}{os.pathsep}" + env["PATH"]
+    env["WORKSPACE_DIR"] = str(workspace)
+    recipe = "applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml"
+    result = subprocess.run(
+        [
+            "bash",
+            str(workspace / "applications/dynaclr/tools/normalize.sbatch"),
+            "collection.yml",
+            "family",
+            "run",
+            "last",
+            "/datasets",
+            "SEC61B,TOMM20",
+            recipe,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    args = result.stdout.splitlines()
+    assert "normalize-embeddings" in args
+    marker_positions = [i for i, arg in enumerate(args) if arg == "--markers"]
+    assert [args[i + 1] for i in marker_positions] == ["SEC61B", "TOMM20"]
+    assert args[args.index("--recipe") + 1] == recipe
+    assert "--overwrite" in args
+
+
+def test_dry_run_prints_four_stage_dependencies(tmp_path, capsys):
+    model = submit_matrix.resolve_model(
+        {"train_sbatch": str(_write_sh(tmp_path))},
+        {
+            "ckpt_name": "last",
+            "collection": "c.yml",
+            "eval_config": "e.yaml",
+            "datasets_root": "/d",
+        },
+    )
+    submit_matrix.run_model(model, ("train", "predict", "normalize", "eval"), print_only=True)
+    output = capsys.readouterr().out
+    assert output.count("--dependency=afterok:<prev>") == 3
+    assert [line.rsplit("[", 1)[-1].rstrip("]") for line in output.splitlines() if line.startswith("# ")] == [
+        "train",
+        "predict",
+        "normalize",
+        "eval",
+    ]

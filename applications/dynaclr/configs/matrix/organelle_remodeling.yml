@@ -5,8 +5,10 @@
 # row per MODEL; run-matrix fans out predict per experiment inside the collection
 # and skips already-embedded ones.
 #
-#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --stages predict --dry-run
-#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --stages predict
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --dry-run
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml
+# Backfill/refit the pooled representation without prediction or evaluation:
+#   dynaclr run-matrix -c applications/dynaclr/configs/matrix/organelle_remodeling.yml --stages normalize
 #
 # Progressive: skip-existing is the DEFAULT — datasets already embedded for a row's
 # (model_family, run, ckpt_name) are pruned; append a dataset to the collection and
@@ -19,6 +21,9 @@ defaults:
   # This is independent of the INPUT root — the collection's own datasets_root
   # (VAST) still resolves each experiment's data_path/tracks_path for reading.
   datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+  # Canonical shared representation: time-matched control median/MAD, then
+  # marker-specific PCA retaining 80% variance, fit across the full collection.
+  normalization_recipe: applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml
   # Organelle reporters + label-free. Sensor markers differ by virus (pAL17 ZIKV /
   # pAL40 DENV); include both to embed the sensor across all datasets, or drop them
   # to embed only the organelle question.

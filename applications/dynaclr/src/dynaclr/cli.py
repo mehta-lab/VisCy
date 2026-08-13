@@ -276,7 +276,15 @@ dynaclr.add_command(
     LazyCommand(
         name="run-matrix",
         import_path="dynaclr.evaluation.orchestration.matrix.main",
-        short_help="Run many models through train→predict→eval in parallel (SLURM afterok chain)",
+        short_help="Run models through train→predict→normalize→eval (SLURM afterok chain)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="normalize-embeddings",
+        import_path="dynaclr.evaluation.mmd.checkpoint_representation.main",
+        short_help="Write pooled control-MAD/PCA80 coordinates to checkpoint embeddings",
     )
 )
 

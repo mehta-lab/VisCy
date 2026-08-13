@@ -14,7 +14,9 @@ pooled_representation:
     - cond_a: uninfected
       cond_b: DENV
       label: uninfected_vs_DENV
-  condition_aliases: null
+  # Legacy collections may encode the same untreated control as `mock`.
+  condition_aliases:
+    uninfected: [uninfected, mock]
   representation:
     normalization: control_mad
     control_key: perturbation

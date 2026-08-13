@@ -1,10 +1,12 @@
-# DynaCLR model matrix — run many models through train → predict → eval
+# DynaCLR model matrix — train → predict → normalize → eval
 
 Launchers for running one or many DynaCLR models through the full pipeline. Models
-run **in parallel**; within a model the three stages chain via SLURM
+run **in parallel**; within a model the stages chain via SLURM
 `--dependency=afterok`. Embeddings are written once into the dataset-centric tree
-(`<dataset>/2-phenotyping/predictions/{model_family}/{run}/{ckpt_name}/{marker}.zarr`)
-and evaluated from there — no re-prediction to iterate on evals.
+(`<dataset>/2-phenotyping/predictions/{model_family}/{run}/{ckpt_name}/embeddings/{marker}.zarr`).
+After prediction, one full-collection control-median/MAD → pooled marker-PCA80 fit writes
+`obsm["X_normalized_pca80"]` and matching `uns` provenance to every store; evaluation
+then reads the shared representation from there — no re-prediction to iterate on evals.
 
 ## The matrix YAML
 
@@ -19,6 +21,7 @@ defaults:
   ckpt_name: last                # → checkpoints/last.ckpt (or pin epochN-stepM)
   collection: applications/dynaclr/configs/collections/<...>.yml
   eval_config: applications/dynaclr/configs/evaluation/<...>.yaml
+  normalization_recipe: applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml
   datasets_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
   predict_flags: {z_range: [15, 45], z_reduction: mip, reference_pixel_size: 0.1494}
 models:
@@ -34,17 +37,18 @@ Add a model = add one line. Change something sweep-wide = edit `defaults:`.
 # see the chained sbatch commands without submitting
 uv run dynaclr run-matrix -c <matrix.yml> --dry-run
 
-# submit the full chain (train → predict → eval) for every model, in parallel
+# submit the default chain (predict → normalize → eval) for every model
 uv run dynaclr run-matrix -c <matrix.yml>
 
 # run a subset of stages (e.g. skip training, evaluate existing checkpoints)
-uv run dynaclr run-matrix -c <matrix.yml> --stages predict,eval
+uv run dynaclr run-matrix -c <matrix.yml> --stages normalize
 ```
 
 Per model, `dynaclr run-matrix` submits:
-`train` → `predict` (`afterok:train`) → `eval` (`afterok:predict`). `train` is the
-model's own `.sh`; `predict` and `eval` are the `predict.sbatch` / `eval.sbatch`
-wrappers (which call `dynaclr predict-batch` / `dynaclr eval`).
+`train` → `predict` → `normalize` → `eval`, with each link using `afterok`.
+`normalize` is one CPU job per model/checkpoint and always uses the original full
+collection, even when skip-existing predicts only newly added datasets. It selectively
+replaces only the named normalized `obsm`/`uns` entries in every expected store.
 
 ## Preprocessing precondition (AI-ready datasets)
 
@@ -82,10 +86,11 @@ models:
 
 | Tool | Does |
 |---|---|
-| `dynaclr run-matrix` | the whole matrix — parse `.sh`, preflight, chain train→predict→eval |
+| `dynaclr run-matrix` | the whole matrix — parse `.sh`, preflight, chain train→predict→normalize→eval |
 | `dynaclr predict-batch` | predict one model over a collection (wraps `predict-triplet`) + AI-ready preflight |
+| `dynaclr normalize-embeddings` | fit/export the full-checkpoint pooled control-MAD/PCA80 representation |
 | `dynaclr eval` | evaluate one model's embeddings (launches Nextflow `eval_from_embeddings`) |
-| `predict.sbatch` / `eval.sbatch` | the wrapper jobs the matrix chains |
+| `predict.sbatch` / `normalize.sbatch` / `eval.sbatch` | the wrapper jobs the matrix chains |
 
 See [`../docs/DAGs/end_to_end.md`](../docs/DAGs/end_to_end.md) for the pipeline overview
 and [`../nextflow/README.md`](../nextflow/README.md) for the eval Nextflow entries.

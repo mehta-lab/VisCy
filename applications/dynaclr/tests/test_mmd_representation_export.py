@@ -43,6 +43,7 @@ def _write_store(path: Path, experiment: str, seed: int) -> np.ndarray:
 def _config(paths: list[Path], output_dir: Path) -> MMDPooledConfig:
     return MMDPooledConfig(
         input_paths=[str(path) for path in paths],
+        condition_aliases={"uninfected": ["uninfected", "mock"]},
         output_dir=str(output_dir),
         comparisons=[
             ComparisonSpec(
@@ -81,6 +82,8 @@ def test_export_pooled_representation_updates_only_named_slots(tmp_path: Path):
         metadata = result.uns["X_normalized_pca80"]
         assert metadata["representation"] == "control_mad_pca80"
         assert metadata["source_embedding_key"] == "X"
+        assert metadata["condition_column"] == "perturbation"
+        assert list(metadata["condition_aliases"]["uninfected"]) == ["uninfected", "mock"]
         assert metadata["fit_cells"] == 188
         assert metadata["n_components_by_marker"]["SEC61B"] == scores.shape[1]
 

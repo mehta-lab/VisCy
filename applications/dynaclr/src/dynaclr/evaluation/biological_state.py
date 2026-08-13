@@ -16,6 +16,11 @@ from dynaclr.evaluation.linear_classifiers.witness_gmm_labels import (
     PooledWitnessGmmFit,
     fit_pooled_witness_gmm,
 )
+from dynaclr.evaluation.mmd.checkpoint_representation import (
+    CheckpointRepresentationPlan,
+    export_checkpoint_representation,
+    plan_checkpoint_representation,
+)
 from dynaclr.evaluation.mmd.export_representation import (
     DEFAULT_REPRESENTATION_KEY,
     export_pooled_representation,
@@ -37,15 +42,18 @@ from dynaclr.evaluation.temporal import (
 __all__ = [
     "DEFAULT_REPRESENTATION_KEY",
     "CausalSequences",
+    "CheckpointRepresentationPlan",
     "CompactTCNConfig",
     "ExplainedVariancePCA",
     "MultitaskTCNFit",
     "PooledWitnessGmmFit",
     "PreparedMMDRepresentation",
     "build_causal_sequences",
+    "export_checkpoint_representation",
     "export_pooled_representation",
     "fit_multitask_tcn",
     "fit_pca_for_explained_variance",
     "fit_pooled_witness_gmm",
+    "plan_checkpoint_representation",
     "prepare_mmd_representation",
 ]

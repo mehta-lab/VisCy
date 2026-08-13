@@ -155,6 +155,8 @@ def export_pooled_representation(
         "schema_version": 1,
         "representation": prepared.label,
         "source_embedding_key": config.embedding_key or "X",
+        "condition_column": config.group_by,
+        "condition_aliases": config.condition_aliases,
         "normalization": config.representation.model_dump(mode="json"),
         "pooled_fit": True,
         "fit_input_paths": [str(path) for path in paths],
