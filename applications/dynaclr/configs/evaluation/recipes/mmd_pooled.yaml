@@ -12,8 +12,9 @@ comparisons:
     label: uninfected_vs_DENV
 condition_aliases: null
 
-# Normalization is fit independently per experiment/marker. PCA is then fit
-# once per marker on balanced control/perturbed samples pooled across datasets.
+# Normalization is fit independently per experiment/marker. PCA is fit once per
+# marker with balanced control/perturbed rows when both classes are present;
+# otherwise the available class is sampled up to the per-dataset cap.
 representation:
   normalization: control_mad
   control_key: perturbation
