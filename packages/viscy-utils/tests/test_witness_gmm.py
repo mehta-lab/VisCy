@@ -54,33 +54,93 @@ def test_fit_gmm_labels_threshold_strictness():
     assert (strict.hard_label == 1).sum() <= (lax.hard_label == 1).sum()
 
 
-def test_control_anchored_labels_calibrated_fp():
-    """Control-anchored gate: labels the excess over baseline and holds the
-    control false-positive rate near the target, without needing bimodality."""
-    from viscy_utils.evaluation.witness_gmm import fit_control_anchored_labels
+def test_fit_gmm_labels_can_fit_a_separate_pooled_population():
+    """A control+perturbed calibration pool can anchor a missing control-like mode.
 
-    rng = np.random.default_rng(0)
+    The scored population contains only the negative perturbation mode. Fitting
+    that population alone would ask a two-component GMM to split one cloud;
+    fitting a balanced pool recovers the biological negative/control modes while
+    still returning one posterior per requested perturbation cell.
+    """
+    rng = np.random.default_rng(11)
+    control = rng.normal(1.0, 0.15, 600)
+    perturbed = rng.normal(-1.0, 0.15, 80)
+    pooled = np.concatenate([control[: len(perturbed)], perturbed])
+
+    res = fit_gmm_labels(
+        perturbed,
+        fit_scores_1d=pooled,
+        pos_threshold=0.8,
+        random_state=4,
+    )
+
+    assert res.n_fit_samples == len(pooled)
+    assert len(res.posterior) == len(perturbed)
+    assert res.separated
+    assert res.posterior.mean() > 0.99
+    np.testing.assert_allclose(np.sort(res.gmm.means_.ravel()), [-1.0, 1.0], atol=0.08)
+
+
+def test_tied_covariance_has_one_monotonic_posterior_transition():
+    rng = np.random.default_rng(12)
+    control = rng.normal(0.22, 0.03, 1000)
+    perturbed = rng.normal(-0.10, 0.13, 1000)
+    scores = np.linspace(-0.5, 0.5, 2000)
+    result = fit_gmm_labels(
+        scores,
+        fit_scores_1d=np.concatenate([control, perturbed]),
+        covariance_type="tied",
+    )
+    posterior = result.posterior
+    assert np.all(np.diff(posterior) <= 1e-12)
+    assert len(result.component_stds) == 2
+    assert result.component_stds[0] == result.component_stds[1]
+
+
+def test_percentile_gate_labels_a_pure_shift():
+    """A unimodal SHIFTED perturbed population still gets labeled — the case that
+    breaks the GMM (no second mode to find) and the reason this gate exists.
+
+    Also pins the FP calibration: the gate is a quantile of the control scores, so
+    the control false-positive rate matches the target by construction.
+    """
+    from viscy_utils.evaluation.witness_gmm import fit_gmm_labels, fit_percentile_labels
+
+    rng = np.random.default_rng(2)
     control = rng.normal(0.0, 1.0, 4000)
-    # Perturbed = mostly baseline + a shifted (remodel) minority (subtle, overlapping).
-    perturbed = np.concatenate([rng.normal(0.0, 1.0, 3000), rng.normal(-2.0, 1.0, 1000)])
-    res = fit_control_anchored_labels(perturbed, control, control_fp_target=0.05)
-    # FP rate is calibrated to the target.
-    assert abs(res.control_fp - 0.05) < 0.02
-    # Some perturbed cells are labeled remodel; remodel fraction is positive and < 1.
-    assert 0.0 < (1.0 - res.pi_baseline) < 1.0
-    assert (res.hard_label == 1).any()
-    # Remodel component sits below (more negative than) the control baseline.
-    assert res.mu_r < res.mu_c
+    # One Gaussian, shifted — no subpopulation, no bimodality anywhere.
+    perturbed = rng.normal(-1.0, 1.0, 4000)
+
+    # The GMM has no honest split to find here and says so via `separated`.
+    assert not fit_gmm_labels(perturbed).separated
+
+    res = fit_percentile_labels(perturbed, control, control_fp_target=0.02)
+    assert abs(res.control_fp - 0.02) < 0.005
+    # A 1-sigma shift puts far more than the 2% control rate past the gate.
+    assert (res.hard_label == 1).mean() > 0.10
+    # Three-way: positives below `gate`, negatives above `neg_gate`, and a middle
+    # band left unlabeled. Without the separate negative cut, cells just above the
+    # positive gate — indistinguishable from positives — would become confident
+    # negatives.
+    assert res.gate < res.neg_gate
+    assert ((perturbed < res.gate) == (res.hard_label == 1)).all()
+    assert ((perturbed > res.neg_gate) == (res.hard_label == 0)).all()
+    assert (res.hard_label == -1).any()
 
 
-def test_control_anchored_no_shift_low_positives():
-    """When perturbed == control (no real shift), few cells clear the calibrated
-    threshold — the FP-calibrated cut keeps the positive rate near the target."""
-    from viscy_utils.evaluation.witness_gmm import fit_control_anchored_labels
+def test_percentile_posterior_is_graded_and_bounded():
+    """The posterior is a bounded, monotone ordering (it feeds downstream CE
+    weighting) and is 0 for every cell at or above the gate."""
+    from viscy_utils.evaluation.witness_gmm import fit_percentile_labels
 
-    rng = np.random.default_rng(1)
-    control = rng.normal(0.0, 1.0, 4000)
-    perturbed = rng.normal(0.0, 1.0, 4000)  # identical distribution
-    res = fit_control_anchored_labels(perturbed, control, control_fp_target=0.05)
-    # No real excess → perturbed positive rate stays near the target FP (~5%).
-    assert (res.hard_label == 1).mean() < 0.15
+    rng = np.random.default_rng(3)
+    control = rng.normal(0.0, 1.0, 2000)
+    perturbed = rng.normal(-1.5, 1.0, 2000)
+    res = fit_percentile_labels(perturbed, control, control_fp_target=0.02)
+
+    assert res.posterior.min() >= 0.0 and res.posterior.max() <= 1.0
+    # Non-positives carry no weight.
+    assert (res.posterior[res.hard_label == -1] == 0.0).all()
+    # Monotone in the score: the most extreme cell outranks a marginal one.
+    order = np.argsort(perturbed)
+    assert res.posterior[order[0]] >= res.posterior[order[len(order) // 2]]

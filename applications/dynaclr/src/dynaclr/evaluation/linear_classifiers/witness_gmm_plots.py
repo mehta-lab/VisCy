@@ -7,7 +7,8 @@ the MMD witness + per-condition GMM into an annotation file. These plots are the
 
 - :func:`plot_witness_gmm` — per (marker, condition): the perturbed cells'
   witness-score histogram with the fitted two-component GMM overlaid (the
-  bimodality the gate keys on) and the positive-posterior threshold marked.
+  bimodality the gate keys on), both posterior thresholds marked, and the
+  ambiguous posterior interval shaded.
 - :func:`plot_mmd_null` — per (marker, condition): the MMD² permutation-null
   histogram with the observed MMD² and p-value (the significance gate).
 - :func:`plot_remodeling_vs_time` — per marker: the fraction of cells in the
@@ -40,30 +41,34 @@ def plot_witness_gmm(
     output_path: Path,
     pos_label: str = "remodeled",
     neg_label: str = "unaffected",
+    fit_population: str = "perturbed",
 ) -> None:
     """Plot perturbed vs control witness scores with the fitted GMM overlaid.
 
     Two histograms are overlaid so the reader can see *which population each GMM
     mode corresponds to*:
 
-    - **perturbed** (grey): the condition's cells — the mixture the GMM is fit on.
-    - **control** (blue): the clean negative-reference cells (control wells) — NOT
-      GMM-fit, shown only as the reference cloud.
+    - **perturbed** (grey): the condition's cells.
+    - **control** (blue): the clean negative-reference cells (control wells).
 
-    The two GMM component densities (fit on the perturbed mixture) are drawn on
+    Under ``fit_population="perturbed"`` the blue distribution is an overlay only.
+    Under ``"joint_control_perturbed"`` every score from both distributions fits
+    one mixture; under ``"balanced_control_perturbed"`` equal-size samples from
+    both distributions fit one mixture. The two fitted GMM component densities are drawn on
     top: the ``pos_label`` mode (red, lower mean, perturbed-leaning) and the
     ``neg_label`` mode (blue). A sound gate has the ``neg_label`` component sitting
     on top of the control histogram (both are control-like) and the ``pos_label``
-    component pulled away toward negative scores. The dashed line is the
-    posterior-``pos_threshold`` decision boundary.
+    component pulled away toward negative scores. Dashed lines mark the
+    confident-negative and confident-positive posterior boundaries; the
+    interval between them is the abstention region.
 
     Parameters
     ----------
     scores : NDArray
         Witness scores for the condition's perturbed cells, shape ``(n,)``.
     control_scores : NDArray
-        Witness scores of the control-reference cells, shape ``(m,)`` (the clean
-        negative reference; not GMM-fit, overlaid for comparison).
+        Witness scores of the control-reference cells, shape ``(m,)``. They are
+        an overlay in perturbation-only mode and part of either joint fit mode.
     result : GmmLabelResult
         The fitted GMM result for this condition.
     pos_threshold : float
@@ -78,6 +83,8 @@ def plot_witness_gmm(
         Class name for the positive (perturbed-leaning) mode, for the legend.
     neg_label : str
         Class name for the negative (control-like) mode, for the legend.
+    fit_population : str
+        Provenance label describing which populations fit the GMM.
     """
     scores = np.asarray(scores).ravel()
     control_scores = np.asarray(control_scores).ravel()
@@ -101,7 +108,7 @@ def plot_witness_gmm(
 
     grid = np.linspace(lo, hi, 400)
     means = result.gmm.means_.ravel()
-    stds = np.sqrt(result.gmm.covariances_.ravel())
+    stds = result.component_stds
     weights = result.gmm.weights_.ravel()
     for k in range(len(means)):
         density = weights[k] / (stds[k] * np.sqrt(2 * np.pi)) * np.exp(-0.5 * ((grid - means[k]) / stds[k]) ** 2)
@@ -114,20 +121,68 @@ def plot_witness_gmm(
             label=f"GMM {pos_label if is_pos else neg_label} mode (w={weights[k]:.2f})",
         )
 
-    # Score at which the positive-component posterior equals pos_threshold — the
-    # decision boundary, found on the score grid (posterior is monotone in score
-    # for a two-component 1-D GMM).
+    # Scores at which the positive-component posterior clears the confident
+    # positive and negative gates. The common two-mode case is monotone between
+    # component means; shading is driven directly by posterior values so it also
+    # remains correct if unequal variances produce a non-linear transition.
     grid_post = result.gmm.predict_proba(grid.reshape(-1, 1))[:, result.remod_component]
-    crossing = grid[grid_post >= pos_threshold]
-    if crossing.size:
-        boundary = crossing.max() if means[result.remod_component] < means.mean() else crossing.min()
-        ax.axvline(boundary, color="k", ls="--", lw=1, label=f"posterior ≥ {pos_threshold:g}")
+    neg_threshold = 1.0 - pos_threshold
+
+    def _crossings(threshold: float) -> np.ndarray:
+        delta = grid_post - threshold
+        indices = np.flatnonzero(delta[:-1] * delta[1:] <= 0)
+        values = []
+        for index in indices:
+            x0, x1 = grid[index : index + 2]
+            y0, y1 = delta[index : index + 2]
+            if y1 == y0:
+                values.append(float((x0 + x1) / 2))
+            else:
+                values.append(float(x0 - y0 * (x1 - x0) / (y1 - y0)))
+        return np.asarray(values, dtype=float)
+
+    positive_boundaries = _crossings(pos_threshold)
+    negative_boundaries = _crossings(neg_threshold)
+    posterior_diff = np.diff(grid_post)
+    nonmonotonic = bool(np.any(posterior_diff > 1e-6) and np.any(posterior_diff < -1e-6))
+
+    y_max = ax.get_ylim()[1]
+    ambiguous = (grid_post > neg_threshold) & (grid_post < pos_threshold)
+    ax.fill_between(
+        grid,
+        0,
+        y_max,
+        where=ambiguous,
+        color="#F2C94C",
+        alpha=0.28,
+        zorder=0,
+        label=(f"ambiguous: {neg_threshold:g} < P({pos_label}) < {pos_threshold:g}"),
+    )
+    for index, boundary in enumerate(negative_boundaries):
+        ax.axvline(
+            boundary,
+            color="tab:blue",
+            ls="--",
+            lw=1.3,
+            label=(f"P({pos_label}) = {neg_threshold:g}" if index == 0 else None),
+        )
+    for index, boundary in enumerate(positive_boundaries):
+        ax.axvline(
+            boundary,
+            color="tab:red",
+            ls="--",
+            lw=1.3,
+            label=(f"P({pos_label}) = {pos_threshold:g}" if index == 0 else None),
+        )
+    ax.set_ylim(0, y_max)
 
     n_pos = int((result.hard_label == 1).sum())
     ax.set_title(
         f"Witness-GMM gate — {marker} / {condition}\n"
         f"{'bimodal' if result.separated else 'UNIMODAL (skipped)'} · "
-        f"{n_pos}/{len(scores)} confident {pos_label}"
+        f"{n_pos}/{len(scores)} confident {pos_label} · yellow = abstain\n"
+        f"fit population: {fit_population.replace('_', ' ')} · "
+        f"posterior: {'NON-MONOTONIC' if nonmonotonic else 'monotonic'}"
     )
     ax.set_xlabel("witness score  (negative = perturbed-leaning)")
     ax.set_ylabel("density")
@@ -389,5 +444,91 @@ def plot_mmd_vs_hpi(
     ax.set_ylabel("MMD²  (control vs condition)", fontsize=11)
     ax.grid(True, alpha=0.3)
     ax.legend(frameon=True, fontsize=9)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_percentile_gate(
+    perturbed_scores: NDArray,
+    control_scores: NDArray,
+    result,
+    marker: str,
+    condition: str,
+    output_path: Path,
+    pos_label: str = "remodel",
+    neg_label: str = "noremodel",
+) -> None:
+    """Plot the control-calibrated percentile gate.
+
+    Nothing is fit here, so unlike the witness-GMM plot there are no fitted
+    component curves to draw. The plot shows the two score distributions and the
+    two decision boundaries — both quantiles of the **control** scores — so the
+    reader can judge the gate the way it is actually defined: by where the
+    perturbed mass sits relative to cuts placed on the control distribution.
+
+    The unshaded strip between the cuts is what gets dropped: cells resembling
+    neither reference confidently.
+
+    Read it by asking whether the perturbed histogram is *shifted* relative to
+    control, not whether either is bimodal. That is the regime this gate is for;
+    when a genuine second mode exists, :func:`plot_witness_gmm` is the better view.
+
+    Parameters
+    ----------
+    perturbed_scores, control_scores : NDArray
+        Witness scores of the condition's perturbed cells and the (time-matched)
+        control-reference cells.
+    result : PercentileLabelResult
+        The fitted gate (``gate``, ``control_fp``, ``hard_label``).
+    marker, condition : str
+        For the title.
+    output_path : Path
+        Output file path.
+    pos_label, neg_label : str
+        Class names for the legend.
+    """
+    p = np.asarray(perturbed_scores).ravel()
+    c = np.asarray(control_scores).ravel()
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    lo = float(min(p.min(), c.min()))
+    hi = float(max(p.max(), c.max()))
+    bins = np.linspace(lo, hi, 61)
+    ax.hist(p, bins=bins, density=True, color="0.7", alpha=0.7, label=f"perturbed ({condition}, n={len(p)})")
+    ax.hist(c, bins=bins, density=True, histtype="step", color="tab:blue", lw=1.5, label=f"control (n={len(c)})")
+
+    ax.axvline(
+        result.gate,
+        color="k",
+        ls="--",
+        lw=1.5,
+        label=f"{pos_label} cut = {result.gate:.4f}  (control FP {result.control_fp:.1%})",
+    )
+    ax.axvline(
+        result.neg_gate,
+        color="tab:blue",
+        ls="--",
+        lw=1.5,
+        label=f"{neg_label} cut = {result.neg_gate:.4f}",
+    )
+    # Shade both labeled regions; the unshaded middle is what gets dropped.
+    ax.axvspan(lo, result.gate, color="tab:red", alpha=0.08, label=f"{pos_label} region")
+    ax.axvspan(result.neg_gate, hi, color="tab:blue", alpha=0.08, label=f"{neg_label} region")
+
+    n_pos = int((result.hard_label == 1).sum())
+    n_neg = int((result.hard_label == 0).sum())
+    n_amb = int((result.hard_label == -1).sum())
+    # Report where each cut actually falls on the control distribution, measured
+    # rather than assumed — the negative cut is NOT the mirror of the positive one
+    # (see fit_percentile_labels), so it cannot be derived from control_fp.
+    pos_pctl = 100.0 * float((c < result.gate).mean())
+    neg_pctl = 100.0 * float((c < result.neg_gate).mean())
+    ax.set_title(
+        f"Percentile gate — {marker} / {condition}\n"
+        f"{n_pos} {pos_label} · {n_neg} {neg_label} · {n_amb} ambiguous (dropped) "
+        f"of {len(p)} · cuts = control p{pos_pctl:.0f}/p{neg_pctl:.0f}"
+    )
+    ax.set_xlabel("witness score  (negative = perturbed-leaning)")
+    ax.set_ylabel("density")
+    ax.legend(fontsize=8)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)

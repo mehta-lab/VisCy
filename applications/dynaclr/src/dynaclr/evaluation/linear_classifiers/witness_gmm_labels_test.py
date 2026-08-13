@@ -6,8 +6,11 @@ import pandas as pd
 
 from dynaclr.evaluation.evaluate_config import WitnessGmmExperiment, WitnessGmmLabelsConfig
 from dynaclr.evaluation.linear_classifiers.witness_gmm_labels import (
+    _balanced_reference_indices,
+    _extract_embedding_matrix,
     _well_prefix_mask,
     compute_marker_scores,
+    fit_pooled_witness_gmm,
     generate_witness_gmm_annotation,
     label_marker,
     obs_filter_mask,
@@ -137,11 +140,12 @@ def test_build_marker_annotation_maps_class_vocabulary(tmp_path):
     # All control-well cells labeled uninfected.
     ctrl = frame[frame["fov_name"].str.startswith("A/1")]
     assert (ctrl["infection_state"] == "uninfected").all()
-    # Every *labeled* perturbed-well cell is a confident positive (infected); the
-    # unaffected half of the perturbed well is dropped (not in the frame).
+    # The perturbed well contributes BOTH classes: confident positives, plus the
+    # cells the gate is confidently negative about (pre-onset / bystanders). Before
+    # the symmetric-threshold fix only positives were kept here, so every negative
+    # came from a different well than the positives.
     pert = frame[frame["fov_name"].str.startswith("B/2")]
-    assert len(pert) > 0
-    assert (pert["infection_state"] == "infected").all()
+    assert set(pert["infection_state"].unique()) == {"infected", "uninfected"}
     # Key columns present for the annotation join.
     assert {"experiment", "fov_name", "id"}.issubset(frame.columns)
 
@@ -173,7 +177,18 @@ def test_generate_writes_annotation_file(tmp_path):
     assert (plots / "remodeling_vs_time_viral_sensor.png").exists()
     # Population-level provenance sidecar.
     mmd = pd.read_csv(tmp_path / "ckpt" / "labels" / "viral_sensor_infection_state_mmd.csv")
-    assert {"marker", "condition", "mmd2", "p_raw", "p_adjusted", "mmd_significant"}.issubset(mmd.columns)
+    assert {
+        "marker",
+        "condition",
+        "mmd2",
+        "p_raw",
+        "p_adjusted",
+        "mmd_significant",
+        "embedding_key",
+        "reference_sampling",
+        "gmm_fit_population",
+        "gmm_covariance_type",
+    }.issubset(mmd.columns)
 
 
 def test_annotation_joins_by_key_under_shuffle(tmp_path):
@@ -190,12 +205,19 @@ def test_annotation_joins_by_key_under_shuffle(tmp_path):
     shuffled = adata[perm].copy()
     joined = load_annotation_anndata(shuffled, str(out), "infection_state")
 
-    # Every control-well cell that received a label reads "uninfected"; perturbed "infected".
+    # The join is by key, so each cell must carry the label Stage A gave THAT cell.
+    # Compare against the annotation file itself rather than assuming a well maps to
+    # one class — perturbed wells legitimately carry both (confident positives plus
+    # pre-onset/bystander negatives).
     labeled = joined.obs["infection_state"].notna()
-    ctrl = joined.obs["fov_name"].astype(object).str.strip("/").str.startswith("A/1")
-    pert = joined.obs["fov_name"].astype(object).str.strip("/").str.startswith("B/2")
-    assert (joined.obs.loc[labeled & ctrl, "infection_state"] == "uninfected").all()
-    assert (joined.obs.loc[labeled & pert, "infection_state"] == "infected").all()
+    expected = pd.read_csv(out).set_index(["fov_name", "id"])["infection_state"]
+    got = joined.obs.loc[labeled].copy()
+    got["fov_name"] = got["fov_name"].astype(object).str.strip("/")
+    keys = list(zip(got["fov_name"], got["id"], strict=False))
+    assert (got["infection_state"].to_numpy() == expected.loc[keys].to_numpy()).all()
+    # Control cells are negative by well identity, so that direction still holds.
+    ctrl = got["fov_name"].str.startswith("A/1")
+    assert (got.loc[ctrl, "infection_state"] == "uninfected").all()
 
 
 def test_build_marker_annotation_none_when_reference_missing(tmp_path):
@@ -246,3 +268,145 @@ def test_build_marker_annotation_mmd_gate_skips_nonsignificant(tmp_path):
 
     cfg = _config(tmp_path / "labels.csv")
     assert build_marker_annotation(adata, cfg.experiments, cfg) is None
+
+
+def test_time_matched_witness_scores_all_cells(tmp_path):
+    """Time-matched witness (witness_time_bin_hours set) scores every cell and
+    still separates the classes — labels land as with the pooled reference."""
+    adata = _make_separable_embeddings()
+    cfg = _config(tmp_path / "ckpt")
+    cfg = cfg.model_copy(update={"witness_time_bin_hours": 24.0})
+    ms = compute_marker_scores(adata, cfg.experiments, cfg)
+    assert ms is not None
+    # Every cell got a finite witness score (no bin left a cell unscored).
+    assert np.isfinite(ms.scores).all()
+    assert ms.scores.shape[0] == adata.n_obs
+    # The class signal survives time-matching: control cells lean positive-score
+    # (control reference), the remodeled half of perturbed leans negative.
+    frame = build_marker_annotation(adata, cfg.experiments, cfg)
+    assert frame is not None
+    assert set(frame["infection_state"].unique()) == {"infected", "uninfected"}
+
+
+def test_balanced_control_perturbed_gmm_fit_uses_both_populations(tmp_path):
+    """The pooled mode fits equal control/perturbed samples but scores the condition."""
+    adata = _make_separable_embeddings(n_per_well=80)
+    cfg = _config(tmp_path / "ckpt").model_copy(update={"gmm_fit_population": "balanced_control_perturbed"})
+    marker_scores = compute_marker_scores(adata, cfg.experiments, cfg)
+    assert marker_scores is not None
+    result = label_marker(marker_scores, {"DENV"}, cfg)
+    assert result is not None
+    gmm = result.cond_gmm["DENV"]
+    assert gmm.n_fit_samples == 160
+    assert len(gmm.posterior) == 80
+    assert gmm.separated
+
+
+def test_joint_control_perturbed_gmm_fit_uses_every_cell(tmp_path):
+    """Literal joint mode concatenates all control and condition witness scores."""
+    adata = _make_separable_embeddings(n_per_well=60)
+    cfg = _config(tmp_path / "ckpt").model_copy(update={"gmm_fit_population": "joint_control_perturbed"})
+    marker_scores = compute_marker_scores(adata, cfg.experiments, cfg)
+    assert marker_scores is not None
+    result = label_marker(marker_scores, {"DENV"}, cfg)
+    assert result is not None
+    gmm = result.cond_gmm["DENV"]
+    assert gmm.n_fit_samples == 120
+    assert len(gmm.posterior) == 60
+
+
+def test_joint_gmm_applies_symmetric_gate_to_control_cells(tmp_path):
+    """Joint mode does not force a perturbed-like control cell negative."""
+    adata = _make_separable_embeddings(n_per_well=80)
+    cfg = _config(tmp_path / "ckpt").model_copy(
+        update={
+            "gmm_fit_population": "joint_control_perturbed",
+            "gmm_covariance_type": "tied",
+        }
+    )
+    marker_scores = compute_marker_scores(adata, cfg.experiments, cfg)
+    assert marker_scores is not None
+    remodeled = marker_scores.scores[marker_scores.perturbed_mask]
+    marker_scores.scores[0] = remodeled.min()
+
+    result = label_marker(marker_scores, {"DENV"}, cfg)
+
+    assert result is not None
+    forced_outlier = result.frame[result.frame["id"] == 0]
+    assert forced_outlier["infection_state"].tolist() == ["infected"]
+    assert result.control_pos[0]
+
+
+def test_function_api_fits_joint_tied_pooled_teacher(tmp_path):
+    """The script-level API returns annotations without CLI or file I/O."""
+    adata = _make_separable_embeddings(n_per_well=60)
+    cfg = _config(tmp_path / "ckpt").model_copy(
+        update={
+            "gmm_fit_population": "joint_control_perturbed",
+            "gmm_covariance_type": "tied",
+            "reference_sampling": "balanced_by_experiment",
+            "max_reference_cells": 50,
+        }
+    )
+    fit = fit_pooled_witness_gmm(adata, cfg)
+
+    assert not fit.annotations.empty
+    assert set(fit.annotations["infection_state"]) == {
+        "infected",
+        "uninfected",
+    }
+    result = fit.marker_labels["viral_sensor"]
+    assert result is not None
+    assert result.cond_gmm["DENV"].gmm.covariance_type == "tied"
+
+
+def test_stored_normalized_pca_representation_is_used(tmp_path):
+    """Stage A can consume persisted normalized PCA scores without touching raw X."""
+    adata = _make_separable_embeddings()
+    adata.obsm["X_normalized_pca80"] = np.asarray(adata.X).copy()
+    adata.X = np.zeros_like(np.asarray(adata.X))
+    cfg = _config(tmp_path / "ckpt").model_copy(
+        update={
+            "embedding_key": "X_normalized_pca80",
+            "gmm_fit_population": "joint_control_perturbed",
+            "gmm_covariance_type": "tied",
+        }
+    )
+    marker_scores = compute_marker_scores(adata, cfg.experiments, cfg)
+    assert marker_scores is not None
+    assert np.isfinite(marker_scores.scores).all()
+    result = label_marker(marker_scores, {"DENV"}, cfg)
+    assert result is not None
+    assert result.cond_gmm["DENV"].gmm.covariance_type == "tied"
+
+
+def test_balanced_reference_sampling_is_equal_per_experiment(tmp_path):
+    """A feasible cap gives every experiment equal control and perturbed references."""
+    first = _make_separable_embeddings(n_per_well=50, experiment="exp_A")
+    second = _make_separable_embeddings(n_per_well=35, experiment="exp_B")
+    pooled = ad.concat([first, second], index_unique="-")
+    sources = [
+        WitnessGmmExperiment(
+            experiment=name,
+            embeddings_zarr="unused.zarr",
+            control_filter={"perturbation": "uninfected"},
+            perturbed_filter={"perturbation": "DENV"},
+        )
+        for name in ("exp_A", "exp_B")
+    ]
+    control = pooled.obs["perturbation"].to_numpy() == "uninfected"
+    perturbed = pooled.obs["perturbation"].to_numpy() == "DENV"
+    control_idx, perturbed_idx = _balanced_reference_indices(
+        pooled.obs,
+        control,
+        perturbed,
+        sources,
+        max_per_experiment_class=30,
+        rng=np.random.default_rng(7),
+    )
+    experiments = pooled.obs["experiment"].astype(str).to_numpy()
+    for name in ("exp_A", "exp_B"):
+        assert np.sum(experiments[control_idx] == name) == 30
+        assert np.sum(experiments[perturbed_idx] == name) == 30
+
+    assert _extract_embedding_matrix(first, None).shape == first.X.shape

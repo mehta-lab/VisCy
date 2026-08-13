@@ -10,7 +10,10 @@ import pandas as pd
 import pytest
 
 from dynaclr.evaluation.mmd.config import ComparisonSpec, MMDPooledConfig
-from dynaclr.evaluation.mmd.export_representation import export_pooled_representation
+from dynaclr.evaluation.mmd.export_representation import (
+    export_pooled_representation,
+    load_pooled_representation_config,
+)
 
 
 def _write_store(path: Path, experiment: str, seed: int) -> np.ndarray:
@@ -108,3 +111,15 @@ def test_default_key_rejects_misleading_representation_name(tmp_path: Path):
 
     with pytest.raises(ValueError, match="reserved for control_mad"):
         export_pooled_representation(config)
+
+
+def test_canonical_recipe_exposes_pooled_representation_section():
+    recipe = Path(__file__).parents[1] / "configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml"
+
+    config = load_pooled_representation_config(recipe)
+
+    assert config.representation.normalization == "control_mad"
+    assert config.representation.pca_variance == 0.80
+    assert config.representation.pca_max_cells_per_dataset_class == 1900
+    assert config.mmd.n_permutations == 1000
+    assert config.mmd.balance_samples

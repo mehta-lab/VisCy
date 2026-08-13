@@ -168,12 +168,16 @@ For standalone runs, use a generated MMD YAML:
 ```sh
 uv run dynaclr compute-mmd -c mmd.yaml
 uv run dynaclr compute-mmd --combined -c mmd_cross_exp.yaml
-uv run dynaclr compute-mmd --pooled -c mmd_pooled.yaml
+uv run python applications/dynaclr/scripts/evaluation/write_normalized_pca80.py \
+  -c applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml
+uv run dynaclr witness-gmm-labels \
+  -c applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml
 ```
 
-Copyable standalone examples live at
-`applications/dynaclr/configs/evaluation/recipes/mmd.yaml` and
-`applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml`.
+The only maintained pooled biological-state example is
+`applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml`. Its `pooled_representation` section drives PCA80 export, and its
+`witness_gmm_labels` section drives pooled MMD permutation testing plus the
+joint/tied GMM teacher.
 
 ## Linear classifiers
 

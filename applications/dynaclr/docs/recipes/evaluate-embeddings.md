@@ -90,16 +90,16 @@ Cross-experiment `--combined` and correction `--over-time` modes remain in
 their supplied coordinates so the preprocessing cannot erase the batch effect
 being measured.
 
-Copyable standalone configurations are available at
-`applications/dynaclr/configs/evaluation/recipes/mmd.yaml` and
-`applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml`.
+The only maintained biological-state recipe is
+`applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml`. Its `pooled_representation` section configures normalization,
+PCA80, and pooled MMD; its `witness_gmm_labels` section configures the pooled
+joint/tied teacher. Edit both sections so they name the same input stores.
 
-To reuse the normalized PCA80 coordinates outside MMD, run the direct export
-script with the pooled YAML:
+To persist the normalized PCA80 coordinates, run:
 
 ```sh
 uv run python applications/dynaclr/scripts/evaluation/write_normalized_pca80.py \
-  --config applications/dynaclr/configs/evaluation/recipes/mmd_pooled.yaml
+  --config applications/dynaclr/configs/evaluation/recipes/witness_gmm_pooled_joint_pca80.yaml
 ```
 
 It fits one pooled marker-specific representation and selectively replaces

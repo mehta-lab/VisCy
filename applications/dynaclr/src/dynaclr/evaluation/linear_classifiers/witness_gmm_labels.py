@@ -17,9 +17,10 @@ Pipeline per marker:
 1. Build a control reference (X) and a perturbed reference (Y) from
    per-experiment control/perturbed wells or filters.
 2. Fit the empirical MMD witness on (X, Y) and score every cell.
-3. Per perturbed condition, fit a 2-component GMM on the scores; cells above the
-   posterior threshold are confident positives. Negatives = all control-well
-   cells (well identity). Near-noise markers (unimodal GMM) are skipped.
+3. Per perturbed condition, fit the configured 2-component GMM. The validated
+   pooled contract fits one joint control+perturbed, tied-covariance GMM and
+   applies symmetric posterior gates; ambiguous cells abstain. Near-noise
+   markers (unimodal GMM) are skipped.
 4. Map positive/negative to the config's class vocabulary and write the
    annotation file (CSV or parquet by extension).
 """
@@ -40,22 +41,71 @@ from scipy.stats import false_discovery_control
 from dynaclr.evaluation.linear_classifiers.witness_gmm_plots import (
     plot_mmd_null,
     plot_mmd_vs_hpi,
+    plot_percentile_gate,
     plot_remodeling_vs_time,
     plot_witness_gmm,
 )
 from viscy_utils.cli_utils import load_config
 from viscy_utils.evaluation.mmd import median_heuristic, mmd_permutation_test, subsample, witness_function
 from viscy_utils.evaluation.witness_gmm import (
-    ControlAnchoredResult,
-    _gaussian_pdf,
-    fit_control_anchored_labels,
+    PercentileLabelResult,
     fit_gmm_labels,
+    fit_percentile_labels,
 )
 
 if TYPE_CHECKING:
     from dynaclr.evaluation.evaluate_config import WitnessGmmExperiment, WitnessGmmLabelsConfig
 
 _logger = logging.getLogger(__name__)
+
+
+def _extract_embedding_matrix(adata: ad.AnnData, embedding_key: str | None) -> np.ndarray:
+    """Return the configured row-aligned representation as float32."""
+    values = adata.X if embedding_key is None else adata.obsm[embedding_key]
+    if hasattr(values, "toarray"):
+        values = values.toarray()
+    return np.asarray(values, dtype=np.float32)
+
+
+def _balanced_reference_indices(
+    obs: pd.DataFrame,
+    control_mask: np.ndarray,
+    perturbed_mask: np.ndarray,
+    experiments: list[WitnessGmmExperiment],
+    *,
+    max_per_experiment_class: int | None,
+    rng: np.random.Generator,
+    condition: object | None = None,
+    condition_column: str = "perturbation",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sample equal control/perturbed references within every experiment.
+
+    A shared feasible cap makes every experiment contribute equally. If the cap
+    exceeds a sparse stratum, that experiment contributes its smaller available
+    count; the saved configuration must therefore declare the intended cap.
+    """
+    experiment_values = obs["experiment"].astype(str).to_numpy()
+    condition_values = obs[condition_column].to_numpy()
+    control_parts: list[np.ndarray] = []
+    perturbed_parts: list[np.ndarray] = []
+    for source in experiments:
+        exp_mask = experiment_values == str(source.experiment)
+        control_rows = np.flatnonzero(control_mask & exp_mask)
+        condition_mask = perturbed_mask & exp_mask
+        if condition is not None:
+            condition_mask &= condition_values == condition
+        perturbed_rows = np.flatnonzero(condition_mask)
+        n = min(len(control_rows), len(perturbed_rows))
+        if max_per_experiment_class is not None:
+            n = min(n, max_per_experiment_class)
+        if n < 1:
+            raise ValueError(
+                f"{source.experiment}: balanced reference sampling needs both "
+                f"control and perturbed rows (condition={condition!r})"
+            )
+        control_parts.append(rng.choice(control_rows, n, replace=False))
+        perturbed_parts.append(rng.choice(perturbed_rows, n, replace=False))
+    return np.concatenate(control_parts), np.concatenate(perturbed_parts)
 
 
 def _well_prefix_mask(fov_name: pd.Series, wells: list[str]) -> np.ndarray:
@@ -256,13 +306,26 @@ def compute_marker_scores(
         control_mask |= exp_mask & ctrl
         perturbed_mask |= exp_mask & pert
 
-    X_all = adata.X if isinstance(adata.X, np.ndarray) else adata.X.toarray()
+    X_all = _extract_embedding_matrix(adata, config.embedding_key)
     if control_mask.sum() == 0 or perturbed_mask.sum() == 0:
         _logger.warning("No control/perturbed reference cells found; skipping marker.")
         return None
 
-    X_ref = subsample(X_all[control_mask], config.max_reference_cells, rng)
-    Y_ref = subsample(X_all[perturbed_mask], config.max_reference_cells, rng)
+    if config.reference_sampling == "balanced_by_experiment":
+        control_ref_idx, perturbed_ref_idx = _balanced_reference_indices(
+            obs,
+            control_mask,
+            perturbed_mask,
+            experiments,
+            max_per_experiment_class=config.max_reference_cells,
+            rng=rng,
+            condition_column=config.condition_column,
+        )
+        X_ref = X_all[control_ref_idx]
+        Y_ref = X_all[perturbed_ref_idx]
+    else:
+        X_ref = subsample(X_all[control_mask], config.max_reference_cells, rng)
+        Y_ref = subsample(X_all[perturbed_mask], config.max_reference_cells, rng)
     # Global bandwidth from the pooled reference — kept even in time-matched mode
     # so witness scores are on one comparable scale across timepoints.
     bandwidth = config.bandwidth if config.bandwidth is not None else median_heuristic(X_ref, Y_ref)
@@ -282,9 +345,25 @@ def compute_marker_scores(
         cond_mask = perturbed_mask & (conditions == cond)
         if cond_mask.sum() < 5:
             continue
+        if config.reference_sampling == "balanced_by_experiment":
+            control_test_idx, perturbed_test_idx = _balanced_reference_indices(
+                obs,
+                control_mask,
+                perturbed_mask,
+                experiments,
+                max_per_experiment_class=config.max_reference_cells,
+                rng=rng,
+                condition=cond,
+                condition_column=config.condition_column,
+            )
+            X_test = X_all[control_test_idx]
+            Y_test = X_all[perturbed_test_idx]
+        else:
+            X_test = X_ref
+            Y_test = subsample(X_all[cond_mask], config.max_reference_cells, rng)
         mmd2, p_value, null = mmd_permutation_test(
-            X_ref,
-            subsample(X_all[cond_mask], config.max_reference_cells, rng),
+            X_test,
+            Y_test,
             n_permutations=config.mmd_n_permutations,
             bandwidth=bandwidth,
             seed=config.random_seed,
@@ -419,6 +498,25 @@ def _compute_hpi_mmd(
     return out
 
 
+def _balanced_control_perturbed_fit_scores(
+    control_scores: np.ndarray,
+    perturbed_scores: np.ndarray,
+    *,
+    max_per_population: int | None,
+    random_seed: int,
+) -> np.ndarray:
+    """Return an equal-size, deterministic control + perturbed GMM fit pool."""
+    n = min(len(control_scores), len(perturbed_scores))
+    if max_per_population is not None:
+        n = min(n, max_per_population)
+    if n < 1:
+        raise ValueError("control and perturbed GMM fit populations must be non-empty")
+    rng = np.random.default_rng(random_seed)
+    control_idx = rng.choice(len(control_scores), size=n, replace=False)
+    perturbed_idx = rng.choice(len(perturbed_scores), size=n, replace=False)
+    return np.concatenate([control_scores[control_idx], perturbed_scores[perturbed_idx]])
+
+
 def label_marker(
     marker_scores: _MarkerScores,
     significant_conditions: set,
@@ -428,10 +526,18 @@ def label_marker(
 
     A condition is labeled only if it is in ``significant_conditions`` (cleared
     the FDR-controlled MMD gate, decided run-wide) AND its GMM is bimodal.
-    Negatives are all control-well cells (well identity). ``None`` when no
-    condition survives both gates. The returned :class:`_MarkerLabels` also
-    carries the per-condition GMM fits and the scores they were fit on, for the
-    Stage-A diagnostic plots.
+
+    In legacy perturbed-only mode, negatives include every control-well cell by
+    well identity plus perturbed-well cells whose posterior is confidently
+    negative. In control-inclusive GMM modes, the same symmetric posterior gates
+    are applied to every control and perturbed cell; ambiguous cells from either
+    population stay unlabeled. With multiple perturbed conditions, a control is
+    positive if any separated condition model is confidently positive and is
+    negative only if every separated model is confidently negative.
+
+    ``None`` when no condition survives both gates. The returned
+    :class:`_MarkerLabels` also carries the per-condition GMM fits and the scores
+    they were fit on, for the Stage-A diagnostic plots.
     """
     obs = marker_scores.obs
     key_cols = _annotation_key_columns(obs)
@@ -443,15 +549,16 @@ def label_marker(
     neg_label = config.class_map["negative"]
 
     labels = np.full(len(obs), None, dtype=object)
-    labels[control_mask] = neg_label
+    control_inclusive_gmm = config.gate == "gmm" and config.gmm_fit_population != "perturbed"
+    if not control_inclusive_gmm:
+        labels[control_mask] = neg_label
 
-    # Per-cell provenance carried into the annotation file: the raw witness score
-    # (every scored cell) and the GMM posterior of the assigned class. Control
-    # cells are the clean negative reference (not GMM-fit) → posterior 1.0 (full
-    # confidence by design); perturbed positives get their remodel-mode posterior.
-    # The posterior doubles as a per-sample confidence weight for Stage-B training.
+    # Per-cell provenance carried into the annotation file. Legacy modes retain
+    # forced control negatives with confidence 1.0. Control-inclusive GMM modes
+    # fill these values from the same posterior gates used for perturbed cells.
     gmm_posterior = np.full(len(obs), np.nan, dtype=float)
-    gmm_posterior[control_mask] = 1.0
+    if not control_inclusive_gmm:
+        gmm_posterior[control_mask] = 1.0
 
     time_col = "hours_post_perturbation" if "hours_post_perturbation" in obs.columns else "t"
     time_values = obs[time_col].to_numpy() if time_col in obs.columns else None
@@ -460,6 +567,7 @@ def label_marker(
     cond_gmm: dict = {}
     cond_scores: dict = {}
     cond_time: dict = {}
+    control_gmm_posteriors: list[np.ndarray] = []
     any_separated = False
     for cond in pd.unique(conditions[perturbed_mask]):
         cond_mask = perturbed_mask & (conditions == cond)
@@ -472,29 +580,88 @@ def label_marker(
         if time_values is not None:
             cond_time[cond] = time_values[cond_mask]
         cond_idx = np.flatnonzero(cond_mask)
-        if config.gate == "control_anchored":
-            # Baseline frozen to control; label the excess over baseline. Never
-            # abstains — right for graded, subtle shifts (weak channels).
-            res = fit_control_anchored_labels(
-                scores[cond_mask], control_scores_all, control_fp_target=config.control_fp_target
+        if config.gate == "percentile":
+            # Symmetric quantiles of the CONTROL scores: positive below the
+            # control_fp_target quantile, negative above the (1 - target) one,
+            # ambiguous between. Fits nothing, so it neither requires the perturbed
+            # pool to be bimodal nor invents a second mode when the perturbation
+            # merely SHIFTS a unimodal population. Never abstains.
+            res = fit_percentile_labels(
+                scores[cond_mask],
+                control_scores_all,
+                control_fp_target=config.control_fp_target,
+                negative_quantile=config.negative_quantile,
             )
             cond_gmm[cond] = res
             any_separated = True
         else:
+            fit_scores = None
+            if config.gmm_fit_population == "joint_control_perturbed":
+                fit_scores = np.concatenate([control_scores_all, scores[cond_mask]])
+            elif config.gmm_fit_population == "balanced_control_perturbed":
+                fit_scores = _balanced_control_perturbed_fit_scores(
+                    control_scores_all,
+                    scores[cond_mask],
+                    max_per_population=config.max_reference_cells,
+                    random_seed=config.random_seed,
+                )
             res = fit_gmm_labels(
-                scores[cond_mask], pos_threshold=config.gmm_pos_threshold, random_state=config.random_seed
+                scores[cond_mask],
+                pos_threshold=config.gmm_pos_threshold,
+                random_state=config.random_seed,
+                fit_scores_1d=fit_scores,
+                covariance_type=config.gmm_covariance_type,
             )
             cond_gmm[cond] = res
             if not res.separated:
                 _logger.warning("GMM unimodal for condition %r; no positives labeled.", cond)
                 continue
             any_separated = True
+            if control_inclusive_gmm:
+                control_gmm_posteriors.append(
+                    res.gmm.predict_proba(control_scores_all.reshape(-1, 1))[:, res.remod_component]
+                )
         idx = cond_idx[res.hard_label == 1]
         labels[idx] = pos_label
         gmm_posterior[idx] = res.posterior[res.hard_label == 1]
 
+        # Cells the gate is equally confident are NOT positive are real negatives:
+        # pre-onset cells (in a timelapse, a cell in a perturbed well genuinely is
+        # unperturbed before onset) and bystanders (infection is never 100%).
+        # Dropping them — the old behavior — meant a perturbed FOV contributed
+        # ONLY positives, so every negative came from the control well and the
+        # classifier never saw a batch-matched negative (same well, plate,
+        # illumination, segmentation as the positives).
+        #
+        # Both gates hold negatives to the same bar as positives and leave a
+        # middle band unlabeled, but they express it differently: the GMM has a
+        # posterior to threshold symmetrically, while the percentile gate marks
+        # negatives directly (hard_label == 0) from its own control quantile,
+        # since its posterior is 0 for every cell above the positive cut.
+        if isinstance(res, PercentileLabelResult):
+            neg_sel = res.hard_label == 0
+        else:
+            neg_sel = res.posterior <= 1.0 - config.gmm_pos_threshold
+        idx_neg = cond_idx[neg_sel]
+        labels[idx_neg] = neg_label
+        # Same convention as control-well negatives: negatives are not
+        # distinguished by provenance.
+        gmm_posterior[idx_neg] = 1.0
+
     if not any_separated:
         return None
+
+    if control_inclusive_gmm:
+        if not control_gmm_posteriors:
+            return None
+        max_control_posterior = np.max(np.vstack(control_gmm_posteriors), axis=0)
+        control_idx = np.flatnonzero(control_mask)
+        control_positive = max_control_posterior >= config.gmm_pos_threshold
+        control_negative = max_control_posterior <= 1.0 - config.gmm_pos_threshold
+        labels[control_idx[control_positive]] = pos_label
+        labels[control_idx[control_negative]] = neg_label
+        gmm_posterior[control_idx[control_positive]] = max_control_posterior[control_positive]
+        gmm_posterior[control_idx[control_negative]] = 1.0 - max_control_posterior[control_negative]
 
     keep = labels != None  # noqa: E711 — object-array null test
     carry = key_cols + [c for c in _METADATA_COLUMNS if c in obs.columns and c not in key_cols]
@@ -514,16 +681,17 @@ def label_marker(
     # rate, not a hardcoded zero. NaN posterior for controls when no GMM separated.
     control_pos = np.zeros(control_mask.sum(), dtype=bool)
     ctrl_s = scores[control_mask]
+    if control_inclusive_gmm:
+        control_pos = np.max(np.vstack(control_gmm_posteriors), axis=0) >= config.gmm_pos_threshold
     for res in cond_gmm.values():
-        if isinstance(res, ControlAnchoredResult):
-            # Control-anchored: score controls under the fitted mixture, threshold
-            # at the calibrated cut (FP ≈ control_fp_target by construction).
-            base = res.pi_baseline * _gaussian_pdf(ctrl_s, res.mu_c, res.sigma_c)
-            rem = (1 - res.pi_baseline) * _gaussian_pdf(ctrl_s, res.mu_r, res.sigma_r)
-            post = rem / (base + rem + 1e-300)
-            control_pos |= post >= res.threshold
+        if isinstance(res, PercentileLabelResult):
+            # Percentile: the gate is a raw-score cut, so controls are scored by
+            # the identical rule. This FP is ≈ control_fp_target by construction
+            # (the gate is a quantile of these very scores) — it is a consistency
+            # check on the plot, not a discovered quantity.
+            control_pos |= ctrl_s < res.gate
             continue
-        if not res.separated:
+        if not res.separated or control_inclusive_gmm:
             continue
         post = res.gmm.predict_proba(ctrl_s.reshape(-1, 1))[:, res.remod_component]
         control_pos |= post >= config.gmm_pos_threshold
@@ -535,6 +703,93 @@ def label_marker(
         control_time,
         control_scores,
         control_pos,
+    )
+
+
+@dataclass(frozen=True)
+class PooledWitnessGmmFit:
+    """In-memory result of pooled witness scoring, MMD/FDR, and GMM gates."""
+
+    annotations: pd.DataFrame
+    marker_scores: dict[str, _MarkerScores]
+    marker_labels: dict[str, _MarkerLabels | None]
+    adjusted_pvalues: dict[tuple[str, object], float]
+    significant_conditions: dict[str, set]
+
+
+def fit_pooled_witness_gmm(
+    adata: ad.AnnData,
+    config: WitnessGmmLabelsConfig,
+) -> PooledWitnessGmmFit:
+    """Fit the pooled witness and joint/tied GMM stack without file I/O.
+
+    This is the canonical script-level API. It scores the selected representation,
+    applies run-wide Benjamini-Yekutieli correction to marker/condition MMD tests,
+    then gates each significant condition with the configured GMM. The YAML/CLI
+    entrypoint loads AnnData and writes diagnostics around this function.
+    """
+    if "marker" not in adata.obs:
+        raise KeyError("pooled witness input needs obs['marker']")
+    markers = config.marker_filters or list(pd.unique(adata.obs["marker"]))
+
+    marker_scores: dict[str, _MarkerScores] = {}
+    pval_keys: list[tuple[str, object]] = []
+    pvalues: list[float] = []
+    for marker in markers:
+        sub = adata[adata.obs["marker"] == marker]
+        if sub.n_obs == 0:
+            _logger.warning("No cells for marker %r; skipping.", marker)
+            continue
+        scores = compute_marker_scores(
+            sub.copy(),
+            config.experiments,
+            config,
+        )
+        if scores is None:
+            continue
+        marker_scores[str(marker)] = scores
+        for condition, pvalue in scores.cond_pvalues.items():
+            pval_keys.append((str(marker), condition))
+            pvalues.append(pvalue)
+
+    if not pvalues:
+        raise RuntimeError("No testable conditions; check references and condition_column.")
+
+    adjusted = false_discovery_control(
+        np.asarray(pvalues),
+        method="by",
+    )
+    adjusted_pvalues: dict[tuple[str, object], float] = {}
+    significant: dict[str, set] = {}
+    for (marker, condition), adjusted_pvalue in zip(pval_keys, adjusted, strict=True):
+        adjusted_pvalues[(marker, condition)] = float(adjusted_pvalue)
+        if adjusted_pvalue <= config.mmd_pvalue_threshold:
+            significant.setdefault(marker, set()).add(condition)
+        else:
+            _logger.info(
+                "Condition %r (marker %r): BY-adjusted p=%.3g > %.3g; skipped.",
+                condition,
+                marker,
+                adjusted_pvalue,
+                config.mmd_pvalue_threshold,
+            )
+
+    marker_labels = {
+        marker: label_marker(
+            scores,
+            significant.get(marker, set()),
+            config,
+        )
+        for marker, scores in marker_scores.items()
+    }
+    frames = [result.frame for result in marker_labels.values() if result is not None]
+    annotations = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    return PooledWitnessGmmFit(
+        annotations=annotations,
+        marker_scores=marker_scores,
+        marker_labels=marker_labels,
+        adjusted_pvalues=adjusted_pvalues,
+        significant_conditions=significant,
     )
 
 
@@ -564,56 +819,32 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path | No
         The written annotation-file path.
     """
     parts: list[ad.AnnData] = []
-    for exp in config.experiments:
-        _logger.info("Loading embeddings for %s: %s", exp.experiment, exp.embeddings_zarr)
-        a = ad.read_zarr(exp.embeddings_zarr)
+    sources_by_path: dict[str, list[WitnessGmmExperiment]] = {}
+    for source in config.experiments:
+        sources_by_path.setdefault(source.embeddings_zarr, []).append(source)
+    for embeddings_zarr, sources in sources_by_path.items():
+        _logger.info(
+            "Loading embeddings for %s: %s",
+            ", ".join(source.experiment for source in sources),
+            embeddings_zarr,
+        )
+        a = ad.read_zarr(embeddings_zarr)
         a.obs_names_make_unique()
         if "experiment" not in a.obs.columns:
-            a.obs["experiment"] = exp.experiment
+            if len(sources) != 1:
+                raise ValueError(
+                    f"{embeddings_zarr}: pooled store needs obs['experiment'] "
+                    "when it is referenced by multiple experiments"
+                )
+            a.obs["experiment"] = sources[0].experiment
         parts.append(a)
     adata = ad.concat(parts, join="outer") if len(parts) > 1 else parts[0]
     adata.obs_names_make_unique()
 
-    markers = config.marker_filters or list(pd.unique(adata.obs["marker"]))
-
-    # Pass 1: witness-score every marker and collect raw per-condition MMD
-    # p-values across the whole run.
-    marker_scores: dict[str, _MarkerScores] = {}
-    pval_keys: list[tuple[str, object]] = []  # (marker, condition)
-    pvals: list[float] = []
-    for marker in markers:
-        sub = adata[adata.obs["marker"] == marker]
-        if sub.n_obs == 0:
-            _logger.warning("No cells for marker %r; skipping.", marker)
-            continue
-        ms = compute_marker_scores(sub.copy(), config.experiments, config)
-        if ms is None:
-            continue
-        marker_scores[marker] = ms
-        for cond, p in ms.cond_pvalues.items():
-            pval_keys.append((marker, cond))
-            pvals.append(p)
-
-    if not pvals:
-        raise RuntimeError("No testable conditions — check references and condition_column.")
-
-    # Benjamini-Yekutieli FDR control across the whole run's (marker, condition)
-    # family; a condition is significant if its adjusted p ≤ mmd_pvalue_threshold.
-    adjusted = false_discovery_control(np.asarray(pvals), method="by")
-    p_adj_by_key: dict[tuple[str, object], float] = {}
-    significant: dict[str, set] = {}
-    for (marker, cond), p_adj in zip(pval_keys, adjusted):
-        p_adj_by_key[(marker, cond)] = float(p_adj)
-        if p_adj <= config.mmd_pvalue_threshold:
-            significant.setdefault(marker, set()).add(cond)
-        else:
-            _logger.info(
-                "Condition %r (marker %r): BY-adjusted p=%.3g > %.3g — skipped.",
-                cond,
-                marker,
-                p_adj,
-                config.mmd_pvalue_threshold,
-            )
+    fit = fit_pooled_witness_gmm(adata, config)
+    marker_scores = fit.marker_scores
+    p_adj_by_key = fit.adjusted_pvalues
+    significant = fit.significant_conditions
 
     labels_dir = Path(config.output_dir) / "labels"
     plots_dir = labels_dir / "plots"
@@ -646,7 +877,7 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path | No
     frames: list[pd.DataFrame] = []
     mmd_rows: list[dict] = []  # per (marker, condition) provenance sidecar
     for marker, ms in marker_scores.items():
-        result = label_marker(ms, significant.get(marker, set()), config)
+        result = fit.marker_labels.get(marker)
         cond_gmm = result.cond_gmm if result else {}
         # Provenance row per tested (marker, condition): MMD gate + GMM summary.
         for cond, mmd in ms.cond_mmd.items():
@@ -660,20 +891,32 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path | No
                 "p_adjusted": p_adj_by_key[(marker, cond)],
                 "mmd_significant": cond in significant.get(marker, set()),
                 "gate": config.gate,
+                "embedding_key": config.embedding_key or "X",
+                "reference_sampling": config.reference_sampling,
+                "max_reference_cells": config.max_reference_cells,
+                "gmm_fit_population": config.gmm_fit_population,
+                "gmm_covariance_type": config.gmm_covariance_type,
                 "n_confident_positive": int((res.hard_label == 1).sum()) if res is not None else 0,
             }
-            if isinstance(res, ControlAnchoredResult):
+            if isinstance(res, PercentileLabelResult):
                 row.update(
                     {
-                        "remodel_fraction": 1.0 - res.pi_baseline,
+                        "positive_fraction": float((res.hard_label == 1).mean()),
+                        "negative_fraction": float((res.hard_label == 0).mean()),
+                        "ambiguous_fraction": float((res.hard_label == -1).mean()),
                         "control_fp": res.control_fp,
-                        "posterior_threshold": res.threshold,
+                        "score_gate": res.gate,
+                        "score_neg_gate": res.neg_gate,
+                        "negative_quantile": config.negative_quantile,
                     }
                 )
             elif res is not None:
                 row.update(
                     {
                         "gmm_separated": bool(res.separated),
+                        "gmm_fit_population": config.gmm_fit_population,
+                        "gmm_covariance_type": config.gmm_covariance_type,
+                        "n_gmm_fit": res.n_fit_samples,
                         "gmm_remodel_weight": float(res.gmm.weights_[res.remod_component]),
                         "gmm_bic": res.bic,
                         "gmm_aic": res.aic,
@@ -681,9 +924,20 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path | No
                     }
                 )
             mmd_rows.append(row)
-        # Witness-GMM diagnostic (GMM gate only; control-anchored uses a different model).
+        # Gate diagnostic per condition: percentile gets its own plot (both score
+        # distributions + the control-calibrated cut); GMM gets the two-mode plot.
         for cond, res in cond_gmm.items():
-            if isinstance(res, ControlAnchoredResult):
+            if isinstance(res, PercentileLabelResult):
+                plot_percentile_gate(
+                    result.cond_scores[cond],
+                    result.control_scores,
+                    res,
+                    marker=str(marker),
+                    condition=str(cond),
+                    pos_label=config.class_map["positive"],
+                    neg_label=config.class_map["negative"],
+                    output_path=plots_dir / f"percentile_gate_{marker}_{cond}.png",
+                )
                 continue
             plot_witness_gmm(
                 result.cond_scores[cond],
@@ -694,6 +948,7 @@ def generate_witness_gmm_annotation(config: WitnessGmmLabelsConfig) -> Path | No
                 condition=str(cond),
                 pos_label=config.class_map["positive"],
                 neg_label=config.class_map["negative"],
+                fit_population=(f"{config.gmm_fit_population}; covariance={config.gmm_covariance_type}"),
                 output_path=plots_dir / f"witness_gmm_{marker}_{cond}.png",
             )
         if result is None:

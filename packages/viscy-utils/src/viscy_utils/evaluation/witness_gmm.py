@@ -2,18 +2,24 @@
 
 The MMD witness score (:func:`viscy_utils.evaluation.mmd.witness_function`) is a
 scalar per cell measuring how far its embedding leans toward the perturbed
-reference distribution. This module fits a two-component Gaussian mixture to
-those 1-D scores and derives a confidence-gated label: the lower-mean component
-is the remodeled/perturbed mode, and a cell is called positive when its
-posterior for that mode clears a threshold.
+reference distribution. This module turns those 1-D scores into gated labels.
 
-This replaces the earlier hard sign + dead-zone gate. The GMM crossover is a
-calibrated boundary (it adapts to the two modes' locations) rather than a
-hardcoded sign-at-zero cut, which matters for the heavily imbalanced gated
-classes the witness produces.
+Two gates are provided, and the choice depends on whether the perturbed
+population is genuinely **bimodal** or merely **shifted**:
 
-The single public function :func:`fit_gmm_labels` is pure NumPy/scikit-learn so
-it can be reused from application code and standalone analysis scripts alike.
+- :func:`fit_gmm_labels` — two-component GMM on the perturbed scores; positive
+  when the remodel-mode posterior clears a threshold. Right when perturbation
+  creates a distinct second state. Reports a ``separated`` flag so a unimodal
+  blob split in half can be rejected rather than labeled.
+- :func:`fit_percentile_labels` — gate at a quantile of the **control** scores,
+  fixing the control false-positive rate by construction. Assumes nothing and
+  fits nothing, so it neither requires bimodality nor invents a second component
+  when there is none. Right when perturbation shifts a unimodal population, and
+  its free parameter (an error rate) means the same thing across markers, plates
+  and timepoints — a posterior cut does not.
+
+Both are pure NumPy/scikit-learn so they can be reused from application code and
+standalone analysis scripts alike.
 """
 
 from dataclasses import dataclass
@@ -57,6 +63,11 @@ class GmmLabelResult:
         independent, likelihood-based cross-check on the ``separated`` heuristic.
         Note: at large ``n`` the likelihood term dominates the parameter penalty,
         so 2 components almost always wins; read the *gap*, not the sign.
+    n_fit_samples : int
+        Number of witness scores used to fit the mixture. This can differ from
+        ``len(posterior)`` when the mixture is fit on a separate calibration
+        population (for example, balanced control + perturbed scores) and then
+        applied to the requested cells.
     """
 
     gmm: GaussianMixture
@@ -68,6 +79,16 @@ class GmmLabelResult:
     bic: float
     aic: float
     bic_1comp: float
+    n_fit_samples: int
+
+    @property
+    def component_stds(self) -> NDArray:
+        """One standard deviation per component, including tied covariance."""
+        if self.gmm.covariance_type == "tied":
+            value = float(np.sqrt(self.gmm.covariances_[0, 0]))
+            return np.full(self.gmm.n_components, value, dtype=np.float64)
+        covariance = self.gmm.covariances_.reshape(self.gmm.n_components, -1)
+        return np.sqrt(covariance[:, 0])
 
 
 def fit_gmm_labels(
@@ -77,6 +98,8 @@ def fit_gmm_labels(
     n_init: int = 5,
     random_state: int = 42,
     separation_eps: float = 2.0,
+    fit_scores_1d: NDArray | None = None,
+    covariance_type: str = "full",
 ) -> GmmLabelResult:
     """Fit a two-component GMM to witness scores and derive confident labels.
 
@@ -88,7 +111,8 @@ def fit_gmm_labels(
     Parameters
     ----------
     scores_1d : NDArray
-        Witness scores, shape ``(n,)`` (reshaped to ``(n, 1)`` internally).
+        Witness scores to label, shape ``(n,)`` (reshaped to ``(n, 1)``
+        internally).
     pos_threshold : float, optional
         Posterior of the remodeled component at or above which a cell is a
         confident positive. By default 0.8.
@@ -104,6 +128,18 @@ def fit_gmm_labels(
         standard deviation (a separation-to-width ratio). By default 2.0, so the
         two Gaussians must stand roughly two standard deviations apart — a true
         bimodal fit, not one unimodal blob split in half. By default 2.0.
+    fit_scores_1d : NDArray or None, optional
+        Separate witness scores on which to fit the GMM. The fitted model is then
+        applied to ``scores_1d``. ``None`` preserves the original behavior and
+        fits on the cells being labeled. This separation supports either the
+        literal joint control+perturbed calibration population or a balanced
+        sensitivity sample without duplicating or reordering output cells.
+        Default: ``None``.
+    covariance_type : {"full", "tied"}, optional
+        Component variance model. ``"full"`` preserves the original independent
+        1-D variances. ``"tied"`` shares one variance across both components,
+        which guarantees a single monotonic posterior transition in 1-D and avoids
+        a broad component capturing both distribution tails. Default: ``"full"``.
 
     Returns
     -------
@@ -112,10 +148,25 @@ def fit_gmm_labels(
         gated ``hard_label``, and the ``converged`` / ``separated`` flags.
     """
     scores_1d = np.asarray(scores_1d, dtype=np.float64).ravel()
+    fit_scores = scores_1d if fit_scores_1d is None else np.asarray(fit_scores_1d, dtype=np.float64).ravel()
+    if covariance_type not in ("full", "tied"):
+        raise ValueError(f"covariance_type must be 'full' or 'tied', got {covariance_type!r}")
+    if scores_1d.size == 0:
+        raise ValueError("scores_1d must contain at least one score")
+    if fit_scores.size < n_components:
+        raise ValueError(f"fit_scores_1d must contain at least {n_components} scores; got {fit_scores.size}")
+    if not np.isfinite(scores_1d).all() or not np.isfinite(fit_scores).all():
+        raise ValueError("witness scores must all be finite")
     X = scores_1d.reshape(-1, 1)
+    X_fit = fit_scores.reshape(-1, 1)
 
-    gmm = GaussianMixture(n_components=n_components, random_state=random_state, n_init=n_init)
-    gmm.fit(X)
+    gmm = GaussianMixture(
+        n_components=n_components,
+        covariance_type=covariance_type,
+        random_state=random_state,
+        n_init=n_init,
+    )
+    gmm.fit(X_fit)
 
     means = gmm.means_.ravel()
     remod_component = int(np.argmin(means))
@@ -128,14 +179,22 @@ def fit_gmm_labels(
     # bimodal fit has the two Gaussians standing well apart from each other
     # (ratio large); splitting one unimodal blob in half gives overlapping
     # components whose gap is comparable to their width (ratio ~1-2).
-    component_std = float(np.sqrt(gmm.covariances_.ravel()).mean())
+    if covariance_type == "tied":
+        component_std = float(np.sqrt(gmm.covariances_[0, 0]))
+    else:
+        component_std = float(np.sqrt(gmm.covariances_.ravel()).mean())
     mean_gap = float(means.max() - means.min())
     separated = bool(mean_gap > separation_eps * component_std)
 
     # Likelihood-based model-selection scores. bic_1comp is a single-component fit
     # to the same data, so the caller can read the ΔBIC (bic_1comp - bic) as an
     # independent cross-check on the `separated` heuristic.
-    gmm_1 = GaussianMixture(n_components=1, random_state=random_state, n_init=n_init).fit(X)
+    gmm_1 = GaussianMixture(
+        n_components=1,
+        covariance_type=covariance_type,
+        random_state=random_state,
+        n_init=n_init,
+    ).fit(X_fit)
 
     return GmmLabelResult(
         gmm=gmm,
@@ -144,162 +203,151 @@ def fit_gmm_labels(
         hard_label=hard_label,
         converged=bool(gmm.converged_),
         separated=separated,
-        bic=float(gmm.bic(X)),
-        aic=float(gmm.aic(X)),
-        bic_1comp=float(gmm_1.bic(X)),
+        bic=float(gmm.bic(X_fit)),
+        aic=float(gmm.aic(X_fit)),
+        bic_1comp=float(gmm_1.bic(X_fit)),
+        n_fit_samples=int(fit_scores.size),
     )
 
 
-def _gaussian_pdf(x: NDArray, mu: float, sigma: float) -> NDArray:
-    """1-D Gaussian density (sigma floored to avoid divide-by-zero)."""
-    sigma = max(float(sigma), 1e-9)
-    return np.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
-
-
 @dataclass
-class ControlAnchoredResult:
-    """Result of gating perturbed witness scores against a control-anchored baseline.
+class PercentileLabelResult:
+    """Result of gating witness scores at a control-calibrated percentile.
 
-    Models the perturbed scores as a two-component mixture
-    ``perturbed = pi * N(mu_c, sigma_c) + (1 - pi) * N(mu_r, sigma_r)`` where the
-    baseline component is **frozen to the control distribution** and only the
-    remodel component + mixing weight are fit. "Remodel" therefore means *excess
-    over the control baseline*, not one of two modes discovered within the
-    perturbed cells — the right frame when infection shifts the proportions of a
-    shared state-space rather than creating a distinct new state.
+    A cell is called positive when its witness score falls below ``gate``, the
+    ``control_fp_target`` quantile of the **control** scores. The false-positive
+    rate on controls is therefore fixed *by construction* rather than measured
+    after the fact, and the free parameter is an interpretable error rate that
+    means the same thing on every marker, plate and timepoint — unlike a
+    posterior cut, whose operating point drifts with the fitted mixture.
+
+    Unlike :func:`fit_gmm_labels` this makes **no distributional assumption and
+    fits nothing**. It neither requires the perturbed scores to be bimodal nor
+    invents a second component when they are not, which is the right frame when
+    perturbation shifts a unimodal population rather than splitting it.
+
+    Both cuts are quantiles of the **control** distribution, but they are not
+    mirror images of each other, because the two tails are not comparable. The
+    positive cut sits in the control's lower tail, where perturbed cells are
+    dense. The negative cut sits at ``negative_quantile`` — low on the control
+    distribution, marking where control mass actually begins — because the
+    perturbed scores typically die out well before the control's *upper* tail; a
+    mirrored ``1 - control_fp_target`` cut would label almost nothing (measured:
+    39 of 29,652 cells on 04_14 SEC61B).
+
+    Cells between the two cuts resemble neither reference confidently and are
+    left unlabeled. That band matters: the perturbed histogram is continuous
+    across the positive gate, so without a separate negative cut a cell just
+    above the gate — indistinguishable from a positive — would become a confident
+    negative on no evidence.
 
     Parameters
     ----------
-    mu_c, sigma_c : float
-        Frozen baseline Gaussian, fit to the control witness scores.
-    mu_r, sigma_r : float
-        Fitted remodel Gaussian (the perturbed-enriched excess).
-    pi_baseline : float
-        Estimated fraction of perturbed cells still explained by the baseline
-        component; ``1 - pi_baseline`` is the remodeled fraction. Weakly
-        identified when the shift is small — treat as approximate.
+    gate : float
+        Positive cut: the ``control_fp_target`` quantile of control scores. Cells
+        below it are positive (witness leans negative = perturbed).
+    neg_gate : float
+        Negative cut: the ``negative_quantile`` quantile of control scores. Cells
+        above it have reached the range where controls actually live.
     posterior : NDArray
-        Per perturbed cell: P(remodel | score), shape ``(n_perturbed,)``.
+        Per cell, in ``[0, 1]``: how far past ``gate`` the score sits, normalized
+        by the distance from ``gate`` to the most extreme score. This is a graded
+        **ordering**, not a probability — it carries no distributional claim, and
+        is intended as a per-sample confidence weight for downstream training.
+        ``0`` for cells at or above the gate.
     hard_label : NDArray
-        Per perturbed cell, int8: ``1`` where ``posterior >= threshold`` (remodel),
-        else ``-1``.
-    threshold : float
-        Posterior threshold, calibrated so the control false-positive rate equals
-        ``control_fp_target``.
+        Per cell, int8: ``1`` below ``gate`` (positive), ``0`` above ``neg_gate``
+        (negative), ``-1`` in between (ambiguous — caller drops these).
     control_fp : float
-        Realized control false-positive rate at ``threshold`` (≈ the target).
-    converged : bool
-        Whether the constrained EM converged.
+        Realized control false-positive rate at ``gate`` (≈ the target; exact
+        equality is limited by ties and sample size).
     """
 
-    mu_c: float
-    sigma_c: float
-    mu_r: float
-    sigma_r: float
-    pi_baseline: float
+    gate: float
+    neg_gate: float
     posterior: NDArray
     hard_label: NDArray
-    threshold: float
     control_fp: float
-    converged: bool
 
 
-def fit_control_anchored_labels(
-    perturbed_scores: NDArray,
+def fit_percentile_labels(
+    scores: NDArray,
     control_scores: NDArray,
-    control_fp_target: float = 0.05,
-    max_iter: int = 200,
-    tol: float = 1e-6,
-) -> ControlAnchoredResult:
-    """Gate perturbed witness scores against a control-anchored baseline.
+    control_fp_target: float = 0.02,
+    negative_quantile: float = 0.10,
+) -> PercentileLabelResult:
+    """Gate witness scores against two control-calibrated percentiles.
 
-    The baseline Gaussian is frozen to the control scores' mean/std; the perturbed
-    scores are then modeled as ``pi * baseline + (1 - pi) * remodel`` and only the
-    remodel Gaussian + mixing weight ``pi`` are fit by a constrained EM (the
-    baseline component's parameters never move). A perturbed cell's remodel
-    posterior is thresholded, with the threshold **calibrated so the control
-    false-positive rate equals ``control_fp_target``** — a controlled error rate
-    rather than a fixed posterior cut. Unlike :func:`fit_gmm_labels`, this never
-    abstains on a unimodal perturbed distribution: it measures the *excess* over
-    baseline, so a subtle proportion shift still yields labels (with a small
-    remodeled fraction).
+    ``gate = quantile(control, control_fp_target)`` and
+    ``neg_gate = quantile(control, negative_quantile)``. A cell is positive below
+    ``gate``, negative above ``neg_gate``, and ambiguous in between.
+
+    The two cuts are deliberately **not** mirror images. ``gate`` sits in the
+    control's lower tail, where perturbed cells are dense, so it fixes the
+    control false-positive rate. ``neg_gate`` sits low on the control
+    distribution — where control mass begins — because perturbed scores usually
+    die out before the control's upper tail, so a mirrored ``1 - target`` cut
+    labels almost nothing (measured: 39 of 29,652 cells on 04_14 SEC61B).
+
+    The middle band matters: the perturbed score distribution is usually
+    continuous across ``gate`` with no valley there, so labeling everything above
+    ``gate`` as negative would turn cells indistinguishable from positives into
+    confident negatives. Those cells resemble neither reference and are excluded.
+
+    The returned ``posterior`` grades each cell by how far beyond ``gate`` it
+    sits, scaled to ``[0, 1]`` by the most extreme score present. It is a rank-like
+    confidence with no distributional assumption behind it — deliberately not a
+    probability, since under a pure distribution shift there is no second
+    population for a probability to refer to.
 
     Parameters
     ----------
-    perturbed_scores : NDArray
-        Witness scores of the condition's perturbed cells, shape ``(n,)``.
+    scores : NDArray
+        Witness scores to gate, shape ``(n,)``. Pass **all** cells (control and
+        perturbed alike) to label them under one rule.
     control_scores : NDArray
-        Witness scores of the (time-matched) control-reference cells, shape ``(m,)``.
+        Witness scores of the control reference, shape ``(m,)``. Both cuts are
+        quantiles of this distribution.
     control_fp_target : float, optional
-        Target control false-positive rate; the posterior threshold is set so this
-        fraction of control cells is called remodel. By default 0.05.
-    max_iter : int, optional
-        Max constrained-EM iterations. By default 200.
-    tol : float, optional
-        Log-likelihood convergence tolerance. By default 1e-6.
+        Fraction of control cells called positive, by construction. Default 0.02.
+    negative_quantile : float, optional
+        Control quantile above which a cell is called negative — where the control
+        distribution begins. Must exceed ``control_fp_target``. Default 0.10.
 
     Returns
     -------
-    ControlAnchoredResult
+    PercentileLabelResult
     """
-    p = np.asarray(perturbed_scores, dtype=np.float64).ravel()
+    if negative_quantile <= control_fp_target:
+        raise ValueError(
+            f"negative_quantile ({negative_quantile}) must exceed control_fp_target "
+            f"({control_fp_target}); otherwise the positive and negative regions overlap."
+        )
+    s = np.asarray(scores, dtype=np.float64).ravel()
     c = np.asarray(control_scores, dtype=np.float64).ravel()
 
-    # Frozen baseline from control.
-    mu_c = float(c.mean())
-    sigma_c = float(c.std())
+    gate = float(np.quantile(c, control_fp_target))
+    neg_gate = float(np.quantile(c, negative_quantile))
 
-    # Initialize the remodel component on the side of the perturbed cloud away from
-    # control (witness is negative = perturbed-leaning, so init below the mean).
-    mu_r = float(p.mean() - p.std())
-    sigma_r = float(p.std())
-    pi = 0.5  # baseline weight
+    hard_label = np.full(len(s), -1, dtype=np.int8)  # ambiguous by default
+    hard_label[s < gate] = 1
+    hard_label[s > neg_gate] = 0
 
-    prev_ll = -np.inf
-    converged = False
-    for _ in range(max_iter):
-        base = pi * _gaussian_pdf(p, mu_c, sigma_c)
-        rem = (1 - pi) * _gaussian_pdf(p, mu_r, sigma_r)
-        total = base + rem + 1e-300
-        resp_r = rem / total  # responsibility of the remodel component
-        # M-step — update ONLY the remodel component and the mixing weight.
-        nr = resp_r.sum()
-        if nr > 1e-6:
-            mu_r = float((resp_r * p).sum() / nr)
-            sigma_r = float(np.sqrt((resp_r * (p - mu_r) ** 2).sum() / nr))
-            sigma_r = max(sigma_r, 1e-6)
-        pi = float(1.0 - nr / len(p))
-        pi = min(max(pi, 1e-6), 1 - 1e-6)
-        ll = float(np.log(total).sum())
-        if abs(ll - prev_ll) < tol:
-            converged = True
-            break
-        prev_ll = ll
+    # Graded confidence by distance past the gate, normalized by the furthest
+    # score seen. Assumption-free: pure ordering, no density model. Cells at or
+    # above the gate get 0.
+    span = gate - float(s.min()) if s.size else 0.0
+    if span > 0:
+        posterior = np.clip((gate - s) / span, 0.0, 1.0)
+    else:
+        posterior = np.zeros_like(s)
 
-    def _posterior(x: NDArray) -> NDArray:
-        base = pi * _gaussian_pdf(x, mu_c, sigma_c)
-        rem = (1 - pi) * _gaussian_pdf(x, mu_r, sigma_r)
-        return rem / (base + rem + 1e-300)
+    control_fp = float((c < gate).mean()) if c.size else 0.0
 
-    post_p = _posterior(p)
-    post_c = _posterior(c)
-    # Calibrate the threshold so the control FP rate matches the target: the
-    # (1 - target) quantile of the control posteriors.
-    threshold = float(np.quantile(post_c, 1.0 - control_fp_target))
-    control_fp = float((post_c >= threshold).mean())
-
-    hard_label = np.full(len(p), -1, dtype=np.int8)
-    hard_label[post_p >= threshold] = 1
-
-    return ControlAnchoredResult(
-        mu_c=mu_c,
-        sigma_c=sigma_c,
-        mu_r=mu_r,
-        sigma_r=sigma_r,
-        pi_baseline=pi,
-        posterior=post_p,
+    return PercentileLabelResult(
+        gate=gate,
+        neg_gate=neg_gate,
+        posterior=posterior,
         hard_label=hard_label,
-        threshold=threshold,
         control_fp=control_fp,
-        converged=converged,
     )

@@ -14,10 +14,11 @@ import pandas as pd
 
 from dynaclr.evaluation.mmd.config import MMDPooledConfig
 from dynaclr.evaluation.mmd.representation import prepare_mmd_representation
-from viscy_utils.compose import load_composed_config
+from viscy_utils.cli_utils import load_config_section
 from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
 
 DEFAULT_REPRESENTATION_KEY = "X_normalized_pca80"
+DEFAULT_CONFIG_SECTION = "pooled_representation"
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,16 @@ def _pca_checksums(prepared) -> dict[str, str]:
         marker: hashlib.sha256(fit.mean.tobytes() + fit.components.tobytes()).hexdigest()
         for marker, fit in prepared.pca_fits.items()
     }
+
+
+def load_pooled_representation_config(path: Path) -> MMDPooledConfig:
+    """Load the pooled representation section from the canonical recipe.
+
+    Root-level historical configs remain readable for backward compatibility,
+    but new work should use the canonical multi-section recipe.
+    """
+    raw = load_config_section(path, None, default_section=DEFAULT_CONFIG_SECTION)
+    return MMDPooledConfig(**raw)
 
 
 def export_pooled_representation(
@@ -195,7 +206,7 @@ def export_pooled_representation(
     "--config",
     type=click.Path(exists=True, path_type=Path),
     required=True,
-    help="Pooled MMD YAML whose input_paths and representation settings should be used.",
+    help="Canonical biological-state YAML with a pooled_representation section.",
 )
 @click.option("--obsm-key", default=DEFAULT_REPRESENTATION_KEY, show_default=True)
 @click.option("--uns-key", default=None, help="Metadata key; defaults to --obsm-key.")
@@ -209,7 +220,7 @@ def main(
     overwrite: bool,
 ) -> None:
     """Write pooled control-normalized PCA coordinates into source Zarrs."""
-    cfg = MMDPooledConfig(**load_composed_config(config))
+    cfg = load_pooled_representation_config(config)
     manifest = export_pooled_representation(
         cfg,
         obsm_key=obsm_key,

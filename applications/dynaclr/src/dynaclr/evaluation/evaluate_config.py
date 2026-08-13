@@ -278,7 +278,9 @@ class WitnessGmmLabelsConfig(BaseModel):
     The label's *meaning* is named by the modality it is computed from: a witness
     over ``viral_sensor`` produces ``infection_state`` (infected/uninfected); over
     an organelle marker it produces ``organelle_remodeling_state``
-    (remodel/noremodel). One config = one microscope/marker (no pooling, no LOT).
+    (remodel/noremodel). Multiple experiments may be pooled explicitly; use
+    ``reference_sampling="balanced_by_experiment"`` for the validated pooled
+    control/perturbed contract.
 
     Parameters
     ----------
@@ -307,6 +309,14 @@ class WitnessGmmLabelsConfig(BaseModel):
     condition_column : str
         obs column whose distinct values define per-condition GMM fits and carry
         the biological condition (e.g. ``"perturbation"``). Default: ``"perturbation"``.
+    embedding_key : str or None
+        Row-aligned representation in ``adata.obsm``. None reads ``adata.X``.
+        The validated biological workflow uses ``"X_normalized_pca80"``.
+    reference_sampling : str
+        ``"pooled"`` applies a single global cap.
+        ``"balanced_by_experiment"`` samples equal control and perturbed
+        counts within each configured experiment before pooling.
+        Default: ``"pooled"`` for backward compatibility.
     gmm_pos_threshold : float
         GMM remodeled-component posterior at/above which a perturbed cell is a
         confident positive. Symmetrically, ``1 - gmm_pos_threshold`` is the bar for
@@ -314,6 +324,27 @@ class WitnessGmmLabelsConfig(BaseModel):
         negative class (the pre-onset and bystander cells), so a perturbed well
         contributes both classes. Cells between the two bars are ambiguous and are
         left unlabeled. Default: 0.8 (so negatives at ≤ 0.2).
+    gmm_fit_population : str
+        Which witness scores fit the two-component GMM when ``gate="gmm"``:
+
+        - ``"perturbed"`` preserves the legacy behavior: fit only the condition's
+          perturbed-well cells.
+        - ``"joint_control_perturbed"`` fits one GMM to the literal concatenation
+          of every control and perturbed witness score. No component is assigned
+          from well identity; the lower-mean fitted component is oriented as the
+          perturbed state only after the joint fit.
+        - ``"balanced_control_perturbed"`` fits the same single joint GMM after an
+          equal-size deterministic sample of control and perturbed cells. This is
+          an optional sensitivity analysis for population-size imbalance.
+
+        Default: ``"perturbed"``.
+    gmm_covariance_type : str
+        ``"full"`` gives each component its own variance (legacy behavior).
+        ``"tied"`` shares one variance, producing a single monotonic posterior
+        transition in 1-D. The tied model is recommended with either joint
+        control+perturbation fit because an unconstrained broad perturbation
+        component can otherwise capture both tails of a narrow
+        control distribution. Default: ``"full"``.
     mmd_pvalue_threshold : float
         Target FDR level for the significance gate. Each perturbed condition is
         MMD-permutation-tested against the control reference; the raw p-values
@@ -384,7 +415,11 @@ class WitnessGmmLabelsConfig(BaseModel):
     annotation_format: str = "csv"
     marker_filters: list[str] | None = None
     condition_column: str = "perturbation"
+    embedding_key: str | None = None
+    reference_sampling: Literal["pooled", "balanced_by_experiment"] = "pooled"
     gmm_pos_threshold: float = 0.8
+    gmm_fit_population: str = "perturbed"
+    gmm_covariance_type: str = "full"
     mmd_pvalue_threshold: float = 0.05
     mmd_n_permutations: int = 1000
     bandwidth: float | None = None
@@ -407,6 +442,18 @@ class WitnessGmmLabelsConfig(BaseModel):
             raise ValueError(f"gmm_pos_threshold must be in (0, 1], got {self.gmm_pos_threshold}")
         if self.gate not in ("gmm", "percentile"):
             raise ValueError(f"gate must be 'gmm' or 'percentile', got {self.gate!r}")
+        if self.gmm_fit_population not in (
+            "perturbed",
+            "joint_control_perturbed",
+            "balanced_control_perturbed",
+        ):
+            raise ValueError(
+                "gmm_fit_population must be 'perturbed', "
+                "'joint_control_perturbed', or 'balanced_control_perturbed'; got "
+                f"{self.gmm_fit_population!r}"
+            )
+        if self.gmm_covariance_type not in ("full", "tied"):
+            raise ValueError(f"gmm_covariance_type must be 'full' or 'tied', got {self.gmm_covariance_type!r}")
         if not 0.0 < self.control_fp_target < 1.0:
             raise ValueError(f"control_fp_target must be in (0, 1), got {self.control_fp_target}")
         if not self.control_fp_target < self.negative_quantile < 1.0:
@@ -690,6 +737,10 @@ class WitnessGmmStepConfig(BaseModel):
     perturbed_filter: dict
     gate: str = "gmm"
     gmm_pos_threshold: float = 0.8
+    gmm_fit_population: Literal["perturbed", "joint_control_perturbed", "balanced_control_perturbed"] = "perturbed"
+    gmm_covariance_type: Literal["full", "tied"] = "full"
+    embedding_key: str | None = None
+    reference_sampling: Literal["pooled", "balanced_by_experiment"] = "pooled"
     control_fp_target: float = 0.05
     negative_quantile: float = 0.10
     mmd_pvalue_threshold: float = 0.05

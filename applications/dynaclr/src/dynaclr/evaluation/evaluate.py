@@ -301,7 +301,60 @@ def _generate_append_predictions_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
     return out_path
 
 
-def _generate_linear_classifiers_yaml(eval_cfg: EvaluationConfig, output_dir: Path) -> Path:
+def _embeddings_dir(output_dir: Path, embeddings_glob: str | None) -> Path:
+    """Return the directory that holds the per-marker embedding zarrs.
+
+    In the matrix ``eval_from_embeddings`` flow the raw zarrs live under the
+    canonical predictions tree, not under ``{output_dir}/embeddings`` (which is
+    never populated there). ``embeddings_glob`` is the shell glob built by
+    :func:`dynaclr.evaluation.orchestration.eval_launch.build_embeddings_glob`,
+    of the form ``.../{family}/{run}/{ckpt}/embeddings/{marker_slot}``; its
+    parent is the canonical ``{ckpt}/embeddings`` directory (with the dataset
+    slot preserved verbatim). When no glob is supplied (legacy predict-based
+    flow, which does populate ``{output_dir}/embeddings``), fall back to that.
+    """
+    if embeddings_glob:
+        return Path(embeddings_glob).parent
+    return output_dir / "embeddings"
+
+
+def _resolve_lc_annotations(eval_cfg: EvaluationConfig, output_dir: Path) -> list[dict]:
+    """Resolve the LC step's annotation list.
+
+    An explicit ``linear_classifiers.annotations`` list is used verbatim (hand
+    annotations or non-witness runs). Otherwise, when ``witness_gmm`` is an
+    active step, annotations are auto-filled from the witness label sources:
+    one entry per (witness experiment × label source), each pointing at the
+    Stage-A CSV ``{output_dir}/labels/{marker}_{label_column}.csv`` that the
+    witness step writes at runtime. This is the only place that knows both the
+    per-model ``output_dir`` and the witness label filenames, so the author
+    never hand-writes per-model paths.
+
+    Returns
+    -------
+    list[dict]
+        ``[{"experiment": ..., "path": ...}, ...]`` for the LC config.
+    """
+    lc = eval_cfg.linear_classifiers
+    if lc.annotations:
+        return [{"experiment": a.experiment, "path": a.path} for a in lc.annotations]
+    if "witness_gmm" in eval_cfg.steps and eval_cfg.witness_gmm is not None:
+        wg = eval_cfg.witness_gmm
+        labels_dir = output_dir / "labels"
+        return [
+            {
+                "experiment": experiment,
+                "path": str(labels_dir / f"{source.marker}_{source.label_column}.csv"),
+            }
+            for experiment in wg.experiments
+            for source in wg.label_sources
+        ]
+    return []
+
+
+def _generate_linear_classifiers_yaml(
+    eval_cfg: EvaluationConfig, output_dir: Path, embeddings_glob: str | None
+) -> Path:
     """Generate linear classifiers config YAML for dynaclr run-linear-classifiers.
 
     Propagates ``publish_dir`` (central LC registry root) when set — the writer
@@ -309,13 +362,21 @@ def _generate_linear_classifiers_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
     the ``latest`` symlink.
     """
     lc = eval_cfg.linear_classifiers
-    embeddings_dir = str(output_dir / "embeddings")
+    embeddings_dir = str(_embeddings_dir(output_dir, embeddings_glob))
     lc_output_dir = str(output_dir / "linear_classifiers")
+
+    # When witness_gmm drives the labels, the LC annotation CSVs are the
+    # per-marker label files the witness step writes to {output_dir}/labels/ at
+    # runtime — a path only known once output_dir is resolved per-model. Auto-fill
+    # annotations from the witness label sources (experiment × source) so the
+    # author does not hand-write per-model paths. An explicit lc.annotations list
+    # still wins (hand annotations / non-witness runs).
+    annotations = _resolve_lc_annotations(eval_cfg, output_dir)
 
     cfg_dict: dict = {
         "embeddings_path": embeddings_dir,
         "output_dir": lc_output_dir,
-        "annotations": [{"experiment": a.experiment, "path": a.path} for a in lc.annotations],
+        "annotations": annotations,
         "tasks": [{"task": t.task, "marker_filters": t.marker_filters} for t in lc.tasks],
         "use_scaling": lc.use_scaling,
         "use_pca": lc.use_pca,
@@ -326,6 +387,8 @@ def _generate_linear_classifiers_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
         "split_train_data": lc.split_train_data,
         "random_seed": lc.random_seed,
     }
+    if lc.split_groups_by:
+        cfg_dict["split_groups_by"] = lc.split_groups_by
     if lc.publish_dir:
         cfg_dict["publish_dir"] = lc.publish_dir
 
@@ -333,6 +396,69 @@ def _generate_linear_classifiers_yaml(eval_cfg: EvaluationConfig, output_dir: Pa
     with open(out_path, "w") as f:
         yaml.dump(cfg_dict, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
     return out_path
+
+
+def _generate_witness_gmm_yaml(eval_cfg: EvaluationConfig, output_dir: Path, embeddings_glob: str | None) -> list[Path]:
+    """Generate one Stage-A witness-GMM config YAML per label source.
+
+    Each YAML is rooted at ``witness_gmm_labels:`` and consumed by
+    ``dynaclr witness-gmm-labels``. The generated ``experiments`` list carries
+    one entry per configured experiment name (all sharing the block's
+    control/perturbed filters), since ``compute_marker_scores`` masks references
+    by ``obs["experiment"]``. The scored embeddings zarr for a source is
+    ``{embeddings_dir}/{marker}.zarr`` — the canonical ``{ckpt}/embeddings`` dir
+    derived from ``embeddings_glob`` in the matrix flow, else
+    ``{output_dir}/embeddings``.
+
+    Returns
+    -------
+    list[Path]
+        The written config paths, one per ``label_sources`` entry.
+    """
+    wg = eval_cfg.witness_gmm
+    embeddings_dir = _embeddings_dir(output_dir, embeddings_glob)
+    paths: list[Path] = []
+    for source in wg.label_sources:
+        experiments = [
+            {
+                "experiment": name,
+                "embeddings_zarr": str(embeddings_dir / f"{source.marker}.zarr"),
+                "control_filter": wg.control_filter,
+                "perturbed_filter": wg.perturbed_filter,
+            }
+            for name in wg.experiments
+        ]
+        cfg_dict = {
+            "witness_gmm_labels": {
+                "experiments": experiments,
+                "marker_filters": [source.marker],
+                "label_column": source.label_column,
+                "class_map": source.class_map,
+                "output_dir": str(output_dir),
+                "gate": wg.gate,
+                "gmm_pos_threshold": wg.gmm_pos_threshold,
+                "gmm_fit_population": wg.gmm_fit_population,
+                "gmm_covariance_type": wg.gmm_covariance_type,
+                "embedding_key": wg.embedding_key,
+                "reference_sampling": wg.reference_sampling,
+                "control_fp_target": wg.control_fp_target,
+                "negative_quantile": wg.negative_quantile,
+                "mmd_pvalue_threshold": wg.mmd_pvalue_threshold,
+                "mmd_n_permutations": wg.mmd_n_permutations,
+                "bandwidth": wg.bandwidth,
+                "max_reference_cells": wg.max_reference_cells,
+                "condition_column": wg.condition_column,
+                "annotation_format": wg.annotation_format,
+                "witness_time_bin_hours": wg.witness_time_bin_hours,
+                "mmd_hpi_bin_hours": wg.mmd_hpi_bin_hours,
+                "random_seed": wg.random_seed,
+            }
+        }
+        out_path = output_dir / "configs" / f"witness_gmm_{source.marker}.yaml"
+        with open(out_path, "w") as f:
+            yaml.dump(cfg_dict, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        paths.append(out_path)
+    return paths
 
 
 def _mmd_block_name(mmd: "MMDStepConfig", idx: int) -> str:  # noqa: F821
@@ -398,18 +524,39 @@ def _resolve_cell_index_path(eval_cfg: EvaluationConfig, training_cfg: dict) -> 
 # ---------------------------------------------------------------------------
 
 
-def prepare_configs(config: Path) -> None:
+def prepare_configs(config: Path, embeddings_glob: str | None = None) -> None:
     """Generate all per-step YAML configs and print a JSON manifest to stdout.
 
     The manifest maps step names to generated config paths and includes paths
     needed by Nextflow to wire the pipeline (embeddings_dir, output_dir,
     cell_index_path, mmd_blocks).
+
+    Parameters
+    ----------
+    config : Path
+        Path to the evaluation YAML configuration file.
+    embeddings_glob : str or None, optional
+        Shell glob locating the per-marker embedding zarrs under the canonical
+        predictions tree (``.../{family}/{run}/{ckpt}/embeddings/{marker_slot}``),
+        as built by ``eval_launch.build_embeddings_glob``. Threaded through in
+        the matrix ``eval_from_embeddings`` flow so the witness-GMM and
+        linear-classifier configs point at the real embeddings dir. ``None``
+        (legacy predict-based flow) falls back to ``{output_dir}/embeddings``.
     """
     raw = load_config(config)
     eval_cfg = EvaluationConfig(**raw)
 
     training_cfg = _load_training_config(eval_cfg.training_config)
-    output_dir = Path(eval_cfg.output_dir)
+    # In the matrix eval_from_embeddings flow the same static eval config runs
+    # over every model row, so the YAML's output_dir would collide across models.
+    # Derive it per-model from the embeddings glob instead: the canonical
+    # {ckpt}/embeddings dir's parent IS that model's {ckpt} tree, so labels/,
+    # linear_classifiers/, plots/ land beside embeddings/. The legacy
+    # predict-based flow (no glob) keeps the YAML's output_dir verbatim.
+    if embeddings_glob:
+        output_dir = _embeddings_dir(output_dir=Path(eval_cfg.output_dir), embeddings_glob=embeddings_glob).parent
+    else:
+        output_dir = Path(eval_cfg.output_dir)
 
     # Create output directories for active steps
     subdirs = ["configs", "embeddings"]
@@ -417,6 +564,7 @@ def prepare_configs(config: Path) -> None:
         "smoothness": "smoothness",
         "mmd": "mmd",
         "plot": "plots",
+        "witness_gmm": "labels",
         "linear_classifiers": "linear_classifiers",
     }
     for step in eval_cfg.steps:
@@ -491,14 +639,29 @@ def prepare_configs(config: Path) -> None:
                     manifest["mmd_combined_blocks"].append(block_name)
                     click.echo(f"[mmd]      {mmd_combined_yaml}", err=True)
 
+        elif step == "witness_gmm":
+            if eval_cfg.witness_gmm is None:
+                click.echo("[witness_gmm] skipped: no config provided", err=True)
+                continue
+            witness_yamls = _generate_witness_gmm_yaml(eval_cfg, output_dir, embeddings_glob)
+            manifest["witness_gmm"] = [str(p) for p in witness_yamls]
+            for wy in witness_yamls:
+                click.echo(f"[witness]  {wy}", err=True)
+
         elif step == "linear_classifiers":
             if eval_cfg.linear_classifiers is None:
                 click.echo("[linear_classifiers] skipped: no config provided", err=True)
                 continue
-            if not eval_cfg.linear_classifiers.annotations:
+            witness_active = "witness_gmm" in eval_cfg.steps and eval_cfg.witness_gmm is not None
+            if not eval_cfg.linear_classifiers.annotations and not witness_active:
                 click.echo(
                     "[linear_classifiers] Warning: annotations is empty. "
                     "Add experiment + annotation CSV paths before running.",
+                    err=True,
+                )
+            elif not eval_cfg.linear_classifiers.annotations and witness_active:
+                click.echo(
+                    "[linear_classifiers] annotations auto-filled from witness_gmm label sources.",
                     err=True,
                 )
             if not eval_cfg.linear_classifiers.tasks:
@@ -507,7 +670,7 @@ def prepare_configs(config: Path) -> None:
                     "Add task specs (task + optional marker_filters) before running.",
                     err=True,
                 )
-            lc_yaml = _generate_linear_classifiers_yaml(eval_cfg, output_dir)
+            lc_yaml = _generate_linear_classifiers_yaml(eval_cfg, output_dir, embeddings_glob)
             manifest["linear_classifiers"] = str(lc_yaml)
             click.echo(f"[lc]       {lc_yaml}", err=True)
 
@@ -571,14 +734,25 @@ def prepare_configs(config: Path) -> None:
     required=True,
     help="Path to evaluation YAML configuration file",
 )
-def main(config: Path) -> None:
+@click.option(
+    "--embeddings-glob",
+    default=None,
+    help=(
+        "Shell glob to the canonical per-marker embedding zarrs "
+        "(.../{family}/{run}/{ckpt}/embeddings/{marker_slot}). Passed by the "
+        "matrix eval_from_embeddings flow so witness-GMM and linear-classifier "
+        "configs read embeddings from the predictions tree. Omit for the legacy "
+        "predict-based flow (falls back to {output_dir}/embeddings)."
+    ),
+)
+def main(config: Path, embeddings_glob: str | None) -> None:
     """Generate evaluation configs for a trained DynaCLR model.
 
     Writes per-step YAML configs to output_dir/configs/ and prints a JSON manifest
     to stdout mapping step names to config paths. Used as the entry point for the
     Nextflow evaluation pipeline.
     """
-    prepare_configs(config)
+    prepare_configs(config, embeddings_glob)
 
 
 if __name__ == "__main__":
