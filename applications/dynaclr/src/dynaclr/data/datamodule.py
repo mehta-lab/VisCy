@@ -57,9 +57,12 @@ class MultiExperimentDataModule(LightningDataModule):
         + ``preprocess-cell-index``). Contains all metadata needed for
         training: TCZYX shape, normalization stats, focus slice.
     z_window : int
-        Number of Z slices the model consumes (final crop size).
+        Number of reference-grid Z slices the model consumes (final crop
+        size) when ``reference_pixel_size_z_um`` is set; otherwise native
+        slices.
     z_extraction_window : int or None
-        Number of Z slices to extract from zarr before cropping.
+        Number of reference-grid Z slices to extract before cropping when
+        ``reference_pixel_size_z_um`` is set; otherwise native slices.
         Must be >= ``z_window``. When None (default), falls back to
         ``z_window`` (deterministic Z, no random crop). When larger,
         enables random Z cropping during training for focus-plane
@@ -129,8 +132,12 @@ class MultiExperimentDataModule(LightningDataModule):
         Reference pixel size in XY (micrometers) for physical-scale normalization.
         None = no rescaling. Default: None.
     reference_pixel_size_z_um : float or None
-        Reference voxel size in Z (micrometers) for physical-scale normalization.
-        None = no rescaling. Default: None.
+        Reference Z sampling (micrometers per slice) for physical-scale
+        normalization. When set, ``z_window`` and ``z_extraction_window`` are
+        interpreted on this reference grid: each experiment reads the native
+        slice count covering the same physical depth, then resamples to the
+        reference grid before slice-based augmentations and MIP. None keeps
+        legacy slice-count semantics. Default: None.
     positive_cell_source : str
         ``"self"`` — SimCLR: anchor and positive are the same crop.
         ``"lookup"`` (default) — find a different cell via ``positive_match_columns``.

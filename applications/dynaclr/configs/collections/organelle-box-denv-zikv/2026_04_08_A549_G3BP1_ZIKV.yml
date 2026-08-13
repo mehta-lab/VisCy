@@ -1,0 +1,38 @@
+name: organelle-box-2026_04_08_A549_G3BP1_ZIKV
+description: "Embed-only collection: 2026_04_08 A549 G3BP1 ZIKV (single-marker organelle box).
+  Channels embedded as bag-of-channels samples: G3BP1 (GFP), viral_sensor (mCherry), Phase3D.
+  Prepared zarr on VAST with timepoint_statistics + focus_slice. No annotations."
+datasets_root: /hpc/projects/organelle_phenotyping/datasets
+
+provenance:
+  airtable_base_id: app8vqaoWyOwa0sB5
+  airtable_query: "SEARCH(\"2026_04_08_A549_G3BP1_ZIKV\", {dataset})"
+  created_by: "eduardo.hirata"
+
+experiments:
+  - name: 2026_04_08_A549_G3BP1_ZIKV
+    data_path: ${datasets_root}/2026_04_08_A549_G3BP1_ZIKV/2026_04_08_A549_G3BP1_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_04_08_A549_G3BP1_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: G3BP1
+      - name: raw mCherry EX561 EM600-37
+        marker: viral_sensor
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected:
+        - D/6
+      ZIKV:
+        - B/5
+        - B/6
+        - C/5
+        - C/6
+        - D/5
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    marker: G3BP1
+    organelle: stress_granules
+    moi: 5.0
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995

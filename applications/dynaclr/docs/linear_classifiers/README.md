@@ -1,191 +1,168 @@
-# Linear Classifier for Cell Phenotyping
+# Train and apply linear classifiers
 
-Train and apply logistic regression classifiers on DynaCLR cell embeddings for supervised cell phenotyping tasks.
+Linear classifiers are logistic-regression probes trained on DynaCLR cell
+embeddings. Use the batch workflow for evaluation runs and tracked time series.
+Use the standalone workflow only when models must be stored as W&B artifacts.
 
-## Overview
+## Choose a workflow
 
-This directory contains:
+| Need | Commands | Model storage |
+| --- | --- | --- |
+| Evaluation metrics, group-aware validation, reusable local bundles | `run-linear-classifiers`, `append-predictions` | Versioned joblib bundle |
+| W&B artifact training and inference | `train-linear-classifier`, `apply-linear-classifier` | W&B artifact |
+| Dataset contribution analysis | `cross-validate` | CSV and optional PDF report |
 
-| File | Description |
-|------|-------------|
-| `src/utils.py` | Shared functions for discovering predictions, annotations, channel resolution, and path utilities |
-| `src/report.py` | PDF report generation for cross-validation (optional, `--report` flag) |
-| `scripts/generate_prediction_scripts.py` | Generates SLURM `.sh`/`.yml` scripts for datasets missing embeddings |
-| `scripts/generate_batch_predictions.py` | Batch prediction config & SLURM script generator with auto z-range |
-| `scripts/generate_train_config.py` | Generates training YAML configs for all valid task x channel combinations |
-| `scripts/train_linear_classifier.py` | CLI for training a classifier from a config |
-| `scripts/apply_linear_classifier.py` | CLI for applying a trained classifier to new embeddings |
-| `scripts/cross_validation.py` | Leave-one-dataset-out CV with impact scoring (helps/hurts/uncertain) |
+All paths require embeddings and annotation CSVs that follow the
+[annotation contract](annotations_and_linear_classifiers.md). Train and apply a
+classifier only within the same embedding feature space.
 
-## Prerequisites
+## Recommended: evaluation bundle
 
-Install DynaCLR with the eval extras:
-
-```bash
-pip install -e "applications/dynaclr[eval]"
-```
-
-You also need a [Weights & Biases](https://wandb.ai) account for model storage and tracking. Log in before running:
-
-```bash
-wandb login
-```
-
-## Workflow
-
-### 1. Discover datasets and generate prediction scripts
-
-If some annotated datasets don't have embeddings yet, generate the SLURM prediction scripts:
-
-```python
-# Edit configuration in scripts/generate_prediction_scripts.py, then run cells
-# Key parameters:
-#   embeddings_dir  - base directory with dataset folders
-#   annotations_dir - base directory with annotation CSVs
-#   model           - model directory glob pattern
-#   version         - model version (e.g. "v3")
-#   ckpt_path       - checkpoint to use for ALL datasets
-```
-
-This will:
-- Discover which annotated datasets are missing predictions
-- Use an existing dataset as a template
-- Generate `predict_{phase,sensor,organelle}.{sh,yml}` and `run_all.sh` per dataset
-- Enforce a single checkpoint across all generated scripts
-
-### 2. Generate training configs
-
-Once datasets have both embeddings and annotations:
-
-```python
-# Edit configuration in scripts/generate_train_config.py, then run cells
-# Generates one YAML config per (task, channel) combination
-```
-
-### 3. Train a classifier
-
-```bash
-dynaclr train-linear-classifier -c configs/generated/cell_death_state_phase.yaml
-```
-
-### 4. Apply a trained classifier to new data
-
-```bash
-dynaclr apply-linear-classifier -c configs/example_linear_classifier_inference.yaml
-```
-
-### 5. Cross-validate training datasets
-
-Determine which training datasets help or hurt classifier performance using rotating leave-one-dataset-out CV. Run from the `linear_classifiers/` directory:
-
-```bash
-dynaclr cross-validate -c configs/cross_validate_example.yaml
-dynaclr cross-validate -c configs/cross_validate_example.yaml --report  # with PDF
-```
-
-Outputs:
-- `cv_results.csv` — raw results (one row per fold x seed)
-- `cv_summary.csv` — aggregated impact labels per dataset
-- `cv_recommended_subsets.csv` — recommended training subsets with harmful datasets excluded
-- `cv_report.pdf` — (optional) impact heatmaps, AUROC distributions, temporal curves
-
-Each dataset is labeled as:
-- **helps** — removing it hurts performance (keep it)
-- **hurts** — removing it improves performance (exclude it)
-- **uncertain** — delta within noise
-- **unsafe** — fold skipped due to insufficient class samples
-
-## Training Configuration
-
-Create a YAML config file (see `configs/example_linear_classifier_train.yaml`):
+The full evaluation config places this block under `linear_classifiers`. The
+orchestrator generates the direct step config and runs it through Nextflow.
 
 ```yaml
-task: cell_death_state  # infection_state | organelle_state | cell_division_state | cell_death_state
-input_channel: phase    # phase | sensor | organelle
-embedding_model: DynaCLR-2D-BagOfChannels-timeaware-v3
+linear_classifiers:
+  label_source: annotations
+  annotations:
+    - experiment: experiment-a
+      path: /path/to/experiment-a-annotations.csv
+    - experiment: experiment-b
+      path: /path/to/experiment-b-annotations.csv
+  tasks:
+    - task: infection_state
+      marker_filters: [Phase3D]
+  publish_dir: /path/to/linear_classifiers/<feature-space>
+  use_scaling: true
+  use_pca: false
+  split_train_data: 0.8
+  split_groups_by: [experiment, fov_name, track_id]
+  random_seed: 42
+```
 
+Use a group-aware split whenever multiple timepoints from one track are
+present. This prevents a track from contributing to both training and
+validation.
+
+For a direct run, use the generated YAML or add its two top-level paths:
+
+```yaml
+embeddings_path: /path/to/combined-embeddings.zarr
+output_dir: /path/to/evaluation/linear_classifiers
+
+label_source: annotations
+annotations:
+  - experiment: experiment-a
+    path: /path/to/experiment-a-annotations.csv
+tasks:
+  - task: infection_state
+    marker_filters: [Phase3D]
+split_groups_by: [experiment, fov_name, track_id]
+```
+
+```sh
+uv run dynaclr run-linear-classifiers -c linear_classifiers.yaml
+```
+
+The command trains one classifier per task-marker pair and writes:
+
+```text
+<output_dir>/
+├── metrics_summary.csv
+├── <task>_summary.pdf
+└── pipelines/
+    ├── manifest.json
+    └── <task>_<marker>.joblib
+```
+
+When `publish_dir` is set, the finished bundle is promoted to `vN/` and the
+`latest` symlink is updated. Pin `vN` for reproducible application.
+
+Apply a saved bundle to a directory of per-experiment zarrs:
+
+```yaml
+embeddings_path: /path/to/per-experiment-embeddings
+pipelines_dir: /path/to/linear_classifiers/<feature-space>/v2
+```
+
+```sh
+uv run dynaclr append-predictions -c append_predictions.yaml
+```
+
+For the complete Nextflow launch, see the
+[evaluation runbook](../DAGs/evaluation.md). Witness-GMM pseudo-labels use this
+same training path; see the
+[witness-GMM runbook](../DAGs/witness_gmm_classifiers.md).
+
+## Standalone W&B artifacts
+
+This path performs standalone classifier training and uses W&B for storage.
+Start from the maintained configs:
+
+- [`example_linear_classifier_train.yaml`](../../configs/linear_classifiers/example_linear_classifier_train.yaml)
+- [`example_linear_classifier_inference.yaml`](../../configs/linear_classifiers/example_linear_classifier_inference.yaml)
+
+Required training fields are:
+
+```yaml
+task: organelle_state
+input_channel: marker
+marker: g3bp1
+embedding_model_name: DynaCLR-2D-BagOfChannels-timeaware
+embedding_model_version: v3
 train_datasets:
-  - embeddings: /path/to/dataset1/embeddings_phase.zarr
-    annotations: /path/to/dataset1/annotations.csv
-  - embeddings: /path/to/dataset2/embeddings_phase.zarr
-    annotations: /path/to/dataset2/annotations.csv
-    include_wells: ["A/1", "C/2"]  # optional: filter by well prefix
-
+  - embeddings: /path/to/embeddings_marker.zarr
+    annotations: /path/to/annotations.csv
+    include_wells: [C/1, C/2]
 use_scaling: true
 use_pca: false
-n_pca_components: null
-max_iter: 1000
-class_weight: balanced
-solver: liblinear
 split_train_data: 0.8
 random_seed: 42
-
-wandb_project: DynaCLR-2D-linearclassifiers
 wandb_entity: null
 wandb_tags: []
 ```
 
-### Well filtering
+```sh
+wandb login
+uv run dynaclr train-linear-classifier \
+  -c applications/dynaclr/configs/linear_classifiers/<train>.yaml
+```
 
-Each dataset entry can optionally specify `include_wells` — a list of well prefixes (e.g. `["A/1", "B/2"]`) to restrict which FOVs are used. The `fov_name` column in annotations follows the format `{row}/{col}/{position}` (e.g. `B/1/002001`), and filtering matches on the `{row}/{col}/` prefix. If `include_wells` is omitted or null, all wells are used.
-
-This is useful for the `organelle_state` task where different wells contain different organelle markers and remodeling phenotypes differ between them.
-
-### What happens during training
-
-1. Embeddings and annotations are loaded and matched on `(fov_name, id)`
-2. If `include_wells` is specified, only matching FOVs are kept
-3. Cells with missing or `"unknown"` labels are filtered out
-4. Multiple datasets are concatenated
-5. Optional preprocessing is applied (StandardScaler, PCA)
-6. Data is split into train/validation sets (stratified)
-7. A `LogisticRegression` classifier is trained
-8. Metrics (accuracy, precision, recall, F1) are logged to W&B
-9. The trained model pipeline is saved as a W&B artifact
-
-## Inference Configuration
+Apply one or more artifact versions:
 
 ```yaml
-wandb_project: DynaCLR-2D-linearclassifiers
-model_name: linear-classifier-cell_death_state-phase
-version: latest
-wandb_entity: null
+embedding_model_name: DynaCLR-2D-BagOfChannels-timeaware
+embedding_model_version: v3
 embeddings_path: /path/to/embeddings.zarr
-output_path: /path/to/output_with_predictions.zarr
+output_path: /path/to/embeddings-with-predictions.zarr
 overwrite: false
+models:
+  - model_name: linear-classifier-infection_state-phase
+    version: v2
+  - model_name: linear-classifier-organelle_state-marker-g3bp1
+    version: v1
+    include_wells: [C/1, C/2]
 ```
 
-### Output format
-
-```python
-adata.obs[f"predicted_{task}"]            # Predicted class labels
-adata.obsm[f"predicted_{task}_proba"]     # Class probabilities (n_cells x n_classes)
-adata.uns[f"predicted_{task}_classes"]    # Ordered list of class names
+```sh
+uv run dynaclr apply-linear-classifier \
+  -c applications/dynaclr/configs/linear_classifiers/<inference>.yaml
 ```
 
-## Supported Tasks and Channels
+The W&B project is derived as
+`linearclassifiers-<embedding_model_name>-<embedding_model_version>`.
 
-| Task | Description | Example Labels |
-|------|-------------|----------------|
-| `infection_state` | Viral infection status | `infected`, `uninfected` |
-| `organelle_state` | Organelle morphology | `nonremodel`, `remodeled` |
-| `cell_division_state` | Cell cycle phase | `mitosis`, `interphase` |
-| `cell_death_state` | Cell viability/death | `alive`, `dead` |
+## Cross-validation
 
-| Channel | Description |
-|---------|-------------|
-| `phase` | Phase contrast / brightfield |
-| `sensor` | Fluorescent reporter |
-| `organelle` | Organelle staining |
+Use rotating leave-one-dataset-out validation to identify datasets that help or
+hurt transfer:
 
-## Model Naming Convention
-
-```
-linear-classifier-{task}-{channel}[-pca{n}]
+```sh
+uv run dynaclr cross-validate \
+  -c applications/dynaclr/configs/linear_classifiers/cross_validate_example.yaml \
+  --report
 ```
 
-Examples: `linear-classifier-cell_death_state-phase`, `linear-classifier-infection_state-sensor-pca32`
-
-## Further Reference
-
-See `annotations_and_linear_classifiers.md` for the full specification of the annotations schema and naming conventions.
+The output directory contains raw folds, the dataset impact summary,
+recommended subsets, and an optional PDF report. This analysis is separate from
+the group-aware train/validation split used to fit the final bundle.

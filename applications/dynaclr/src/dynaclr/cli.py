@@ -137,6 +137,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="witness-gmm-labels",
+        import_path="dynaclr.evaluation.linear_classifiers.witness_gmm_labels.main",
+        short_help="Generate an annotation file from the MMD witness + GMM (Stage A)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="run-linear-classifiers",
         import_path="dynaclr.evaluation.linear_classifiers.orchestrated.main",
         short_help="Run linear classifiers on orchestrator embeddings (batch, CSV metrics)",
@@ -225,6 +233,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="embedding-consistency-qc",
+        import_path="dynaclr.evaluation.mmd.consistency.main",
+        short_help="Per-marker dataset x dataset embedding-consistency MMD matrix (control cells)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="prepare-eval-configs",
         import_path="dynaclr.evaluation.evaluate.main",
         short_help="Generate evaluation YAML configs and print JSON manifest (Nextflow entry point)",
@@ -258,9 +274,65 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="run-matrix",
+        import_path="dynaclr.evaluation.orchestration.matrix.main",
+        short_help="Run many models through train→predict→eval in parallel (SLURM afterok chain)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="predict-batch",
+        import_path="dynaclr.evaluation.orchestration.predict_batch.main",
+        short_help="Batch predict embeddings for one model over a collection (+ AI-ready preflight)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="eval",
+        import_path="dynaclr.evaluation.orchestration.eval_launch.main",
+        short_help="Launch eval_from_embeddings over a model/run/ckpt's embeddings",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="plot-embeddings",
         import_path="dynaclr.evaluation.plot_embeddings.main",
         short_help="Generate scatter plots from an AnnData embedding store",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="fit-lot-correction",
+        import_path="dynaclr.evaluation.lot_correction.fit_lot_correction.main",
+        short_help="Fit a LOT batch-correction pipeline on source and target embedding zarrs",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="apply-lot-correction",
+        import_path="dynaclr.evaluation.lot_correction.apply_lot_correction.main",
+        short_help="Apply a fitted LOT pipeline to correct batch effects in an embedding zarr",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="predict-triplet",
+        import_path="dynaclr.evaluation.predict_triplet.main",
+        short_help="Per-reporter triplet embedding inference from a collection + checkpoint",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="enrich-obs-from-collection",
+        import_path="dynaclr.evaluation.predict_triplet.enrich_main",
+        short_help="Backfill collection metadata (perturbation/hpi/marker/...) onto embedding obs",
     )
 )
 

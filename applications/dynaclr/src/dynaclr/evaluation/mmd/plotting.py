@@ -68,6 +68,96 @@ def plot_mmd_kinetics(df: pd.DataFrame, output_path: Path) -> None:
     plt.close(fig)
 
 
+def plot_mmd_pre_post_kinetics(df: pd.DataFrame, output_path: Path) -> None:
+    """Plot MMD over time as four lines per condition (mean MMD² per bin):
+
+    * **v1 vs v1 (uncorrected floor)** (solid gray) — source↔source on the RAW
+      uncorrected embeddings. This is the fixed within-platform reference: the
+      residual distance between same-platform acquisitions. The corrected
+      cross-platform curve should approach THIS line.
+    * **v1 vs v1 (after LOT→target)** (dashed gray) — source↔source AFTER both
+      were LOT-mapped to the target. NOT a stable baseline (it lives in the
+      corrected PCA space and LOT maps v1→target, not v1→v1); shown only for
+      reference / honesty, not as the floor to compare against.
+    * **v1 vs v2 (pre)** (red) — source↔target before correction: the batch effect.
+    * **v1 vs v2 (post)** (blue) — source↔target after LOT correction.
+
+    The batch-correction story: the blue (post) curve should drop from the red
+    (pre) curve toward the SOLID gray (uncorrected within-platform) floor and stay
+    flat over time. When ``pair_kind`` is absent all pairs are treated as cross and
+    only the pre/post lines are drawn.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Over-time MMD results for a single marker, with columns:
+        condition, correction, pair_kind, hours_bin_start, hours_bin_end,
+        mmd2, p_value.
+    output_path : Path
+        Output file path. Format inferred from suffix (.pdf or .png).
+    """
+    df = df.copy().dropna(subset=["hours_bin_start", "hours_bin_end"])
+    if df.empty:
+        return
+    if "pair_kind" not in df.columns:
+        df["pair_kind"] = "cross"
+    df["bin_mid"] = (df["hours_bin_start"] + df["hours_bin_end"]) / 2
+
+    cross = df[df["pair_kind"] == "cross"]
+    within = df[df["pair_kind"] == "within"]
+
+    conditions = sorted(cross["condition"].unique())
+    n_conds = len(conditions)
+    if n_conds == 0:
+        return
+    fig, axes = plt.subplots(1, n_conds, figsize=(max(4 * n_conds, 5), 4), squeeze=False, sharey=True)
+    marker_name = df["marker"].iloc[0] if "marker" in df.columns else ""
+
+    def _line(ax, sub, label, color, linestyle="-"):
+        """Mean MMD² per bin as a line, with BH-significance stars."""
+        sub = sub.sort_values("bin_mid")
+        if sub.empty:
+            return
+        agg = sub.groupby("bin_mid", as_index=False).agg(mmd2=("mmd2", "mean"), p_value=("p_value", "min"))
+        ax.plot(agg["bin_mid"], agg["mmd2"], marker="o", label=label, color=color, linestyle=linestyle)
+        for row, s in zip(agg.itertuples(), _bh_significance(agg["p_value"].to_numpy())):
+            if s:
+                ax.text(row.bin_mid, row.mmd2, "*", ha="center", va="bottom", color=color, fontsize=12)
+
+    # Two same-space comparisons (MMD is only comparable WITHIN a space, since raw
+    # is 768-dim and corrected is n_pca-dim):
+    #   RAW space      → cross/pre (red solid)   vs within/pre  (red dashed, floor)
+    #   CORRECTED space→ cross/post (blue solid)  vs within/post (blue dashed, floor)
+    # Read post's success as blue-solid approaching blue-dashed, NOT the red floor.
+    for ax, condition in zip(axes[0], conditions):
+        cond_within = within[within["condition"] == condition]
+        cond_cross = cross[cross["condition"] == condition]
+        # Raw space (pre) — warm.
+        _line(ax, cond_within[cond_within["correction"] == "pre"], "v1↔v1 raw (floor)", "lightcoral", linestyle="--")
+        _line(ax, cond_cross[cond_cross["correction"] == "pre"], "v1↔v2 pre (raw)", "tab:red")
+        # Corrected space (post) — cool.
+        _line(
+            ax,
+            cond_within[cond_within["correction"] == "post"],
+            "v1↔v1 corrected (floor)",
+            "lightskyblue",
+            linestyle="--",
+        )
+        _line(ax, cond_cross[cond_cross["correction"] == "post"], "v1↔v2 post (corrected)", "tab:blue")
+
+        ax.set_title(condition)
+        ax.set_xlabel("Hours post perturbation (bin midpoint)")
+        ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
+        sns.despine(ax=ax)
+
+    axes[0][0].set_ylabel("MMD²")
+    axes[0][-1].legend(bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=9)
+    fig.suptitle(f"Cross-platform batch effect over time — {marker_name}")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def plot_mmd_combined_heatmap(df: pd.DataFrame, output_path: Path) -> None:
     """Plot combined cross-experiment MMD heatmap: markers × experiment pairs.
 

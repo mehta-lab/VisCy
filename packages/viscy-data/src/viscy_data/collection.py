@@ -133,7 +133,48 @@ class ExperimentEntry(BaseModel):
         # Derive channels from channel_names if not set
         if not self.channels and self.channel_names:
             self.channels = [ChannelEntry(name=ch, marker=ch) for ch in self.channel_names]
+        self._validate_shared_channel_wells()
         return self
+
+    def _validate_shared_channel_wells(self) -> None:
+        """Fail loud on ambiguous box-plate channels.
+
+        When one physical channel ``name`` carries different markers by well
+        (e.g. a shared GFP → SEC61B in A/2, TOMM20 in A/3), each such entry must
+        pin non-overlapping ``wells``. If a shared-name channel has empty
+        ``wells`` (= all wells) or two entries' wells overlap, the well→marker
+        mapping is ambiguous — the same pixels would be embedded under multiple
+        markers. Raise now rather than silently produce wrong embeddings.
+        """
+        from collections import defaultdict
+
+        by_name: dict[str, list[ChannelEntry]] = defaultdict(list)
+        for ch in self.channels:
+            by_name[ch.name].append(ch)
+
+        for name, entries in by_name.items():
+            if len(entries) < 2:
+                continue  # single-use channel: empty wells (= all) is fine
+            markers = [e.marker for e in entries]
+            no_wells = [e.marker for e in entries if not e.wells]
+            if no_wells:
+                raise ValueError(
+                    f"Experiment '{self.name}': channel '{name}' maps to multiple markers "
+                    f"{markers} but marker(s) {no_wells} have no 'wells' restriction — the "
+                    "well→marker mapping is ambiguous (a shared channel used for several "
+                    "organelles must pin each marker's wells). Add explicit 'wells' per entry."
+                )
+            seen: dict[str, str] = {}
+            for e in entries:
+                for w in e.wells:
+                    if w in seen:
+                        raise ValueError(
+                            f"Experiment '{self.name}': channel '{name}' well '{w}' is claimed by "
+                            f"both marker '{seen[w]}' and '{e.marker}' — overlapping wells make the "
+                            "well→marker mapping ambiguous. Wells must be disjoint across markers "
+                            "sharing a channel."
+                        )
+                    seen[w] = e.marker
 
 
 class Collection(BaseModel):

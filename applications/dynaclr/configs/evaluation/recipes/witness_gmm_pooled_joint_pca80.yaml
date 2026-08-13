@@ -1,0 +1,76 @@
+# Canonical pooled biological-state recipe.
+#
+# This is the only maintained recipe for the validated stack. Edit both sections
+# so their input paths refer to the same per-marker stores. Run pooled_representation
+# first to write obsm["X_normalized_pca80"], then run witness_gmm_labels.
+
+pooled_representation:
+  input_paths:
+    - /path/to/dataset_1_marker_embeddings.zarr
+    - /path/to/dataset_2_marker_embeddings.zarr
+  output_dir: /path/to/pooled_joint_witness_results
+  group_by: perturbation
+  comparisons:
+    - cond_a: uninfected
+      cond_b: DENV
+      label: uninfected_vs_DENV
+  condition_aliases: null
+  representation:
+    normalization: control_mad
+    control_key: perturbation
+    control_values: [uninfected]
+    experiment_key: experiment
+    marker_key: marker
+    hpi_key: hours_post_perturbation
+    smooth_sigma_timepoints: 2.0
+    mad_floor_quantile: 0.05
+    pca_variance: 0.80
+    pca_max_cells_per_dataset_class: 1900
+    random_seed: 42
+  temporal_bin_size: 0.5
+  save_plots: true
+  mmd:
+    n_permutations: 1000
+    max_cells: 2000
+    min_cells: 20
+    seed: 42
+    balance_samples: true
+    share_bandwidth_from: null
+  map_settings:
+    enabled: false
+
+witness_gmm_labels:
+  experiments:
+    - experiment: dataset_1
+      embeddings_zarr: /path/to/dataset_1_marker_embeddings.zarr
+      control_filter: {perturbation: uninfected}
+      perturbed_filter: {perturbation: DENV}
+    - experiment: dataset_2
+      embeddings_zarr: /path/to/dataset_2_marker_embeddings.zarr
+      control_filter: {perturbation: uninfected}
+      perturbed_filter: {perturbation: DENV}
+
+  marker_filters: [pAL40]
+  label_column: infection_state
+  class_map: {positive: infected, negative: uninfected}
+  output_dir: /path/to/pooled_joint_witness_results
+  annotation_format: csv
+
+  # Promoted representation and pooled-teacher contract.
+  embedding_key: X_normalized_pca80
+  reference_sampling: balanced_by_experiment
+  max_reference_cells: 1900
+  witness_time_bin_hours: null
+  bandwidth: null
+
+  # MMD significance gate and all-cell joint/tied GMM.
+  mmd_n_permutations: 1000
+  mmd_pvalue_threshold: 0.05
+  gmm_fit_population: joint_control_perturbed
+  gmm_covariance_type: tied
+  gmm_pos_threshold: 0.8
+  gate: gmm
+
+  condition_column: perturbation
+  mmd_hpi_bin_hours: 2.0
+  random_seed: 42
