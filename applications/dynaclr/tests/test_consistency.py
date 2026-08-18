@@ -16,6 +16,8 @@ from dynaclr.evaluation.mmd.consistency import (
     plot_consistency_matrix,
     run_consistency_qc,
     temporal_std_per_marker,
+    write_corr_summary_pdf,
+    write_existing_corr_summary_pdf,
 )
 from dynaclr.evaluation.paths import embedding_store
 
@@ -64,6 +66,88 @@ def test_plot_consistency_matrix_writes(tmp_path):
     assert out.exists() and out.stat().st_size > 0
 
 
+def test_write_corr_summary_pdf_combines_markers(tmp_path):
+    matrix = pd.DataFrame(
+        [[1.0, 0.91], [0.91, 1.0]],
+        index=["ds_a", "ds_b"],
+        columns=["ds_a", "ds_b"],
+    )
+    comparison = pd.DataFrame(
+        [
+            {
+                "marker": marker,
+                "representation": representation,
+                "mean_off_diagonal_pearson": value,
+                "median_off_diagonal_pearson": value,
+            }
+            for marker in ("G3BP1", "TOMM20")
+            for representation, value in (("raw", 0.91), ("control_mad_pca80", 0.96))
+        ]
+    )
+    out = tmp_path / "embedding_consistency_summary.pdf"
+    config = _qc_config(tmp_path / "datasets", tmp_path / "qc")
+    write_corr_summary_pdf(
+        {"G3BP1": matrix, "TOMM20": matrix},
+        {"G3BP1": matrix + 0.05, "TOMM20": matrix + 0.05},
+        config,
+        out,
+        comparison,
+    )
+
+    assert out.exists() and out.stat().st_size > 0
+    assert out.read_bytes().startswith(b"%PDF")
+
+
+def test_write_existing_corr_summary_pdf_does_not_recompute(tmp_path):
+    output_dir = tmp_path / "qc"
+    output_dir.mkdir()
+    pca_dir = output_dir / "pearson_mad_pca80"
+    pca_dir.mkdir()
+    matrix = pd.DataFrame(
+        [[1.0, 0.91], [0.91, 1.0]],
+        index=["ds_a", "ds_b"],
+        columns=["ds_a", "ds_b"],
+    )
+    matrix.to_csv(output_dir / "consistency_corr_matrix_TOMM20.csv")
+    (matrix + 0.05).to_csv(output_dir / "consistency_corr_matrix_TOMM20_mad_pca80.csv")
+    pd.DataFrame(
+        [
+            {
+                "marker": "TOMM20",
+                "representation": representation,
+                "mean_off_diagonal_pearson": value,
+                "median_off_diagonal_pearson": value,
+            }
+            for representation, value in (("raw", 0.91), ("control_mad_pca80", 0.96))
+        ]
+    ).to_csv(output_dir / "consistency_corr_comparison.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "marker": "TOMM20",
+                "reference_dataset": "ds_a",
+                "embedding_dimensions": 4,
+                "n_components": 3,
+                "target_variance": 0.8,
+                "realized_variance": 0.85,
+            }
+        ]
+    ).to_csv(pca_dir / "marker_pca_80pct_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "marker": ["TOMM20"] * 3,
+            "pc": [1, 2, 3],
+            "explained_variance_ratio": [0.4, 0.3, 0.15],
+            "cumulative_explained_variance": [0.4, 0.7, 0.85],
+        }
+    ).to_csv(pca_dir / "marker_pca_scree_curves.csv", index=False)
+
+    output_path = write_existing_corr_summary_pdf(_qc_config(tmp_path / "datasets", output_dir))
+
+    assert output_path == output_dir / "embedding_consistency_summary.pdf"
+    assert output_path.read_bytes().startswith(b"%PDF")
+
+
 def _corr_dataset(experiment: str, mean_vec: np.ndarray, n_cells: int = 40) -> ad.AnnData:
     """Control-only dataset whose per-cell embeddings scatter tightly around ``mean_vec``."""
     rng = np.random.default_rng(abs(hash(experiment)) % (2**32))
@@ -88,6 +172,65 @@ def test_corr_matrix_per_marker(tmp_path):
     corr = matrices["TOMM20"]
     assert corr.loc["ds_a", "ds_b"] == pytest.approx(1.0, abs=1e-2)
     assert corr.loc["ds_a", "ds_c"] == pytest.approx(-1.0, abs=1e-2)
+
+
+def test_precomputed_pca80_compares_raw_and_normalized(tmp_path):
+    artifact_dir = tmp_path / "pooled_pca"
+    artifact_dir.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "marker": "TOMM20",
+                "embedding_dimensions": 4,
+                "pca_fit_cells": 80,
+                "n_components": 2,
+                "target_variance": 0.8,
+                "realized_variance": 0.86,
+            }
+        ]
+    ).to_csv(artifact_dir / "marker_pca_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "marker": ["TOMM20"] * 4,
+            "pc": [1, 2, 3, 4],
+            "explained_variance_ratio": [0.5, 0.36, 0.09, 0.05],
+            "cumulative_explained_variance": [0.5, 0.86, 0.95, 1.0],
+        }
+    ).to_csv(artifact_dir / "marker_pca_scree.csv", index=False)
+
+    paths = []
+    base = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    for experiment, vector in (("ds_a", base), ("ds_b", base * 1.2)):
+        adata = _corr_dataset(experiment, vector)
+        adata.obsm["X_normalized_pca80"] = np.asarray(adata.X)[:, :2]
+        adata.uns["X_normalized_pca80"] = {
+            "artifact_dir": str(artifact_dir),
+            "fit_input_paths": ["ds_a", "ds_b"],
+            "n_components_by_marker": {"TOMM20": 2},
+            "n_dimensions": 2,
+        }
+        store = tmp_path / f"{experiment}.zarr"
+        adata.write_zarr(store)
+        paths.append(str(store))
+
+    output_dir = tmp_path / "qc"
+    config = _qc_config(tmp_path, output_dir).model_copy(
+        update={
+            "metrics": ["pearson"],
+            "embedding_key": "X_normalized_pca80",
+            "pearson_compare_raw": True,
+        }
+    )
+    run_consistency_qc(config, input_paths=paths)
+
+    assert (output_dir / "consistency_corr_matrix_TOMM20.csv").exists()
+    assert (output_dir / "consistency_corr_matrix_TOMM20_mad_pca80.csv").exists()
+    comparison = pd.read_csv(output_dir / "consistency_corr_comparison.csv")
+    assert set(comparison["representation"]) == {"raw", "control_mad_pca80"}
+    assert comparison.set_index("representation").loc["control_mad_pca80", "n_components"] == 2
+    staged = pd.read_csv(output_dir / "pearson_mad_pca80" / "marker_pca_80pct_summary.csv")
+    assert staged.loc[0, "reference_dataset"] == "pooled global fit (2 stores)"
+    assert (output_dir / "embedding_consistency_summary.pdf").read_bytes().startswith(b"%PDF")
 
 
 def _make_dataset_adata(
@@ -148,6 +291,7 @@ def test_run_consistency_qc_end_to_end(tmp_path):
     assert (output_dir / "consistency_mmd_matrix_TOMM20.png").exists()
     assert (output_dir / "consistency_corr_matrix_TOMM20.csv").exists()
     assert (output_dir / "consistency_corr_matrix_TOMM20.png").exists()
+    assert (output_dir / "embedding_consistency_summary.pdf").exists()
 
     matrix = pd.read_csv(output_dir / "consistency_mmd_matrix_TOMM20.csv", index_col=0)
     # ds_c is mean-shifted; with center_per_experiment=False its off-diagonal MMD
@@ -294,3 +438,87 @@ def test_run_consistency_qc_split_by_microscope(tmp_path):
     pairs = {frozenset((a, b)) for a, b in zip(cross_df["exp_a"], cross_df["exp_b"])}
     assert all("ds_v1a" in p for p in pairs)  # every kept pair straddles the v1/v2 boundary
     assert frozenset(("ds_v2a", "ds_v2b")) not in pairs  # within-v2 pairs excluded from cross
+
+
+def _make_normalization_dataset(
+    experiment: str,
+    plate_shift: float,
+    seed: int,
+) -> ad.AnnData:
+    """Synthetic timecourse with controls and perturbation for PCA fitting."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    embeddings = []
+    direction = np.linspace(-1.0, 1.0, 8)
+    for hpi in (0.0, 1.0, 2.0, 3.0):
+        control_center = plate_shift + 0.4 * hpi
+        for perturbation, effect in (("uninfected", 0.0), ("ZIKV", 2.0)):
+            for _ in range(24):
+                embeddings.append(
+                    rng.normal(
+                        loc=control_center + effect * direction,
+                        scale=0.4,
+                        size=8,
+                    )
+                )
+                rows.append(
+                    {
+                        "experiment": experiment,
+                        "marker": "TOMM20",
+                        "perturbation": perturbation,
+                        "hours_post_perturbation": hpi,
+                    }
+                )
+    return ad.AnnData(
+        X=np.asarray(embeddings, dtype=np.float32),
+        obs=pd.DataFrame(rows),
+    )
+
+
+def test_run_consistency_qc_raw_and_control_mad_pca80(tmp_path):
+    """The optional transform keeps raw output and adds audited normalized output."""
+    datasets_root = tmp_path / "datasets"
+    output_dir = tmp_path / "qc_out"
+    for dataset, shift, seed in (
+        ("ds_a", 0.0, 0),
+        ("ds_b", 3.0, 1),
+        ("ds_c", -2.0, 2),
+    ):
+        store = embedding_store(
+            dataset,
+            "modelX",
+            "run1",
+            "ckptA",
+            "TOMM20",
+            datasets_root=datasets_root,
+        )
+        store.parent.mkdir(parents=True, exist_ok=True)
+        _make_normalization_dataset(dataset, shift, seed).write_zarr(str(store))
+
+    cfg = _qc_config(datasets_root, output_dir).model_copy(
+        update={
+            "metrics": ["pearson"],
+            "save_plots": False,
+            "pearson_hpi_bin_hours": 2.0,
+            "pearson_normalization": "control_mad_pca80",
+            "pearson_pca_reference_datasets": {"TOMM20": "ds_a"},
+            "pearson_pca_max_cells_per_class": 50,
+        }
+    )
+    run_consistency_qc(cfg)
+
+    raw = output_dir / "consistency_corr_matrix_TOMM20.csv"
+    normalized = output_dir / "consistency_corr_matrix_TOMM20_mad_pca80.csv"
+    comparison = output_dir / "consistency_corr_comparison.csv"
+    pca_summary = output_dir / "pearson_mad_pca80" / "marker_pca_80pct_summary.csv"
+    assert raw.exists()
+    assert normalized.exists()
+    assert comparison.exists()
+    assert pca_summary.exists()
+
+    result = pd.read_csv(comparison)
+    assert set(result["representation"]) == {"raw", "control_mad_pca80"}
+    pca = pd.read_csv(pca_summary)
+    assert pca.loc[0, "reference_dataset"] == "ds_a"
+    assert 1 <= int(pca.loc[0, "n_components"]) <= 8
+    assert float(pca.loc[0, "realized_variance"]) >= 0.80

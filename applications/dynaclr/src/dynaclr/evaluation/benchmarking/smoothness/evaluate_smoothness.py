@@ -17,6 +17,7 @@ import click
 import numpy as np
 import pandas as pd
 
+from dynaclr.evaluation.representation import representation_as_x
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.smoothness import compute_embeddings_smoothness
 
@@ -56,6 +57,7 @@ def main(config: Path):
 
         try:
             features_ad = ad.read_zarr(model_path)
+            features_ad = representation_as_x(features_ad, config.embedding_key)
             validate_embedding(features_ad)
 
             if config.verbose:
@@ -163,6 +165,8 @@ def main(config: Path):
 
         except Exception as e:
             click.echo(f"  Error processing {model_label}: {e}", err=True)
+            if config.fail_fast:
+                raise
             continue
 
     if not all_results:

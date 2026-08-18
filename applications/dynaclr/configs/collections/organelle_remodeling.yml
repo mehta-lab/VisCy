@@ -1,6 +1,6 @@
 name: organelle_remodeling
 description: "Merged organelle-remodeling collection: SEC61B (ER), TOMM20 (mitochondria),
-  G3BP1 (stress granules), CAAX (membrane), and H2B (nuclear) reporters under
+  G3BP1 (stress granules), MAP4 (microtubules), CAAX (membrane), and H2B (nuclear) reporters under
   ZIKV/DENV infection. One experiment per physical dataset, including five annotated
   Mantis v1 datasets from 2025. All are prepared on VAST (normalization + focus_slice).
   mCherry viral sensor marker matches Airtable channel_2_marker: pAL17 for ZIKV,
@@ -244,6 +244,54 @@ experiments:
     organelle: membrane_nuclear
     pixel_size_xy_um: 0.1133
     pixel_size_z_um: 0.174
+    microscope: mantis_v2
+
+  # --- ZIKV, MAP4 (microtubules) ---
+  # Well mappings and marker scopes come from the registered Airtable records.
+  - name: 2026_07_14_A549_MAP4_ZIKV
+    data_path: ${datasets_root}/2026_07_14_A549_MAP4_ZIKV/2026_07_14_A549_MAP4_ZIKV.zarr
+    tracks_path: ${datasets_root}/2026_07_14_A549_MAP4_ZIKV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: MAP4
+        wells: [B/2, B/3, B/4, B/5, C/3, C/4]
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL17
+        wells: [B/4, B/5, C/4]
+      - name: Phase3D
+        marker: Phase3D
+        wells: [B/2, B/3, B/4, B/5, C/3, C/4]
+    perturbation_wells:
+      uninfected: [B/2, B/5]
+      ZIKV: [B/3, B/4, C/3, C/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: microtubules
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
+    microscope: mantis_v2
+
+  # --- DENV, SEC61B (ER) ---
+  - name: 2026_08_11_A549_SEC61B_DENV
+    data_path: ${datasets_root}/2026_08_11_A549_SEC61B_DENV/2026_08_11_A549_SEC61B_DENV.zarr
+    tracks_path: ${datasets_root}/2026_08_11_A549_SEC61B_DENV/tracking.zarr
+    channels:
+      - name: raw GFP EX488 EM525-45
+        marker: SEC61B
+      - name: raw mCherry EX561 EM600-37
+        marker: pAL40
+      - name: Phase3D
+        marker: Phase3D
+    perturbation_wells:
+      uninfected: [C/2, D/2]
+      DENV: [C/3, C/4, D/3, D/4]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    moi: 5.0
+    organelle: endoplasmic_reticulum
+    pixel_size_xy_um: 0.1133
+    pixel_size_z_um: 0.16995
     microscope: mantis_v2
 
   # --- Annotated Mantis v1 datasets from 2025 ---

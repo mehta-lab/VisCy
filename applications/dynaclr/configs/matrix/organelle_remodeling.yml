@@ -1,7 +1,7 @@
 # Organelle-remodeling model matrix — persistent, iterated on over time.
 #
-# ONE merged collection (organelle_remodeling.yml = 15 physical datasets spanning
-# SEC61B/TOMM20/G3BP1/CAAX/H2B under ZIKV/DENV) run through MULTIPLE models. One
+# ONE merged collection (organelle_remodeling.yml = 17 physical datasets spanning
+# SEC61B/TOMM20/G3BP1/MAP4/CAAX/H2B under ZIKV/DENV) run through MULTIPLE models. One
 # row per MODEL; run-matrix fans out predict per experiment inside the collection
 # and skips already-embedded ones.
 #
@@ -28,7 +28,7 @@ defaults:
   # pAL40 DENV); include both to embed the sensor across all datasets, or drop them
   # to embed only the organelle question.
   # (CAAX/H2B are the 2026_03_26 dual-virus markers; a marker only runs where present.)
-  markers: [SEC61B, TOMM20, G3BP1, Phase3D, pAL17, pAL40, CAAX, H2B]
+  markers: [SEC61B, TOMM20, G3BP1, MAP4, Phase3D, pAL17, pAL40, CAAX, H2B]
   # Focus-centered Z: window WIDTH (slices) centered per-FOV on the focus plane
   # (from focus_slice zattrs). z_reduction mip → fluorescence max-projected,
   # label-free (Phase3D) center slice. z_focus_offset = fraction below focus.

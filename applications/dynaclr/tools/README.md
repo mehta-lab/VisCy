@@ -1,12 +1,13 @@
-# DynaCLR model matrix — train → predict → normalize → eval
+# DynaCLR model matrix — predict, normalize, and direct evaluation
 
 Launchers for running one or many DynaCLR models through the full pipeline. Models
 run **in parallel**; within a model the stages chain via SLURM
 `--dependency=afterok`. Embeddings are written once into the dataset-centric tree
 (`<dataset>/2-phenotyping/predictions/{model_family}/{run}/{ckpt_name}/embeddings/{marker}.zarr`).
 After prediction, one full-collection control-median/MAD → pooled marker-PCA80 fit writes
-`obsm["X_normalized_pca80"]` and matching `uns` provenance to every store; evaluation
-then reads the shared representation from there — no re-prediction to iterate on evals.
+`obsm["X_normalized_pca80"]` and matching `uns` provenance to every store. The direct
+`run-matrix-eval` command then runs configured metrics from that representation without
+Nextflow or re-prediction.
 
 ## The matrix YAML
 
@@ -50,6 +51,35 @@ Per model, `dynaclr run-matrix` submits:
 collection, even when skip-existing predicts only newly added datasets. It selectively
 replaces only the named normalized `obsm`/`uns` entries in every expected store.
 
+## Direct progressive evaluation (no Nextflow)
+
+An evaluation-plan YAML names the model matrix, output root, default representation,
+and requested metrics. The maintained organelle-remodeling plan is
+`../configs/evaluation/matrix/organelle_remodeling.yml`; its default representation is
+`X_normalized_pca80`.
+
+```bash
+# preview the missing model x checkpoint x metric units
+uv run --package dynaclr dynaclr run-matrix-eval \
+  -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml \
+  --dry-run
+
+# submit only missing or stale units
+uv run --package dynaclr dynaclr run-matrix-eval \
+  -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml
+
+# deliberately rerun selected work, or compare raw backbone X
+uv run --package dynaclr dynaclr run-matrix-eval -c <plan.yml> \
+  --evaluation temporal_smoothness --overwrite
+uv run --package dynaclr dynaclr run-matrix-eval -c <plan.yml> --embedding-key X
+```
+
+Each successful unit writes a fingerprinted `_SUCCESS.json`. The fingerprint covers the
+model/checkpoint, metric config, selected representation, and exact expected store list.
+Adding a dataset therefore makes the affected aggregate units stale, while unrelated completed
+metrics stay skipped. Use `--local` for sequential development runs in the current allocation;
+the default submits one plain SLURM job per pending unit.
+
 ## Preprocessing precondition (AI-ready datasets)
 
 Prediction needs each dataset's FOV zattrs to already carry `normalization` +
@@ -89,8 +119,10 @@ models:
 | `dynaclr run-matrix` | the whole matrix — parse `.sh`, preflight, chain train→predict→normalize→eval |
 | `dynaclr predict-batch` | predict one model over a collection (wraps `predict-triplet`) + AI-ready preflight |
 | `dynaclr normalize-embeddings` | fit/export the full-checkpoint pooled control-MAD/PCA80 representation |
-| `dynaclr eval` | evaluate one model's embeddings (launches Nextflow `eval_from_embeddings`) |
-| `predict.sbatch` / `normalize.sbatch` / `eval.sbatch` | the wrapper jobs the matrix chains |
+| `dynaclr run-matrix-eval` | run only missing configured metrics across all matrix rows, directly through SLURM |
+| `dynaclr evaluate-matrix-unit` | worker for one model/checkpoint/metric unit |
+| `dynaclr eval` | legacy Nextflow `eval_from_embeddings` launcher |
+| `predict.sbatch` / `normalize.sbatch` / `matrix_eval.sbatch` | direct prediction, normalization, and evaluation workers |
 
 See [`../docs/DAGs/end_to_end.md`](../docs/DAGs/end_to_end.md) for the pipeline overview
 and [`../nextflow/README.md`](../nextflow/README.md) for the eval Nextflow entries.

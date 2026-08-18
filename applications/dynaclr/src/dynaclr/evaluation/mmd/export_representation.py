@@ -170,14 +170,24 @@ def export_pooled_representation(
 
     rows: list[dict] = []
     for store in stores:
-        local_features = prepared.features[store.start : store.stop]
         local_markers = sorted(
             pooled_obs.iloc[store.start : store.stop][config.representation.marker_key].astype(str).unique()
         )
+        local_component_counts = {prepared.n_components_by_marker[marker] for marker in local_markers}
+        if len(local_component_counts) != 1:
+            widths = {marker: prepared.n_components_by_marker[marker] for marker in local_markers}
+            raise ValueError(
+                f"{store.path}: one AnnData store contains markers with different "
+                f"PCA80 widths: {widths}. Export one marker per store so obsm "
+                "can retain the exact marker width."
+            )
+        local_dimensions = local_component_counts.pop()
+        local_features = prepared.features[store.start : store.stop, :local_dimensions]
         local_metadata = {
             **metadata,
             "source_path": str(store.path),
             "markers": local_markers,
+            "n_dimensions": local_dimensions,
         }
         append_to_anndata_zarr(
             store.path,

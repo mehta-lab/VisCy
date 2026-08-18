@@ -1,0 +1,40 @@
+# Direct, progressive evaluation plan for the organelle-remodeling model matrix.
+#
+# Preview missing model x evaluation units:
+#   uv run --package dynaclr dynaclr run-matrix-eval -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml --dry-run
+# Submit only missing/stale units (default):
+#   uv run --package dynaclr dynaclr run-matrix-eval -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml
+# Force every selected unit:
+#   uv run --package dynaclr dynaclr run-matrix-eval -c applications/dynaclr/configs/evaluation/matrix/organelle_remodeling.yml --overwrite
+# Compare raw .X instead of the default normalized representation:
+#   ... --embedding-key X
+
+matrix: applications/dynaclr/configs/matrix/organelle_remodeling.yml
+output_root: /hpc/projects/intracellular_dashboard/organelle_dynamics/matrix_evaluations/organelle_remodeling
+embedding_key: X_normalized_pca80
+
+resources:
+  partition: cpu
+  cpus: 8
+  memory: 128G
+  time: 1-00:00:00
+
+evaluations:
+  - name: embedding_consistency
+    type: embedding_consistency
+    config: applications/dynaclr/configs/evaluation/recipes/embedding_consistency_qc_normalized.yml
+
+  - name: temporal_smoothness
+    type: smoothness
+    parameters:
+      distance_metric: cosine
+      group_by: null
+      save_plots: true
+      save_distributions: false
+      verbose: false
+
+  - name: linear_classifiers
+    type: linear_classifiers
+    config: model.eval_config
+    parameters:
+      publish: false

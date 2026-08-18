@@ -90,6 +90,50 @@ def test_export_pooled_representation_updates_only_named_slots(tmp_path: Path):
     assert (artifact_dir / "zarr_export_manifest.csv").exists()
     assert (artifact_dir / "zarr_export_metadata.json").exists()
     assert (artifact_dir / "pca_models" / "SEC61B.npz").exists()
+    assert (artifact_dir / "marker_pca_scree.pdf").read_bytes().startswith(b"%PDF")
+
+
+def test_export_uses_each_markers_exact_global_pca80_width(tmp_path: Path):
+    rng = np.random.default_rng(12)
+    paths = []
+    for marker, correlated in (("CORRELATED", True), ("ISOTROPIC", False)):
+        rows = []
+        values = []
+        for condition, shift in (("uninfected", 0.0), ("DENV", 0.3)):
+            for index in range(160):
+                if correlated:
+                    latent = rng.normal(shift, 1.0)
+                    vector = latent + rng.normal(0.0, 0.02, size=10)
+                else:
+                    vector = rng.normal(shift, 1.0, size=10)
+                values.append(vector)
+                rows.append(
+                    {
+                        "experiment": f"exp_{marker.lower()}",
+                        "marker": marker,
+                        "perturbation": condition,
+                        "hours_post_perturbation": float(index % 8),
+                        "qc": "keep",
+                    }
+                )
+        path = tmp_path / f"{marker}.zarr"
+        ad.AnnData(X=np.asarray(values, dtype=np.float32), obs=pd.DataFrame(rows)).write_zarr(path)
+        paths.append(path)
+
+    config = _config(paths, tmp_path / "output")
+    manifest = export_pooled_representation(config, artifact_dir=tmp_path / "artifacts")
+
+    widths = {}
+    for path in paths:
+        result = ad.read_zarr(path)
+        marker = str(result.obs["marker"].iloc[0])
+        width = result.obsm["X_normalized_pca80"].shape[1]
+        widths[marker] = width
+        metadata = result.uns["X_normalized_pca80"]
+        assert width == metadata["n_components_by_marker"][marker]
+        assert width == metadata["n_dimensions"]
+    assert widths["CORRELATED"] < widths["ISOTROPIC"]
+    assert set(manifest["n_dimensions"]) == set(widths.values())
 
 
 def test_export_pooled_representation_can_refuse_replacement(tmp_path: Path):

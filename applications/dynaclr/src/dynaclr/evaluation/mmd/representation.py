@@ -329,6 +329,7 @@ def save_representation_artifacts(
         )
     if scree:
         pd.DataFrame(scree).to_csv(artifact_dir / "marker_pca_scree.csv", index=False)
+        _save_marker_scree_pdf(prepared, config, artifact_dir)
     run_info = {
         "representation": prepared.label,
         "normalization": config.normalization,
@@ -342,3 +343,66 @@ def save_representation_artifacts(
         "n_components_by_marker": prepared.n_components_by_marker,
     }
     (artifact_dir / "run_info.json").write_text(json.dumps(run_info, indent=2) + "\n", encoding="utf-8")
+
+
+def _save_marker_scree_pdf(
+    prepared: PreparedMMDRepresentation,
+    config: MMDRepresentationConfig,
+    artifact_dir: Path,
+) -> None:
+    """Write a compact, referenceable scree report for every marker PCA fit."""
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    markers = sorted(prepared.pca_fits)
+    if not markers:
+        return
+    per_page = 6
+    with PdfPages(artifact_dir / "marker_pca_scree.pdf") as pdf:
+        for page_start in range(0, len(markers), per_page):
+            page_markers = markers[page_start : page_start + per_page]
+            fig, axes = plt.subplots(3, 2, figsize=(11.69, 8.27), squeeze=False)
+            for ax, marker in zip(axes.flat, page_markers, strict=False):
+                fit = prepared.pca_fits[marker]
+                selected = fit.components.shape[0]
+                max_pc = min(
+                    len(fit.cumulative_explained_variance),
+                    max(20, selected + 10, int(np.ceil(selected * 1.5))),
+                )
+                pcs = np.arange(1, max_pc + 1)
+                ax.plot(
+                    pcs,
+                    fit.cumulative_explained_variance[:max_pc],
+                    color="tab:blue",
+                    linewidth=1.8,
+                )
+                ax.axhline(
+                    config.pca_variance,
+                    color="tab:red",
+                    linestyle="--",
+                    linewidth=1,
+                    label=f"target {config.pca_variance:.0%}",
+                )
+                ax.axvline(
+                    selected,
+                    color="black",
+                    linestyle=":",
+                    linewidth=1,
+                    label=f"selected {selected} PCs",
+                )
+                ax.scatter([selected], [fit.realized_variance], color="black", s=18, zorder=3)
+                ax.set_title(
+                    f"{marker}: {selected}/{fit.mean.size} PCs ({fit.realized_variance:.1%} variance)",
+                    fontsize=10,
+                )
+                ax.set_xlabel("Principal component")
+                ax.set_ylabel("Cumulative explained variance")
+                ax.set_ylim(0, 1.02)
+                ax.grid(alpha=0.2)
+                ax.legend(loc="lower right", fontsize=7)
+            for ax in axes.flat[len(page_markers) :]:
+                ax.axis("off")
+            fig.suptitle("Globally fitted marker-specific PCA80 scree curves", fontsize=14)
+            fig.tight_layout(rect=(0, 0, 1, 0.95))
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)

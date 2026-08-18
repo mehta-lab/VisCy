@@ -348,3 +348,26 @@ class EmbeddingConsistencyConfig(_MMDBaseConfig):
     intervals / frame counts across acquisitions) cannot masquerade as a batch
     effect. Bins are anchored at 0 h and shared across datasets, so acquisitions
     with different ``start_hpi`` still align on a common biological timeline."""
+    pearson_normalization: Literal["control_mad_pca80"] | None = None
+    """Optional second Pearson representation. ``control_mad_pca80`` applies
+    the promoted control-reference stack before computing the companion matrix:
+    a Gaussian-smoothed, time-matched control median; one normal-consistent MAD
+    per dimension pooled across HPI; and a shared unwhitened marker PCA retaining
+    ``pearson_pca_variance``. The raw Pearson matrix is always retained."""
+    pearson_compare_raw: bool = False
+    """When ``embedding_key`` selects a precomputed normalized representation,
+    also compute Pearson from raw ``X`` and emit a side-by-side before/after
+    comparison. No second normalization or PCA fit is performed."""
+    pearson_pca_reference_datasets: dict[str, str] = Field(default_factory=dict)
+    """Marker -> source dataset used to fit the shared PCA basis. Markers not
+    listed choose the dataset with the largest balanced control/perturbed cohort."""
+    pearson_pca_variance: float = Field(default=0.80, gt=0.0, lt=1.0)
+    pearson_pca_max_cells_per_class: int = Field(default=10_000, ge=2)
+    pearson_smooth_sigma_timepoints: float = Field(default=2.0, ge=0.0)
+    pearson_mad_floor_quantile: float = Field(default=0.05, ge=0.0, le=1.0)
+    pearson_control_value: str = "uninfected"
+    obs_filter_aliases: dict[str, list[str]] = Field(default_factory=dict)
+    """Optional accepted values for an ``obs_filter`` column. For example,
+    ``{"perturbation": ["uninfected", "mock"]}`` harmonizes legacy control
+    labels without rewriting embedding stores."""
+    pearson_random_seed: int = 42

@@ -38,6 +38,10 @@ class SmoothnessEvalConfig(BaseModel):
         obs column to group by before computing smoothness (e.g. "marker").
         Smoothness is computed per group; the reported aggregate stats are
         mean ± std across groups. Set to null to compute on the whole embedding.
+    embedding_key : str or None
+        Representation in ``adata.obsm``. None uses raw ``adata.X``.
+    fail_fast : bool
+        Raise on the first invalid store instead of continuing. Default: False.
     """
 
     models: list[ModelEntry] = Field(..., min_length=1)
@@ -49,6 +53,8 @@ class SmoothnessEvalConfig(BaseModel):
     use_optimized: bool = True
     verbose: bool = False
     group_by: str | None = "marker"
+    embedding_key: str | None = None
+    fail_fast: bool = False
 
     @model_validator(mode="after")
     def validate_paths(self):

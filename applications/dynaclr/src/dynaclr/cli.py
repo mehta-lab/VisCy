@@ -282,6 +282,22 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="run-matrix-eval",
+        import_path="dynaclr.evaluation.orchestration.matrix_eval.main",
+        short_help="Run missing configured evaluations over a model matrix (direct SLURM, no Nextflow)",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="evaluate-matrix-unit",
+        import_path="dynaclr.evaluation.orchestration.matrix_eval.task_main",
+        short_help="Execute one direct model-matrix evaluation unit",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="normalize-embeddings",
         import_path="dynaclr.evaluation.mmd.checkpoint_representation.main",
         short_help="Write pooled control-MAD/PCA80 coordinates to checkpoint embeddings",

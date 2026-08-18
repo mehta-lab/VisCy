@@ -574,6 +574,10 @@ class LinearClassifiersStepConfig(BaseModel):
         control_IQR`` referenced against ``uninfected`` cells. Default: False.
     control_normalize_bin_hours : float
         HPI bin width for control-reference normalization. Default: 2.0.
+    embedding_key : str or None
+        Representation in ``adata.obsm`` used for classifier features. None
+        uses raw ``adata.X``. Matrix evaluation defaults this to
+        ``X_normalized_pca80``.
     """
 
     label_source: Literal["annotations"] = "annotations"
@@ -591,6 +595,7 @@ class LinearClassifiersStepConfig(BaseModel):
     split_groups_by: list[str] | None = None
     control_normalize: bool = False
     control_normalize_bin_hours: float = 2.0
+    embedding_key: str | None = None
 
     @model_validator(mode="after")
     def _validate_label_source(self) -> "LinearClassifiersStepConfig":

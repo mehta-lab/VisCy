@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,6 +30,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 
+from dynaclr.evaluation.representation import representation_as_x
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
 from viscy_utils.evaluation.linear_classifier import (
@@ -145,7 +147,7 @@ def _apply_control_normalization(adata, bin_hours: float) -> None:
 
 
 def run_linear_classifiers(
-    embeddings_path: Path,
+    embeddings_path: Path | Sequence[Path],
     config: LinearClassifiersStepConfig,
     output_dir: Path,
 ) -> pd.DataFrame:
@@ -169,17 +171,28 @@ def run_linear_classifiers(
     import anndata as ad
 
     click.echo(f"Loading embeddings from {embeddings_path}")
-    if embeddings_path.is_dir() and not str(embeddings_path).endswith(".zarr"):
+    if isinstance(embeddings_path, Sequence) and not isinstance(embeddings_path, (str, Path)):
+        zarr_paths = [Path(path) for path in embeddings_path]
+        if not zarr_paths:
+            raise FileNotFoundError("No embedding paths provided")
+        parts = [representation_as_x(ad.read_zarr(path), config.embedding_key) for path in zarr_paths]
+        adata = ad.concat(parts, join="outer", fill_value=0.0)
+        adata.obs_names_make_unique()
+        click.echo(f"  Loaded {len(zarr_paths)} per-experiment zarrs")
+    elif embeddings_path.is_dir() and not str(embeddings_path).endswith(".zarr"):
         zarr_paths = sorted(embeddings_path.glob("*.zarr"))
         if not zarr_paths:
             raise FileNotFoundError(f"No .zarr files found in {embeddings_path}")
-        parts = [ad.read_zarr(p) for p in zarr_paths]
-        adata = ad.concat(parts, join="outer")
+        parts = [representation_as_x(ad.read_zarr(p), config.embedding_key) for p in zarr_paths]
+        adata = ad.concat(parts, join="outer", fill_value=0.0)
         adata.obs_names_make_unique()
         click.echo(f"  Loaded {len(zarr_paths)} per-experiment zarrs")
     else:
-        adata = ad.read_zarr(embeddings_path)
+        adata = representation_as_x(ad.read_zarr(embeddings_path), config.embedding_key)
     click.echo(f"  {adata.n_obs} cells, {adata.n_vars} features")
+
+    if config.embedding_key is not None:
+        click.echo(f"  Using obsm[{config.embedding_key!r}] ({adata.n_vars} features)")
 
     missing = [col for col in ["experiment", "marker"] if col not in adata.obs.columns]
     if missing:
