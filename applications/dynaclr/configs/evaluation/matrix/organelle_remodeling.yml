@@ -33,8 +33,19 @@ evaluations:
       save_distributions: false
       verbose: false
 
+  # Historical mixed-task infectomics probe. Keep its completed outputs for
+  # comparison, but do not schedule it in the maintained matrix evaluation.
   - name: linear_classifiers
     type: linear_classifiers
     config: model.eval_config
+    parameters:
+      publish: false
+    enabled: false
+
+  # Infection-only probe: manual perturbed-well labels plus systematic true-control
+  # pseudolabels in every annotation-bearing experiment.
+  - name: infection_classifiers
+    type: linear_classifiers
+    config: applications/dynaclr/configs/evaluation/matrix/infection_classifiers_with_controls.yml
     parameters:
       publish: false

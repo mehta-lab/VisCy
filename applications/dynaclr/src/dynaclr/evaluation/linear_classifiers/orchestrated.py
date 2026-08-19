@@ -67,6 +67,33 @@ def _annotation_run_specs(
     return specs
 
 
+def _apply_control_pseudolabels(
+    config: LinearClassifiersStepConfig,
+    adata_exp: ad.AnnData,
+    task: str,
+) -> int:
+    """Label true-control rows for one annotated task and reject conflicts."""
+    label = config.control_pseudolabels.get(task)
+    if label is None:
+        return 0
+
+    condition_column = config.control_condition_column
+    if condition_column not in adata_exp.obs.columns:
+        raise ValueError(f"control pseudolabels for {task!r} require obs column {condition_column!r}")
+
+    control_mask = adata_exp.obs[condition_column].isin(config.control_condition_values)
+    existing = adata_exp.obs[task]
+    conflict_mask = control_mask & existing.notna() & (existing != "unknown") & (existing != label)
+    if conflict_mask.any():
+        conflicts = sorted(existing.loc[conflict_mask].astype(str).unique().tolist())
+        raise ValueError(f"control rows for {task!r} contain labels conflicting with {label!r}: {conflicts}")
+
+    if isinstance(existing.dtype, pd.CategoricalDtype) and label not in existing.cat.categories:
+        adata_exp.obs[task] = existing.cat.add_categories([label])
+    adata_exp.obs.loc[control_mask, task] = label
+    return int(control_mask.sum())
+
+
 def _build_labeled_adata(
     config: LinearClassifiersStepConfig,
     adata: ad.AnnData,
@@ -109,6 +136,13 @@ def _build_labeled_adata(
         except KeyError:
             click.echo(f"  Experiment {ann_src.experiment!r}: task {task!r} not in {ann_path.name}, skipping.")
             continue
+
+        n_pseudo = _apply_control_pseudolabels(config, adata_exp, task)
+        if n_pseudo:
+            click.echo(
+                f"  Experiment {ann_src.experiment!r}: synthesized {n_pseudo} "
+                f"{task}={config.control_pseudolabels[task]!r} true-control rows"
+            )
 
         valid_mask = adata_exp.obs[task].notna() & (adata_exp.obs[task] != "unknown")
         n_valid = int(valid_mask.sum())

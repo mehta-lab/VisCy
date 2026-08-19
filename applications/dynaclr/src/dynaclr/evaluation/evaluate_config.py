@@ -578,6 +578,18 @@ class LinearClassifiersStepConfig(BaseModel):
         Representation in ``adata.obsm`` used for classifier features. None
         uses raw ``adata.X``. Matrix evaluation defaults this to
         ``X_normalized_pca80``.
+    control_pseudolabels : dict[str, str]
+        Optional task-to-label mapping synthesized for true control rows in
+        every annotation-bearing experiment. For example,
+        ``{"infection_state": "uninfected"}`` adds all rows whose
+        ``control_condition_column`` is one of ``control_condition_values`` as
+        negative infection examples. Manual non-control annotations remain the
+        positive-label source; experiments without that task are still skipped.
+    control_condition_column : str
+        Obs column used to identify true control rows. Default: ``perturbation``.
+    control_condition_values : list[str]
+        Values in ``control_condition_column`` treated as controls. Default:
+        ``["uninfected"]``.
     """
 
     label_source: Literal["annotations"] = "annotations"
@@ -596,6 +608,9 @@ class LinearClassifiersStepConfig(BaseModel):
     control_normalize: bool = False
     control_normalize_bin_hours: float = 2.0
     embedding_key: str | None = None
+    control_pseudolabels: dict[str, str] = {}
+    control_condition_column: str = "perturbation"
+    control_condition_values: list[str] = ["uninfected"]
 
     @model_validator(mode="after")
     def _validate_label_source(self) -> "LinearClassifiersStepConfig":
