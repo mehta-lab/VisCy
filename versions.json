@@ -10,6 +10,13 @@
     "aliases": []
   },
   {
+    "version": "iscy-models-v0.1.0",
+    "title": "iscy-models-v0.1.0",
+    "aliases": [
+      "stable"
+    ]
+  },
+  {
     "version": "iscy-models-v0.1.0a0",
     "title": "iscy-models-v0.1.0a0",
     "aliases": []
@@ -17,9 +24,7 @@
   {
     "version": "iscy-data-v0.1.0",
     "title": "iscy-data-v0.1.0",
-    "aliases": [
-      "stable"
-    ]
+    "aliases": []
   },
   {
     "version": "iscy-data-v0.1.0a0",
