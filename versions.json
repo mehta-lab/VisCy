@@ -1,5 +1,12 @@
 [
   {
+    "version": "iscy-utils-v0.1.0",
+    "title": "iscy-utils-v0.1.0",
+    "aliases": [
+      "stable"
+    ]
+  },
+  {
     "version": "iscy-utils-v0.1.0a0",
     "title": "iscy-utils-v0.1.0a0",
     "aliases": []
@@ -7,9 +14,7 @@
   {
     "version": "iscy-transforms-v0.1.0",
     "title": "iscy-transforms-v0.1.0",
-    "aliases": [
-      "stable"
-    ]
+    "aliases": []
   },
   {
     "version": "iscy-transforms-v0.1.0a0",
