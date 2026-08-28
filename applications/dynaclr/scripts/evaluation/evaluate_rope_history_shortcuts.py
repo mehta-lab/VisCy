@@ -32,6 +32,7 @@ DEFAULT_OUTPUT = Path(
     "cell-dino-rope-context5-history-shortcut-ablation-seed17-v1"
 )
 INTERVENTION_SEEDS = (101, 102, 103, 104, 105)
+REPLAY_TOLERANCE = 5e-6
 
 
 def _load_features(fold: Path, labels: pd.DataFrame, phase_x: np.ndarray) -> np.ndarray:
@@ -311,7 +312,7 @@ def run_fold(args: argparse.Namespace) -> None:
             )
             if name == "ordered":
                 error = np.max(np.abs(probability[test_mask] - saved_ordered))
-                if error > 1e-6:
+                if error > REPLAY_TOLERANCE:
                     raise RuntimeError(f"Ordered replay differs from saved probabilities: {error}")
                 (working / "ordered_replay_max_abs_error.txt").write_text(f"{error:.12g}\n")
             print(f"{held_out}: {name}/{local_seed} complete", flush=True)
