@@ -130,6 +130,62 @@ def test_resume_missing_checkpoint_raises(tmp_path):
         sbj.submit([str(leaf), "--resume-from", str(tmp_path / "missing.ckpt"), "--print-script"])
 
 
+def test_resume_prefers_newest_last_v_ckpt(capsys, tmp_path):
+    """--resume anchors on the NEWEST last*.ckpt by mtime, not the fixed last.ckpt.
+
+    Lightning writes last-v1.ckpt (then -v2, ...) whenever last.ckpt already exists,
+    so on a resumed run last.ckpt is the FIRST segment's state -- measured 14-91
+    epochs stale across seven joint FCMAE arms at completion. Baking it into the
+    sbatch script rewinds the run (job 35154718 lost 83 epochs on 2026-08-07, and
+    Slurm replays the stored script verbatim on every requeue)."""
+    ckpt_dir = tmp_path / "checkpoints"
+    ckpt_dir.mkdir()
+    stale = ckpt_dir / "last.ckpt"
+    stale.write_bytes(b"stub")
+    newest = ckpt_dir / "last-v1.ckpt"
+    newest.write_bytes(b"stub")
+    older = newest.stat().st_mtime - 100
+    os.utime(stale, (older, older))
+
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    rc = sbj.submit([str(leaf), "--override", f"launcher.run_root={tmp_path}", "--resume", "--print-script"])
+    assert rc == 0
+    srun_line = capsys.readouterr().out.splitlines()[-1]
+    assert f"--ckpt_path={newest}" in srun_line
+    assert f"--ckpt_path={stale}" not in srun_line
+
+
+def test_resume_from_wins_over_newest_last_ckpt(capsys, tmp_path):
+    """An explicit --resume-from is used verbatim, even when a newer last*.ckpt exists."""
+    ckpt_dir = tmp_path / "checkpoints"
+    ckpt_dir.mkdir()
+    (ckpt_dir / "last-v9.ckpt").write_bytes(b"stub")
+    explicit = tmp_path / "explicit.ckpt"
+    explicit.write_bytes(b"stub")
+
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    rc = sbj.submit(
+        [
+            str(leaf),
+            "--override",
+            f"launcher.run_root={tmp_path}",
+            "--resume-from",
+            str(explicit),
+            "--print-script",
+        ]
+    )
+    assert rc == 0
+    assert f"--ckpt_path={explicit}" in capsys.readouterr().out.splitlines()[-1]
+
+
+def test_resume_without_any_last_ckpt_raises(tmp_path):
+    """--resume against a checkpoint dir holding no last*.ckpt fails before submission."""
+    (tmp_path / "checkpoints").mkdir()
+    leaf = BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"
+    with pytest.raises(SystemExit, match=r"resume checkpoint not found: no last\*\.ckpt in"):
+        sbj.submit([str(leaf), "--override", f"launcher.run_root={tmp_path}", "--resume", "--print-script"])
+
+
 def test_resume_rejects_predict_mode(tmp_path):
     """--resume/--resume-from is fit-only; a predict leaf must error before rendering."""
     ckpt = tmp_path / "resume.ckpt"

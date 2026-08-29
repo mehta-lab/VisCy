@@ -224,6 +224,30 @@ def _render_env_block(env: dict | None) -> str:
     return "\n".join(lines)
 
 
+def resolve_newest_last_ckpt(ckpt_dir: Path) -> Path | None:
+    """Most recently modified ``last*.ckpt`` in ``ckpt_dir``, or None if there is none.
+
+    Lightning writes ``last-v1.ckpt`` (then ``-v2``, ...) whenever ``last.ckpt``
+    already exists, so on any resumed run the newest training state is NOT
+    ``last.ckpt``. Measured across seven joint FCMAE arms at completion,
+    ``last.ckpt`` lagged the true final state by 14/23/26/50/81/85/91 epochs.
+    Every consumer of "the last checkpoint" — ``--resume`` and
+    :func:`resolve_best_ckpt` — must therefore key on mtime, not on the name.
+
+    Parameters
+    ----------
+    ckpt_dir : Path
+        Directory holding a run's checkpoints.
+
+    Returns
+    -------
+    Path | None
+        Newest ``last*.ckpt`` by mtime, or None if ``ckpt_dir`` holds none.
+    """
+    lasts = sorted(ckpt_dir.glob("last*.ckpt"), key=lambda p: p.stat().st_mtime)
+    return lasts[-1] if lasts else None
+
+
 def resolve_best_ckpt(ckpt_dir: Path) -> Path | None:
     """Best-by-monitor checkpoint in ``ckpt_dir``, or None if none is resolvable.
 
@@ -241,11 +265,11 @@ def resolve_best_ckpt(ckpt_dir: Path) -> Path | None:
     file travels with the dir, so its basename under ``ckpt_dir`` is authoritative —
     prefer that, then the literal stored path, then the highest-epoch ``epoch=*.ckpt``.
     """
-    lasts = sorted(ckpt_dir.glob("last*.ckpt"), key=lambda p: p.stat().st_mtime)
-    if lasts:
+    newest_last = resolve_newest_last_ckpt(ckpt_dir)
+    if newest_last is not None:
         import torch  # lazy: only imported for best-ckpt resolution
 
-        state = torch.load(lasts[-1], map_location="cpu", weights_only=False)
+        state = torch.load(newest_last, map_location="cpu", weights_only=False)
         for key, val in state.get("callbacks", {}).items():
             if "ModelCheckpoint" in str(key) and isinstance(val, dict):
                 best = val.get("best_model_path")
@@ -327,12 +351,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     resume.add_argument(
         "--resume",
         action="store_true",
-        help="resume a fit job from <run_root>/checkpoints/last.ckpt "
-        "(appends --ckpt_path to the training command). The standing policy "
-        "for re-training resubmits: never restart from scratch. Requires "
-        "last.ckpt to exist and be the intended (e.g. raw, de-shadowed) "
-        "checkpoint; run the checkpoint cleanup helper first if the dir "
-        "carries stale/pre-flip checkpoints. fit mode only.",
+        help="resume a fit job from the newest <run_root>/checkpoints/last*.ckpt "
+        "by mtime, resolved at submit time (appends --ckpt_path to the training "
+        "command). The standing policy for re-training resubmits: never restart "
+        "from scratch. Lightning writes last-v1.ckpt, last-v2.ckpt, ... on each "
+        "resume, so last.ckpt is the first segment's state, not the newest — "
+        "mtime is what identifies the true training state. Use --resume-from to "
+        "anchor on a different checkpoint. fit mode only.",
     )
     resume.add_argument(
         "--resume-from",
@@ -340,8 +365,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="CKPT",
         help="resume a fit job from an explicit checkpoint path (appends "
-        "--ckpt_path=CKPT). Use when the resume source is not last.ckpt. "
-        "fit mode only.",
+        "--ckpt_path=CKPT). Use when the resume source is not the newest "
+        "last*.ckpt. fit mode only.",
     )
     ap.add_argument(
         "--resume-predict",
@@ -439,16 +464,28 @@ def submit(argv: list[str] | None = None) -> int:
     # policy for re-training resubmits (verified via LightningCLI fit, which
     # restores model+optimizer+loop state). fit mode only; predict has its own
     # checkpoint handling.
+    #
+    # The anchor is the NEWEST ``last*.ckpt`` by mtime, never the fixed
+    # ``last.ckpt``: Lightning renames to ``last-vN.ckpt`` on every resume, so on
+    # a resumed run ``last.ckpt`` is the FIRST segment's state (measured 14-91
+    # epochs stale). Job 35154718 rewound 83 epochs on 2026-08-07 replaying it.
     resume_arg = ""
     if args.resume or args.resume_from is not None:
         if mode != "fit":
             raise SystemExit(f"--resume/--resume-from is only valid for fit mode (got {mode!r})")
-        ckpt = args.resume_from if args.resume_from is not None else Path(run_root) / "checkpoints" / "last.ckpt"
-        if not ckpt.is_file():
-            raise SystemExit(
-                f"resume checkpoint not found: {ckpt}. Run the checkpoint cleanup helper "
-                f"(archive stale/pre-flip ckpts, promote the intended raw ckpt to last.ckpt) first."
-            )
+        if args.resume_from is not None:
+            ckpt = args.resume_from
+            if not ckpt.is_file():
+                raise SystemExit(f"resume checkpoint not found: {ckpt}")
+        else:
+            ckpt_dir = Path(run_root) / "checkpoints"
+            newest = resolve_newest_last_ckpt(ckpt_dir)
+            if newest is None:
+                raise SystemExit(
+                    f"resume checkpoint not found: no last*.ckpt in {ckpt_dir}. "
+                    f"Pass --resume-from CKPT to name the resume source explicitly."
+                )
+            ckpt = newest
         resume_arg = f" --ckpt_path={shlex.quote(str(ckpt))}"
 
     # Predict-mode checkpoint override: repoint model.init_args.ckpt_path so a
