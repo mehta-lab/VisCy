@@ -9,6 +9,7 @@ not the worker-spawn × real-DDP interaction.
 
 from __future__ import annotations
 
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -189,6 +190,13 @@ def test_batched_concat_real_ddp_iter_does_not_hang(
         pytest.skip("torch.distributed not available")
     if "fork" not in mp.get_all_start_methods():
         pytest.skip("fork start_method not available (Windows)")
+    if sys.platform == "darwin":
+        pytest.skip(
+            "macOS aborts fork() of a multi-threaded process once the Metal/MPS "
+            "Objective-C runtime is initialized (objc '+[MPSGraphObject initialize] "
+            "may have been in progress ... Crashing instead'). These real-fork DDP "
+            "tests are exercised on the Linux CI runner."
+        )
 
     work_dir = tmp_path_factory.mktemp(f"ddp_{num_workers}_{int(mmap_preload)}")
     data_path = work_dir / "smoke.zarr"

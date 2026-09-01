@@ -7050,6 +7050,7 @@ dependencies = [
     { name = "tensorstore" },
     { name = "torch" },
     { name = "viscy-data" },
+    { name = "wandb" },
     { name = "xarray" },
 ]
 
@@ -7061,7 +7062,6 @@ all = [
     { name = "phate" },
     { name = "scikit-learn" },
     { name = "umap-learn" },
-    { name = "wandb" },
 ]
 anndata = [
     { name = "anndata" },
@@ -7072,7 +7072,6 @@ eval = [
     { name = "phate" },
     { name = "scikit-learn" },
     { name = "umap-learn" },
-    { name = "wandb" },
 ]
 
 [package.dev-dependencies]
@@ -7082,7 +7081,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "scikit-learn" },
-    { name = "wandb" },
 ]
 test = [
     { name = "anndata" },
@@ -7090,7 +7088,6 @@ test = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "scikit-learn" },
-    { name = "wandb" },
 ]
 
 [package.metadata]
@@ -7121,8 +7118,7 @@ requires-dist = [
     { name = "umap-learn", marker = "extra == 'all'" },
     { name = "umap-learn", marker = "extra == 'eval'" },
     { name = "viscy-data", editable = "packages/viscy-data" },
-    { name = "wandb", marker = "extra == 'all'" },
-    { name = "wandb", marker = "extra == 'eval'" },
+    { name = "wandb", specifier = ">=0.12.10" },
     { name = "xarray" },
 ]
 provides-extras = ["all", "anndata", "eval"]
@@ -7134,7 +7130,6 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "scikit-learn" },
-    { name = "wandb" },
 ]
 test = [
     { name = "anndata", specifier = "<0.12.9" },
@@ -7142,7 +7137,6 @@ test = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
     { name = "scikit-learn" },
-    { name = "wandb" },
 ]
 
 [[package]]
