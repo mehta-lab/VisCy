@@ -63,12 +63,28 @@ CANONICAL_ORGANELLE_DIRS = ("er", "membrane", "mito", "nucleus")
 DEFAULT_DEST = Path("/hpc/projects/virtual_staining/dynacell_v1")
 
 # --- source -> public taxonomy --------------------------------------------
+# Both path grammars: the canonical post-migration tokens (#480 re-tokenized every
+# leaf onto the paths.py grammar) and the pre-migration ones that a few un-migrated
+# movie leaves still pin. These dicts double as the public-release allowlist -- the
+# ablation train sets (a549__bf, ipsc__bf, randinit) are deliberately absent, which
+# is why this does not normalize through paths._TRAIN_ALIAS/_ORG_ALIAS.
 TRAIN_PUB = {
     "ipsc": "ipsc",
+    "a549": "a549",
+    "joint": "joint",
     "a549_mantis": "a549",
     "joint_ipsc_confocal_a549_mantis": "joint",
 }
-GENE_PUB = {"nucl": "nucleus", "memb": "membrane", "sec61b": "er", "tomm20": "mito"}
+GENE_PUB = {
+    "nucleus": "nucleus",
+    "membrane": "membrane",
+    "er": "er",
+    "mito": "mito",
+    "nucl": "nucleus",
+    "memb": "membrane",
+    "sec61b": "er",
+    "tomm20": "mito",
+}
 MODEL_PUB = {
     "fnet3d_paper": "fnet3d",
     "fcmae_vscyto3d_scratch": "unext2",
@@ -385,6 +401,14 @@ def main() -> None:
     manifest = args.manifest or (
         dest_models / "checkpoints.csv" if args.execute else args.dest / "checkpoints_manifest_dryrun.csv"
     )
+    # A run that resolves nothing is always a bug -- a path-grammar drift, a bad
+    # --models filter -- never a legitimate no-op. Fail before write_manifest can
+    # replace a good manifest with dead rows while the published .ckpt stay on disk.
+    if not any(p["status"] == "resolved" for p in plan):
+        raise SystemExit(
+            f"no checkpoint resolved from {len(plan)} candidate cell(s); refusing to write a "
+            "manifest. Check TRAIN_PUB/GENE_PUB against the ckpt_path grammar in the predict leaves."
+        )
     if args.execute:
         print("\nEXECUTING copies...")
         do_copy(plan)
