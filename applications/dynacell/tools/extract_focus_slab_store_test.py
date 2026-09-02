@@ -16,25 +16,17 @@ $WT/packages/viscy-transforms/src:$WT/packages/viscy-data/src:$WT/applications/d
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-from iohub.ngff import TransformationMeta, open_ome_zarr
-from scipy.ndimage import gaussian_filter
-
-# The tools/ directory is not a Python package; add it to sys.path so the module
-# is importable by short name (mirrors generate_grouped_eval_configs_test.py).
-_TOOLS_DIR = Path(__file__).resolve().parent
-if str(_TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_DIR))
-
 from extract_focus_slab_store import (  # noqa: E402
     clamp_shift_slab,
     extract_focus_slab_store,
     main,
 )
+from iohub.ngff import TransformationMeta, open_ome_zarr
+from scipy.ndimage import gaussian_filter
 
 _CHANNELS = ["Phase3D", "Structure"]
 _PIXEL_SIZE = 0.1494

@@ -18,19 +18,10 @@ Run::
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-from iohub.ngff import TransformationMeta, open_ome_zarr
-
-# The tools/ directory is not a Python package; add it to sys.path so the module is
-# importable by short name (mirrors extract_focus_slab_store_test.py).
-_TOOLS_DIR = Path(__file__).resolve().parent
-if str(_TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_DIR))
-
 from build_temporal_subset_zarr import (  # noqa: E402
     build_temporal_subset_zarr,
     early_timepoints,
@@ -38,6 +29,7 @@ from build_temporal_subset_zarr import (  # noqa: E402
     spread_timepoints,
     verify_temporal_subset,
 )
+from iohub.ngff import TransformationMeta, open_ome_zarr
 
 _CHANNELS = ["Phase3D", "Brightfield", "Nuclei"]
 _Z, _Y, _X = 4, 8, 8

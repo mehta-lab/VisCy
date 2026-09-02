@@ -1,16 +1,6 @@
 """Tests for the stalled-job detector, driven by real measured job traces."""
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# The tools/ directory is not a Python package; add it to sys.path so the
-# watchdog module is importable by short name.
-_TOOLS_DIR = Path(__file__).resolve().parent
-if str(_TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_DIR))
-
 from watch_stalled_jobs import (  # noqa: E402
     JobState,
     Sample,
