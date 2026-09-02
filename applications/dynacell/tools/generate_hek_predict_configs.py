@@ -120,8 +120,14 @@ def _train_stem(train_set: str) -> str:
 
 # FCMAE predicts full_image at fp32: ~7 GB on A549 640x960x15, ~13 GB on the HEK
 # 960x1184x15. hardware_predict_any_gpu leaves constraint null, which admits
-# 24 GB L4s; pin >=48 GB for headroom. submit_benchmark_batch does not compare
-# `constraint` across leaves, so this does not force --allow-mixed-directives.
+# 24 GB L4s; this string excludes them. Floor is 40 GB, not 48: bare `a100`
+# matches gpu-a-[1-4], which advertise `a100 a100_40`. That is deliberate --
+# 40 GB is ~3x the measured 13 GB footprint, and pinning `a100_80` would drop
+# four nodes of scheduling breadth to defend against an OOM the measurement
+# says cannot happen. Contrast the deep-feature re-extraction configs, which do
+# need `a100_80|h100_80|h200` because cold DINOv3 extraction genuinely exceeds
+# 40 GB. submit_benchmark_batch does not compare `constraint` across leaves, so
+# this does not force --allow-mixed-directives.
 _CONSTRAINT = "a40|l40s|a6000|a100|h100|h200"
 
 
