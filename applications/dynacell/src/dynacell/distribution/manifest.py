@@ -49,6 +49,16 @@ def write_pack_manifest(
     -------
     Path
         Resolved path to the written manifest.
+
+    Notes
+    -----
+    Writing is a **merge**, not a full rebuild: a split-scoped pack
+    (``pack --splits train`` then ``pack --splits test``) must not leave a
+    manifest that omits the archive the earlier call produced. Prior entries
+    survive only while their ``.ozx`` is still on disk, so a ledger whose whole
+    job is checksums never keeps a row for an archive that has been deleted.
+    Entries this call produced always win over a prior row for the same
+    destination.
     """
     entries = [
         {
@@ -62,7 +72,31 @@ def write_pack_manifest(
         }
         for r in results
     ]
+    entries = _merge_with_existing(entries, output_path)
     manifest = PackManifest(dataset=dataset, entries=entries)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(manifest.to_json() + "\n")
     return output_path.resolve()
+
+
+def _merge_with_existing(entries: list[dict], output_path: Path) -> list[dict]:
+    """Fold surviving prior entries into ``entries`` and order deterministically.
+
+    Parameters
+    ----------
+    entries
+        Rows built from the current call's pack results.
+    output_path
+        MANIFEST.json being written. Absent on a first pack.
+
+    Returns
+    -------
+    list of dict
+        Merged rows sorted by ``(split, target)`` so a re-pack of the same
+        archives is a no-op diff.
+    """
+    if output_path.exists():
+        prior = json.loads(output_path.read_text())["entries"]
+        fresh = {e["dst_ozx_path"] for e in entries}
+        entries = [e for e in prior if e["dst_ozx_path"] not in fresh and Path(e["dst_ozx_path"]).exists()] + entries
+    return sorted(entries, key=lambda e: (e["split"], e["target"]))

@@ -6,6 +6,7 @@ shape. Real-data E2E tests live behind an opt-in environment variable
 so the suite stays fast off-HPC.
 """
 
+import dataclasses
 import json
 import zipfile
 from pathlib import Path
@@ -468,3 +469,70 @@ class TestManifest:
         assert entry["split"] == "train"
         assert entry["sha256"] == "a" * 64
         assert entry["ozx_version"] == "0.5"
+
+    def test_split_scoped_packs_accumulate(self, tmp_path):
+        """A second --splits-scoped pack keeps the first call's archive.
+
+        ``pack --splits train`` then ``pack --splits test`` leaves both .ozx on
+        disk; a truncating write would publish a checksum ledger naming only the
+        second.
+        """
+        from dynacell.distribution import (
+            PackResult,
+            write_pack_manifest,
+        )
+
+        def _result(split: str, digest: str) -> PackResult:
+            ozx = tmp_path / f"{split}.ozx"
+            ozx.write_bytes(b"archive")
+            return PackResult(
+                dataset="test",
+                target="sec61b",
+                split=split,
+                src_zarr_path=Path(f"/src/{split}/SEC61B.zarr"),
+                dst_ozx_path=ozx,
+                bytes=7,
+                sha256=digest * 64,
+                ozx_version="0.5",
+            )
+
+        manifest_path = tmp_path / "MANIFEST.json"
+        write_pack_manifest("test", [_result("train", "a")], manifest_path)
+        write_pack_manifest("test", [_result("test", "b")], manifest_path)
+
+        entries = json.loads(manifest_path.read_text())["entries"]
+        assert [e["split"] for e in entries] == ["test", "train"]
+
+    def test_a_deleted_archive_is_dropped_from_the_ledger(self, tmp_path):
+        """A prior entry survives only while its .ozx is still on disk."""
+        from dynacell.distribution import (
+            PackResult,
+            write_pack_manifest,
+        )
+
+        gone = tmp_path / "train.ozx"
+        gone.write_bytes(b"archive")
+        stale = PackResult(
+            dataset="test",
+            target="sec61b",
+            split="train",
+            src_zarr_path=Path("/src/SEC61B.zarr"),
+            dst_ozx_path=gone,
+            bytes=7,
+            sha256="a" * 64,
+            ozx_version="0.5",
+        )
+        manifest_path = tmp_path / "MANIFEST.json"
+        write_pack_manifest("test", [stale], manifest_path)
+        gone.unlink()
+
+        kept = tmp_path / "test.ozx"
+        kept.write_bytes(b"archive")
+        write_pack_manifest(
+            "test",
+            [dataclasses.replace(stale, split="test", dst_ozx_path=kept, sha256="b" * 64)],
+            manifest_path,
+        )
+
+        entries = json.loads(manifest_path.read_text())["entries"]
+        assert [e["split"] for e in entries] == ["test"]
