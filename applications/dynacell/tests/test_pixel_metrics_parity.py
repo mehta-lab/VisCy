@@ -16,7 +16,20 @@ Tolerances (per key):
                                 inherent boundary difference, not a bug. 5e-2 catches gross
                                 errors like swapped pred/target or dropped normalization while
                                 accepting implementation drift.)
-- Spectral_PCC, *_FSC : 1e-4  (unchanged code path)
+- Spectral_PCC, *_FSC : 1e-4  (single cubic version; see below)
+
+The spectral three are pinned against a *specific* cubic release, recorded in
+the fixture as ``_pin_cubic_version``. They are not stable across cubic
+versions and are not meant to be: 0.7.0 -> 0.9.0a1 moved ``Spectral_PCC`` by
+1.9% and multiplied ``XY_FSC_Resolution`` by ``spacing_z/spacing_x`` exactly
+(2.685185 here, reproduced to 2.8e-7), a deliberate rescale. The base four were
+bit-identical across that same bump, which is why only the spectral values were
+re-pinned. A parity failure here means "the cubic pin moved", not "the metric
+broke" — check ``_pin_cubic_version`` against the pyproject pin first.
+
+``_pin_gpu`` is recorded for the same reason: GPU reduction order can shift a
+scalar by ~1e-4 across devices, which is the whole tolerance. If this fails on a
+different card than the one named in the fixture, suspect that before the code.
 
 The golden pins the *scale-sensitive* family, which is what the bare
 ``PSNR``/``SSIM``/``NRMSE`` names mean: the fixture predates the scale-invariant
