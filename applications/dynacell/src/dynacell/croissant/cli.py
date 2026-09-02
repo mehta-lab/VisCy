@@ -1,6 +1,8 @@
 """``croissant`` subcommand entry points.
 
-Wired into the ``dynacell-paper`` top-level dispatcher.
+Wired into the ``dynacell`` top-level dispatcher (``_ARGPARSE_COMMANDS``
+in ``dynacell/__main__.py``). The retired ``dynacell-paper`` console
+script this originally targeted was removed by the Phase 13 migration.
 The dispatcher strips its own subcommand token from ``sys.argv``
 before invoking ``main()``, so by the time argparse runs here
 ``sys.argv[1:]`` holds the croissant-side flags.
@@ -13,8 +15,8 @@ from pathlib import Path
 
 
 def main() -> None:
-    """Route ``dynacell-paper croissant {from-release|validate}`` to handlers."""
-    parser = argparse.ArgumentParser(prog="dynacell-paper croissant")
+    """Route ``dynacell croissant {from-release|validate}`` to handlers."""
+    parser = argparse.ArgumentParser(prog="dynacell croissant")
     sub = parser.add_subparsers(dest="action", required=True)
 
     rel = sub.add_parser(
