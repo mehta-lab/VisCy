@@ -47,6 +47,9 @@ export HF_HUB_CACHE="$HF_HUB_CACHE"
 
 ml uv 2>/dev/null || true
 
+# The builder refuses an existing output rather than truncating it. To rebuild
+# the nine stores in place, add --force to the line below -- deliberately not on
+# by default, since these are the canonical io.cell_segmentation_path stores.
 uv run --no-sync --directory "$VISCY_ROOT" python \
     "$VISCY_ROOT/applications/dynacell/tools/build_cpdino_seg_cleaned.py" \
     --vs-store "$VS_STORE"

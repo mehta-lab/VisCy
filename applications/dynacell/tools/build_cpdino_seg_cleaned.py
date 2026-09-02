@@ -128,6 +128,7 @@ def build_one(
     membrane_channel: str = MEMBRANE_CHANNEL,
     min_size_3d: int = MIN_SIZE_3D,
     focus_slab_halfwidth: int | None = None,
+    force: bool = False,
 ) -> Path:
     """Segment one store's membrane channel into a cpdino ``_seg_cleaned.zarr``.
 
@@ -150,13 +151,35 @@ def build_one(
         ``None`` (default) max-projects the full stack, preserving the A549
         behaviour. An int restricts the projection to ``focus_plane +/- hw``; see
         :func:`_membrane_projection`.
+    force : bool
+        Overwrite an existing output store. Off by default: ``mode="w"`` destroys
+        the destination at ``__enter__``, so a rerun that fails afterwards would
+        leave no segmentation at all.
 
     Returns
     -------
     pathlib.Path
         The written ``_seg_cleaned.zarr`` path.
+
+    Raises
+    ------
+    FileExistsError
+        If the output store exists and ``force`` is not set.
+    ValueError
+        If ``membrane_channel`` is not a channel of ``vs_store``.
     """
     out_path = _seg_cleaned_path(vs_store)
+    # Everything that can raise must run BEFORE the writer opens: iohub's
+    # mode="w" destroys the destination at __enter__ and only logs a warning, so
+    # a later failure (bad channel, OOM, unreadable input) would leave the
+    # canonical io.cell_segmentation_path store truncated and invalid.
+    if out_path.exists() and not force:
+        raise FileExistsError(f"{out_path} already exists; pass --force to rebuild")
+    with open_ome_zarr(vs_store, mode="r") as vs:
+        if membrane_channel not in vs.channel_names:
+            raise ValueError(
+                f"channel {membrane_channel!r} not in {vs_store}; available channels: {list(vs.channel_names)}"
+            )
     with (
         open_ome_zarr(out_path, mode="w", layout="hcs", version="0.5", channel_names=["segmentation"]) as out,
         open_ome_zarr(vs_store, mode="r") as vs,
@@ -218,6 +241,12 @@ def main() -> None:
         action="store_true",
         help="Load the model on CPU (debug only; cpdino inference is GPU-only).",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing <stem>_seg_cleaned.zarr. Without this a rerun "
+        "refuses rather than truncating the store the eval campaign reads.",
+    )
     args = parser.parse_args()
 
     if not args.vs_store.exists():
@@ -230,6 +259,7 @@ def main() -> None:
         membrane_channel=args.membrane_channel,
         min_size_3d=args.min_size_3d,
         focus_slab_halfwidth=args.focus_slab_halfwidth,
+        force=args.force,
     )
     print(f"Wrote {out_path}", flush=True)
 
