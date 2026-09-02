@@ -51,8 +51,11 @@ Usage
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import re
+import shutil
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -329,10 +332,25 @@ def report(plan: list[dict], dest_models: Path, execute: bool) -> None:
             print(f"  {p['train_pub']}/{p['organelle']}/{p['model_slug']}")
 
 
-def write_manifest(plan: list[dict], path: Path) -> None:
-    """Write the full manifest CSV (all cells, all statuses)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as fh:
+def write_manifest(plan: list[dict], path: Path | None) -> None:
+    """Write the full manifest CSV (all cells, all statuses).
+
+    Parameters
+    ----------
+    plan : list of dict
+        Resolved plan rows.
+    path : pathlib.Path or None
+        Destination CSV. ``None`` writes to stdout instead, which is what a
+        dry run does by default: ``--dest`` is the public share, and a run that
+        promises to write nothing must not materialize a directory and a CSV
+        there just to show a preview.
+    """
+    with contextlib.ExitStack() as stack:
+        if path is None:
+            fh = sys.stdout
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fh = stack.enter_context(open(path, "w", newline=""))
         w = csv.writer(fh)
         w.writerow(
             [
@@ -369,8 +387,6 @@ def write_manifest(plan: list[dict], path: Path) -> None:
 
 def do_copy(plan: list[dict]) -> None:
     """Copy resolved checkpoints + their config.yaml into the release tree (overwrite)."""
-    import shutil
-
     for p in plan:
         if p["status"] != "resolved":
             continue
@@ -410,9 +426,9 @@ def main() -> None:
     plan = resolve(collect_cells(selected), dest_models)
     report(plan, dest_models, args.execute)
 
-    manifest = args.manifest or (
-        dest_models / "checkpoints.csv" if args.execute else args.dest / "checkpoints_manifest_dryrun.csv"
-    )
+    # A dry run writes nothing by default: --dest is the public share. Pass
+    # --manifest PATH to capture the preview as a file.
+    manifest = args.manifest or (dest_models / "checkpoints.csv" if args.execute else None)
     # A run that resolves nothing is always a bug -- a path-grammar drift, a bad
     # --models filter -- never a legitimate no-op. Fail before write_manifest can
     # replace a good manifest with dead rows while the published .ckpt stay on disk.
@@ -427,8 +443,11 @@ def main() -> None:
         write_manifest(plan, manifest)
         print(f"\nmanifest: {manifest}\ndone.")
     else:
+        if manifest is None:
+            print("\n(dry run) manifest preview follows; pass --manifest PATH to write it instead.\n")
         write_manifest(plan, manifest)
-        print(f"\n(dry run) manifest preview: {manifest}\nre-run with --execute to copy.")
+        dest_note = "stdout" if manifest is None else str(manifest)
+        print(f"\n(dry run) manifest preview: {dest_note}\nre-run with --execute to copy.")
 
 
 if __name__ == "__main__":

@@ -321,7 +321,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     wells = [w for w in _WELLS if args.well is None or w.name in args.well]
-    _OUT_ROOT.mkdir(parents=True, exist_ok=True)
+    # --dry-run "writes nothing"; creating the output root is still a write.
+    if not args.dry_run:
+        _OUT_ROOT.mkdir(parents=True, exist_ok=True)
 
     errors: list[str] = []
     for well in wells:
