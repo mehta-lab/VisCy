@@ -1665,6 +1665,19 @@ class DynacellGAN(LightningModule):
 
     def configure_optimizers(self):
         """Build two AdamW optimizers + WarmupCosine schedulers via the shared helper."""
+        # __init__ adopts an EMA shadow from a checkpoint's own generator_ema.* keys
+        # even when the config omits ema_kimg -- a deliberate predict-side affordance
+        # (2bfa636b), since at inference only the shadow's existence matters. Training
+        # does need the decay constant: training_step computes
+        # 0.5 ** (bs / max(self.ema_kimg * 1000.0, 1e-8)) and would raise TypeError on
+        # step 1, after the allocation is already burned. Fail here instead -- Lightning
+        # calls this only under TrainerFn.FITTING, so predict is untouched.
+        if self.generator_ema is not None and self.ema_kimg is None:
+            raise ValueError(
+                "ckpt_path carries generator_ema.* tensors but this fit config sets no "
+                "ema_kimg, so the EMA shadow has no decay constant to update with. Set "
+                "ema_kimg to continue the EMA, or drop ckpt_path if the shadow is not wanted."
+            )
         [opt_g], [sch_g] = configure_adamw_scheduler(
             self,
             self.generator,
