@@ -99,6 +99,20 @@ def preflight(moves: list[Move]) -> tuple[list[Move], list[Move], list[Move], li
             if d == s or s in d.parents or d in s.parents:
                 errors.append(f"NESTED src/dest: src={s} <-> dest={d}")
 
+    # Classification has to reason about the tree as it will be when each move
+    # RUNS, not as it is now. apply_moves walks `pending` in manifest order
+    # (ck_rows + pr_rows + ev_rows) and calls dest.parent.mkdir(parents=True),
+    # and prediction_store() returns `<leaf>/prediction.zarr` -- a child of the
+    # eval move's dest. So the prediction move materializes the eval's dest
+    # before the eval move is reached: a dest that looks absent here exists, and
+    # is non-empty, by then. Judging on the current tree classified those evals
+    # as whole-dir renames, and `src.rename(dest)` then raised ENOTEMPTY mid-run
+    # with checkpoint and prediction renames already committed -- exactly the
+    # partial mutation this module's docstring promises cannot happen.
+    will_exist: set[Path] = set()
+    for m in moves:
+        will_exist.update(m.dest.parents)
+
     seen_dest: dict[Path, Path] = {}
     for m in moves:
         if m.dest in seen_dest and seen_dest[m.dest] != m.src:
@@ -106,7 +120,7 @@ def preflight(moves: list[Move]) -> tuple[list[Move], list[Move], list[Move], li
         seen_dest[m.dest] = m.src
 
         src_exists = m.src.exists()
-        dest_exists = m.dest.exists()
+        dest_exists = m.dest.exists() or m.dest in will_exist
         if src_exists and not dest_exists:
             # Same-filesystem (rename is not cross-device)?
             src_dev = m.src.stat().st_dev
@@ -123,11 +137,16 @@ def preflight(moves: list[Move]) -> tuple[list[Move], list[Move], list[Move], li
             # Canonical eval leaf == the prediction leaf: prediction.zarr is
             # already inside the dest dir. A whole-dir rename would collide, so
             # merge the eval's children into the leaf iff none of them clash.
-            if m.kind == "eval" and m.src.is_dir() and m.dest.is_dir():
-                clashes = sorted(c.name for c in m.src.iterdir() if (m.dest / c.name).exists())
+            if m.kind == "eval" and m.src.is_dir() and (m.dest.is_dir() or m.dest in will_exist):
+                # A dest that only `will_exist` has no children on disk yet, so
+                # nothing can clash with it; the prediction move that creates it
+                # writes prediction.zarr, which an eval src never owns.
+                clashes = (
+                    sorted(c.name for c in m.src.iterdir() if (m.dest / c.name).exists()) if m.dest.is_dir() else []
+                )
                 if clashes:
                     errors.append(f"MERGE CLASH {m.dest} already has {clashes} (src {m.src})")
-                elif m.src.stat().st_dev != m.dest.stat().st_dev:
+                elif m.src.stat().st_dev != _existing_ancestor(m.dest).stat().st_dev:
                     errors.append(f"CROSS-DEVICE (merge unsafe) src={m.src} dest={m.dest}")
                 else:
                     merges.append(m)

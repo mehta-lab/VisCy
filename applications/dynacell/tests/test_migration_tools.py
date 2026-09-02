@@ -282,6 +282,46 @@ def test_preflight_blocks_preexisting_dest(tmp_path, monkeypatch):
     assert any("DEST ALREADY EXISTS" in e for e in errors)
 
 
+def test_eval_merge_is_planned_when_the_prediction_move_will_create_the_leaf(tmp_path):
+    """The eval dest need not exist YET for the eval to be a merge, not a rename.
+
+    apply_moves walks pending in manifest order (checkpoints, predictions,
+    evals) and mkdir(parents=True)s each dest's parent, and prediction_store()
+    returns ``<leaf>/prediction.zarr`` — a child of the eval's dest. So the
+    prediction move materializes the eval's dest, non-empty, before the eval
+    move is reached. Classifying on the pre-move tree called that eval a
+    whole-dir rename, and src.rename(dest) then raised ENOTEMPTY *after* the
+    checkpoint and prediction renames had already committed — the partial,
+    half-journaled mutation this module promises cannot happen.
+    """
+    leaf = tmp_path / "data" / "er" / "celldiff_r2" / "a549__deconv" / "a549__denv"
+    # Nothing at the leaf yet: the prediction move has not run.
+    pred_src = tmp_path / "data" / "a549" / "predictions" / "sec61b_celldiff_r2_denv.zarr"
+    _make_zarr(pred_src)
+    eval_src = (
+        tmp_path / "data" / "a549" / "evaluations_a549trained_with_embeddings" / "eval_celldiff_r2_a549trained_er_denv"
+    )
+    _write(eval_src / "pixel_metrics.csv", "p")
+    _write(eval_src / "feature_metrics.csv", "f")
+
+    pred_move = rm.Move("prediction", pred_src, leaf / "prediction.zarr", "pred->leaf")
+    eval_move = rm.Move("eval", eval_src, leaf, "eval->leaf")
+
+    pending, merges, already, errors = rm.preflight([pred_move, eval_move])
+    assert errors == []
+    assert pending == [pred_move]
+    assert merges == [eval_move], "eval must be a merge, not a whole-dir rename"
+
+    # And the whole plan applies cleanly in one pass, with nothing left behind.
+    journal = tmp_path / "journal.csv"
+    assert rm.apply_moves(pending, merges, journal, dry_run=False) == 2
+    assert (leaf / "prediction.zarr" / "zarr.json").is_file()
+    assert (leaf / "pixel_metrics.csv").is_file()
+    assert (leaf / "feature_metrics.csv").is_file()
+    assert not eval_src.exists()
+    assert not pred_src.exists()
+
+
 def test_eval_merges_into_shared_prediction_leaf(tmp_path):
     """An eval whose canonical dest leaf already holds prediction.zarr is merged,
     not whole-dir renamed onto it; rollback restores the eval without touching
