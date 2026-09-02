@@ -593,6 +593,37 @@ def test_slice_fraction_only_keys_the_identity_when_selection_is_frac() -> None:
     assert frac_a != frac_b
 
 
+def test_subtract_nuclei_only_keys_the_identity_for_membrane() -> None:
+    """subtract_nuclei belongs to the identity only on the target that carves.
+
+    It gates the whole-cell nucleus carve in ``segment_whole_cell_cpdino`` and is
+    stripped from the segmenter kwargs by ``_CPDINO_NON_INFER_KEYS``, so the nucleus
+    path provably cannot see it. Recording it unconditionally meant flipping the
+    shared ``segmentation.cpdino.subtract_nuclei`` for a membrane re-carve re-keyed
+    every ``nucleus__cpdino`` entry — recomputing byte-identical labels, or raising
+    StaleCacheError under require_complete_cache, for a parameter that cannot change
+    a nucleus mask. Same convention as slice_fraction above.
+    """
+
+    def _ident(target: str, subtract: bool) -> dict:
+        cfg = _make_config(
+            target_name=target,
+            **{"segmentation": {"backend": "cpdino", "cpdino": {"subtract_nuclei": subtract}}},
+        )
+        ctx = init_cache_context(cfg, side="gt", dinov3_model_name="dinov3_vits16", dinov3_preprocess_version="v1")
+        return _instance_identity(ctx)
+
+    # nucleus: inert, so it must neither appear nor perturb the identity.
+    nuc_on, nuc_off = _ident("nucleus", True), _ident("nucleus", False)
+    assert "subtract_nuclei" not in nuc_on
+    assert nuc_on == nuc_off
+
+    # membrane: the carve is active, so the value must key the cache.
+    memb_on, memb_off = _ident("membrane", True), _ident("membrane", False)
+    assert memb_on["subtract_nuclei"] is True
+    assert memb_on != memb_off
+
+
 def test_focus_off_leaves_tag_and_identity_untagged() -> None:
     """With focus disabled (the default), no focus tag or focus keys appear anywhere."""
     ctx = init_cache_context(

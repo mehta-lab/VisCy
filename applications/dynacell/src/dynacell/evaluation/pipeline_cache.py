@@ -783,7 +783,16 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     # cpdino keys on its own param block (raw image + normalize=True, no CLAHE), NOT the
     # cellpose robust-clip/CLAHE params — so a cpdino cache never aliases a cellpose one
     # even beyond the ``__{backend}`` stem separation.
-    seg_params = ctx.cpdino_params if ctx.backend == "cpdino" else ctx.cellpose_params
+    if ctx.backend == "cpdino":
+        # ``subtract_nuclei`` gates the whole-cell nucleus carve only -- it is stripped
+        # before reaching the segmenter (see _CPDINO_NON_INFER_KEYS), and the nucleus
+        # path never reads it. Record it only where it is active, the same convention
+        # applied to slice_fraction below and to the nuclei_channel/nuclei_path block.
+        seg_params = {
+            k: v for k, v in ctx.cpdino_params.items() if k != "subtract_nuclei" or ctx.target_name == "membrane"
+        }
+    else:
+        seg_params = ctx.cellpose_params
     identity: dict[str, Any] = {
         **seg_params,
         "dimension": ctx.dimension,
