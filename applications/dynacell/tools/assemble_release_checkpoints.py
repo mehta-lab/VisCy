@@ -199,13 +199,25 @@ def canonical_ckpt(src: Path) -> Path | None:
     if not siblings:
         return None
     if src.name.startswith("last") and src.exists():
-        size = src.stat().st_size
-        matches = [
-            (int(EPOCH_RE.search(s.name).group(1)), s)
-            for s in siblings
-            if s.stat().st_size == size and EPOCH_RE.search(s.name)
-        ]
-        return max(matches)[1] if matches else None
+        # Byte size does not identify a checkpoint -- every retained epoch of one run
+        # shares a size. Measured on a549/membrane/celldiff_r2: three distinct inodes
+        # all exactly 1119472953 bytes. And an epoch-only max mis-orders WITHIN an
+        # epoch: on ipsc/er/fnet3d_paper four same-size siblings share epoch=2 and the
+        # lexicographic tie-break picked step=57 over the correct step=549.
+        #
+        # best_model_path is not the answer either -- it names the best-BY-MONITOR
+        # epoch (there, epoch=1-step=366), which is not what last.ckpt holds and not
+        # what the evals consumed. The pinned file records its own (epoch,
+        # global_step); match on that.
+        import torch  # lazy: only needed to resolve a last*.ckpt pin
+
+        state = torch.load(src, map_location="cpu", weights_only=False, mmap=True)
+        want = (int(state["epoch"]), int(state["global_step"]))
+        for s in siblings:
+            m = EPOCH_RE.search(s.name)
+            if m and (int(m.group(1)), int(m.group(2))) == want:
+                return s
+        return None  # last.ckpt's epoch was not retained by save_top_k -> pending
     if src.name.startswith("best_ep") and src.exists():
         ino = src.stat().st_ino
         for s in siblings:  # hardlink match is exact
