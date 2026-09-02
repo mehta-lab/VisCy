@@ -13,9 +13,31 @@ from urllib.parse import urlparse
 
 
 def _iter_content_urls(jsonld: dict[str, Any]) -> list[str]:
-    """Walk a Croissant JSON-LD doc and yield every ``contentUrl`` string."""
+    """Walk a Croissant JSON-LD doc and yield every ``contentUrl`` string.
+
+    Parameters
+    ----------
+    jsonld : dict
+        Parsed Croissant document.
+
+    Returns
+    -------
+    list of str
+        Every ``contentUrl`` found under ``distribution``.
+
+    Raises
+    ------
+    KeyError
+        If the doc has no ``distribution`` key. Defaulting to ``[]`` made a
+        missing, renamed or ``@graph``-wrapped key indistinguishable from a
+        doc with nothing to check: ``verify-public`` then printed nothing and
+        exited 0, reporting success having verified no URL at all. Every
+        producer in this codebase sets ``distribution`` unconditionally
+        (``builder.py`` and ``merge_croissant_docs``), so its absence means
+        the doc is not what this tool expects.
+    """
     urls: list[str] = []
-    distribution = jsonld.get("distribution", [])
+    distribution = jsonld["distribution"]
     if isinstance(distribution, list):
         for item in distribution:
             if isinstance(item, dict):

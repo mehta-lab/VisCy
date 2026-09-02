@@ -545,6 +545,18 @@ class TestVerifyPublic:
         urls = _iter_content_urls(jsonld)
         assert urls == ["s3://b/k1", "s3://b/k2"]
 
+    def test_missing_distribution_key_raises(self):
+        """A doc with no ``distribution`` must raise, not verify zero URLs.
+
+        Defaulting to [] made "renamed/@graph-wrapped key" look identical to
+        "nothing to check": verify-public printed nothing and exited 0, which
+        reads as a clean pass over a doc it never inspected.
+        """
+        from dynacell.distribution.verify import _iter_content_urls
+
+        with pytest.raises(KeyError, match="distribution"):
+            _iter_content_urls({"@type": "sc:Dataset", "name": "no distribution here"})
+
 
 class TestManifest:
     """MANIFEST.json shape + serialization."""
