@@ -26,6 +26,7 @@ from iohub.core.ozx import (
     pack_ozx,
     read_ozx_version,
 )
+from iohub.ngff import TransformationMeta
 
 from dynacell.data import get_manifest
 
@@ -297,7 +298,21 @@ class _subset_zarr:
                     t_take = min(self.t_limit, src_arr.shape[0])
                     sub = src_arr[:t_take, ...]
                     dst_pos = dst.create_position(*pos_name.split("/"))
-                    dst_pos.create_image("0", sub, chunks=src_arr.chunks)
+                    # Carry the source voxel size through. Without an explicit
+                    # transform iohub writes scale=[1,1,1,1,1], so a sample of a
+                    # [1, 1, 0.174, 0.1494, 0.1494] store would publish itself as
+                    # isotropic 1 um -- a 5.8x Z error in a released artifact.
+                    dst_pos.create_image(
+                        "0",
+                        sub,
+                        chunks=src_arr.chunks,
+                        transform=[TransformationMeta(type="scale", scale=list(src_pos.scale))],
+                    )
+                    # Non-OME per-position attrs (normalization, focus_slice,
+                    # hpi_values, ...) are not copied by create_position; the
+                    # eval path reads several of them with .get(), so dropping
+                    # them degrades silently rather than raising.
+                    dst_pos.zattrs.update({k: v for k, v in dict(src_pos.zattrs).items() if k != "ome"})
         return dst_zarr
 
     def __exit__(self, *exc: object) -> None:

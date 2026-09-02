@@ -23,8 +23,21 @@ from iohub.core.ozx import (
 from iohub.ngff import open_ome_zarr
 
 
-def _make_fixture_zarr(path: Path, n_pos: int, t: int) -> None:
-    """Write a tiny HCS OME-Zarr with ``n_pos`` positions × ``t`` timepoints."""
+def _make_fixture_zarr(
+    path: Path,
+    n_pos: int,
+    t: int,
+    scale: list[float] | None = None,
+    zattrs: dict | None = None,
+) -> None:
+    """Write a tiny HCS OME-Zarr with ``n_pos`` positions × ``t`` timepoints.
+
+    ``scale`` and ``zattrs`` default to None, leaving the historical fixture
+    shape untouched; pass them to exercise metadata that packing must carry
+    through to the archive.
+    """
+    from iohub.ngff import TransformationMeta
+
     with open_ome_zarr(
         path,
         mode="w-",
@@ -36,7 +49,10 @@ def _make_fixture_zarr(path: Path, n_pos: int, t: int) -> None:
             position = plate.create_position(row, col, fov)
             data = np.zeros((t, 2, 1, 8, 8), dtype=np.float32)
             data[..., 0, 0] = float(i)  # discriminator value
-            position.create_image("0", data)
+            transform = [TransformationMeta(type="scale", scale=scale)] if scale else None
+            position.create_image("0", data, transform=transform)
+            if zattrs:
+                position.zattrs.update(zattrs)
 
 
 class TestUpstreamOzx:
@@ -308,6 +324,41 @@ class TestSampleMode:
         for path, size in full_bytes.items():
             assert path.exists(), f"{path} was destroyed by the sample pack"
             assert path.stat().st_size == size, f"{path} was rewritten by the sample pack"
+
+    def test_sample_preserves_voxel_scale_and_position_attrs(self, tmp_path):
+        """A sampled archive keeps the source voxel size and non-OME zattrs.
+
+        create_image without an explicit transform writes scale=[1,1,1,1,1], so
+        a sample of an anisotropic store would publish itself as isotropic 1 um
+        — a 5.8x Z error on the real [0.174, 0.1494, 0.1494] spacing, in an
+        artifact that ships. The eval path reads normalization / focus_slice
+        with .get(), so losing them degrades silently instead of raising.
+        """
+        import zipfile
+
+        from dynacell.distribution import pack_dataset
+
+        scale = [1.0, 1.0, 0.174, 0.1494, 0.1494]
+        train_zarr = tmp_path / "train_cell.zarr"
+        test_zarr = tmp_path / "test_cell.zarr"
+        for z in (train_zarr, test_zarr):
+            _make_fixture_zarr(z, n_pos=2, t=2, scale=scale, zattrs={"focus_slice": 3})
+        out = tmp_path / "out"
+
+        with patch("dynacell.distribution.ozx.get_manifest", return_value=self._manifest(train_zarr, test_zarr)):
+            results = pack_dataset("test-dataset", output_root=out, mode="sample", fov_limit=1, t_limit=1)
+
+        assert results
+        for r in results:
+            # Both the multiscales block and the custom attrs live on the
+            # position's zarr.json; the array's own zarr.json carries no
+            # attributes, so read the position node.
+            with zipfile.ZipFile(r.dst_ozx_path) as zf:
+                name = next(n for n in zf.namelist() if n.endswith("B/1/000000/zarr.json"))
+                attrs = json.loads(zf.read(name))["attributes"]
+            transforms = attrs["ome"]["multiscales"][0]["datasets"][0]["coordinateTransformations"]
+            assert [t for t in transforms if t["type"] == "scale"][0]["scale"] == scale
+            assert attrs["focus_slice"] == 3
 
     def test_sample_mode_subset_writer_limits_fovs_and_t(self, tmp_path):
         """``mode='sample'`` packs at most ``fov_limit`` FOVs × ``t_limit`` frames.
