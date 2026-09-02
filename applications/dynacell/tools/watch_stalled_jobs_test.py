@@ -69,6 +69,28 @@ def test_hung_pix2pix_predict_is_flagged() -> None:
     assert prior_efficiency > 1.0
 
 
+def test_step_boundary_cpu_reset_is_not_flagged() -> None:
+    """A batched predict crossing an srun step boundary must not read as stalled.
+
+    ``sstat`` reports only the RUNNING step, so ``AveCPU`` restarts near zero
+    each time ``submit_benchmark_batch`` advances to the next of its N
+    sequential steps. The unguarded subtraction made that a negative rate,
+    which is below any stall threshold — so the watchdog would flag a job that
+    is burning CPU as hard as ever, and ``--once`` would exit 1.
+    """
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    state.add(Sample(wall_s=3.00 * HOUR, cpu_s=2.90 * HOUR))
+    # Step 2 starts: same allocation, fresh AveCPU counter.
+    state.add(Sample(wall_s=3.60 * HOUR, cpu_s=0.05 * HOUR))
+
+    assert state.stall_report() is None
+
+    # The stale pre-reset baseline is dropped, so the next window measures the
+    # new step honestly rather than against a counter that no longer exists.
+    state.add(Sample(wall_s=4.20 * HOUR, cpu_s=0.65 * HOUR))
+    assert state.stall_report() is None
+
+
 def test_healthy_multithreaded_fit_is_not_flagged() -> None:
     """Trace of fit 35083472: 32.6 h wall against 255.8 h of CPU across 16 CPUs.
 

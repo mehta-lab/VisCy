@@ -121,7 +121,18 @@ class JobState:
         if prior_efficiency < MIN_PRIOR_EFFICIENCY:
             return None
         wall_delta = newest.wall_s - baseline.wall_s
-        fraction = (newest.cpu_s - baseline.cpu_s) / wall_delta
+        cpu_delta = newest.cpu_s - baseline.cpu_s
+        if cpu_delta < 0:
+            # sstat reports only the RUNNING step, so AveCPU resets to ~0 at
+            # every step boundary -- and submit_benchmark_batch renders N
+            # sequential srun steps per allocation. A negative delta means the
+            # counter restarted, not that the job stopped burning CPU; treating
+            # it as a stall would flag a healthy multi-step predict (and exit 1
+            # under --once). Drop the stale baseline and wait for two samples
+            # inside the current step.
+            self.samples = [newest]
+            return None
+        fraction = cpu_delta / wall_delta
         if fraction >= STALL_CPU_FRACTION:
             return None
         return fraction, prior_efficiency, baseline
