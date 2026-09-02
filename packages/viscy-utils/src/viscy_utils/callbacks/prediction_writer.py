@@ -143,8 +143,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         later window overwrites everything but that center plane and the
         volume is assembled one plane per forward pass with no averaging.
         The leading ``z_window_size // 2`` planes come from the first window
-        and the trailing ``z_window_size // 2 - 1`` from the last, since no
-        window is centered on them.
+        and the trailing ``z_window_size - 1 - z_window_size // 2`` from the
+        last, since no window is centered on them. For odd ``z_window_size``
+        that trailing count equals ``z_window_size // 2`` -- at ``w=5`` it is
+        2, not 1. Every dynacell leaf that sets ``z_window_size`` uses an odd
+        value.
 
         Both modes assume windows arrive in increasing ``z`` order within a
         ``(position, timepoint)`` -- ``'blend'`` because its factors are
