@@ -108,6 +108,18 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
             if seg_model is None or spacing_zyx is None:
                 raise ValueError("cellpose nucleus segmentation requires seg_model (CellposeModel) and spacing_zyx.")
             return segment_nucleus(img, tuple(spacing_zyx), seg_model).astype(bool)
+        if backend != "supermodel":
+            # cpdino / cellpose_watershed produce LABELS, not binary masks, and their
+            # loaders return a CellposeModel -- which has no apply_on_single_zstack, so
+            # falling through below raises an opaque AttributeError on the first cold
+            # position. Only the eval path is protected (_validate_instance_ap_config
+            # forces compute_instance_ap=true, which routes around this function);
+            # precompute-gt never calls that validator.
+            raise ValueError(
+                f"segment() has no binary-mask path for backend={backend!r}: the instance "
+                "backends produce labels, not masks. Set build.masks=false for "
+                "precompute-gt, or compute_instance_ap=true for eval."
+            )
         _require_segmenter_model_zoo()
         if seg_model is None:
             raise ValueError("seg_model (a loaded SuperModel) must be provided for nucleus and membrane segmentation.")
