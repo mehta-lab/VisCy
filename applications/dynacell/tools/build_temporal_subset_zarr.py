@@ -79,6 +79,11 @@ _OME_METADATA_KEY: str = "ome"
 # Position zattrs whose entries are per-timepoint and must be filtered to the kept
 # indices rather than copied whole.
 _PER_TIMEPOINT_KEYS: tuple[str, ...] = ("hpi_values", "native_frame_indices", "tick_hpi_values")
+# Keys that describe the SOURCE grid and become false under any subset. A
+# --mode spread selection can leave frames 10 h apart, so a stride copied over
+# verbatim would claim a spacing the destination does not have; hpi_values
+# survives the filter above and carries the real per-frame timing.
+_SOURCE_GRID_KEYS: tuple[str, ...] = ("grid_stride_h",)
 
 
 @dataclass
@@ -207,6 +212,8 @@ def _subset_position_zattrs(custom: dict, kept: list[int], n_frames: int) -> dic
         and silently dropping it would let the arm train under wrong statistics.
     """
     out = dict(custom)
+    for key in _SOURCE_GRID_KEYS:
+        out.pop(key, None)
     for key in _PER_TIMEPOINT_KEYS:
         values = out.get(key)
         # Only filter when the entry really is one-per-timepoint; a scalar or a

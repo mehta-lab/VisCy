@@ -73,7 +73,7 @@ def _make_store(path: Path, frames_per_position: list[int]) -> None:
                 {
                     "condition": ["mock", "DENV", "ZIKV"][ordinal % 3],
                     "hpi_start": 5.0,
-                    "effective_delta_t_h": 2.0,
+                    "grid_stride_h": 2.0,
                     "hpi_values": [5.0 + 2.0 * t for t in range(n_frames)],
                     "native_frame_indices": list(range(n_frames)),
                     "normalization": {
@@ -172,6 +172,9 @@ def test_spread_subset_reindexes_timepoint_statistics(tmp_path: Path) -> None:
         assert attrs["native_frame_indices"] == [2, 7]
         assert attrs["temporal_subset"]["source_timepoints"] == [2, 7]
         assert attrs["condition"] == "ZIKV"
+        # The source grid stride describes a spacing this subset does not have --
+        # these two frames are 10 h apart, not 2 h -- so it must not be copied.
+        assert "grid_stride_h" not in attrs
 
 
 def test_mixed_length_plate_keeps_every_position(tmp_path: Path) -> None:

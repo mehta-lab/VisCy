@@ -160,7 +160,16 @@ def _provenance_attrs(
     well_id: str,
     fov: str,
     grid_frames: list[GridFrame],
+    stride_h: float,
 ) -> dict:
+    """Build the per-position provenance zattrs for one assembled FOV.
+
+    ``grid_stride_h`` records the *requested* grid stride (``cfg.grid.stride_h``).
+    The realized spacing is irregular wherever :func:`build_grid` tail-snaps the
+    last tick onto the final native frame, so ``hpi_values`` — not this scalar —
+    is the per-frame source of truth. Three of the eight authoring plates have a
+    short final interval for exactly that reason.
+    """
     well = platemap.wells[well_id]
     return {
         "plate_id": platemap.experiment,
@@ -169,7 +178,7 @@ def _provenance_attrs(
         "source_position": f"{well_id}/{fov}",
         "condition": well.condition,
         "hpi_start": platemap.hpi_start,
-        "effective_delta_t_h": 2.0,
+        "grid_stride_h": float(stride_h),
         "native_delta_t_min": platemap.native_delta_t_min,
         "hpi_values": [float(f.hpi) for f in grid_frames],
         "tick_hpi_values": [float(f.tick_hpi) for f in grid_frames],
@@ -853,7 +862,7 @@ def _assemble_one_pool(
                     shards_ratio=shards_ratio,
                     transform=transform,
                 )
-                out_pos.zattrs.update(_provenance_attrs(c.platemap, well_id, fov, c.grid_frames))
+                out_pos.zattrs.update(_provenance_attrs(c.platemap, well_id, fov, c.grid_frames, stride_h))
                 provenance[pool_pos_name] = {
                     "plate_id": c.platemap.experiment,
                     "well_id": well_id,
