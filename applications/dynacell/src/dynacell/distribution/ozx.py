@@ -179,7 +179,14 @@ def pack_dataset(
             if src_path in seen_sources:
                 # Dedup: shared store across targets emits one OZX.
                 continue
-            dst_path = output_root / name / split / f"{src_path.stem}.ozx"
+            # mode="sample" MUST NOT collide with the full archive. The
+            # `_sample` suffix used to live only on the throwaway tmp zarr, so
+            # `pack <ds>` followed by `sample <ds> --overwrite` into the same
+            # --output-root replaced a multi-GB release archive with a 2-FOV
+            # reviewer subset -- and write_pack_manifest then recorded the
+            # sample's sha256/bytes as the dataset's.
+            stem = f"{src_path.stem}_sample" if mode == "sample" else src_path.stem
+            dst_path = output_root / name / split / f"{stem}.ozx"
             result = _pack_one(
                 dataset=name,
                 target=target_key,

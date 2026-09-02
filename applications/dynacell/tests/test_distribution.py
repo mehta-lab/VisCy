@@ -250,6 +250,65 @@ class TestPackDatasetValidation:
 class TestSampleMode:
     """Sample mode writes a bounded subset zarr before packing."""
 
+    def _manifest(self, train_zarr, test_zarr):
+        from dynacell.data.manifests import (
+            DatasetManifest,
+            StoreLocations,
+            TargetConfig,
+            VoxelSpacing,
+        )
+
+        return DatasetManifest(
+            name="test-dataset",
+            version="1",
+            description="Test",
+            cell_type="A549",
+            imaging_modality="confocal",
+            spacing=VoxelSpacing(z=1.0, y=1.0, x=1.0),
+            channels={"source": "Phase3D"},
+            targets={
+                "nucleus": TargetConfig(
+                    gene="H2B",
+                    organelle="nucleus",
+                    display_name="Nucleus",
+                    target_channel="Nuclei",
+                    stores=StoreLocations(train=train_zarr, test=test_zarr),
+                    splits="splits/nucleus.yaml",
+                ),
+            },
+        )
+
+    def test_sample_does_not_overwrite_the_full_archive(self, tmp_path):
+        """`pack` then `sample` into one --output-root must leave both archives.
+
+        They used to resolve to the identical dst_ozx_path — the `_sample`
+        suffix lived only on the throwaway tmp zarr — so a reviewer subset
+        silently replaced a multi-GB release archive, and write_pack_manifest
+        then recorded the sample's sha256/bytes as the dataset's.
+        """
+        from dynacell.distribution import pack_dataset
+
+        train_zarr = tmp_path / "train_cell.zarr"
+        test_zarr = tmp_path / "test_cell.zarr"
+        _make_fixture_zarr(train_zarr, n_pos=4, t=3)
+        _make_fixture_zarr(test_zarr, n_pos=4, t=3)
+        out = tmp_path / "out"
+
+        with patch("dynacell.distribution.ozx.get_manifest", return_value=self._manifest(train_zarr, test_zarr)):
+            full = pack_dataset("test-dataset", output_root=out, mode="all")
+            full_bytes = {r.dst_ozx_path: r.dst_ozx_path.stat().st_size for r in full}
+            sample = pack_dataset(
+                "test-dataset", output_root=out, mode="sample", fov_limit=1, t_limit=1, overwrite=True
+            )
+
+        full_paths = {r.dst_ozx_path for r in full}
+        sample_paths = {r.dst_ozx_path for r in sample}
+        assert full_paths.isdisjoint(sample_paths)
+        assert all(p.name.endswith("_sample.ozx") for p in sample_paths)
+        for path, size in full_bytes.items():
+            assert path.exists(), f"{path} was destroyed by the sample pack"
+            assert path.stat().st_size == size, f"{path} was rewritten by the sample pack"
+
     def test_sample_mode_subset_writer_limits_fovs_and_t(self, tmp_path):
         """``mode='sample'`` packs at most ``fov_limit`` FOVs × ``t_limit`` frames.
 
