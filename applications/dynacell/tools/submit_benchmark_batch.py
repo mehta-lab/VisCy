@@ -437,13 +437,40 @@ def _write_resolved_configs(
     exp_ids: list[str],
     resolved_dir: Path,
     timestamp: str,
+    *,
+    preview_only: bool = False,
 ) -> list[Path]:
-    """Write each composed config to ``{resolved_dir}/{exp_id}__{timestamp}.yml``."""
-    resolved_dir.mkdir(parents=True, exist_ok=True)
+    """Write each composed config to ``{resolved_dir}/{exp_id}__{timestamp}.yml``.
+
+    Parameters
+    ----------
+    composed_list : list of dict
+        Fully composed leaf configs, one per leaf.
+    exp_ids : list of str
+        Experiment ids used to name each resolved file.
+    resolved_dir : pathlib.Path
+        Destination under the bucket's ``launcher.run_root``.
+    timestamp : str
+        Shared submission timestamp, so one invocation's files sort together.
+    preview_only : bool
+        Return the paths the files *would* take without creating the directory
+        or writing anything. ``--print-script`` promises "no writes", and the
+        run_root it renders is often a share the caller cannot write -- on a CI
+        runner ``/hpc`` does not exist at all. Matches the preview contract
+        ``submit_benchmark_job.py`` already documents.
+
+    Returns
+    -------
+    list of pathlib.Path
+        One resolved-config path per leaf, in input order.
+    """
+    if not preview_only:
+        resolved_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
     for composed, exp_id in zip(composed_list, exp_ids):
         p = resolved_dir / f"{exp_id}__{timestamp}.yml"
-        p.write_text(yaml.safe_dump(composed, default_flow_style=False))
+        if not preview_only:
+            p.write_text(yaml.safe_dump(composed, default_flow_style=False))
         paths.append(p)
     return paths
 
@@ -693,8 +720,15 @@ def submit(argv: list[str] | None = None) -> int:
         base_job_name = args.job_name or (bucket_launchers[0].get("job_name", "predict") + "_batch")
         job_name = f"{base_job_name}_g{bucket_idx}" if len(buckets) > 1 else base_job_name
 
-        resolved_paths = _write_resolved_configs(bucket_composed, bucket_exp_ids, bucket_resolved_dir, timestamp)
-        bucket_slurm_dir.mkdir(parents=True, exist_ok=True)
+        resolved_paths = _write_resolved_configs(
+            bucket_composed,
+            bucket_exp_ids,
+            bucket_resolved_dir,
+            timestamp,
+            preview_only=args.print_script,
+        )
+        if not args.print_script:
+            bucket_slurm_dir.mkdir(parents=True, exist_ok=True)
 
         # --parallel P>1: split this bucket's leaves into ceil(N/P) chunks,
         # each chunk gets its own sbatch with P concurrent backgrounded

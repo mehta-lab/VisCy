@@ -63,6 +63,40 @@ def test_negative_max_array_concurrency_rejected():
         )
 
 
+def test_print_script_writes_nothing(monkeypatch, tmp_path):
+    """``--print-script`` must not create or write anything under run_root.
+
+    The flag's own help says "no writes", and the leaves it renders point at
+    /hpc project shares the caller often cannot write -- on a CI runner /hpc
+    does not exist, so a stray mkdir is a hard PermissionError rather than a
+    stray directory. Assert against the syscalls, not against a path, so this
+    holds wherever the suite runs.
+    """
+    import os
+
+    real_mkdir, real_write = os.mkdir, Path.write_text
+    calls: list[str] = []
+
+    def guard_mkdir(path, *a, **kw):
+        calls.append(f"mkdir {path}")
+        return real_mkdir(path, *a, **kw)
+
+    def guard_write(self, *a, **kw):
+        calls.append(f"write {self}")
+        return real_write(self, *a, **kw)
+
+    monkeypatch.setattr(os, "mkdir", guard_mkdir)
+    monkeypatch.setattr(Path, "write_text", guard_write)
+
+    buf = io.StringIO()
+    args = [str(p) for p in ER_A549_LEAVES] + ["--job-name", "TEST", "--print-script"]
+    with redirect_stdout(buf):
+        rc = sbb.submit(args)
+    assert rc == 0
+    assert buf.getvalue().startswith("#!/bin/bash")
+    assert calls == [], f"--print-script touched the filesystem: {calls}"
+
+
 def test_mixed_run_roots_rejected_without_allow_mixed():
     """Without ``--allow-mixed-directives``, leaves spanning two ``run_root``s must raise."""
     args = [str(p) for p in ER_MIXED_RUN_ROOT_LEAVES] + ["--array", "--print-script"]
