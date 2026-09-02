@@ -1070,6 +1070,42 @@ def _worker_setup(config: DictConfig) -> None:
     )
 
 
+def _validate_exclusions(exclude: list[str], position_names: list[str]) -> None:
+    """Reject an ``io.exclude_fov_names`` entry that is a typo or ambiguous.
+
+    Parameters
+    ----------
+    exclude : list of str
+        Requested exclusions, each a full position name (``0/0/fov0011``) or a
+        bare leaf (``fov0011``).
+    position_names : list of str
+        Full names of the prediction positions the exclusions filter.
+
+    Raises
+    ------
+    ValueError
+        If an entry matches no position, or if a bare leaf matches more than
+        one. Both fail open otherwise: a typo silently evaluates the full set
+        (the opposite of what was asked), and an ambiguous leaf silently drops
+        every well sharing it -- ``exclude: ["1"]`` removes ``A/1/1`` *and*
+        ``B/2/1``. Leaf matching itself is deliberate; only ambiguity is not.
+    """
+    for entry in exclude:
+        matched = [name for name in position_names if name == entry or name.rsplit("/", 1)[-1] == entry]
+        if not matched:
+            raise ValueError(
+                f"io.exclude_fov_names entry {entry!r} matched no position; "
+                f"expected a full name (e.g. {position_names[0]!r}) or its leaf. "
+                "Leaving it unmatched would silently evaluate the full set."
+            )
+        if len(matched) > 1:
+            raise ValueError(
+                f"io.exclude_fov_names entry {entry!r} is ambiguous: it matches "
+                f"{len(matched)} positions ({', '.join(matched)}). Use full "
+                "position names to disambiguate."
+            )
+
+
 def _separate_nuclei_path(config: DictConfig) -> str | None:
     """GT-nuclei store path when it is a *separate* store from the GT membrane plate.
 
@@ -1314,12 +1350,19 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
             # Optional explicit FOV exclusion (e.g. drop positions whose prediction
             # zarr is incomplete). Applied uniformly to pred/gt/seg so the counts
-            # stay aligned and the strict-mode validation below still holds. Unlike
-            # ``limit_positions`` this does NOT set ``partial_walk``, so deep-feature
-            # caches auto-invalidate/self-heal normally. Match on the full position
-            # name (``0/0/fov0011``) or its leaf (``fov0011``).
+            # stay aligned and the strict-mode validation below still holds. Match
+            # on the full position name (``0/0/fov0011``) or its leaf (``fov0011``).
+            #
+            # Unlike ``limit_positions`` this does NOT set ``partial_walk``: a hard
+            # StaleCacheError would defeat the point, since this flag exists to
+            # evaluate the finished FOVs of a partially-run predict, where a full
+            # walk is impossible. It DOES set ``excluded_walk``, which stops the
+            # manifest advancing its preprocess_version over the skipped FOVs --
+            # otherwise a later unrestricted run reads their stale embeddings back
+            # as a cache hit. See ``_update_manifest_entry``.
             exclude = OmegaConf.select(config, "io.exclude_fov_names", default=None) or []
             if exclude:
+                _validate_exclusions(exclude, [n for n, _ in pred_positions])
                 exclude_set = set(exclude)
 
                 def _keep(name: str) -> bool:

@@ -77,6 +77,7 @@ class _CacheContext:
     patch_size: int
     _: KW_ONLY
     partial_walk: bool = False
+    excluded_walk: bool = False
     use_gpu: bool = True
     backend: str = "supermodel"
     compute_instance_ap: bool = False
@@ -228,6 +229,12 @@ def init_cache_context(
     patch_size = int(config.feature_metrics.patch_size)
     use_gpu = bool(getattr(config, "use_gpu", True))
     partial_walk = OmegaConf.select(config, "limit_positions", default=None) is not None
+    # ``io.exclude_fov_names`` also produces a partial walk, but it must not take
+    # the hard-raise path above: its purpose is evaluating the finished FOVs of a
+    # partially-run predict, where a full walk is impossible by construction. The
+    # walk is still partial, so the manifest may not advance its identity stamp
+    # over FOVs this run never touched -- see ``_update_manifest_entry``.
+    excluded_walk = bool(OmegaConf.select(config, "io.exclude_fov_names", default=None))
 
     dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
@@ -287,6 +294,7 @@ def init_cache_context(
         spacing=spacing,
         patch_size=patch_size,
         partial_walk=partial_walk,
+        excluded_walk=excluded_walk,
         use_gpu=use_gpu,
         backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
         compute_instance_ap=bool(OmegaConf.select(config, "compute_instance_ap", default=False)),
@@ -603,12 +611,33 @@ def _raise_if_require_complete(ctx: _CacheContext, artifact: str, pos_name: str,
         raise StaleCacheError(f"{artifact} cache miss at {where} and io.require_complete_cache=true")
 
 
-def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict) -> None:
-    """Walk-and-create nested dict path, then shallow-merge *entry* into leaf."""
+def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, preserve_identity: bool = False) -> None:
+    """Walk-and-create nested dict path, then shallow-merge *entry* into leaf.
+
+    Parameters
+    ----------
+    manifest : dict
+        In-memory cache manifest being mutated.
+    keys : list of str
+        Nested path under ``artifacts`` to the entry.
+    entry : dict
+        Identity fields (``preprocess_version``, artifact params) for this run.
+    preserve_identity : bool
+        Keep any value already recorded rather than overwriting it. Set on a
+        partial walk driven by ``io.exclude_fov_names``: the entry is a
+        store-wide claim, so stamping it with this run's version would certify
+        FOVs the walk skipped. Leaving the older stamp in place costs one
+        redundant rebuild on the next full walk and keeps the invalidation
+        honest; advancing it would let those FOVs' stale embeddings read back as
+        a cache hit forever. New keys are still added -- this only refuses to
+        *change* a recorded value.
+    """
     current = manifest.setdefault("artifacts", {})
     for key in keys[:-1]:
         current = current.setdefault(key, {})
     leaf = current.setdefault(keys[-1], {})
+    if preserve_identity:
+        entry = {k: v for k, v in entry.items() if k not in leaf}
     leaf.update(entry)
 
 
@@ -739,6 +768,7 @@ def _fov_masks(
             ctx.manifest,
             ["organelle_masks", manifest_key],
             manifest_entry,
+            preserve_identity=ctx.excluded_walk,
         )
         _add_position(ctx.manifest, ["organelle_masks", manifest_key], pos_name)
         ctx.mark_manifest_dirty()
@@ -1351,7 +1381,7 @@ def _fov_deep_features(
     )
 
     if ctx.enabled and manifest_updated:
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry)
+        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
 
