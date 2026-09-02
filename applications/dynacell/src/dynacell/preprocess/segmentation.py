@@ -108,7 +108,22 @@ def run_cellpose_segmentation(
                     masks, _, _ = model.eval(imgs_2d, channel_axis=0, niter=niter_2d)
                     masks = [np.repeat(mask[None, ...], D, axis=0) for mask in masks]
 
-                masks_arr = np.stack(masks, axis=0)[:, None, ...].astype(_output_dtype)
+                stacked = np.stack(masks, axis=0)[:, None, ...]
+                # Cellpose returns an int32 LABEL image, so a narrowing cast
+                # wraps modulo the dtype range instead of clipping: at
+                # output_dtype="uint8" (the default) a FOV with >=256 objects
+                # silently turns label 256 into background and merges 257 with
+                # a distant cell. The shape guard below cannot see that, and
+                # downstream instance-AP would score the corrupted field.
+                max_label = int(stacked.max())
+                dtype_max = np.iinfo(_output_dtype).max
+                if max_label > dtype_max:
+                    raise ValueError(
+                        f"{pos_name}: Cellpose produced {max_label} labels, which does not fit "
+                        f"output_dtype={_output_dtype!r} (max {dtype_max}); labels would wrap "
+                        "silently. Pass output_dtype='uint16'."
+                    )
+                masks_arr = stacked.astype(_output_dtype)
 
                 t, _, d, h, w = masks_arr.shape
                 if (t, d, h, w) != (T, D, H, W):
