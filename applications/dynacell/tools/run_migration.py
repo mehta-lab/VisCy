@@ -208,6 +208,7 @@ def rollback(journal: Path, dry_run: bool) -> int:
             raise RuntimeError(f"cannot reverse: src already exists {src}")
         if dry_run:
             print(f"  [dry-run] reverse {r['kind']}: {dest}\n            -> {src}")
+            reversed_count += 1
             continue
         src.parent.mkdir(parents=True, exist_ok=True)
         dest.rename(src)

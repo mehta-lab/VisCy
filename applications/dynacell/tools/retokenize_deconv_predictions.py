@@ -424,6 +424,7 @@ def rollback(journal: Path, dry_run: bool) -> int:
                 raise RuntimeError(f"cannot reverse dir move: src already exists {src}")
             if dry_run:
                 print(f"  [dry-run] reverse move: {dst} -> {src}")
+                reversed_count += 1
                 continue
             dst.rename(src)
             _append_journal(journal, {"op": "dir_move", "src": str(dst), "dst": str(src), "result": "reversed"})
@@ -435,6 +436,7 @@ def rollback(journal: Path, dry_run: bool) -> int:
                 continue
             if dry_run:
                 print(f"  [dry-run] reverse edit: {path} ({new_value} -> {old_value})")
+                reversed_count += 1
                 continue
             tmp = path.with_name(path.name + ".retok_tmp")
             tmp.write_text(text.replace(new_value, old_value))
