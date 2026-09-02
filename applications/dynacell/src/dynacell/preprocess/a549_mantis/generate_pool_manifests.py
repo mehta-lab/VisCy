@@ -98,11 +98,20 @@ def _pool_fov_list(
     plates: list[str],
     authoring_root: Path,
     plate_zarr_root: Path,
+    pool_condition: str | None,
     start_index: int = 0,
 ) -> tuple[list[str], list[tuple[float, float, float]]]:
     """Compute the deterministic ``0/0/fov<NNNN>`` list for one pool + plate spacings.
 
     Mirrors the iteration order in ``_assemble_one_pool``.
+
+    ``pool_condition`` is the condition the on-disk store was assembled with --
+    ``None`` for the all-condition ``<TARGET>_all`` train store -- and therefore
+    fixes the fov index space. ``condition`` then selects which of that store's
+    positions belong to this pool. The two differ on the train side, where every
+    pool reads the same pooled store: filtering the walk by ``condition`` there
+    renumbered the survivors from zero and produced indices into a store that
+    does not exist.
 
     Returns
     -------
@@ -114,7 +123,7 @@ def _pool_fov_list(
     """
     contribs = _gather_plate_contributions(
         target=target,
-        condition=condition,
+        condition=pool_condition,
         split=split,
         plates=plates,
         plate_zarr_root=plate_zarr_root,
@@ -128,10 +137,14 @@ def _pool_fov_list(
     plate_spacings: list[tuple[float, float, float]] = []
     idx = start_index
     for c in contribs:
-        for _ in c.positions:
-            fov_names.append(f"0/0/fov{idx:04d}")
+        kept_any = False
+        for well_id, _fov in c.positions:
+            if c.platemap.wells[well_id].condition == condition:
+                fov_names.append(f"0/0/fov{idx:04d}")
+                kept_any = True
             idx += 1
-        plate_spacings.append(c.spacing)
+        if kept_any:
+            plate_spacings.append(c.spacing)
     return fov_names, plate_spacings
 
 
@@ -244,6 +257,8 @@ def _generate_pair(
         plates=plates,
         authoring_root=authoring_root,
         plate_zarr_root=plate_zarr_root,
+        # Train reads the pooled <TARGET>_all store, assembled with condition=None.
+        pool_condition=None,
     )
     test_fovs, test_spacings = _pool_fov_list(
         target=target,
@@ -252,6 +267,8 @@ def _generate_pair(
         plates=plates,
         authoring_root=authoring_root,
         plate_zarr_root=plate_zarr_root,
+        # Test stores are per-condition, so the pool condition IS the condition.
+        pool_condition=condition,
     )
     if not train_fovs and not test_fovs:
         print(f"  skip {target}/{condition}: no contributing positions")
