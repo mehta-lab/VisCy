@@ -38,8 +38,19 @@ nvidia-smi
 export MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n1)
 export MASTER_PORT=$((15000 + SLURM_JOB_ID % 20000))
 
+# --cpu-bind=none on every srun below. Slurm hands out non-contiguous CPU masks
+# on a busy node (measured: 0x...0FFFFF3DEF00 on gpu-h-6, holes mid-mask), and
+# srun's default core binding cannot satisfy one -- "CPU binding outside of job
+# step allocation ... Unable to satisfy cpu bind request", rc 192, ~3 s in.
+# Reproduced on a controlled probe: plain srun rc=192, --cpu-bind=none rc=0,
+# exporting SRUN_CPUS_PER_TASK rc=192. It is not node-specific; three different
+# nodes failed with three different fragmented masks.
+# Tradeoff: multi-task DDP steps lose Slurm's per-rank pinning, so ranks float
+# across the allocation's CPUs and can lose some NUMA locality. That is a
+# performance cost; the alternative is that no fit or predict launches at all
+# while the cluster is fragmented.
 echo "[preflight] NCCL smoke test..."
-srun --kill-on-bad-exit=1 uv run python @@repo_root/applications/dynacell/tools/nccl_smoke_test.py
+srun --cpu-bind=none --kill-on-bad-exit=1 uv run python @@repo_root/applications/dynacell/tools/nccl_smoke_test.py
 SMOKE_RC=$?
 if [ $SMOKE_RC -ne 0 ]; then
     echo "[preflight] smoke test FAILED on $SLURM_JOB_NODELIST (rc=$SMOKE_RC); exiting before main srun" >&2
@@ -50,4 +61,4 @@ fi
 # leak the preflight values into the training srun.
 unset MASTER_ADDR MASTER_PORT
 
-srun uv run python -m dynacell @@mode --config @@resolved_config@@resume_arg
+srun --cpu-bind=none uv run python -m dynacell @@mode --config @@resolved_config@@resume_arg
