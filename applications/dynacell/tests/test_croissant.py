@@ -87,8 +87,18 @@ def _make_synthetic_release(root: Path) -> Path:
     return root
 
 
-def _make_release_tree(root: Path, prefix: str, markers: tuple[str, ...]) -> Path:
-    """Build ``data/<prefix>/{train,test}/<marker>.ozx`` fixtures."""
+def _make_release_tree(
+    root: Path,
+    prefix: str,
+    markers: tuple[str, ...],
+    t_per_position: tuple[int, ...] = (2,),
+) -> Path:
+    """Build ``data/<prefix>/{train,test}/<marker>.ozx`` fixtures.
+
+    ``t_per_position`` gives one timepoint count per position, so a store can be
+    built with the heterogeneous T the real A549 pools carry. Defaults to a
+    single T=2 position, leaving the historical fixture unchanged.
+    """
     import numpy as np
     from iohub import open_ome_zarr
     from iohub.core.ozx import pack_ozx
@@ -105,12 +115,13 @@ def _make_release_tree(root: Path, prefix: str, markers: tuple[str, ...]) -> Pat
                 layout="hcs",
                 channel_names=["Phase3D", "Brightfield", "Structure"],
             ) as plate:
-                pos = plate.create_position("A", "1", "0")
-                pos.create_image(
-                    "0",
-                    np.zeros((2, 3, 4, 8, 8), dtype=np.float32),
-                    chunks=(1, 1, 1, 8, 8),
-                )
+                for i, n_t in enumerate(t_per_position):
+                    pos = plate.create_position("A", "1", str(i))
+                    pos.create_image(
+                        "0",
+                        np.zeros((n_t, 3, 4, 8, 8), dtype=np.float32),
+                        chunks=(1, 1, 1, 8, 8),
+                    )
             pack_ozx(zarr_path, split_dir / f"{marker}.ozx")
     return root
 
@@ -194,6 +205,33 @@ class TestFromRelease:
             "prov:wasDerivedFrom",
         ):
             assert key in jsonld, f"missing {key}"
+
+    def test_shape_reports_a_range_when_positions_disagree(self, tmp_path):
+        """A store with heterogeneous T must not publish one position's shape.
+
+        Heterogeneous T is by design in the A549 pools -- the real
+        a549-mantis-sec61b-mock train store holds 14 FOVs at T=7 and 14 at
+        T=10 -- so probing position 0 stated one shape for a store where half
+        the FOVs differ, in a document meant to describe the release.
+        """
+        _make_release_tree(tmp_path, "biohub-a549", ("H2B_mock",), t_per_position=(7, 10, 7))
+        jsonld = build_croissant_from_release(tmp_path, _placeholder_static(), dataset_prefix="biohub-a549")
+
+        described = [fo["description"] for fo in jsonld["distribution"] if fo.get("@id", "").startswith("biohub-a549/")]
+        assert described
+        for desc in described:
+            assert "shape [7-10, 3, 4, 8, 8]" in desc, desc
+            assert "3 FOVs" in desc
+
+    def test_shape_stays_exact_when_positions_agree(self, tmp_path):
+        """The homogeneous case still prints plain integers, not a degenerate range."""
+        _make_release_tree(tmp_path, "biohub-a549", ("H2B_mock",), t_per_position=(5, 5))
+        jsonld = build_croissant_from_release(tmp_path, _placeholder_static(), dataset_prefix="biohub-a549")
+
+        described = [fo["description"] for fo in jsonld["distribution"] if fo.get("@id", "").startswith("biohub-a549/")]
+        assert described
+        for desc in described:
+            assert "shape [5, 3, 4, 8, 8]" in desc, desc
 
     def test_keywords_and_creators_come_from_static_fields(self, tmp_path):
         """Attribution is per-dataset, never hardcoded in the builder.

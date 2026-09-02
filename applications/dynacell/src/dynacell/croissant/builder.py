@@ -67,6 +67,25 @@ _TARGET_META: dict[str, tuple[str, str, str]] = {
 }
 
 
+def _format_shape(shape_min: list[int], shape_max: list[int]) -> str:
+    """Render a store's shape, showing a range on any axis that varies.
+
+    Parameters
+    ----------
+    shape_min, shape_max : list of int
+        Per-axis minimum and maximum over every position in the store.
+
+    Returns
+    -------
+    str
+        e.g. ``"[10, 3, 48, 640, 960]"`` when all positions agree, or
+        ``"[7-10, 3, 48, 640, 960]"`` when T varies. Heterogeneous T is by
+        design in the A549 pools, so collapsing it to one number would state
+        something false about half the FOVs in a published document.
+    """
+    return "[" + ", ".join(str(lo) if lo == hi else f"{lo}-{hi}" for lo, hi in zip(shape_min, shape_max)) + "]"
+
+
 def _scan_ozx_tree(
     release_root: Path,
     dataset_prefix: str,
@@ -98,7 +117,21 @@ def _scan_ozx_tree(
                 if not positions:
                     raise ValueError(f"OZX store has no positions: {ozx_path}")
                 first_pos_key = positions[0][0]
-                shape = list(ds[first_pos_key + "/0"].shape)
+                # Shape is published as a store-wide claim, so read every
+                # position rather than position 0. Heterogeneous T is by design
+                # in these pools -- a549-mantis-sec61b-mock train really does
+                # hold 14 FOVs at T=7 and 14 at T=10 -- so a single-position
+                # probe states one shape for a store where half the FOVs differ.
+                shapes = [list(ds[name + "/0"].shape) for name, _ in positions]
+                if len({len(sh) for sh in shapes}) != 1:
+                    raise ValueError(f"positions disagree on rank in {ozx_path}: {sorted({len(sh) for sh in shapes})}")
+                shape_min = [min(sh[a] for sh in shapes) for a in range(len(shapes[0]))]
+                shape_max = [max(sh[a] for sh in shapes) for a in range(len(shapes[0]))]
+                if shape_min[1] != shape_max[1]:
+                    raise ValueError(
+                        f"positions disagree on channel count in {ozx_path}: "
+                        f"{shape_min[1]}..{shape_max[1]}; channels are a store-level property"
+                    )
                 omero = ds[first_pos_key].zattrs["ome"]["omero"]
                 channels = [ch["label"] for ch in omero["channels"]]
                 multiscales = ds[first_pos_key].zattrs["ome"]["multiscales"][0]
@@ -125,7 +158,8 @@ def _scan_ozx_tree(
                     "target": root_attrs.get("assembly_target", fallback_target.lower()),
                     "condition": root_attrs.get("assembly_condition", fallback_condition),
                     "n_fov": len(positions),
-                    "shape": shape,
+                    "shape_min": shape_min,
+                    "shape_max": shape_max,
                     "channels": channels,
                     "voxel_size": voxel_size,
                     "size_bytes": ozx_path.stat().st_size,
@@ -196,7 +230,7 @@ def build_croissant_from_release(
                 "description": (
                     f"OZX-packed OME-Zarr for {e['target']} ({e['condition']}, "
                     f"{e['split']} split, {e['n_fov']} FOVs, "
-                    f"shape {e['shape']})"
+                    f"shape {_format_shape(e['shape_min'], e['shape_max'])})"
                 ),
                 "contentUrl": f"{s3_base}/{e['split']}/{e['file']}",
                 "sameAs": [f"{https_base}/{e['split']}/{e['file']}"],
@@ -248,7 +282,7 @@ def build_croissant_from_release(
     )
 
     organelles = [_TARGET_META.get(t, (t.upper(), t, t))[1] for t in targets]
-    channel_counts = sorted({e["shape"][1] for e in entries})
+    channel_counts = sorted({e["shape_min"][1] for e in entries})
     channel_clause = (
         f" {channel_counts[0]} channels per FOV (label-free Phase3D + brightfield + fluorescence target)."
         if len(channel_counts) == 1
