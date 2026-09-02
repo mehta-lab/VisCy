@@ -4,6 +4,8 @@ Exercises the from-release builder against a small synthetic OZX tree
 and asserts the generated JSON-LD validates against mlcroissant 1.1.
 """
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,6 @@ from dynacell.croissant import (
     StaticFields,
     build_croissant_from_release,
     merge_croissant_docs,
-    validate_croissant,
 )
 
 
@@ -215,6 +216,8 @@ class TestValidate:
     def test_validate_passes_for_from_release(self, tmp_path):
         """Generated from-release Croissant validates."""
         pytest.importorskip("mlcroissant")
+        from dynacell.croissant.validate import validate_croissant
+
         _make_synthetic_release(tmp_path)
         jsonld = build_croissant_from_release(tmp_path, _placeholder_static(), dataset_prefix="biohub-a549")
         validate_croissant(jsonld)
@@ -265,5 +268,26 @@ class TestMergeRelease:
     def test_merged_validates(self, tmp_path):
         """The merged two-license document passes mlcroissant validation."""
         pytest.importorskip("mlcroissant")
+        from dynacell.croissant.validate import validate_croissant
+
         doc_a, doc_b = self._two_docs(tmp_path)
         validate_croissant(merge_croissant_docs([doc_a, doc_b]))
+
+
+def test_builder_imports_without_the_croissant_extra():
+    """Importing the builder must not drag in the optional ``croissant`` extra.
+
+    ``validate.py`` imports mlcroissant at module top, so re-exporting
+    ``validate_croissant`` from the package ``__init__`` made an optional extra a
+    hard requirement for ``builder`` -- defeating cli.py's lazy imports and the
+    --no-validate flag, and erroring this whole file at collection wherever the
+    extra is absent (which is every interpreter on this machine).
+
+    Run in a subprocess so a module already imported by the test session cannot
+    mask the regression.
+    """
+    subprocess.run(
+        [sys.executable, "-c", "import dynacell.croissant.builder"],
+        check=True,
+        capture_output=True,
+    )

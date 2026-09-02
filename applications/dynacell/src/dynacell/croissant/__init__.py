@@ -11,11 +11,13 @@ from dynacell.croissant.builder import (
     merge_croissant_docs,
 )
 from dynacell.croissant.static import StaticFields
-from dynacell.croissant.validate import validate_croissant
 
+# ``validate_croissant`` is deliberately NOT re-exported here: its module imports
+# mlcroissant at top level, so an eager re-export makes the optional ``croissant``
+# extra a hard requirement for ``builder`` too -- defeating cli.py's lazy imports
+# and the --no-validate flag. Import it from dynacell.croissant.validate directly.
 __all__ = [
     "StaticFields",
     "build_croissant_from_release",
     "merge_croissant_docs",
-    "validate_croissant",
 ]
