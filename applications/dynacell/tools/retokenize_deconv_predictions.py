@@ -153,14 +153,28 @@ def plan_dir_moves(data_root: Path, organelles: tuple[str, ...], skips: list[str
     organelles : tuple of str
         Organelle roots to scan (``("er", "mito")``).
     skips : list of str
-        ``--skip`` exclude entries.
+        ``--skip`` exclude entries. Every entry must match at least one
+        scanned dir; see Raises.
 
     Returns
     -------
     list of DirMove
         Sorted by src path.
+
+    Raises
+    ------
+    ValueError
+        If a ``--skip`` entry matched nothing. The module docstring makes this
+        list the live-writer *contract* ("Detecting a live writer from a tool
+        is unreliable, so the exclude list is the contract"), and an unmatched
+        entry produced the identical move count as passing no skip at all. So
+        ``--skip celldiff_r2`` -- the natural model-level phrasing, which
+        ``_is_excluded`` does not accept since it matches a path tail, not a
+        component -- silently renamed a dir out from under an active SLURM
+        writer while the operator believed it was protected.
     """
     moves: list[DirMove] = []
+    matched_skips: set[str] = set()
     for organelle in organelles:
         org_root = data_root / organelle
         if not org_root.is_dir():
@@ -170,7 +184,9 @@ def plan_dir_moves(data_root: Path, organelles: tuple[str, ...], skips: list[str
                 src = model_dir / old_token
                 if not src.is_dir():
                     continue
-                if _is_excluded(src, skips):
+                hit = [raw for raw in skips if _is_excluded(src, [raw])]
+                if hit:
+                    matched_skips.update(hit)
                     continue
                 moves.append(
                     DirMove(
@@ -180,6 +196,14 @@ def plan_dir_moves(data_root: Path, organelles: tuple[str, ...], skips: list[str
                         dst=model_dir / new_token,
                     )
                 )
+    unmatched = [raw for raw in skips if raw not in matched_skips]
+    if unmatched:
+        raise ValueError(
+            f"--skip entries matched no scanned directory: {unmatched}. "
+            "Entries match an absolute src path, the <organelle>/<model>/<train_set> "
+            "tail, or a trailing path fragment -- not a bare model name. An unmatched "
+            "entry would leave the dir it was meant to protect in the move plan."
+        )
     return sorted(moves, key=lambda m: str(m.src))
 
 

@@ -106,6 +106,26 @@ def test_plan_dir_moves_skip_excludes(tmp_path: Path) -> None:
     assert len(moves) == 7
 
 
+def test_plan_dir_moves_rejects_an_unmatched_skip(tmp_path: Path) -> None:
+    """A --skip entry that matches nothing raises instead of planning the move.
+
+    The module docstring makes this list the live-writer contract, so an
+    unmatched entry is the worst outcome: identical move count to passing no
+    skip at all, while the operator believes a dir with an active SLURM writer
+    is protected. ``celldiff_r2`` is the natural model-level phrasing and is
+    exactly what _is_excluded does not accept — it matches a path tail, not a
+    single component.
+    """
+    data_root = tmp_path / "dynacell"
+    _build_tree(data_root)
+
+    with pytest.raises(ValueError, match="matched no scanned directory"):
+        plan_dir_moves(data_root, _ORGANELLES, skips=["celldiff_r2"])
+
+    with pytest.raises(ValueError, match=r"\['mito/celldiff_r2/a549__typo'\]"):
+        plan_dir_moves(data_root, _ORGANELLES, skips=["mito/celldiff_r2/a549__typo"])
+
+
 def test_plan_dir_moves_organelle_filter(tmp_path: Path) -> None:
     """Restricting to one organelle limits the moves to that organelle."""
     data_root = tmp_path / "dynacell"
