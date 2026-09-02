@@ -342,7 +342,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="{best,last,PATH}",
         help="predict mode: override model.init_args.ckpt_path. 'best' resolves "
         "the best-by-monitor checkpoint (from last.ckpt's ModelCheckpoint state) "
-        "in the leaf's checkpoint dir; 'last' uses that dir's last.ckpt; a PATH is "
+        "in the leaf's checkpoint dir; 'last' uses the newest last*.ckpt by mtime "
+        "(Lightning renames to last-vN.ckpt on resume); a PATH is "
         "used verbatim. Use 'best' for Phase-9 re-predict so a retrained model "
         "predicts from its new best checkpoint instead of the leaf's hardcoded "
         "(possibly stale) epoch. predict mode only (fit uses --resume).",
@@ -502,7 +503,13 @@ def submit(argv: list[str] | None = None) -> int:
         if args.ckpt == "best":
             resolved_ckpt = _resolve_best_ckpt(ckpt_dir)
         elif args.ckpt == "last":
-            resolved_ckpt = ckpt_dir / "last.ckpt"
+            # Lightning renames to last-vN.ckpt whenever last.ckpt already exists, so
+            # the name is not the newest file -- key on mtime, per the invariant stated
+            # at resolve_newest_last_ckpt. 2066caf8 fixed --resume and _resolve_best_ckpt
+            # and missed this third caller.
+            resolved_ckpt = resolve_newest_last_ckpt(ckpt_dir)
+            if resolved_ckpt is None:
+                raise SystemExit(f"--ckpt last: no last*.ckpt in {ckpt_dir}")
         else:
             resolved_ckpt = Path(args.ckpt)
         if not resolved_ckpt.is_file():

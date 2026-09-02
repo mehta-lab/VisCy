@@ -205,6 +205,41 @@ def test_ckpt_explicit_path_overrides(capsys, tmp_path):
     assert f"ckpt_path: {ckpt}" in capsys.readouterr().out
 
 
+def test_ckpt_last_prefers_newest_last_v_ckpt(capsys, tmp_path):
+    """--ckpt last resolves the NEWEST last*.ckpt by mtime, not the fixed name.
+
+    Same invariant as --resume (resolve_newest_last_ckpt): Lightning renames to
+    last-vN.ckpt whenever last.ckpt exists, so on any resumed fit the file literally
+    named last.ckpt is the first segment's state. Measured on live dirs, ipsc/er
+    fnet3d_paper holds last.ckpt at epoch 2 beside last-v5.ckpt at epoch 228 -- so
+    keying on the name predicted from a near-init checkpoint, silently.
+    """
+    ckpt_dir = tmp_path / "checkpoints"
+    ckpt_dir.mkdir()
+    stale = ckpt_dir / "last.ckpt"
+    stale.write_bytes(b"stub")
+    newest = ckpt_dir / "last-v1.ckpt"
+    newest.write_bytes(b"stub")
+    older = newest.stat().st_mtime - 100
+    os.utime(stale, (older, older))
+
+    leaf = BENCHMARKS / "mito/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_denv.yml"
+    rc = sbj.submit(
+        [
+            str(leaf),
+            "--override",
+            f"model.init_args.ckpt_path={stale}",
+            "--ckpt",
+            "last",
+            "--print-resolved-config",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"ckpt_path: {newest}" in out
+    assert f"ckpt_path: {stale}" not in out
+
+
 def test_ckpt_missing_raises(tmp_path):
     """--ckpt pointing at a nonexistent checkpoint fails fast before submission."""
     leaf = BENCHMARKS / "mito/fcmae_vscyto3d_scratch/a549_mantis/predict__a549_mantis_denv.yml"
