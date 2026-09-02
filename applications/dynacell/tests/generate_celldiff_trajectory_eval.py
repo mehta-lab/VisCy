@@ -155,9 +155,7 @@ def main() -> None:
     source = batch["source"].to(args.device)  # (1, 1, Z, Y, X), normalized
     print(f"Normalized source shape: {tuple(source.shape)}")
 
-    print(
-        f"Generating {args.save_mode} ({args.num_steps} steps, method={args.predict_method}) on {args.device}..."
-    )
+    print(f"Generating {args.save_mode} ({args.num_steps} steps, method={args.predict_method}) on {args.device}...")
     if args.save_mode == "denoise":
         trajectory = model.model.generate_iterative_denoise_trajectory(
             source, num_steps=args.num_steps, overlap_size=tuple(args.overlap)
