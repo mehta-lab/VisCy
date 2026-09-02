@@ -22,10 +22,9 @@ def _placeholder_static() -> StaticFields:
     return StaticFields(
         name="Test dataset",
         license_url="https://creativecommons.org/licenses/by/4.0/",
-        license_name="CC-BY-4.0",
         cite_as="@misc{test, title={Test}, year={2026}}",
-        creator_name="Test creator",
-        creator_url="https://example.org",
+        keywords=("Test cell line",),
+        creators=({"@type": "sc:Organization", "name": "Test creator", "url": "https://example.org"},),
         publisher_name="Test publisher",
         publisher_url="https://example.org",
         contact_email="test@example.org",
@@ -125,7 +124,8 @@ def _allen_static() -> StaticFields:
     kwargs = _placeholder_static().__dict__.copy()
     kwargs["name"] = "iPSC subset"
     kwargs["license_url"] = _ALLEN
-    kwargs["license_name"] = "Allen Institute Terms of Use"
+    kwargs["keywords"] = ("Other cell line",)
+    kwargs["creators"] = ({"@type": "sc:Organization", "name": "Other creator", "url": "https://example.net"},)
     kwargs["rai_data_collection"] = "iPSC-specific collection prose."
     return StaticFields(**kwargs)
 
@@ -194,6 +194,28 @@ class TestFromRelease:
             "prov:wasDerivedFrom",
         ):
             assert key in jsonld, f"missing {key}"
+
+    def test_keywords_and_creators_come_from_static_fields(self, tmp_path):
+        """Attribution is per-dataset, never hardcoded in the builder.
+
+        The builder runs once per ``dataset_prefix``. A hardcoded cell line or
+        creator block would keyword the Allen WTC-11 subset as A549 and credit
+        it to the A549 collaborators -- wrong attribution in a license-sensitive
+        published artifact.
+        """
+        _make_release_tree(tmp_path, "biohub-a549", ("H2B_mock", "TOMM20_mock"))
+        _make_release_tree(tmp_path, "aics-hipsc", ("cell", "SEC61B"))
+        a549 = build_croissant_from_release(tmp_path, _placeholder_static(), dataset_prefix="biohub-a549")
+        ipsc = build_croissant_from_release(tmp_path, _allen_static(), dataset_prefix="aics-hipsc")
+
+        assert "Test cell line" in a549["keywords"]
+        assert "Test cell line" not in ipsc["keywords"]
+        assert "Other cell line" in ipsc["keywords"]
+        # Modality terms stay shared.
+        assert "virtual staining" in a549["keywords"] and "virtual staining" in ipsc["keywords"]
+
+        assert [c["name"] for c in a549["creator"]] == ["Test creator"]
+        assert [c["name"] for c in ipsc["creator"]] == ["Other creator"]
 
     def test_compute_sha256_populates_field(self, tmp_path):
         """--compute-sha256 fills the sha256 field with a 64-hex digest."""

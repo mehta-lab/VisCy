@@ -21,12 +21,17 @@ class StaticFields:
         from any sibling release docs in the same publication.
     license_url
         Canonical license URL (e.g. ``https://creativecommons.org/licenses/by/4.0/``).
-    license_name
-        Human-readable license label (e.g. ``"CC-BY-4.0"``).
     cite_as
         BibTeX entry for the dataset's primary citation.
-    creator_name, creator_url
-        Top-level ``creator`` block.
+    keywords
+        Dataset-specific ``keywords`` entries, appended to the shared modality
+        terms every DynaCell release carries. Cell line and platform belong
+        here — they differ per release and must not be hardcoded in the builder.
+    creators
+        Top-level ``creator`` block, verbatim JSON-LD entries. This is the field
+        aggregators read for attribution, so the list must name the institutions
+        that produced *this* subset's data, not the release as a whole; upstream
+        provenance additionally goes in ``prov_was_derived_from``.
     publisher_name, publisher_url
         Top-level ``publisher`` block.
     contact_email
@@ -66,10 +71,9 @@ class StaticFields:
 
     name: str
     license_url: str
-    license_name: str
     cite_as: str
-    creator_name: str
-    creator_url: str
+    keywords: tuple[str, ...]
+    creators: tuple[dict[str, object], ...]
     publisher_name: str
     publisher_url: str
     contact_email: str

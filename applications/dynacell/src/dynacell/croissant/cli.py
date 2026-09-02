@@ -159,6 +159,22 @@ def _do_validate(args: argparse.Namespace) -> None:
     print(f"Validated {args.path}")
 
 
+_CONTACT_EMAIL = "shalin.mehta@czbiohub.org"
+
+# Creator entries shared by every DynaCell release. The per-dataset factories
+# add the institution that acquired that subset's data.
+_BIOHUB_ORG: dict[str, object] = {
+    "@type": "sc:Organization",
+    "name": "Biohub San Francisco",
+    "url": "https://www.czbiohub.org",
+}
+_CORRESPONDING_AUTHOR: dict[str, object] = {
+    "@type": "sc:Person",
+    "name": "Shalin B. Mehta",
+    "email": _CONTACT_EMAIL,
+    "affiliation": {"@type": "sc:Organization", "name": "Biohub San Francisco"},
+}
+
 _DYNACELL_BIBTEX = (
     "@inproceedings{dynacell2026, "
     "title={{DynaCell}: an Evaluation Framework for Dynamic 3D "
@@ -217,13 +233,20 @@ def _a549_static_fields():
     return StaticFields(
         name="DynaCell — A549 (Mantis)",
         license_url="https://creativecommons.org/licenses/by/4.0/",
-        license_name="CC-BY-4.0",
         cite_as=_DYNACELL_BIBTEX,
-        creator_name="Biohub San Francisco",
-        creator_url="https://www.czbiohub.org",
+        keywords=("A549", "Mantis"),
+        creators=(
+            _BIOHUB_ORG,
+            {
+                "@type": "sc:Organization",
+                "name": "University of California San Francisco — Huang Lab",
+                "url": "https://huanglab.ucsf.edu",
+            },
+            _CORRESPONDING_AUTHOR,
+        ),
         publisher_name="AWS Open Data",
         publisher_url="https://registry.opendata.aws",
-        contact_email="shalin.mehta@czbiohub.org",
+        contact_email=_CONTACT_EMAIL,
         aws_bucket="dynacell",
         aws_prefix="v1",
         rai_data_collection=(
@@ -380,13 +403,24 @@ def _aics_hipsc_static_fields():
     return StaticFields(
         name="DynaCell — iPSC (WTC-11)",
         license_url="https://www.allencell.org/terms-of-use.html",
-        license_name="Allen Institute Terms of Use",
         cite_as=_DYNACELL_BIBTEX + "\n\n" + _VIANA_BIBTEX + "\n\n" + _AICS2018_BIBTEX,
-        creator_name="Biohub San Francisco",
-        creator_url="https://www.czbiohub.org",
+        keywords=("WTC-11", "iPSC"),
+        # The Allen Institute acquired this data; DynaCell reprocessed it. Allen
+        # must appear in `creator` -- that is the field aggregators read -- not
+        # only in prov:wasDerivedFrom. UCSF Huang Lab is deliberately absent: it
+        # contributed to the A549 acquisition, not this subset.
+        creators=(
+            _BIOHUB_ORG,
+            {
+                "@type": "sc:Organization",
+                "name": "Allen Institute for Cell Science",
+                "url": "https://www.allencell.org",
+            },
+            _CORRESPONDING_AUTHOR,
+        ),
         publisher_name="AWS Open Data",
         publisher_url="https://registry.opendata.aws",
-        contact_email="shalin.mehta@czbiohub.org",
+        contact_email=_CONTACT_EMAIL,
         aws_bucket="dynacell",
         aws_prefix="v1",
         rai_data_collection=(

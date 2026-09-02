@@ -276,6 +276,9 @@ def build_croissant_from_release(
         "isLiveDataset": False,
         "datePublished": "2026",
         "inLanguage": "en",
+        # Only modality terms are shared across releases. Cell line and platform
+        # come from StaticFields: this builder runs per dataset_prefix, so a
+        # hardcoded "A549" would keyword the Allen WTC-11 subset as A549.
         "keywords": [
             "virtual staining",
             "live-cell imaging",
@@ -283,32 +286,12 @@ def build_croissant_from_release(
             "fluorescence microscopy",
             "3D time-lapse",
             "benchmark",
-            "A549",
             "OME-Zarr",
+            *static.keywords,
             *sorted(organelles),
             *sorted(conditions),
         ],
-        "creator": [
-            {
-                "@type": "sc:Organization",
-                "name": "Biohub San Francisco",
-                "url": "https://www.czbiohub.org",
-            },
-            {
-                "@type": "sc:Organization",
-                "name": "University of California San Francisco — Huang Lab",
-                "url": "https://huanglab.ucsf.edu",
-            },
-            {
-                "@type": "sc:Person",
-                "name": "Shalin B. Mehta",
-                "email": static.contact_email,
-                "affiliation": {
-                    "@type": "sc:Organization",
-                    "name": "Biohub San Francisco",
-                },
-            },
-        ],
+        "creator": list(static.creators),
         "publisher": {
             "@type": "sc:Organization",
             "name": static.publisher_name,
