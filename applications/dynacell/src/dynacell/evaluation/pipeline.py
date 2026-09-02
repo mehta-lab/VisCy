@@ -1718,9 +1718,6 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
     """Save metrics to files."""
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    # Stamp the numeric stack that produced these rows, so a later run can tell
-    # whether the cache is comparable instead of assuming it is.
-    write_metrics_provenance(save_dir)
 
     for metrics, csv_name, npy_name, plot_dir in (
         (mask_metrics, config.save.mask_csv_filename, config.save.mask_metrics_filename, "mask_metrics"),
@@ -1736,6 +1733,12 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
         if not df.empty:
             plot_metrics(df, save_dir, plot_dir)
             print(f"Saved {plot_dir} plots to {save_dir / plot_dir}")
+
+    # Stamp the numeric stack that produced these rows LAST, so a later run can tell
+    # whether the cache is comparable instead of assuming it is. Stamping first meant a
+    # crash partway through the loop above left a fresh stamp certifying a previous
+    # run's rows -- the exact misattribution the sidecar exists to make detectable.
+    write_metrics_provenance(save_dir)
 
 
 #: Pixel columns that only a dual-scaling run writes. Their absence marks a pixel
