@@ -107,7 +107,7 @@ def test_rendered_sbatch_has_srun_at_expected_resolved_path(capsys, leaf_subpath
     rendered = capsys.readouterr().out
 
     srun_line = rendered.splitlines()[-1]
-    assert srun_line.startswith("srun uv run python -m dynacell fit --config")
+    assert srun_line.startswith("srun --cpu-bind=none uv run python -m dynacell fit --config")
     assert expected_resolved_prefix in srun_line
 
 
@@ -119,7 +119,7 @@ def test_resume_from_renders_ckpt_path(capsys, tmp_path):
     rc = sbj.submit([str(leaf), "--resume-from", str(ckpt), "--print-script"])
     assert rc == 0
     srun_line = capsys.readouterr().out.splitlines()[-1]
-    assert srun_line.startswith("srun uv run python -m dynacell fit --config")
+    assert srun_line.startswith("srun --cpu-bind=none uv run python -m dynacell fit --config")
     assert f"--ckpt_path={ckpt}" in srun_line
 
 
@@ -343,7 +343,7 @@ def test_repo_root_substituted_in_preflight_path(rendered_celldiff_sbatch):
 def test_preflight_failure_exits_before_main_srun(rendered_celldiff_sbatch):
     """``exit $SMOKE_RC`` appears ahead of the main dynacell srun line."""
     exit_idx = rendered_celldiff_sbatch.index("exit $SMOKE_RC")
-    main_srun_idx = rendered_celldiff_sbatch.index("srun uv run python -m dynacell")
+    main_srun_idx = rendered_celldiff_sbatch.index("srun --cpu-bind=none uv run python -m dynacell")
     assert exit_idx < main_srun_idx
 
 

@@ -455,11 +455,16 @@ def _render_serial_sbatch(
     head_env: dict,
     resolved_paths: list[Path],
 ) -> str:
-    """Render ``sbatch_template_batch.sbatch`` with N srun invocations in series."""
+    """Render ``sbatch_template_batch.sbatch`` with N srun invocations in series.
+
+    Each step carries ``--cpu-bind=none``; see ``sbatch_template.sbatch`` for the
+    fragmented-mask failure it avoids. These steps are single-rank predicts, so
+    no per-rank NUMA pinning is given up.
+    """
     invocations = "\n\n".join(
         (
             f"echo '[batch] step {i + 1}/{len(resolved_paths)}: {p.name}'\n"
-            f"srun uv run python -m dynacell predict --config {p}"
+            f"srun --cpu-bind=none uv run python -m dynacell predict --config {p}"
         )
         for i, p in enumerate(resolved_paths)
     )

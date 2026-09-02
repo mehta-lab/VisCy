@@ -75,7 +75,7 @@ def test_serial_mode_renders_one_sbatch_with_chained_sruns():
     out = buf.getvalue()
     # Three echo-step lines, three srun lines.
     assert out.count("[batch] step ") == 3
-    assert out.count("srun uv run python -m dynacell predict --config") == 3
+    assert out.count("srun --cpu-bind=none uv run python -m dynacell predict --config") == 3
     # No array directive, no CONFIGS array.
     assert "#SBATCH --array=" not in out
     assert "CONFIGS=(" not in out
