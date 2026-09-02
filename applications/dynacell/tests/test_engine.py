@@ -762,17 +762,53 @@ def test_dynacell_gan_modernized_smoke(tmp_path):
 
 
 def test_dynacell_gan_lazy_r1_step_counter():
-    """`_d_step_count` increments per D step, gates R1 correctly."""
-    model = _build_modernized_gan(r1_every=4)
-    # Counter starts at 0.
+    """Real training steps advance ``_d_step_count`` and fire R1 only on the gate.
+
+    The previous version incremented the counter in the test body and asserted
+    ``4 % 4 == 0`` -- engine.py:1458 never executed, so the test held whatever
+    the engine did. This drives four D steps through ``trainer.fit`` with
+    ``r1_every=4`` and checks the observable consequence: ``reg/r1`` is logged
+    exactly once, on the fourth step.
+    """
+    seed_everything(0)
+    model = _build_modernized_gan(r1_every=4, r1_gamma=10.0)
     assert model._d_step_count == 0
-    # Simulate four D steps by directly incrementing (the actual training
-    # path increments inside training_step; here we verify the gating math).
-    for _ in range(4):
-        model._d_step_count += 1
-    assert model._d_step_count == 4
-    # 4 % 4 == 0, so reg fires on this step.
-    assert model._d_step_count % model.r1_every == 0
+
+    r1_logs: list[float] = []
+    real_log = model.log
+
+    def _capture_log(name, value, *args, **kwargs):
+        if name == "reg/r1":
+            r1_logs.append(float(value.detach()) if isinstance(value, torch.Tensor) else float(value))
+        return real_log(name, value, *args, **kwargs)
+
+    model.log = _capture_log  # type: ignore[method-assign]
+    batch = _make_gan_batch()
+
+    class _BatchDataset(torch.utils.data.Dataset):
+        def __init__(self, n: int):
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"source": batch["source"][0], "target": batch["target"][0]}
+
+    # 4 samples at batch_size=1 -> exactly four D steps.
+    train_loader = torch.utils.data.DataLoader(_BatchDataset(4), batch_size=1)
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, train_dataloaders=train_loader)
+
+    assert model._d_step_count == 4, "the engine, not the test, must advance the counter"
+    assert len(r1_logs) == 1, f"r1_every=4 over 4 steps should fire once, fired {len(r1_logs)}x"
 
 
 def test_dynacell_gan_lsgan_gamma_zero_skips_r1(tmp_path):
@@ -1102,39 +1138,69 @@ def test_dynacell_gan_rpgan_smoke(tmp_path):
 
 
 def test_dynacell_gan_ema_update_math():
-    """One EMA update step produces lerp_(p, 1-decay) with the StyleGAN2 decay formula."""
+    """A real training step moves generator_ema by the StyleGAN2 lerp.
+
+    Drives ``trainer.fit`` rather than applying ``lerp_`` in the test body: the
+    previous version reimplemented the update and asserted a ``torch.lerp_``
+    identity, so deleting the engine's EMA block left it green. The closed form
+    below is derived independently of the engine -- ``decay * ema_before +
+    (1 - decay) * gen_after`` -- and the batch size is read off the loader, since
+    the engine derives ``bs`` from ``source.shape[0]``.
+    """
     seed_everything(42)
-    model = _build_modernized_gan(ema_kimg=1.0)  # short half-life -> larger move
-    # Snapshot EMA before any update.
+    # decay = 0.5 ** (bs / (ema_kimg * 1000)); with bs=2 this gives decay=0.5,
+    # so one step moves the shadow halfway. At the realistic ema_kimg=1.0 the
+    # step moves it by 0.0014 of the generator delta, which is under any sane
+    # atol -- the assertion would hold just as well if the engine never updated.
+    model = _build_modernized_gan(ema_kimg=0.002)
     ema_before = {n: p.detach().clone() for n, p in model.generator_ema.named_parameters()}
     gen_before = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
-    # All ema params equal generator params at init.
     for n, p in ema_before.items():
-        assert torch.equal(p, gen_before[n])
+        assert torch.equal(p, gen_before[n]), f"{n} should start tied to the generator"
 
-    # Synthetic generator update: perturb generator params, then apply the
-    # EMA update by hand using the same formula the engine uses.
-    with torch.no_grad():
-        for p in model.generator.parameters():
-            p.add_(0.1)
+    batch = _make_gan_batch()
+
+    class _BatchDataset(torch.utils.data.Dataset):
+        def __init__(self, n: int):
+            self.n = n
+
+        def __len__(self) -> int:
+            return self.n
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"source": batch["source"][0], "target": batch["target"][0]}
+
+    bs = 2
+    train_loader = torch.utils.data.DataLoader(_BatchDataset(bs), batch_size=bs)
+    trainer = Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(model, train_dataloaders=train_loader)
+
     gen_after = {n: p.detach().clone() for n, p in model.generator.named_parameters()}
+    moved = [n for n, p in gen_after.items() if not torch.equal(p, gen_before[n])]
+    assert moved, "the generator never moved, so the EMA assertion below would be vacuous"
 
-    bs = 4  # mirrors the test config
     decay = 0.5 ** (bs / max(model.ema_kimg * 1000.0, 1e-8))
-    # Apply the EXACT lerp_ from the engine (lerp_(target, 1-decay) means
-    # self = self + (1-decay)*(target - self) = decay*self + (1-decay)*target).
-    with torch.no_grad():
-        for p_ema, p in zip(
-            model.generator_ema.parameters(),
-            model.generator.parameters(),
-            strict=True,
-        ):
-            p_ema.lerp_(p.detach(), 1.0 - decay)
+    assert decay == pytest.approx(0.5), "test relies on a half-way step to stay sensitive"
 
-    # Closed-form expectation: ema = decay * ema_before + (1-decay) * gen_after.
-    for n, p_ema in model.generator_ema.named_parameters():
+    ema_after = dict(model.generator_ema.named_parameters())
+    # Blunt liveness check first: without it the closed form below can be
+    # satisfied by an EMA that never moved, whenever (1-decay) * delta is small.
+    assert any(not torch.equal(ema_after[n].detach(), ema_before[n]) for n in moved), (
+        "generator_ema never moved -- the engine's EMA update did not run"
+    )
+    for n, p_ema in ema_after.items():
         expected = decay * ema_before[n] + (1.0 - decay) * gen_after[n]
         assert torch.allclose(p_ema, expected, atol=1e-6), f"EMA update math mismatch on {n}"
+
+    # The shadow must actually be a shadow: distinct from both endpoints.
+    assert any(not torch.equal(ema_after[n].detach(), gen_after[n]) for n in moved)
 
 
 def test_dynacell_gan_use_ema_at_predict_false():
