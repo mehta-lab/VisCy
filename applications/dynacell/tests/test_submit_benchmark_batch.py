@@ -17,13 +17,22 @@ import submit_benchmark_batch as sbb  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
 
-# Three same-bucket A549-test predict leaves (CellDiff r2, ER, mock/denv/zikv).
+# Three same-bucket A549-test predict leaves (rand-init VSCyto3D, ER, mock/denv/zikv).
+#
+# These must genuinely share one ``launcher.run_root``, which is what serial and
+# array mode batch on. The CellDiff leaves this fixture used to name no longer
+# qualify: the canonical artifact-path migration (569bf51b) re-tokenized their
+# run_roots to per-condition ``.../a549/a549__{cond}``, so all four tests below
+# died on the shared-run_root guard rather than on anything they assert.
 ER_A549_LEAVES = [
-    BENCHMARKS / f"er/celldiff/a549_mantis/predict__a549_mantis_{cond}.yml" for cond in ("denv", "mock", "zikv")
+    BENCHMARKS / f"er/fcmae_vscyto3d_pretrained/_no_train_randinit/predict__a549_mantis_{cond}.yml"
+    for cond in ("denv", "mock", "zikv")
 ]
 
 # 4 ER leaves spanning two run_roots (3 a549-test + 1 ipsc-test).
-ER_MIXED_RUN_ROOT_LEAVES = ER_A549_LEAVES + [BENCHMARKS / "er/celldiff/a549_mantis/predict__ipsc_confocal.yml"]
+ER_MIXED_RUN_ROOT_LEAVES = ER_A549_LEAVES + [
+    BENCHMARKS / "er/fcmae_vscyto3d_pretrained/_no_train_randinit/predict__ipsc_confocal.yml"
+]
 
 
 # ---------------------------------------------------------------------------
