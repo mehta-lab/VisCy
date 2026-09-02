@@ -152,14 +152,26 @@ jobs:
         # segmenter + feature-extractor model loads — but pipeline import still
         # needs the eval stack). test_evaluation_grouped drives the
         # multi-condition driver against the same cache-only fixture.
+        #
+        # test_submit_benchmark_batch covers the OTHER two srun emitters (array
+        # + chained-serial), which drifted out of sync with the single-job
+        # template because only the latter was under test. test_distribution,
+        # test_croissant and test_main_cli_routing cover the release path: the
+        # OZX packer / MANIFEST ledger, the per-dataset Croissant attribution,
+        # and the entry-point wiring that kept both of those CLIs reachable.
+        # All four are CPU-only and need no extra deps.
         run: |
           uv run --frozen pytest \
             tests/test_benchmark_config_composition.py \
             tests/test_submit_benchmark_job.py \
+            tests/test_submit_benchmark_batch.py \
             tests/test_runtime.py \
             tests/test_evaluation_pipeline_parallel.py \
             tests/test_evaluation_pipeline_parallel_cpu.py \
             tests/test_evaluation_grouped.py \
+            tests/test_distribution.py \
+            tests/test_croissant.py \
+            tests/test_main_cli_routing.py \
             -v
         working-directory: applications/dynacell
 
