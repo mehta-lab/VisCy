@@ -341,10 +341,18 @@ def _compute_ssim_and_cs_bf16(
     sigma_xy_bound = _safe_sqrt(sigma_x * sigma_y)
     sigma_xy = torch.clamp(mu_xy - mu_x * mu_y, min=-sigma_xy_bound, max=sigma_xy_bound)
 
-    # ``_SSIM_DENOM_EPS`` floors the denominators so a zero data_range (→ c1=c2=0) on a
-    # flat window cannot yield 0/0; negligible vs the c1/c2 stability constants otherwise.
-    contrast_sensitivity = (2 * sigma_xy + c2) / (sigma_x + sigma_y + c2 + _SSIM_DENOM_EPS)
-    ssim_full = ((2 * mu_x * mu_y + c1) / (mu_x * mu_x + mu_y * mu_y + c1 + _SSIM_DENOM_EPS)) * contrast_sensitivity
+    # ``_SSIM_DENOM_EPS`` floors the stability constants so a zero data_range (→ c1=c2=0)
+    # on a flat window cannot yield 0/0. It goes in the NUMERATOR as well as the
+    # denominator -- exactly c1 -> c1 + eps, c2 -> c2 + eps -- because SSIM(x, x) == 1
+    # only holds when the same constant appears in both. Flooring the denominator alone
+    # gave SSIM(y, y) = 0.082 at data_range 1e-3 and 0.0 at data_range 0, and
+    # ``ms_ssim_25d`` recomputes data_range from a downsampled target per scale, so an
+    # all-zero crop scored loss 1.0 for a numerically perfect prediction. Negligible vs
+    # c1/c2 otherwise: max 2.2e-4 relative on ordinary inputs.
+    contrast_sensitivity = (2 * sigma_xy + c2 + _SSIM_DENOM_EPS) / (sigma_x + sigma_y + c2 + _SSIM_DENOM_EPS)
+    ssim_full = (
+        (2 * mu_x * mu_y + c1 + _SSIM_DENOM_EPS) / (mu_x * mu_x + mu_y * mu_y + c1 + _SSIM_DENOM_EPS)
+    ) * contrast_sensitivity
 
     return ssim_full, contrast_sensitivity
 

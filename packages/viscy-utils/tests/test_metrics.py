@@ -207,6 +207,29 @@ def test_ssim_helper_finite_on_zero_data_range():
 
 
 @_skip_no_bf16
+def test_ssim_helper_identity_holds_at_small_data_range():
+    """SSIM(y, y) == 1 for every ``data_range``, including 0.
+
+    ``_SSIM_DENOM_EPS`` must floor c1/c2 SYMMETRICALLY -- numerator and denominator.
+    Flooring only the denominator keeps the helper finite (the sibling test above)
+    but breaks the identity: measured SSIM(y, y) = 0.082158 at data_range 1e-3 and
+    exactly 0.0 at data_range 0. Since ``ms_ssim_25d`` recomputes
+    ``data_range = target.max()`` per scale from a downsampled target, an all-zero
+    or masked-out crop then scored loss 1.0 for a numerically perfect prediction.
+    """
+    shape = (2, 1, 1, 64, 64)
+    for value in (0.0, 1e-4, 1e-3, 3e-3, 1e-2, 1.0):
+        y = torch.full(shape, value, device="cuda")
+        ssim_full, cs = _compute_ssim_and_cs_bf16(y, y, kernel_size=(1, 11, 11), data_range=y.max())
+        assert torch.isfinite(ssim_full).all()
+        assert abs(ssim_full.mean().item() - 1.0) < 1e-6, f"SSIM(y, y) != 1 at data_range={value}"
+        assert abs(cs.mean().item() - 1.0) < 1e-6, f"cs(y, y) != 1 at data_range={value}"
+
+    zeros = torch.zeros(1, 1, 5, 256, 256, device="cuda")
+    assert abs(metrics_module.ms_ssim_25d(zeros, zeros, clamp=True).item() - 1.0) < 1e-6
+
+
+@_skip_no_bf16
 def test_ssim_helper_flat_window_contrast_is_unity():
     """Regression: near-flat windows over large-magnitude inputs keep cs≈1.
 
