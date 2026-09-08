@@ -1,0 +1,62 @@
+# FNet3DBigPatchBF predict: nucleus trained on ipsc_confocal_brightfield, BRIGHTFIELD input,
+# predicting against ipsc_confocal.
+#
+# Arm A of the FNet3D patch-vs-augmentation ablation: the larger 384^2 training
+# patch with FNet's flip-only augmentations, now on brightfield input.
+#
+# Brightfield-input arm of nucleus/fnet3d_bigpatch/ipsc_confocal/predict__*.yml. Every
+# field is copied from that phase baseline; the only differences are the input
+# channel (dataset_ref.source_channel + the normalization key), the checkpoint,
+# and the on-disk identity (train_set token `ipsc__bf`).
+#
+# Checkpoint is the loss/validate-monitored best, 0.6960 at epoch 59 of 0-76,
+# read from the monitored ModelCheckpoint callback in last.ckpt -- that file also
+# carries an unmonitored `latest-*` callback whose best_model_path is just the
+# final step (epoch 76). The fit ran to `max_steps=200000` and val loss drifts up
+# after the minimum, so `last.ckpt` is the wrong pin here as on the phase arm.
+# Not directly comparable to the phase baseline's 0.788 (epoch 43): that
+# run's checkpoint writes halted hours before it ended, so its retained best is a
+# floor, not its true minimum.
+
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal_brightfield
+  predict_set: ipsc_confocal
+  model_name: fnet3d_bigpatch
+  experiment_id: nucleus__ipsc_confocal_brightfield__fnet3d_bigpatch__ipsc_confocal
+  dataset_ref:
+    source_channel: Brightfield
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_bigpatch/checkpoints/epoch=59-step=156000-loss=0.696.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/ipsc/prediction.zarr
+
+launcher:
+  job_name: FNet3DBigPatchBF_PRED_NUCL
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/ipsc
