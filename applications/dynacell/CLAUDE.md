@@ -200,3 +200,28 @@ mutually exclusive shapes — pick by parallelism, not familiarity:
 For local foreground runs, `tools/predict_local.sh --parallel N` backgrounds on
 the current host's GPU (2-up confirmed on the A40 interactive node) — a different
 path from the sbatch helper's `--parallel`.
+
+## Repository boundary: paper artifacts do not belong here
+
+**This repo owns data packaging, model training and evaluation. Every paper table
+and figure is produced in the dynacell repo** (`/hpc/mydata/alex.kalinin/dynacell`),
+which reads the evaluation outputs this repo writes.
+
+The split had blurred in two directions, both since corrected:
+
+- `VisCy/.tmp/` accumulated 58 untracked scripts, 34 of which wrote an artifact. One
+  of them, `segcompare_nucleus.py`, filled the mask cache behind a **live** paper
+  figure, so the manuscript depended on an untracked scratch directory. It has been
+  copied to `dynacell/paper/scripts/` with its cache under
+  `$DATA_ROOT/segcompare`; the originals remain in `.tmp/`, which is now purely
+  exploratory. `.tmp/` is **not gitignored** — never stage it.
+- `src/dynacell/reporting/` and `src/dynacell/evaluation/spectral_pcc/plot_*.py`
+  stay here and are correct as they are: `reporting/` is a *library* the dynacell
+  generators import, and the `spectral_pcc` plots are metric-validation
+  diagnostics, not paper figures.
+
+Before adding a script that emits a `.tex`, a `.pdf`, or a table, ask whether it is
+producing a paper artifact. If it is, it belongs in dynacell. The generator index
+lives at `dynacell/paper/scripts/CLAUDE.md`, `dynacell/paper/tables/CLAUDE.md` and
+`dynacell/paper/figures/CLAUDE.md`, with retired tooling and the full `.tmp/`
+classification in `dynacell/paper/archive/README.md`.
