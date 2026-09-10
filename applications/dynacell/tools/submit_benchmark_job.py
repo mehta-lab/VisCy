@@ -418,7 +418,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "the markers record the checkpoint's content hash and depth settings, so a store "
         "predicted with other weights or settings is refused rather than mixed, and a store "
         "written before markers existed cannot be verified and is refused too. "
-        "unmarked legacy FOVs are recomputed. "
         "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
     )
     ap.add_argument(
