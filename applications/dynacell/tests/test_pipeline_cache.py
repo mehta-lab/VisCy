@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -965,6 +966,99 @@ def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> Non
     assert manifest["artifacts"]["cp_features"]["source"] == "prediction"
 
 
+@pytest.mark.parametrize("side", ["gt", "pred"])
+def test_fov_cp_features_excluded_walk_seeds_identity_on_fresh_cache(tmp_path: Path, monkeypatch, side) -> None:
+    """A first-ever CP write on an excluded walk records the identity, so later runs hit.
+
+    Left bare, the leaf is ``{positions: [...]}``: every later init sees an
+    all-keys mismatch (perpetual recompute of the walked FOVs) and
+    ``require_complete_cache=true`` raises StaleCacheError on a cache that is
+    in fact complete for the FOVs it claims.
+    """
+
+    def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
+        return np.full((2, 3), float(image.sum()), dtype=np.float32)
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
+    overrides = {f"io.{side}_cache_dir": str(tmp_path), "io.exclude_fov_names": ["A/1/1"]}
+    ctx = init_cache_context(_make_config(**overrides), side=side)
+    assert ctx.excluded_walk
+    image = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
+    cell_seg = np.ones_like(image, dtype=np.int32)
+    results = fov_cp_features(ctx, "A/1/0", image, cell_seg)
+    flush_manifest(ctx)
+
+    entry = load_manifest(cache_paths(tmp_path))["artifacts"]["cp_features"]
+    assert entry["positions"] == ["A/1/0"]
+    assert entry["cp_norm_p_lo"] == 1.0  # identity stamped, not a positions-only leaf
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ctx2 = init_cache_context(_make_config(**overrides), side=side)
+    assert ctx2.force[f"{side}_cp"] is False
+    assert not [str(w.message) for w in caught if "artifact param mismatch" in str(w.message)]
+
+    def fail(*args, **kwargs):
+        raise AssertionError("cp_regionprops must not run on a cache hit")
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fail)
+    strict = init_cache_context(_make_config(**overrides, **{"io.require_complete_cache": True}), side=side)
+    for t, feats in enumerate(fov_cp_features(strict, "A/1/0", image, cell_seg)):
+        np.testing.assert_array_equal(feats, results[t])
+
+
+@pytest.mark.parametrize("side", ["gt", "pred"])
+def test_fov_cp_features_excluded_refresh_does_not_certify_skipped_fovs(tmp_path: Path, monkeypatch, side) -> None:
+    """An excluded-walk CP recompute must leave the manifest identity on the old recipe.
+
+    Stamping the new ``p_lo`` would certify the skipped FOV's stale features:
+    the next full walk would compare new to new, skip invalidation, and read
+    them back as a hit. Keeping the old stamp costs one redundant rebuild of
+    the walked FOVs instead, and the full walk then self-heals the manifest.
+    """
+
+    def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del image, cell_seg, spacing, glcm_cfg, use_gpu
+        return np.full((2, 3), float(norm["p_lo"]), dtype=np.float32)
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
+    image = np.zeros((2, 1, 2, 2), dtype=np.float32)
+    cell_seg = np.ones_like(image, dtype=np.int32)
+    paths = cache_paths(tmp_path)
+
+    def config(p_lo: float, **extra: Any):
+        return _make_config(**{f"io.{side}_cache_dir": str(tmp_path), "feature_metrics.cp.norm.p_lo": p_lo, **extra})
+
+    def recipe_on_disk(pos_name: str) -> float:
+        return float(read_features(paths, "cp", pos_name, 0)[0, 0])
+
+    ctx1 = init_cache_context(config(1.0), side=side)
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_cp_features(ctx1, pos_name, image, cell_seg)
+    flush_manifest(ctx1)
+    assert load_manifest(paths)["artifacts"]["cp_features"]["cp_norm_p_lo"] == 1.0
+
+    with pytest.warns(UserWarning, match="cp_norm_p_lo"):
+        ctx2 = init_cache_context(config(2.0, **{"io.exclude_fov_names": ["A/1/1"]}), side=side)
+    assert ctx2.force[f"{side}_cp"] is True
+    fov_cp_features(ctx2, "A/1/0", image, cell_seg)
+    flush_manifest(ctx2)
+    entry = load_manifest(paths)["artifacts"]["cp_features"]
+    assert entry["cp_norm_p_lo"] == 1.0  # the skipped FOV is still on the old recipe
+    assert sorted(entry["positions"]) == ["A/1/0", "A/1/1"]
+    assert (recipe_on_disk("A/1/0"), recipe_on_disk("A/1/1")) == (2.0, 1.0)
+
+    with pytest.warns(UserWarning, match="cp_norm_p_lo"):
+        ctx3 = init_cache_context(config(2.0), side=side)
+    assert ctx3.force[f"{side}_cp"] is True
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_cp_features(ctx3, pos_name, image, cell_seg)
+    flush_manifest(ctx3)
+    assert load_manifest(paths)["artifacts"]["cp_features"]["cp_norm_p_lo"] == 2.0
+    assert (recipe_on_disk("A/1/0"), recipe_on_disk("A/1/1")) == (2.0, 2.0)
+
+
 def _write_tiny_hcs_plate(
     path: Path,
     positions: list[tuple[str, str, str]],
@@ -1567,6 +1661,44 @@ def test_instance_cache_identity_invalidation(tmp_path: Path, monkeypatch) -> No
     changed = dict(_CELLPOSE_PARAMS, min_obj_size=99)
     ctx2 = init_cache_context(_nucleus_instance_config(tmp_path, **{"segmentation.cellpose": changed}), side="gt")
     assert ctx2.force["gt_instances"] is True
+
+
+def test_fov_nucleus_instances_excluded_refresh_does_not_certify_skipped_fovs(tmp_path: Path, monkeypatch) -> None:
+    """An excluded-walk instance recompute must leave the manifest identity on the old params.
+
+    Same contract as CP features: the entry is a store-wide claim, so the
+    skipped FOV's stale labels must keep tripping the mismatch on the next
+    full walk instead of reading back as a hit.
+    """
+    from dynacell.evaluation import segmentation_cellpose
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    nuc_stack = np.zeros((2, 16, 16), dtype=np.float32)
+    paths = cache_paths(tmp_path / "gt")
+
+    def entry() -> dict[str, Any]:
+        return load_manifest(paths)["artifacts"]["instance_masks"]["nucleus__cellpose"]
+
+    ctx1 = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_nucleus_instances(ctx1, pos_name, nuc_stack, _FakeSegModel())
+    flush_manifest(ctx1)
+    assert entry()["slice_selection"] == "frac"
+
+    changed = {"segmentation.slice_selection": "sharpest"}
+    with pytest.warns(UserWarning, match="slice_selection"):
+        ctx2 = init_cache_context(
+            _nucleus_instance_config(tmp_path, **changed, **{"io.exclude_fov_names": ["A/1/1"]}), side="gt"
+        )
+    assert ctx2.force["gt_instances"] is True
+    fov_nucleus_instances(ctx2, "A/1/0", nuc_stack, _FakeSegModel())
+    flush_manifest(ctx2)
+    assert entry()["slice_selection"] == "frac"  # the skipped FOV is still on the old params
+    assert sorted(entry()["positions"]) == ["A/1/0", "A/1/1"]
+
+    with pytest.warns(UserWarning, match="slice_selection"):
+        ctx3 = init_cache_context(_nucleus_instance_config(tmp_path, **changed), side="gt")
+    assert ctx3.force["gt_instances"] is True
 
 
 def test_whole_cell_cache_invalidates_on_nuclei_gt_path(tmp_path: Path, monkeypatch) -> None:

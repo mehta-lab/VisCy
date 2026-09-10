@@ -964,7 +964,7 @@ def _fov_instances(
         write_instance_mask(ctx.paths, ctx.target_name, pos_name, labels, backend=ctx.backend)
 
     def _record_write() -> None:
-        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry)
+        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
 
@@ -1246,7 +1246,7 @@ def fov_cp_features(
             "built_at": built_at_now(),
             **_cp_identity(ctx),
         }
-        _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
+        _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, ["cp_features"], pos_name)
         ctx.mark_manifest_dirty()
 
