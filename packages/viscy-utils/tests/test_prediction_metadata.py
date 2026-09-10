@@ -3,6 +3,8 @@
 import hashlib
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -35,8 +37,11 @@ def test_checkpoint_sha256_12_writes_and_reuses_sidecar(tmp_path: Path, monkeypa
     recorded = json.loads(sidecar.read_text())
     assert recorded["sha256"][:12] == h1
     assert len(recorded["sha256"]) == 64
-    assert recorded["size"] == ckpt.stat().st_size
-    assert recorded["mtime_ns"] == ckpt.stat().st_mtime_ns
+    stat = ckpt.stat()
+    assert recorded["size"] == stat.st_size
+    assert recorded["mtime_ns"] == stat.st_mtime_ns
+    assert recorded["ctime_ns"] == stat.st_ctime_ns
+    assert recorded["ino"] == stat.st_ino
 
     calls = {"n": 0}
     real_sha256 = hashlib.sha256
@@ -82,6 +87,26 @@ def test_checkpoint_sha256_12_recomputes_after_replacement_with_older_mtime(tmp_
     older = sidecar.stat().st_mtime - 3600
     os.utime(ckpt, (older, older))
 
+    h2 = checkpoint_sha256_12(ckpt)
+    assert h2 == hashlib.sha256(b"weights-v2").hexdigest()[:12]
+    assert h2 != h1
+
+
+def test_checkpoint_sha256_12_recomputes_after_replacement_preserving_size_and_mtime(tmp_path: Path) -> None:
+    """A same-size copy that carries the old mtime along still gets a new ctime, so the sidecar is dropped."""
+    ckpt = tmp_path / "last.ckpt"
+    ckpt.write_bytes(b"weights-v1")
+    h1 = checkpoint_sha256_12(ckpt)
+    before = ckpt.stat()
+    replacement = tmp_path / "replacement.ckpt"
+    replacement.write_bytes(b"weights-v2")
+    os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
+    time.sleep(0.05)  # ctime advances per kernel tick, not per write
+
+    shutil.copy2(replacement, ckpt)
+
+    assert ckpt.stat().st_mtime_ns == before.st_mtime_ns
+    assert ckpt.stat().st_size == before.st_size
     h2 = checkpoint_sha256_12(ckpt)
     assert h2 == hashlib.sha256(b"weights-v2").hexdigest()[:12]
     assert h2 != h1

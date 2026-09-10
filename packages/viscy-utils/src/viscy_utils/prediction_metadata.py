@@ -75,13 +75,20 @@ def outruns(array: ImageArray, source_shape: list[int]) -> bool:
     return array.frames > source_shape[0] or array.slices > source_shape[1]
 
 
-def checkpoint_signature(path: str | os.PathLike) -> tuple[int, int]:
-    """Return the size and ``st_mtime_ns`` of the file at *path*.
+_SIGNATURE_FIELDS = ("size", "mtime_ns", "ctime_ns", "ino")
 
-    A replacement changes at least one of them even when copied with a
-    preserved or older mtime, so equal signatures mean the same bytes for
-    every purpose here: trusting a hash sidecar, or checking that a checkpoint
-    did not change between loading its weights and recording its hash.
+
+def checkpoint_signature(path: str | os.PathLike) -> tuple[int, int, int, int]:
+    """Return the size, ``st_mtime_ns``, ``st_ctime_ns`` and inode of the file at *path*.
+
+    Overwriting a file or replacing it by rename changes at least one of these:
+    a copy can preserve size and mtime, but the kernel sets ctime itself and a
+    rename swaps the inode. Equal signatures therefore mean the same bytes for
+    the hash memo in :func:`checkpoint_sha256_12` and for the writer's check
+    that a checkpoint did not change between loading its weights and hashing
+    it. The one blind spot is a same-size, mtime-preserving overwrite within
+    the same clock tick as the previous change; identity-critical callers hash
+    the bytes instead (:func:`prediction_run`).
 
     Parameters
     ----------
@@ -91,10 +98,10 @@ def checkpoint_signature(path: str | os.PathLike) -> tuple[int, int]:
     Returns
     -------
     tuple of int
-        ``(size, st_mtime_ns)``.
+        ``(size, st_mtime_ns, st_ctime_ns, st_ino)``.
     """
     stat = Path(path).stat()
-    return stat.st_size, stat.st_mtime_ns
+    return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino
 
 
 def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True) -> str:
@@ -102,13 +109,13 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True)
 
     On repeated calls for the same checkpoint, reads the digest from a
     ``<path>.sha256`` sidecar file, avoiding a multi-GB re-read. The sidecar
-    records the size and ``st_mtime_ns`` of the file it hashed and is only
-    trusted when both still match exactly: a checkpoint replaced in place
-    changes at least one of them even when it was copied with a preserved or
-    older mtime, so the digest never certifies stale weights (a sidecar that
-    is merely newer than the checkpoint proves nothing). Writes the sidecar
-    after a fresh hash; silently tolerates read-only parent directories and
-    NFS flakes by falling back to recompute.
+    records the :func:`checkpoint_signature` of the file it hashed and is only
+    trusted when every field still matches exactly: a checkpoint overwritten
+    or replaced changes at least one of them even when it was copied with a
+    preserved or older mtime, so the digest never certifies stale weights (a
+    sidecar that is merely newer than the checkpoint proves nothing). Writes
+    the sidecar after a fresh hash; silently tolerates read-only parent
+    directories and NFS flakes by falling back to recompute.
 
     Parameters
     ----------
@@ -126,13 +133,12 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True)
     """
     ckpt = Path(path)
     sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
-    size, mtime_ns = checkpoint_signature(ckpt)
+    signature = dict(zip(_SIGNATURE_FIELDS, checkpoint_signature(ckpt), strict=True))
     try:
         recorded = json.loads(sidecar.read_text())
         if (
             isinstance(recorded, dict)
-            and recorded.get("size") == size
-            and recorded.get("mtime_ns") == mtime_ns
+            and all(recorded.get(field) == value for field, value in signature.items())
             and isinstance(recorded.get("sha256"), str)
             and len(recorded["sha256"]) == 64
         ):
@@ -148,7 +154,7 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True)
         return digest[:12]
     try:
         tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
-        tmp.write_text(json.dumps({"sha256": digest, "size": size, "mtime_ns": mtime_ns}) + "\n")
+        tmp.write_text(json.dumps({"sha256": digest, **signature}) + "\n")
         tmp.replace(sidecar)
     except OSError:
         pass
