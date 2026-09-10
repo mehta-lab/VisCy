@@ -145,9 +145,10 @@ def _completed_prediction_fovs(
 
     Every prediction channel must have a completion marker written after all
     of the FOV's (T, Z-window) writes succeed. The marker must match the input
-    and output TZYX shapes. Unmarked legacy outputs are recomputed because
-    array dimensions grow before all windows are written. Metadata-only:
-    reads completion markers and shapes, never voxel data.
+    and output TZYX shapes, and output T must equal input T. Unmarked legacy
+    outputs are recomputed because array dimensions grow before all windows
+    are written. Metadata-only: reads completion markers and shapes, never
+    voxel data.
 
     Parameters
     ----------
@@ -180,6 +181,8 @@ def _completed_prediction_fovs(
                 continue
             markers = pos.zattrs.get("viscy_prediction_complete", {})
             output_shape = [pos["0"].shape[i] for i in (0, 2, 3, 4)]
+            if output_shape[0] != input_shapes[name][0]:
+                continue
             if all(
                 markers.get(ch) == {"source_shape": input_shapes[name], "output_shape": output_shape}
                 for ch in prediction_channels

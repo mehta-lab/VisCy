@@ -664,6 +664,44 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
     assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
 
 
+def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_path):
+    """A complete T=2 overwrite cannot certify a T=3 array's stale final frame."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 3})
+    with open_ome_zarr(out, mode="r+") as plate:
+        plate["0/0/fov0000/0"][:] = 999
+    data = HCSDataModule(
+        data_path=str(inp),
+        source_channel=["Phase3D"],
+        target_channel=["Structure"],
+        z_window_size=1,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+    )
+    Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_progress_bar=False,
+        callbacks=[HCSPredictionWriter(str(out), overwrite=True)],
+    ).predict(_ConstantPrediction(), datamodule=data, return_predictions=False)
+
+    with open_ome_zarr(out, mode="r") as plate:
+        image = plate["0/0/fov0000/0"]
+        assert image.shape[0] == 3
+        np.testing.assert_array_equal(image[:2], 1)
+        np.testing.assert_array_equal(image[2], 999)
+        assert plate["0/0/fov0000"].zattrs["viscy_prediction_complete"]["Structure_prediction"] == {
+            "source_shape": [2, 4, 8, 8],
+            "output_shape": [3, 4, 8, 8],
+        }
+    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+
+
 def test_completed_prediction_fovs_no_store(tmp_path):
     """A missing output store yields no completed FOVs but the correct input total."""
     pytest.importorskip("iohub")
