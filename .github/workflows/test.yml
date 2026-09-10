@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, modular-viscy-staging]
   pull_request:
-    branches: [main, modular-viscy-staging]
+    branches: [main, modular-viscy-staging, dynacell-models]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -119,7 +119,7 @@ jobs:
         working-directory: applications/${{ matrix.application }}
 
   test-dynacell-configs:
-    name: Test dynacell benchmark configs (Python 3.13, ubuntu-latest)
+    name: Test dynacell configs and regressions (Python 3.13, ubuntu-latest)
     runs-on: ubuntu-latest
 
     steps:
@@ -142,7 +142,7 @@ jobs:
         run: uv sync --frozen --extra eval --group test
         working-directory: applications/dynacell
 
-      - name: Run benchmark-schema + submit-tool + eval-runtime tests
+      - name: Run benchmark configs and pipeline regressions
         # test_benchmark_config_composition + test_submit_benchmark_job cover
         # config composition + the launcher. test_runtime + the two
         # test_evaluation_pipeline_parallel* suites cover the runtime module,
@@ -172,6 +172,11 @@ jobs:
             tests/test_distribution.py \
             tests/test_croissant.py \
             tests/test_main_cli_routing.py \
+            tests/test_engine.py \
+            tests/test_pipeline_cache.py \
+            tools/watch_stalled_jobs_test.py \
+            ../../packages/viscy-utils/tests/test_prediction_writer.py \
+            ../../packages/viscy-utils/src/viscy_utils/callbacks/monitor_health_test.py \
             -v
         working-directory: applications/dynacell
 
