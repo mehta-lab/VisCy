@@ -174,6 +174,52 @@ def _predict_ones(source, output, *, checkpoint_path=None, exclude=None, overwri
     ).predict(_OnesModule(), datamodule=data_module, return_predictions=False)
 
 
+def test_appending_a_channel_keeps_existing_predictions(tmp_path):
+    """A store holding another model's channel gains ours; its voxels and marker are untouched."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0", "0/0/1"])
+    other_run = prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=None)
+    with open_ome_zarr(output, layout="hcs", mode="w-", channel_names=["Other_prediction"]) as plate:
+        for fov in ("0/0/0", "0/0/1"):
+            position = plate.create_position(*fov.split("/"))
+            position.create_zeros("0", (1, 1, 4, 8, 8), dtype=np.float32)[:] = 7
+            mark_complete(position, ["Other_prediction"], completion_marker([1, 4, 8, 8], other_run))
+
+    _predict_ones(source, output)
+
+    with open_ome_zarr(output, mode="r") as plate:
+        assert plate.channel_names == ["Other_prediction", "Nuclei_prediction"]
+        for fov in ("0/0/0", "0/0/1"):
+            position = plate[fov]
+            assert position.channel_names == ["Other_prediction", "Nuclei_prediction"]
+            np.testing.assert_array_equal(position["0"][:, 0], 7)
+            np.testing.assert_array_equal(position["0"][:, 1], 1)
+            marker = position.zattrs[PREDICTION_COMPLETE_KEY]
+            assert marker["Other_prediction"] == completion_marker([1, 4, 8, 8], other_run)
+            assert "Nuclei_prediction" in marker
+
+
+def test_writer_refuses_positions_that_would_disagree_on_channel_order(tmp_path):
+    """Channel indices are plate-wide, so positions must end up with one channel order; check before writing."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0", "0/0/1"])
+    with open_ome_zarr(output, layout="hcs", mode="w-", channel_names=["Other_prediction"]) as plate:
+        for fov in ("0/0/0", "0/0/1"):
+            plate.create_position(*fov.split("/")).create_zeros("0", (1, 1, 4, 8, 8), dtype=np.float32)
+    # Separate handles: positions created in one session share one channel list in memory.
+    for fov, channel in (("0/0/0", "Nuclei_prediction"), ("0/0/1", "Third")):
+        with open_ome_zarr(output, mode="r+") as plate:
+            plate[fov].append_channel(channel, resize_arrays=True)
+
+    with pytest.raises(ValueError, match="channel order"):
+        _predict_ones(source, output, overwrite=True)
+
+    with open_ome_zarr(output, mode="r") as plate:
+        assert plate["0/0/1"].channel_names == ["Other_prediction", "Third"]
+
+
 def test_interrupted_fov_carries_an_empty_marker(tmp_path):
     """A FOV the writer created but never finished is marked as such, unlike pre-marker outputs."""
     source = tmp_path / "source.zarr"

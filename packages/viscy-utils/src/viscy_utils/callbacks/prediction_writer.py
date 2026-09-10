@@ -247,13 +247,16 @@ class HCSPredictionWriter(BasePredictionWriter):
             else:
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
                 # Validate all positions before mutating any.
-                needs_append: list[tuple[Position, list[str]]] = []
-                overwritten: list[Position] = []
+                positions = dict(self.plate.positions())
+                needs_append: list[tuple[str, list[str]]] = []
+                overwritten: list[str] = []
                 mixed: list[str] = []
                 oversized: list[str] = []
-                for name, pos in self.plate.positions():
+                channel_orders: set[tuple[str, ...]] = set()
+                for name, pos in positions.items():
                     existing = set(pos.channel_names)
                     missing = [ch for ch in prediction_channel if ch not in existing]
+                    channel_orders.add((*pos.channel_names, *missing))
                     for ch in prediction_channel:
                         if ch in existing and not self.overwrite:
                             self.plate.close()
@@ -269,9 +272,9 @@ class HCSPredictionWriter(BasePredictionWriter):
                                 self.output_store,
                             )
                     if missing:
-                        needs_append.append((pos, missing))
+                        needs_append.append((name, missing))
                     if name in run_positions:
-                        overwritten.append(pos)
+                        overwritten.append(name)
                         if self._has_extra_timepoints(pos, name, dm.array_key):
                             oversized.append(name)
                     elif self._cannot_share(pos, prediction_channel):
@@ -292,14 +295,28 @@ class HCSPredictionWriter(BasePredictionWriter):
                         f"existed or with a different checkpoint or settings (e.g. {mixed[:3]}); "
                         "predict into a new output store instead of mixing them."
                     )
-                for pos, channels in needs_append:
+                if len(channel_orders) > 1:
+                    self.plate.close()
+                    raise ValueError(
+                        f"Positions of '{self.output_store}' would disagree on channel order after "
+                        f"appending {prediction_channel} ({sorted(channel_orders)}); the writer addresses "
+                        "channels by one plate-wide index. Predict into a new output store."
+                    )
+                for name, channels in needs_append:
                     for ch in channels:
-                        pos.append_channel(ch, resize_arrays=True)
+                        positions[name].append_channel(ch, resize_arrays=True)
+                if needs_append:
+                    # Plate.channel_names is cached from the first position when the
+                    # store is opened; reopen so channel indices and positions created
+                    # later in this run see the appended channel.
+                    self.plate.close()
+                    self.plate = open_ome_zarr(self.output_store, mode="r+")
+                    positions = {name: self.plate[name] for name in overwritten}
                 # This run replaces these channels' voxels, so an interrupted run
                 # must never reuse their old completion. FOVs outside the run
                 # (e.g. excluded on resume) keep theirs.
-                for pos in overwritten:
-                    clear_completion(pos, prediction_channel)
+                for name in overwritten:
+                    clear_completion(positions[name], prediction_channel)
         else:
             channel_names = prediction_channel
             if self.write_input:
