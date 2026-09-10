@@ -36,6 +36,7 @@ from viscy_utils.compose import deep_merge, load_composed_config
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
     completion_marker,
+    outruns,
     prediction_complete,
     prediction_run,
     same_marker,
@@ -160,6 +161,7 @@ class _StoreSurvey:
     completed: set[str]
     conflicting: set[str]
     unverifiable: set[str]
+    oversized: set[str]
 
 
 def _survey_prediction_store(
@@ -179,10 +181,12 @@ def _survey_prediction_store(
     incomplete. Any other marker is conflicting: the channel was predicted
     from another source shape or with other weights or settings, and finishing
     the store would mix them. Input shapes are read
-    from the array level ``run["array_key"]``, which every input must have;
-    the marker's source shape is the only output check needed because the
-    writer refuses to rewrite an output that already outruns its source.
-    Metadata-only: reads markers and shapes, never voxel data.
+    from the array level ``run["array_key"]``, which every input must have. A
+    FOV whose output array at that level outruns its source in T or Z is
+    oversized whatever its markers say: another channel's run can grow the
+    shared array after this channel completed, and the writer would refuse to
+    rewrite it, so it is reported before a job is submitted. Metadata-only:
+    reads markers and shapes, never voxel data.
 
     Parameters
     ----------
@@ -199,7 +203,7 @@ def _survey_prediction_store(
     -------
     _StoreSurvey
         Total input FOV count plus plate-relative names (e.g. ``"0/0/fov0000"``)
-        of complete, conflicting and unverifiable FOVs.
+        of complete, conflicting, unverifiable and oversized FOVs.
     """
     array_key = run["array_key"]
     input_shapes: dict[str, list[int]] = {}
@@ -209,21 +213,28 @@ def _survey_prediction_store(
     completed: set[str] = set()
     conflicting: set[str] = set()
     unverifiable: set[str] = set()
+    oversized: set[str] = set()
     if not os.path.exists(output_store):
-        return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable)
+        return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable, oversized)
     with open_ome_zarr(output_store, mode="r") as plate:
         for name, pos in plate.positions():
             if name not in input_shapes:
                 continue
+            try:
+                output = pos[array_key]
+            except KeyError:
+                output = None
             present = [ch for ch in prediction_channels if ch in pos.channel_names]
             markers = pos.zattrs.get(PREDICTION_COMPLETE_KEY, {})
-            if any(ch not in markers for ch in present):
+            if output is not None and outruns(output, input_shapes[name]):
+                oversized.add(name)
+            elif any(ch not in markers for ch in present):
                 unverifiable.add(name)
             elif prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
                 completed.add(name)
             elif not all(same_marker(markers[ch], started_marker(run)) for ch in present):
                 conflicting.add(name)
-    return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable)
+    return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable, oversized)
 
 
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
@@ -601,6 +612,13 @@ def submit(argv: list[str] | None = None) -> int:
                 checkpoint_path=model_init["ckpt_path"],
             )
             survey = _survey_prediction_store(output_store, data_path, pred_channels, run)
+            if survey.oversized:
+                examples = ", ".join(sorted(survey.oversized)[:5])
+                raise SystemExit(
+                    f"--resume-predict: {len(survey.oversized)} FOVs in {output_store} hold more timepoints or "
+                    f"depth slices than their source ({examples}); arrays only grow, so the stale planes would "
+                    "survive every rewrite. Predict into a new output store"
+                )
             if survey.unverifiable:
                 examples = ", ".join(sorted(survey.unverifiable)[:5])
                 raise SystemExit(

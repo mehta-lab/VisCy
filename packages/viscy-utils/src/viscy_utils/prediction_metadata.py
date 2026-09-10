@@ -15,6 +15,7 @@ __all__ = [
     "completion_marker",
     "mark_complete",
     "mark_started",
+    "outruns",
     "prediction_complete",
     "prediction_run",
     "same_marker",
@@ -50,6 +51,27 @@ def tzyx_shape(array: ImageArray) -> list[int]:
         ``[T, Z, Y, X]``, the source identity a completion marker records.
     """
     return [array.frames, array.slices, array.height, array.width]
+
+
+def outruns(array: ImageArray, source_shape: list[int]) -> bool:
+    """Return whether an output array holds more frames or depth slices than its source.
+
+    Arrays only grow and no run writes beyond its source's extent, so the
+    excess would keep stale voxels under a fresh completion marker.
+
+    Parameters
+    ----------
+    array : ImageArray
+        Existing output array.
+    source_shape : list of int
+        TZYX shape of the source, from :func:`tzyx_shape`.
+
+    Returns
+    -------
+    bool
+        True when ``array`` exceeds the source in T or Z.
+    """
+    return array.frames > source_shape[0] or array.slices > source_shape[1]
 
 
 def checkpoint_sha256_12(path: str | os.PathLike) -> str:

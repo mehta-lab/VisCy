@@ -827,6 +827,22 @@ def test_predict_refuses_an_output_that_outruns_its_source(tmp_path, output_shap
         assert plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY] == {"Structure_prediction": started_marker(_run(1))}
 
 
+@pytest.mark.parametrize("output_shape", [(3, 1, 4, 8, 8), (2, 1, 5, 8, 8)], ids=["extra_T", "extra_Z"])
+def test_survey_flags_a_completed_output_that_outruns_its_source(tmp_path, output_shape):
+    """A valid marker does not certify an array that another channel's run has since grown."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+    run = _run(1)
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2}, completed={"0/0/fov0000"}, run=run)
+    assert _completed(out, inp, run) == {"0/0/fov0000"}
+    with open_ome_zarr(out, mode="r+") as plate:
+        plate["0/0/fov0000/0"].resize(output_shape)
+
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run)
+    assert (survey.completed, survey.conflicting, survey.oversized) == (set(), set(), {"0/0/fov0000"})
+
+
 def test_survey_no_store(tmp_path):
     """A missing output store yields no completed FOVs but the correct input total."""
     inp = tmp_path / "input.zarr"
@@ -942,6 +958,22 @@ def test_resume_predict_refuses_a_store_without_markers(tmp_path):
     leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
 
     with pytest.raises(SystemExit, match="cannot be verified"):
+        sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"])
+
+
+def test_resume_predict_refuses_an_output_that_outruns_its_source(tmp_path):
+    """The writer would refuse such a store at job start; the launcher refuses before submitting."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt)
+    with open_ome_zarr(out, mode="r+") as plate:
+        plate["0/0/fov0000/0"].resize((2, 1, 4, 8, 8))
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+
+    with pytest.raises(SystemExit, match="more timepoints or depth slices"):
         sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"])
 
 

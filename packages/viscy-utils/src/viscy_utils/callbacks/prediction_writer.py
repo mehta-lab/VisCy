@@ -22,6 +22,7 @@ from viscy_utils.prediction_metadata import (
     completion_marker,
     mark_complete,
     mark_started,
+    outruns,
     prediction_run,
     same_run,
     tzyx_shape,
@@ -473,16 +474,13 @@ class HCSPredictionWriter(BasePredictionWriter):
         Returns
         -------
         bool
-            True when the array exists and has more frames or more depth slices
-            than the source; no run writes beyond either extent, so the excess
-            would keep stale voxels under a fresh completion marker.
+            True when the array exists and :func:`outruns` the source.
         """
         try:
             output = position[array_key]
         except KeyError:
             return False
-        frames, slices = self._source_shapes[f"/{name}/{array_key}"][:2]
-        return output.frames > frames or output.slices > slices
+        return outruns(output, self._source_shapes[f"/{name}/{array_key}"])
 
     def _cannot_share(self, position: Position, channels: list[str]) -> bool:
         """Return whether ``position`` holds any of ``channels`` that this run cannot vouch for.
