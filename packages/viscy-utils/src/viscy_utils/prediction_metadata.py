@@ -104,7 +104,16 @@ def checkpoint_signature(path: str | os.PathLike) -> tuple[int, int, int, int]:
     return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino
 
 
-def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True) -> str:
+def _sha256_hex(path: Path) -> str:
+    """Return the full sha256 hex digest of the file at *path*, read in 1 MiB chunks."""
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def checkpoint_sha256_12(path: str | os.PathLike, *, memoize: bool = True) -> str:
     """Return the first 12 hex chars of the sha256 of the file at *path*.
 
     On repeated calls for the same checkpoint, reads the digest from a
@@ -121,10 +130,11 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True)
     ----------
     path : str or PathLike
         Checkpoint file to hash.
-    write_sidecar : bool, optional
-        Record a freshly computed digest in the sidecar (default). Pass False
-        from read-only previews, which may look a sidecar up but must leave
-        the checkpoint's directory untouched.
+    memoize : bool, optional
+        Consult and maintain the sidecar (default). Pass False to hash the
+        bytes as they are now and leave the checkpoint's directory untouched:
+        file metadata cannot prove byte equality, so a digest that certifies
+        which weights a run loaded must come from the bytes themselves.
 
     Returns
     -------
@@ -132,6 +142,8 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True)
         First 12 hex characters of the file's sha256 digest.
     """
     ckpt = Path(path)
+    if not memoize:
+        return _sha256_hex(ckpt)[:12]
     sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
     signature = dict(zip(_SIGNATURE_FIELDS, checkpoint_signature(ckpt), strict=True))
     try:
@@ -145,13 +157,7 @@ def checkpoint_sha256_12(path: str | os.PathLike, *, write_sidecar: bool = True)
             return recorded["sha256"][:12]
     except (OSError, ValueError):
         pass
-    hasher = hashlib.sha256()
-    with open(ckpt, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            hasher.update(chunk)
-    digest = hasher.hexdigest()
-    if not write_sidecar:
-        return digest[:12]
+    digest = _sha256_hex(ckpt)
     try:
         tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
         tmp.write_text(json.dumps({"sha256": digest, **signature}) + "\n")
@@ -168,11 +174,13 @@ def prediction_run(
     z_reduction: str,
     checkpoint_path: str | os.PathLike | None,
     settings_sha256_12: str | None = None,
-    write_sidecar: bool = True,
 ) -> dict[str, Any]:
     """Describe what determines a run's voxels: the weights, the depth handling and the other settings.
 
-    Call once per run; the checkpoint is hashed here, not per FOV.
+    Call once per run; the checkpoint's bytes are hashed here, not per FOV,
+    and never taken from a ``<ckpt>.sha256`` sidecar: the marker certifies
+    which weights produced the voxels, and a memo keyed on file metadata
+    cannot prove that a same-size copy did not replace them.
 
     Parameters
     ----------
@@ -188,8 +196,6 @@ def prediction_run(
         Hash of the remaining settings that shape the predicted voxels (model
         inference arguments, input normalization, precision), computed by the
         submitter from the resolved config; ``None`` when the run records none.
-    write_sidecar : bool, optional
-        Passed to :func:`checkpoint_sha256_12`; False keeps a preview read-only.
 
     Returns
     -------
@@ -204,7 +210,7 @@ def prediction_run(
         "checkpoint_path": None if checkpoint_path is None else str(checkpoint_path),
         "checkpoint_sha256_12": None
         if checkpoint_path is None
-        else checkpoint_sha256_12(checkpoint_path, write_sidecar=write_sidecar),
+        else checkpoint_sha256_12(checkpoint_path, memoize=False),
         "settings_sha256_12": settings_sha256_12,
     }
 

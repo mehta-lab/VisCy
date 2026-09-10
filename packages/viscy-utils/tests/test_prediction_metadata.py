@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from viscy_utils import prediction_metadata
-from viscy_utils.prediction_metadata import checkpoint_sha256_12
+from viscy_utils.prediction_metadata import checkpoint_sha256_12, prediction_run
 
 
 def test_checkpoint_sha256_12(tmp_path: Path) -> None:
@@ -125,16 +125,51 @@ def test_checkpoint_sha256_12_ignores_unusable_sidecars(tmp_path: Path, content:
     assert json.loads(sidecar.read_text())["sha256"][:12] == h
 
 
-def test_checkpoint_sha256_12_can_leave_the_sidecar_alone(tmp_path: Path) -> None:
-    """A read-only preview gets the digest without leaving a sidecar behind."""
+def test_checkpoint_sha256_12_without_memo_ignores_the_sidecar(tmp_path: Path) -> None:
+    """``memoize=False`` hashes the bytes: it neither trusts a sidecar that matches the file nor leaves one."""
     ckpt = tmp_path / "model.ckpt"
     ckpt.write_bytes(b"weights")
     sidecar = tmp_path / "model.ckpt.sha256"
+    expected = hashlib.sha256(b"weights").hexdigest()[:12]
 
-    assert checkpoint_sha256_12(ckpt, write_sidecar=False) == hashlib.sha256(b"weights").hexdigest()[:12]
+    assert checkpoint_sha256_12(ckpt, memoize=False) == expected
     assert not sidecar.exists()
-    assert checkpoint_sha256_12(ckpt) == hashlib.sha256(b"weights").hexdigest()[:12]
-    assert sidecar.exists()
+
+    stat = ckpt.stat()
+    forged = json.dumps(
+        {
+            "sha256": "0" * 64,
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "ctime_ns": stat.st_ctime_ns,
+            "ino": stat.st_ino,
+        }
+    )
+    sidecar.write_text(forged + "\n")
+    assert checkpoint_sha256_12(ckpt) == "0" * 12
+    assert checkpoint_sha256_12(ckpt, memoize=False) == expected
+    assert sidecar.read_text() == forged + "\n"
+
+
+def test_prediction_run_hashes_the_checkpoint_bytes_not_a_sidecar(tmp_path: Path) -> None:
+    """The reviewer's probe: a same-size copy carrying the old mtime, made right after hashing, gets its own digest."""
+    ckpt = tmp_path / "model.ckpt"
+    replacement = tmp_path / "replacement.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    replacement.write_bytes(b"weights-b")
+    before = ckpt.stat()
+    os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    def identity() -> dict:
+        return prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=ckpt)
+
+    first = identity()
+    shutil.copy2(replacement, ckpt)
+    second = identity()
+
+    assert first["checkpoint_sha256_12"] == hashlib.sha256(b"weights-a").hexdigest()[:12]
+    assert second["checkpoint_sha256_12"] == hashlib.sha256(b"weights-b").hexdigest()[:12]
+    assert not (tmp_path / "model.ckpt.sha256").exists()
 
 
 def test_checkpoint_sha256_12_read_only_dir(tmp_path: Path) -> None:
