@@ -1403,6 +1403,17 @@ def test_sliding_window_single_window_is_exact(blend):
     assert torch.allclose(out, expected, atol=1e-6)
 
 
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+@pytest.mark.parametrize("spatial", [(16, 64, 64), (16, 96, 96)])
+def test_sliding_window_half_precision_preserves_covered_voxels(blend, spatial):
+    """FP16 corners must stay covered and overlapping sums must not overflow."""
+    source = torch.full((1, 1, *spatial), 40000.0)
+    out = _sliding_window_inference(lambda x: x.to(torch.float16), source, (16, 64, 64), (4, 32, 32), blend=blend)
+    assert out.dtype == torch.float16
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(out, source.to(torch.float16), rtol=0, atol=0)
+
+
 def test_cosine_blend_suppresses_window_seams():
     """A model whose output depends on its window's identity produces a step at
     every window face under uniform averaging; the cosine cross-fade must

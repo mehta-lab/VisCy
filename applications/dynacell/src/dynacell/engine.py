@@ -249,6 +249,7 @@ def _sliding_window_inference(
     prediction_sum: Tensor | None = None
     weight_sum: Tensor | None = None
     weight: Tensor | None = None
+    output_dtype = source.dtype
 
     with torch.no_grad():
         for starts in itertools.product(*start_lists):
@@ -257,23 +258,26 @@ def _sliding_window_inference(
                 slicer[-(n_spatial - i)] = slice(st, st + patch[i])
             patch_out = forward_fn(source[tuple(slicer)])
             if prediction_sum is None:
+                output_dtype = patch_out.dtype
                 out_shape = list(source.shape)
                 out_shape[1] = patch_out.shape[1]
-                prediction_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
-                weight_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
+                # FP16 Hann products can underflow at corners, and overlapping
+                # predictions can overflow before the normalized mean is taken.
+                prediction_sum = torch.zeros(out_shape, device=source.device, dtype=torch.float32)
+                weight_sum = torch.zeros(out_shape, device=source.device, dtype=torch.float32)
                 weight = (
-                    _blend_weight(patch, source.device, patch_out.dtype)
+                    _blend_weight(patch, source.device, torch.float32)
                     if blend == "cosine"
-                    else torch.ones([1, 1, *patch], device=source.device, dtype=patch_out.dtype)
+                    else torch.ones([1, 1, *patch], device=source.device, dtype=torch.float32)
                 )
-            prediction_sum[tuple(slicer)] += patch_out * weight
+            prediction_sum[tuple(slicer)] += patch_out.float() * weight
             weight_sum[tuple(slicer)] += weight
 
     if prediction_sum is None:
         raise RuntimeError("sliding window produced no patches")
     if not torch.all(weight_sum > 0):
         raise RuntimeError("sliding window left uncovered voxels")
-    return prediction_sum / weight_sum
+    return (prediction_sum / weight_sum).to(output_dtype)
 
 
 def _phase_shift_average(
