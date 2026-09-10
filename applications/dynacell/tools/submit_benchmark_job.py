@@ -17,6 +17,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -135,21 +137,82 @@ def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
         cb.setdefault("init_args", {})["overwrite"] = True
 
 
+# ``data.init_args`` that steer loading, FOV selection and training, not the
+# predicted voxels. ``data_path`` is among them: the marker records the source
+# shape, and a moved input must still resume.
+_LOADING_ONLY_DATA_ARGS = frozenset(
+    {
+        "data_path",
+        "batch_size",
+        "num_workers",
+        "persistent_workers",
+        "prefetch_factor",
+        "pin_memory",
+        "mmap_preload",
+        "scratch_dir",
+        "include_fov_names",
+        "exclude_fov_names",
+        "split_ratio",
+        "ground_truth_masks",
+        "augmentations",
+        "gpu_augmentations",
+        "val_augmentations",
+        "val_gpu_augmentations",
+        "min_nonzero_fraction",
+        "nonzero_threshold",
+        "nonzero_channel",
+        "max_nonzero_retries",
+        "fg_mask_key",
+    }
+)
+
+
+def prediction_settings_sha256_12(composed: dict) -> str:
+    """Hash the settings besides the checkpoint that shape a predict run's voxels.
+
+    Covers the model class and its init args except ``ckpt_path`` (inference
+    settings such as ``predict_method`` or ``num_generate_steps`` live there),
+    the data module class and its init args except the loading-only ones in
+    ``_LOADING_ONLY_DATA_ARGS`` (so ``normalizations``, channels, patch size
+    and depth window count), and ``trainer.precision``. Two runs with the same
+    checkpoint but different settings produce different voxels and must not
+    complete one store together; a resume that changes only paths, batch
+    size, workers or FOV selection still matches.
+    """
+    model = composed.get("model", {})
+    data = composed.get("data", {})
+    settings = {
+        "model": {
+            "class_path": model.get("class_path"),
+            "init_args": {k: v for k, v in model.get("init_args", {}).items() if k != "ckpt_path"},
+        },
+        "data": {
+            "class_path": data.get("class_path"),
+            "init_args": {k: v for k, v in data.get("init_args", {}).items() if k not in _LOADING_ONLY_DATA_ARGS},
+        },
+        "precision": composed.get("trainer", {}).get("precision"),
+    }
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def bind_prediction_run(composed: dict) -> None:
-    """Name the model checkpoint to every ``HCSPredictionWriter`` of a composed predict config.
+    """Bind the run identity to every ``HCSPredictionWriter`` of a composed predict config.
 
     Mutates ``composed`` in place so each FOV's completion marker records the
-    weights that produced it (see :mod:`viscy_utils.prediction_metadata`).
-    Shared by the single-job and batch launchers: a submission path that
-    skipped it would leave the writer recording a null checkpoint, and a
-    resume through the other path would then reject the store as another
-    checkpoint's. No-op without ``model.init_args.ckpt_path``.
+    checkpoint (``model.init_args.ckpt_path``, when the model has one) and the
+    hash of the other prediction settings that produced it (see
+    :mod:`viscy_utils.prediction_metadata`). Shared by the single-job and batch
+    launchers: a submission path that skipped it would leave the writer
+    recording a null identity, and a resume through the other path would then
+    reject the store as another run's.
     """
     ckpt_path = composed.get("model", {}).get("init_args", {}).get("ckpt_path")
-    if not ckpt_path:
-        return
+    settings = prediction_settings_sha256_12(composed)
     for cb in _writer_callbacks(composed):
-        cb.setdefault("init_args", {})["checkpoint_path"] = str(ckpt_path)
+        init_args = cb.setdefault("init_args", {})
+        if ckpt_path:
+            init_args["checkpoint_path"] = str(ckpt_path)
+        init_args["settings_sha256_12"] = settings
 
 
 def _as_channel_list(target_channel: Any) -> list[str]:
@@ -448,7 +511,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "and sets the writer overwrite=True, so the resubmit continues instead of "
         "crashing on the existing prediction channel (overwrite=False) or recomputing "
         "every FOV (--overwrite alone). Requires completion markers for all Z windows; "
-        "the markers record the checkpoint's content hash and depth settings, so a store "
+        "the markers record the checkpoint's content hash, depth handling and a hash of the "
+        "prediction settings, so a store "
         "predicted with other weights or settings is refused rather than mixed, and a store "
         "written before markers existed cannot be verified and is refused too. "
         "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
@@ -617,13 +681,15 @@ def submit(argv: list[str] | None = None) -> int:
                 )
             if data_init.get("z_window_size") is None:
                 raise SystemExit(f"{args.leaf}: --resume-predict requires data.init_args.z_window_size")
-            writer_init = _writer_callbacks(composed)[0].get("init_args", {})
-            # Defaults mirror HCSDataModule.array_key and HCSPredictionWriter.z_reduction.
+            writer_init = _writer_callbacks(composed)[0]["init_args"]
+            # Defaults mirror HCSDataModule.array_key and HCSPredictionWriter.z_reduction;
+            # bind_prediction_run() set the settings hash above.
             run = prediction_run(
                 array_key=str(data_init.get("array_key", "0")),
                 z_window_size=int(data_init["z_window_size"]),
                 z_reduction=str(writer_init.get("z_reduction", "blend")),
                 checkpoint_path=model_init["ckpt_path"],
+                settings_sha256_12=writer_init["settings_sha256_12"],
             )
             survey = _survey_prediction_store(output_store, data_path, pred_channels, run)
             if survey.oversized:

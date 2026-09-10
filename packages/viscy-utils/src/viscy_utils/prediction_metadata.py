@@ -132,8 +132,9 @@ def prediction_run(
     z_window_size: int,
     z_reduction: str,
     checkpoint_path: str | os.PathLike | None,
+    settings_sha256_12: str | None = None,
 ) -> dict[str, Any]:
-    """Describe what determines a run's voxels: the weights and the depth handling.
+    """Describe what determines a run's voxels: the weights, the depth handling and the other settings.
 
     Call once per run; the checkpoint is hashed here, not per FOV.
 
@@ -147,6 +148,10 @@ def prediction_run(
         How overlapping depth windows are combined by the writer.
     checkpoint_path : str or PathLike or None
         Checkpoint the model predicts with; ``None`` when the run has none.
+    settings_sha256_12 : str or None, optional
+        Hash of the remaining settings that shape the predicted voxels (model
+        inference arguments, input normalization, precision), computed by the
+        submitter from the resolved config; ``None`` when the run records none.
 
     Returns
     -------
@@ -160,6 +165,7 @@ def prediction_run(
         "z_reduction": z_reduction,
         "checkpoint_path": None if checkpoint_path is None else str(checkpoint_path),
         "checkpoint_sha256_12": None if checkpoint_path is None else checkpoint_sha256_12(checkpoint_path),
+        "settings_sha256_12": settings_sha256_12,
     }
 
 

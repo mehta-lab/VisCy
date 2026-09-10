@@ -120,6 +120,7 @@ def test_completion_marker_layout(tmp_path):
                 "z_reduction": "blend",
                 "checkpoint_path": None,
                 "checkpoint_sha256_12": None,
+                "settings_sha256_12": None,
             }
         }
         assert prediction_complete(position, ["Nuclei_prediction"], completion_marker([1, Z_SIZE, 8, 8], run))

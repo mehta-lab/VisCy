@@ -173,6 +173,14 @@ class HCSPredictionWriter(BasePredictionWriter):
         recorded in every FOV's completion marker, so a resume can tell
         predictions made with different weights apart and refuses to mix
         them in one store. Default None records no checkpoint.
+    settings_sha256_12 : str or None, optional
+        Hash of the other settings that shape the predicted voxels (model
+        inference arguments, input normalization, precision), recorded in the
+        marker alongside the checkpoint so a resume with the same weights but
+        other settings is refused as well. The submitter computes it from the
+        resolved config (``submit_benchmark_job.prediction_settings_sha256_12``);
+        the writer cannot derive it from live objects. Default None records
+        none.
     """
 
     def __init__(
@@ -183,6 +191,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
         z_reduction: Literal["blend", "center"] = "blend",
         checkpoint_path: str | None = None,
+        settings_sha256_12: str | None = None,
     ) -> None:
         super().__init__(write_interval)
         if z_reduction not in ("blend", "center"):
@@ -192,6 +201,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.write_input = write_input
         self.z_reduction = z_reduction
         self.checkpoint_path = checkpoint_path
+        self.settings_sha256_12 = settings_sha256_12
         self._dataset_scale = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
@@ -241,6 +251,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             z_window_size=dm.z_window_size,
             z_reduction=self.z_reduction,
             checkpoint_path=self.checkpoint_path,
+            settings_sha256_12=self.settings_sha256_12,
         )
         window_arrays = dm.predict_dataset.window_arrays
         self._source_shapes = {f"/{array.path}": tzyx_shape(array) for array in window_arrays}

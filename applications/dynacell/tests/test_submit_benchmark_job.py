@@ -755,6 +755,7 @@ def _predict(
     limit_batches: int | None = None,
     overwrite: bool = False,
     checkpoint: Path | None = None,
+    settings: str | None = None,
 ) -> None:
     """Write all-ones predictions for the first ``limit_batches`` windows of ``inp`` into ``out``."""
     data = HCSDataModule(
@@ -769,7 +770,10 @@ def _predict(
         augmentations=[],
     )
     writer = HCSPredictionWriter(
-        str(out), overwrite=overwrite, checkpoint_path=None if checkpoint is None else str(checkpoint)
+        str(out),
+        overwrite=overwrite,
+        checkpoint_path=None if checkpoint is None else str(checkpoint),
+        settings_sha256_12=settings,
     )
     Trainer(
         accelerator="cpu",
@@ -915,8 +919,13 @@ def _resolved_config(capsys) -> dict:
     return yaml.safe_load("\n".join(lines))
 
 
-def test_predict_submit_records_checkpoint_in_writer(capsys, tmp_path):
-    """Every predict submission names its checkpoint to the writer, so markers carry it."""
+def _leaf_settings(leaf: Path) -> str:
+    """The settings hash the launcher binds to a leaf's writer."""
+    return sbj.prediction_settings_sha256_12(sbj.load_composed_config(leaf, resolver=sbj._dynacell_ref_resolver))
+
+
+def test_predict_submit_records_the_run_identity_in_writer(capsys, tmp_path):
+    """Every predict submission names its checkpoint and settings hash to the writer, so markers carry them."""
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1})
     ckpt = tmp_path / "a.ckpt"
@@ -924,8 +933,37 @@ def test_predict_submit_records_checkpoint_in_writer(capsys, tmp_path):
     leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=tmp_path / "pred.zarr", ckpt=ckpt, z_window_size=4)
 
     assert sbj.submit([str(leaf), "--print-resolved-config"]) == 0
-    writer_init = _resolved_config(capsys)["trainer"]["callbacks"][0]["init_args"]
+    config = _resolved_config(capsys)
+    writer_init = config["trainer"]["callbacks"][0]["init_args"]
     assert writer_init["checkpoint_path"] == str(ckpt)
+    assert writer_init["settings_sha256_12"] == _leaf_settings(leaf) == sbj.prediction_settings_sha256_12(config)
+
+
+def test_prediction_settings_hash_tracks_only_what_shapes_the_voxels():
+    """Inference arguments, normalization and precision change the hash; loading and FOV selection do not."""
+    base = {
+        "model": {"class_path": "m.Model", "init_args": {"ckpt_path": "/a.ckpt", "num_generate_steps": 100}},
+        "data": {
+            "class_path": "viscy_data.HCSDataModule",
+            "init_args": {"data_path": "/in.zarr", "normalizations": [{"class_path": "t.Norm"}], "batch_size": 1},
+        },
+        "trainer": {"precision": "32-true"},
+    }
+    reference = sbj.prediction_settings_sha256_12(base)
+    assert len(reference) == 12
+
+    def variant(section: str, **changes) -> str:
+        composed = {k: dict(v) for k, v in base.items()}
+        composed[section]["init_args"] = {**base[section]["init_args"], **changes}
+        return sbj.prediction_settings_sha256_12(composed)
+
+    assert variant("model", ckpt_path="/b.ckpt") == reference
+    assert (
+        variant("data", data_path="/moved.zarr", batch_size=8, num_workers=4, exclude_fov_names=["0/0/1"]) == reference
+    )
+    assert variant("model", num_generate_steps=50) != reference
+    assert variant("data", normalizations=[]) != reference
+    assert sbj.prediction_settings_sha256_12({**base, "trainer": {"precision": "bf16-mixed"}}) != reference
 
 
 def test_resume_predict_excludes_complete_fovs_and_keeps_the_checkpoint(capsys, tmp_path):
@@ -935,9 +973,9 @@ def test_resume_predict_excludes_complete_fovs_and_keeps_the_checkpoint(capsys, 
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
     ckpt = tmp_path / "a.ckpt"
     ckpt.write_bytes(b"weights-a")
-    # One full-depth window per FOV: the first batch completes fov0000 only.
-    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt)
     leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+    # One full-depth window per FOV: the first batch completes fov0000 only.
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt, settings=_leaf_settings(leaf))
 
     assert sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"]) == 0
     config = _resolved_config(capsys)
@@ -945,6 +983,23 @@ def test_resume_predict_excludes_complete_fovs_and_keeps_the_checkpoint(capsys, 
     writer_init = config["trainer"]["callbacks"][0]["init_args"]
     assert writer_init["overwrite"] is True
     assert writer_init["checkpoint_path"] == str(ckpt)
+    assert writer_init["settings_sha256_12"] == _leaf_settings(leaf)
+
+
+def test_resume_predict_refuses_a_store_predicted_with_other_settings(tmp_path):
+    """Same weights, other inference settings: different voxels, so the store must not be completed."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt, settings=_leaf_settings(leaf))
+
+    with pytest.raises(SystemExit, match="another checkpoint or settings"):
+        sbj.submit(
+            [str(leaf), "--resume-predict", "--override", "model.init_args.num_generate_steps=5", "--print-script"]
+        )
 
 
 def test_resume_predict_refuses_a_store_without_markers(tmp_path):
@@ -968,10 +1023,10 @@ def test_resume_predict_refuses_an_output_that_outruns_its_source(tmp_path):
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
     ckpt = tmp_path / "a.ckpt"
     ckpt.write_bytes(b"weights-a")
-    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt)
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt, settings=_leaf_settings(leaf))
     with open_ome_zarr(out, mode="r+") as plate:
         plate["0/0/fov0000/0"].resize((2, 1, 4, 8, 8))
-    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
 
     with pytest.raises(SystemExit, match="more timepoints or depth slices"):
         sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"])
