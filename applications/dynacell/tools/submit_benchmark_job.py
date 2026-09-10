@@ -143,13 +143,11 @@ def _completed_prediction_fovs(
 ) -> tuple[set[str], int]:
     """Return ``(complete FOV names, total input FOV count)`` for predict resume.
 
-    A FOV counts as complete when the output store holds every prediction
-    channel for it *and* its written T dimension equals that FOV's input T.
-    Predict configs set ``z_window_size`` to the full stack, so each timepoint
-    is written in a single ``write_sample`` call and the array's T grows
-    monotonically as timepoints finish — a crash mid-FOV leaves ``T < input T``.
-    A T-match is therefore a sufficient completeness signal. Metadata-only:
-    reads array shapes, never voxel data.
+    Every prediction channel must have a completion marker written after all
+    of the FOV's (T, Z-window) writes succeed. The marker must match the input
+    and output TZYX shapes. Unmarked legacy outputs are recomputed because
+    array dimensions grow before all windows are written. Metadata-only:
+    reads completion markers and shapes, never voxel data.
 
     Parameters
     ----------
@@ -166,11 +164,11 @@ def _completed_prediction_fovs(
         Plate-relative names (e.g. ``"0/0/fov0000"``) of complete FOVs, and
         the total number of input FOVs.
     """
-    input_t: dict[str, int] = {}
+    input_shapes: dict[str, list[int]] = {}
     with open_ome_zarr(data_path, mode="r") as plate:
         for name, pos in plate.positions():
-            input_t[name] = pos["0"].shape[0]
-    total = len(input_t)
+            input_shapes[name] = [pos["0"].shape[i] for i in (0, 2, 3, 4)]
+    total = len(input_shapes)
     completed: set[str] = set()
     if not os.path.exists(output_store):
         return completed, total
@@ -178,7 +176,14 @@ def _completed_prediction_fovs(
         for name, pos in plate.positions():
             if not all(ch in pos.channel_names for ch in prediction_channels):
                 continue
-            if input_t.get(name) is not None and pos["0"].shape[0] == input_t[name]:
+            if name not in input_shapes:
+                continue
+            markers = pos.zattrs.get("viscy_prediction_complete", {})
+            output_shape = [pos["0"].shape[i] for i in (0, 2, 3, 4)]
+            if all(
+                markers.get(ch) == {"source_shape": input_shapes[name], "output_shape": output_shape}
+                for ch in prediction_channels
+            ):
                 completed.add(name)
     return completed, total
 
@@ -376,7 +381,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "wall-time kill. Skips FOVs already fully written (via exclude_fov_names) "
         "and sets the writer overwrite=True, so the resubmit continues instead of "
         "crashing on the existing prediction channel (overwrite=False) or recomputing "
-        "every FOV (--overwrite alone). Completeness is per-FOV (written T == input T). "
+        "every FOV (--overwrite alone). Requires completion markers for all Z windows; "
+        "unmarked legacy FOVs are recomputed. "
         "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
     )
     ap.add_argument(

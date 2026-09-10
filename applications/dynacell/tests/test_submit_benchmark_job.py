@@ -7,7 +7,14 @@ import os
 from contextlib import redirect_stdout
 from pathlib import Path
 
+import numpy as np
 import pytest
+import torch
+from iohub.ngff import open_ome_zarr
+from lightning.pytorch import LightningModule, Trainer
+
+from viscy_data import HCSDataModule
+from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 
 yaml = pytest.importorskip("yaml")
 
@@ -566,29 +573,95 @@ def test_sbatch_cmd_dependency_and_parsable(monkeypatch, tmp_path):
 # --- predict resume (--resume-predict) ---------------------------------------
 
 
-def _write_hcs_store(path: Path, channels: list[str], fov_t: dict[str, int]) -> None:
+def _write_hcs_store(
+    path: Path, channels: list[str], fov_t: dict[str, int], *, completed: set[str] | None = None
+) -> None:
     """Write a minimal HCS OME-Zarr with one array per FOV at the given T length."""
-    np = pytest.importorskip("numpy")
-    from iohub.ngff import open_ome_zarr
-
     with open_ome_zarr(path, layout="hcs", mode="a", channel_names=channels) as plate:
         for fov_name, t in fov_t.items():
             row, col, pos = fov_name.split("/")
             position = plate.create_position(row, col, pos)
             position.create_zeros("0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8))
+            if completed and fov_name in completed:
+                position.zattrs["viscy_prediction_complete"] = {
+                    channel: {"source_shape": [t, 4, 8, 8], "output_shape": [t, 4, 8, 8]} for channel in channels
+                }
 
 
 def test_completed_prediction_fovs_detects_partial(tmp_path):
-    """Only FOVs whose written T matches the input T count as complete."""
+    """Only marked FOVs matching the input and output shapes count as complete."""
     pytest.importorskip("iohub")
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 10})
     out = tmp_path / "pred.zarr"
     # fov0000, fov0001 complete (T=10); fov0002 killed mid-run (T=5).
-    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 5})
+    _write_hcs_store(
+        out,
+        ["Structure_prediction"],
+        {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 5},
+        completed={"0/0/fov0000", "0/0/fov0001", "0/0/fov0002"},
+    )
     completed, total = sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"])
     assert total == 3
     assert completed == {"0/0/fov0000", "0/0/fov0001"}
+
+
+def test_completed_prediction_fovs_requires_explicit_completion(tmp_path):
+    """Legacy output shapes cannot establish whether every Z window was written."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2})
+    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+
+
+class _ConstantPrediction(LightningModule):
+    def predict_step(self, batch, batch_idx: int) -> torch.Tensor:
+        return torch.ones_like(batch["source"])
+
+
+@pytest.mark.parametrize("z_window_size", [1, 3])
+def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp_path, z_window_size):
+    """2D and overlapping 3D windows reach full T before the final writes."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+
+    def predict(limit_batches: int, *, overwrite: bool = False) -> None:
+        data = HCSDataModule(
+            data_path=str(inp),
+            source_channel=["Phase3D"],
+            target_channel=["Structure"],
+            z_window_size=z_window_size,
+            batch_size=1,
+            num_workers=0,
+            yx_patch_size=[8, 8],
+            normalizations=[],
+            augmentations=[],
+        )
+        Trainer(
+            accelerator="cpu",
+            logger=False,
+            enable_progress_bar=False,
+            limit_predict_batches=limit_batches,
+            callbacks=[HCSPredictionWriter(str(out), overwrite=overwrite)],
+        ).predict(_ConstantPrediction(), datamodule=data, return_predictions=False)
+
+    windows_per_t = 4 - z_window_size + 1
+    predict(windows_per_t + 1)
+    with open_ome_zarr(out, mode="r") as plate:
+        image = plate["0/0/fov0000/0"]
+        assert image.shape == (2, 1, 4, 8, 8)
+        np.testing.assert_array_equal(image[1, 0, :, 0, 0], [1] * z_window_size + [0] * (4 - z_window_size))
+    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+
+    predict(2 * windows_per_t, overwrite=True)
+    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == ({"0/0/fov0000"}, 1)
+    with open_ome_zarr(out, mode="r") as plate:
+        np.testing.assert_array_equal(plate["0/0/fov0000/0"][:], 1)
+
+    predict(1, overwrite=True)
+    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
 
 
 def test_completed_prediction_fovs_no_store(tmp_path):

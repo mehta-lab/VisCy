@@ -208,6 +208,12 @@ class HCSPredictionWriter(BasePredictionWriter):
         source_channel = dm.source_channel
         target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
+        self._prediction_channels = prediction_channel
+        self._source_shapes = {
+            f"/{array.path}": [array.shape[i] for i in (0, 2, 3, 4)] for array in dm.predict_dataset.window_arrays
+        }
+        self._z_window_size = dm.z_window_size
+        self._written_windows: dict[str, NDArray[np.bool_]] = {}
         if os.path.exists(self.output_store):
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
@@ -335,10 +341,23 @@ class HCSPredictionWriter(BasePredictionWriter):
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)
+        window_z_index = z_index
         # account for lost slices in 2.5D
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
+        source_shape = self._source_shapes[img_name]
+        if img_name not in self._written_windows:
+            # Invalidate before replacing any voxels; excluded FOVs retain their
+            # markers. An interrupted overwrite must never reuse old completion.
+            position = self.plate[img_name.rsplit("/", 1)[0]]
+            completed = dict(position.zattrs.get("viscy_prediction_complete", {}))
+            for channel in self._prediction_channels:
+                completed.pop(channel, None)
+            position.zattrs["viscy_prediction_complete"] = completed
+            self._written_windows[img_name] = np.zeros(
+                (source_shape[0], source_shape[1] - self._z_window_size + 1), dtype=bool
+            )
         _resize_image(image, t_index, z_slice)
         if self.write_input:
             source_stack = batch["source"][sample_index].cpu()
@@ -359,6 +378,19 @@ class HCSPredictionWriter(BasePredictionWriter):
                 sample_prediction = sample_prediction[..., keep:, :, :]
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
         image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
+        # Array dimensions grow before writes, so only successful, distinct
+        # (T, Z-window) writes establish completion, including overlapping windows.
+        written = self._written_windows[img_name]
+        written[t_index, window_z_index] = True
+        if written.all():
+            position = self.plate[img_name.rsplit("/", 1)[0]]
+            completed = dict(position.zattrs.get("viscy_prediction_complete", {}))
+            for channel in self._prediction_channels:
+                completed[channel] = {
+                    "source_shape": source_shape,
+                    "output_shape": [image.shape[i] for i in (0, 2, 3, 4)],
+                }
+            position.zattrs["viscy_prediction_complete"] = completed
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.
