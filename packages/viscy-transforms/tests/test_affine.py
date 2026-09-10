@@ -413,6 +413,13 @@ def test_affine_depth_one_partial_batch():
     torch.manual_seed(0)
     out = t({"source": base.clone(), "target": base.clone()})
 
+    # Pin that the batch really was partial, or this silently degrades into
+    # another prob=1 (or prob=0) test and stops covering the sliced branch.
+    transformed = [not torch.equal(out["source"][i], base[i]) for i in range(base.shape[0])]
+    assert 0 < sum(transformed) < base.shape[0], (
+        f"batch was not partial: {sum(transformed)}/{base.shape[0]} transformed"
+    )
+
     nonzero = (out["source"] != 0).float().mean(dim=(1, 2, 3, 4))
     assert (nonzero > 0).all(), f"partial batch had blanked samples: {nonzero.tolist()}"
     assert torch.equal(out["source"], out["target"])
