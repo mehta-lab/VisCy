@@ -238,6 +238,31 @@ def poll_once(user: str, states: dict[str, JobState]) -> list[str]:
     return alerts
 
 
+def _load_states(path: Path, user: str) -> dict[str, JobState]:
+    """Rehydrate the persisted job histories; empty when nothing was saved yet."""
+    if not path.exists():
+        return {}
+    with path.open() as saved:
+        payload = json.load(saved)
+    if payload["user"] != user:
+        raise ValueError(f"state file {path} belongs to another user")
+    states = {}
+    for jobid, data in payload["states"].items():
+        data["samples"] = [Sample(**sample) for sample in data["samples"]]
+        if data["progress_start"] is not None:
+            data["progress_start"] = Sample(**data["progress_start"])
+        states[jobid] = JobState(**data)
+    return states
+
+
+def _save_states(path: Path, user: str, states: dict[str, JobState]) -> None:
+    """Replace the persisted histories atomically."""
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w") as saved:
+        json.dump({"user": user, "states": {job: asdict(s) for job, s in states.items()}}, saved)
+    temporary.replace(path)
+
+
 def main() -> int:
     """Poll until interrupted, printing an alert line per stalled job."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -259,25 +284,9 @@ def main() -> int:
         # Coordinate continuous and one-shot monitors sharing the same history.
         with state_path.with_name(state_path.name + ".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            states: dict[str, JobState] = {}
-            if state_path.exists():
-                with state_path.open() as saved:
-                    payload = json.load(saved)
-                if payload["user"] != args.user:
-                    raise ValueError(f"state file {state_path} belongs to another user")
-                for jobid, data in payload["states"].items():
-                    data["samples"] = [Sample(**sample) for sample in data["samples"]]
-                    if data["progress_start"] is not None:
-                        data["progress_start"] = Sample(**data["progress_start"])
-                    states[jobid] = JobState(**data)
+            states = _load_states(state_path, args.user)
             alerts = poll_once(args.user, states)
-            temporary = state_path.with_name(state_path.name + ".tmp")
-            with temporary.open("w") as saved:
-                json.dump(
-                    {"user": args.user, "states": {job: asdict(s) for job, s in states.items()}},
-                    saved,
-                )
-            temporary.replace(state_path)
+            _save_states(state_path, args.user, states)
         if alerts:
             for alert in alerts:
                 print(f"[{stamp}] {alert}", flush=True)
