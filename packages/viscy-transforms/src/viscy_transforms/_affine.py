@@ -24,7 +24,13 @@ class _PaddedRandomAffine3D(RandomAffine3D):
 
     Kornia 0.8.x hard-codes ``padding_mode='zeros'`` in apply_transform.
     This subclass overrides that call to forward the user-specified mode,
-    and forces the transform's Z row to identity for depth-1 input.
+    and forces the matrix row of any singleton spatial axis to identity.
+
+    Note the neutralized row is applied to a copy, so
+    ``self._transform_matrix`` (and therefore
+    :meth:`RandomAffine3D.inverse`) still records the un-neutralized matrix
+    on a singleton axis. Nothing in VisCy reads those, but do not rely on
+    them for such inputs without re-applying the same neutralization.
     """
 
     def __init__(self, *args: object, padding_mode: str = "zeros", **kwargs: object) -> None:
@@ -38,21 +44,26 @@ class _PaddedRandomAffine3D(RandomAffine3D):
         flags: dict,
         transform: Tensor | None = None,
     ) -> Tensor:
-        # clone(): transform[:, :3] is a non-contiguous view, and warp_affine3d
-        # needs a contiguous matrix anyway. Kornia rebuilds this per key, so the
-        # copy is not protecting the source/target pairing.
+        # clone() is load-bearing: transform[:, :3] is a VIEW into the same
+        # tensor kornia stores as self._transform_matrix right after this
+        # returns, so mutating it in place would corrupt the recorded
+        # transform (and hence RandomAffine3D.inverse()). It is not about
+        # contiguity -- warp_affine3d accepts the non-contiguous view -- and
+        # not about the source/target pairing, which kornia rebuilds per key.
         matrix = transform[:, :3].clone()
-        if input.shape[-3] == 1:
-            # Kornia normalizes pixel coordinates with a 2 / (size - 1) scale;
-            # its depth == 1 guard divides by eps=1e-14 instead, so the Z scale
-            # blows up to ~2e14. Any non-identity Z entry then pushes every
-            # sampled coordinate out of bounds and padding_mode="zeros" blanks
-            # the volume. A single plane has no Z extent to rotate, shear,
-            # scale or translate along, so identity is the correct Z row. The X
-            # and Y rows are left alone and still warp in-plane; their
-            # Z-dependent terms are divided by that same 2e14 and vanish.
-            matrix[:, 2] = 0.0
-            matrix[:, 2, 2] = 1.0
+        # Kornia normalizes pixel coordinates with a 2 / (size - 1) scale and
+        # guards a singleton axis by dividing by eps=1e-14 instead, so that
+        # axis' scale blows up to ~2e14. Any non-identity entry in the
+        # corresponding matrix row then pushes every sampled coordinate out of
+        # bounds and padding_mode="zeros" blanks the volume. A singleton axis
+        # has no extent to rotate, shear, scale or translate along, so identity
+        # is the correct row. Other rows are left alone and still warp
+        # normally; their terms for this axis are divided by the same 2e14 and
+        # vanish. Rows are ordered (x, y, z), i.e. (W, H, D).
+        for row, size in enumerate((input.shape[-1], input.shape[-2], input.shape[-3])):
+            if size == 1:
+                matrix[:, row] = 0.0
+                matrix[:, row, row] = 1.0
         return warp_affine3d(
             input,
             matrix,
