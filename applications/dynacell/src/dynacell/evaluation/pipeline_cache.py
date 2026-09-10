@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import zarr
 from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation.cache import (
@@ -635,7 +636,9 @@ def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, pres
         nothing to preserve, and leaving it bare would make every later run an
         all-keys mismatch -- a perpetual recompute of the walked FOVs, or a
         :class:`StaleCacheError` under ``io.require_complete_cache`` /
-        ``limit_positions``.
+        ``limit_positions``. That stamp is only honest when the artifact holds
+        nothing but this run's own write; callers establish that with
+        :func:`_check_identity_bootstrap` before computing.
     """
     current = manifest.setdefault("artifacts", {})
     for key in keys[:-1]:
@@ -655,6 +658,73 @@ def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
     positions = current.setdefault("positions", [])
     if pos_name not in positions:
         positions.append(pos_name)
+
+
+def _check_identity_bootstrap(
+    ctx: _CacheContext,
+    keys: list[str],
+    *,
+    artifact_label: str,
+    force_key: str,
+    writing: set[str],
+    stored: set[str],
+) -> None:
+    """Refuse to stamp a bare manifest leaf over cache data of unknown identity.
+
+    Only an excluded walk (``io.exclude_fov_names``) is concerned, and only while
+    the leaf at *keys* carries no identity -- absent, or ``positions`` alone.
+    :func:`_update_manifest_entry` would then stamp this run's full identity, and
+    that stamp is a store-wide claim: every slot under the leaf reads back as a
+    hit for this identity, FOVs the walk skipped included. It is honest only when
+    the artifact is provably free of other data: no recorded ``positions`` and
+    nothing in the backing store beyond *writing*, the slots this run is about to
+    (re)write. A positions-only leaf is the residue of the pre-fix excluded walk;
+    slots with no manifest at all are what a builder stopped before its deferred
+    flush leaves behind. Both hold data of unknown identity, and it is not
+    recovered here: the operator rebuilds on a full walk or starts a fresh cache.
+
+    Call it before the FOV's compute so a refusal wastes no work. Once the first
+    stamp lands in ``ctx.manifest`` the leaf has an identity, and later FOVs of
+    the same run return here without touching the store.
+    """
+    if not ctx.excluded_walk:
+        return
+    leaf = ctx.manifest.get("artifacts", {})
+    for key in keys:
+        leaf = leaf.get(key, {})
+    if leaf.keys() - {"positions"}:
+        return
+    recorded = list(leaf.get("positions") or [])
+    foreign = sorted(stored - writing)
+    if not recorded and not foreign:
+        return
+    details = []
+    if recorded:
+        details.append(f"manifest lists positions {recorded[:5]} without an identity")
+    if foreign:
+        details.append(f"store holds slots {foreign[:5]} outside this write")
+    raise StaleCacheError(
+        f"{artifact_label}: the cache holds data of unknown identity ({'; '.join(details)}) and an excluded walk "
+        f"(io.exclude_fov_names) cannot certify it. Rebuild it on a full walk -- run once without "
+        f"io.exclude_fov_names and with force_recompute.{force_key}=true -- or use a fresh cache directory."
+    )
+
+
+def _plate_positions(plate_path: Path) -> set[str]:
+    """``row/col/fov`` names present on disk in one HCS cache plate (empty when the plate is absent).
+
+    Reads the directory tree rather than the plate metadata so a position a
+    crashed writer left half-created (see ``cache._is_position_malformed``) still
+    counts as data of unknown identity.
+    """
+    return {p.relative_to(plate_path).as_posix() for p in plate_path.glob("*/*/*") if p.is_dir()}
+
+
+def _feature_slots(group: zarr.Group | None) -> set[str]:
+    """``{pos_name}/t{t}`` keys of every array in an open feature group (empty when the store is absent)."""
+    if group is None:
+        return set()
+    return {path for path, node in group.members(max_depth=None) if isinstance(node, zarr.Array)}
 
 
 @contextlib.contextmanager
@@ -780,6 +850,16 @@ def _fov_masks(
     def _write_masks(masks: np.ndarray) -> None:
         write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name, backend=ctx.backend)
 
+    def _check_bootstrap() -> None:
+        _check_identity_bootstrap(
+            ctx,
+            ["organelle_masks", manifest_key],
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={pos_name},
+            stored=_plate_positions(ctx.paths.mask_plate(ctx.target_name, ctx.backend)),
+        )
+
     # Cache disabled — compute fresh, no locking, no caching.
     if not ctx.enabled:
         return _compute_masks()
@@ -788,6 +868,7 @@ def _fov_masks(
     # cache-miss writer for the same slot, then overwrite.
     if ctx.force[force_key]:
         with _pos_write_lock(ctx, f"{ctx.side}_masks_{ctx.target_name}", pos_name):
+            _check_bootstrap()
             masks = _compute_masks()
             _write_masks(masks)
             _record_write()
@@ -806,6 +887,7 @@ def _fov_masks(
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
+        _check_bootstrap()
         masks = _compute_masks()
         _write_masks(masks)
         _record_write()
@@ -963,6 +1045,16 @@ def _fov_instances(
     def _write(labels: np.ndarray) -> None:
         write_instance_mask(ctx.paths, ctx.target_name, pos_name, labels, backend=ctx.backend)
 
+    def _check_bootstrap() -> None:
+        _check_identity_bootstrap(
+            ctx,
+            manifest_keys,
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={pos_name},
+            stored=_plate_positions(ctx.paths.instance_mask_plate(ctx.target_name, ctx.backend)),
+        )
+
     def _record_write() -> None:
         _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
@@ -974,6 +1066,7 @@ def _fov_instances(
     lock_tag = f"{ctx.side}_instances_{ctx.target_name}"
     if ctx.force[force_key]:
         with _pos_write_lock(ctx, lock_tag, pos_name):
+            _check_bootstrap()
             labels = _compute()
             _write(labels)
             _record_write()
@@ -988,6 +1081,7 @@ def _fov_instances(
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
+        _check_bootstrap()
         labels = _compute()
         _write(labels)
         _record_write()
@@ -1154,6 +1248,7 @@ def _load_or_compute_feature_timepoints(
     t_count: int,
     force_key: str,
     artifact_label: str,
+    manifest_keys: list[str],
     cache_kwargs: dict[str, Any],
     compute_fn,
 ) -> tuple[list[np.ndarray], bool]:
@@ -1162,7 +1257,9 @@ def _load_or_compute_feature_timepoints(
     Reads from the backing zarr group lockless (concurrent readers are
     safe on append-only feature zarrs); only acquires the per-FOV write
     lock when at least one timepoint is missing or force-recompute is
-    set. Returns ``(per_t_features, manifest_updated)``.
+    set. Before the first compute, :func:`_check_identity_bootstrap` refuses
+    an excluded walk that would stamp the bare leaf at *manifest_keys* over
+    slots of unknown identity. Returns ``(per_t_features, manifest_updated)``.
     """
     if not ctx.enabled:
         return [np.asarray(compute_fn(t)) for t in range(t_count)], False
@@ -1192,6 +1289,14 @@ def _load_or_compute_feature_timepoints(
         _pos_write_lock(ctx, lock_tag, pos_name),
         open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group,
     ):
+        _check_identity_bootstrap(
+            ctx,
+            manifest_keys,
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={f"{pos_name}/t{t}" for t in pending},
+            stored=_feature_slots(group),
+        )
         for t in pending:
             if not force_recompute:
                 # A concurrent writer may have populated this slot between
@@ -1226,6 +1331,7 @@ def fov_cp_features(
         t_count=image_arr.shape[0],
         force_key=f"{ctx.side}_cp",
         artifact_label=f"{ctx.label_prefix}cp_features",
+        manifest_keys=["cp_features"],
         cache_kwargs={},
         compute_fn=lambda t: cp_regionprops(
             image_arr[t],
@@ -1380,6 +1486,7 @@ def _fov_deep_features(
         t_count=image_arr.shape[0],
         force_key=force_key,
         artifact_label=artifact_label,
+        manifest_keys=manifest_keys,
         cache_kwargs=cache_kwargs,
         compute_fn=compute_fn,
     )
@@ -1573,12 +1680,21 @@ def _flush_kind(
     flat: list[np.ndarray] = [c for _, _, crops in items for c in crops]
     counts = [len(crops) for _, _, crops in items]
 
-    with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
-        feats = features_from_crops(flat, extractor)
-
     cache_kwargs = _kind_cache_kwargs(ctx, kind)
     lock_tag = _kind_lock_tag(kind, cache_kwargs)
-    _, _, _, manifest_keys, entry = _deep_feature_cache_metadata(ctx, kind)
+    force_key, artifact_label, _, manifest_keys, entry = _deep_feature_cache_metadata(ctx, kind)
+    with open_features_group(ctx.paths, kind, mode="r", **cache_kwargs) as group:
+        _check_identity_bootstrap(
+            ctx,
+            manifest_keys,
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={f"{pos_name}/t{t}" for pos_name, t, _ in items},
+            stored=_feature_slots(group),
+        )
+
+    with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
+        feats = features_from_crops(flat, extractor)
 
     by_pos: dict[str, list[tuple[int, np.ndarray]]] = {}
     cursor = 0
