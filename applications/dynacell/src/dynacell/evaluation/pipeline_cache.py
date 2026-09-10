@@ -1596,7 +1596,7 @@ def _flush_kind(
         ):
             for t, chunk in ts_chunks:
                 write_features_to_group(group, pos_name, t, chunk)
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry)
+        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
     # Manifest persistence is deferred to the caller (after batcher.drain()).

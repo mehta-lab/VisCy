@@ -15,6 +15,7 @@ pytest.importorskip("iohub")
 from dynacell.evaluation.cache import (  # noqa: E402
     StaleCacheError,
     cache_paths,
+    feature_slug,
     load_manifest,
     read_features,
     read_instance_mask,
@@ -1011,13 +1012,14 @@ def _write_tiny_seg_plate(
 class _BatchedConstantExtractor:
     """Stub extractor that honors the ``extract_features_batch`` contract.
 
-    Returns ones of shape ``(len(images), feature_dim)`` so equality
+    Returns constant arrays of shape ``(len(images), feature_dim)`` so equality
     checks across paths are bit-exact. Counts batch calls and records
     every batch size so tests can assert skipped slots.
     """
 
-    def __init__(self, feature_dim: int = 16) -> None:
+    def __init__(self, feature_dim: int = 16, value: float = 1.0) -> None:
         self.feature_dim = feature_dim
+        self.value = value
         self.batch_call_count = 0
         self.batch_sizes: list[int] = []
 
@@ -1026,12 +1028,12 @@ class _BatchedConstantExtractor:
 
         self.batch_call_count += 1
         self.batch_sizes.append(len(images))
-        return torch.from_numpy(np.ones((len(images), self.feature_dim), dtype=np.float32))
+        return torch.from_numpy(np.full((len(images), self.feature_dim), self.value, dtype=np.float32))
 
     def extract_features(self, img):
         import torch
 
-        return torch.from_numpy(np.ones((self.feature_dim,), dtype=np.float32))
+        return torch.from_numpy(np.full((self.feature_dim,), self.value, dtype=np.float32))
 
 
 def _open_precompute_inputs(tmp_path: Path, *, n_t: int = 3, n_cells: int = 2):
@@ -1181,6 +1183,65 @@ def test_precompute_deep_features_skips_cached_slots(tmp_path: Path) -> None:
     finally:
         gt_plate.close()
         seg_plate.close()
+
+
+@pytest.mark.parametrize("side", ["gt", "pred"])
+@pytest.mark.parametrize("flush_threshold", [1, 256])
+def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, flush_threshold) -> None:
+    """A partial refresh cannot certify excluded embeddings for the next full run."""
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path, n_t=1)
+    cache_dir = tmp_path / "cache"
+    model_name = "facebook/test-dinov3"
+    with gt_plate, seg_plate:
+        cfg = _make_config(
+            **{
+                f"io.{side}_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                f"io.{side}_cache_dir": str(cache_dir),
+            }
+        )
+        positions = list(gt_plate.positions())
+        seg_positions = list(seg_plate.positions())
+
+        def precompute(ctx, selected, value):
+            precompute_deep_features(
+                sides={side: ctx},
+                side_positions={side: positions[:selected]},
+                side_channel_names={side: "target"},
+                seg_positions=seg_positions[:selected],
+                extractors={"dinov3": _BatchedConstantExtractor(value=value)},
+                flush_threshold=flush_threshold,
+            )
+            flush_manifest(ctx)
+
+        ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v1")
+        precompute(ctx, selected=2, value=1.0)
+
+        cfg.io.exclude_fov_names = ["A/1/1"]
+        with pytest.warns(UserWarning, match="preprocess_version mismatch"):
+            ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v2")
+        precompute(ctx, selected=1, value=2.0)
+        paths = cache_paths(cache_dir)
+        for pos_name, value in [("A/1/0", 2.0), ("A/1/1", 1.0)]:
+            np.testing.assert_array_equal(
+                read_features(paths, "dinov3", pos_name, 0, model_name=model_name),
+                np.full((2, 16), value, dtype=np.float32),
+            )
+        entry = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        assert entry["preprocess_version"] == "v1"
+
+        cfg.io.exclude_fov_names = []
+        with pytest.warns(UserWarning, match="preprocess_version mismatch"):
+            ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v2")
+        assert ctx.force[f"{side}_dinov3"]
+        precompute(ctx, selected=2, value=3.0)
+        for pos_name in ("A/1/0", "A/1/1"):
+            np.testing.assert_array_equal(
+                read_features(paths, "dinov3", pos_name, 0, model_name=model_name),
+                np.full((2, 16), 3.0, dtype=np.float32),
+            )
+        entry = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        assert entry["preprocess_version"] == "v2"
 
 
 def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> None:
