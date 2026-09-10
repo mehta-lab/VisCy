@@ -15,6 +15,7 @@ from watch_stalled_jobs import (  # noqa: E402
     _load_states,
     _save_states,
     parse_slurm_duration,
+    poll_once,
     running_steps,
     step_cpu_seconds,
 )
@@ -108,6 +109,44 @@ def test_step_cpu_seconds_reads_the_single_step_row(monkeypatch) -> None:
     assert step_cpu_seconds("36115356.1") == pytest.approx(22 * HOUR + 22 * 60 + 4)
     assert step_cpu_seconds("36115356.2") is None
     assert calls[0] == ["sstat", "-j", "36115356.1", "-P", "--format=JobID,AveCPU"]
+
+
+def test_header_only_sstat_output_skips_the_step_for_this_poll(monkeypatch) -> None:
+    """``sstat`` can exit 0 with only the header line and its error on stderr.
+
+    Reproduced on the cluster for an ended step (``sstat: error: ... Invalid
+    user id``). Unpacking the missing row raised ValueError and took the
+    daemon down with exit 2, so the step is skipped this poll and its history
+    kept; a second row for one step id would still be a contract change.
+    """
+    outputs = {
+        "36132690_1.0": "JobID|AveCPU\n",
+        "36120000.0": "JobID|AveCPU\n36120000.0|02:00:00\n",
+        "36120001.0": "JobID|AveCPU\n36120001.0|02:00:00\n36120001.1|00:00:01\n",
+    }
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=outputs[argv[2]], stderr="sstat: error: Invalid user id\n")
+
+    monkeypatch.setattr(watch_stalled_jobs.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        watch_stalled_jobs,
+        "running_steps",
+        lambda user: [
+            ("36132690_1.0", "ER_PREDICT_batch", 3 * HOUR + 900, "gpu-f-3"),
+            ("36120000.0", "FNet3DT01_A549_NUCL", 2.5 * HOUR, "gpu-b-3"),
+        ],
+    )
+    ended = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    ended.add(Sample(wall_s=3 * HOUR, cpu_s=2 * HOUR))
+    states = {"36132690_1.0": ended}
+
+    assert step_cpu_seconds("36132690_1.0") is None
+    assert poll_once("alex.kalinin", states) == []
+    assert states["36132690_1.0"].samples == [Sample(wall_s=3 * HOUR, cpu_s=2 * HOUR)]
+    assert states["36120000.0"].samples == [Sample(wall_s=2.5 * HOUR, cpu_s=2 * HOUR)]
+    with pytest.raises(ValueError):
+        step_cpu_seconds("36120001.0")
 
 
 def test_hung_pix2pix_predict_is_flagged() -> None:

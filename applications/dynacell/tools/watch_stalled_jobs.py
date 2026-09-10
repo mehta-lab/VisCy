@@ -219,11 +219,12 @@ def running_steps(user: str) -> list[tuple[str, str, float, str]]:
 
 
 def step_cpu_seconds(step_id: str) -> float | None:
-    """Return the step's ``AveCPU`` in seconds, or None when ``sstat`` fails.
+    """Return the step's ``AveCPU`` in seconds, or None when ``sstat`` has no row for it.
 
-    ``sstat`` fails once the step has ended, which can happen between the
-    ``squeue`` listing and this call. ``-P`` is required because the default
-    ``AveCPU`` width truncates long durations to ``"10-15:41:+"``.
+    Once the step has ended -- which can happen between the ``squeue`` listing
+    and this call -- ``sstat`` either exits non-zero or exits 0 with only the
+    header line and its error on stderr. ``-P`` is required because the
+    default ``AveCPU`` width truncates long durations to ``"10-15:41:+"``.
     """
     proc = subprocess.run(
         ["sstat", "-j", step_id, "-P", "--format=JobID,AveCPU"],
@@ -232,7 +233,11 @@ def step_cpu_seconds(step_id: str) -> float | None:
     )
     if proc.returncode != 0:
         return None
-    (row,) = proc.stdout.splitlines()[1:]
+    rows = proc.stdout.splitlines()[1:]
+    if not rows:
+        return None
+    # A second row for a single step id would be a scheduler contract change.
+    (row,) = rows
     _, ave = row.rsplit("|", 1)
     return parse_slurm_duration(ave)
 
