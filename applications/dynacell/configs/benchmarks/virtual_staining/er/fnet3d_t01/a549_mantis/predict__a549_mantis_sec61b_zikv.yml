@@ -33,7 +33,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/er/fnet3d_t01/checkpoints/epoch=69-step=8680-loss=0.827.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/er/fnet3d_t01/checkpoints/epoch=599-step=74400-loss=0.747.ckpt
 
 data:
   init_args:

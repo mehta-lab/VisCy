@@ -18,7 +18,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/memb/fcmae_vscyto3d_pretrained/checkpoints/epoch=154-step=33635.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/membrane/fcmae_vscyto3d_pretrained/checkpoints/epoch=121-step=26474.ckpt
 
 data:
   class_path: viscy_data.hcs.HCSDataModule

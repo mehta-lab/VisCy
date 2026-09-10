@@ -27,7 +27,7 @@ model:
     # ckpt lives under the _ws8500 training-output subdir; config namespace
     # uses fcmae_vscyto3d_pretrained (no _ws8500 suffix) for consistency with
     # iPSC + a549 single-set predict configs.
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fcmae_vscyto3d_pretrained/checkpoints/epoch=117-step=51094-v1.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fcmae_vscyto3d_pretrained/checkpoints/epoch=162-step=70579-loss=0.411.ckpt
 
 data:
   init_args:
