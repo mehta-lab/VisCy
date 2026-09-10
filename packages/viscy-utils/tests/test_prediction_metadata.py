@@ -1,8 +1,11 @@
 """Tests for the checkpoint content hash shared by prediction writers and caches."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
+
+import pytest
 
 from viscy_utils import prediction_metadata
 from viscy_utils.prediction_metadata import checkpoint_sha256_12
@@ -24,15 +27,16 @@ def test_checkpoint_sha256_12(tmp_path: Path) -> None:
 
 
 def test_checkpoint_sha256_12_writes_and_reuses_sidecar(tmp_path: Path, monkeypatch) -> None:
-    """First call writes ``<ckpt>.sha256``; second call skips the hash."""
+    """First call writes ``<ckpt>.sha256`` with the file's size and mtime; second call skips the hash."""
     ckpt = tmp_path / "last.ckpt"
     ckpt.write_bytes(b"weights")
     h1 = checkpoint_sha256_12(ckpt)
     sidecar = tmp_path / "last.ckpt.sha256"
-    assert sidecar.exists()
-    written = sidecar.read_text().strip()
-    assert written[:12] == h1
-    assert len(written) == 64
+    recorded = json.loads(sidecar.read_text())
+    assert recorded["sha256"][:12] == h1
+    assert len(recorded["sha256"]) == 64
+    assert recorded["size"] == ckpt.stat().st_size
+    assert recorded["mtime_ns"] == ckpt.stat().st_mtime_ns
 
     calls = {"n": 0}
     real_sha256 = hashlib.sha256
@@ -60,23 +64,40 @@ def test_checkpoint_sha256_12_recomputes_when_sidecar_older(tmp_path: Path) -> N
 
     h2 = checkpoint_sha256_12(ckpt)
     assert h2 != h1
-    assert sidecar.read_text().strip()[:12] == h2
+    assert json.loads(sidecar.read_text())["sha256"][:12] == h2
 
 
-def test_checkpoint_sha256_12_ignores_corrupt_sidecar(tmp_path: Path) -> None:
-    """Non-hex sidecar is treated as missing and recomputed."""
+def test_checkpoint_sha256_12_recomputes_after_replacement_with_older_mtime(tmp_path: Path) -> None:
+    """A same-size checkpoint copied in with a preserved, older mtime must not reuse the old digest.
+
+    Only exact size and ``st_mtime_ns`` equality qualifies the sidecar; being
+    newer than the checkpoint is not evidence the content is unchanged.
+    """
+    ckpt = tmp_path / "last.ckpt"
+    ckpt.write_bytes(b"weights-v1")
+    h1 = checkpoint_sha256_12(ckpt)
+    sidecar = tmp_path / "last.ckpt.sha256"
+
+    ckpt.write_bytes(b"weights-v2")  # same size as v1
+    older = sidecar.stat().st_mtime - 3600
+    os.utime(ckpt, (older, older))
+
+    h2 = checkpoint_sha256_12(ckpt)
+    assert h2 == hashlib.sha256(b"weights-v2").hexdigest()[:12]
+    assert h2 != h1
+
+
+@pytest.mark.parametrize("content", ["not-a-hex-digest\n", "a" * 64 + "\n", '{"sha256": "abc"}\n'])
+def test_checkpoint_sha256_12_ignores_unusable_sidecars(tmp_path: Path, content: str) -> None:
+    """Corrupt, legacy plain-hex, and incomplete sidecars are treated as missing and recomputed."""
     ckpt = tmp_path / "last.ckpt"
     ckpt.write_bytes(b"weights")
     sidecar = tmp_path / "last.ckpt.sha256"
-    sidecar.write_text("not-a-hex-digest\n")
-    # Match ckpt mtime so the mtime check passes and we exercise the hex guard.
-    st = ckpt.stat()
-    os.utime(sidecar, (st.st_mtime, st.st_mtime))
+    sidecar.write_text(content)
 
     h = checkpoint_sha256_12(ckpt)
-    assert all(c in "0123456789abcdef" for c in h)
-    assert len(h) == 12
-    assert sidecar.read_text().strip()[:12] == h
+    assert h == hashlib.sha256(b"weights").hexdigest()[:12]
+    assert json.loads(sidecar.read_text())["sha256"][:12] == h
 
 
 def test_checkpoint_sha256_12_read_only_dir(tmp_path: Path) -> None:

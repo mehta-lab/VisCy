@@ -1,6 +1,7 @@
 """Prediction completion metadata shared by writers and submission tools."""
 
 import hashlib
+import json
 import os
 from collections.abc import Iterable
 from pathlib import Path
@@ -51,10 +52,14 @@ def checkpoint_sha256_12(path: str | os.PathLike) -> str:
     """Return the first 12 hex chars of the sha256 of the file at *path*.
 
     On repeated calls for the same checkpoint, reads the digest from a
-    ``<path>.sha256`` sidecar file when present and newer than the
-    checkpoint, avoiding a multi-GB re-read. Writes the sidecar after a
-    fresh hash; silently tolerates read-only parent directories and NFS
-    flakes by falling back to recompute.
+    ``<path>.sha256`` sidecar file, avoiding a multi-GB re-read. The sidecar
+    records the size and ``st_mtime_ns`` of the file it hashed and is only
+    trusted when both still match exactly: a checkpoint replaced in place
+    changes at least one of them even when it was copied with a preserved or
+    older mtime, so the digest never certifies stale weights (a sidecar that
+    is merely newer than the checkpoint proves nothing). Writes the sidecar
+    after a fresh hash; silently tolerates read-only parent directories and
+    NFS flakes by falling back to recompute.
 
     Parameters
     ----------
@@ -68,12 +73,18 @@ def checkpoint_sha256_12(path: str | os.PathLike) -> str:
     """
     ckpt = Path(path)
     sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
+    stat = ckpt.stat()
     try:
-        if sidecar.stat().st_mtime >= ckpt.stat().st_mtime:
-            digest = sidecar.read_text().strip()
-            if len(digest) >= 12 and all(c in "0123456789abcdef" for c in digest[:12]):
-                return digest[:12]
-    except OSError:
+        recorded = json.loads(sidecar.read_text())
+        if (
+            isinstance(recorded, dict)
+            and recorded.get("size") == stat.st_size
+            and recorded.get("mtime_ns") == stat.st_mtime_ns
+            and isinstance(recorded.get("sha256"), str)
+            and len(recorded["sha256"]) == 64
+        ):
+            return recorded["sha256"][:12]
+    except (OSError, ValueError):
         pass
     hasher = hashlib.sha256()
     with open(ckpt, "rb") as f:
@@ -82,7 +93,7 @@ def checkpoint_sha256_12(path: str | os.PathLike) -> str:
     digest = hasher.hexdigest()
     try:
         tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
-        tmp.write_text(digest + "\n")
+        tmp.write_text(json.dumps({"sha256": digest, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}) + "\n")
         tmp.replace(sidecar)
     except OSError:
         pass
