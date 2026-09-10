@@ -64,7 +64,7 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 **Using the stall watchdog.** `applications/dynacell/tools/watch_stalled_jobs.py` automates exactly that comparison. Start it whenever a campaign has long jobs in flight and leave it running:
 
 ```sh
-# one-shot check: exit 0 = no stall detected, exit 1 = something is stalled
+# one-shot check: exit 0 = no stall detected, exit 1 = something is stalled, exit 2 = tool error
 uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --once
 
 # continuous, 10-min poll (launch in the background; it runs until killed)

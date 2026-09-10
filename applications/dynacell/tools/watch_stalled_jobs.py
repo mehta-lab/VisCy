@@ -21,6 +21,10 @@ Usage
 -----
     uv run python applications/dynacell/tools/watch_stalled_jobs.py --once
     uv run python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
+
+Exit codes: 0 = no stall detected, 1 = something is stalled, 2 = the tool
+itself failed (traceback on stderr). A tool error must never read as a stall
+verdict, so it gets its own code.
 """
 
 import argparse
@@ -31,6 +35,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -48,6 +53,11 @@ MIN_PRIOR_EFFICIENCY = 0.30
 # >= 93%, so this is an order of magnitude of margin.
 STALL_CPU_FRACTION = 0.10
 LOOKBACK_S = 900.0
+
+# Bump whenever the persisted payload changes shape. The state file is a
+# derived cache: an old schema is discarded and the next poll rebuilds a
+# baseline, instead of every run tracebacking until someone deletes the file.
+STATE_VERSION = 2
 
 
 def parse_slurm_duration(text: str) -> float | None:
@@ -239,11 +249,19 @@ def poll_once(user: str, states: dict[str, JobState]) -> list[str]:
 
 
 def _load_states(path: Path, user: str) -> dict[str, JobState]:
-    """Rehydrate the persisted job histories; empty when nothing was saved yet."""
+    """Rehydrate the persisted job histories.
+
+    Empty when nothing was saved yet or when the file was written by another
+    schema version; a file written for another user is an error.
+    """
     if not path.exists():
         return {}
     with path.open() as saved:
         payload = json.load(saved)
+    found = payload.get("version")
+    if found != STATE_VERSION:
+        print(f"state file {path}: schema {found!r} is not {STATE_VERSION}; starting a new history", flush=True)
+        return {}
     if payload["user"] != user:
         raise ValueError(f"state file {path} belongs to another user")
     states = {}
@@ -258,8 +276,9 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
 def _save_states(path: Path, user: str, states: dict[str, JobState]) -> None:
     """Replace the persisted histories atomically."""
     temporary = path.with_name(path.name + ".tmp")
+    payload = {"version": STATE_VERSION, "user": user, "states": {job: asdict(s) for job, s in states.items()}}
     with temporary.open("w") as saved:
-        json.dump({"user": user, "states": {job: asdict(s) for job, s in states.items()}}, saved)
+        json.dump(payload, saved)
     temporary.replace(path)
 
 
@@ -301,4 +320,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        # Exit 1 is the stall verdict. A tool error must not collide with it,
+        # so this is the one deliberate broad except: report and exit 2.
+        traceback.print_exc()
+        sys.exit(2)

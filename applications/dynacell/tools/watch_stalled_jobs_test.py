@@ -1,14 +1,27 @@
 """Tests for the stalled-job detector, driven by real measured job traces."""
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 import watch_stalled_jobs
 from watch_stalled_jobs import (  # noqa: E402
+    STATE_VERSION,
     JobState,
     Sample,
+    _load_states,
     parse_slurm_duration,
 )
 
 HOUR = 3600.0
+SCRIPT = Path(watch_stalled_jobs.__file__)
+
+
+def _write_state_file(path: Path, **payload) -> None:
+    """Write a state file as another writer would; keys override the defaults."""
+    path.write_text(json.dumps({"version": STATE_VERSION, "user": "alex.kalinin", "states": {}} | payload))
 
 
 @pytest.mark.parametrize(
@@ -243,3 +256,56 @@ def test_requeued_job_uses_its_reported_wall_age() -> None:
     verdict = state.stall_report()
     assert verdict is not None
     assert verdict[1] == pytest.approx(1700 / 1800)
+
+
+def test_once_restarts_history_from_an_unversioned_state_file(tmp_path, monkeypatch, capsys) -> None:
+    """A state file from an earlier schema is discarded, not rehydrated.
+
+    Rehydrating it unguarded tracebacked on the first field change, and under
+    the exit-code contract that traceback exited 1 -- indistinguishable from a
+    stall -- on every run until the cache was deleted by hand.
+    """
+    state_file = tmp_path / "watch.json"
+    state_file.write_text(json.dumps({"user": "alex.kalinin", "states": {"1": {"field_from_v1": 1.0}}}))
+    monkeypatch.setattr("sys.argv", ["watch_stalled_jobs", "--once", "--state-file", str(state_file)])
+    monkeypatch.setattr(
+        watch_stalled_jobs,
+        "running_jobs",
+        lambda user: [("35083019_0", "P2P_EMA_REST_g44", 21.18 * HOUR, "gpu-b-4")],
+    )
+    monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid: 21.75 * HOUR)
+
+    assert watch_stalled_jobs.main() == 0
+
+    assert f"schema None is not {STATE_VERSION}; starting a new history" in capsys.readouterr().out
+    rewritten = json.loads(state_file.read_text())
+    assert rewritten["version"] == STATE_VERSION
+    assert set(rewritten["states"]) == {"35083019_0"}
+
+
+def test_load_states_rejects_another_users_file(tmp_path) -> None:
+    """Same schema, different user is a real error rather than a fresh start."""
+    state_file = tmp_path / "watch.json"
+    _write_state_file(state_file, user="someone.else")
+
+    with pytest.raises(ValueError, match="another user"):
+        _load_states(state_file, "alex.kalinin")
+
+
+def test_cli_exits_2_on_a_tool_error(tmp_path) -> None:
+    """A tool failure must not exit 1, which the contract reserves for a stall.
+
+    Pointing ``--user`` at another user's state file raises before any
+    ``squeue`` call, so the script fails without touching the scheduler.
+    """
+    state_file = tmp_path / "watch.json"
+    _write_state_file(state_file)
+
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--once", "--user", "someone.else", "--state-file", str(state_file)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 2
+    assert "ValueError: state file" in proc.stderr
