@@ -14,7 +14,7 @@ from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
-from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
+from viscy_utils.callbacks.prediction_writer import PREDICTION_COMPLETE_KEY, HCSPredictionWriter
 
 yaml = pytest.importorskip("yaml")
 
@@ -580,13 +580,11 @@ def _write_hcs_store(
             position = plate.create_position(row, col, pos)
             position.create_zeros("0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8))
             if completed and fov_name in completed:
-                position.zattrs["viscy_prediction_complete"] = {
-                    channel: {"source_shape": [t, 4, 8, 8], "output_shape": [t, 4, 8, 8]} for channel in channels
-                }
+                position.zattrs[PREDICTION_COMPLETE_KEY] = {channel: [t, 4, 8, 8] for channel in channels}
 
 
 def test_completed_prediction_fovs_detects_partial(tmp_path):
-    """Only marked FOVs matching the input and output shapes count as complete."""
+    """Only marked FOVs whose output T matches the input count as complete."""
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 10})
     out = tmp_path / "pred.zarr"
@@ -691,10 +689,7 @@ def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_pa
         assert image.shape[0] == 3
         np.testing.assert_array_equal(image[:2], 1)
         np.testing.assert_array_equal(image[2], 999)
-        assert plate["0/0/fov0000"].zattrs["viscy_prediction_complete"]["Structure_prediction"] == {
-            "source_shape": [2, 4, 8, 8],
-            "output_shape": [3, 4, 8, 8],
-        }
+        assert plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY] == {"Structure_prediction": [2, 4, 8, 8]}
     assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
 
 

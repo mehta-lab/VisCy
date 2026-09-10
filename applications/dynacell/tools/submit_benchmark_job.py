@@ -31,6 +31,7 @@ import yaml
 from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
+from viscy_utils.callbacks.prediction_writer import PREDICTION_COMPLETE_KEY, tzyx_shape
 from viscy_utils.compose import deep_merge, load_composed_config
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -143,12 +144,13 @@ def _completed_prediction_fovs(
 ) -> tuple[set[str], int]:
     """Return ``(complete FOV names, total input FOV count)`` for predict resume.
 
-    Every prediction channel must have a completion marker written after all
-    of the FOV's (T, Z-window) writes succeed. The marker must match the input
-    and output TZYX shapes, and output T must equal input T. Unmarked legacy
-    outputs are recomputed because array dimensions grow before all windows
-    are written. Metadata-only: reads completion markers and shapes, never
-    voxel data.
+    A FOV is complete when every prediction channel carries the writer's
+    completion marker for this input's TZYX shape (stamped only after all of
+    the FOV's (T, Z-window) writes succeed) and the output holds exactly the
+    input's timepoints, so stale extra frames are never certified. Unmarked
+    legacy outputs are recomputed because array dimensions grow before all
+    windows are written. Metadata-only: reads markers and shapes, never voxel
+    data.
 
     Parameters
     ----------
@@ -168,25 +170,19 @@ def _completed_prediction_fovs(
     input_shapes: dict[str, list[int]] = {}
     with open_ome_zarr(data_path, mode="r") as plate:
         for name, pos in plate.positions():
-            input_shapes[name] = [pos["0"].shape[i] for i in (0, 2, 3, 4)]
+            input_shapes[name] = tzyx_shape(pos["0"])
     total = len(input_shapes)
     completed: set[str] = set()
     if not os.path.exists(output_store):
         return completed, total
     with open_ome_zarr(output_store, mode="r") as plate:
         for name, pos in plate.positions():
-            if not all(ch in pos.channel_names for ch in prediction_channels):
+            if name not in input_shapes or not all(ch in pos.channel_names for ch in prediction_channels):
                 continue
-            if name not in input_shapes:
+            if pos["0"].frames != input_shapes[name][0]:
                 continue
-            markers = pos.zattrs.get("viscy_prediction_complete", {})
-            output_shape = [pos["0"].shape[i] for i in (0, 2, 3, 4)]
-            if output_shape[0] != input_shapes[name][0]:
-                continue
-            if all(
-                markers.get(ch) == {"source_shape": input_shapes[name], "output_shape": output_shape}
-                for ch in prediction_channels
-            ):
+            markers = pos.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+            if all(markers.get(ch) == input_shapes[name] for ch in prediction_channels):
                 completed.add(name)
     return completed, total
 

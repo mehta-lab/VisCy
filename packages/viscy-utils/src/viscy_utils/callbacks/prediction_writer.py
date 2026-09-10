@@ -22,8 +22,29 @@ from viscy_utils.tensor_utils import to_numpy
 if TYPE_CHECKING:
     from viscy_data import HCSDataModule, Sample
 
-__all__ = ["HCSPredictionWriter"]
+__all__ = ["PREDICTION_COMPLETE_KEY", "HCSPredictionWriter", "tzyx_shape"]
 _logger = logging.getLogger("lightning.pytorch")
+
+# Position attribute mapping each prediction channel to the TZYX shape of the
+# source it was fully predicted from. A channel that is missing, or recorded
+# against a different source shape, is incomplete and must be recomputed.
+PREDICTION_COMPLETE_KEY = "viscy_prediction_complete"
+
+
+def tzyx_shape(array: ImageArray) -> list[int]:
+    """Return the TZYX extent of a 5D OME-Zarr array.
+
+    Parameters
+    ----------
+    array : ImageArray
+        Array whose ``(T, C, Z, Y, X)`` shape to project.
+
+    Returns
+    -------
+    list of int
+        ``[T, Z, Y, X]``, the identity a completion marker records.
+    """
+    return [array.frames, array.slices, array.height, array.width]
 
 
 def _pad_shape(shape: tuple[int, ...], target: int = 5) -> tuple[int, ...]:
@@ -209,11 +230,15 @@ class HCSPredictionWriter(BasePredictionWriter):
         target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
         self._prediction_channels = prediction_channel
-        self._source_shapes = {
-            f"/{array.path}": [array.shape[i] for i in (0, 2, 3, 4)] for array in dm.predict_dataset.window_arrays
+        window_arrays = dm.predict_dataset.window_arrays
+        self._source_shapes = {f"/{array.path}": tzyx_shape(array) for array in window_arrays}
+        # Array dimensions grow before writes, so only a successful write of every
+        # distinct (T, Z-window) establishes completion, including overlapping windows.
+        self._written_windows: dict[str, NDArray[np.bool_]] = {
+            f"/{array.path}": np.zeros((array.frames, array.slices - dm.z_window_size + 1), dtype=bool)
+            for array in window_arrays
         }
-        self._z_window_size = dm.z_window_size
-        self._written_windows: dict[str, NDArray[np.bool_]] = {}
+        run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
         if os.path.exists(self.output_store):
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
@@ -221,7 +246,8 @@ class HCSPredictionWriter(BasePredictionWriter):
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
                 # Validate all positions before mutating any.
                 needs_append: list[tuple[Position, list[str]]] = []
-                for _, pos in self.plate.positions():
+                overwritten: list[Position] = []
+                for name, pos in self.plate.positions():
                     existing = set(pos.channel_names)
                     missing = [ch for ch in prediction_channel if ch not in existing]
                     for ch in prediction_channel:
@@ -240,9 +266,16 @@ class HCSPredictionWriter(BasePredictionWriter):
                             )
                     if missing:
                         needs_append.append((pos, missing))
+                    if name in run_positions:
+                        overwritten.append(pos)
                 for pos, channels in needs_append:
                     for ch in channels:
                         pos.append_channel(ch, resize_arrays=True)
+                # This run replaces these channels' voxels, so an interrupted run
+                # must never reuse their old completion. FOVs outside the run
+                # (e.g. excluded on resume) keep theirs.
+                for pos in overwritten:
+                    self._set_completion(pos, None)
         else:
             channel_names = prediction_channel
             if self.write_input:
@@ -346,18 +379,6 @@ class HCSPredictionWriter(BasePredictionWriter):
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         image = self._create_image(img_name, sample_prediction.shape, sample_prediction.dtype)
-        source_shape = self._source_shapes[img_name]
-        if img_name not in self._written_windows:
-            # Invalidate before replacing any voxels; excluded FOVs retain their
-            # markers. An interrupted overwrite must never reuse old completion.
-            position = self.plate[img_name.rsplit("/", 1)[0]]
-            completed = dict(position.zattrs.get("viscy_prediction_complete", {}))
-            for channel in self._prediction_channels:
-                completed.pop(channel, None)
-            position.zattrs["viscy_prediction_complete"] = completed
-            self._written_windows[img_name] = np.zeros(
-                (source_shape[0], source_shape[1] - self._z_window_size + 1), dtype=bool
-            )
         _resize_image(image, t_index, z_slice)
         if self.write_input:
             source_stack = batch["source"][sample_index].cpu()
@@ -378,19 +399,29 @@ class HCSPredictionWriter(BasePredictionWriter):
                 sample_prediction = sample_prediction[..., keep:, :, :]
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
         image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
-        # Array dimensions grow before writes, so only successful, distinct
-        # (T, Z-window) writes establish completion, including overlapping windows.
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if written.all():
-            position = self.plate[img_name.rsplit("/", 1)[0]]
-            completed = dict(position.zattrs.get("viscy_prediction_complete", {}))
-            for channel in self._prediction_channels:
-                completed[channel] = {
-                    "source_shape": source_shape,
-                    "output_shape": [image.shape[i] for i in (0, 2, 3, 4)],
-                }
-            position.zattrs["viscy_prediction_complete"] = completed
+            self._set_completion(self.plate[img_name.rsplit("/", 1)[0]], self._source_shapes[img_name])
+
+    def _set_completion(self, position: Position, source_shape: list[int] | None) -> None:
+        """Mark this run's prediction channels complete for ``source_shape``, or clear them with ``None``.
+
+        Parameters
+        ----------
+        position : Position
+            Output position whose completion marker to update.
+        source_shape : list of int or None
+            TZYX shape of the source the channels were fully predicted from;
+            ``None`` removes the channels from the marker.
+        """
+        completed = dict(position.zattrs.get(PREDICTION_COMPLETE_KEY, {}))
+        for channel in self._prediction_channels:
+            if source_shape is None:
+                completed.pop(channel, None)
+            else:
+                completed[channel] = source_shape
+        position.zattrs[PREDICTION_COMPLETE_KEY] = completed
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.
