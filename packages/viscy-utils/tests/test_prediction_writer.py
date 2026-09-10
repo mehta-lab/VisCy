@@ -283,6 +283,38 @@ def test_writer_refuses_a_legacy_channel_after_another_channel_was_marked(tmp_pa
             assert set(plate[fov].zattrs[PREDICTION_COMPLETE_KEY]) == {"Other_prediction"}
 
 
+def test_channels_appended_to_excluded_fovs_carry_this_runs_started_marker(tmp_path):
+    """Appending a channel allocates zeros in every FOV; excluded FOVs record who did, so a resume can finish them."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0", "0/0/1"])
+    _predict_ones(source, output)
+    _predict_ones(source, output, exclude=["0/0/1"], target="Other")
+
+    run = prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=None)
+    complete = completion_marker([1, 4, 8, 8], run)
+    with open_ome_zarr(output, mode="r") as plate:
+        assert plate["0/0/0"].zattrs[PREDICTION_COMPLETE_KEY] == {
+            "Nuclei_prediction": complete,
+            "Other_prediction": complete,
+        }
+        assert plate["0/0/1"].zattrs[PREDICTION_COMPLETE_KEY] == {
+            "Nuclei_prediction": complete,
+            "Other_prediction": started_marker(run),
+        }
+        np.testing.assert_array_equal(plate["0/0/1/0"][:, 1], 0)
+
+    _predict_ones(source, output, exclude=["0/0/0"], target="Other", overwrite=True)
+
+    with open_ome_zarr(output, mode="r") as plate:
+        for fov in ("0/0/0", "0/0/1"):
+            assert plate[fov].zattrs[PREDICTION_COMPLETE_KEY] == {
+                "Nuclei_prediction": complete,
+                "Other_prediction": complete,
+            }
+            np.testing.assert_array_equal(plate[fov]["0"][:], 1)
+
+
 def test_marker_records_the_checkpoint_content(tmp_path):
     """The marker names the checkpoint and hashes its content, so a moved copy still matches."""
     source = tmp_path / "source.zarr"

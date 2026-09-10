@@ -756,18 +756,21 @@ def _predict(
     overwrite: bool = False,
     checkpoint: Path | None = None,
     settings: str | None = None,
+    target: str = "Structure",
+    exclude: list[str] | None = None,
 ) -> None:
     """Write all-ones predictions for the first ``limit_batches`` windows of ``inp`` into ``out``."""
     data = HCSDataModule(
         data_path=str(inp),
         source_channel=["Phase3D"],
-        target_channel=["Structure"],
+        target_channel=[target],
         z_window_size=z_window_size,
         batch_size=1,
         num_workers=0,
         yx_patch_size=[8, 8],
         normalizations=[],
         augmentations=[],
+        exclude_fov_names=exclude,
     )
     writer = HCSPredictionWriter(
         str(out),
@@ -1032,6 +1035,25 @@ def test_resume_predict_refuses_a_store_without_markers(tmp_path):
 
     with pytest.raises(SystemExit, match="cannot be verified"):
         sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"])
+
+
+def test_resume_predict_finishes_a_channel_appended_to_excluded_fovs(capsys, tmp_path):
+    """Predicting a new channel into part of a store allocates it everywhere; the rest resumes, unrefused."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+    settings = _leaf_settings(leaf)
+    _predict(inp, out, z_window_size=4, checkpoint=ckpt, settings=settings, target="Other")
+    _predict(inp, out, z_window_size=4, checkpoint=ckpt, settings=settings, exclude=["0/0/fov0001"])
+    with open_ome_zarr(out, mode="r") as plate:
+        assert plate["0/0/fov0001"].channel_names == ["Other_prediction", "Structure_prediction"]
+
+    assert sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"]) == 0
+    config = _resolved_config(capsys)
+    assert config["data"]["init_args"]["exclude_fov_names"] == ["0/0/fov0000"]
 
 
 def test_resume_predict_refuses_an_output_that_outruns_its_source(tmp_path):

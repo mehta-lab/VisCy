@@ -338,7 +338,17 @@ class HCSPredictionWriter(BasePredictionWriter):
                         f"appending {prediction_channel} ({sorted(channel_orders)}); the writer addresses "
                         "channels by one plate-wide index. Predict into a new output store."
                     )
+                # A started marker names this run as the writer of a channel's voxels.
+                # Run positions get one for every prediction channel: this run
+                # replaces their voxels, so an interrupted run must never reuse an
+                # old completion, and the next resume sees unfinished FOVs, not
+                # legacy ones. FOVs outside the run (e.g. excluded on resume) keep
+                # their markers, except for the channels appended below: those hold
+                # zeros this run allocated, and without a marker a later resume
+                # could not tell them from data predicted before markers existed.
+                started = {name: prediction_channel for name in overwritten}
                 for name, channels in needs_append:
+                    started.setdefault(name, channels)
                     for ch in channels:
                         positions[name].append_channel(ch, resize_arrays=True)
                 if needs_append:
@@ -347,14 +357,9 @@ class HCSPredictionWriter(BasePredictionWriter):
                     # later in this run see the appended channel.
                     self.plate.close()
                     self.plate = open_ome_zarr(self.output_store, mode="r+")
-                    positions = {name: self.plate[name] for name in overwritten}
-                # This run replaces these channels' voxels, so an interrupted run
-                # must never reuse their old completion; a started marker also
-                # tells the next resume these are this run's unfinished FOVs, not
-                # legacy ones. FOVs outside the run (e.g. excluded on resume)
-                # keep theirs.
-                for name in overwritten:
-                    mark_started(positions[name], prediction_channel, self._run)
+                    positions = {name: self.plate[name] for name in started}
+                for name, channels in started.items():
+                    mark_started(positions[name], channels, self._run)
         else:
             channel_names = prediction_channel
             if self.write_input:
