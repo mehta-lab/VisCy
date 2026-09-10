@@ -39,7 +39,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix2d_unetvit/checkpoints/epoch=39-step=20000-loss=0.724.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix2d_unetvit/checkpoints/epoch=22-step=11500-loss=0.712.ckpt
 
 data:
   init_args:

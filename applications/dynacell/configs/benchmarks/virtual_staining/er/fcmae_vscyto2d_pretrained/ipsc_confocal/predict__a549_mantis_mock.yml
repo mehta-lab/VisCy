@@ -30,7 +30,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto2d_pretrained/checkpoints/epoch=10-step=4642-loss=0.540.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto2d_pretrained/checkpoints/epoch=9-step=4220-loss=0.530.ckpt
 
 data:
   init_args:
