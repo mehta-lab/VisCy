@@ -17,34 +17,14 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
 
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, tzyx_shape
 from viscy_utils.tensor_utils import to_numpy
 
 if TYPE_CHECKING:
     from viscy_data import HCSDataModule, Sample
 
-__all__ = ["PREDICTION_COMPLETE_KEY", "HCSPredictionWriter", "tzyx_shape"]
+__all__ = ["HCSPredictionWriter"]
 _logger = logging.getLogger("lightning.pytorch")
-
-# Position attribute mapping each prediction channel to the TZYX shape of the
-# source it was fully predicted from. A channel that is missing, or recorded
-# against a different source shape, is incomplete and must be recomputed.
-PREDICTION_COMPLETE_KEY = "viscy_prediction_complete"
-
-
-def tzyx_shape(array: ImageArray) -> list[int]:
-    """Return the TZYX extent of a 5D OME-Zarr array.
-
-    Parameters
-    ----------
-    array : ImageArray
-        Array whose ``(T, C, Z, Y, X)`` shape to project.
-
-    Returns
-    -------
-    list of int
-        ``[T, Z, Y, X]``, the identity a completion marker records.
-    """
-    return [array.frames, array.slices, array.height, array.width]
 
 
 def _pad_shape(shape: tuple[int, ...], target: int = 5) -> tuple[int, ...]:

@@ -31,8 +31,8 @@ import yaml
 from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
-from viscy_utils.callbacks.prediction_writer import PREDICTION_COMPLETE_KEY, tzyx_shape
 from viscy_utils.compose import deep_merge, load_composed_config
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, tzyx_shape
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -14,7 +16,8 @@ from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
-from viscy_utils.callbacks.prediction_writer import PREDICTION_COMPLETE_KEY, HCSPredictionWriter
+from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY
 
 yaml = pytest.importorskip("yaml")
 
@@ -24,6 +27,32 @@ import submit_benchmark_job as sbj  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHMARKS = REPO_ROOT / "applications" / "dynacell" / "configs" / "benchmarks" / "virtual_staining"
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["--help"], "usage:"),
+        ([str(BENCHMARKS / "er/celldiff/ipsc_confocal/train.yml"), "--print-script"], "#SBATCH"),
+    ],
+)
+def test_submitter_runs_without_optional_evaluation_dependencies(args, expected):
+    """Submission and config rendering must work without scikit-learn installed."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; sys.modules['sklearn'] = None; "
+            "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')",
+            str(REPO_ROOT / "applications/dynacell/tools/submit_benchmark_job.py"),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert expected in result.stdout
 
 
 @pytest.fixture(scope="module")
