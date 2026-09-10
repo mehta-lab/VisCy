@@ -1,5 +1,6 @@
 import math
 
+import pytest
 import torch
 
 from viscy_transforms import BatchedRandAffined
@@ -351,13 +352,17 @@ def test_affine_depth_one_still_transforms_in_plane():
     assert not torch.equal(out, base), "YX transform was not applied at D=1"
 
 
-def test_affine_depth_one_all_shear_facets():
+@pytest.mark.parametrize(
+    "index,name",
+    list(enumerate(["sxy", "sxz", "syx", "syz", "szx", "szy"])),
+)
+def test_affine_depth_one_all_shear_facets(index: int, name: str):
     """Every individual shear facet is safe at depth 1."""
-    facets = ["sxy", "sxz", "syx", "syz", "szx", "szy"]
-    for i, name in enumerate(facets):
-        shear = [(0.0, 0.0)] * 6
-        shear[i] = (-0.05, 0.05)
-        t = BatchedRandAffined(keys=["source"], prob=1.0, shear_range=shear)
-        torch.manual_seed(0)
-        out = t({"source": torch.ones(2, 1, 1, 64, 64)})["source"]
-        assert float(out.mean()) > 0.5, f"facet {name} blanked the depth-1 volume"
+    shear = [(0.0, 0.0)] * 6
+    shear[index] = (-0.05, 0.05)
+    t = BatchedRandAffined(keys=["source"], prob=1.0, shear_range=shear)
+
+    torch.manual_seed(0)
+    out = t({"source": torch.ones(2, 1, 1, 64, 64)})["source"]
+
+    assert float(out.mean()) > 0.5, f"facet {name} blanked the depth-1 volume"
