@@ -12,6 +12,7 @@ from iohub.ngff import ImageArray, Position
 __all__ = [
     "PREDICTION_COMPLETE_KEY",
     "checkpoint_sha256_12",
+    "checkpoint_signature",
     "completion_marker",
     "mark_complete",
     "mark_started",
@@ -74,6 +75,28 @@ def outruns(array: ImageArray, source_shape: list[int]) -> bool:
     return array.frames > source_shape[0] or array.slices > source_shape[1]
 
 
+def checkpoint_signature(path: str | os.PathLike) -> tuple[int, int]:
+    """Return the size and ``st_mtime_ns`` of the file at *path*.
+
+    A replacement changes at least one of them even when copied with a
+    preserved or older mtime, so equal signatures mean the same bytes for
+    every purpose here: trusting a hash sidecar, or checking that a checkpoint
+    did not change between loading its weights and recording its hash.
+
+    Parameters
+    ----------
+    path : str or PathLike
+        Checkpoint file to describe.
+
+    Returns
+    -------
+    tuple of int
+        ``(size, st_mtime_ns)``.
+    """
+    stat = Path(path).stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
 def checkpoint_sha256_12(path: str | os.PathLike) -> str:
     """Return the first 12 hex chars of the sha256 of the file at *path*.
 
@@ -99,13 +122,13 @@ def checkpoint_sha256_12(path: str | os.PathLike) -> str:
     """
     ckpt = Path(path)
     sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
-    stat = ckpt.stat()
+    size, mtime_ns = checkpoint_signature(ckpt)
     try:
         recorded = json.loads(sidecar.read_text())
         if (
             isinstance(recorded, dict)
-            and recorded.get("size") == stat.st_size
-            and recorded.get("mtime_ns") == stat.st_mtime_ns
+            and recorded.get("size") == size
+            and recorded.get("mtime_ns") == mtime_ns
             and isinstance(recorded.get("sha256"), str)
             and len(recorded["sha256"]) == 64
         ):
@@ -119,7 +142,7 @@ def checkpoint_sha256_12(path: str | os.PathLike) -> str:
     digest = hasher.hexdigest()
     try:
         tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
-        tmp.write_text(json.dumps({"sha256": digest, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}) + "\n")
+        tmp.write_text(json.dumps({"sha256": digest, "size": size, "mtime_ns": mtime_ns}) + "\n")
         tmp.replace(sidecar)
     except OSError:
         pass

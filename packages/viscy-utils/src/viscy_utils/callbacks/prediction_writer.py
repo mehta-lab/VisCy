@@ -19,6 +19,7 @@ from numpy.typing import DTypeLike, NDArray
 
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
+    checkpoint_signature,
     completion_marker,
     mark_complete,
     mark_started,
@@ -172,7 +173,12 @@ class HCSPredictionWriter(BasePredictionWriter):
         Checkpoint the model predicts with. Its path and content hash are
         recorded in every FOV's completion marker, so a resume can tell
         predictions made with different weights apart and refuses to mix
-        them in one store. Default None records no checkpoint.
+        them in one store. The file's size and mtime are taken when the
+        writer is constructed -- the same instantiation pass that loads the
+        model's weights -- and ``on_predict_start`` refuses a file changed
+        since, so the recorded hash names the bytes the model loaded rather
+        than whatever sits at the path later. Default None records no
+        checkpoint.
     settings_sha256_12 : str or None, optional
         Hash of the other settings that shape the predicted voxels (model
         inference arguments, input normalization, precision), recorded in the
@@ -201,6 +207,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.write_input = write_input
         self.z_reduction = z_reduction
         self.checkpoint_path = checkpoint_path
+        self._checkpoint_signature = None if checkpoint_path is None else checkpoint_signature(checkpoint_path)
         self.settings_sha256_12 = settings_sha256_12
         self._dataset_scale = None
 
@@ -245,6 +252,14 @@ class HCSPredictionWriter(BasePredictionWriter):
         target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
         self._prediction_channels = prediction_channel
+        if (
+            self.checkpoint_path is not None
+            and checkpoint_signature(self.checkpoint_path) != self._checkpoint_signature
+        ):
+            raise RuntimeError(
+                f"Checkpoint '{self.checkpoint_path}' changed since this writer was constructed alongside the "
+                "model, so its hash would not name the weights actually loaded. Restart the predict."
+            )
         # Hashes the checkpoint once; every FOV's marker records this identity.
         self._run = prediction_run(
             array_key=dm.array_key,

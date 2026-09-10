@@ -153,11 +153,9 @@ def _write_source(path, fovs: list[str], z_size: int = 4) -> None:
             plate.create_position(*fov.split("/")).create_zeros("0", (1, 2, z_size, 8, 8), dtype=np.float32)
 
 
-def _predict_ones(
-    source, output, *, checkpoint_path=None, exclude=None, overwrite=False, limit_batches=None, target="Nuclei"
-) -> None:
-    """Predict all-ones for every FOV of ``source`` with depth-4 windows into ``output``."""
-    data_module = HCSDataModule(
+def _ones_data_module(source, *, exclude=None, target="Nuclei") -> HCSDataModule:
+    """Depth-4 windows over every FOV of ``source``, predicting ``target``."""
+    return HCSDataModule(
         data_path=str(source),
         source_channel=["Phase3D"],
         target_channel=[target],
@@ -169,7 +167,10 @@ def _predict_ones(
         augmentations=[],
         exclude_fov_names=exclude,
     )
-    writer = HCSPredictionWriter(str(output), overwrite=overwrite, checkpoint_path=checkpoint_path)
+
+
+def _predict_ones_with(writer: HCSPredictionWriter, data_module: HCSDataModule, *, limit_batches=None) -> None:
+    """Run ``_OnesModule`` through ``writer`` on the CPU."""
     Trainer(
         accelerator="cpu",
         logger=False,
@@ -177,6 +178,14 @@ def _predict_ones(
         limit_predict_batches=limit_batches,
         callbacks=[writer],
     ).predict(_OnesModule(), datamodule=data_module, return_predictions=False)
+
+
+def _predict_ones(
+    source, output, *, checkpoint_path=None, exclude=None, overwrite=False, limit_batches=None, target="Nuclei"
+) -> None:
+    """Predict all-ones for every FOV of ``source`` with depth-4 windows into ``output``."""
+    writer = HCSPredictionWriter(str(output), overwrite=overwrite, checkpoint_path=checkpoint_path)
+    _predict_ones_with(writer, _ones_data_module(source, exclude=exclude, target=target), limit_batches=limit_batches)
 
 
 def test_appending_a_channel_keeps_existing_predictions(tmp_path):
@@ -294,6 +303,21 @@ def test_marker_records_the_checkpoint_content(tmp_path):
     assert not same_run(
         marker, prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=other)
     )
+
+
+def test_writer_refuses_a_checkpoint_replaced_after_construction(tmp_path):
+    """The hash must name the weights the model loaded, so a file swapped after the writer saw it is refused."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0"])
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    writer = HCSPredictionWriter(str(output), checkpoint_path=str(ckpt))
+    ckpt.write_bytes(b"weights-bb")
+
+    with pytest.raises(RuntimeError, match="changed since this writer was constructed"):
+        _predict_ones_with(writer, _ones_data_module(source))
+    assert not output.exists()
 
 
 def test_writer_refuses_to_mix_checkpoints_across_fovs(tmp_path):
