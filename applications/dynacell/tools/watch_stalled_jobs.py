@@ -285,25 +285,25 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
 
     Empty when nothing was saved yet or when the file was written by another
     schema version. A file written for another user, or on another host, is an
-    error: ``flock`` on this NFS mount only excludes processes on the same
-    host, so the daemon and its one-shot checks must share a node.
+    error whatever its schema: ``flock`` on this NFS mount only excludes
+    processes on the same host, so the daemon and its one-shot checks must
+    share a node, and a foreign history must never be taken over.
     """
     if not path.exists():
         return {}
     with path.open() as saved:
         payload = json.load(saved)
+    if "user" in payload and payload["user"] != user:
+        raise ValueError(f"state file {path} belongs to another user")
+    if "host" in payload and payload["host"] != socket.gethostname():
+        raise ValueError(
+            f"state file {path} was written on {payload['host']}; flock is node-local on NFS, so run the daemon "
+            f"and its --once checks on {payload['host']} or pass a different --state-file"
+        )
     found = payload.get("version")
     if found != STATE_VERSION:
         print(f"state file {path}: schema {found!r} is not {STATE_VERSION}; starting a new history", flush=True)
         return {}
-    if payload["user"] != user:
-        raise ValueError(f"state file {path} belongs to another user")
-    host = payload["host"]
-    if host != socket.gethostname():
-        raise ValueError(
-            f"state file {path} was written on {host}; flock is node-local on NFS, so run the daemon "
-            f"and its --once checks on {host} or pass a different --state-file"
-        )
     states = {}
     for step_id, data in payload["states"].items():
         data["samples"] = [Sample(**sample) for sample in data["samples"]]
@@ -313,15 +313,34 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
     return states
 
 
-def _save_states(path: Path, user: str, states: dict[str, JobState]) -> None:
-    """Replace the persisted histories atomically."""
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+def _save_states(path: Path, user: str, states: dict[str, JobState], *, create: bool) -> None:
+    """Persist the histories.
+
+    With ``create`` the file did not exist at load time and this save claims
+    it: ``O_EXCL`` creation is atomic on the NFS server, so of two hosts that
+    both found no file exactly one wins and the other fails here instead of
+    overwriting the winner's history. Later saves replace the file atomically
+    through a temp file named for this host and process.
+    """
     payload = {
         "version": STATE_VERSION,
         "user": user,
         "host": socket.gethostname(),
         "states": {step: asdict(s) for step, s in states.items()},
     }
+    if create:
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        except FileExistsError:
+            with path.open() as saved:
+                host = json.load(saved)["host"]
+            raise ValueError(
+                f"state file {path} was created on {host} during this poll; pass a different --state-file"
+            ) from None
+        with os.fdopen(descriptor, "w") as saved:
+            json.dump(payload, saved)
+        return
+    temporary = path.with_name(f"{path.name}.{socket.gethostname()}.{os.getpid()}.tmp")
     with temporary.open("w") as saved:
         json.dump(payload, saved)
     temporary.replace(path)
@@ -336,23 +355,28 @@ def main() -> int:
     parser.add_argument(
         "--state-file",
         type=Path,
-        help="sample history JSON (default: $XDG_CACHE_HOME/viscy/watch_stalled_jobs-USER.json)",
+        help=(
+            "sample history JSON (default: $XDG_CACHE_HOME/viscy/watch_stalled_jobs-USER@HOST.json); "
+            "a path shared between hosts is claimed by the first host to create it"
+        ),
     )
     args = parser.parse_args()
 
     cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    state_path = args.state_file or cache_root / "viscy" / f"watch_stalled_jobs-{args.user}.json"
+    state_path = args.state_file or cache_root / "viscy" / f"watch_stalled_jobs-{args.user}@{socket.gethostname()}.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         # Serialise the daemon and one-shot checks sharing this history. On
         # this NFS mount flock only excludes processes on the same host, so
-        # the state file records its host and _load_states enforces it.
+        # the state file records its host, _load_states enforces it, and the
+        # first save claims an absent file atomically.
         with state_path.with_name(state_path.name + ".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
+            existed = state_path.exists()
             states = _load_states(state_path, args.user)
             alerts = poll_once(args.user, states)
-            _save_states(state_path, args.user, states)
+            _save_states(state_path, args.user, states, create=not existed)
         if alerts:
             for alert in alerts:
                 print(f"[{stamp}] {alert}", flush=True)

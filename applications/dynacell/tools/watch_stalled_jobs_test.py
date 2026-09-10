@@ -500,17 +500,74 @@ def test_load_states_rejects_a_file_written_on_another_host(tmp_path) -> None:
         _load_states(state_file, "alex.kalinin")
 
 
+def test_load_states_rejects_a_foreign_hosts_obsolete_file(tmp_path) -> None:
+    """The host check runs before the schema check.
+
+    Discarding an obsolete schema first let a daemon on another node take over
+    a file it does not own, so ownership is established before the payload is
+    judged.
+    """
+    state_file = tmp_path / "watch.json"
+    _write_state_file(state_file, version=STATE_VERSION - 1, host="gpu-x-9")
+
+    with pytest.raises(ValueError, match="written on gpu-x-9"):
+        _load_states(state_file, "alex.kalinin")
+
+
 def test_state_file_round_trips_on_the_same_host(tmp_path) -> None:
-    """Saving then loading on the writing host returns the same histories."""
+    """Saving then loading on the writing host returns the same histories.
+
+    The first save claims the absent file; the second replaces it through a
+    temp file. Neither leaves anything but the file behind.
+    """
     state = JobState(name="P2P_EMA_REST_g44", node="gpu-b-4")
     state.add(Sample(wall_s=21.18 * HOUR, cpu_s=21.75 * HOUR))
-    state.add(Sample(wall_s=22.00 * HOUR, cpu_s=21.75 * HOUR))
     state_file = tmp_path / "watch.json"
 
-    _save_states(state_file, "alex.kalinin", {"35083019_0.0": state})
+    _save_states(state_file, "alex.kalinin", {"35083019_0.0": state}, create=True)
+    assert _load_states(state_file, "alex.kalinin") == {"35083019_0.0": state}
 
+    state.add(Sample(wall_s=22.00 * HOUR, cpu_s=21.75 * HOUR))
+    _save_states(state_file, "alex.kalinin", {"35083019_0.0": state}, create=False)
     assert _load_states(state_file, "alex.kalinin") == {"35083019_0.0": state}
     assert sorted(p.name for p in tmp_path.iterdir()) == ["watch.json"]
+
+
+def test_first_save_claims_a_shared_state_file_atomically(tmp_path, monkeypatch) -> None:
+    """Two hosts that both found no state file must not both write one.
+
+    ``flock`` is node-local on NFS, so two daemons started against the same
+    absent ``--state-file`` on different nodes both pass their lock and load an
+    empty history. The first save creates the file with ``O_EXCL``; the loser
+    raises, naming the winner, instead of replacing the winner's history.
+    """
+    state_file = tmp_path / "shared.json"
+    monkeypatch.setattr(watch_stalled_jobs.socket, "gethostname", lambda: "gpu-a-1")
+    first = _load_states(state_file, "alex.kalinin")
+    monkeypatch.setattr(watch_stalled_jobs.socket, "gethostname", lambda: "gpu-b-2")
+    second = _load_states(state_file, "alex.kalinin")
+    assert first == second == {}
+
+    monkeypatch.setattr(watch_stalled_jobs.socket, "gethostname", lambda: "gpu-a-1")
+    _save_states(state_file, "alex.kalinin", first, create=True)
+    monkeypatch.setattr(watch_stalled_jobs.socket, "gethostname", lambda: "gpu-b-2")
+    with pytest.raises(ValueError, match="created on gpu-a-1"):
+        _save_states(state_file, "alex.kalinin", second, create=True)
+
+    assert json.loads(state_file.read_text())["host"] == "gpu-a-1"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["shared.json"]
+
+
+def test_default_state_path_is_per_host(tmp_path, monkeypatch) -> None:
+    """Without ``--state-file`` each node keeps its own history under the cache root."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setattr("sys.argv", ["watch_stalled_jobs", "--once"])
+    monkeypatch.setattr(watch_stalled_jobs, "running_steps", lambda user: [])
+
+    assert watch_stalled_jobs.main() == 0
+
+    state_file = tmp_path / "viscy" / f"watch_stalled_jobs-alex.kalinin@{socket.gethostname()}.json"
+    assert json.loads(state_file.read_text())["host"] == socket.gethostname()
 
 
 def test_cli_exits_2_on_a_tool_error(tmp_path) -> None:
