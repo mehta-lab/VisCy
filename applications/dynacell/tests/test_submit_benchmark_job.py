@@ -17,7 +17,7 @@ from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
-from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, mark_complete, tzyx_shape
 
 yaml = pytest.importorskip("yaml")
 
@@ -607,9 +607,11 @@ def _write_hcs_store(
         for fov_name, t in fov_t.items():
             row, col, pos = fov_name.split("/")
             position = plate.create_position(row, col, pos)
-            position.create_zeros("0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8))
+            array = position.create_zeros(
+                "0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8)
+            )
             if completed and fov_name in completed:
-                position.zattrs[PREDICTION_COMPLETE_KEY] = {channel: [t, 4, 8, 8] for channel in channels}
+                mark_complete(position, channels, tzyx_shape(array))
 
 
 def test_completed_prediction_fovs_detects_partial(tmp_path):

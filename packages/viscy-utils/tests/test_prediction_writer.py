@@ -8,6 +8,12 @@ from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    clear_completion,
+    mark_complete,
+    prediction_complete,
+)
 
 Z_SIZE = 16
 Z_WINDOW = 8
@@ -87,6 +93,32 @@ def test_predict_z_reduction_center_takes_one_pass_per_plane(tmp_path):
     np.testing.assert_array_equal(written, expected)
     interior = range(center, last + center + 1)
     assert all(written[p] % 10 == center for p in interior)
+
+
+def test_completion_marker_layout(tmp_path):
+    """One position attribute maps each prediction channel to the source TZYX it was predicted from.
+
+    The launcher's resume check and test fixtures read this literal layout, so a
+    change here is a contract change, not a refactor.
+    """
+    _run_predict(tmp_path, "blend")
+    with open_ome_zarr(tmp_path / "prediction_blend.zarr", mode="r") as plate:
+        position = plate["0/0/0"]
+        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"Nuclei_prediction": [1, Z_SIZE, 8, 8]}
+        assert prediction_complete(position, ["Nuclei_prediction"], [1, Z_SIZE, 8, 8])
+        assert not prediction_complete(position, ["Nuclei_prediction"], [2, Z_SIZE, 8, 8])
+
+
+def test_completion_helpers_keep_other_channels(tmp_path):
+    """Marking or clearing one channel must leave the other channels' markers intact."""
+    with open_ome_zarr(tmp_path / "plate.zarr", layout="hcs", mode="w-", channel_names=["A", "B"]) as plate:
+        position = plate.create_position("0", "0", "0")
+        mark_complete(position, ["A"], [1, 2, 3, 4])
+        mark_complete(position, ["B"], [1, 2, 3, 4])
+        clear_completion(position, ["A"])
+        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"B": [1, 2, 3, 4]}
+        assert prediction_complete(position, ["B"], [1, 2, 3, 4])
+        assert not prediction_complete(position, ["A", "B"], [1, 2, 3, 4])
 
 
 def test_writer_rejects_unknown_z_reduction():

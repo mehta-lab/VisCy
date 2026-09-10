@@ -17,7 +17,7 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
 
-from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, tzyx_shape
+from viscy_utils.prediction_metadata import clear_completion, mark_complete, tzyx_shape
 from viscy_utils.tensor_utils import to_numpy
 
 if TYPE_CHECKING:
@@ -255,7 +255,7 @@ class HCSPredictionWriter(BasePredictionWriter):
                 # must never reuse their old completion. FOVs outside the run
                 # (e.g. excluded on resume) keep theirs.
                 for pos in overwritten:
-                    self._set_completion(pos, None)
+                    clear_completion(pos, prediction_channel)
         else:
             channel_names = prediction_channel
             if self.write_input:
@@ -382,26 +382,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         written = self._written_windows[img_name]
         written[t_index, window_z_index] = True
         if written.all():
-            self._set_completion(self.plate[img_name.rsplit("/", 1)[0]], self._source_shapes[img_name])
-
-    def _set_completion(self, position: Position, source_shape: list[int] | None) -> None:
-        """Mark this run's prediction channels complete for ``source_shape``, or clear them with ``None``.
-
-        Parameters
-        ----------
-        position : Position
-            Output position whose completion marker to update.
-        source_shape : list of int or None
-            TZYX shape of the source the channels were fully predicted from;
-            ``None`` removes the channels from the marker.
-        """
-        completed = dict(position.zattrs.get(PREDICTION_COMPLETE_KEY, {}))
-        for channel in self._prediction_channels:
-            if source_shape is None:
-                completed.pop(channel, None)
-            else:
-                completed[channel] = source_shape
-        position.zattrs[PREDICTION_COMPLETE_KEY] = completed
+            position = self.plate[img_name.rsplit("/", 1)[0]]
+            mark_complete(position, self._prediction_channels, self._source_shapes[img_name])
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.

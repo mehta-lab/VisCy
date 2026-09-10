@@ -32,7 +32,7 @@ from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
-from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, tzyx_shape
+from viscy_utils.prediction_metadata import prediction_complete, tzyx_shape
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -181,8 +181,7 @@ def _completed_prediction_fovs(
                 continue
             if pos["0"].frames != input_shapes[name][0]:
                 continue
-            markers = pos.zattrs.get(PREDICTION_COMPLETE_KEY, {})
-            if all(markers.get(ch) == input_shapes[name] for ch in prediction_channels):
+            if prediction_complete(pos, prediction_channels, input_shapes[name]):
                 completed.add(name)
     return completed, total
 
