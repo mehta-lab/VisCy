@@ -14,6 +14,7 @@ from omegaconf import OmegaConf
 pytest.importorskip("zarr")
 pytest.importorskip("iohub")
 
+from dynacell.evaluation import pipeline_cache  # noqa: E402
 from dynacell.evaluation.cache import (  # noqa: E402
     StaleCacheError,
     cache_paths,
@@ -1555,6 +1556,75 @@ def test_deep_features_excluded_walk_refuses_unknown_identity(tmp_path: Path, wr
         assert sorted(leaf["positions"]) == ["A/1/0", "A/1/1"]
         for pos_name in ("A/1/0", "A/1/1"):
             np.testing.assert_array_equal(features(pos_name), np.full((2, 16), 3.0, dtype=np.float32))
+
+
+@pytest.mark.parametrize("writer", ["fov", "batch"])
+def test_deep_feature_writes_scan_the_store_only_to_bootstrap_a_bare_leaf(tmp_path: Path, monkeypatch, writer) -> None:
+    """Slot discovery visits every array in the feature store; a full walk or a settled leaf must not pay per write.
+
+    The reviewer's measurement on #497: each of 12 per-FOV writes enumerated the
+    arrays every earlier write had left, 132 visits for 24 arrays. The scan is
+    only evidence when an excluded walk meets a leaf without an identity.
+    """
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path, n_t=1)
+    cache_dir = tmp_path / "cache"
+    model_name = "facebook/test-dinov3"
+    scans: list[int] = []
+    real_feature_slots = pipeline_cache._feature_slots
+
+    def counting_feature_slots(group):
+        scans.append(1)
+        return real_feature_slots(group)
+
+    monkeypatch.setattr(pipeline_cache, "_feature_slots", counting_feature_slots)
+
+    with gt_plate, seg_plate:
+        positions = list(gt_plate.positions())
+        seg_positions = list(seg_plate.positions())
+        cfg = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_dir),
+            }
+        )
+
+        def init():
+            return init_cache_context(cfg, side="gt", dinov3_model_name=model_name, dinov3_preprocess_version="v1")
+
+        def write(ctx, selected: int, value: float) -> None:
+            extractor = _BatchedConstantExtractor(value=value)
+            if writer == "batch":
+                precompute_deep_features(
+                    sides={"gt": ctx},
+                    side_positions={"gt": positions[:selected]},
+                    side_channel_names={"gt": "target"},
+                    seg_positions=seg_positions[:selected],
+                    extractors={"dinov3": extractor},
+                )
+                return
+            for (pos_name, pos), (_, pos_seg) in zip(positions[:selected], seg_positions[:selected]):
+                image = np.asarray(pos.data[:, 0])
+                cell_seg = np.asarray(pos_seg.data[:, 0])
+                fov_deep_features(ctx, pos_name, image, cell_seg, extractor, "dinov3")
+
+        ctx1 = init()
+        write(ctx1, 2, 1.0)
+        flush_manifest(ctx1)
+        assert scans == []  # a full walk stamps the leaf without looking at the store
+
+        cfg.io.exclude_fov_names = ["A/1/1"]
+        cfg.force_recompute.gt_dinov3 = True
+        ctx2 = init()
+        write(ctx2, 1, 2.0)
+        flush_manifest(ctx2)
+        assert scans == []  # the leaf already carries an identity
+
+        _strip_leaf_identity(cache_paths(cache_dir), ["dinov3_features", feature_slug(model_name)])
+        ctx3 = init()
+        with pytest.raises(StaleCacheError, match="unknown identity"):
+            write(ctx3, 1, 3.0)
+        assert scans == [1]  # the bare leaf is the one case that needs the evidence
 
 
 def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> None:

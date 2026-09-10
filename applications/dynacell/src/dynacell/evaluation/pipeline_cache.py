@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -667,7 +667,7 @@ def _check_identity_bootstrap(
     artifact_label: str,
     force_key: str,
     writing: set[str],
-    stored: set[str],
+    stored: Callable[[], set[str]],
 ) -> None:
     """Refuse to stamp a bare manifest leaf over cache data of unknown identity.
 
@@ -683,9 +683,12 @@ def _check_identity_bootstrap(
     flush leaves behind. Both hold data of unknown identity, and it is not
     recovered here: the operator rebuilds on a full walk or starts a fresh cache.
 
-    Call it before the FOV's compute so a refusal wastes no work. Once the first
-    stamp lands in ``ctx.manifest`` the leaf has an identity, and later FOVs of
-    the same run return here without touching the store.
+    Call it before the FOV's compute so a refusal wastes no work. *stored*
+    enumerates the artifact's backing store (every array of a feature group,
+    every position directory of a mask plate) and is called only once the
+    excluded walk finds the leaf bare: a full walk never pays for the scan, and
+    once the first stamp lands in ``ctx.manifest`` the leaf has an identity, so
+    later FOVs of the same run return here without touching the store.
     """
     if not ctx.excluded_walk:
         return
@@ -695,7 +698,7 @@ def _check_identity_bootstrap(
     if leaf.keys() - {"positions"}:
         return
     recorded = list(leaf.get("positions") or [])
-    foreign = sorted(stored - writing)
+    foreign = sorted(stored() - writing)
     if not recorded and not foreign:
         return
     details = []
@@ -857,7 +860,7 @@ def _fov_masks(
             artifact_label=artifact_label,
             force_key=force_key,
             writing={pos_name},
-            stored=_plate_positions(ctx.paths.mask_plate(ctx.target_name, ctx.backend)),
+            stored=lambda: _plate_positions(ctx.paths.mask_plate(ctx.target_name, ctx.backend)),
         )
 
     # Cache disabled — compute fresh, no locking, no caching.
@@ -1052,7 +1055,7 @@ def _fov_instances(
             artifact_label=artifact_label,
             force_key=force_key,
             writing={pos_name},
-            stored=_plate_positions(ctx.paths.instance_mask_plate(ctx.target_name, ctx.backend)),
+            stored=lambda: _plate_positions(ctx.paths.instance_mask_plate(ctx.target_name, ctx.backend)),
         )
 
     def _record_write() -> None:
@@ -1295,7 +1298,7 @@ def _load_or_compute_feature_timepoints(
             artifact_label=artifact_label,
             force_key=force_key,
             writing={f"{pos_name}/t{t}" for t in pending},
-            stored=_feature_slots(group),
+            stored=lambda: _feature_slots(group),
         )
         for t in pending:
             if not force_recompute:
@@ -1690,7 +1693,7 @@ def _flush_kind(
             artifact_label=artifact_label,
             force_key=force_key,
             writing={f"{pos_name}/t{t}" for pos_name, t, _ in items},
-            stored=_feature_slots(group),
+            stored=lambda: _feature_slots(group),
         )
 
     with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
