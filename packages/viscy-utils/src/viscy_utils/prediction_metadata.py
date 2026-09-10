@@ -12,19 +12,23 @@ from iohub.ngff import ImageArray, Position
 __all__ = [
     "PREDICTION_COMPLETE_KEY",
     "checkpoint_sha256_12",
-    "clear_completion",
     "completion_marker",
     "mark_complete",
+    "mark_started",
     "prediction_complete",
     "prediction_run",
+    "same_marker",
     "same_run",
+    "started_marker",
     "tzyx_shape",
 ]
 
-# Position attribute mapping each prediction channel to the marker recorded when
-# the channel was fully predicted: the source TZYX it came from plus the run
-# identity from ``prediction_run``. A channel that is missing, or recorded with
-# a different marker, is incomplete and must be recomputed.
+# Position attribute mapping each prediction channel to its marker: the run
+# identity from ``prediction_run`` while a run is writing the channel
+# (``started_marker``), and that identity plus the source TZYX once every
+# window was written (``completion_marker``). A channel with no entry of its
+# own was never recorded by any run -- written before markers existed -- so
+# nothing can vouch for it, even when other channels of the FOV are marked.
 PREDICTION_COMPLETE_KEY = "viscy_prediction_complete"
 
 # Marker fields kept for provenance only; two markers that differ solely in
@@ -137,6 +141,23 @@ def prediction_run(
     }
 
 
+def started_marker(run: dict[str, Any]) -> dict[str, Any]:
+    """Return the marker a run records while it is writing a channel: its identity alone.
+
+    Parameters
+    ----------
+    run : dict
+        Run identity from :func:`prediction_run`.
+
+    Returns
+    -------
+    dict
+        ``dict(run)``; :func:`completion_marker` adds ``source_shape`` once the
+        channel is fully written.
+    """
+    return dict(run)
+
+
 def completion_marker(source_shape: list[int], run: dict[str, Any]) -> dict[str, Any]:
     """Return the marker a run records for a channel predicted from ``source_shape``.
 
@@ -162,8 +183,26 @@ def _identity(marker: Any) -> Any:
     return marker
 
 
+def same_marker(recorded: Any, marker: Any) -> bool:
+    """Return whether a recorded marker equals ``marker`` up to provenance fields.
+
+    Parameters
+    ----------
+    recorded : Any
+        Recorded marker value, or None when the channel has no entry.
+    marker : Any
+        Marker from :func:`started_marker` or :func:`completion_marker`.
+
+    Returns
+    -------
+    bool
+        True when both describe the same prediction state.
+    """
+    return _identity(recorded) == _identity(marker)
+
+
 def same_run(marker: Any, run: dict[str, Any]) -> bool:
-    """Return whether a recorded marker came from ``run``, whatever its source shape.
+    """Return whether a recorded marker came from ``run``, started or complete, whatever its source shape.
 
     Parameters
     ----------
@@ -201,19 +240,26 @@ def mark_complete(position: Position, channels: Iterable[str], marker: dict[str,
     position.zattrs[PREDICTION_COMPLETE_KEY] = completed
 
 
-def clear_completion(position: Position, channels: Iterable[str]) -> None:
-    """Drop ``channels`` from the completion attribute, keeping other channels' markers.
+def mark_started(position: Position, channels: Iterable[str], run: dict[str, Any]) -> None:
+    """Record that ``run`` is writing ``channels``, keeping other channels' markers.
+
+    Replaces any completion of ``channels``, whose voxels are about to change,
+    so an interrupted run never leaves an old completion behind; unlike a
+    channel with no entry, a started channel is known to be this run's
+    unfinished work rather than an unverifiable legacy prediction.
 
     Parameters
     ----------
     position : Position
         Output position whose completion attribute to update.
     channels : iterable of str
-        Prediction channels about to be rewritten.
+        Prediction channels about to be (re)written.
+    run : dict
+        Run identity from :func:`prediction_run`.
     """
     completed = dict(position.zattrs.get(PREDICTION_COMPLETE_KEY, {}))
     for channel in channels:
-        completed.pop(channel, None)
+        completed[channel] = started_marker(run)
     position.zattrs[PREDICTION_COMPLETE_KEY] = completed
 
 
@@ -236,5 +282,4 @@ def prediction_complete(position: Position, channels: Iterable[str], marker: dic
         provenance fields.
     """
     completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
-    expected = _identity(marker)
-    return all(_identity(completed.get(channel)) == expected for channel in channels)
+    return all(same_marker(completed.get(channel), marker) for channel in channels)

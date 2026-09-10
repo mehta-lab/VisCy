@@ -19,9 +19,9 @@ from numpy.typing import DTypeLike, NDArray
 
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
-    clear_completion,
     completion_marker,
     mark_complete,
+    mark_started,
     prediction_run,
     same_run,
     tzyx_shape,
@@ -322,10 +322,12 @@ class HCSPredictionWriter(BasePredictionWriter):
                     self.plate = open_ome_zarr(self.output_store, mode="r+")
                     positions = {name: self.plate[name] for name in overwritten}
                 # This run replaces these channels' voxels, so an interrupted run
-                # must never reuse their old completion. FOVs outside the run
-                # (e.g. excluded on resume) keep theirs.
+                # must never reuse their old completion; a started marker also
+                # tells the next resume these are this run's unfinished FOVs, not
+                # legacy ones. FOVs outside the run (e.g. excluded on resume)
+                # keep theirs.
                 for name in overwritten:
-                    clear_completion(positions[name], prediction_channel)
+                    mark_started(positions[name], prediction_channel, self._run)
         else:
             channel_names = prediction_channel
             if self.write_input:
@@ -483,7 +485,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         return output.frames > frames or output.slices > slices
 
     def _cannot_share(self, position: Position, channels: list[str]) -> bool:
-        """Return whether ``position`` holds any of ``channels`` from a run other than this one.
+        """Return whether ``position`` holds any of ``channels`` that this run cannot vouch for.
 
         Parameters
         ----------
@@ -495,15 +497,16 @@ class HCSPredictionWriter(BasePredictionWriter):
         Returns
         -------
         bool
-            True when the position carries a channel without any completion
-            attribute (written before markers existed, so unverifiable), or a
-            marker written with other weights or settings, or in a layout this
-            version cannot read.
+            True when a channel present in the position has no marker of its
+            own (written before markers existed, so unverifiable even if other
+            channels are marked), or a marker written with other weights or
+            settings, or in a layout this version cannot read.
         """
-        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY)
-        if completed is None:
-            return any(channel in position.channel_names for channel in channels)
-        return any(channel in completed and not same_run(completed[channel], self._run) for channel in channels)
+        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+        return any(
+            channel in position.channel_names and not same_run(completed.get(channel), self._run)
+            for channel in channels
+        )
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.
@@ -536,9 +539,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         _logger.debug(f"Creating image '{img_name}'")
         _, row_name, col_name, pos_name, arr_name = img_name.split("/")
         position = self.plate.create_position(row_name, col_name, pos_name)
-        # An empty marker from the first write on distinguishes an interrupted FOV
+        # A started marker from the first write on distinguishes an interrupted FOV
         # from one written before completion markers existed.
-        clear_completion(position, self._prediction_channels)
+        mark_started(position, self._prediction_channels, self._run)
         shape = [1] + list(shape)
         shape[1] = len(position.channel_names)
         return position.create_zeros(

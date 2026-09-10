@@ -38,6 +38,8 @@ from viscy_utils.prediction_metadata import (
     completion_marker,
     prediction_complete,
     prediction_run,
+    same_marker,
+    started_marker,
     tzyx_shape,
 )
 
@@ -169,12 +171,14 @@ def _survey_prediction_store(
     run would write: the input's TZYX shape plus the run identity (checkpoint
     content hash, array level, depth window and reduction), stamped by the
     writer only after all of the FOV's (T, Z-window) writes succeed. A FOV
-    whose channels are marked complete with any other marker is conflicting:
-    it was predicted from another source shape or with other weights or
-    settings, and finishing the store would mix them. A FOV that holds the
-    channels but no completion attribute at all predates the markers (the
-    writer stamps an empty one when it creates a FOV), so nothing can vouch
-    for it: it is unverifiable rather than incomplete. Input shapes are read
+    whose present channels carry only this run's started marker is its own
+    unfinished work and is recomputed. A FOV that holds a prediction channel
+    with no marker of its own predates the markers (the writer stamps a
+    started marker before its first write), so nothing can vouch for it even
+    when other channels of the FOV are marked: it is unverifiable rather than
+    incomplete. Any other marker is conflicting: the channel was predicted
+    from another source shape or with other weights or settings, and finishing
+    the store would mix them. Input shapes are read
     from the array level ``run["array_key"]``, which every input must have;
     the marker's source shape is the only output check needed because the
     writer refuses to rewrite an output that already outruns its source.
@@ -209,14 +213,15 @@ def _survey_prediction_store(
         return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable)
     with open_ome_zarr(output_store, mode="r") as plate:
         for name, pos in plate.positions():
-            if name not in input_shapes or not all(ch in pos.channel_names for ch in prediction_channels):
+            if name not in input_shapes:
                 continue
-            if PREDICTION_COMPLETE_KEY not in pos.zattrs:
+            present = [ch for ch in prediction_channels if ch in pos.channel_names]
+            markers = pos.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+            if any(ch not in markers for ch in present):
                 unverifiable.add(name)
-                continue
-            if prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
+            elif prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
                 completed.add(name)
-            elif any(ch in pos.zattrs[PREDICTION_COMPLETE_KEY] for ch in prediction_channels):
+            elif not all(same_marker(markers[ch], started_marker(run)) for ch in present):
                 conflicting.add(name)
     return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable)
 

@@ -19,10 +19,11 @@ from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
-    clear_completion,
     completion_marker,
     mark_complete,
+    mark_started,
     prediction_run,
+    started_marker,
     tzyx_shape,
 )
 
@@ -622,7 +623,7 @@ def _write_hcs_store(
 ) -> None:
     """Write a minimal HCS OME-Zarr with one array per FOV at the given T length.
 
-    Passing ``completed`` makes it an output store: every FOV gets the empty
+    Passing ``completed`` makes it an output store: every FOV gets the started
     marker the writer stamps at creation and the named FOVs are marked as fully
     predicted by ``run``. ``unmarked`` mimics an output written before markers
     existed.
@@ -635,7 +636,7 @@ def _write_hcs_store(
                 "0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8)
             )
             if completed is not None and not unmarked:
-                clear_completion(position, channels)
+                mark_started(position, channels, run)
             if completed and fov_name in completed:
                 mark_complete(position, channels, completion_marker(tzyx_shape(array), run))
 
@@ -674,6 +675,22 @@ def test_survey_reports_output_without_markers_as_unverifiable(tmp_path):
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
     assert (survey.total, survey.completed, survey.conflicting) == (1, set(), set())
     assert survey.unverifiable == {"0/0/fov0000"}
+
+
+def test_survey_treats_a_channel_without_its_own_marker_as_unverifiable(tmp_path):
+    """Another channel's marker vouches for nothing: a legacy channel stays unverifiable, never merely incomplete."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+    run = _run(1)
+    _write_hcs_store(
+        out, ["Other_prediction", "Structure_prediction"], {"0/0/fov0000": 2}, completed=set(), unmarked=True
+    )
+    with open_ome_zarr(out, mode="r+") as plate:
+        mark_complete(plate["0/0/fov0000"], ["Other_prediction"], completion_marker([2, 4, 8, 8], run))
+
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run)
+    assert (survey.completed, survey.conflicting, survey.unverifiable) == (set(), set(), {"0/0/fov0000"})
 
 
 def test_survey_reads_the_configured_array_level(tmp_path):
@@ -777,7 +794,7 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
         image = plate["0/0/fov0000/0"]
         assert image.shape == (2, 1, 4, 8, 8)
         np.testing.assert_array_equal(image[1, 0, :, 0, 0], [1] * z_window_size + [0] * (4 - z_window_size))
-    # Interrupted, not legacy: the writer stamped an empty marker when it created the FOV.
+    # Interrupted, not legacy: the writer stamped a started marker when it created the FOV.
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run)
     assert (survey.completed, survey.unverifiable) == (set(), set())
 
@@ -797,7 +814,7 @@ def test_predict_refuses_an_output_that_outruns_its_source(tmp_path, output_shap
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
-    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2}, completed=set())
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2}, completed=set(), run=_run(1))
     with open_ome_zarr(out, mode="r+") as plate:
         plate["0/0/fov0000/0"].resize(output_shape)
         plate["0/0/fov0000/0"][:] = 999
@@ -807,7 +824,7 @@ def test_predict_refuses_an_output_that_outruns_its_source(tmp_path, output_shap
 
     with open_ome_zarr(out, mode="r") as plate:
         np.testing.assert_array_equal(plate["0/0/fov0000/0"][:], 999)
-        assert plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY] == {}
+        assert plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY] == {"Structure_prediction": started_marker(_run(1))}
 
 
 def test_survey_no_store(tmp_path):

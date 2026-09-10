@@ -13,12 +13,13 @@ from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_in
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
-    clear_completion,
     completion_marker,
     mark_complete,
+    mark_started,
     prediction_complete,
     prediction_run,
     same_run,
+    started_marker,
 )
 
 Z_SIZE = 16
@@ -126,15 +127,15 @@ def test_completion_marker_layout(tmp_path):
 
 
 def test_completion_helpers_keep_other_channels(tmp_path):
-    """Marking or clearing one channel must leave the other channels' markers intact."""
+    """Completing or restarting one channel must leave the other channels' markers intact."""
     run = prediction_run(array_key="0", z_window_size=1, z_reduction="blend", checkpoint_path=None)
     marker = completion_marker([1, 2, 3, 4], run)
     with open_ome_zarr(tmp_path / "plate.zarr", layout="hcs", mode="w-", channel_names=["A", "B"]) as plate:
         position = plate.create_position("0", "0", "0")
         mark_complete(position, ["A"], marker)
         mark_complete(position, ["B"], marker)
-        clear_completion(position, ["A"])
-        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"B": marker}
+        mark_started(position, ["A"], run)
+        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"A": started_marker(run), "B": marker}
         assert prediction_complete(position, ["B"], marker)
         assert not prediction_complete(position, ["A", "B"], marker)
 
@@ -151,12 +152,14 @@ def _write_source(path, fovs: list[str], z_size: int = 4) -> None:
             plate.create_position(*fov.split("/")).create_zeros("0", (1, 2, z_size, 8, 8), dtype=np.float32)
 
 
-def _predict_ones(source, output, *, checkpoint_path=None, exclude=None, overwrite=False, limit_batches=None) -> None:
+def _predict_ones(
+    source, output, *, checkpoint_path=None, exclude=None, overwrite=False, limit_batches=None, target="Nuclei"
+) -> None:
     """Predict all-ones for every FOV of ``source`` with depth-4 windows into ``output``."""
     data_module = HCSDataModule(
         data_path=str(source),
         source_channel=["Phase3D"],
-        target_channel=["Nuclei"],
+        target_channel=[target],
         z_window_size=4,
         batch_size=1,
         num_workers=0,
@@ -221,14 +224,15 @@ def test_writer_refuses_positions_that_would_disagree_on_channel_order(tmp_path)
         assert plate["0/0/1"].channel_names == ["Other_prediction", "Third"]
 
 
-def test_interrupted_fov_carries_an_empty_marker(tmp_path):
-    """A FOV the writer created but never finished is marked as such, unlike pre-marker outputs."""
+def test_interrupted_fov_carries_a_started_marker(tmp_path):
+    """A FOV the writer created but never finished names the run writing it, unlike pre-marker outputs."""
     source = tmp_path / "source.zarr"
     _write_source(source, ["0/0/0"], z_size=8)
     _predict_ones(source, tmp_path / "pred.zarr", limit_batches=2)  # 2 of 5 depth windows
 
+    run = prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=None)
     with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
-        assert plate["0/0/0"].zattrs[PREDICTION_COMPLETE_KEY] == {}
+        assert plate["0/0/0"].zattrs[PREDICTION_COMPLETE_KEY] == {"Nuclei_prediction": started_marker(run)}
 
 
 def test_writer_refuses_fovs_predicted_before_markers_existed(tmp_path):
@@ -246,6 +250,27 @@ def test_writer_refuses_fovs_predicted_before_markers_existed(tmp_path):
     with open_ome_zarr(output, mode="r") as plate:
         assert all(PREDICTION_COMPLETE_KEY not in pos.zattrs for _, pos in plate.positions())
         np.testing.assert_array_equal(plate["0/0/1/0"][:], 0)
+
+
+def test_writer_refuses_a_legacy_channel_after_another_channel_was_marked(tmp_path):
+    """Markers are per channel: predicting a new channel into a legacy store vouches for nothing else."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0", "0/0/1"])
+    with open_ome_zarr(output, layout="hcs", mode="w-", channel_names=["Nuclei_prediction"]) as plate:
+        for fov in ("0/0/0", "0/0/1"):
+            plate.create_position(*fov.split("/")).create_zeros("0", (1, 1, 4, 8, 8), dtype=np.float32)[:] = 999
+    _predict_ones(source, output, target="Other")
+    with open_ome_zarr(output, mode="r") as plate:
+        assert set(plate["0/0/0"].zattrs[PREDICTION_COMPLETE_KEY]) == {"Other_prediction"}
+
+    with pytest.raises(ValueError, match="before completion markers"):
+        _predict_ones(source, output, exclude=["0/0/0"], overwrite=True)
+
+    with open_ome_zarr(output, mode="r") as plate:
+        for fov in ("0/0/0", "0/0/1"):
+            np.testing.assert_array_equal(plate[fov]["0"][:, 0], 999)
+            assert set(plate[fov].zattrs[PREDICTION_COMPLETE_KEY]) == {"Other_prediction"}
 
 
 def test_marker_records_the_checkpoint_content(tmp_path):
