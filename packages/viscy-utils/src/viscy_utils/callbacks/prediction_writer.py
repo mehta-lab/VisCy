@@ -250,6 +250,7 @@ class HCSPredictionWriter(BasePredictionWriter):
                 needs_append: list[tuple[Position, list[str]]] = []
                 overwritten: list[Position] = []
                 mixed: list[str] = []
+                oversized: list[str] = []
                 for name, pos in self.plate.positions():
                     existing = set(pos.channel_names)
                     missing = [ch for ch in prediction_channel if ch not in existing]
@@ -271,8 +272,18 @@ class HCSPredictionWriter(BasePredictionWriter):
                         needs_append.append((pos, missing))
                     if name in run_positions:
                         overwritten.append(pos)
+                        if self._has_extra_timepoints(pos, name, dm.array_key):
+                            oversized.append(name)
                     elif self._cannot_share(pos, prediction_channel):
                         mixed.append(name)
+                if oversized:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(oversized)} FOVs in '{self.output_store}' hold more timepoints than "
+                        f"their source (e.g. {oversized[:3]}); arrays only grow, so the stale frames "
+                        "would survive every rewrite and the FOVs could never be marked complete. "
+                        "Predict into a new output store."
+                    )
                 if mixed:
                     self.plate.close()
                     raise ValueError(
@@ -418,6 +429,29 @@ class HCSPredictionWriter(BasePredictionWriter):
             position = self.plate[img_name.rsplit("/", 1)[0]]
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
+
+    def _has_extra_timepoints(self, position: Position, name: str, array_key: str) -> bool:
+        """Return whether the existing output array outruns this run's source in T.
+
+        Parameters
+        ----------
+        position : Position
+            Existing output position that this run rewrites.
+        name : str
+            Plate-relative position name.
+        array_key : str
+            Array level this run writes.
+
+        Returns
+        -------
+        bool
+            True when the array exists and has more frames than the source.
+        """
+        try:
+            output = position[array_key]
+        except KeyError:
+            return False
+        return output.frames > self._source_shapes[f"/{name}/{array_key}"][0]
 
     def _cannot_share(self, position: Position, channels: list[str]) -> bool:
         """Return whether ``position`` holds any of ``channels`` from a run other than this one.

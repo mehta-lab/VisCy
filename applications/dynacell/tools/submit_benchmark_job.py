@@ -174,11 +174,11 @@ def _survey_prediction_store(
     settings, and finishing the store would mix them. A FOV that holds the
     channels but no completion attribute at all predates the markers (the
     writer stamps an empty one when it creates a FOV), so nothing can vouch
-    for it: it is unverifiable rather than incomplete. Shapes are read from
-    the array level ``run["array_key"]`` on both sides: the input must have
-    it (anything else is a configuration error), an output lacking it is
-    simply incomplete. Metadata-only: reads markers and shapes, never voxel
-    data.
+    for it: it is unverifiable rather than incomplete. Input shapes are read
+    from the array level ``run["array_key"]``, which every input must have;
+    the marker's source shape is the only output check needed because the
+    writer refuses to rewrite an output that already outruns its source.
+    Metadata-only: reads markers and shapes, never voxel data.
 
     Parameters
     ----------
@@ -213,12 +213,6 @@ def _survey_prediction_store(
                 continue
             if PREDICTION_COMPLETE_KEY not in pos.zattrs:
                 unverifiable.add(name)
-                continue
-            try:
-                output = pos[array_key]
-            except KeyError:
-                continue  # this level was never written: incomplete
-            if output.frames != input_shapes[name][0]:
                 continue
             if prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
                 completed.add(name)

@@ -19,6 +19,7 @@ from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
+    clear_completion,
     completion_marker,
     mark_complete,
     prediction_run,
@@ -617,10 +618,14 @@ def _write_hcs_store(
     *,
     completed: set[str] | None = None,
     run: dict | None = None,
+    unmarked: bool = False,
 ) -> None:
     """Write a minimal HCS OME-Zarr with one array per FOV at the given T length.
 
-    FOVs named in ``completed`` are marked as fully predicted by ``run``.
+    Passing ``completed`` makes it an output store: every FOV gets the empty
+    marker the writer stamps at creation and the named FOVs are marked as fully
+    predicted by ``run``. ``unmarked`` mimics an output written before markers
+    existed.
     """
     with open_ome_zarr(path, layout="hcs", mode="a", channel_names=channels) as plate:
         for fov_name, t in fov_t.items():
@@ -629,6 +634,8 @@ def _write_hcs_store(
             array = position.create_zeros(
                 "0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8)
             )
+            if completed is not None and not unmarked:
+                clear_completion(position, channels)
             if completed and fov_name in completed:
                 mark_complete(position, channels, completion_marker(tzyx_shape(array), run))
 
@@ -644,18 +651,18 @@ def test_survey_detects_partial(tmp_path):
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 10})
     out = tmp_path / "pred.zarr"
     run = _run(1)
-    # fov0000, fov0001 complete (T=10); fov0002 killed mid-run (T=5).
+    # fov0000, fov0001 complete (T=10); fov0002 killed mid-run (T=5, never marked).
     _write_hcs_store(
         out,
         ["Structure_prediction"],
         {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 5},
-        completed={"0/0/fov0000", "0/0/fov0001", "0/0/fov0002"},
+        completed={"0/0/fov0000", "0/0/fov0001"},
         run=run,
     )
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run)
     assert survey.total == 3
     assert survey.completed == {"0/0/fov0000", "0/0/fov0001"}
-    assert survey.conflicting == set()
+    assert (survey.conflicting, survey.unverifiable) == (set(), set())
 
 
 def test_survey_reports_output_without_markers_as_unverifiable(tmp_path):
@@ -663,7 +670,7 @@ def test_survey_reports_output_without_markers_as_unverifiable(tmp_path):
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
-    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2})
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2}, completed=set(), unmarked=True)
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
     assert (survey.total, survey.completed, survey.conflicting) == (1, set(), set())
     assert survey.unverifiable == {"0/0/fov0000"}
@@ -685,8 +692,9 @@ def test_survey_reads_the_configured_array_level(tmp_path):
 
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], level_one)
     assert (survey.completed, survey.conflicting) == ({"0/0/fov0000"}, set())
+    # Completed at another level: that is a different run, so it conflicts rather than resumes.
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
-    assert (survey.completed, survey.conflicting) == (set(), set())
+    assert (survey.completed, survey.conflicting) == (set(), {"0/0/fov0000"})
     with pytest.raises(KeyError):
         sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], dict(level_one, array_key="2"))
 
@@ -782,24 +790,21 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
     assert _completed(out, inp, run) == set()
 
 
-def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_path):
-    """A complete T=2 overwrite cannot certify a T=3 array's stale final frame."""
+def test_predict_refuses_an_output_with_more_timepoints_than_its_source(tmp_path):
+    """Arrays only grow, so a T=3 output can never be completed from a T=2 source; refuse before writing."""
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
-    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 3})
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 3}, completed=set())
     with open_ome_zarr(out, mode="r+") as plate:
         plate["0/0/fov0000/0"][:] = 999
-    _predict(inp, out, z_window_size=1, overwrite=True)
+
+    with pytest.raises(ValueError, match="more timepoints"):
+        _predict(inp, out, z_window_size=1, overwrite=True)
 
     with open_ome_zarr(out, mode="r") as plate:
-        image = plate["0/0/fov0000/0"]
-        assert image.shape[0] == 3
-        np.testing.assert_array_equal(image[:2], 1)
-        np.testing.assert_array_equal(image[2], 999)
-        marker = plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY]
-        assert marker == {"Structure_prediction": completion_marker([2, 4, 8, 8], _run(1))}
-    assert _completed(out, inp, _run(1)) == set()
+        np.testing.assert_array_equal(plate["0/0/fov0000/0"][:], 999)
+        assert plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY] == {}
 
 
 def test_survey_no_store(tmp_path):
@@ -911,7 +916,7 @@ def test_resume_predict_refuses_a_store_without_markers(tmp_path):
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
-    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 1})
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 1}, completed=set(), unmarked=True)
     ckpt = tmp_path / "a.ckpt"
     ckpt.write_bytes(b"weights-a")
     leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
