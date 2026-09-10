@@ -86,6 +86,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from submit_benchmark_job import bind_prediction_run
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
@@ -376,6 +377,8 @@ def _compose_leaves(
         if "launcher" not in composed:
             raise SystemExit(f"{leaf}: missing required 'launcher:' block")
         launcher = composed.pop("launcher")
+        if launcher.get("mode") == "predict":
+            bind_prediction_run(composed)
         bench = composed.pop("benchmark", None) or {}
         exp_id = bench.get("experiment_id")
         if not exp_id:

@@ -97,6 +97,62 @@ def test_print_script_writes_nothing(monkeypatch, tmp_path):
     assert calls == [], f"--print-script touched the filesystem: {calls}"
 
 
+def _write_predict_leaf(tmp_path: Path, ckpt: Path) -> Path:
+    """Synthetic predict leaf: one writer, a model with ``ckpt_path``, an experiment id."""
+    leaf = tmp_path / "predict.yml"
+    leaf.write_text(
+        yaml.safe_dump(
+            {
+                "launcher": {
+                    "mode": "predict",
+                    "job_name": "PRED",
+                    "run_root": str(tmp_path / "run_root"),
+                    "sbatch": {
+                        "partition": "gpu",
+                        "nodes": 1,
+                        "ntasks_per_node": 1,
+                        "cpus_per_task": 1,
+                        "gpus": 1,
+                        "mem": "1G",
+                        "constraint": "h200",
+                        "time": "1:00:00",
+                    },
+                },
+                "benchmark": {"experiment_id": "pred_test"},
+                "trainer": {
+                    "devices": 1,
+                    "callbacks": [
+                        {
+                            "class_path": "viscy_utils.callbacks.prediction_writer.HCSPredictionWriter",
+                            "init_args": {"output_store": str(tmp_path / "pred.zarr")},
+                        }
+                    ],
+                },
+                "model": {"class_path": "dynacell.engine.DynacellUNet", "init_args": {"ckpt_path": str(ckpt)}},
+                "data": {
+                    "class_path": "viscy_data.HCSDataModule",
+                    "init_args": {
+                        "data_path": str(tmp_path / "input.zarr"),
+                        "source_channel": ["Phase3D"],
+                        "target_channel": ["Structure"],
+                        "z_window_size": 4,
+                    },
+                },
+            }
+        )
+    )
+    return leaf
+
+
+def test_batch_composition_binds_the_checkpoint_to_the_writer(tmp_path):
+    """Batch submissions record the checkpoint in the writer exactly as single-job ones do."""
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    composed_list, _, _ = sbb._compose_leaves([_write_predict_leaf(tmp_path, ckpt)], [], False)
+    writer_init = composed_list[0]["trainer"]["callbacks"][0]["init_args"]
+    assert writer_init["checkpoint_path"] == str(ckpt)
+
+
 def test_mixed_run_roots_rejected_without_allow_mixed():
     """Without ``--allow-mixed-directives``, leaves spanning two ``run_root``s must raise."""
     args = [str(p) for p in ER_MIXED_RUN_ROOT_LEAVES] + ["--array", "--print-script"]

@@ -135,6 +135,23 @@ def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
         cb.setdefault("init_args", {})["overwrite"] = True
 
 
+def bind_prediction_run(composed: dict) -> None:
+    """Name the model checkpoint to every ``HCSPredictionWriter`` of a composed predict config.
+
+    Mutates ``composed`` in place so each FOV's completion marker records the
+    weights that produced it (see :mod:`viscy_utils.prediction_metadata`).
+    Shared by the single-job and batch launchers: a submission path that
+    skipped it would leave the writer recording a null checkpoint, and a
+    resume through the other path would then reject the store as another
+    checkpoint's. No-op without ``model.init_args.ckpt_path``.
+    """
+    ckpt_path = composed.get("model", {}).get("init_args", {}).get("ckpt_path")
+    if not ckpt_path:
+        return
+    for cb in _writer_callbacks(composed):
+        cb.setdefault("init_args", {})["checkpoint_path"] = str(ckpt_path)
+
+
 def _as_channel_list(target_channel: Any) -> list[str]:
     """Normalize a ``target_channel`` config value to a list of channel names."""
     if target_channel is None:
@@ -573,12 +590,9 @@ def submit(argv: list[str] | None = None) -> int:
             raise SystemExit(f"--ckpt resolved to a missing checkpoint: {resolved_ckpt}")
         model_init["ckpt_path"] = str(resolved_ckpt)
 
-    # Record the checkpoint in the writer so every FOV's completion marker names
-    # the weights that produced it (see viscy_utils.prediction_metadata).
     model_init = composed.get("model", {}).get("init_args", {})
-    if mode == "predict" and model_init.get("ckpt_path"):
-        for cb in _writer_callbacks(composed):
-            cb.setdefault("init_args", {})["checkpoint_path"] = str(model_init["ckpt_path"])
+    if mode == "predict":
+        bind_prediction_run(composed)
 
     # Predict-mode resume: continue a partially-written prediction store instead of
     # crashing or recomputing. The writer raises FileExistsError on an existing
