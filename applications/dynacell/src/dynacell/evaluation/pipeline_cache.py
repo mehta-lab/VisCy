@@ -27,7 +27,6 @@ from dynacell.evaluation.cache import (
     built_at_now,
     cache_paths,
     check_cache_identity,
-    ckpt_sha256_12,
     diff_artifact_params,
     encoder_config_sha256_12,
     feature_slug,
@@ -51,6 +50,7 @@ from dynacell.evaluation.metrics import (
     features_from_crops,
 )
 from dynacell.evaluation.runtime import region_timer
+from viscy_utils.prediction_metadata import checkpoint_sha256_12
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
 
@@ -236,9 +236,9 @@ def init_cache_context(
     # over FOVs this run never touched -- see ``_update_manifest_entry``.
     excluded_walk = bool(OmegaConf.select(config, "io.exclude_fov_names", default=None))
 
-    dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
+    dynaclr_ckpt_sha12 = checkpoint_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
-    celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
+    celldino_weights_sha12 = checkpoint_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
 
     cache_dir_key, plate_key, channel_key = _SIDE_IO_KEYS[side]
     cache_dir = OmegaConf.select(config, f"io.{cache_dir_key}", default=None)

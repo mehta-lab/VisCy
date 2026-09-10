@@ -17,7 +17,15 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
 
-from viscy_utils.prediction_metadata import clear_completion, mark_complete, tzyx_shape
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    clear_completion,
+    completion_marker,
+    mark_complete,
+    prediction_run,
+    same_run,
+    tzyx_shape,
+)
 from viscy_utils.tensor_utils import to_numpy
 
 if TYPE_CHECKING:
@@ -155,6 +163,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         derived from ``z_slice.start``, ``'center'`` because it relies on
         last-write-wins. The predict dataloader is sequential and iterates
         ``z`` innermost, which is what makes that hold.
+    checkpoint_path : str or None, optional
+        Checkpoint the model predicts with. Its path and content hash are
+        recorded in every FOV's completion marker, so a resume can tell
+        predictions made with different weights apart and refuses to mix
+        them in one store. Default None records no checkpoint.
     """
 
     def __init__(
@@ -164,6 +177,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
         z_reduction: Literal["blend", "center"] = "blend",
+        checkpoint_path: str | None = None,
     ) -> None:
         super().__init__(write_interval)
         if z_reduction not in ("blend", "center"):
@@ -172,6 +186,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.overwrite = overwrite
         self.write_input = write_input
         self.z_reduction = z_reduction
+        self.checkpoint_path = checkpoint_path
         self._dataset_scale = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
@@ -210,6 +225,13 @@ class HCSPredictionWriter(BasePredictionWriter):
         target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
         self._prediction_channels = prediction_channel
+        # Hashes the checkpoint once; every FOV's marker records this identity.
+        self._run = prediction_run(
+            array_key=dm.array_key,
+            z_window_size=dm.z_window_size,
+            z_reduction=self.z_reduction,
+            checkpoint_path=self.checkpoint_path,
+        )
         window_arrays = dm.predict_dataset.window_arrays
         self._source_shapes = {f"/{array.path}": tzyx_shape(array) for array in window_arrays}
         # Array dimensions grow before writes, so only a successful write of every
@@ -227,6 +249,7 @@ class HCSPredictionWriter(BasePredictionWriter):
                 # Validate all positions before mutating any.
                 needs_append: list[tuple[Position, list[str]]] = []
                 overwritten: list[Position] = []
+                mixed: list[str] = []
                 for name, pos in self.plate.positions():
                     existing = set(pos.channel_names)
                     missing = [ch for ch in prediction_channel if ch not in existing]
@@ -248,6 +271,16 @@ class HCSPredictionWriter(BasePredictionWriter):
                         needs_append.append((pos, missing))
                     if name in run_positions:
                         overwritten.append(pos)
+                    elif self._holds_other_run(pos, prediction_channel):
+                        mixed.append(name)
+                if mixed:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(mixed)} FOVs outside this run already hold {prediction_channel} "
+                        f"predicted with a different checkpoint or settings in "
+                        f"'{self.output_store}' (e.g. {mixed[:3]}); predict into a new "
+                        "output store instead of mixing them."
+                    )
                 for pos, channels in needs_append:
                     for ch in channels:
                         pos.append_channel(ch, resize_arrays=True)
@@ -383,7 +416,27 @@ class HCSPredictionWriter(BasePredictionWriter):
         written[t_index, window_z_index] = True
         if written.all():
             position = self.plate[img_name.rsplit("/", 1)[0]]
-            mark_complete(position, self._prediction_channels, self._source_shapes[img_name])
+            marker = completion_marker(self._source_shapes[img_name], self._run)
+            mark_complete(position, self._prediction_channels, marker)
+
+    def _holds_other_run(self, position: Position, channels: list[str]) -> bool:
+        """Return whether any of ``channels`` is marked complete by a different run.
+
+        Parameters
+        ----------
+        position : Position
+            Existing output position outside this run.
+        channels : list of str
+            This run's prediction channels.
+
+        Returns
+        -------
+        bool
+            True when a recorded marker was written with other weights or
+            settings, or in a layout this version cannot read.
+        """
+        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+        return any(channel in completed and not same_run(completed[channel], self._run) for channel in channels)
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.

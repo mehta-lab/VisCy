@@ -17,7 +17,13 @@ from lightning.pytorch import LightningModule, Trainer
 
 from viscy_data import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
-from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, mark_complete, tzyx_shape
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    completion_marker,
+    mark_complete,
+    prediction_run,
+    tzyx_shape,
+)
 
 yaml = pytest.importorskip("yaml")
 
@@ -599,10 +605,23 @@ def test_sbatch_cmd_dependency_and_parsable(monkeypatch, tmp_path):
 # --- predict resume (--resume-predict) ---------------------------------------
 
 
+def _run(z_window_size: int, checkpoint: Path | None = None) -> dict:
+    """Run identity of the test predicts: array ``0``, blended windows, an optional stub checkpoint."""
+    return prediction_run(array_key="0", z_window_size=z_window_size, z_reduction="blend", checkpoint_path=checkpoint)
+
+
 def _write_hcs_store(
-    path: Path, channels: list[str], fov_t: dict[str, int], *, completed: set[str] | None = None
+    path: Path,
+    channels: list[str],
+    fov_t: dict[str, int],
+    *,
+    completed: set[str] | None = None,
+    run: dict | None = None,
 ) -> None:
-    """Write a minimal HCS OME-Zarr with one array per FOV at the given T length."""
+    """Write a minimal HCS OME-Zarr with one array per FOV at the given T length.
+
+    FOVs named in ``completed`` are marked as fully predicted by ``run``.
+    """
     with open_ome_zarr(path, layout="hcs", mode="a", channel_names=channels) as plate:
         for fov_name, t in fov_t.items():
             row, col, pos = fov_name.split("/")
@@ -611,33 +630,68 @@ def _write_hcs_store(
                 "0", shape=(t, len(channels), 4, 8, 8), dtype=np.float32, chunks=(1, 1, 4, 8, 8)
             )
             if completed and fov_name in completed:
-                mark_complete(position, channels, tzyx_shape(array))
+                mark_complete(position, channels, completion_marker(tzyx_shape(array), run))
 
 
-def test_completed_prediction_fovs_detects_partial(tmp_path):
+def _completed(out: Path, inp: Path, run: dict) -> set[str]:
+    """FOVs the launcher would skip on ``--resume-predict`` for this run."""
+    return sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run).completed
+
+
+def test_survey_detects_partial(tmp_path):
     """Only marked FOVs whose output T matches the input count as complete."""
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 10})
     out = tmp_path / "pred.zarr"
+    run = _run(1)
     # fov0000, fov0001 complete (T=10); fov0002 killed mid-run (T=5).
     _write_hcs_store(
         out,
         ["Structure_prediction"],
         {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 5},
         completed={"0/0/fov0000", "0/0/fov0001", "0/0/fov0002"},
+        run=run,
     )
-    completed, total = sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"])
-    assert total == 3
-    assert completed == {"0/0/fov0000", "0/0/fov0001"}
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run)
+    assert survey.total == 3
+    assert survey.completed == {"0/0/fov0000", "0/0/fov0001"}
+    assert survey.conflicting == set()
 
 
-def test_completed_prediction_fovs_requires_explicit_completion(tmp_path):
+def test_survey_requires_explicit_completion(tmp_path):
     """Legacy output shapes cannot establish whether every Z window was written."""
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
     _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2})
-    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
+    assert (survey.total, survey.completed, survey.conflicting) == (1, set(), set())
+
+
+def test_survey_flags_fovs_predicted_with_another_checkpoint(tmp_path):
+    """A FOV marked complete by other weights is conflicting, not merely incomplete.
+
+    The comparison is on checkpoint content, so the same file at another path
+    is still the same run.
+    """
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+    ckpt_a = tmp_path / "a.ckpt"
+    ckpt_a.write_bytes(b"weights-a")
+    ckpt_b = tmp_path / "b.ckpt"
+    ckpt_b.write_bytes(b"weights-b")
+    moved_a = tmp_path / "moved" / "a.ckpt"
+    moved_a.parent.mkdir()
+    moved_a.write_bytes(b"weights-a")
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2}, completed={"0/0/fov0000"}, run=_run(1, ckpt_a))
+
+    same = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1, ckpt_a))
+    assert (same.completed, same.conflicting) == ({"0/0/fov0000"}, set())
+    moved = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1, moved_a))
+    assert (moved.completed, moved.conflicting) == ({"0/0/fov0000"}, set())
+    other = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1, ckpt_b))
+    assert (other.completed, other.conflicting) == (set(), {"0/0/fov0000"})
 
 
 class _ConstantPrediction(LightningModule):
@@ -646,7 +700,13 @@ class _ConstantPrediction(LightningModule):
 
 
 def _predict(
-    inp: Path, out: Path, *, z_window_size: int, limit_batches: int | None = None, overwrite: bool = False
+    inp: Path,
+    out: Path,
+    *,
+    z_window_size: int,
+    limit_batches: int | None = None,
+    overwrite: bool = False,
+    checkpoint: Path | None = None,
 ) -> None:
     """Write all-ones predictions for the first ``limit_batches`` windows of ``inp`` into ``out``."""
     data = HCSDataModule(
@@ -660,12 +720,15 @@ def _predict(
         normalizations=[],
         augmentations=[],
     )
+    writer = HCSPredictionWriter(
+        str(out), overwrite=overwrite, checkpoint_path=None if checkpoint is None else str(checkpoint)
+    )
     Trainer(
         accelerator="cpu",
         logger=False,
         enable_progress_bar=False,
         limit_predict_batches=limit_batches,
-        callbacks=[HCSPredictionWriter(str(out), overwrite=overwrite)],
+        callbacks=[writer],
     ).predict(_ConstantPrediction(), datamodule=data, return_predictions=False)
 
 
@@ -675,6 +738,7 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
+    run = _run(z_window_size)
 
     windows_per_t = 4 - z_window_size + 1
     _predict(inp, out, z_window_size=z_window_size, limit_batches=windows_per_t + 1)
@@ -682,15 +746,15 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
         image = plate["0/0/fov0000/0"]
         assert image.shape == (2, 1, 4, 8, 8)
         np.testing.assert_array_equal(image[1, 0, :, 0, 0], [1] * z_window_size + [0] * (4 - z_window_size))
-    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+    assert _completed(out, inp, run) == set()
 
     _predict(inp, out, z_window_size=z_window_size, limit_batches=2 * windows_per_t, overwrite=True)
-    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == ({"0/0/fov0000"}, 1)
+    assert _completed(out, inp, run) == {"0/0/fov0000"}
     with open_ome_zarr(out, mode="r") as plate:
         np.testing.assert_array_equal(plate["0/0/fov0000/0"][:], 1)
 
     _predict(inp, out, z_window_size=z_window_size, limit_batches=1, overwrite=True)
-    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+    assert _completed(out, inp, run) == set()
 
 
 def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_path):
@@ -708,28 +772,129 @@ def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_pa
         assert image.shape[0] == 3
         np.testing.assert_array_equal(image[:2], 1)
         np.testing.assert_array_equal(image[2], 999)
-        assert plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY] == {"Structure_prediction": [2, 4, 8, 8]}
-    assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
+        marker = plate["0/0/fov0000"].zattrs[PREDICTION_COMPLETE_KEY]
+        assert marker == {"Structure_prediction": completion_marker([2, 4, 8, 8], _run(1))}
+    assert _completed(out, inp, _run(1)) == set()
 
 
-def test_completed_prediction_fovs_no_store(tmp_path):
+def test_survey_no_store(tmp_path):
     """A missing output store yields no completed FOVs but the correct input total."""
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10})
-    completed, total = sbj._completed_prediction_fovs(str(tmp_path / "absent.zarr"), str(inp), ["Structure_prediction"])
-    assert total == 2
-    assert completed == set()
+    survey = sbj._survey_prediction_store(str(tmp_path / "absent.zarr"), str(inp), ["Structure_prediction"], _run(1))
+    assert survey.total == 2
+    assert survey.completed == set()
 
 
-def test_completed_prediction_fovs_missing_channel_not_complete(tmp_path):
+def test_survey_missing_channel_not_complete(tmp_path):
     """A FOV at full T but lacking the prediction channel is not complete."""
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10})
     out = tmp_path / "pred.zarr"
     _write_hcs_store(out, ["Other_prediction"], {"0/0/fov0000": 10})
-    completed, total = sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"])
-    assert total == 1
-    assert completed == set()
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
+    assert survey.total == 1
+    assert survey.completed == set()
+
+
+def _write_predict_leaf(tmp_path: Path, *, data_path: Path, output_store: Path, ckpt: Path, z_window_size: int) -> Path:
+    """Synthetic predict leaf: a writer on ``output_store`` predicting ``data_path`` with ``ckpt``."""
+    leaf = tmp_path / "predict.yml"
+    leaf.write_text(
+        yaml.safe_dump(
+            {
+                "launcher": {
+                    "mode": "predict",
+                    "job_name": "PRED",
+                    "run_root": str(tmp_path / "run_root"),
+                    "sbatch": {
+                        "partition": "gpu",
+                        "nodes": 1,
+                        "ntasks_per_node": 1,
+                        "cpus_per_task": 1,
+                        "gpus": 1,
+                        "mem": "1G",
+                        "constraint": "h200",
+                        "time": "1:00:00",
+                    },
+                },
+                "trainer": {
+                    "devices": 1,
+                    "callbacks": [
+                        {
+                            "class_path": "viscy_utils.callbacks.prediction_writer.HCSPredictionWriter",
+                            "init_args": {"output_store": str(output_store)},
+                        }
+                    ],
+                },
+                "model": {"class_path": "dynacell.engine.DynacellUNet", "init_args": {"ckpt_path": str(ckpt)}},
+                "data": {
+                    "class_path": "viscy_data.HCSDataModule",
+                    "init_args": {
+                        "data_path": str(data_path),
+                        "source_channel": ["Phase3D"],
+                        "target_channel": ["Structure"],
+                        "z_window_size": z_window_size,
+                    },
+                },
+            }
+        )
+    )
+    return leaf
+
+
+def _resolved_config(capsys) -> dict:
+    """Parse the YAML that ``--print-resolved-config`` wrote, skipping resume status lines."""
+    lines = [line for line in capsys.readouterr().out.splitlines() if not line.startswith("--resume-predict")]
+    return yaml.safe_load("\n".join(lines))
+
+
+def test_predict_submit_records_checkpoint_in_writer(capsys, tmp_path):
+    """Every predict submission names its checkpoint to the writer, so markers carry it."""
+    inp = tmp_path / "input.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=tmp_path / "pred.zarr", ckpt=ckpt, z_window_size=4)
+
+    assert sbj.submit([str(leaf), "--print-resolved-config"]) == 0
+    writer_init = _resolved_config(capsys)["trainer"]["callbacks"][0]["init_args"]
+    assert writer_init["checkpoint_path"] == str(ckpt)
+
+
+def test_resume_predict_excludes_complete_fovs_and_keeps_the_checkpoint(capsys, tmp_path):
+    """A resume skips FOVs the same checkpoint completed and rewrites the rest."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    # One full-depth window per FOV: the first batch completes fov0000 only.
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt)
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+
+    assert sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"]) == 0
+    config = _resolved_config(capsys)
+    assert config["data"]["init_args"]["exclude_fov_names"] == ["0/0/fov0000"]
+    writer_init = config["trainer"]["callbacks"][0]["init_args"]
+    assert writer_init["overwrite"] is True
+    assert writer_init["checkpoint_path"] == str(ckpt)
+
+
+def test_resume_predict_refuses_a_store_from_another_checkpoint(tmp_path):
+    """Re-baking the leaf's checkpoint must not finish a store begun with other weights."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    ckpt_a = tmp_path / "a.ckpt"
+    ckpt_a.write_bytes(b"weights-a")
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt_a)
+    ckpt_b = tmp_path / "b.ckpt"
+    ckpt_b.write_bytes(b"weights-b")
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt_b, z_window_size=4)
+
+    with pytest.raises(SystemExit, match="another checkpoint"):
+        sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"])
 
 
 def test_resume_predict_rejects_fit_mode():

@@ -1,5 +1,7 @@
 """Tests for prediction writer blending utilities."""
 
+import hashlib
+
 import numpy as np
 import pytest
 import torch
@@ -11,8 +13,11 @@ from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter, _blend_
 from viscy_utils.prediction_metadata import (
     PREDICTION_COMPLETE_KEY,
     clear_completion,
+    completion_marker,
     mark_complete,
     prediction_complete,
+    prediction_run,
+    same_run,
 )
 
 Z_SIZE = 16
@@ -96,29 +101,115 @@ def test_predict_z_reduction_center_takes_one_pass_per_plane(tmp_path):
 
 
 def test_completion_marker_layout(tmp_path):
-    """One position attribute maps each prediction channel to the source TZYX it was predicted from.
+    """One position attribute maps each prediction channel to what produced it.
 
     The launcher's resume check and test fixtures read this literal layout, so a
     change here is a contract change, not a refactor.
     """
     _run_predict(tmp_path, "blend")
+    run = prediction_run(array_key="0", z_window_size=Z_WINDOW, z_reduction="blend", checkpoint_path=None)
     with open_ome_zarr(tmp_path / "prediction_blend.zarr", mode="r") as plate:
         position = plate["0/0/0"]
-        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"Nuclei_prediction": [1, Z_SIZE, 8, 8]}
-        assert prediction_complete(position, ["Nuclei_prediction"], [1, Z_SIZE, 8, 8])
-        assert not prediction_complete(position, ["Nuclei_prediction"], [2, Z_SIZE, 8, 8])
+        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {
+            "Nuclei_prediction": {
+                "source_shape": [1, Z_SIZE, 8, 8],
+                "array_key": "0",
+                "z_window_size": Z_WINDOW,
+                "z_reduction": "blend",
+                "checkpoint_path": None,
+                "checkpoint_sha256_12": None,
+            }
+        }
+        assert prediction_complete(position, ["Nuclei_prediction"], completion_marker([1, Z_SIZE, 8, 8], run))
+        assert not prediction_complete(position, ["Nuclei_prediction"], completion_marker([2, Z_SIZE, 8, 8], run))
 
 
 def test_completion_helpers_keep_other_channels(tmp_path):
     """Marking or clearing one channel must leave the other channels' markers intact."""
+    run = prediction_run(array_key="0", z_window_size=1, z_reduction="blend", checkpoint_path=None)
+    marker = completion_marker([1, 2, 3, 4], run)
     with open_ome_zarr(tmp_path / "plate.zarr", layout="hcs", mode="w-", channel_names=["A", "B"]) as plate:
         position = plate.create_position("0", "0", "0")
-        mark_complete(position, ["A"], [1, 2, 3, 4])
-        mark_complete(position, ["B"], [1, 2, 3, 4])
+        mark_complete(position, ["A"], marker)
+        mark_complete(position, ["B"], marker)
         clear_completion(position, ["A"])
-        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"B": [1, 2, 3, 4]}
-        assert prediction_complete(position, ["B"], [1, 2, 3, 4])
-        assert not prediction_complete(position, ["A", "B"], [1, 2, 3, 4])
+        assert position.zattrs[PREDICTION_COMPLETE_KEY] == {"B": marker}
+        assert prediction_complete(position, ["B"], marker)
+        assert not prediction_complete(position, ["A", "B"], marker)
+
+
+class _OnesModule(LightningModule):
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0) -> torch.Tensor:
+        return torch.ones_like(batch["source"])
+
+
+def _write_source(path, fovs: list[str], z_size: int = 4) -> None:
+    """Create a two-channel source plate with one ``(1, 2, Z, 8, 8)`` array per FOV."""
+    with open_ome_zarr(path, layout="hcs", mode="w-", channel_names=["Phase3D", "Nuclei"]) as plate:
+        for fov in fovs:
+            plate.create_position(*fov.split("/")).create_zeros("0", (1, 2, z_size, 8, 8), dtype=np.float32)
+
+
+def _predict_ones(source, output, *, checkpoint_path=None, exclude=None, overwrite=False) -> None:
+    """Predict all-ones for every FOV of ``source`` (full-depth windows) into ``output``."""
+    data_module = HCSDataModule(
+        data_path=str(source),
+        source_channel=["Phase3D"],
+        target_channel=["Nuclei"],
+        z_window_size=4,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+        exclude_fov_names=exclude,
+    )
+    writer = HCSPredictionWriter(str(output), overwrite=overwrite, checkpoint_path=checkpoint_path)
+    Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
+        _OnesModule(), datamodule=data_module, return_predictions=False
+    )
+
+
+def test_marker_records_the_checkpoint_content(tmp_path):
+    """The marker names the checkpoint and hashes its content, so a moved copy still matches."""
+    source = tmp_path / "source.zarr"
+    _write_source(source, ["0/0/0"])
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    _predict_ones(source, tmp_path / "pred.zarr", checkpoint_path=str(ckpt))
+
+    with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
+        marker = plate["0/0/0"].zattrs[PREDICTION_COMPLETE_KEY]["Nuclei_prediction"]
+    assert marker["checkpoint_path"] == str(ckpt)
+    assert marker["checkpoint_sha256_12"] == hashlib.sha256(b"weights-a").hexdigest()[:12]
+    moved = tmp_path / "moved.ckpt"
+    moved.write_bytes(b"weights-a")
+    other = tmp_path / "b.ckpt"
+    other.write_bytes(b"weights-b")
+    assert same_run(marker, prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=moved))
+    assert not same_run(
+        marker, prediction_run(array_key="0", z_window_size=4, z_reduction="blend", checkpoint_path=other)
+    )
+
+
+def test_writer_refuses_to_mix_checkpoints_across_fovs(tmp_path):
+    """FOVs outside the run that other weights completed make the store off limits, before any write."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0", "0/0/1"])
+    ckpt_a = tmp_path / "a.ckpt"
+    ckpt_a.write_bytes(b"weights-a")
+    ckpt_b = tmp_path / "b.ckpt"
+    ckpt_b.write_bytes(b"weights-b")
+    _predict_ones(source, output, checkpoint_path=str(ckpt_a))
+    with open_ome_zarr(output, mode="r") as plate:
+        before = {name: pos.zattrs[PREDICTION_COMPLETE_KEY] for name, pos in plate.positions()}
+
+    with pytest.raises(ValueError, match="different checkpoint"):
+        _predict_ones(source, output, checkpoint_path=str(ckpt_b), exclude=["0/0/0"], overwrite=True)
+
+    with open_ome_zarr(output, mode="r") as plate:
+        assert {name: pos.zattrs[PREDICTION_COMPLETE_KEY] for name, pos in plate.positions()} == before
 
 
 def test_writer_rejects_unknown_z_reduction():
