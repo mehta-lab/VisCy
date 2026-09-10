@@ -139,7 +139,8 @@ jobs:
         # (falls back to numpy/scikit-image without CUDA), so the eval extra
         # installs and runs on a GPU-less runner. eval_gpu (cupy/cucim) is NOT
         # installed — those are the only CUDA-only deps.
-        run: uv sync --frozen --extra eval --group test
+        # Include viscy-utils' test group for the prediction-writer fixtures.
+        run: uv sync --frozen --package dynacell --package viscy-utils --extra eval --group test
         working-directory: applications/dynacell
 
       - name: Run benchmark configs and pipeline regressions
@@ -161,7 +162,7 @@ jobs:
         # and the entry-point wiring that kept both of those CLIs reachable.
         # All four are CPU-only and need no extra deps.
         run: |
-          uv run --frozen pytest \
+          uv run --frozen --no-sync pytest \
             tests/test_benchmark_config_composition.py \
             tests/test_submit_benchmark_job.py \
             tests/test_submit_benchmark_batch.py \
