@@ -77,7 +77,7 @@ Quiet polls print `no stall detected, tracking N: <jobid>(<samples>) ...`, or `c
 - **Interactive sessions are excluded by name** (`nomachine`, `gpu-hold`, `interactive`, bare `bash`/`sh`/`srun`). A renamed interactive session would get flagged — it still would not be cancelled, but don't act on the alert without checking.
 - It needs **two samples >= 15 min apart** and a job **>= 30 min old**, so expect no verdict on a fresh job for the first couple of polls.
 - Both modes persist samples in `$XDG_CACHE_HOME/viscy/watch_stalled_jobs-<user>.json` (default cache root: `~/.cache`); `--state-file` overrides the path. Repeat `--once` after at least 15 minutes. Its first invocation collects history; exit 0 does not establish that every job is healthy.
-- A decrease in CPU or job-wall counters starts fresh history. After a CPU reset, the 30-minute age and prior CPU progress are measured within the new step; the old step's CPU history cannot establish progress for the new one.
+- A decrease in CPU or job-wall counters starts fresh history. After a CPU reset, the 30-minute minimum age starts at the first observation of the new step. Its CPU progress can include work completed since the preceding observation, but the old step's CPU history cannot establish progress for the new one.
 - A job that has never burned CPU is never flagged: startup NFS staging is legitimately ~0% CPU, so the check requires the job to have previously demonstrated CPU progress.
 - `--user` defaults to `alex.kalinin`; `sstat` only works on your own running jobs, so it cannot watch someone else's.
 

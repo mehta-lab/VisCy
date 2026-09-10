@@ -164,6 +164,9 @@ def test_new_step_work_before_first_observation_can_establish_progress() -> None
     assert state.stall_report() is None
 
     state.add(Sample(wall_s=10 * HOUR + 2700, cpu_s=1700))
+    assert state.stall_report() is None
+
+    state.add(Sample(wall_s=10 * HOUR + 3600, cpu_s=1700))
     verdict = state.stall_report()
     assert verdict is not None
     assert verdict[1] == pytest.approx(1700 / 1800)
@@ -207,3 +210,36 @@ def test_once_persists_new_step_progress(tmp_path, monkeypatch, capsys) -> None:
         monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid, cpu_s=cpu_s: cpu_s)
         assert watch_stalled_jobs.main() == expected_status
     assert "STALLED 123" in capsys.readouterr().out
+
+
+def test_once_sparse_cpu_reset_waits_for_observed_step_age(tmp_path, monkeypatch, capsys) -> None:
+    """A sparse CPU reset proves prior work but cannot prove the step's age."""
+    monkeypatch.setattr(
+        "sys.argv",
+        ["watch_stalled_jobs", "--once", "--state-file", str(tmp_path / "watch.json")],
+    )
+    # A multithreaded step can consume 3000 CPU seconds shortly before the
+    # first post-reset observation, even when observations are an hour apart.
+    samples = [(10 * HOUR, 9 * HOUR), (11 * HOUR, 3000), (11 * HOUR + 900, 3000), (11 * HOUR + 1800, 3000)]
+    for (wall_s, cpu_s), expected_status in zip(samples, (0, 0, 0, 1), strict=True):
+        monkeypatch.setattr(
+            watch_stalled_jobs,
+            "running_jobs",
+            lambda user, wall_s=wall_s: [("123", "ER_PREDICT_batch", wall_s, "gpu-f-3")],
+        )
+        monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid, cpu_s=cpu_s: cpu_s)
+        assert watch_stalled_jobs.main() == expected_status
+        output = capsys.readouterr().out
+        assert ("STALLED 123" in output) == bool(expected_status)
+    assert "was 0.83 before" in output
+
+
+def test_requeued_job_uses_its_reported_wall_age() -> None:
+    """A wall-clock reset supplies the new job's elapsed time directly."""
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    state.add(Sample(wall_s=10 * HOUR, cpu_s=9 * HOUR))
+    state.add(Sample(wall_s=1800, cpu_s=1700))
+    state.add(Sample(wall_s=2700, cpu_s=1700))
+    verdict = state.stall_report()
+    assert verdict is not None
+    assert verdict[1] == pytest.approx(1700 / 1800)

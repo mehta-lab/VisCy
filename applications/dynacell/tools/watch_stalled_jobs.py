@@ -107,12 +107,15 @@ class JobState:
             # Running-step CPU resets at srun boundaries; job wall time resets
             # on requeue. Neither counter can be compared across that boundary.
             previous = self.samples[-1]
-            self.step_start_wall_s = 0.0 if sample.wall_s < previous.wall_s else previous.wall_s
+            requeued = sample.wall_s < previous.wall_s
+            # Only the first post-reset observation bounds the step's age
+            # conservatively; the earlier observation may precede it by hours.
+            self.step_start_wall_s = 0.0 if requeued else sample.wall_s
             # The new step started since the preceding observation. This upper
             # bound on its elapsed time gives a lower bound on CPU efficiency,
             # including work finished before we first observe the new counter.
             self.progress_start = sample
-            elapsed = sample.wall_s - self.step_start_wall_s
+            elapsed = sample.wall_s if requeued else sample.wall_s - previous.wall_s
             self.prior_efficiency = sample.cpu_s / elapsed if elapsed else 0.0
             self.samples.clear()
         elif self.progress_start is None:
