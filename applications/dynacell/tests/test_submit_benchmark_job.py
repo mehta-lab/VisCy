@@ -668,6 +668,28 @@ def test_survey_requires_explicit_completion(tmp_path):
     assert (survey.total, survey.completed, survey.conflicting) == (1, set(), set())
 
 
+def test_survey_reads_the_configured_array_level(tmp_path):
+    """Both shapes come from ``array_key``; a level the output never wrote is incomplete, not an error."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    with open_ome_zarr(inp, layout="hcs", mode="a", channel_names=["Phase3D"]) as plate:
+        position = plate.create_position("0", "0", "fov0000")
+        position.create_zeros("0", shape=(2, 1, 4, 8, 8), dtype=np.float32)
+        position.create_zeros("1", shape=(2, 1, 4, 4, 4), dtype=np.float32)
+    level_one = prediction_run(array_key="1", z_window_size=1, z_reduction="blend", checkpoint_path=None)
+    with open_ome_zarr(out, layout="hcs", mode="a", channel_names=["Structure_prediction"]) as plate:
+        position = plate.create_position("0", "0", "fov0000")
+        array = position.create_zeros("1", shape=(2, 1, 4, 4, 4), dtype=np.float32)
+        mark_complete(position, ["Structure_prediction"], completion_marker(tzyx_shape(array), level_one))
+
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], level_one)
+    assert (survey.completed, survey.conflicting) == ({"0/0/fov0000"}, set())
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
+    assert (survey.completed, survey.conflicting) == (set(), set())
+    with pytest.raises(KeyError):
+        sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], dict(level_one, array_key="2"))
+
+
 def test_survey_flags_fovs_predicted_with_another_checkpoint(tmp_path):
     """A FOV marked complete by other weights is conflicting, not merely incomplete.
 

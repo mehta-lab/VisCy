@@ -170,8 +170,11 @@ def _survey_prediction_store(
     writer only after all of the FOV's (T, Z-window) writes succeed. A FOV
     whose channels are marked complete with any other marker is conflicting:
     it was predicted from another source shape or with other weights or
-    settings, and finishing the store would mix them. Metadata-only: reads
-    markers and shapes, never voxel data.
+    settings, and finishing the store would mix them. Shapes are read from
+    the array level ``run["array_key"]`` on both sides: the input must have
+    it (anything else is a configuration error), an output lacking it is
+    simply incomplete. Metadata-only: reads markers and shapes, never voxel
+    data.
 
     Parameters
     ----------
@@ -190,10 +193,11 @@ def _survey_prediction_store(
         Total input FOV count plus plate-relative names (e.g. ``"0/0/fov0000"``)
         of complete and conflicting FOVs.
     """
+    array_key = run["array_key"]
     input_shapes: dict[str, list[int]] = {}
     with open_ome_zarr(data_path, mode="r") as plate:
         for name, pos in plate.positions():
-            input_shapes[name] = tzyx_shape(pos["0"])
+            input_shapes[name] = tzyx_shape(pos[array_key])
     completed: set[str] = set()
     conflicting: set[str] = set()
     if not os.path.exists(output_store):
@@ -202,7 +206,11 @@ def _survey_prediction_store(
         for name, pos in plate.positions():
             if name not in input_shapes or not all(ch in pos.channel_names for ch in prediction_channels):
                 continue
-            if pos["0"].frames != input_shapes[name][0]:
+            try:
+                output = pos[array_key]
+            except KeyError:
+                continue  # this level was never written: incomplete
+            if output.frames != input_shapes[name][0]:
                 continue
             if prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
                 completed.add(name)
