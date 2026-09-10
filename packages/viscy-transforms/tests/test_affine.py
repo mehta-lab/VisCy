@@ -302,3 +302,62 @@ def test_safe_crop_size_preserves_key_consistency():
     torch.manual_seed(42)
     out = t(sample)
     assert torch.equal(out["source"], out["target"])
+
+
+def test_affine_depth_one_preserves_data():
+    """A depth-1 volume must not be blanked by the affine.
+
+    Kornia normalizes pixel coordinates with a ``2 / (D - 1)`` scale, which
+    at ``D == 1`` becomes ~2e14. Any non-identity entry in the transform's Z
+    row is then multiplied by that factor, pushing every sampled coordinate
+    out of bounds so ``padding_mode="zeros"`` returns an all-zero tensor.
+
+    The 2D training overlays (``z_window_size: 1``) use exactly this shear
+    configuration, so a regression here silently blanks training data.
+    """
+    t = BatchedRandAffined(
+        keys=["source", "target"],
+        prob=1.0,
+        rotate_range=[0, 0, 0],
+        shear_range=[0.0, 0.05, 0.05],
+        scale_range=[[1, 1], [0.5, 1.5], [0.5, 1.5]],
+    )
+    base = torch.ones(4, 1, 1, 64, 64)
+    sample = {"source": base.clone(), "target": base.clone()}
+
+    torch.manual_seed(0)
+    out = t(sample)
+
+    nonzero = (out["source"] != 0).float().mean(dim=(1, 2, 3, 4))
+    assert (nonzero > 0.5).all(), f"depth-1 volume was blanked: per-sample nonzero {nonzero.tolist()}"
+    assert torch.equal(out["source"], out["target"])
+
+
+def test_affine_depth_one_still_transforms_in_plane():
+    """Neutralizing the Z row must not disable the YX transform at D=1."""
+    t = BatchedRandAffined(
+        keys=["source"],
+        prob=1.0,
+        rotate_range=[3.14, 0, 0],
+        scale_range=[[1, 1], [0.5, 1.5], [0.5, 1.5]],
+    )
+    base = torch.zeros(2, 1, 1, 64, 64)
+    base[:, :, :, 16:48, 16:48] = 1.0
+
+    torch.manual_seed(0)
+    out = t({"source": base.clone()})["source"]
+
+    assert (out != 0).any(), "depth-1 volume was blanked"
+    assert not torch.equal(out, base), "YX transform was not applied at D=1"
+
+
+def test_affine_depth_one_all_shear_facets():
+    """Every individual shear facet is safe at depth 1."""
+    facets = ["sxy", "sxz", "syx", "syz", "szx", "szy"]
+    for i, name in enumerate(facets):
+        shear = [(0.0, 0.0)] * 6
+        shear[i] = (-0.05, 0.05)
+        t = BatchedRandAffined(keys=["source"], prob=1.0, shear_range=shear)
+        torch.manual_seed(0)
+        out = t({"source": torch.ones(2, 1, 1, 64, 64)})["source"]
+        assert float(out.mean()) > 0.5, f"facet {name} blanked the depth-1 volume"

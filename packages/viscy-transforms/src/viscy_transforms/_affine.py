@@ -20,15 +20,49 @@ _logger = logging.getLogger(__name__)
 
 
 class _PaddedRandomAffine3D(RandomAffine3D):
-    """RandomAffine3D with configurable padding_mode.
+    """RandomAffine3D with configurable padding_mode and depth-1 safety.
 
     Kornia 0.8.x hard-codes ``padding_mode='zeros'`` in apply_transform.
     This subclass overrides that call to forward the user-specified mode.
+
+    It also neutralizes the Z row of the transform for depth-1 inputs; see
+    :meth:`_neutralize_z_row` for why that is required.
     """
 
     def __init__(self, *args: object, padding_mode: str = "zeros", **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._padding_mode = padding_mode
+
+    @staticmethod
+    def _neutralize_z_row(transform: Tensor) -> Tensor:
+        """Return ``transform`` with the Z row replaced by identity.
+
+        Kornia normalizes pixel coordinates to ``[-1, 1]`` with a per-axis
+        scale of ``2 / (size - 1)``. At ``depth == 1`` that divisor is zero,
+        and the guarded reciprocal yields a Z scale of roughly ``2e14``.
+        Any non-identity entry in the transform's Z row is multiplied by
+        that factor, so every sampled Z coordinate lands far outside the
+        volume and ``padding_mode="zeros"`` returns an all-zero tensor.
+
+        A single-plane volume has no Z extent to rotate, shear, scale or
+        translate along, so forcing the Z row to ``[0, 0, 1, 0]`` is the
+        semantically correct transform rather than a workaround. The X and
+        Y rows are untouched, so in-plane warping still applies; their
+        Z-dependent terms are scaled by ``1 / 2e14`` and vanish harmlessly.
+
+        Parameters
+        ----------
+        transform : Tensor
+            Affine matrices of shape ``(B, 3, 4)``.
+
+        Returns
+        -------
+        Tensor
+            A copy with row 2 set to ``[0, 0, 1, 0]``.
+        """
+        transform = transform.clone()
+        transform[:, 2, :] = torch.tensor([0.0, 0.0, 1.0, 0.0], dtype=transform.dtype, device=transform.device)
+        return transform
 
     def apply_transform(
         self,
@@ -37,9 +71,12 @@ class _PaddedRandomAffine3D(RandomAffine3D):
         flags: dict,
         transform: Tensor | None = None,
     ) -> Tensor:
+        matrix = transform[:, :3, :]
+        if input.shape[-3] == 1:
+            matrix = self._neutralize_z_row(matrix)
         return warp_affine3d(
             input,
-            transform[:, :3, :],
+            matrix,
             (input.shape[-3], input.shape[-2], input.shape[-1]),
             flags["resample"].name.lower(),
             padding_mode=self._padding_mode,
