@@ -614,6 +614,30 @@ class _ConstantPrediction(LightningModule):
         return torch.ones_like(batch["source"])
 
 
+def _predict(
+    inp: Path, out: Path, *, z_window_size: int, limit_batches: int | None = None, overwrite: bool = False
+) -> None:
+    """Write all-ones predictions for the first ``limit_batches`` windows of ``inp`` into ``out``."""
+    data = HCSDataModule(
+        data_path=str(inp),
+        source_channel=["Phase3D"],
+        target_channel=["Structure"],
+        z_window_size=z_window_size,
+        batch_size=1,
+        num_workers=0,
+        yx_patch_size=[8, 8],
+        normalizations=[],
+        augmentations=[],
+    )
+    Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_progress_bar=False,
+        limit_predict_batches=limit_batches,
+        callbacks=[HCSPredictionWriter(str(out), overwrite=overwrite)],
+    ).predict(_ConstantPrediction(), datamodule=data, return_predictions=False)
+
+
 @pytest.mark.parametrize("z_window_size", [1, 3])
 def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp_path, z_window_size):
     """2D and overlapping 3D windows reach full T before the final writes."""
@@ -621,40 +645,20 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
 
-    def predict(limit_batches: int, *, overwrite: bool = False) -> None:
-        data = HCSDataModule(
-            data_path=str(inp),
-            source_channel=["Phase3D"],
-            target_channel=["Structure"],
-            z_window_size=z_window_size,
-            batch_size=1,
-            num_workers=0,
-            yx_patch_size=[8, 8],
-            normalizations=[],
-            augmentations=[],
-        )
-        Trainer(
-            accelerator="cpu",
-            logger=False,
-            enable_progress_bar=False,
-            limit_predict_batches=limit_batches,
-            callbacks=[HCSPredictionWriter(str(out), overwrite=overwrite)],
-        ).predict(_ConstantPrediction(), datamodule=data, return_predictions=False)
-
     windows_per_t = 4 - z_window_size + 1
-    predict(windows_per_t + 1)
+    _predict(inp, out, z_window_size=z_window_size, limit_batches=windows_per_t + 1)
     with open_ome_zarr(out, mode="r") as plate:
         image = plate["0/0/fov0000/0"]
         assert image.shape == (2, 1, 4, 8, 8)
         np.testing.assert_array_equal(image[1, 0, :, 0, 0], [1] * z_window_size + [0] * (4 - z_window_size))
     assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
 
-    predict(2 * windows_per_t, overwrite=True)
+    _predict(inp, out, z_window_size=z_window_size, limit_batches=2 * windows_per_t, overwrite=True)
     assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == ({"0/0/fov0000"}, 1)
     with open_ome_zarr(out, mode="r") as plate:
         np.testing.assert_array_equal(plate["0/0/fov0000/0"][:], 1)
 
-    predict(1, overwrite=True)
+    _predict(inp, out, z_window_size=z_window_size, limit_batches=1, overwrite=True)
     assert sbj._completed_prediction_fovs(str(out), str(inp), ["Structure_prediction"]) == (set(), 1)
 
 
@@ -666,23 +670,7 @@ def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_pa
     _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 3})
     with open_ome_zarr(out, mode="r+") as plate:
         plate["0/0/fov0000/0"][:] = 999
-    data = HCSDataModule(
-        data_path=str(inp),
-        source_channel=["Phase3D"],
-        target_channel=["Structure"],
-        z_window_size=1,
-        batch_size=1,
-        num_workers=0,
-        yx_patch_size=[8, 8],
-        normalizations=[],
-        augmentations=[],
-    )
-    Trainer(
-        accelerator="cpu",
-        logger=False,
-        enable_progress_bar=False,
-        callbacks=[HCSPredictionWriter(str(out), overwrite=True)],
-    ).predict(_ConstantPrediction(), datamodule=data, return_predictions=False)
+    _predict(inp, out, z_window_size=1, overwrite=True)
 
     with open_ome_zarr(out, mode="r") as plate:
         image = plate["0/0/fov0000/0"]
