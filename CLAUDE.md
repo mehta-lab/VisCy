@@ -64,18 +64,20 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 **Using the stall watchdog.** `applications/dynacell/tools/watch_stalled_jobs.py` automates exactly that comparison. Start it whenever a campaign has long jobs in flight and leave it running:
 
 ```sh
-# one-shot check: exit 0 = all healthy, exit 1 = something is stalled
+# one-shot check: exit 0 = no stall detected, exit 1 = something is stalled
 uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --once
 
 # continuous, 10-min poll (launch in the background; it runs until killed)
 uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
 ```
 
-Quiet polls print `ok, tracking N: <jobid>(<samples>) ...`; a stalled job prints one `STALLED <jobid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
+Quiet polls print `no stall detected, tracking N: <jobid>(<samples>) ...`, or `collecting history` when a job lacks a 15-minute baseline. A stalled job prints one `STALLED <jobid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
 
 - It **only reports — it never cancels.** Cancelling a job with `afterok` dependents strands them, so follow the kill order above by hand.
 - **Interactive sessions are excluded by name** (`nomachine`, `gpu-hold`, `interactive`, bare `bash`/`sh`/`srun`). A renamed interactive session would get flagged — it still would not be cancelled, but don't act on the alert without checking.
 - It needs **two samples >= 15 min apart** and a job **>= 30 min old**, so expect no verdict on a fresh job for the first couple of polls.
+- Both modes persist samples in `$XDG_CACHE_HOME/viscy/watch_stalled_jobs-<user>.json` (default cache root: `~/.cache`); `--state-file` overrides the path. Repeat `--once` after at least 15 minutes. Its first invocation collects history; exit 0 does not establish that every job is healthy.
+- A decrease in CPU or job-wall counters starts fresh history. After a CPU reset, the 30-minute age and prior CPU progress are measured within the new step; the old step's CPU history cannot establish progress for the new one.
 - A job that has never burned CPU is never flagged: startup NFS staging is legitimately ~0% CPU, so the check requires the job to have previously demonstrated CPU progress.
 - `--user` defaults to `alex.kalinin`; `sstat` only works on your own running jobs, so it cannot watch someone else's.
 

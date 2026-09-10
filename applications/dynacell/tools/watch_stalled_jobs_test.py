@@ -1,6 +1,7 @@
 """Tests for the stalled-job detector, driven by real measured job traces."""
 
 import pytest
+import watch_stalled_jobs
 from watch_stalled_jobs import (  # noqa: E402
     JobState,
     Sample,
@@ -123,3 +124,86 @@ def test_narrow_window_defers_the_verdict() -> None:
     state.add(Sample(wall_s=21.20 * HOUR, cpu_s=21.75 * HOUR))
 
     assert state.stall_report() is None
+
+
+def test_new_step_can_demonstrate_progress_after_a_long_allocation() -> None:
+    """Step-local CPU must be compared with step-local elapsed time."""
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    state.add(Sample(wall_s=9.9 * HOUR, cpu_s=9.0 * HOUR))
+    state.add(Sample(wall_s=10 * HOUR, cpu_s=0))
+    state.add(Sample(wall_s=10 * HOUR + 1800, cpu_s=1700))
+    assert state.stall_report() is None
+
+    state.add(Sample(wall_s=10 * HOUR + 2700, cpu_s=1700))
+    verdict = state.stall_report()
+    assert verdict is not None
+    assert verdict[0] == pytest.approx(0.0)
+    assert verdict[1] == pytest.approx(1700 / 1800)
+
+    # The demonstrated progress survives both a long stall and sample pruning.
+    for elapsed in range(3600, 18001, 900):
+        state.add(Sample(wall_s=10 * HOUR + elapsed, cpu_s=1700))
+        assert state.stall_report() is not None
+
+
+def test_new_step_staging_does_not_inherit_previous_progress() -> None:
+    """A CPU reset clears the previous step's evidence of active compute."""
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    state.add(Sample(wall_s=10 * HOUR, cpu_s=9 * HOUR))
+    state.add(Sample(wall_s=10 * HOUR + 100, cpu_s=5))
+    state.add(Sample(wall_s=11 * HOUR, cpu_s=5))
+    assert state.stall_report() is None
+    assert all(sample.cpu_s == 5 for sample in state.samples)
+
+
+def test_new_step_work_before_first_observation_can_establish_progress() -> None:
+    """The first sample after a reset may contain all of the new step's work."""
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    state.add(Sample(wall_s=10 * HOUR, cpu_s=9 * HOUR))
+    state.add(Sample(wall_s=10 * HOUR + 1800, cpu_s=1700))
+    assert state.stall_report() is None
+
+    state.add(Sample(wall_s=10 * HOUR + 2700, cpu_s=1700))
+    verdict = state.stall_report()
+    assert verdict is not None
+    assert verdict[1] == pytest.approx(1700 / 1800)
+
+
+@pytest.mark.parametrize("next_wall_s", [22 * HOUR, 24 * HOUR])
+def test_once_reuses_history_between_invocations(tmp_path, monkeypatch, capsys, next_wall_s) -> None:
+    """Separate CLI invocations can identify the measured hung predict."""
+    monkeypatch.setattr(
+        "sys.argv",
+        ["watch_stalled_jobs", "--once", "--state-file", str(tmp_path / "watch.json")],
+    )
+    clock = iter([21.18 * HOUR, next_wall_s])
+    monkeypatch.setattr(
+        watch_stalled_jobs,
+        "running_jobs",
+        lambda user: [("35083019_0", "P2P_EMA_REST_g44", next(clock), "gpu-b-4")],
+    )
+    monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid: 21.75 * HOUR)
+
+    assert watch_stalled_jobs.main() == 0
+    assert "collecting history" in capsys.readouterr().out
+    assert watch_stalled_jobs.main() == 1
+    assert "STALLED 35083019_0" in capsys.readouterr().out
+
+
+def test_once_persists_new_step_progress(tmp_path, monkeypatch, capsys) -> None:
+    """Persist the current step's origin and prior CPU progress with its samples."""
+    monkeypatch.setattr(
+        "sys.argv",
+        ["watch_stalled_jobs", "--once", "--state-file", str(tmp_path / "watch.json")],
+    )
+    samples = iter([(9.9 * HOUR, 9 * HOUR), (10 * HOUR, 0), (10 * HOUR + 1800, 1700), (10 * HOUR + 2700, 1700)])
+    for expected_status in (0, 0, 0, 1):
+        wall_s, cpu_s = next(samples)
+        monkeypatch.setattr(
+            watch_stalled_jobs,
+            "running_jobs",
+            lambda user, wall_s=wall_s: [("123", "ER_PREDICT_batch", wall_s, "gpu-f-3")],
+        )
+        monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid, cpu_s=cpu_s: cpu_s)
+        assert watch_stalled_jobs.main() == expected_status
+    assert "STALLED 123" in capsys.readouterr().out

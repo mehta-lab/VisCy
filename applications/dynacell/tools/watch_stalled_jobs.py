@@ -24,11 +24,15 @@ Usage
 """
 
 import argparse
+import fcntl
+import json
+import os
 import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 # Interactive sessions legitimately idle for days. Never flag them -- and never
 # cancel them (see the "cancel all jobs means batch only" house rule).
@@ -93,17 +97,44 @@ class JobState:
     name: str
     node: str
     samples: list[Sample] = field(default_factory=list)
+    progress_start: Sample | None = None
+    step_start_wall_s: float = 0.0
+    prior_efficiency: float = 0.0
 
     def add(self, sample: Sample) -> None:
-        """Append a sample, dropping ones older than the lookback window."""
+        """Track CPU progress within a step and keep a rolling stall baseline."""
+        if self.samples and (sample.cpu_s < self.samples[-1].cpu_s or sample.wall_s < self.samples[-1].wall_s):
+            # Running-step CPU resets at srun boundaries; job wall time resets
+            # on requeue. Neither counter can be compared across that boundary.
+            previous = self.samples[-1]
+            self.step_start_wall_s = 0.0 if sample.wall_s < previous.wall_s else previous.wall_s
+            # The new step started since the preceding observation. This upper
+            # bound on its elapsed time gives a lower bound on CPU efficiency,
+            # including work finished before we first observe the new counter.
+            self.progress_start = sample
+            elapsed = sample.wall_s - self.step_start_wall_s
+            self.prior_efficiency = sample.cpu_s / elapsed if elapsed else 0.0
+            self.samples.clear()
+        elif self.progress_start is None:
+            self.progress_start = sample
+            # On first observation, cumulative CPU can already prove activity.
+            self.prior_efficiency = sample.cpu_s / sample.wall_s if sample.wall_s else 0.0
+        else:
+            elapsed = sample.wall_s - self.progress_start.wall_s
+            if elapsed > 0:
+                efficiency = (sample.cpu_s - self.progress_start.cpu_s) / elapsed
+                # A long idle period must not erase previously observed work.
+                self.prior_efficiency = max(self.prior_efficiency, efficiency)
         self.samples.append(sample)
         cutoff = sample.wall_s - LOOKBACK_S * 4
-        self.samples = [s for s in self.samples if s.wall_s >= cutoff]
+        # Keep one older baseline even when one-shot invocations are far apart.
+        older = [s for s in self.samples if s.wall_s < cutoff]
+        self.samples = older[-1:] + [s for s in self.samples if s.wall_s >= cutoff]
 
     def stall_report(self) -> tuple[float, float, Sample] | None:
         """Return ``(delta_fraction, prior_efficiency, baseline)`` when stalled.
 
-        Compares the newest sample against the oldest one at least
+        Compares the newest sample against the closest one at least
         ``LOOKBACK_S`` older. Returns None when the job is too young, the
         window is not yet wide enough, the job never demonstrated CPU
         progress, or CPU time is still advancing.
@@ -111,31 +142,20 @@ class JobState:
         if not self.samples:
             return None
         newest = self.samples[-1]
-        if newest.wall_s < MIN_AGE_S:
+        if newest.wall_s - self.step_start_wall_s < MIN_AGE_S:
             return None
         baselines = [s for s in self.samples if newest.wall_s - s.wall_s >= LOOKBACK_S]
         if not baselines:
             return None
         baseline = baselines[-1]
-        prior_efficiency = baseline.cpu_s / baseline.wall_s if baseline.wall_s else 0.0
-        if prior_efficiency < MIN_PRIOR_EFFICIENCY:
+        if self.prior_efficiency < MIN_PRIOR_EFFICIENCY:
             return None
         wall_delta = newest.wall_s - baseline.wall_s
         cpu_delta = newest.cpu_s - baseline.cpu_s
-        if cpu_delta < 0:
-            # sstat reports only the RUNNING step, so AveCPU resets to ~0 at
-            # every step boundary -- and submit_benchmark_batch renders N
-            # sequential srun steps per allocation. A negative delta means the
-            # counter restarted, not that the job stopped burning CPU; treating
-            # it as a stall would flag a healthy multi-step predict (and exit 1
-            # under --once). Drop the stale baseline and wait for two samples
-            # inside the current step.
-            self.samples = [newest]
-            return None
         fraction = cpu_delta / wall_delta
         if fraction >= STALL_CPU_FRACTION:
             return None
-        return fraction, prior_efficiency, baseline
+        return fraction, self.prior_efficiency, baseline
 
 
 def running_jobs(user: str) -> list[tuple[str, str, float, str]]:
@@ -220,18 +240,48 @@ def main() -> int:
     parser.add_argument("--user", default="alex.kalinin")
     parser.add_argument("--interval", type=float, default=600.0, help="seconds between polls")
     parser.add_argument("--once", action="store_true", help="poll once and exit")
+    parser.add_argument(
+        "--state-file",
+        type=Path,
+        help="sample history JSON (default: $XDG_CACHE_HOME/viscy/watch_stalled_jobs-USER.json)",
+    )
     args = parser.parse_args()
 
-    states: dict[str, JobState] = {}
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    state_path = args.state_file or cache_root / "viscy" / f"watch_stalled_jobs-{args.user}.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        alerts = poll_once(args.user, states)
+        # Coordinate continuous and one-shot monitors sharing the same history.
+        with state_path.with_name(state_path.name + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            states: dict[str, JobState] = {}
+            if state_path.exists():
+                with state_path.open() as saved:
+                    payload = json.load(saved)
+                if payload["user"] != args.user:
+                    raise ValueError(f"state file {state_path} belongs to another user")
+                for jobid, data in payload["states"].items():
+                    data["samples"] = [Sample(**sample) for sample in data["samples"]]
+                    if data["progress_start"] is not None:
+                        data["progress_start"] = Sample(**data["progress_start"])
+                    states[jobid] = JobState(**data)
+            alerts = poll_once(args.user, states)
+            temporary = state_path.with_name(state_path.name + ".tmp")
+            with temporary.open("w") as saved:
+                json.dump(
+                    {"user": args.user, "states": {job: asdict(s) for job, s in states.items()}},
+                    saved,
+                )
+            temporary.replace(state_path)
         if alerts:
             for alert in alerts:
                 print(f"[{stamp}] {alert}", flush=True)
         else:
             tracked = ", ".join(f"{j}({len(s.samples)})" for j, s in sorted(states.items()))
-            print(f"[{stamp}] ok, tracking {len(states)}: {tracked}", flush=True)
+            collecting = any(s.samples[-1].wall_s - s.samples[0].wall_s < LOOKBACK_S for s in states.values())
+            status = "collecting history" if collecting else "no stall detected"
+            print(f"[{stamp}] {status}, tracking {len(states)}: {tracked}", flush=True)
         if args.once:
             return 1 if alerts else 0
         time.sleep(args.interval)
