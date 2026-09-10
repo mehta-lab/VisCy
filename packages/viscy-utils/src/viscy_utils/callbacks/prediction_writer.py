@@ -123,6 +123,10 @@ def _blend_in(
 class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
+    Single-process only: completion is tracked per process and channels are
+    appended to the store without cross-rank coordination, so a multi-device
+    predict is refused before the store is opened.
+
     Parameters
     ----------
     output_store : str
@@ -217,6 +221,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         pl_module : LightningModule
             The Lightning module being used for prediction.
         """
+        if trainer.world_size > 1:
+            raise NotImplementedError(
+                f"HCSPredictionWriter tracks completion per process and appends channels without "
+                f"cross-rank coordination; run predict on a single device (got world_size={trainer.world_size})."
+            )
         dm: HCSDataModule = trainer.datamodule
         self._get_scale_metadata(dm.data_path)
         self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0

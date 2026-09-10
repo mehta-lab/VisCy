@@ -1,6 +1,7 @@
 """Tests for prediction writer blending utilities."""
 
 import hashlib
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -287,6 +288,14 @@ def test_writer_refuses_to_mix_checkpoints_across_fovs(tmp_path):
 
     with open_ome_zarr(output, mode="r") as plate:
         assert {name: pos.zattrs[PREDICTION_COMPLETE_KEY] for name, pos in plate.positions()} == before
+
+
+def test_writer_refuses_multi_device_predict(tmp_path):
+    """Per-process completion bitmaps cannot certify a FOV split across ranks; fail before opening the store."""
+    writer = HCSPredictionWriter(str(tmp_path / "pred.zarr"))
+    with pytest.raises(NotImplementedError, match="single device"):
+        writer.on_predict_start(SimpleNamespace(world_size=2), None)
+    assert not (tmp_path / "pred.zarr").exists()
 
 
 def test_writer_rejects_unknown_z_reduction():
