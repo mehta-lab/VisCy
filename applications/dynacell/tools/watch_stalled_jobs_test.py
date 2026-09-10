@@ -1,6 +1,7 @@
 """Tests for the stalled-job detector, driven by real measured job traces."""
 
 import json
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ from watch_stalled_jobs import (  # noqa: E402
     JobState,
     Sample,
     _load_states,
+    _save_states,
     parse_slurm_duration,
 )
 
@@ -21,7 +23,8 @@ SCRIPT = Path(watch_stalled_jobs.__file__)
 
 def _write_state_file(path: Path, **payload) -> None:
     """Write a state file as another writer would; keys override the defaults."""
-    path.write_text(json.dumps({"version": STATE_VERSION, "user": "alex.kalinin", "states": {}} | payload))
+    defaults = {"version": STATE_VERSION, "user": "alex.kalinin", "host": socket.gethostname(), "states": {}}
+    path.write_text(json.dumps(defaults | payload))
 
 
 @pytest.mark.parametrize(
@@ -290,6 +293,33 @@ def test_load_states_rejects_another_users_file(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="another user"):
         _load_states(state_file, "alex.kalinin")
+
+
+def test_load_states_rejects_a_file_written_on_another_host(tmp_path) -> None:
+    """``~/.cache`` is NFS with ``local_lock=all``: flock excludes only same-host processes.
+
+    A daemon on one node and a ``--once`` check on another would interleave
+    their read-modify-write of the history unguarded, so the file names the
+    host that owns it.
+    """
+    state_file = tmp_path / "watch.json"
+    _write_state_file(state_file, host="gpu-x-9")
+
+    with pytest.raises(ValueError, match="written on gpu-x-9; flock is node-local on NFS"):
+        _load_states(state_file, "alex.kalinin")
+
+
+def test_state_file_round_trips_on_the_same_host(tmp_path) -> None:
+    """Saving then loading on the writing host returns the same histories."""
+    state = JobState(name="P2P_EMA_REST_g44", node="gpu-b-4")
+    state.add(Sample(wall_s=21.18 * HOUR, cpu_s=21.75 * HOUR))
+    state.add(Sample(wall_s=22.00 * HOUR, cpu_s=21.75 * HOUR))
+    state_file = tmp_path / "watch.json"
+
+    _save_states(state_file, "alex.kalinin", {"35083019_0": state})
+
+    assert _load_states(state_file, "alex.kalinin") == {"35083019_0": state}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["watch.json"]
 
 
 def test_cli_exits_2_on_a_tool_error(tmp_path) -> None:

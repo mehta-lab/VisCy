@@ -32,6 +32,7 @@ import fcntl
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -252,7 +253,9 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
     """Rehydrate the persisted job histories.
 
     Empty when nothing was saved yet or when the file was written by another
-    schema version; a file written for another user is an error.
+    schema version. A file written for another user, or on another host, is an
+    error: ``flock`` on this NFS mount only excludes processes on the same
+    host, so the daemon and its one-shot checks must share a node.
     """
     if not path.exists():
         return {}
@@ -264,6 +267,12 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
         return {}
     if payload["user"] != user:
         raise ValueError(f"state file {path} belongs to another user")
+    host = payload["host"]
+    if host != socket.gethostname():
+        raise ValueError(
+            f"state file {path} was written on {host}; flock is node-local on NFS, so run the daemon "
+            f"and its --once checks on {host} or pass a different --state-file"
+        )
     states = {}
     for jobid, data in payload["states"].items():
         data["samples"] = [Sample(**sample) for sample in data["samples"]]
@@ -275,8 +284,13 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
 
 def _save_states(path: Path, user: str, states: dict[str, JobState]) -> None:
     """Replace the persisted histories atomically."""
-    temporary = path.with_name(path.name + ".tmp")
-    payload = {"version": STATE_VERSION, "user": user, "states": {job: asdict(s) for job, s in states.items()}}
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    payload = {
+        "version": STATE_VERSION,
+        "user": user,
+        "host": socket.gethostname(),
+        "states": {job: asdict(s) for job, s in states.items()},
+    }
     with temporary.open("w") as saved:
         json.dump(payload, saved)
     temporary.replace(path)
@@ -300,7 +314,9 @@ def main() -> int:
     state_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        # Coordinate continuous and one-shot monitors sharing the same history.
+        # Serialise the daemon and one-shot checks sharing this history. On
+        # this NFS mount flock only excludes processes on the same host, so
+        # the state file records its host and _load_states enforces it.
         with state_path.with_name(state_path.name + ".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             states = _load_states(state_path, args.user)
