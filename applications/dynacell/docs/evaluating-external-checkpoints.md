@@ -270,7 +270,9 @@ aligned so the numbers match the matrix:
   `num_steps` — it trades quality vs wall-time.
 - **Sampling is slow** (CellDiff runs ~hours/FOV at 100 steps). Run predict on SLURM via
   `tools/submit_benchmark_job.py`, and use `--resume-predict` if a wall-time kill leaves a
-  partially-written store.
+  partially-written store. Resume relies on the writer's completion markers (which record
+  the checkpoint), so a store written before markers existed, or with other weights, is
+  refused: predict it into a new output store instead.
 - **640×960 A549 exceeds a single flow-matching patch** — use an overlap-anchored tiler
   (`generate_iterative`), not one full-FOV pass (same constraint CellDiff/ViT hit; iPSC
   512² is a single patch, so `FULL_IMAGE`-equivalent there).

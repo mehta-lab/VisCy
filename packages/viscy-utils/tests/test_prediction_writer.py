@@ -150,8 +150,8 @@ def _write_source(path, fovs: list[str], z_size: int = 4) -> None:
             plate.create_position(*fov.split("/")).create_zeros("0", (1, 2, z_size, 8, 8), dtype=np.float32)
 
 
-def _predict_ones(source, output, *, checkpoint_path=None, exclude=None, overwrite=False) -> None:
-    """Predict all-ones for every FOV of ``source`` (full-depth windows) into ``output``."""
+def _predict_ones(source, output, *, checkpoint_path=None, exclude=None, overwrite=False, limit_batches=None) -> None:
+    """Predict all-ones for every FOV of ``source`` with depth-4 windows into ``output``."""
     data_module = HCSDataModule(
         data_path=str(source),
         source_channel=["Phase3D"],
@@ -165,9 +165,40 @@ def _predict_ones(source, output, *, checkpoint_path=None, exclude=None, overwri
         exclude_fov_names=exclude,
     )
     writer = HCSPredictionWriter(str(output), overwrite=overwrite, checkpoint_path=checkpoint_path)
-    Trainer(accelerator="cpu", logger=False, enable_progress_bar=False, callbacks=[writer]).predict(
-        _OnesModule(), datamodule=data_module, return_predictions=False
-    )
+    Trainer(
+        accelerator="cpu",
+        logger=False,
+        enable_progress_bar=False,
+        limit_predict_batches=limit_batches,
+        callbacks=[writer],
+    ).predict(_OnesModule(), datamodule=data_module, return_predictions=False)
+
+
+def test_interrupted_fov_carries_an_empty_marker(tmp_path):
+    """A FOV the writer created but never finished is marked as such, unlike pre-marker outputs."""
+    source = tmp_path / "source.zarr"
+    _write_source(source, ["0/0/0"], z_size=8)
+    _predict_ones(source, tmp_path / "pred.zarr", limit_batches=2)  # 2 of 5 depth windows
+
+    with open_ome_zarr(tmp_path / "pred.zarr", mode="r") as plate:
+        assert plate["0/0/0"].zattrs[PREDICTION_COMPLETE_KEY] == {}
+
+
+def test_writer_refuses_fovs_predicted_before_markers_existed(tmp_path):
+    """Channels without any completion attribute cannot be verified, so the store is off limits."""
+    source = tmp_path / "source.zarr"
+    output = tmp_path / "pred.zarr"
+    _write_source(source, ["0/0/0", "0/0/1"])
+    with open_ome_zarr(output, layout="hcs", mode="w-", channel_names=["Nuclei_prediction"]) as plate:
+        for fov in ("0/0/0", "0/0/1"):
+            plate.create_position(*fov.split("/")).create_zeros("0", (1, 1, 4, 8, 8), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="before completion markers"):
+        _predict_ones(source, output, exclude=["0/0/0"], overwrite=True)
+
+    with open_ome_zarr(output, mode="r") as plate:
+        assert all(PREDICTION_COMPLETE_KEY not in pos.zattrs for _, pos in plate.positions())
+        np.testing.assert_array_equal(plate["0/0/1/0"][:], 0)
 
 
 def test_marker_records_the_checkpoint_content(tmp_path):

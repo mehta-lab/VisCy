@@ -271,15 +271,15 @@ class HCSPredictionWriter(BasePredictionWriter):
                         needs_append.append((pos, missing))
                     if name in run_positions:
                         overwritten.append(pos)
-                    elif self._holds_other_run(pos, prediction_channel):
+                    elif self._cannot_share(pos, prediction_channel):
                         mixed.append(name)
                 if mixed:
                     self.plate.close()
                     raise ValueError(
                         f"{len(mixed)} FOVs outside this run already hold {prediction_channel} "
-                        f"predicted with a different checkpoint or settings in "
-                        f"'{self.output_store}' (e.g. {mixed[:3]}); predict into a new "
-                        "output store instead of mixing them."
+                        f"in '{self.output_store}' that were predicted before completion markers "
+                        f"existed or with a different checkpoint or settings (e.g. {mixed[:3]}); "
+                        "predict into a new output store instead of mixing them."
                     )
                 for pos, channels in needs_append:
                     for ch in channels:
@@ -419,8 +419,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
 
-    def _holds_other_run(self, position: Position, channels: list[str]) -> bool:
-        """Return whether any of ``channels`` is marked complete by a different run.
+    def _cannot_share(self, position: Position, channels: list[str]) -> bool:
+        """Return whether ``position`` holds any of ``channels`` from a run other than this one.
 
         Parameters
         ----------
@@ -432,10 +432,14 @@ class HCSPredictionWriter(BasePredictionWriter):
         Returns
         -------
         bool
-            True when a recorded marker was written with other weights or
-            settings, or in a layout this version cannot read.
+            True when the position carries a channel without any completion
+            attribute (written before markers existed, so unverifiable), or a
+            marker written with other weights or settings, or in a layout this
+            version cannot read.
         """
-        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY)
+        if completed is None:
+            return any(channel in position.channel_names for channel in channels)
         return any(channel in completed and not same_run(completed[channel], self._run) for channel in channels)
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
@@ -469,6 +473,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         _logger.debug(f"Creating image '{img_name}'")
         _, row_name, col_name, pos_name, arr_name = img_name.split("/")
         position = self.plate.create_position(row_name, col_name, pos_name)
+        # An empty marker from the first write on distinguishes an interrupted FOV
+        # from one written before completion markers existed.
+        clear_completion(position, self._prediction_channels)
         shape = [1] + list(shape)
         shape[1] = len(position.channel_names)
         return position.create_zeros(

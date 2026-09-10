@@ -658,14 +658,15 @@ def test_survey_detects_partial(tmp_path):
     assert survey.conflicting == set()
 
 
-def test_survey_requires_explicit_completion(tmp_path):
-    """Legacy output shapes cannot establish whether every Z window was written."""
+def test_survey_reports_output_without_markers_as_unverifiable(tmp_path):
+    """A full-T output written before markers existed proves nothing about its Z windows."""
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
     _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2})
     survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], _run(1))
     assert (survey.total, survey.completed, survey.conflicting) == (1, set(), set())
+    assert survey.unverifiable == {"0/0/fov0000"}
 
 
 def test_survey_reads_the_configured_array_level(tmp_path):
@@ -768,7 +769,9 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
         image = plate["0/0/fov0000/0"]
         assert image.shape == (2, 1, 4, 8, 8)
         np.testing.assert_array_equal(image[1, 0, :, 0, 0], [1] * z_window_size + [0] * (4 - z_window_size))
-    assert _completed(out, inp, run) == set()
+    # Interrupted, not legacy: the writer stamped an empty marker when it created the FOV.
+    survey = sbj._survey_prediction_store(str(out), str(inp), ["Structure_prediction"], run)
+    assert (survey.completed, survey.unverifiable) == (set(), set())
 
     _predict(inp, out, z_window_size=z_window_size, limit_batches=2 * windows_per_t, overwrite=True)
     assert _completed(out, inp, run) == {"0/0/fov0000"}
@@ -901,6 +904,20 @@ def test_resume_predict_excludes_complete_fovs_and_keeps_the_checkpoint(capsys, 
     writer_init = config["trainer"]["callbacks"][0]["init_args"]
     assert writer_init["overwrite"] is True
     assert writer_init["checkpoint_path"] == str(ckpt)
+
+
+def test_resume_predict_refuses_a_store_without_markers(tmp_path):
+    """Outputs written before completion markers existed cannot be resumed; they would be overwritten."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+
+    with pytest.raises(SystemExit, match="cannot be verified"):
+        sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"])
 
 
 def test_resume_predict_refuses_a_store_from_another_checkpoint(tmp_path):

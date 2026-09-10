@@ -157,6 +157,7 @@ class _StoreSurvey:
     total: int
     completed: set[str]
     conflicting: set[str]
+    unverifiable: set[str]
 
 
 def _survey_prediction_store(
@@ -170,7 +171,10 @@ def _survey_prediction_store(
     writer only after all of the FOV's (T, Z-window) writes succeed. A FOV
     whose channels are marked complete with any other marker is conflicting:
     it was predicted from another source shape or with other weights or
-    settings, and finishing the store would mix them. Shapes are read from
+    settings, and finishing the store would mix them. A FOV that holds the
+    channels but no completion attribute at all predates the markers (the
+    writer stamps an empty one when it creates a FOV), so nothing can vouch
+    for it: it is unverifiable rather than incomplete. Shapes are read from
     the array level ``run["array_key"]`` on both sides: the input must have
     it (anything else is a configuration error), an output lacking it is
     simply incomplete. Metadata-only: reads markers and shapes, never voxel
@@ -191,7 +195,7 @@ def _survey_prediction_store(
     -------
     _StoreSurvey
         Total input FOV count plus plate-relative names (e.g. ``"0/0/fov0000"``)
-        of complete and conflicting FOVs.
+        of complete, conflicting and unverifiable FOVs.
     """
     array_key = run["array_key"]
     input_shapes: dict[str, list[int]] = {}
@@ -200,11 +204,15 @@ def _survey_prediction_store(
             input_shapes[name] = tzyx_shape(pos[array_key])
     completed: set[str] = set()
     conflicting: set[str] = set()
+    unverifiable: set[str] = set()
     if not os.path.exists(output_store):
-        return _StoreSurvey(len(input_shapes), completed, conflicting)
+        return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable)
     with open_ome_zarr(output_store, mode="r") as plate:
         for name, pos in plate.positions():
             if name not in input_shapes or not all(ch in pos.channel_names for ch in prediction_channels):
+                continue
+            if PREDICTION_COMPLETE_KEY not in pos.zattrs:
+                unverifiable.add(name)
                 continue
             try:
                 output = pos[array_key]
@@ -214,9 +222,9 @@ def _survey_prediction_store(
                 continue
             if prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
                 completed.add(name)
-            elif any(ch in pos.zattrs.get(PREDICTION_COMPLETE_KEY, {}) for ch in prediction_channels):
+            elif any(ch in pos.zattrs[PREDICTION_COMPLETE_KEY] for ch in prediction_channels):
                 conflicting.add(name)
-    return _StoreSurvey(len(input_shapes), completed, conflicting)
+    return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable)
 
 
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
@@ -414,7 +422,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "crashing on the existing prediction channel (overwrite=False) or recomputing "
         "every FOV (--overwrite alone). Requires completion markers for all Z windows; "
         "the markers record the checkpoint's content hash and depth settings, so a store "
-        "predicted with other weights or settings is refused rather than mixed. "
+        "predicted with other weights or settings is refused rather than mixed, and a store "
+        "written before markers existed cannot be verified and is refused too. "
         "unmarked legacy FOVs are recomputed. "
         "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
     )
@@ -594,6 +603,14 @@ def submit(argv: list[str] | None = None) -> int:
                 checkpoint_path=model_init["ckpt_path"],
             )
             survey = _survey_prediction_store(output_store, data_path, pred_channels, run)
+            if survey.unverifiable:
+                examples = ", ".join(sorted(survey.unverifiable)[:5])
+                raise SystemExit(
+                    f"--resume-predict: {len(survey.unverifiable)} FOVs in {output_store} hold "
+                    f"{pred_channels} without a completion marker ({examples}), so their completion "
+                    "cannot be verified and a resume would overwrite them; predict into a new output "
+                    "store, or delete this one to recompute everything"
+                )
             if survey.conflicting:
                 examples = ", ".join(sorted(survey.conflicting)[:5])
                 raise SystemExit(
