@@ -263,7 +263,6 @@ def test_ckpt_rejects_fit_mode():
 
 def test_resolve_best_ckpt_reads_best_model_path(tmp_path):
     """_resolve_best_ckpt returns ModelCheckpoint.best_model_path from last.ckpt."""
-    torch = pytest.importorskip("torch")
     best = tmp_path / "epoch=7-step=100.ckpt"
     best.write_bytes(b"x")
     (tmp_path / "epoch=3-step=40.ckpt").write_bytes(b"x")
@@ -293,7 +292,6 @@ def test_resolve_best_ckpt_skips_nonconforming_epoch_files(tmp_path):
 def test_resolve_best_ckpt_rebases_moved_dir(tmp_path):
     """best_model_path stored as a stale absolute path (moved/renamed ckpt dir) is
     re-based onto ckpt_dir, NOT silently degraded to the highest-epoch fallback."""
-    torch = pytest.importorskip("torch")
     # the true best (ep7) exists in the *current* dir; a later, more-overfit ckpt
     # (ep13) also exists, which the highest-epoch fallback would wrongly pick.
     best = tmp_path / "epoch=7-step=100.ckpt"
@@ -311,7 +309,6 @@ def test_resolve_best_ckpt_prefers_newest_last_v(tmp_path):
     """A resumed run leaves last.ckpt + last-vN.ckpt; the newest (by mtime) is
     authoritative. Keying on last.ckpt alone mis-resolves to the first segment's best
     (the messy legacy iPSC dirs: last.ckpt is epoch 1, last-v5.ckpt is epoch 183)."""
-    torch = pytest.importorskip("torch")
     stale_best = tmp_path / "epoch=1-step=10.ckpt"
     stale_best.write_bytes(b"x")
     true_best = tmp_path / "epoch=183-step=1830.ckpt"
@@ -590,7 +587,6 @@ def _write_hcs_store(
 
 def test_completed_prediction_fovs_detects_partial(tmp_path):
     """Only marked FOVs matching the input and output shapes count as complete."""
-    pytest.importorskip("iohub")
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10, "0/0/fov0002": 10})
     out = tmp_path / "pred.zarr"
@@ -704,7 +700,6 @@ def test_resume_prediction_rejects_stale_extra_timepoints_after_overwrite(tmp_pa
 
 def test_completed_prediction_fovs_no_store(tmp_path):
     """A missing output store yields no completed FOVs but the correct input total."""
-    pytest.importorskip("iohub")
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10, "0/0/fov0001": 10})
     completed, total = sbj._completed_prediction_fovs(str(tmp_path / "absent.zarr"), str(inp), ["Structure_prediction"])
@@ -714,7 +709,6 @@ def test_completed_prediction_fovs_no_store(tmp_path):
 
 def test_completed_prediction_fovs_missing_channel_not_complete(tmp_path):
     """A FOV at full T but lacking the prediction channel is not complete."""
-    pytest.importorskip("iohub")
     inp = tmp_path / "input.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 10})
     out = tmp_path / "pred.zarr"
