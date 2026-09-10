@@ -134,18 +134,20 @@ class JobState:
             self.prior_efficiency = 0.0
         if self.progress_start is None:
             self.progress_start = sample
-            # On first observation, cumulative CPU over the step's own elapsed
-            # time can already prove activity -- including for a step that was
-            # already hung when the watcher started mid-allocation -- but only
-            # once the step is old enough that the ratio spans a real window.
-            if sample.wall_s >= MIN_AGE_S:
-                self.prior_efficiency = sample.cpu_s / sample.wall_s
         else:
             elapsed = sample.wall_s - self.progress_start.wall_s
             if elapsed >= MIN_AGE_S:
                 efficiency = (sample.cpu_s - self.progress_start.cpu_s) / elapsed
                 # A long idle period must not erase previously observed work.
                 self.prior_efficiency = max(self.prior_efficiency, efficiency)
+        if sample.wall_s >= MIN_AGE_S and all(s.wall_s < MIN_AGE_S for s in self.samples):
+            # First sample taken once the step is old enough for its cumulative
+            # ratio to span a real window: CPU over the step's own elapsed time
+            # proves activity even when the watcher first saw the step too young
+            # to judge, or mid-allocation when it was already hung. Wall time is
+            # monotonic within a step and pruning keeps the newest samples, so
+            # "no retained mature sample" means this is the first one.
+            self.prior_efficiency = max(self.prior_efficiency, sample.cpu_s / sample.wall_s)
         self.samples.append(sample)
         # Keep the closest baseline older than the lookback even when one-shot
         # invocations are far apart; nothing reads samples older than that.

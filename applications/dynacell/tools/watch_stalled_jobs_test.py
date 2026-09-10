@@ -271,6 +271,32 @@ def test_step_already_hung_when_first_seen_is_flagged() -> None:
     assert verdict[1] == pytest.approx(2 / 3)
 
 
+def test_step_first_seen_just_too_young_still_qualifies_from_cumulative_cpu() -> None:
+    """A step first seen 10 s short of ``MIN_AGE_S`` must qualify at its next sample.
+
+    Applying the cumulative ratio only on the very first observation meant this
+    trace never qualified: the first sample is too young, and every later
+    progress window has zero CPU growth. A watcher that first saw the same step
+    10 s later would have qualified it immediately, and the implementation
+    before the window rule alerted at the third sample. Now the cumulative
+    ratio is applied at the first sample taken once the step is >= 30 min old,
+    so the report appears at the third sample (wall 2700 s): the first one with
+    a baseline at least ``LOOKBACK_S`` (900 s) older.
+    """
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    trace = [(1790, 1690), (1800, 1700), (2700, 1700), (3600, 1700), (14400, 1700)]
+    verdicts = []
+    for wall_s, cpu_s in trace:
+        state.add(Sample(wall_s=wall_s, cpu_s=cpu_s))
+        verdicts.append(state.stall_report())
+
+    assert verdicts[:2] == [None, None]
+    for verdict in verdicts[2:]:
+        assert verdict is not None
+        assert verdict[0] == pytest.approx(0.0)
+        assert verdict[1] == pytest.approx(1700 / 1800)
+
+
 def test_startup_import_burst_does_not_qualify_a_staging_step() -> None:
     """A 2-min import burst followed by ~0% NFS staging must never read as a stall.
 
