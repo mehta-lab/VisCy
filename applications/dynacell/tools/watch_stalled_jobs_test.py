@@ -232,6 +232,53 @@ def test_step_already_hung_when_first_seen_is_flagged() -> None:
     assert verdict[1] == pytest.approx(2 / 3)
 
 
+def test_startup_import_burst_does_not_qualify_a_staging_step() -> None:
+    """A 2-min import burst followed by ~0% NFS staging must never read as a stall.
+
+    The burst put 60 s of CPU into a 120 s old step (0.5 efficient). Seeding
+    ``prior_efficiency`` from that window and freezing it with ``max()`` made
+    the legitimately idle staging phase that followed alert as soon as the
+    step turned 30 min old. Only a window at least ``MIN_AGE_S`` long may
+    qualify a step.
+    """
+    state = JobState(name="FNet3DTSpread_A549_SEC61B", node="gpu-b-5")
+    for wall_s, cpu_s in ((120, 60), (720, 65), (1320, 65), (1920, 65)):
+        state.add(Sample(wall_s=wall_s, cpu_s=cpu_s))
+        assert state.stall_report() is None
+    for wall_s in range(2820, int(4 * HOUR) + 1, 900):
+        state.add(Sample(wall_s=wall_s, cpu_s=65))
+        assert state.stall_report() is None
+
+
+def test_early_burst_on_a_fresh_step_does_not_qualify_it() -> None:
+    """A fresh step first seen at 10 min with a burst then staging must never alert.
+
+    200 s of CPU in a 600 s old step is 0.33 -- over ``MIN_PRIOR_EFFICIENCY``
+    -- yet the window is far too short to prove the step does real work.
+    """
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    for wall_s, cpu_s in ((600, 200), (1500, 280), (2400, 280), (3300, 280)):
+        state.add(Sample(wall_s=wall_s, cpu_s=cpu_s))
+        assert state.stall_report() is None
+
+
+def test_qualified_step_stays_flagged_through_a_long_stall() -> None:
+    """Positive control: 3500 s of CPU over a 3600 s old step qualifies it for good.
+
+    The step is old enough on first sight for its cumulative ratio to count,
+    and ``max()`` keeps that evidence while the idle stretch runs for hours.
+    """
+    state = JobState(name="P2P_EMA_REST_g44", node="gpu-b-4")
+    state.add(Sample(wall_s=3600, cpu_s=3500))
+    assert state.stall_report() is None
+
+    for wall_s in range(4500, int(3600 + 8 * HOUR) + 1, 900):
+        state.add(Sample(wall_s=wall_s, cpu_s=3500))
+        verdict = state.stall_report()
+        assert verdict is not None
+        assert verdict[1] == pytest.approx(3500 / 3600)
+
+
 def test_requeued_step_restarts_its_history() -> None:
     """A requeue reuses the step id; the wall-clock decrease restarts the history."""
     state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")

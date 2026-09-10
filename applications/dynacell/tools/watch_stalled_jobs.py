@@ -48,9 +48,12 @@ from pathlib import Path
 # cancel them (see the "cancel all jobs means batch only" house rule).
 INTERACTIVE_NAMES = re.compile(r"^(nomachine|gpu-hold|interactive|bash|sh|srun)$", re.IGNORECASE)
 
-# A step must have run this long, and must have *already* proven it can burn CPU,
-# before a flat stretch counts as a stall. Without the second condition a job
-# staging a 14 GB store off NFS at startup -- legitimately ~0% CPU -- would trip.
+# A step must have run this long, and must have *already* proven it can burn
+# CPU at this rate over a window at least this long, before a flat stretch
+# counts as a stall. Without the prior-efficiency condition a job staging a
+# 14 GB store off NFS at startup -- legitimately ~0% CPU -- would trip. Without
+# the window length a few seconds of import-time CPU on a young step would
+# qualify it, and that same staging phase would then read as a stall.
 MIN_AGE_S = 1800.0
 MIN_PRIOR_EFFICIENCY = 0.30
 
@@ -133,11 +136,13 @@ class JobState:
             self.progress_start = sample
             # On first observation, cumulative CPU over the step's own elapsed
             # time can already prove activity -- including for a step that was
-            # already hung when the watcher started mid-allocation.
-            self.prior_efficiency = sample.cpu_s / sample.wall_s if sample.wall_s else 0.0
+            # already hung when the watcher started mid-allocation -- but only
+            # once the step is old enough that the ratio spans a real window.
+            if sample.wall_s >= MIN_AGE_S:
+                self.prior_efficiency = sample.cpu_s / sample.wall_s
         else:
             elapsed = sample.wall_s - self.progress_start.wall_s
-            if elapsed > 0:
+            if elapsed >= MIN_AGE_S:
                 efficiency = (sample.cpu_s - self.progress_start.cpu_s) / elapsed
                 # A long idle period must not erase previously observed work.
                 self.prior_efficiency = max(self.prior_efficiency, efficiency)
