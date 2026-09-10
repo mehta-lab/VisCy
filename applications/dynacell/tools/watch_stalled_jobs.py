@@ -129,8 +129,9 @@ class JobState:
                 # A long idle period must not erase previously observed work.
                 self.prior_efficiency = max(self.prior_efficiency, efficiency)
         self.samples.append(sample)
-        cutoff = sample.wall_s - LOOKBACK_S * 4
-        # Keep one older baseline even when one-shot invocations are far apart.
+        # Keep the closest baseline older than the lookback even when one-shot
+        # invocations are far apart; nothing reads samples older than that.
+        cutoff = sample.wall_s - LOOKBACK_S
         older = [s for s in self.samples if s.wall_s < cutoff]
         self.samples = older[-1:] + [s for s in self.samples if s.wall_s >= cutoff]
 
