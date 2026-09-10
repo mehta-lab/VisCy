@@ -1425,6 +1425,30 @@ def test_sliding_window_preserves_double_precision(blend, spatial):
     torch.testing.assert_close(out, expected, rtol=0, atol=2 * torch.finfo(torch.float64).eps)
 
 
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_phase_shift_average_half_precision_does_not_overflow(blend):
+    """Summing the shifted FP16 crops must not overflow before the mean is taken."""
+    source = torch.full((1, 1, 16, 96, 96), 40000.0)
+    out = _phase_shift_average(
+        lambda x: x.to(torch.float16), source, (16, 64, 64), (4, 32, 32), offsets=(0, 8), blend=blend
+    )
+    assert out.dtype == torch.float16
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(out, source.to(torch.float16), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+def test_phase_shift_average_preserves_double_precision(blend):
+    """Double predictions must retain values below float32's precision through the shift mean."""
+    source = torch.ones((1, 1, 4, 24, 40))
+    expected = source.to(torch.float64) + 2**-30
+    out = _phase_shift_average(
+        lambda x: x.to(torch.float64) + 2**-30, source, (4, 16, 16), (2, 8, 8), offsets=(0, 3), blend=blend
+    )
+    assert out.dtype == torch.float64
+    torch.testing.assert_close(out, expected, rtol=0, atol=2 * torch.finfo(torch.float64).eps)
+
+
 def test_cosine_blend_suppresses_window_seams():
     """A model whose output depends on its window's identity produces a step at
     every window face under uniform averaging; the cosine cross-fade must

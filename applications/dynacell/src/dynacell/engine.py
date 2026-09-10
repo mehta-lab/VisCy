@@ -442,6 +442,7 @@ def _phase_shift_average(
     padded = F.pad(source, (margin, margin, margin, margin, 0, 0), mode="reflect")
 
     total: Tensor | None = None
+    output_dtype: torch.dtype | None = None
     for offset_y, offset_x in shifts:
         # `sub` starts at `offset` in padded coordinates, so the original FOV
         # sits at `margin - offset` within it, and each window origin lands at
@@ -453,8 +454,15 @@ def _phase_shift_average(
             margin - offset_y : margin - offset_y + height,
             margin - offset_x : margin - offset_x + width,
         ]
-        total = crop if total is None else total + crop
-    return total / len(shifts)
+        if total is None:
+            # `_sliding_window_inference` returns the model's dtype, so N
+            # half-precision crops overflow before the mean is taken. Sum in
+            # at least float32 (float64 stays float64) and cast back once.
+            output_dtype = crop.dtype
+            total = crop.to(torch.promote_types(crop.dtype, torch.float32))
+        else:
+            total = total + crop
+    return (total / len(shifts)).to(output_dtype)
 
 
 class DynacellUNet(LightningModule):
