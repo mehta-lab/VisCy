@@ -249,7 +249,7 @@ def _sliding_window_inference(
     prediction_sum: Tensor | None = None
     weight_sum: Tensor | None = None
     weight: Tensor | None = None
-    output_dtype = source.dtype
+    output_dtype: torch.dtype | None = None
 
     with torch.no_grad():
         for starts in itertools.product(*start_lists):
@@ -271,14 +271,16 @@ def _sliding_window_inference(
                     if blend == "cosine"
                     else torch.ones([1, 1, *patch], device=source.device, dtype=accumulation_dtype)
                 )
-            prediction_sum[tuple(slicer)] += patch_out.to(prediction_sum.dtype) * weight
+            # Fused multiply-accumulate into the view; promotes half-precision
+            # patches to the accumulation dtype without a temporary.
+            prediction_sum[tuple(slicer)].addcmul_(patch_out, weight)
             weight_sum[tuple(slicer)] += weight
 
     if prediction_sum is None:
         raise RuntimeError("sliding window produced no patches")
     if not torch.all(weight_sum > 0):
         raise RuntimeError("sliding window left uncovered voxels")
-    return (prediction_sum / weight_sum).to(output_dtype)
+    return prediction_sum.div_(weight_sum).to(output_dtype)
 
 
 def _phase_shift_average(
