@@ -12,8 +12,12 @@ every healthy job spent CPU seconds at >= 0.93x wall seconds; the hung one sat
 at 0.561 and had spent *zero* additional CPU since the moment its work
 finished. There is no overlap between the two populations.
 
-This polls ``sstat`` and flags a job when its CPU time stops advancing while
-its wall clock keeps going. It only reports -- it never cancels. Killing a job
+This polls ``sstat`` per running step and flags a step when its CPU time stops
+advancing while its elapsed time keeps going. Histories are per step, keyed by
+the ``<jobid>.<step>`` id from ``squeue -s`` and judged against that step's own
+elapsed time: a ``submit_benchmark_batch`` chain advancing to its next ``srun``
+step, or a requeue, starts a fresh history instead of comparing counters across
+the boundary. It only reports -- it never cancels. Killing a job
 with ``afterok`` dependents strands them in ``DependencyNeverSatisfied``, so
 the remediation order matters and is left to a human; the report prints it.
 
@@ -44,7 +48,7 @@ from pathlib import Path
 # cancel them (see the "cancel all jobs means batch only" house rule).
 INTERACTIVE_NAMES = re.compile(r"^(nomachine|gpu-hold|interactive|bash|sh|srun)$", re.IGNORECASE)
 
-# A job must have run this long, and must have *already* proven it can burn CPU,
+# A step must have run this long, and must have *already* proven it can burn CPU,
 # before a flat stretch counts as a stall. Without the second condition a job
 # staging a 14 GB store off NFS at startup -- legitimately ~0% CPU -- would trip.
 MIN_AGE_S = 1800.0
@@ -95,7 +99,7 @@ def parse_slurm_duration(text: str) -> float | None:
 
 @dataclass(frozen=True)
 class Sample:
-    """One observation of a job's wall and CPU clocks."""
+    """One observation of a step's elapsed and CPU clocks."""
 
     wall_s: float
     cpu_s: float
@@ -103,35 +107,33 @@ class Sample:
 
 @dataclass
 class JobState:
-    """Rolling samples for one job."""
+    """Rolling samples for one running step.
+
+    ``sstat`` reports the running step's CPU and ``squeue -s`` that step's
+    elapsed time, so both clocks belong to the step and restart together when
+    a chain advances to its next ``srun`` step (a new key) or the job is
+    requeued (the same key, with both counters decreasing).
+    """
 
     name: str
     node: str
     samples: list[Sample] = field(default_factory=list)
     progress_start: Sample | None = None
-    step_start_wall_s: float = 0.0
     prior_efficiency: float = 0.0
 
     def add(self, sample: Sample) -> None:
-        """Track CPU progress within a step and keep a rolling stall baseline."""
-        if self.samples and (sample.cpu_s < self.samples[-1].cpu_s or sample.wall_s < self.samples[-1].wall_s):
-            # Running-step CPU resets at srun boundaries; job wall time resets
-            # on requeue. Neither counter can be compared across that boundary.
-            previous = self.samples[-1]
-            requeued = sample.wall_s < previous.wall_s
-            # Only the first post-reset observation bounds the step's age
-            # conservatively; the earlier observation may precede it by hours.
-            self.step_start_wall_s = 0.0 if requeued else sample.wall_s
-            # The new step started since the preceding observation. This upper
-            # bound on its elapsed time gives a lower bound on CPU efficiency,
-            # including work finished before we first observe the new counter.
-            self.progress_start = sample
-            elapsed = sample.wall_s if requeued else sample.wall_s - previous.wall_s
-            self.prior_efficiency = sample.cpu_s / elapsed if elapsed else 0.0
+        """Track the step's CPU progress and keep a rolling stall baseline."""
+        if self.samples and (sample.wall_s < self.samples[-1].wall_s or sample.cpu_s < self.samples[-1].cpu_s):
+            # A step id is reused only when the job is requeued. The new step's
+            # counters cannot be compared with the old ones, so start over.
             self.samples.clear()
-        elif self.progress_start is None:
+            self.progress_start = None
+            self.prior_efficiency = 0.0
+        if self.progress_start is None:
             self.progress_start = sample
-            # On first observation, cumulative CPU can already prove activity.
+            # On first observation, cumulative CPU over the step's own elapsed
+            # time can already prove activity -- including for a step that was
+            # already hung when the watcher started mid-allocation.
             self.prior_efficiency = sample.cpu_s / sample.wall_s if sample.wall_s else 0.0
         else:
             elapsed = sample.wall_s - self.progress_start.wall_s
@@ -150,14 +152,14 @@ class JobState:
         """Return ``(delta_fraction, prior_efficiency, baseline)`` when stalled.
 
         Compares the newest sample against the closest one at least
-        ``LOOKBACK_S`` older. Returns None when the job is too young, the
-        window is not yet wide enough, the job never demonstrated CPU
+        ``LOOKBACK_S`` older. Returns None when the step is too young, the
+        window is not yet wide enough, the step never demonstrated CPU
         progress, or CPU time is still advancing.
         """
         if not self.samples:
             return None
         newest = self.samples[-1]
-        if newest.wall_s - self.step_start_wall_s < MIN_AGE_S:
+        if newest.wall_s < MIN_AGE_S:
             return None
         baselines = [s for s in self.samples if newest.wall_s - s.wall_s >= LOOKBACK_S]
         if not baselines:
@@ -173,48 +175,61 @@ class JobState:
         return fraction, self.prior_efficiency, baseline
 
 
-def running_jobs(user: str) -> list[tuple[str, str, float, str]]:
-    """Return ``(jobid, name, wall_s, node)`` for the user's running jobs."""
-    out = subprocess.run(
-        ["squeue", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%j|%M|%N"],
+def running_steps(user: str) -> list[tuple[str, str, float, str]]:
+    """Return ``(step_id, job_name, step_wall_s, node)`` for the user's running compute steps.
+
+    Names and the interactive-session filter come from the job listing: in the
+    step listing ``%j`` is the step's own name (e.g. ``uv``). ``.batch`` and
+    ``.extern`` never carry the compute, and a step whose job is missing from
+    the filtered job list is either interactive or ended between the queries.
+    """
+    jobs = subprocess.run(
+        ["squeue", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%j"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    jobs = []
-    for line in out.splitlines():
-        jobid, name, elapsed, node = line.split("|")
-        if INTERACTIVE_NAMES.match(name.strip()):
+    names = {}
+    for line in jobs.splitlines():
+        jobid, name = line.split("|")
+        if not INTERACTIVE_NAMES.match(name.strip()):
+            names[jobid.strip()] = name.strip()
+    steps = subprocess.run(
+        ["squeue", "-s", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%M|%N"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    running = []
+    for line in steps.splitlines():
+        step_id, elapsed, node = line.split("|")
+        step_id = step_id.strip()
+        jobid, _, step = step_id.rpartition(".")
+        if step in {"batch", "extern"} or jobid not in names:
             continue
         wall_s = parse_slurm_duration(elapsed)
         if wall_s is not None:
-            jobs.append((jobid.strip(), name.strip(), wall_s, node.strip()))
-    return jobs
+            running.append((step_id, names[jobid], wall_s, node.strip()))
+    return running
 
 
-def step_cpu_seconds(jobid: str) -> float | None:
-    """Return the largest per-step ``AveCPU`` for a running job, in seconds.
+def step_cpu_seconds(step_id: str) -> float | None:
+    """Return the step's ``AveCPU`` in seconds, or None when ``sstat`` fails.
 
-    The compute step is the one that matters; ``.batch`` and ``.extern`` sit at
-    zero. ``-P`` is required because the default ``AveCPU`` width truncates
-    long durations to ``"10-15:41:+"``.
+    ``sstat`` fails once the step has ended, which can happen between the
+    ``squeue`` listing and this call. ``-P`` is required because the default
+    ``AveCPU`` width truncates long durations to ``"10-15:41:+"``.
     """
     proc = subprocess.run(
-        ["sstat", "-j", jobid, "-a", "-P", "--format=JobID,AveCPU"],
+        ["sstat", "-j", step_id, "-P", "--format=JobID,AveCPU"],
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
         return None
-    best = None
-    for line in proc.stdout.splitlines()[1:]:
-        if "|" not in line:
-            continue
-        _, ave = line.rsplit("|", 1)
-        seconds = parse_slurm_duration(ave)
-        if seconds is not None and (best is None or seconds > best):
-            best = seconds
-    return best
+    (row,) = proc.stdout.splitlines()[1:]
+    _, ave = row.rsplit("|", 1)
+    return parse_slurm_duration(ave)
 
 
 def _format_hours(seconds: float) -> str:
@@ -222,15 +237,15 @@ def _format_hours(seconds: float) -> str:
 
 
 def poll_once(user: str, states: dict[str, JobState]) -> list[str]:
-    """Sample every running job and return one report line per stalled job."""
+    """Sample every running step and return one report line per stalled step."""
     alerts = []
     live = set()
-    for jobid, name, wall_s, node in running_jobs(user):
-        live.add(jobid)
-        cpu_s = step_cpu_seconds(jobid)
+    for step_id, name, wall_s, node in running_steps(user):
+        live.add(step_id)
+        cpu_s = step_cpu_seconds(step_id)
         if cpu_s is None:
             continue
-        state = states.setdefault(jobid, JobState(name=name, node=node))
+        state = states.setdefault(step_id, JobState(name=name, node=node))
         state.add(Sample(wall_s=wall_s, cpu_s=cpu_s))
         verdict = state.stall_report()
         if verdict is None:
@@ -238,19 +253,19 @@ def poll_once(user: str, states: dict[str, JobState]) -> list[str]:
         fraction, prior, baseline = verdict
         idle_s = wall_s - baseline.wall_s
         alerts.append(
-            f"STALLED {jobid} {name} on {node}: "
+            f"STALLED {step_id} {name} on {node}: "
             f"wall {_format_hours(wall_s)}, cpu {_format_hours(cpu_s)}, "
             f"burned {fraction:.3f} core-s/s over the last {_format_hours(idle_s)} "
             f"(was {prior:.2f} before). Verify the output store is complete, then "
             f"clear dependents' Dependency= BEFORE scancel."
         )
-    for jobid in set(states) - live:
-        del states[jobid]
+    for step_id in set(states) - live:
+        del states[step_id]
     return alerts
 
 
 def _load_states(path: Path, user: str) -> dict[str, JobState]:
-    """Rehydrate the persisted job histories.
+    """Rehydrate the persisted step histories.
 
     Empty when nothing was saved yet or when the file was written by another
     schema version. A file written for another user, or on another host, is an
@@ -274,11 +289,11 @@ def _load_states(path: Path, user: str) -> dict[str, JobState]:
             f"and its --once checks on {host} or pass a different --state-file"
         )
     states = {}
-    for jobid, data in payload["states"].items():
+    for step_id, data in payload["states"].items():
         data["samples"] = [Sample(**sample) for sample in data["samples"]]
         if data["progress_start"] is not None:
             data["progress_start"] = Sample(**data["progress_start"])
-        states[jobid] = JobState(**data)
+        states[step_id] = JobState(**data)
     return states
 
 
@@ -289,7 +304,7 @@ def _save_states(path: Path, user: str, states: dict[str, JobState]) -> None:
         "version": STATE_VERSION,
         "user": user,
         "host": socket.gethostname(),
-        "states": {job: asdict(s) for job, s in states.items()},
+        "states": {step: asdict(s) for step, s in states.items()},
     }
     with temporary.open("w") as saved:
         json.dump(payload, saved)
@@ -297,7 +312,7 @@ def _save_states(path: Path, user: str, states: dict[str, JobState]) -> None:
 
 
 def main() -> int:
-    """Poll until interrupted, printing an alert line per stalled job."""
+    """Poll until interrupted, printing an alert line per stalled step."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--user", default="alex.kalinin")
     parser.add_argument("--interval", type=float, default=600.0, help="seconds between polls")

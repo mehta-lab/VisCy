@@ -15,6 +15,8 @@ from watch_stalled_jobs import (  # noqa: E402
     _load_states,
     _save_states,
     parse_slurm_duration,
+    running_steps,
+    step_cpu_seconds,
 )
 
 HOUR = 3600.0
@@ -57,6 +59,57 @@ def test_parse_slurm_duration_rejects_a_truncated_field() -> None:
         parse_slurm_duration("10-15:41:+")
 
 
+def test_running_steps_joins_step_clocks_to_filtered_job_names(monkeypatch) -> None:
+    """Steps carry their own elapsed time; names and the interactive filter come from the job list.
+
+    ``squeue -s`` prints ``%j`` as the STEP name (``uv``), so filtering the step
+    listing by name would never match ``nomachine``. Array tasks print as
+    ``36130452_579.1``; the text before the last ``.`` is the job listing's id.
+    ``.batch``/``.extern`` never carry the compute, and a step whose job is not
+    in the filtered list is interactive or ended between the two queries.
+    """
+    outputs = {
+        ("squeue", "-u", "alex.kalinin", "-h", "-t", "RUNNING", "-o", "%i|%j"): (
+            "36130452_579|ER_PREDICT_batch\n36115356|nomachine\n36120000|FNet3DT01_A549_NUCL\n"
+        ),
+        ("squeue", "-s", "-u", "alex.kalinin", "-h", "-t", "RUNNING", "-o", "%i|%M|%N"): (
+            "36130452_579.batch|3:00:00|gpu-f-3\n"
+            "36130452_579.extern|3:00:00|gpu-f-3\n"
+            "36130452_579.1|12:34|gpu-f-3\n"
+            "36115356.0|1-02:00:00|gpu-e-2\n"
+            "36120000.0|2:00:00|gpu-b-3\n"
+            "36199999.0|0:30|gpu-b-9\n"
+        ),
+    }
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=outputs[tuple(argv)], stderr="")
+
+    monkeypatch.setattr(watch_stalled_jobs.subprocess, "run", fake_run)
+
+    assert running_steps("alex.kalinin") == [
+        ("36130452_579.1", "ER_PREDICT_batch", 754.0, "gpu-f-3"),
+        ("36120000.0", "FNet3DT01_A549_NUCL", 2 * HOUR, "gpu-b-3"),
+    ]
+
+
+def test_step_cpu_seconds_reads_the_single_step_row(monkeypatch) -> None:
+    """``sstat -j <step> -P`` returns that step's row; a failed call (step ended) yields None."""
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if argv[2] == "36115356.1":
+            return subprocess.CompletedProcess(argv, 0, stdout="JobID|AveCPU\n36115356.1|22:22:04\n", stderr="")
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="sstat: error: no steps running\n")
+
+    monkeypatch.setattr(watch_stalled_jobs.subprocess, "run", fake_run)
+
+    assert step_cpu_seconds("36115356.1") == pytest.approx(22 * HOUR + 22 * 60 + 4)
+    assert step_cpu_seconds("36115356.2") is None
+    assert calls[0] == ["sstat", "-j", "36115356.1", "-P", "--format=JobID,AveCPU"]
+
+
 def test_hung_pix2pix_predict_is_flagged() -> None:
     """Trace of job 35083019_0, which held a GPU for 17.5 h after finishing.
 
@@ -76,26 +129,25 @@ def test_hung_pix2pix_predict_is_flagged() -> None:
     assert prior_efficiency > 1.0
 
 
-def test_step_boundary_cpu_reset_is_not_flagged() -> None:
-    """A batched predict crossing an srun step boundary must not read as stalled.
+def test_new_step_starts_its_own_history() -> None:
+    """A batched predict advancing to its next srun step must not read as stalled.
 
     ``sstat`` reports only the RUNNING step, so ``AveCPU`` restarts near zero
     each time ``submit_benchmark_batch`` advances to the next of its N
-    sequential steps. The unguarded subtraction made that a negative rate,
-    which is below any stall threshold — so the watchdog would flag a job that
-    is burning CPU as hard as ever, and ``--once`` would exit 1.
+    sequential steps. Each step is its own key with the scheduler's elapsed
+    time for that step, so the new step is judged on its own clocks rather
+    than against a counter that no longer exists.
     """
-    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
-    state.add(Sample(wall_s=3.00 * HOUR, cpu_s=2.90 * HOUR))
-    # Step 2 starts: same allocation, fresh AveCPU counter.
-    state.add(Sample(wall_s=3.60 * HOUR, cpu_s=0.05 * HOUR))
+    first = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    first.add(Sample(wall_s=3.00 * HOUR, cpu_s=2.90 * HOUR))
+    assert first.stall_report() is None
 
-    assert state.stall_report() is None
-
-    # The stale pre-reset baseline is dropped, so the next window measures the
-    # new step honestly rather than against a counter that no longer exists.
-    state.add(Sample(wall_s=4.20 * HOUR, cpu_s=0.65 * HOUR))
-    assert state.stall_report() is None
+    # Step 2, first seen 3 min into its own life with a fresh AveCPU counter.
+    second = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    second.add(Sample(wall_s=180, cpu_s=180))
+    assert second.stall_report() is None
+    second.add(Sample(wall_s=0.65 * HOUR, cpu_s=0.65 * HOUR))
+    assert second.stall_report() is None
 
 
 def test_healthy_multithreaded_fit_is_not_flagged() -> None:
@@ -143,14 +195,13 @@ def test_narrow_window_defers_the_verdict() -> None:
 
 
 def test_new_step_can_demonstrate_progress_after_a_long_allocation() -> None:
-    """Step-local CPU must be compared with step-local elapsed time."""
+    """A later step of a long allocation is judged on its own elapsed time."""
     state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
-    state.add(Sample(wall_s=9.9 * HOUR, cpu_s=9.0 * HOUR))
-    state.add(Sample(wall_s=10 * HOUR, cpu_s=0))
-    state.add(Sample(wall_s=10 * HOUR + 1800, cpu_s=1700))
+    state.add(Sample(wall_s=60, cpu_s=0))
+    state.add(Sample(wall_s=1860, cpu_s=1700))
     assert state.stall_report() is None
 
-    state.add(Sample(wall_s=10 * HOUR + 2700, cpu_s=1700))
+    state.add(Sample(wall_s=2760, cpu_s=1700))
     verdict = state.stall_report()
     assert verdict is not None
     assert verdict[0] == pytest.approx(0.0)
@@ -158,31 +209,38 @@ def test_new_step_can_demonstrate_progress_after_a_long_allocation() -> None:
 
     # The demonstrated progress survives both a long stall and sample pruning.
     for elapsed in range(3600, 18001, 900):
-        state.add(Sample(wall_s=10 * HOUR + elapsed, cpu_s=1700))
+        state.add(Sample(wall_s=60 + elapsed, cpu_s=1700))
         assert state.stall_report() is not None
 
 
-def test_new_step_staging_does_not_inherit_previous_progress() -> None:
-    """A CPU reset clears the previous step's evidence of active compute."""
+def test_step_already_hung_when_first_seen_is_flagged() -> None:
+    """A watcher started mid-allocation must judge the step by its own elapsed time.
+
+    A step 3 h old with 2 h of CPU is 0.67 efficient. Dividing the step's CPU
+    by the JOB's 30 h elapsed gave 0.067, below ``MIN_PRIOR_EFFICIENCY``, so a
+    ``submit_benchmark_batch`` chain whose current step was already hung was
+    never flagged no matter how long it sat.
+    """
+    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
+    state.add(Sample(wall_s=3 * HOUR, cpu_s=2 * HOUR))
+    assert state.stall_report() is None
+
+    state.add(Sample(wall_s=3 * HOUR + 900, cpu_s=2 * HOUR))
+    verdict = state.stall_report()
+    assert verdict is not None
+    assert verdict[0] == pytest.approx(0.0)
+    assert verdict[1] == pytest.approx(2 / 3)
+
+
+def test_requeued_step_restarts_its_history() -> None:
+    """A requeue reuses the step id; the wall-clock decrease restarts the history."""
     state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
     state.add(Sample(wall_s=10 * HOUR, cpu_s=9 * HOUR))
-    state.add(Sample(wall_s=10 * HOUR + 100, cpu_s=5))
-    state.add(Sample(wall_s=11 * HOUR, cpu_s=5))
-    assert state.stall_report() is None
-    assert all(sample.cpu_s == 5 for sample in state.samples)
-
-
-def test_new_step_work_before_first_observation_can_establish_progress() -> None:
-    """The first sample after a reset may contain all of the new step's work."""
-    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
-    state.add(Sample(wall_s=10 * HOUR, cpu_s=9 * HOUR))
-    state.add(Sample(wall_s=10 * HOUR + 1800, cpu_s=1700))
+    state.add(Sample(wall_s=1800, cpu_s=1700))
+    assert state.samples == [Sample(wall_s=1800, cpu_s=1700)]
     assert state.stall_report() is None
 
-    state.add(Sample(wall_s=10 * HOUR + 2700, cpu_s=1700))
-    assert state.stall_report() is None
-
-    state.add(Sample(wall_s=10 * HOUR + 3600, cpu_s=1700))
+    state.add(Sample(wall_s=2700, cpu_s=1700))
     verdict = state.stall_report()
     assert verdict is not None
     assert verdict[1] == pytest.approx(1700 / 1800)
@@ -198,67 +256,54 @@ def test_once_reuses_history_between_invocations(tmp_path, monkeypatch, capsys, 
     clock = iter([21.18 * HOUR, next_wall_s])
     monkeypatch.setattr(
         watch_stalled_jobs,
-        "running_jobs",
-        lambda user: [("35083019_0", "P2P_EMA_REST_g44", next(clock), "gpu-b-4")],
+        "running_steps",
+        lambda user: [("35083019_0.0", "P2P_EMA_REST_g44", next(clock), "gpu-b-4")],
     )
-    monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid: 21.75 * HOUR)
+    monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda step_id: 21.75 * HOUR)
 
     assert watch_stalled_jobs.main() == 0
-    assert "collecting history" in capsys.readouterr().out
+    assert "collecting history, tracking 1: 35083019_0.0(1)" in capsys.readouterr().out
     assert watch_stalled_jobs.main() == 1
-    assert "STALLED 35083019_0" in capsys.readouterr().out
+    assert "STALLED 35083019_0.0 P2P_EMA_REST_g44 on gpu-b-4" in capsys.readouterr().out
 
 
 def test_once_persists_new_step_progress(tmp_path, monkeypatch, capsys) -> None:
-    """Persist the current step's origin and prior CPU progress with its samples."""
+    """A chain's next step is tracked under its own id, with its own clocks, across invocations."""
     monkeypatch.setattr(
         "sys.argv",
         ["watch_stalled_jobs", "--once", "--state-file", str(tmp_path / "watch.json")],
     )
-    samples = iter([(9.9 * HOUR, 9 * HOUR), (10 * HOUR, 0), (10 * HOUR + 1800, 1700), (10 * HOUR + 2700, 1700)])
-    for expected_status in (0, 0, 0, 1):
-        wall_s, cpu_s = next(samples)
+    polls = [("123.0", 9.9 * HOUR, 9 * HOUR), ("123.1", 60, 0), ("123.1", 1860, 1700), ("123.1", 2760, 1700)]
+    for (step_id, wall_s, cpu_s), expected_status in zip(polls, (0, 0, 0, 1), strict=True):
         monkeypatch.setattr(
             watch_stalled_jobs,
-            "running_jobs",
-            lambda user, wall_s=wall_s: [("123", "ER_PREDICT_batch", wall_s, "gpu-f-3")],
+            "running_steps",
+            lambda user, step_id=step_id, wall_s=wall_s: [(step_id, "ER_PREDICT_batch", wall_s, "gpu-f-3")],
         )
-        monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid, cpu_s=cpu_s: cpu_s)
+        monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda step_id, cpu_s=cpu_s: cpu_s)
         assert watch_stalled_jobs.main() == expected_status
-    assert "STALLED 123" in capsys.readouterr().out
+    assert "STALLED 123.1 ER_PREDICT_batch" in capsys.readouterr().out
+    # The finished step is dropped from the history once it leaves the queue.
+    assert set(json.loads((tmp_path / "watch.json").read_text())["states"]) == {"123.1"}
 
 
-def test_once_sparse_cpu_reset_waits_for_observed_step_age(tmp_path, monkeypatch, capsys) -> None:
-    """A sparse CPU reset proves prior work but cannot prove the step's age."""
+def test_once_flags_a_step_already_hung_when_first_seen(tmp_path, monkeypatch, capsys) -> None:
+    """Sparse one-shot polls judge a mid-allocation step by the scheduler's step age."""
     monkeypatch.setattr(
         "sys.argv",
         ["watch_stalled_jobs", "--once", "--state-file", str(tmp_path / "watch.json")],
     )
-    # A multithreaded step can consume 3000 CPU seconds shortly before the
-    # first post-reset observation, even when observations are an hour apart.
-    samples = [(10 * HOUR, 9 * HOUR), (11 * HOUR, 3000), (11 * HOUR + 900, 3000), (11 * HOUR + 1800, 3000)]
-    for (wall_s, cpu_s), expected_status in zip(samples, (0, 0, 0, 1), strict=True):
+    for wall_s, expected_status in ((3 * HOUR, 0), (3 * HOUR + 900, 1)):
         monkeypatch.setattr(
             watch_stalled_jobs,
-            "running_jobs",
-            lambda user, wall_s=wall_s: [("123", "ER_PREDICT_batch", wall_s, "gpu-f-3")],
+            "running_steps",
+            lambda user, wall_s=wall_s: [("123.1", "ER_PREDICT_batch", wall_s, "gpu-f-3")],
         )
-        monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid, cpu_s=cpu_s: cpu_s)
+        monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda step_id: 2 * HOUR)
         assert watch_stalled_jobs.main() == expected_status
         output = capsys.readouterr().out
-        assert ("STALLED 123" in output) == bool(expected_status)
-    assert "was 0.83 before" in output
-
-
-def test_requeued_job_uses_its_reported_wall_age() -> None:
-    """A wall-clock reset supplies the new job's elapsed time directly."""
-    state = JobState(name="ER_PREDICT_batch", node="gpu-f-3")
-    state.add(Sample(wall_s=10 * HOUR, cpu_s=9 * HOUR))
-    state.add(Sample(wall_s=1800, cpu_s=1700))
-    state.add(Sample(wall_s=2700, cpu_s=1700))
-    verdict = state.stall_report()
-    assert verdict is not None
-    assert verdict[1] == pytest.approx(1700 / 1800)
+        assert ("STALLED 123.1" in output) == bool(expected_status)
+    assert "was 0.67 before" in output
 
 
 def test_once_restarts_history_from_an_unversioned_state_file(tmp_path, monkeypatch, capsys) -> None:
@@ -273,17 +318,17 @@ def test_once_restarts_history_from_an_unversioned_state_file(tmp_path, monkeypa
     monkeypatch.setattr("sys.argv", ["watch_stalled_jobs", "--once", "--state-file", str(state_file)])
     monkeypatch.setattr(
         watch_stalled_jobs,
-        "running_jobs",
-        lambda user: [("35083019_0", "P2P_EMA_REST_g44", 21.18 * HOUR, "gpu-b-4")],
+        "running_steps",
+        lambda user: [("35083019_0.0", "P2P_EMA_REST_g44", 21.18 * HOUR, "gpu-b-4")],
     )
-    monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda jobid: 21.75 * HOUR)
+    monkeypatch.setattr(watch_stalled_jobs, "step_cpu_seconds", lambda step_id: 21.75 * HOUR)
 
     assert watch_stalled_jobs.main() == 0
 
     assert f"schema None is not {STATE_VERSION}; starting a new history" in capsys.readouterr().out
     rewritten = json.loads(state_file.read_text())
     assert rewritten["version"] == STATE_VERSION
-    assert set(rewritten["states"]) == {"35083019_0"}
+    assert set(rewritten["states"]) == {"35083019_0.0"}
 
 
 def test_load_states_rejects_another_users_file(tmp_path) -> None:
@@ -316,9 +361,9 @@ def test_state_file_round_trips_on_the_same_host(tmp_path) -> None:
     state.add(Sample(wall_s=22.00 * HOUR, cpu_s=21.75 * HOUR))
     state_file = tmp_path / "watch.json"
 
-    _save_states(state_file, "alex.kalinin", {"35083019_0": state})
+    _save_states(state_file, "alex.kalinin", {"35083019_0.0": state})
 
-    assert _load_states(state_file, "alex.kalinin") == {"35083019_0": state}
+    assert _load_states(state_file, "alex.kalinin") == {"35083019_0.0": state}
     assert sorted(p.name for p in tmp_path.iterdir()) == ["watch.json"]
 
 

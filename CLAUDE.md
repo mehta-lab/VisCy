@@ -71,13 +71,13 @@ uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --once
 uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
 ```
 
-Quiet polls print `no stall detected, tracking N: <jobid>(<samples>) ...`, or `collecting history` when a job lacks a 15-minute baseline. A stalled job prints one `STALLED <jobid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
+Quiet polls print `no stall detected, tracking N: <stepid>(<samples>) ...`, or `collecting history` when a step lacks a 15-minute baseline. A stalled step prints one `STALLED <stepid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
 
 - It **only reports — it never cancels.** Cancelling a job with `afterok` dependents strands them, so follow the kill order above by hand.
 - **Interactive sessions are excluded by name** (`nomachine`, `gpu-hold`, `interactive`, bare `bash`/`sh`/`srun`). A renamed interactive session would get flagged — it still would not be cancelled, but don't act on the alert without checking.
-- It needs **two samples >= 15 min apart** and a job **>= 30 min old**, so expect no verdict on a fresh job for the first couple of polls.
+- It needs **two samples >= 15 min apart** and a step **>= 30 min old**, so expect no verdict on a fresh step for the first couple of polls.
 - Both modes persist samples in `$XDG_CACHE_HOME/viscy/watch_stalled_jobs-<user>.json` (default cache root: `~/.cache`); `--state-file` overrides the path. The file records the host that wrote it and refuses to load on any other: `~/.cache` is on NFS, where `flock` only excludes processes on the same node, so run the daemon and its `--once` checks on one node, or give each node its own `--state-file`. Repeat `--once` after at least 15 minutes. Its first invocation collects history; exit 0 does not establish that every job is healthy.
-- A decrease in CPU or job-wall counters starts fresh history. After a CPU reset, the 30-minute minimum age starts at the first observation of the new step. Its CPU progress can include work completed since the preceding observation, but the old step's CPU history cannot establish progress for the new one.
+- Histories are **per SLURM step** (`<jobid>.<step>` from `squeue -s`), judged against that step's own elapsed time rather than the job's. A `submit_benchmark_batch` chain advancing to its next `srun` step, or a requeue reusing a step id, starts a fresh history with that step's own clocks; the previous step's CPU cannot establish progress for the new one. A step first seen mid-allocation is judged on its cumulative CPU over its own age, so a watcher started late still catches a step that was already hung.
 - A job that has never burned CPU is never flagged: startup NFS staging is legitimately ~0% CPU, so the check requires the job to have previously demonstrated CPU progress.
 - `--user` defaults to `alex.kalinin`; `sstat` only works on your own running jobs, so it cannot watch someone else's.
 
