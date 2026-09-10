@@ -284,12 +284,13 @@ def test_excluded_walk_does_not_advance_a_recorded_preprocess_version(tmp_path: 
     _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
     leaf = manifest["artifacts"]["dinov3_features"]["dinov3_vitb16"]
     assert leaf["preprocess_version"] == "imagenet_normalize_v2"
-    # Genuinely new keys still land; only recorded values are protected.
-    assert leaf["patch_size"] == 16
+    # A missing parameter describes unknown identity for the excluded FOVs.
+    assert "patch_size" not in leaf
 
     # A full walk advances it, which is what makes the cache self-heal.
     _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=False)
     assert leaf["preprocess_version"] == "imagenet_normalize_v3"
+    assert leaf["patch_size"] == 16
 
 
 def test_limit_positions_rejects_pred_with_unknown_position(tmp_path: Path):

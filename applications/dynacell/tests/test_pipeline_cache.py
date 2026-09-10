@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from dynacell.evaluation.cache import (  # noqa: E402
     read_features,
     read_instance_mask,
     read_mask,
+    save_manifest,
     write_features,
     write_mask,
 )
@@ -1187,7 +1189,8 @@ def test_precompute_deep_features_skips_cached_slots(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("side", ["gt", "pred"])
 @pytest.mark.parametrize("flush_threshold", [1, 256])
-def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, flush_threshold) -> None:
+@pytest.mark.parametrize("refresh_mode", ["versioned", "legacy_focus", "legacy_forced"])
+def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, flush_threshold, refresh_mode) -> None:
     """A partial refresh cannot certify excluded embeddings for the next full run."""
     gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path, n_t=1)
     cache_dir = tmp_path / "cache"
@@ -1211,27 +1214,40 @@ def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, 
                 seg_positions=seg_positions[:selected],
                 extractors={"dinov3": _BatchedConstantExtractor(value=value)},
                 flush_threshold=flush_threshold,
+                focus_slabs=(
+                    {name: [slice(0, 1)] for name, _ in positions[:selected]} if ctx.focus_slab_enabled else None
+                ),
             )
             flush_manifest(ctx)
 
         ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v1")
         precompute(ctx, selected=2, value=1.0)
+        paths = cache_paths(cache_dir)
+        manifest = load_manifest(paths)
+        old_entry = manifest["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        if refresh_mode != "versioned":
+            del old_entry["preprocess_version"]
+            save_manifest(paths, manifest)
+        if refresh_mode == "legacy_focus":
+            cfg.feature_metrics.focus_slab = {"enabled": True, "halfwidth": 0, "channel_name": "Phase3D"}
+        elif refresh_mode == "legacy_forced":
+            cfg.force_recompute[f"{side}_dinov3"] = True
 
         cfg.io.exclude_fov_names = ["A/1/1"]
-        with pytest.warns(UserWarning, match="preprocess_version mismatch"):
+        expect_warning = refresh_mode != "legacy_forced"
+        with pytest.warns(UserWarning, match="preprocess_version mismatch") if expect_warning else nullcontext():
             ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v2")
         precompute(ctx, selected=1, value=2.0)
-        paths = cache_paths(cache_dir)
         for pos_name, value in [("A/1/0", 2.0), ("A/1/1", 1.0)]:
             np.testing.assert_array_equal(
                 read_features(paths, "dinov3", pos_name, 0, model_name=model_name),
                 np.full((2, 16), value, dtype=np.float32),
             )
         entry = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
-        assert entry["preprocess_version"] == "v1"
+        assert entry == old_entry
 
         cfg.io.exclude_fov_names = []
-        with pytest.warns(UserWarning, match="preprocess_version mismatch"):
+        with pytest.warns(UserWarning, match="preprocess_version mismatch") if expect_warning else nullcontext():
             ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v2")
         assert ctx.force[f"{side}_dinov3"]
         precompute(ctx, selected=2, value=3.0)
@@ -1241,7 +1257,8 @@ def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, 
                 np.full((2, 16), 3.0, dtype=np.float32),
             )
         entry = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
-        assert entry["preprocess_version"] == "v2"
+        assert entry["preprocess_version"] == ctx.dinov3_preprocess_version
+        assert entry["patch_size"] == cfg.feature_metrics.patch_size
 
 
 def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> None:

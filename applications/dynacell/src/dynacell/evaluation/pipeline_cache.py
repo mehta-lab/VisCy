@@ -623,22 +623,21 @@ def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, pres
     entry : dict
         Identity fields (``preprocess_version``, artifact params) for this run.
     preserve_identity : bool
-        Keep any value already recorded rather than overwriting it. Set on a
+        Keep recorded values and leave missing identity fields unset. Set on a
         partial walk driven by ``io.exclude_fov_names``: the entry is a
         store-wide claim, so stamping it with this run's version would certify
         FOVs the walk skipped. Leaving the older stamp in place costs one
         redundant rebuild on the next full walk and keeps the invalidation
         honest; advancing it would let those FOVs' stale embeddings read back as
-        a cache hit forever. New keys are still added -- this only refuses to
-        *change* a recorded value.
+        a cache hit forever. A missing identity is unknown, so filling it would
+        also certify skipped FOVs without rebuilding them.
     """
     current = manifest.setdefault("artifacts", {})
     for key in keys[:-1]:
         current = current.setdefault(key, {})
     leaf = current.setdefault(keys[-1], {})
-    if preserve_identity:
-        entry = {k: v for k, v in entry.items() if k not in leaf}
-    leaf.update(entry)
+    if not preserve_identity:
+        leaf.update(entry)
 
 
 def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
