@@ -293,6 +293,39 @@ def test_excluded_walk_does_not_advance_a_recorded_preprocess_version(tmp_path: 
     assert leaf["patch_size"] == 16
 
 
+def test_excluded_walk_stamps_a_leaf_that_has_no_identity_yet():
+    """A first-ever write on an excluded walk must still record the identity.
+
+    There is nothing to preserve on a fresh leaf. Leaving it bare makes every
+    later run an all-keys mismatch in
+    ``_auto_invalidate_on_artifact_param_mismatch``: a perpetual recompute of
+    the walked FOVs, and a StaleCacheError under ``io.require_complete_cache``
+    or ``limit_positions``. A leaf that already carries any identity key keeps
+    dd97ae84's behaviour: missing keys stay unknown.
+    """
+    from dynacell.evaluation.pipeline_cache import _update_manifest_entry
+
+    keys = ["cp_features"]
+    entry = {"spacing": [0.29, 0.108, 0.108], "cp_norm_p_lo": 1.0, "cp_norm_p_hi": 99.0}
+
+    # Absent leaf: created and stamped in full.
+    manifest: dict = {}
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    assert manifest["artifacts"]["cp_features"] == entry
+
+    # Positions-only leaf (e.g. an earlier excluded write that recorded the FOV
+    # but no identity): stamped in full, positions kept.
+    manifest = {"artifacts": {"cp_features": {"positions": ["A/1/0"]}}}
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    assert manifest["artifacts"]["cp_features"] == {**entry, "positions": ["A/1/0"]}
+
+    # Leaf with an identity but a missing key: untouched on an excluded walk.
+    recorded = {"spacing": [0.29, 0.108, 0.108], "cp_norm_p_lo": 0.5, "positions": ["A/1/0"]}
+    manifest = {"artifacts": {"cp_features": dict(recorded)}}
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    assert manifest["artifacts"]["cp_features"] == recorded
+
+
 def test_limit_positions_rejects_pred_with_unknown_position(tmp_path: Path):
     """``limit_positions`` only relaxes count strict equality when pred ⊂ gt.
 

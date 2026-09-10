@@ -623,20 +623,25 @@ def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, pres
     entry : dict
         Identity fields (``preprocess_version``, artifact params) for this run.
     preserve_identity : bool
-        Keep recorded values and leave missing identity fields unset. Set on a
-        partial walk driven by ``io.exclude_fov_names``: the entry is a
-        store-wide claim, so stamping it with this run's version would certify
-        FOVs the walk skipped. Leaving the older stamp in place costs one
-        redundant rebuild on the next full walk and keeps the invalidation
-        honest; advancing it would let those FOVs' stale embeddings read back as
-        a cache hit forever. A missing identity is unknown, so filling it would
-        also certify skipped FOVs without rebuilding them.
+        Set on a partial walk driven by ``io.exclude_fov_names``. The entry is
+        a store-wide claim, so a leaf that already carries an identity is left
+        untouched: stamping it with this run's version would certify FOVs the
+        walk skipped, and their stale artifacts would read back as a cache hit
+        forever. Leaving the older stamp in place costs one redundant rebuild
+        on the next full walk and keeps the invalidation honest. Identity keys
+        the recorded leaf lacks stay unset for the same reason -- unknown is
+        unknown. A leaf with no identity at all (absent, or only ``positions``)
+        is stamped with the full entry even on an excluded walk: there is
+        nothing to preserve, and leaving it bare would make every later run an
+        all-keys mismatch -- a perpetual recompute of the walked FOVs, or a
+        :class:`StaleCacheError` under ``io.require_complete_cache`` /
+        ``limit_positions``.
     """
     current = manifest.setdefault("artifacts", {})
     for key in keys[:-1]:
         current = current.setdefault(key, {})
     leaf = current.setdefault(keys[-1], {})
-    if not preserve_identity:
+    if not preserve_identity or not (leaf.keys() - {"positions"}):
         leaf.update(entry)
 
 
