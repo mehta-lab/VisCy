@@ -263,14 +263,15 @@ def _sliding_window_inference(
                 out_shape[1] = patch_out.shape[1]
                 # FP16 Hann products can underflow at corners, and overlapping
                 # predictions can overflow before the normalized mean is taken.
-                prediction_sum = torch.zeros(out_shape, device=source.device, dtype=torch.float32)
-                weight_sum = torch.zeros(out_shape, device=source.device, dtype=torch.float32)
+                accumulation_dtype = torch.promote_types(patch_out.dtype, torch.float32)
+                prediction_sum = torch.zeros(out_shape, device=source.device, dtype=accumulation_dtype)
+                weight_sum = torch.zeros(out_shape, device=source.device, dtype=accumulation_dtype)
                 weight = (
-                    _blend_weight(patch, source.device, torch.float32)
+                    _blend_weight(patch, source.device, accumulation_dtype)
                     if blend == "cosine"
-                    else torch.ones([1, 1, *patch], device=source.device, dtype=torch.float32)
+                    else torch.ones([1, 1, *patch], device=source.device, dtype=accumulation_dtype)
                 )
-            prediction_sum[tuple(slicer)] += patch_out.float() * weight
+            prediction_sum[tuple(slicer)] += patch_out.to(prediction_sum.dtype) * weight
             weight_sum[tuple(slicer)] += weight
 
     if prediction_sum is None:

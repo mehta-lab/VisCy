@@ -1414,6 +1414,17 @@ def test_sliding_window_half_precision_preserves_covered_voxels(blend, spatial):
     torch.testing.assert_close(out, source.to(torch.float16), rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("blend", ["uniform", "cosine"])
+@pytest.mark.parametrize("spatial", [(4, 16, 16), (4, 24, 40)])
+def test_sliding_window_preserves_double_precision(blend, spatial):
+    """Double predictions must retain values below float32's precision."""
+    source = torch.ones((1, 1, *spatial))
+    expected = source.to(torch.float64) + 2**-30
+    out = _sliding_window_inference(lambda x: x.to(torch.float64) + 2**-30, source, (4, 16, 16), (2, 8, 8), blend=blend)
+    assert out.dtype == torch.float64
+    torch.testing.assert_close(out, expected, rtol=0, atol=2 * torch.finfo(torch.float64).eps)
+
+
 def test_cosine_blend_suppresses_window_seams():
     """A model whose output depends on its window's identity produces a step at
     every window face under uniform averaging; the cosine cross-fade must
