@@ -64,19 +64,21 @@ def _run(val_values: list[float], tmp_path, patience: int = 3, max_epochs: int =
 def test_frozen_monitor_raises(tmp_path):
     """A monitor that never changes must raise rather than train silently."""
     with pytest.raises(MonitorHealthError, match="identical"):
-        _run([1.024275] * 8, tmp_path, patience=3)
+        _run([1.024275] * 3, tmp_path, patience=3, max_epochs=3)
 
 
 def test_non_finite_monitor_raises(tmp_path):
     """A NaN monitor must raise immediately."""
     with pytest.raises(MonitorHealthError, match="non-finite"):
-        _run([0.9, float("nan"), 0.7, 0.6, 0.5, 0.4, 0.3, 0.2], tmp_path, patience=3)
+        _run([0.9, float("nan")], tmp_path, patience=3, max_epochs=2)
 
 
 def test_improving_monitor_does_not_raise(tmp_path):
     """A normally-varying monitor must train to completion untouched."""
     trainer = _run([0.9, 0.8, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45], tmp_path, patience=3)
     assert trainer.current_epoch == 8
+    health = next(callback for callback in trainer.callbacks if isinstance(callback, MonitorHealthCheck))
+    assert health.state_dict()["recent"] == pytest.approx([0.55, 0.5, 0.45])
 
 
 def test_brief_plateau_below_patience_does_not_raise(tmp_path):

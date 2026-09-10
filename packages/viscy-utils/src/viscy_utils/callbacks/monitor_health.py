@@ -64,8 +64,8 @@ class MonitorHealthCheck(Callback):
         self.check_finite = check_finite
         self._recent: deque[float] = deque(maxlen=patience)
 
-    def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        """Inspect the monitored metric at the end of each validation epoch."""
+    def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Inspect metrics after the module's ``on_validation_epoch_end`` logs them."""
         if trainer.sanity_checking:
             return
         value = trainer.callback_metrics.get(self.monitor)
