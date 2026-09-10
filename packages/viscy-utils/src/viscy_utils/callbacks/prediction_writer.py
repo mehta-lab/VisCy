@@ -284,16 +284,16 @@ class HCSPredictionWriter(BasePredictionWriter):
                         needs_append.append((name, missing))
                     if name in run_positions:
                         overwritten.append(name)
-                        if self._has_extra_timepoints(pos, name, dm.array_key):
+                        if self._outruns_source(pos, name, dm.array_key):
                             oversized.append(name)
                     elif self._cannot_share(pos, prediction_channel):
                         mixed.append(name)
                 if oversized:
                     self.plate.close()
                     raise ValueError(
-                        f"{len(oversized)} FOVs in '{self.output_store}' hold more timepoints than "
-                        f"their source (e.g. {oversized[:3]}); arrays only grow, so the stale frames "
-                        "would survive every rewrite and the FOVs could never be marked complete. "
+                        f"{len(oversized)} FOVs in '{self.output_store}' hold more timepoints or depth "
+                        f"slices than their source (e.g. {oversized[:3]}); arrays only grow, so the stale "
+                        "planes would survive every rewrite yet the FOVs would be marked complete. "
                         "Predict into a new output store."
                     )
                 if mixed:
@@ -456,8 +456,8 @@ class HCSPredictionWriter(BasePredictionWriter):
             marker = completion_marker(self._source_shapes[img_name], self._run)
             mark_complete(position, self._prediction_channels, marker)
 
-    def _has_extra_timepoints(self, position: Position, name: str, array_key: str) -> bool:
-        """Return whether the existing output array outruns this run's source in T.
+    def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
+        """Return whether the existing output array outruns this run's source in T or Z.
 
         Parameters
         ----------
@@ -471,13 +471,16 @@ class HCSPredictionWriter(BasePredictionWriter):
         Returns
         -------
         bool
-            True when the array exists and has more frames than the source.
+            True when the array exists and has more frames or more depth slices
+            than the source; no run writes beyond either extent, so the excess
+            would keep stale voxels under a fresh completion marker.
         """
         try:
             output = position[array_key]
         except KeyError:
             return False
-        return output.frames > self._source_shapes[f"/{name}/{array_key}"][0]
+        frames, slices = self._source_shapes[f"/{name}/{array_key}"][:2]
+        return output.frames > frames or output.slices > slices
 
     def _cannot_share(self, position: Position, channels: list[str]) -> bool:
         """Return whether ``position`` holds any of ``channels`` from a run other than this one.

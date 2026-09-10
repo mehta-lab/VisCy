@@ -790,16 +790,19 @@ def test_resume_prediction_requires_all_z_windows_and_invalidates_overwrites(tmp
     assert _completed(out, inp, run) == set()
 
 
-def test_predict_refuses_an_output_with_more_timepoints_than_its_source(tmp_path):
-    """Arrays only grow, so a T=3 output can never be completed from a T=2 source; refuse before writing."""
+@pytest.mark.parametrize("output_shape", [(3, 1, 4, 8, 8), (2, 1, 5, 8, 8)], ids=["extra_T", "extra_Z"])
+def test_predict_refuses_an_output_that_outruns_its_source(tmp_path, output_shape):
+    """Arrays only grow, so an output larger than its (2, 4, 8, 8) source in T or Z would keep stale
+    planes under a fresh completion marker; refuse before writing anything."""
     inp = tmp_path / "input.zarr"
     out = tmp_path / "pred.zarr"
     _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 2})
-    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 3}, completed=set())
+    _write_hcs_store(out, ["Structure_prediction"], {"0/0/fov0000": 2}, completed=set())
     with open_ome_zarr(out, mode="r+") as plate:
+        plate["0/0/fov0000/0"].resize(output_shape)
         plate["0/0/fov0000/0"][:] = 999
 
-    with pytest.raises(ValueError, match="more timepoints"):
+    with pytest.raises(ValueError, match="more timepoints or depth slices"):
         _predict(inp, out, z_window_size=1, overwrite=True)
 
     with open_ome_zarr(out, mode="r") as plate:
