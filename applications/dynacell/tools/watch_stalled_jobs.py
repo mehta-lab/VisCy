@@ -183,12 +183,16 @@ class JobState:
 
 
 def running_steps(user: str) -> list[tuple[str, str, float, str]]:
-    """Return ``(step_id, job_name, step_wall_s, node)`` for the user's running compute steps.
+    """Return ``(step_id, job_name, step_wall_s, node)`` for the user's running steps.
 
     Names and the interactive-session filter come from the job listing: in the
-    step listing ``%j`` is the step's own name (e.g. ``uv``). ``.batch`` and
-    ``.extern`` never carry the compute, and a step whose job is missing from
-    the filtered job list is either interactive or ended between the queries.
+    step listing ``%j`` is the step's own name (e.g. ``uv``). Only ``.extern``
+    is skipped. ``.batch`` is tracked like any other step because
+    ``submit_benchmark_batch --parallel`` and ``run_eval_direct.slurm`` run
+    their compute directly in the batch script with no ``srun`` step; for
+    ``srun``-based jobs the batch step never burns CPU, so it never qualifies.
+    A step whose job is missing from the filtered job list is either
+    interactive or ended between the queries.
     """
     jobs = subprocess.run(
         ["squeue", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%j"],
@@ -212,7 +216,7 @@ def running_steps(user: str) -> list[tuple[str, str, float, str]]:
         step_id, elapsed, node = line.split("|")
         step_id = step_id.strip()
         jobid, _, step = step_id.rpartition(".")
-        if step in {"batch", "extern"} or jobid not in names:
+        if step == "extern" or jobid not in names:
             continue
         wall_s = parse_slurm_duration(elapsed)
         if wall_s is not None:

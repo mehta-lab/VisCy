@@ -66,8 +66,9 @@ def test_running_steps_joins_step_clocks_to_filtered_job_names(monkeypatch) -> N
     ``squeue -s`` prints ``%j`` as the STEP name (``uv``), so filtering the step
     listing by name would never match ``nomachine``. Array tasks print as
     ``36130452_579.1``; the text before the last ``.`` is the job listing's id.
-    ``.batch``/``.extern`` never carry the compute, and a step whose job is not
-    in the filtered list is interactive or ended between the two queries.
+    Only ``.extern`` is skipped -- ``.batch`` can carry the compute -- and a
+    step whose job is not in the filtered list is interactive or ended between
+    the two queries.
     """
     outputs = {
         ("squeue", "-u", "alex.kalinin", "-h", "-t", "RUNNING", "-o", "%i|%j"): (
@@ -89,9 +90,42 @@ def test_running_steps_joins_step_clocks_to_filtered_job_names(monkeypatch) -> N
     monkeypatch.setattr(watch_stalled_jobs.subprocess, "run", fake_run)
 
     assert running_steps("alex.kalinin") == [
+        ("36130452_579.batch", "ER_PREDICT_batch", 3 * HOUR, "gpu-f-3"),
         ("36130452_579.1", "ER_PREDICT_batch", 754.0, "gpu-f-3"),
         ("36120000.0", "FNet3DT01_A549_NUCL", 2 * HOUR, "gpu-b-3"),
     ]
+
+
+def test_batch_step_compute_is_tracked_and_flagged(monkeypatch) -> None:
+    """A job whose compute runs in the batch script has no numbered step to watch.
+
+    ``submit_benchmark_batch --parallel`` backgrounds bare ``uv run python -m
+    dynacell predict`` children without ``srun``, and ``run_eval_direct.slurm``
+    runs the evaluation directly, so ``.batch`` is the only step ``sstat`` can
+    report for them. Skipping it left those jobs untracked no matter how long
+    they hung.
+    """
+    clock = {"wall": "3:00:00"}
+
+    def fake_run(argv, **kwargs):
+        if argv[0] == "squeue" and "-s" not in argv:
+            stdout = "36140000|ER_PREDICT_parallel\n"
+        elif argv[0] == "squeue":
+            stdout = f"36140000.batch|{clock['wall']}|gpu-f-3\n36140000.extern|{clock['wall']}|gpu-f-3\n"
+        else:
+            assert argv == ["sstat", "-j", "36140000.batch", "-P", "--format=JobID,AveCPU"]
+            stdout = "JobID|AveCPU\n36140000.batch|02:00:00\n"
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(watch_stalled_jobs.subprocess, "run", fake_run)
+    states = {}
+
+    assert poll_once("alex.kalinin", states) == []
+    assert set(states) == {"36140000.batch"}
+    clock["wall"] = "3:15:00"
+    alerts = poll_once("alex.kalinin", states)
+    assert len(alerts) == 1
+    assert alerts[0].startswith("STALLED 36140000.batch ER_PREDICT_parallel on gpu-f-3")
 
 
 def test_step_cpu_seconds_reads_the_single_step_row(monkeypatch) -> None:
