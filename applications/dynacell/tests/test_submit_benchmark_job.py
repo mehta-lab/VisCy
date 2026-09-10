@@ -986,6 +986,24 @@ def test_resume_predict_excludes_complete_fovs_and_keeps_the_checkpoint(capsys, 
     assert writer_init["settings_sha256_12"] == _leaf_settings(leaf)
 
 
+def test_resume_predict_preview_writes_no_sidecar_but_a_dry_run_does(tmp_path):
+    """--print-* stays a pure preview even though the survey hashes the checkpoint; --dry-run may cache it."""
+    inp = tmp_path / "input.zarr"
+    out = tmp_path / "pred.zarr"
+    _write_hcs_store(inp, ["Phase3D"], {"0/0/fov0000": 1, "0/0/fov0001": 1})
+    ckpt = tmp_path / "a.ckpt"
+    ckpt.write_bytes(b"weights-a")
+    leaf = _write_predict_leaf(tmp_path, data_path=inp, output_store=out, ckpt=ckpt, z_window_size=4)
+    _predict(inp, out, z_window_size=4, limit_batches=1, checkpoint=ckpt, settings=_leaf_settings(leaf))
+    sidecar = tmp_path / "a.ckpt.sha256"
+    sidecar.unlink()
+
+    assert sbj.submit([str(leaf), "--resume-predict", "--print-resolved-config"]) == 0
+    assert not sidecar.exists()
+    assert sbj.submit([str(leaf), "--resume-predict", "--dry-run"]) == 0
+    assert sidecar.exists()
+
+
 def test_resume_predict_refuses_a_store_predicted_with_other_settings(tmp_path):
     """Same weights, other inference settings: different voxels, so the store must not be completed."""
     inp = tmp_path / "input.zarr"

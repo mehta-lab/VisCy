@@ -100,6 +100,18 @@ def test_checkpoint_sha256_12_ignores_unusable_sidecars(tmp_path: Path, content:
     assert json.loads(sidecar.read_text())["sha256"][:12] == h
 
 
+def test_checkpoint_sha256_12_can_leave_the_sidecar_alone(tmp_path: Path) -> None:
+    """A read-only preview gets the digest without leaving a sidecar behind."""
+    ckpt = tmp_path / "model.ckpt"
+    ckpt.write_bytes(b"weights")
+    sidecar = tmp_path / "model.ckpt.sha256"
+
+    assert checkpoint_sha256_12(ckpt, write_sidecar=False) == hashlib.sha256(b"weights").hexdigest()[:12]
+    assert not sidecar.exists()
+    assert checkpoint_sha256_12(ckpt) == hashlib.sha256(b"weights").hexdigest()[:12]
+    assert sidecar.exists()
+
+
 def test_checkpoint_sha256_12_read_only_dir(tmp_path: Path) -> None:
     """Read-only parent dir does not raise; digest still returned."""
     ckpt_dir = tmp_path / "frozen"

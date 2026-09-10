@@ -553,6 +553,9 @@ def submit(argv: list[str] | None = None) -> int:
             "--resume-predict cannot be combined with --ckpt: a resumed predict must reuse "
             "the original checkpoint, or the store would mix predictions from two models"
         )
+    # Either --print-* flag is a pure preview: nothing on disk may change, not
+    # even a checkpoint hash sidecar (the full contract is spelled out below).
+    preview_only = args.print_script or args.print_resolved_config
 
     composed = load_composed_config(args.leaf, resolver=_dynacell_ref_resolver)
     for token in args.override:
@@ -690,6 +693,7 @@ def submit(argv: list[str] | None = None) -> int:
                 z_reduction=str(writer_init.get("z_reduction", "blend")),
                 checkpoint_path=model_init["ckpt_path"],
                 settings_sha256_12=writer_init["settings_sha256_12"],
+                write_sidecar=not preview_only,
             )
             survey = _survey_prediction_store(output_store, data_path, pred_channels, run)
             if survey.oversized:
@@ -763,7 +767,6 @@ def submit(argv: list[str] | None = None) -> int:
     #   to also see the rendered sbatch on stdout.
     # - --dry-run combined with --print-* = --print-* wins (preview).
     # - Bare invocation = write + submit.
-    preview_only = args.print_script or args.print_resolved_config
     skip_submit = preview_only or args.dry_run
     if not preview_only:
         resolved_dir.mkdir(parents=True, exist_ok=True)
