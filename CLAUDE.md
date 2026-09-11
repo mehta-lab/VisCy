@@ -61,6 +61,17 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 
 **The discriminator is CPU time, and only its derivative.** Across those 509 allocations every healthy job spent CPU at >= 0.93x wall; the hung one sat at 0.561 with a *zero* incremental rate. Absolute ratio alone is useless (a 16-CPU fit runs at ~7.8x wall), so compare two samples: `sstat -j <id> -a -P --format=JobID,AveCPU` — `-P` is mandatory, the default width truncates to `10-15:41:+` and misparses.
 
+**A full-looking output store plus a `RUNNING` job is NOT this signature.** On a
+re-predict launched with `--overwrite`, the writer rewrites chunks in place and the previous
+run's chunks stay on disk, so the store reads 100% complete from the first second — 36 of 36
+CellDiff-2D predicts looked finished-but-hung this way on 2026-09-11 while every one was
+healthy at a 1.01x incremental CPU rate. Judge on the CPU derivative above, never on "the
+output looks done"; see *Re-predict completeness* in `applications/dynacell/CLAUDE.md` for
+the mtime-based gate. In the same direction, a single `find -newermt '-20 minutes'` returning
+nothing is not evidence of a stall either: `/hpc` attribute caching hides fresh writes from a
+login node, and listing real mtimes (`find -printf '%T@ %p' | sort -rn`) showed writes
+seconds old at the same moment.
+
 **Using the stall watchdog.** `applications/dynacell/tools/watch_stalled_jobs.py` automates exactly that comparison. Start it whenever a campaign has long jobs in flight and leave it running:
 
 ```sh

@@ -96,6 +96,46 @@ Two exceptions to watch:
   `<org>_celldiff_r2[_<cond>].zarr`. Sweeps that only walk `predictions/` miss
   them. FCMAE/fnet3d joint zarrs in the same dir do follow `_jointtrained_<cond>`.
 
+## Re-predict completeness: gate on chunk mtime, never chunk count
+
+`--overwrite` makes `HCSPredictionWriter` rewrite the prediction channel **in
+place**. It never deletes the previous run's chunks, so every count-based
+completeness gate reads FULL from the first second of the run.
+
+Measured 2026-09-11 on the 36 CellDiff-2D A549 re-predicts: counting chunks said
+**432/432 FOVs complete across all 36 stores** while all 36 jobs were still
+`RUNNING` — which looks exactly like the post-completion hang in the root
+CLAUDE.md. It was not. An mtime split put `er/celldiff_2d/a549/a549__denv` at
+fov0010 213/480 with fov0011 untouched and **748 chunks still carrying the
+previous run's mtimes**; the true mean across the 36 was ~55%, not 100%.
+
+The gate that works — count only chunks this run wrote:
+
+```sh
+find $STORE/0/0 -path '*/0/c/*' -type f -newermt '<run submit time>' | wc -l
+```
+
+against `n_fov * T * Z`. Three things that make a naive version wrong:
+
+- **Read `T` from each FOV's own `zarr.json` `shape[0]`.** It varies *within* one
+  plate — 7 and 10 both occur in the same A549 prediction store — so one `T` for
+  the whole store over- or under-counts.
+- **The chunk path under `c/` is `<t>/<c>/<z>/<y>/<x>`.** `c/2/0/47/0/0` is
+  **timepoint 2**, z-plane 47 — not channel 2. Reading that index as a channel
+  makes a 7-timepoint store look like a complete 48-plane one.
+- **Comparing declared `T` to the number of timepoint directories present is
+  circular** on a re-predict: the previous run already created every directory,
+  so they always match.
+
+Also restrict the glob to `*/0/c/*` (resolution level 0). `*/c/*` picks up the
+multiscale pyramid levels too and reports >100%.
+
+Separately, a re-predict does **not** invalidate the eval caches — see
+`force_recompute` under *Grouped multi-condition eval*. Overwriting a store in
+place leaves `final_metrics` happy to rescore masks and embeddings derived from
+the old predictions, so a re-predicted bucket needs every `pred_*`
+`force_recompute` flag, not just `final_metrics`.
+
 ## Eval directory naming
 
 `src/dynacell/evaluation/paths.py` is the writer and the cross-repo contract
