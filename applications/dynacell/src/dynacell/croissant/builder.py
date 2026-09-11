@@ -253,6 +253,7 @@ def build_croissant_from_release(
         }
     )
 
+    demo_key = f"{static.aws_prefix}/demo/dynacell_a549_demo.zip"
     file_objects.append(
         {
             "@type": "cr:FileObject",
@@ -263,9 +264,9 @@ def build_croissant_from_release(
                 "FOVs and timepoints, intended for quick inspection without "
                 "downloading the full release."
             ),
-            "contentUrl": f"s3://{static.aws_bucket}/{static.aws_prefix}/demo/",
-            "sameAs": [f"https://{static.aws_bucket}.s3.us-west-2.amazonaws.com/{static.aws_prefix}/demo/"],
-            "encodingFormat": "application/vnd.ome.zarr+zip",
+            "contentUrl": f"s3://{static.aws_bucket}/{demo_key}",
+            "sameAs": [f"https://{static.aws_bucket}.s3.us-west-2.amazonaws.com/{demo_key}"],
+            "encodingFormat": "application/zip",
             "sha256": "",
         }
     )

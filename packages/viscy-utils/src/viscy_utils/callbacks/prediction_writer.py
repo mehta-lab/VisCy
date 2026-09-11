@@ -17,6 +17,17 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
 
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    checkpoint_signature,
+    completion_marker,
+    mark_complete,
+    mark_started,
+    outruns,
+    prediction_run,
+    same_run,
+    tzyx_shape,
+)
 from viscy_utils.tensor_utils import to_numpy
 
 if TYPE_CHECKING:
@@ -114,6 +125,10 @@ def _blend_in(
 class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
+    Single-process only: completion is tracked per process and channels are
+    appended to the store without cross-rank coordination, so a multi-device
+    predict is refused before the store is opened.
+
     Parameters
     ----------
     output_store : str
@@ -154,6 +169,24 @@ class HCSPredictionWriter(BasePredictionWriter):
         derived from ``z_slice.start``, ``'center'`` because it relies on
         last-write-wins. The predict dataloader is sequential and iterates
         ``z`` innermost, which is what makes that hold.
+    checkpoint_path : str or None, optional
+        Checkpoint the model predicts with. Its path and content hash are
+        recorded in every FOV's completion marker, so a resume can tell
+        predictions made with different weights apart and refuses to mix
+        them in one store. The file's size and mtime are taken when the
+        writer is constructed -- the same instantiation pass that loads the
+        model's weights -- and ``on_predict_start`` refuses a file changed
+        since, so the recorded hash names the bytes the model loaded rather
+        than whatever sits at the path later. Default None records no
+        checkpoint.
+    settings_sha256_12 : str or None, optional
+        Hash of the other settings that shape the predicted voxels (model
+        inference arguments, input normalization, precision), recorded in the
+        marker alongside the checkpoint so a resume with the same weights but
+        other settings is refused as well. The submitter computes it from the
+        resolved config (``submit_benchmark_job.prediction_settings_sha256_12``);
+        the writer cannot derive it from live objects. Default None records
+        none.
     """
 
     def __init__(
@@ -163,6 +196,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
         z_reduction: Literal["blend", "center"] = "blend",
+        checkpoint_path: str | None = None,
+        settings_sha256_12: str | None = None,
     ) -> None:
         super().__init__(write_interval)
         if z_reduction not in ("blend", "center"):
@@ -171,6 +206,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.overwrite = overwrite
         self.write_input = write_input
         self.z_reduction = z_reduction
+        self.checkpoint_path = checkpoint_path
+        self._checkpoint_signature = None if checkpoint_path is None else checkpoint_signature(checkpoint_path)
+        self.settings_sha256_12 = settings_sha256_12
         self._dataset_scale = None
 
     def _get_scale_metadata(self, metadata_store: os.PathLike | None) -> None:
@@ -201,6 +239,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         pl_module : LightningModule
             The Lightning module being used for prediction.
         """
+        if trainer.world_size > 1:
+            raise NotImplementedError(
+                f"HCSPredictionWriter tracks completion per process and appends channels without "
+                f"cross-rank coordination; run predict on a single device (got world_size={trainer.world_size})."
+            )
         dm: HCSDataModule = trainer.datamodule
         self._get_scale_metadata(dm.data_path)
         self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0
@@ -208,16 +251,48 @@ class HCSPredictionWriter(BasePredictionWriter):
         source_channel = dm.source_channel
         target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
+        self._prediction_channels = prediction_channel
+        if (
+            self.checkpoint_path is not None
+            and checkpoint_signature(self.checkpoint_path) != self._checkpoint_signature
+        ):
+            raise RuntimeError(
+                f"Checkpoint '{self.checkpoint_path}' changed since this writer was constructed alongside the "
+                "model, so its hash would not name the weights actually loaded. Restart the predict."
+            )
+        # Hashes the checkpoint once; every FOV's marker records this identity.
+        self._run = prediction_run(
+            array_key=dm.array_key,
+            z_window_size=dm.z_window_size,
+            z_reduction=self.z_reduction,
+            checkpoint_path=self.checkpoint_path,
+            settings_sha256_12=self.settings_sha256_12,
+        )
+        window_arrays = dm.predict_dataset.window_arrays
+        self._source_shapes = {f"/{array.path}": tzyx_shape(array) for array in window_arrays}
+        # Array dimensions grow before writes, so only a successful write of every
+        # distinct (T, Z-window) establishes completion, including overlapping windows.
+        self._written_windows: dict[str, NDArray[np.bool_]] = {
+            f"/{array.path}": np.zeros((array.frames, array.slices - dm.z_window_size + 1), dtype=bool)
+            for array in window_arrays
+        }
+        run_positions = {array.path.rsplit("/", 1)[0] for array in window_arrays}
         if os.path.exists(self.output_store):
             if self.write_input:
                 raise FileExistsError("Cannot write input to an existing store. Aborting.")
             else:
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
                 # Validate all positions before mutating any.
-                needs_append: list[tuple[Position, list[str]]] = []
-                for _, pos in self.plate.positions():
+                positions = dict(self.plate.positions())
+                needs_append: list[tuple[str, list[str]]] = []
+                overwritten: list[str] = []
+                mixed: list[str] = []
+                oversized: list[str] = []
+                channel_orders: set[tuple[str, ...]] = set()
+                for name, pos in positions.items():
                     existing = set(pos.channel_names)
                     missing = [ch for ch in prediction_channel if ch not in existing]
+                    channel_orders.add((*pos.channel_names, *missing))
                     for ch in prediction_channel:
                         if ch in existing and not self.overwrite:
                             self.plate.close()
@@ -233,10 +308,58 @@ class HCSPredictionWriter(BasePredictionWriter):
                                 self.output_store,
                             )
                     if missing:
-                        needs_append.append((pos, missing))
-                for pos, channels in needs_append:
+                        needs_append.append((name, missing))
+                    if name in run_positions:
+                        overwritten.append(name)
+                        if self._outruns_source(pos, name, dm.array_key):
+                            oversized.append(name)
+                    elif self._cannot_share(pos, prediction_channel):
+                        mixed.append(name)
+                if oversized:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(oversized)} FOVs in '{self.output_store}' hold more timepoints or depth "
+                        f"slices than their source (e.g. {oversized[:3]}); arrays only grow, so the stale "
+                        "planes would survive every rewrite yet the FOVs would be marked complete. "
+                        "Predict into a new output store."
+                    )
+                if mixed:
+                    self.plate.close()
+                    raise ValueError(
+                        f"{len(mixed)} FOVs outside this run already hold {prediction_channel} "
+                        f"in '{self.output_store}' that were predicted before completion markers "
+                        f"existed or with a different checkpoint or settings (e.g. {mixed[:3]}); "
+                        "predict into a new output store instead of mixing them."
+                    )
+                if len(channel_orders) > 1:
+                    self.plate.close()
+                    raise ValueError(
+                        f"Positions of '{self.output_store}' would disagree on channel order after "
+                        f"appending {prediction_channel} ({sorted(channel_orders)}); the writer addresses "
+                        "channels by one plate-wide index. Predict into a new output store."
+                    )
+                # A started marker names this run as the writer of a channel's voxels.
+                # Run positions get one for every prediction channel: this run
+                # replaces their voxels, so an interrupted run must never reuse an
+                # old completion, and the next resume sees unfinished FOVs, not
+                # legacy ones. FOVs outside the run (e.g. excluded on resume) keep
+                # their markers, except for the channels appended below: those hold
+                # zeros this run allocated, and without a marker a later resume
+                # could not tell them from data predicted before markers existed.
+                started = {name: prediction_channel for name in overwritten}
+                for name, channels in needs_append:
+                    started.setdefault(name, channels)
                     for ch in channels:
-                        pos.append_channel(ch, resize_arrays=True)
+                        positions[name].append_channel(ch, resize_arrays=True)
+                if needs_append:
+                    # Plate.channel_names is cached from the first position when the
+                    # store is opened; reopen so channel indices and positions created
+                    # later in this run see the appended channel.
+                    self.plate.close()
+                    self.plate = open_ome_zarr(self.output_store, mode="r+")
+                    positions = {name: self.plate[name] for name in started}
+                for name, channels in started.items():
+                    mark_started(positions[name], channels, self._run)
         else:
             channel_names = prediction_channel
             if self.write_input:
@@ -335,6 +458,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)
+        window_z_index = z_index
         # account for lost slices in 2.5D
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
@@ -359,6 +483,59 @@ class HCSPredictionWriter(BasePredictionWriter):
                 sample_prediction = sample_prediction[..., keep:, :, :]
                 z_slice = slice(z_slice.start + keep, z_slice.stop)
         image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
+        written = self._written_windows[img_name]
+        written[t_index, window_z_index] = True
+        if written.all():
+            position = self.plate[img_name.rsplit("/", 1)[0]]
+            marker = completion_marker(self._source_shapes[img_name], self._run)
+            mark_complete(position, self._prediction_channels, marker)
+
+    def _outruns_source(self, position: Position, name: str, array_key: str) -> bool:
+        """Return whether the existing output array outruns this run's source in T or Z.
+
+        Parameters
+        ----------
+        position : Position
+            Existing output position that this run rewrites.
+        name : str
+            Plate-relative position name.
+        array_key : str
+            Array level this run writes.
+
+        Returns
+        -------
+        bool
+            True when the array exists and :func:`outruns` the source.
+        """
+        try:
+            output = position[array_key]
+        except KeyError:
+            return False
+        return outruns(output, self._source_shapes[f"/{name}/{array_key}"])
+
+    def _cannot_share(self, position: Position, channels: list[str]) -> bool:
+        """Return whether ``position`` holds any of ``channels`` that this run cannot vouch for.
+
+        Parameters
+        ----------
+        position : Position
+            Existing output position outside this run.
+        channels : list of str
+            This run's prediction channels.
+
+        Returns
+        -------
+        bool
+            True when a channel present in the position has no marker of its
+            own (written before markers existed, so unverifiable even if other
+            channels are marked), or a marker written with other weights or
+            settings, or in a layout this version cannot read.
+        """
+        completed = position.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+        return any(
+            channel in position.channel_names and not same_run(completed.get(channel), self._run)
+            for channel in channels
+        )
 
     def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.
@@ -391,6 +568,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         _logger.debug(f"Creating image '{img_name}'")
         _, row_name, col_name, pos_name, arr_name = img_name.split("/")
         position = self.plate.create_position(row_name, col_name, pos_name)
+        # A started marker from the first write on distinguishes an interrupted FOV
+        # from one written before completion markers existed.
+        mark_started(position, self._prediction_channels, self._run)
         shape = [1] + list(shape)
         shape[1] = len(position.channel_names)
         return position.create_zeros(

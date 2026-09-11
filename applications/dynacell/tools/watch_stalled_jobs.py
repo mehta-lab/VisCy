@@ -12,8 +12,12 @@ every healthy job spent CPU seconds at >= 0.93x wall seconds; the hung one sat
 at 0.561 and had spent *zero* additional CPU since the moment its work
 finished. There is no overlap between the two populations.
 
-This polls ``sstat`` and flags a job when its CPU time stops advancing while
-its wall clock keeps going. It only reports -- it never cancels. Killing a job
+This polls ``sstat`` per running step and flags a step when its CPU time stops
+advancing while its elapsed time keeps going. Histories are per step, keyed by
+the ``<jobid>.<step>`` id from ``squeue -s`` and judged against that step's own
+elapsed time: a ``submit_benchmark_batch`` chain advancing to its next ``srun``
+step, or a requeue, starts a fresh history instead of comparing counters across
+the boundary. It only reports -- it never cancels. Killing a job
 with ``afterok`` dependents strands them in ``DependencyNeverSatisfied``, so
 the remediation order matters and is left to a human; the report prints it.
 
@@ -21,22 +25,35 @@ Usage
 -----
     uv run python applications/dynacell/tools/watch_stalled_jobs.py --once
     uv run python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
+
+Exit codes: 0 = no stall detected, 1 = something is stalled, 2 = the tool
+itself failed (traceback on stderr). A tool error must never read as a stall
+verdict, so it gets its own code.
 """
 
 import argparse
+import fcntl
+import json
+import os
 import re
+import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+import traceback
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 # Interactive sessions legitimately idle for days. Never flag them -- and never
 # cancel them (see the "cancel all jobs means batch only" house rule).
 INTERACTIVE_NAMES = re.compile(r"^(nomachine|gpu-hold|interactive|bash|sh|srun)$", re.IGNORECASE)
 
-# A job must have run this long, and must have *already* proven it can burn CPU,
-# before a flat stretch counts as a stall. Without the second condition a job
-# staging a 14 GB store off NFS at startup -- legitimately ~0% CPU -- would trip.
+# A step must have run this long, and must have *already* proven it can burn
+# CPU at this rate over a window at least this long, before a flat stretch
+# counts as a stall. Without the prior-efficiency condition a job staging a
+# 14 GB store off NFS at startup -- legitimately ~0% CPU -- would trip. Without
+# the window length a few seconds of import-time CPU on a young step would
+# qualify it, and that same staging phase would then read as a stall.
 MIN_AGE_S = 1800.0
 MIN_PRIOR_EFFICIENCY = 0.30
 
@@ -44,6 +61,11 @@ MIN_PRIOR_EFFICIENCY = 0.30
 # >= 93%, so this is an order of magnitude of margin.
 STALL_CPU_FRACTION = 0.10
 LOOKBACK_S = 900.0
+
+# Bump whenever the persisted payload changes shape. The state file is a
+# derived cache: an old schema is discarded and the next poll rebuilds a
+# baseline, instead of every run tracebacking until someone deletes the file.
+STATE_VERSION = 2
 
 
 def parse_slurm_duration(text: str) -> float | None:
@@ -80,7 +102,7 @@ def parse_slurm_duration(text: str) -> float | None:
 
 @dataclass(frozen=True)
 class Sample:
-    """One observation of a job's wall and CPU clocks."""
+    """One observation of a step's elapsed and CPU clocks."""
 
     wall_s: float
     cpu_s: float
@@ -88,24 +110,57 @@ class Sample:
 
 @dataclass
 class JobState:
-    """Rolling samples for one job."""
+    """Rolling samples for one running step.
+
+    ``sstat`` reports the running step's CPU and ``squeue -s`` that step's
+    elapsed time, so both clocks belong to the step and restart together when
+    a chain advances to its next ``srun`` step (a new key) or the job is
+    requeued (the same key, with both counters decreasing).
+    """
 
     name: str
     node: str
     samples: list[Sample] = field(default_factory=list)
+    progress_start: Sample | None = None
+    prior_efficiency: float = 0.0
 
     def add(self, sample: Sample) -> None:
-        """Append a sample, dropping ones older than the lookback window."""
+        """Track the step's CPU progress and keep a rolling stall baseline."""
+        if self.samples and (sample.wall_s < self.samples[-1].wall_s or sample.cpu_s < self.samples[-1].cpu_s):
+            # A step id is reused only when the job is requeued. The new step's
+            # counters cannot be compared with the old ones, so start over.
+            self.samples.clear()
+            self.progress_start = None
+            self.prior_efficiency = 0.0
+        if self.progress_start is None:
+            self.progress_start = sample
+        else:
+            elapsed = sample.wall_s - self.progress_start.wall_s
+            if elapsed >= MIN_AGE_S:
+                efficiency = (sample.cpu_s - self.progress_start.cpu_s) / elapsed
+                # A long idle period must not erase previously observed work.
+                self.prior_efficiency = max(self.prior_efficiency, efficiency)
+        if sample.wall_s >= MIN_AGE_S and all(s.wall_s < MIN_AGE_S for s in self.samples):
+            # First sample taken once the step is old enough for its cumulative
+            # ratio to span a real window: CPU over the step's own elapsed time
+            # proves activity even when the watcher first saw the step too young
+            # to judge, or mid-allocation when it was already hung. Wall time is
+            # monotonic within a step and pruning keeps the newest samples, so
+            # "no retained mature sample" means this is the first one.
+            self.prior_efficiency = max(self.prior_efficiency, sample.cpu_s / sample.wall_s)
         self.samples.append(sample)
-        cutoff = sample.wall_s - LOOKBACK_S * 4
-        self.samples = [s for s in self.samples if s.wall_s >= cutoff]
+        # Keep the closest baseline older than the lookback even when one-shot
+        # invocations are far apart; nothing reads samples older than that.
+        cutoff = sample.wall_s - LOOKBACK_S
+        older = [s for s in self.samples if s.wall_s < cutoff]
+        self.samples = older[-1:] + [s for s in self.samples if s.wall_s >= cutoff]
 
     def stall_report(self) -> tuple[float, float, Sample] | None:
         """Return ``(delta_fraction, prior_efficiency, baseline)`` when stalled.
 
-        Compares the newest sample against the oldest one at least
-        ``LOOKBACK_S`` older. Returns None when the job is too young, the
-        window is not yet wide enough, the job never demonstrated CPU
+        Compares the newest sample against the closest one at least
+        ``LOOKBACK_S`` older. Returns None when the step is too young, the
+        window is not yet wide enough, the step never demonstrated CPU
         progress, or CPU time is still advancing.
         """
         if not self.samples:
@@ -117,69 +172,80 @@ class JobState:
         if not baselines:
             return None
         baseline = baselines[-1]
-        prior_efficiency = baseline.cpu_s / baseline.wall_s if baseline.wall_s else 0.0
-        if prior_efficiency < MIN_PRIOR_EFFICIENCY:
+        if self.prior_efficiency < MIN_PRIOR_EFFICIENCY:
             return None
         wall_delta = newest.wall_s - baseline.wall_s
         cpu_delta = newest.cpu_s - baseline.cpu_s
-        if cpu_delta < 0:
-            # sstat reports only the RUNNING step, so AveCPU resets to ~0 at
-            # every step boundary -- and submit_benchmark_batch renders N
-            # sequential srun steps per allocation. A negative delta means the
-            # counter restarted, not that the job stopped burning CPU; treating
-            # it as a stall would flag a healthy multi-step predict (and exit 1
-            # under --once). Drop the stale baseline and wait for two samples
-            # inside the current step.
-            self.samples = [newest]
-            return None
         fraction = cpu_delta / wall_delta
         if fraction >= STALL_CPU_FRACTION:
             return None
-        return fraction, prior_efficiency, baseline
+        return fraction, self.prior_efficiency, baseline
 
 
-def running_jobs(user: str) -> list[tuple[str, str, float, str]]:
-    """Return ``(jobid, name, wall_s, node)`` for the user's running jobs."""
-    out = subprocess.run(
-        ["squeue", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%j|%M|%N"],
+def running_steps(user: str) -> list[tuple[str, str, float, str]]:
+    """Return ``(step_id, job_name, step_wall_s, node)`` for the user's running steps.
+
+    Names and the interactive-session filter come from the job listing: in the
+    step listing ``%j`` is the step's own name (e.g. ``uv``). Only ``.extern``
+    is skipped. ``.batch`` is tracked like any other step because
+    ``submit_benchmark_batch --parallel`` and ``run_eval_direct.slurm`` run
+    their compute directly in the batch script with no ``srun`` step; for
+    ``srun``-based jobs the batch step never burns CPU, so it never qualifies.
+    A step whose job is missing from the filtered job list is either
+    interactive or ended between the queries.
+    """
+    jobs = subprocess.run(
+        ["squeue", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%j"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    jobs = []
-    for line in out.splitlines():
-        jobid, name, elapsed, node = line.split("|")
-        if INTERACTIVE_NAMES.match(name.strip()):
+    names = {}
+    for line in jobs.splitlines():
+        jobid, name = line.split("|")
+        if not INTERACTIVE_NAMES.match(name.strip()):
+            names[jobid.strip()] = name.strip()
+    steps = subprocess.run(
+        ["squeue", "-s", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%M|%N"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    running = []
+    for line in steps.splitlines():
+        step_id, elapsed, node = line.split("|")
+        step_id = step_id.strip()
+        jobid, _, step = step_id.rpartition(".")
+        if step == "extern" or jobid not in names:
             continue
         wall_s = parse_slurm_duration(elapsed)
         if wall_s is not None:
-            jobs.append((jobid.strip(), name.strip(), wall_s, node.strip()))
-    return jobs
+            running.append((step_id, names[jobid], wall_s, node.strip()))
+    return running
 
 
-def step_cpu_seconds(jobid: str) -> float | None:
-    """Return the largest per-step ``AveCPU`` for a running job, in seconds.
+def step_cpu_seconds(step_id: str) -> float | None:
+    """Return the step's ``AveCPU`` in seconds, or None when ``sstat`` has no row for it.
 
-    The compute step is the one that matters; ``.batch`` and ``.extern`` sit at
-    zero. ``-P`` is required because the default ``AveCPU`` width truncates
-    long durations to ``"10-15:41:+"``.
+    Once the step has ended -- which can happen between the ``squeue`` listing
+    and this call -- ``sstat`` either exits non-zero or exits 0 with only the
+    header line and its error on stderr. ``-P`` is required because the
+    default ``AveCPU`` width truncates long durations to ``"10-15:41:+"``.
     """
     proc = subprocess.run(
-        ["sstat", "-j", jobid, "-a", "-P", "--format=JobID,AveCPU"],
+        ["sstat", "-j", step_id, "-P", "--format=JobID,AveCPU"],
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
         return None
-    best = None
-    for line in proc.stdout.splitlines()[1:]:
-        if "|" not in line:
-            continue
-        _, ave = line.rsplit("|", 1)
-        seconds = parse_slurm_duration(ave)
-        if seconds is not None and (best is None or seconds > best):
-            best = seconds
-    return best
+    rows = proc.stdout.splitlines()[1:]
+    if not rows:
+        return None
+    # A second row for a single step id would be a scheduler contract change.
+    (row,) = rows
+    _, ave = row.rsplit("|", 1)
+    return parse_slurm_duration(ave)
 
 
 def _format_hours(seconds: float) -> str:
@@ -187,15 +253,15 @@ def _format_hours(seconds: float) -> str:
 
 
 def poll_once(user: str, states: dict[str, JobState]) -> list[str]:
-    """Sample every running job and return one report line per stalled job."""
+    """Sample every running step and return one report line per stalled step."""
     alerts = []
     live = set()
-    for jobid, name, wall_s, node in running_jobs(user):
-        live.add(jobid)
-        cpu_s = step_cpu_seconds(jobid)
+    for step_id, name, wall_s, node in running_steps(user):
+        live.add(step_id)
+        cpu_s = step_cpu_seconds(step_id)
         if cpu_s is None:
             continue
-        state = states.setdefault(jobid, JobState(name=name, node=node))
+        state = states.setdefault(step_id, JobState(name=name, node=node))
         state.add(Sample(wall_s=wall_s, cpu_s=cpu_s))
         verdict = state.stall_report()
         if verdict is None:
@@ -203,39 +269,132 @@ def poll_once(user: str, states: dict[str, JobState]) -> list[str]:
         fraction, prior, baseline = verdict
         idle_s = wall_s - baseline.wall_s
         alerts.append(
-            f"STALLED {jobid} {name} on {node}: "
+            f"STALLED {step_id} {name} on {node}: "
             f"wall {_format_hours(wall_s)}, cpu {_format_hours(cpu_s)}, "
             f"burned {fraction:.3f} core-s/s over the last {_format_hours(idle_s)} "
             f"(was {prior:.2f} before). Verify the output store is complete, then "
             f"clear dependents' Dependency= BEFORE scancel."
         )
-    for jobid in set(states) - live:
-        del states[jobid]
+    for step_id in set(states) - live:
+        del states[step_id]
     return alerts
 
 
+def _load_states(path: Path, user: str) -> dict[str, JobState]:
+    """Rehydrate the persisted step histories.
+
+    Empty when nothing was saved yet or when the file was written by another
+    schema version. A file written for another user, or on another host, is an
+    error whatever its schema: ``flock`` on this NFS mount only excludes
+    processes on the same host, so the daemon and its one-shot checks must
+    share a node, and a foreign history must never be taken over.
+    """
+    if not path.exists():
+        return {}
+    with path.open() as saved:
+        payload = json.load(saved)
+    if "user" in payload and payload["user"] != user:
+        raise ValueError(f"state file {path} belongs to another user")
+    if "host" in payload and payload["host"] != socket.gethostname():
+        raise ValueError(
+            f"state file {path} was written on {payload['host']}; flock is node-local on NFS, so run the daemon "
+            f"and its --once checks on {payload['host']} or pass a different --state-file"
+        )
+    found = payload.get("version")
+    if found != STATE_VERSION:
+        print(f"state file {path}: schema {found!r} is not {STATE_VERSION}; starting a new history", flush=True)
+        return {}
+    states = {}
+    for step_id, data in payload["states"].items():
+        data["samples"] = [Sample(**sample) for sample in data["samples"]]
+        if data["progress_start"] is not None:
+            data["progress_start"] = Sample(**data["progress_start"])
+        states[step_id] = JobState(**data)
+    return states
+
+
+def _save_states(path: Path, user: str, states: dict[str, JobState], *, create: bool) -> None:
+    """Persist the histories.
+
+    With ``create`` the file did not exist at load time and this save claims
+    it: ``O_EXCL`` creation is atomic on the NFS server, so of two hosts that
+    both found no file exactly one wins and the other fails here instead of
+    overwriting the winner's history. Later saves replace the file atomically
+    through a temp file named for this host and process.
+    """
+    payload = {
+        "version": STATE_VERSION,
+        "user": user,
+        "host": socket.gethostname(),
+        "states": {step: asdict(s) for step, s in states.items()},
+    }
+    if create:
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        except FileExistsError:
+            with path.open() as saved:
+                host = json.load(saved)["host"]
+            raise ValueError(
+                f"state file {path} was created on {host} during this poll; pass a different --state-file"
+            ) from None
+        with os.fdopen(descriptor, "w") as saved:
+            json.dump(payload, saved)
+        return
+    temporary = path.with_name(f"{path.name}.{socket.gethostname()}.{os.getpid()}.tmp")
+    with temporary.open("w") as saved:
+        json.dump(payload, saved)
+    temporary.replace(path)
+
+
 def main() -> int:
-    """Poll until interrupted, printing an alert line per stalled job."""
+    """Poll until interrupted, printing an alert line per stalled step."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--user", default="alex.kalinin")
     parser.add_argument("--interval", type=float, default=600.0, help="seconds between polls")
     parser.add_argument("--once", action="store_true", help="poll once and exit")
+    parser.add_argument(
+        "--state-file",
+        type=Path,
+        help=(
+            "sample history JSON (default: $XDG_CACHE_HOME/viscy/watch_stalled_jobs-USER@HOST.json); "
+            "a path shared between hosts is claimed by the first host to create it"
+        ),
+    )
     args = parser.parse_args()
 
-    states: dict[str, JobState] = {}
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    state_path = args.state_file or cache_root / "viscy" / f"watch_stalled_jobs-{args.user}@{socket.gethostname()}.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        alerts = poll_once(args.user, states)
+        # Serialise the daemon and one-shot checks sharing this history. On
+        # this NFS mount flock only excludes processes on the same host, so
+        # the state file records its host, _load_states enforces it, and the
+        # first save claims an absent file atomically.
+        with state_path.with_name(state_path.name + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            existed = state_path.exists()
+            states = _load_states(state_path, args.user)
+            alerts = poll_once(args.user, states)
+            _save_states(state_path, args.user, states, create=not existed)
         if alerts:
             for alert in alerts:
                 print(f"[{stamp}] {alert}", flush=True)
         else:
             tracked = ", ".join(f"{j}({len(s.samples)})" for j, s in sorted(states.items()))
-            print(f"[{stamp}] ok, tracking {len(states)}: {tracked}", flush=True)
+            collecting = any(s.samples[-1].wall_s - s.samples[0].wall_s < LOOKBACK_S for s in states.values())
+            status = "collecting history" if collecting else "no stall detected"
+            print(f"[{stamp}] {status}, tracking {len(states)}: {tracked}", flush=True)
         if args.once:
             return 1 if alerts else 0
         time.sleep(args.interval)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        # Exit 1 is the stall verdict. A tool error must not collide with it,
+        # so this is the one deliberate broad except: report and exit 2.
+        traceback.print_exc()
+        sys.exit(2)

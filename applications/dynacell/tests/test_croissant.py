@@ -187,6 +187,12 @@ class TestFromRelease:
             "biohub-a549/test/H2B_mock",
             "biohub-a549/test/TOMM20_mock",
         }
+        demo = next(fo for fo in jsonld["distribution"] if fo["@id"] == "dynacell-demo-sample")
+        assert demo["contentUrl"] == "s3://example-bucket/dynacell/v1/demo/dynacell_a549_demo.zip"
+        assert demo["sameAs"] == [
+            "https://example-bucket.s3.us-west-2.amazonaws.com/dynacell/v1/demo/dynacell_a549_demo.zip"
+        ]
+        assert demo["encodingFormat"] == "application/zip"
 
     def test_rai_fields_present(self, tmp_path):
         """All 9 RAI / sourcing keys land in the generated doc."""

@@ -17,12 +17,15 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shlex
 import string
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +35,16 @@ from iohub.ngff import open_ome_zarr
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
+from viscy_utils.prediction_metadata import (
+    PREDICTION_COMPLETE_KEY,
+    completion_marker,
+    outruns,
+    prediction_complete,
+    prediction_run,
+    same_marker,
+    started_marker,
+    tzyx_shape,
+)
 
 _VALID_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -84,37 +97,122 @@ def _apply_override(composed: dict, path: list[str], value: Any) -> dict:
 _PRED_WRITER_CLASS_SUFFIX = "HCSPredictionWriter"
 
 
-def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
-    """Set ``init_args.overwrite=True`` on every ``HCSPredictionWriter`` callback.
+def _writer_callbacks(composed: dict) -> list[dict]:
+    """Return the ``HCSPredictionWriter`` entries of ``trainer.callbacks``.
 
-    Mutates ``composed`` in place. Walks ``trainer.callbacks`` and matches
-    by ``class_path`` ending in ``HCSPredictionWriter`` — robust against
-    re-ordered callback lists and additional callbacks. Raises if no
-    writer is found, since the alias cannot do what the user asked.
-
-    This intentionally avoids ``--override
-    "trainer.callbacks[0].init_args.overwrite=true"`` because
+    Matches by ``class_path`` ending in ``HCSPredictionWriter`` -- robust
+    against re-ordered callback lists and additional callbacks. Callers
+    mutate the returned dicts in place; ``--override
+    "trainer.callbacks[0].init_args.x=..."`` cannot do that because
     :func:`deep_merge` is dict-key-only and silently no-ops on
     ``[0]``-style segments.
     """
     callbacks = composed.get("trainer", {}).get("callbacks", [])
     if not isinstance(callbacks, list):
         raise SystemExit(
-            f"{leaf_path}: trainer.callbacks must be a list to use --overwrite (got {type(callbacks).__name__})"
+            f"trainer.callbacks must be a list to address the prediction writer (got {type(callbacks).__name__})"
         )
-    matched = 0
-    for cb in callbacks:
-        if not isinstance(cb, dict):
-            continue
-        if str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX):
-            cb.setdefault("init_args", {})["overwrite"] = True
-            matched += 1
-    if matched == 0:
+    return [
+        cb
+        for cb in callbacks
+        if isinstance(cb, dict) and str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX)
+    ]
+
+
+def _apply_overwrite_alias(composed: dict, leaf_path: Path) -> None:
+    """Set ``init_args.overwrite=True`` on every ``HCSPredictionWriter`` callback.
+
+    Mutates ``composed`` in place. Raises if no writer is found, since the
+    alias cannot do what the user asked.
+    """
+    writers = _writer_callbacks(composed)
+    if not writers:
+        callbacks = composed.get("trainer", {}).get("callbacks", [])
         class_paths = [cb.get("class_path") for cb in callbacks if isinstance(cb, dict)]
         raise SystemExit(
             f"{leaf_path}: --overwrite requested but no HCSPredictionWriter callback "
             f"found under trainer.callbacks (got class_paths={class_paths!r})"
         )
+    for cb in writers:
+        cb.setdefault("init_args", {})["overwrite"] = True
+
+
+# ``data.init_args`` that steer loading, FOV selection and training, not the
+# predicted voxels. ``data_path`` is among them: the marker records the source
+# shape, and a moved input must still resume.
+_LOADING_ONLY_DATA_ARGS = frozenset(
+    {
+        "data_path",
+        "batch_size",
+        "num_workers",
+        "persistent_workers",
+        "prefetch_factor",
+        "pin_memory",
+        "mmap_preload",
+        "scratch_dir",
+        "include_fov_names",
+        "exclude_fov_names",
+        "split_ratio",
+        "ground_truth_masks",
+        "augmentations",
+        "gpu_augmentations",
+        "val_augmentations",
+        "val_gpu_augmentations",
+        "min_nonzero_fraction",
+        "nonzero_threshold",
+        "nonzero_channel",
+        "max_nonzero_retries",
+        "fg_mask_key",
+    }
+)
+
+
+def prediction_settings_sha256_12(composed: dict) -> str:
+    """Hash the settings besides the checkpoint that shape a predict run's voxels.
+
+    Covers the model class and its init args except ``ckpt_path`` (inference
+    settings such as ``predict_method`` or ``num_generate_steps`` live there),
+    the data module class and its init args except the loading-only ones in
+    ``_LOADING_ONLY_DATA_ARGS`` (so ``normalizations``, channels, patch size
+    and depth window count), and ``trainer.precision``. Two runs with the same
+    checkpoint but different settings produce different voxels and must not
+    complete one store together; a resume that changes only paths, batch
+    size, workers or FOV selection still matches.
+    """
+    model = composed.get("model", {})
+    data = composed.get("data", {})
+    settings = {
+        "model": {
+            "class_path": model.get("class_path"),
+            "init_args": {k: v for k, v in model.get("init_args", {}).items() if k != "ckpt_path"},
+        },
+        "data": {
+            "class_path": data.get("class_path"),
+            "init_args": {k: v for k, v in data.get("init_args", {}).items() if k not in _LOADING_ONLY_DATA_ARGS},
+        },
+        "precision": composed.get("trainer", {}).get("precision"),
+    }
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def bind_prediction_run(composed: dict) -> None:
+    """Bind the run identity to every ``HCSPredictionWriter`` of a composed predict config.
+
+    Mutates ``composed`` in place so each FOV's completion marker records the
+    checkpoint (``model.init_args.ckpt_path``, when the model has one) and the
+    hash of the other prediction settings that produced it (see
+    :mod:`viscy_utils.prediction_metadata`). Shared by the single-job and batch
+    launchers: a submission path that skipped it would leave the writer
+    recording a null identity, and a resume through the other path would then
+    reject the store as another run's.
+    """
+    ckpt_path = composed.get("model", {}).get("init_args", {}).get("ckpt_path")
+    settings = prediction_settings_sha256_12(composed)
+    for cb in _writer_callbacks(composed):
+        init_args = cb.setdefault("init_args", {})
+        if ckpt_path:
+            init_args["checkpoint_path"] = str(ckpt_path)
+        init_args["settings_sha256_12"] = settings
 
 
 def _as_channel_list(target_channel: Any) -> list[str]:
@@ -128,28 +226,47 @@ def _as_channel_list(target_channel: Any) -> list[str]:
 
 def _prediction_output_store(composed: dict, leaf_path: Path) -> str:
     """Return the ``HCSPredictionWriter.output_store`` path from the composed config."""
-    callbacks = composed.get("trainer", {}).get("callbacks", [])
-    if isinstance(callbacks, list):
-        for cb in callbacks:
-            if isinstance(cb, dict) and str(cb.get("class_path", "")).endswith(_PRED_WRITER_CLASS_SUFFIX):
-                store = cb.get("init_args", {}).get("output_store")
-                if store:
-                    return str(store)
+    for cb in _writer_callbacks(composed):
+        store = cb.get("init_args", {}).get("output_store")
+        if store:
+            return str(store)
     raise SystemExit(f"{leaf_path}: --resume-predict requires an HCSPredictionWriter callback with output_store")
 
 
-def _completed_prediction_fovs(
-    output_store: str, data_path: str, prediction_channels: list[str]
-) -> tuple[set[str], int]:
-    """Return ``(complete FOV names, total input FOV count)`` for predict resume.
+@dataclass(frozen=True)
+class _StoreSurvey:
+    """Per-FOV resume verdicts for an existing prediction store."""
 
-    A FOV counts as complete when the output store holds every prediction
-    channel for it *and* its written T dimension equals that FOV's input T.
-    Predict configs set ``z_window_size`` to the full stack, so each timepoint
-    is written in a single ``write_sample`` call and the array's T grows
-    monotonically as timepoints finish — a crash mid-FOV leaves ``T < input T``.
-    A T-match is therefore a sufficient completeness signal. Metadata-only:
-    reads array shapes, never voxel data.
+    total: int
+    completed: set[str]
+    conflicting: set[str]
+    unverifiable: set[str]
+    oversized: set[str]
+
+
+def _survey_prediction_store(
+    output_store: str, data_path: str, prediction_channels: list[str], run: dict[str, Any]
+) -> _StoreSurvey:
+    """Classify the output store's FOVs for predict resume.
+
+    A FOV is complete when every prediction channel carries the marker this
+    run would write: the input's TZYX shape plus the run identity (checkpoint
+    content hash, array level, depth window and reduction), stamped by the
+    writer only after all of the FOV's (T, Z-window) writes succeed. A FOV
+    whose present channels carry only this run's started marker is its own
+    unfinished work and is recomputed. A FOV that holds a prediction channel
+    with no marker of its own predates the markers (the writer stamps a
+    started marker before its first write), so nothing can vouch for it even
+    when other channels of the FOV are marked: it is unverifiable rather than
+    incomplete. Any other marker is conflicting: the channel was predicted
+    from another source shape or with other weights or settings, and finishing
+    the store would mix them. Input shapes are read
+    from the array level ``run["array_key"]``, which every input must have. A
+    FOV whose output array at that level outruns its source in T or Z is
+    oversized whatever its markers say: another channel's run can grow the
+    shared array after this channel completed, and the writer would refuse to
+    rewrite it, so it is reported before a job is submitted. Metadata-only:
+    reads markers and shapes, never voxel data.
 
     Parameters
     ----------
@@ -159,28 +276,45 @@ def _completed_prediction_fovs(
         Path to the input HCS OME-Zarr the predict run reads.
     prediction_channels : list of str
         Channel names the writer emits (``<target>_prediction``).
+    run : dict
+        Run identity from :func:`viscy_utils.prediction_metadata.prediction_run`.
 
     Returns
     -------
-    tuple of (set of str, int)
-        Plate-relative names (e.g. ``"0/0/fov0000"``) of complete FOVs, and
-        the total number of input FOVs.
+    _StoreSurvey
+        Total input FOV count plus plate-relative names (e.g. ``"0/0/fov0000"``)
+        of complete, conflicting, unverifiable and oversized FOVs.
     """
-    input_t: dict[str, int] = {}
+    array_key = run["array_key"]
+    input_shapes: dict[str, list[int]] = {}
     with open_ome_zarr(data_path, mode="r") as plate:
         for name, pos in plate.positions():
-            input_t[name] = pos["0"].shape[0]
-    total = len(input_t)
+            input_shapes[name] = tzyx_shape(pos[array_key])
     completed: set[str] = set()
+    conflicting: set[str] = set()
+    unverifiable: set[str] = set()
+    oversized: set[str] = set()
     if not os.path.exists(output_store):
-        return completed, total
+        return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable, oversized)
     with open_ome_zarr(output_store, mode="r") as plate:
         for name, pos in plate.positions():
-            if not all(ch in pos.channel_names for ch in prediction_channels):
+            if name not in input_shapes:
                 continue
-            if input_t.get(name) is not None and pos["0"].shape[0] == input_t[name]:
+            try:
+                output = pos[array_key]
+            except KeyError:
+                output = None
+            present = [ch for ch in prediction_channels if ch in pos.channel_names]
+            markers = pos.zattrs.get(PREDICTION_COMPLETE_KEY, {})
+            if output is not None and outruns(output, input_shapes[name]):
+                oversized.add(name)
+            elif any(ch not in markers for ch in present):
+                unverifiable.add(name)
+            elif prediction_complete(pos, prediction_channels, completion_marker(input_shapes[name], run)):
                 completed.add(name)
-    return completed, total
+            elif not all(same_marker(markers[ch], started_marker(run)) for ch in present):
+                conflicting.add(name)
+    return _StoreSurvey(len(input_shapes), completed, conflicting, unverifiable, oversized)
 
 
 _OPTIONAL_SBATCH_DIRECTIVES = frozenset({"constraint", "exclude"})
@@ -376,7 +510,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "wall-time kill. Skips FOVs already fully written (via exclude_fov_names) "
         "and sets the writer overwrite=True, so the resubmit continues instead of "
         "crashing on the existing prediction channel (overwrite=False) or recomputing "
-        "every FOV (--overwrite alone). Completeness is per-FOV (written T == input T). "
+        "every FOV (--overwrite alone). Requires completion markers for all Z windows; "
+        "the markers record the checkpoint's content hash, depth handling and a hash of the "
+        "prediction settings, so a store "
+        "predicted with other weights or settings is refused rather than mixed, and a store "
+        "written before markers existed cannot be verified and is refused too. "
         "Reuses the leaf's checkpoint; cannot combine with --ckpt.",
     )
     ap.add_argument(
@@ -415,6 +553,9 @@ def submit(argv: list[str] | None = None) -> int:
             "--resume-predict cannot be combined with --ckpt: a resumed predict must reuse "
             "the original checkpoint, or the store would mix predictions from two models"
         )
+    # Either --print-* flag is a pure preview: nothing on disk may change (the
+    # full contract is spelled out below).
+    preview_only = args.print_script or args.print_resolved_config
 
     composed = load_composed_config(args.leaf, resolver=_dynacell_ref_resolver)
     for token in args.override:
@@ -516,6 +657,10 @@ def submit(argv: list[str] | None = None) -> int:
             raise SystemExit(f"--ckpt resolved to a missing checkpoint: {resolved_ckpt}")
         model_init["ckpt_path"] = str(resolved_ckpt)
 
+    model_init = composed.get("model", {}).get("init_args", {})
+    if mode == "predict":
+        bind_prediction_run(composed)
+
     # Predict-mode resume: continue a partially-written prediction store instead of
     # crashing or recomputing. The writer raises FileExistsError on an existing
     # prediction channel when overwrite=False, and --overwrite alone re-runs every
@@ -532,7 +677,47 @@ def submit(argv: list[str] | None = None) -> int:
             if not data_path:
                 raise SystemExit(f"{args.leaf}: --resume-predict requires data.init_args.data_path")
             pred_channels = [ch + "_prediction" for ch in _as_channel_list(data_init.get("target_channel"))]
-            completed, total = _completed_prediction_fovs(output_store, data_path, pred_channels)
+            if not model_init.get("ckpt_path"):
+                raise SystemExit(
+                    f"{args.leaf}: --resume-predict requires model.init_args.ckpt_path; the completion "
+                    "markers record the checkpoint so a resume cannot mix weights"
+                )
+            if data_init.get("z_window_size") is None:
+                raise SystemExit(f"{args.leaf}: --resume-predict requires data.init_args.z_window_size")
+            writer_init = _writer_callbacks(composed)[0]["init_args"]
+            # Defaults mirror HCSDataModule.array_key and HCSPredictionWriter.z_reduction;
+            # bind_prediction_run() set the settings hash above.
+            run = prediction_run(
+                array_key=str(data_init.get("array_key", "0")),
+                z_window_size=int(data_init["z_window_size"]),
+                z_reduction=str(writer_init.get("z_reduction", "blend")),
+                checkpoint_path=model_init["ckpt_path"],
+                settings_sha256_12=writer_init["settings_sha256_12"],
+            )
+            survey = _survey_prediction_store(output_store, data_path, pred_channels, run)
+            if survey.oversized:
+                examples = ", ".join(sorted(survey.oversized)[:5])
+                raise SystemExit(
+                    f"--resume-predict: {len(survey.oversized)} FOVs in {output_store} hold more timepoints or "
+                    f"depth slices than their source ({examples}); arrays only grow, so the stale planes would "
+                    "survive every rewrite. Predict into a new output store"
+                )
+            if survey.unverifiable:
+                examples = ", ".join(sorted(survey.unverifiable)[:5])
+                raise SystemExit(
+                    f"--resume-predict: {len(survey.unverifiable)} FOVs in {output_store} hold "
+                    f"{pred_channels} without a completion marker ({examples}), so their completion "
+                    "cannot be verified and a resume would overwrite them; predict into a new output "
+                    "store, or delete this one to recompute everything"
+                )
+            if survey.conflicting:
+                examples = ", ".join(sorted(survey.conflicting)[:5])
+                raise SystemExit(
+                    f"--resume-predict: {len(survey.conflicting)} FOVs in {output_store} were predicted "
+                    f"from another source shape or with another checkpoint or settings ({examples}); "
+                    "predict into a new output store instead of mixing them"
+                )
+            completed, total = survey.completed, survey.total
             if total and len(completed) == total:
                 print(f"--resume-predict: all {total} FOVs already complete in {output_store}; nothing to submit")
                 return 0
@@ -581,7 +766,6 @@ def submit(argv: list[str] | None = None) -> int:
     #   to also see the rendered sbatch on stdout.
     # - --dry-run combined with --print-* = --print-* wins (preview).
     # - Bare invocation = write + submit.
-    preview_only = args.print_script or args.print_resolved_config
     skip_submit = preview_only or args.dry_run
     if not preview_only:
         resolved_dir.mkdir(parents=True, exist_ok=True)

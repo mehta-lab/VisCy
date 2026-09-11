@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +14,16 @@ from omegaconf import OmegaConf
 pytest.importorskip("zarr")
 pytest.importorskip("iohub")
 
+from dynacell.evaluation import pipeline_cache  # noqa: E402
 from dynacell.evaluation.cache import (  # noqa: E402
     StaleCacheError,
     cache_paths,
+    feature_slug,
     load_manifest,
     read_features,
     read_instance_mask,
     read_mask,
+    save_manifest,
     write_features,
     write_mask,
 )
@@ -962,6 +967,212 @@ def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> Non
     assert manifest["artifacts"]["cp_features"]["source"] == "prediction"
 
 
+@pytest.mark.parametrize("side", ["gt", "pred"])
+def test_fov_cp_features_excluded_walk_seeds_identity_on_fresh_cache(tmp_path: Path, monkeypatch, side) -> None:
+    """A first-ever CP write on an excluded walk records the identity, so later runs hit.
+
+    Left bare, the leaf is ``{positions: [...]}``: every later init sees an
+    all-keys mismatch (perpetual recompute of the walked FOVs) and
+    ``require_complete_cache=true`` raises StaleCacheError on a cache that is
+    in fact complete for the FOVs it claims.
+    """
+
+    def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
+        return np.full((2, 3), float(image.sum()), dtype=np.float32)
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
+    overrides = {f"io.{side}_cache_dir": str(tmp_path), "io.exclude_fov_names": ["A/1/1"]}
+    ctx = init_cache_context(_make_config(**overrides), side=side)
+    assert ctx.excluded_walk
+    image = np.stack([np.full((1, 2, 2), 1.0), np.full((1, 2, 2), 2.0)])
+    cell_seg = np.ones_like(image, dtype=np.int32)
+    results = fov_cp_features(ctx, "A/1/0", image, cell_seg)
+    flush_manifest(ctx)
+
+    entry = load_manifest(cache_paths(tmp_path))["artifacts"]["cp_features"]
+    assert entry["positions"] == ["A/1/0"]
+    assert entry["cp_norm_p_lo"] == 1.0  # identity stamped, not a positions-only leaf
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ctx2 = init_cache_context(_make_config(**overrides), side=side)
+    assert ctx2.force[f"{side}_cp"] is False
+    assert not [str(w.message) for w in caught if "artifact param mismatch" in str(w.message)]
+
+    def fail(*args, **kwargs):
+        raise AssertionError("cp_regionprops must not run on a cache hit")
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fail)
+    strict = init_cache_context(_make_config(**overrides, **{"io.require_complete_cache": True}), side=side)
+    for t, feats in enumerate(fov_cp_features(strict, "A/1/0", image, cell_seg)):
+        np.testing.assert_array_equal(feats, results[t])
+
+
+@pytest.mark.parametrize("side", ["gt", "pred"])
+def test_fov_cp_features_excluded_refresh_does_not_certify_skipped_fovs(tmp_path: Path, monkeypatch, side) -> None:
+    """An excluded-walk CP recompute must leave the manifest identity on the old recipe.
+
+    Stamping the new ``p_lo`` would certify the skipped FOV's stale features:
+    the next full walk would compare new to new, skip invalidation, and read
+    them back as a hit. Keeping the old stamp costs one redundant rebuild of
+    the walked FOVs instead, and the full walk then self-heals the manifest.
+    """
+
+    def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del image, cell_seg, spacing, glcm_cfg, use_gpu
+        return np.full((2, 3), float(norm["p_lo"]), dtype=np.float32)
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
+    image = np.zeros((2, 1, 2, 2), dtype=np.float32)
+    cell_seg = np.ones_like(image, dtype=np.int32)
+    paths = cache_paths(tmp_path)
+
+    def config(p_lo: float, **extra: Any):
+        return _make_config(**{f"io.{side}_cache_dir": str(tmp_path), "feature_metrics.cp.norm.p_lo": p_lo, **extra})
+
+    def recipe_on_disk(pos_name: str) -> float:
+        return float(read_features(paths, "cp", pos_name, 0)[0, 0])
+
+    ctx1 = init_cache_context(config(1.0), side=side)
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_cp_features(ctx1, pos_name, image, cell_seg)
+    flush_manifest(ctx1)
+    assert load_manifest(paths)["artifacts"]["cp_features"]["cp_norm_p_lo"] == 1.0
+
+    with pytest.warns(UserWarning, match="cp_norm_p_lo"):
+        ctx2 = init_cache_context(config(2.0, **{"io.exclude_fov_names": ["A/1/1"]}), side=side)
+    assert ctx2.force[f"{side}_cp"] is True
+    fov_cp_features(ctx2, "A/1/0", image, cell_seg)
+    flush_manifest(ctx2)
+    entry = load_manifest(paths)["artifacts"]["cp_features"]
+    assert entry["cp_norm_p_lo"] == 1.0  # the skipped FOV is still on the old recipe
+    assert sorted(entry["positions"]) == ["A/1/0", "A/1/1"]
+    assert (recipe_on_disk("A/1/0"), recipe_on_disk("A/1/1")) == (2.0, 1.0)
+
+    with pytest.warns(UserWarning, match="cp_norm_p_lo"):
+        ctx3 = init_cache_context(config(2.0), side=side)
+    assert ctx3.force[f"{side}_cp"] is True
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_cp_features(ctx3, pos_name, image, cell_seg)
+    flush_manifest(ctx3)
+    assert load_manifest(paths)["artifacts"]["cp_features"]["cp_norm_p_lo"] == 2.0
+    assert (recipe_on_disk("A/1/0"), recipe_on_disk("A/1/1")) == (2.0, 2.0)
+
+
+def _strip_leaf_identity(paths, keys: list[str]) -> None:
+    """Rewrite the manifest leaf at *keys* to ``positions`` only: the pre-fix excluded walk's residue."""
+    manifest = load_manifest(paths)
+    parent = manifest["artifacts"]
+    for key in keys[:-1]:
+        parent = parent[key]
+    parent[keys[-1]] = {"positions": parent[keys[-1]]["positions"]}
+    save_manifest(paths, manifest)
+
+
+@pytest.mark.parametrize("side", ["gt", "pred"])
+@pytest.mark.parametrize("unknown", ["positions_only", "unflushed_store"])
+def test_fov_masks_excluded_walk_refuses_unknown_identity(tmp_path: Path, monkeypatch, side, unknown) -> None:
+    """An excluded walk must not bootstrap a bare mask leaf over slots of unknown identity.
+
+    ``positions_only`` is the leaf the pre-fix excluded walk left behind;
+    ``unflushed_store`` is a builder stopped before its deferred manifest flush
+    (mask slots on disk, no manifest at all). Either way the store holds the FOV
+    this walk skips, so stamping would certify it for every later
+    ``require_complete_cache`` run. The refusal fires before segmentation and
+    leaves the manifest on disk untouched; the prescribed full walk with
+    ``force_recompute`` then rebuilds every slot and stamps.
+    """
+    import dynacell.evaluation.segmentation as segmentation
+
+    def fail(*args, **kwargs):
+        raise AssertionError("segment must not run: the refusal precedes the compute")
+
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    paths = cache_paths(tmp_path)
+    image = np.zeros((2, 1, 4, 4), dtype=np.float32)
+    positions_only = unknown == "positions_only"
+
+    def init(*, expect_mismatch: bool = False, **extra: Any):
+        expect = pytest.warns(UserWarning, match="artifact param mismatch") if expect_mismatch else nullcontext()
+        with expect:
+            return init_cache_context(_make_config(**{f"io.{side}_cache_dir": str(tmp_path), **extra}), side=side)
+
+    ctx1 = init()
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_masks(ctx1, pos_name, image, seg_model=_FakeSegModel())
+    if positions_only:
+        flush_manifest(ctx1)
+        _strip_leaf_identity(paths, ["organelle_masks", "er"])
+    walked = "A/1/0" if positions_only else "A/1/2"  # forced rewrite vs a plain miss
+    before = load_manifest(paths)
+
+    monkeypatch.setattr(segmentation, "segment", fail)
+    ctx2 = init(expect_mismatch=positions_only, **{"io.exclude_fov_names": ["A/1/1"]})
+    with pytest.raises(StaleCacheError, match="unknown identity"):
+        fov_masks(ctx2, walked, image, seg_model=_FakeSegModel())
+    flush_manifest(ctx2)
+    assert load_manifest(paths) == before
+
+    monkeypatch.setattr(segmentation, "segment", _seg_fn_factory(1))
+    ctx3 = init(expect_mismatch=positions_only, **{f"force_recompute.{side}_masks": True})
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_masks(ctx3, pos_name, image, seg_model=_FakeSegModel())
+    flush_manifest(ctx3)
+    leaf = load_manifest(paths)["artifacts"]["organelle_masks"]["er"]
+    assert leaf["target_name"] == "er"
+    assert sorted(leaf["positions"]) == ["A/1/0", "A/1/1"]
+
+
+@pytest.mark.parametrize("side", ["gt", "pred"])
+@pytest.mark.parametrize("unknown", ["positions_only", "unflushed_store"])
+def test_fov_cp_features_excluded_walk_refuses_unknown_identity(tmp_path: Path, monkeypatch, side, unknown) -> None:
+    """CP features honour the same contract as masks, through the shared per-timepoint feature writer."""
+
+    def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
+        del cell_seg, spacing, norm, glcm_cfg, use_gpu
+        return np.full((2, 3), float(image.sum()), dtype=np.float32)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("cp_regionprops must not run: the refusal precedes the compute")
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
+    paths = cache_paths(tmp_path)
+    image = np.ones((2, 1, 2, 2), dtype=np.float32)
+    cell_seg = np.ones_like(image, dtype=np.int32)
+    positions_only = unknown == "positions_only"
+
+    def init(*, expect_mismatch: bool = False, **extra: Any):
+        expect = pytest.warns(UserWarning, match="artifact param mismatch") if expect_mismatch else nullcontext()
+        with expect:
+            return init_cache_context(_make_config(**{f"io.{side}_cache_dir": str(tmp_path), **extra}), side=side)
+
+    ctx1 = init()
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_cp_features(ctx1, pos_name, image, cell_seg)
+    if positions_only:
+        flush_manifest(ctx1)
+        _strip_leaf_identity(paths, ["cp_features"])
+    walked = "A/1/0" if positions_only else "A/1/2"
+    before = load_manifest(paths)
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fail)
+    ctx2 = init(expect_mismatch=positions_only, **{"io.exclude_fov_names": ["A/1/1"]})
+    with pytest.raises(StaleCacheError, match="unknown identity"):
+        fov_cp_features(ctx2, walked, image, cell_seg)
+    flush_manifest(ctx2)
+    assert load_manifest(paths) == before
+
+    monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
+    ctx3 = init(expect_mismatch=positions_only, **{f"force_recompute.{side}_cp": True})
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_cp_features(ctx3, pos_name, image, cell_seg)
+    flush_manifest(ctx3)
+    leaf = load_manifest(paths)["artifacts"]["cp_features"]
+    assert leaf["cp_norm_p_lo"] == 1.0
+    assert sorted(leaf["positions"]) == ["A/1/0", "A/1/1"]
+
+
 def _write_tiny_hcs_plate(
     path: Path,
     positions: list[tuple[str, str, str]],
@@ -1011,13 +1222,14 @@ def _write_tiny_seg_plate(
 class _BatchedConstantExtractor:
     """Stub extractor that honors the ``extract_features_batch`` contract.
 
-    Returns ones of shape ``(len(images), feature_dim)`` so equality
+    Returns constant arrays of shape ``(len(images), feature_dim)`` so equality
     checks across paths are bit-exact. Counts batch calls and records
     every batch size so tests can assert skipped slots.
     """
 
-    def __init__(self, feature_dim: int = 16) -> None:
+    def __init__(self, feature_dim: int = 16, value: float = 1.0) -> None:
         self.feature_dim = feature_dim
+        self.value = value
         self.batch_call_count = 0
         self.batch_sizes: list[int] = []
 
@@ -1026,12 +1238,12 @@ class _BatchedConstantExtractor:
 
         self.batch_call_count += 1
         self.batch_sizes.append(len(images))
-        return torch.from_numpy(np.ones((len(images), self.feature_dim), dtype=np.float32))
+        return torch.from_numpy(np.full((len(images), self.feature_dim), self.value, dtype=np.float32))
 
     def extract_features(self, img):
         import torch
 
-        return torch.from_numpy(np.ones((self.feature_dim,), dtype=np.float32))
+        return torch.from_numpy(np.full((self.feature_dim,), self.value, dtype=np.float32))
 
 
 def _open_precompute_inputs(tmp_path: Path, *, n_t: int = 3, n_cells: int = 2):
@@ -1181,6 +1393,238 @@ def test_precompute_deep_features_skips_cached_slots(tmp_path: Path) -> None:
     finally:
         gt_plate.close()
         seg_plate.close()
+
+
+@pytest.mark.parametrize("side", ["gt", "pred"])
+@pytest.mark.parametrize("flush_threshold", [1, 256])
+@pytest.mark.parametrize("refresh_mode", ["versioned", "legacy_focus", "legacy_forced"])
+def test_precompute_excluded_fov_preserves_cache_identity(tmp_path: Path, side, flush_threshold, refresh_mode) -> None:
+    """A partial refresh cannot certify excluded embeddings for the next full run."""
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path, n_t=1)
+    cache_dir = tmp_path / "cache"
+    model_name = "facebook/test-dinov3"
+    with gt_plate, seg_plate:
+        cfg = _make_config(
+            **{
+                f"io.{side}_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                f"io.{side}_cache_dir": str(cache_dir),
+            }
+        )
+        positions = list(gt_plate.positions())
+        seg_positions = list(seg_plate.positions())
+
+        def precompute(ctx, selected, value):
+            precompute_deep_features(
+                sides={side: ctx},
+                side_positions={side: positions[:selected]},
+                side_channel_names={side: "target"},
+                seg_positions=seg_positions[:selected],
+                extractors={"dinov3": _BatchedConstantExtractor(value=value)},
+                flush_threshold=flush_threshold,
+                focus_slabs=(
+                    {name: [slice(0, 1)] for name, _ in positions[:selected]} if ctx.focus_slab_enabled else None
+                ),
+            )
+            flush_manifest(ctx)
+
+        ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v1")
+        precompute(ctx, selected=2, value=1.0)
+        paths = cache_paths(cache_dir)
+        manifest = load_manifest(paths)
+        old_entry = manifest["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        if refresh_mode != "versioned":
+            del old_entry["preprocess_version"]
+            save_manifest(paths, manifest)
+        if refresh_mode == "legacy_focus":
+            cfg.feature_metrics.focus_slab = {"enabled": True, "halfwidth": 0, "channel_name": "Phase3D"}
+        elif refresh_mode == "legacy_forced":
+            cfg.force_recompute[f"{side}_dinov3"] = True
+
+        cfg.io.exclude_fov_names = ["A/1/1"]
+        expect_warning = refresh_mode != "legacy_forced"
+        with pytest.warns(UserWarning, match="preprocess_version mismatch") if expect_warning else nullcontext():
+            ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v2")
+        precompute(ctx, selected=1, value=2.0)
+        for pos_name, value in [("A/1/0", 2.0), ("A/1/1", 1.0)]:
+            np.testing.assert_array_equal(
+                read_features(paths, "dinov3", pos_name, 0, model_name=model_name),
+                np.full((2, 16), value, dtype=np.float32),
+            )
+        entry = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        assert entry == old_entry
+
+        cfg.io.exclude_fov_names = []
+        with pytest.warns(UserWarning, match="preprocess_version mismatch") if expect_warning else nullcontext():
+            ctx = init_cache_context(cfg, side=side, dinov3_model_name=model_name, dinov3_preprocess_version="v2")
+        assert ctx.force[f"{side}_dinov3"]
+        precompute(ctx, selected=2, value=3.0)
+        for pos_name in ("A/1/0", "A/1/1"):
+            np.testing.assert_array_equal(
+                read_features(paths, "dinov3", pos_name, 0, model_name=model_name),
+                np.full((2, 16), 3.0, dtype=np.float32),
+            )
+        entry = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        assert entry["preprocess_version"] == ctx.dinov3_preprocess_version
+        assert entry["patch_size"] == cfg.feature_metrics.patch_size
+
+
+@pytest.mark.parametrize("writer", ["fov", "batch"])
+@pytest.mark.parametrize("unknown", ["positions_only", "unflushed_store"])
+def test_deep_features_excluded_walk_refuses_unknown_identity(tmp_path: Path, writer, unknown) -> None:
+    """Both deep-feature writers refuse to bootstrap a bare leaf over embeddings of unknown identity.
+
+    The reviewer's reproduction on #497: two FOVs of embeddings sit in the store
+    under a positions-only leaf (the pre-fix excluded walk) or under no manifest
+    at all (a builder stopped before its deferred flush). An excluded walk that
+    re-extracts one FOV must not stamp the leaf -- a later
+    ``require_complete_cache`` run would read the skipped FOV back as a hit --
+    and must refuse before the extractor runs.
+    """
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path, n_t=1)
+    cache_dir = tmp_path / "cache"
+    paths = cache_paths(cache_dir)
+    model_name = "facebook/test-dinov3"
+    positions_only = unknown == "positions_only"
+
+    class ExplodingExtractor:
+        def extract_features_batch(self, images):
+            raise AssertionError("the extractor must not run: the refusal precedes the compute")
+
+        def extract_features(self, img):
+            raise AssertionError("the extractor must not run: the refusal precedes the compute")
+
+    with gt_plate, seg_plate:
+        positions = list(gt_plate.positions())
+        seg_positions = list(seg_plate.positions())
+        cfg = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_dir),
+            }
+        )
+
+        def init(*, expect_mismatch: bool = False):
+            expect = pytest.warns(UserWarning, match="artifact param mismatch") if expect_mismatch else nullcontext()
+            with expect:
+                return init_cache_context(cfg, side="gt", dinov3_model_name=model_name, dinov3_preprocess_version="v1")
+
+        def write(ctx, selected: int, extractor) -> None:
+            if writer == "batch":
+                precompute_deep_features(
+                    sides={"gt": ctx},
+                    side_positions={"gt": positions[:selected]},
+                    side_channel_names={"gt": "target"},
+                    seg_positions=seg_positions[:selected],
+                    extractors={"dinov3": extractor},
+                )
+                return
+            for (pos_name, pos), (_, pos_seg) in zip(positions[:selected], seg_positions[:selected]):
+                image = np.asarray(pos.data[:, 0])
+                cell_seg = np.asarray(pos_seg.data[:, 0])
+                fov_deep_features(ctx, pos_name, image, cell_seg, extractor, "dinov3")
+
+        def features(pos_name: str) -> np.ndarray:
+            return read_features(paths, "dinov3", pos_name, 0, model_name=model_name)
+
+        ctx1 = init()
+        write(ctx1, 2, _BatchedConstantExtractor(value=1.0))
+        if positions_only:
+            flush_manifest(ctx1)
+            _strip_leaf_identity(paths, ["dinov3_features", feature_slug(model_name)])
+        else:
+            assert not paths.manifest.exists()
+        before = load_manifest(paths)
+
+        cfg.io.exclude_fov_names = ["A/1/1"]
+        cfg.force_recompute.gt_dinov3 = True
+        ctx2 = init(expect_mismatch=positions_only)
+        with pytest.raises(StaleCacheError, match="unknown identity"):
+            write(ctx2, 1, ExplodingExtractor())
+        flush_manifest(ctx2)
+        assert load_manifest(paths) == before
+        for pos_name in ("A/1/0", "A/1/1"):
+            np.testing.assert_array_equal(features(pos_name), np.full((2, 16), 1.0, dtype=np.float32))
+
+        cfg.io.exclude_fov_names = []
+        ctx3 = init(expect_mismatch=positions_only)
+        write(ctx3, 2, _BatchedConstantExtractor(value=3.0))
+        flush_manifest(ctx3)
+        leaf = load_manifest(paths)["artifacts"]["dinov3_features"][feature_slug(model_name)]
+        assert leaf["preprocess_version"] == "v1"
+        assert sorted(leaf["positions"]) == ["A/1/0", "A/1/1"]
+        for pos_name in ("A/1/0", "A/1/1"):
+            np.testing.assert_array_equal(features(pos_name), np.full((2, 16), 3.0, dtype=np.float32))
+
+
+@pytest.mark.parametrize("writer", ["fov", "batch"])
+def test_deep_feature_writes_scan_the_store_only_to_bootstrap_a_bare_leaf(tmp_path: Path, monkeypatch, writer) -> None:
+    """Slot discovery visits every array in the feature store; a full walk or a settled leaf must not pay per write.
+
+    The reviewer's measurement on #497: each of 12 per-FOV writes enumerated the
+    arrays every earlier write had left, 132 visits for 24 arrays. The scan is
+    only evidence when an excluded walk meets a leaf without an identity.
+    """
+    gt_plate, seg_plate, gt_path, seg_path = _open_precompute_inputs(tmp_path, n_t=1)
+    cache_dir = tmp_path / "cache"
+    model_name = "facebook/test-dinov3"
+    scans: list[int] = []
+    real_feature_slots = pipeline_cache._feature_slots
+
+    def counting_feature_slots(group):
+        scans.append(1)
+        return real_feature_slots(group)
+
+    monkeypatch.setattr(pipeline_cache, "_feature_slots", counting_feature_slots)
+
+    with gt_plate, seg_plate:
+        positions = list(gt_plate.positions())
+        seg_positions = list(seg_plate.positions())
+        cfg = _make_config(
+            **{
+                "io.gt_path": str(gt_path),
+                "io.cell_segmentation_path": str(seg_path),
+                "io.gt_cache_dir": str(cache_dir),
+            }
+        )
+
+        def init():
+            return init_cache_context(cfg, side="gt", dinov3_model_name=model_name, dinov3_preprocess_version="v1")
+
+        def write(ctx, selected: int, value: float) -> None:
+            extractor = _BatchedConstantExtractor(value=value)
+            if writer == "batch":
+                precompute_deep_features(
+                    sides={"gt": ctx},
+                    side_positions={"gt": positions[:selected]},
+                    side_channel_names={"gt": "target"},
+                    seg_positions=seg_positions[:selected],
+                    extractors={"dinov3": extractor},
+                )
+                return
+            for (pos_name, pos), (_, pos_seg) in zip(positions[:selected], seg_positions[:selected]):
+                image = np.asarray(pos.data[:, 0])
+                cell_seg = np.asarray(pos_seg.data[:, 0])
+                fov_deep_features(ctx, pos_name, image, cell_seg, extractor, "dinov3")
+
+        ctx1 = init()
+        write(ctx1, 2, 1.0)
+        flush_manifest(ctx1)
+        assert scans == []  # a full walk stamps the leaf without looking at the store
+
+        cfg.io.exclude_fov_names = ["A/1/1"]
+        cfg.force_recompute.gt_dinov3 = True
+        ctx2 = init()
+        write(ctx2, 1, 2.0)
+        flush_manifest(ctx2)
+        assert scans == []  # the leaf already carries an identity
+
+        _strip_leaf_identity(cache_paths(cache_dir), ["dinov3_features", feature_slug(model_name)])
+        ctx3 = init()
+        with pytest.raises(StaleCacheError, match="unknown identity"):
+            write(ctx3, 1, 3.0)
+        assert scans == [1]  # the bare leaf is the one case that needs the evidence
 
 
 def test_preprocess_version_missing_in_manifest_is_lenient(tmp_path: Path) -> None:
@@ -1489,6 +1933,88 @@ def test_instance_cache_identity_invalidation(tmp_path: Path, monkeypatch) -> No
     changed = dict(_CELLPOSE_PARAMS, min_obj_size=99)
     ctx2 = init_cache_context(_nucleus_instance_config(tmp_path, **{"segmentation.cellpose": changed}), side="gt")
     assert ctx2.force["gt_instances"] is True
+
+
+def test_fov_nucleus_instances_excluded_refresh_does_not_certify_skipped_fovs(tmp_path: Path, monkeypatch) -> None:
+    """An excluded-walk instance recompute must leave the manifest identity on the old params.
+
+    Same contract as CP features: the entry is a store-wide claim, so the
+    skipped FOV's stale labels must keep tripping the mismatch on the next
+    full walk instead of reading back as a hit.
+    """
+    from dynacell.evaluation import segmentation_cellpose
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    nuc_stack = np.zeros((2, 16, 16), dtype=np.float32)
+    paths = cache_paths(tmp_path / "gt")
+
+    def entry() -> dict[str, Any]:
+        return load_manifest(paths)["artifacts"]["instance_masks"]["nucleus__cellpose"]
+
+    ctx1 = init_cache_context(_nucleus_instance_config(tmp_path), side="gt")
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_nucleus_instances(ctx1, pos_name, nuc_stack, _FakeSegModel())
+    flush_manifest(ctx1)
+    assert entry()["slice_selection"] == "frac"
+
+    changed = {"segmentation.slice_selection": "sharpest"}
+    with pytest.warns(UserWarning, match="slice_selection"):
+        ctx2 = init_cache_context(
+            _nucleus_instance_config(tmp_path, **changed, **{"io.exclude_fov_names": ["A/1/1"]}), side="gt"
+        )
+    assert ctx2.force["gt_instances"] is True
+    fov_nucleus_instances(ctx2, "A/1/0", nuc_stack, _FakeSegModel())
+    flush_manifest(ctx2)
+    assert entry()["slice_selection"] == "frac"  # the skipped FOV is still on the old params
+    assert sorted(entry()["positions"]) == ["A/1/0", "A/1/1"]
+
+    with pytest.warns(UserWarning, match="slice_selection"):
+        ctx3 = init_cache_context(_nucleus_instance_config(tmp_path, **changed), side="gt")
+    assert ctx3.force["gt_instances"] is True
+
+
+@pytest.mark.parametrize("unknown", ["positions_only", "unflushed_store"])
+def test_fov_nucleus_instances_excluded_walk_refuses_unknown_identity(tmp_path: Path, monkeypatch, unknown) -> None:
+    """Instance labels honour the same contract as masks, on the ``instance_masks`` plate."""
+    from dynacell.evaluation import segmentation_cellpose
+
+    def fail(*a, **k):
+        raise AssertionError("segment_nucleus_instances must not run: the refusal precedes the compute")
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    paths = cache_paths(tmp_path / "gt")
+    nuc_stack = np.zeros((2, 16, 16), dtype=np.float32)
+    positions_only = unknown == "positions_only"
+
+    def init(*, expect_mismatch: bool = False, **extra: Any):
+        expect = pytest.warns(UserWarning, match="artifact param mismatch") if expect_mismatch else nullcontext()
+        with expect:
+            return init_cache_context(_nucleus_instance_config(tmp_path, **extra), side="gt")
+
+    ctx1 = init()
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_nucleus_instances(ctx1, pos_name, nuc_stack, _FakeSegModel())
+    if positions_only:
+        flush_manifest(ctx1)
+        _strip_leaf_identity(paths, ["instance_masks", "nucleus__cellpose"])
+    walked = "A/1/0" if positions_only else "A/1/2"
+    before = load_manifest(paths)
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", fail)
+    ctx2 = init(expect_mismatch=positions_only, **{"io.exclude_fov_names": ["A/1/1"]})
+    with pytest.raises(StaleCacheError, match="unknown identity"):
+        fov_nucleus_instances(ctx2, walked, nuc_stack, _FakeSegModel())
+    flush_manifest(ctx2)
+    assert load_manifest(paths) == before
+
+    monkeypatch.setattr(segmentation_cellpose, "segment_nucleus_instances", lambda *a, **k: _two_label_stack(a[0]))
+    ctx3 = init(expect_mismatch=positions_only, **{"force_recompute.gt_instances": True})
+    for pos_name in ("A/1/0", "A/1/1"):
+        fov_nucleus_instances(ctx3, pos_name, nuc_stack, _FakeSegModel())
+    flush_manifest(ctx3)
+    leaf = load_manifest(paths)["artifacts"]["instance_masks"]["nucleus__cellpose"]
+    assert leaf["slice_selection"] == "frac"
+    assert sorted(leaf["positions"]) == ["A/1/0", "A/1/1"]
 
 
 def test_whole_cell_cache_invalidates_on_nuclei_gt_path(tmp_path: Path, monkeypatch) -> None:

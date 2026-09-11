@@ -64,19 +64,21 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 **Using the stall watchdog.** `applications/dynacell/tools/watch_stalled_jobs.py` automates exactly that comparison. Start it whenever a campaign has long jobs in flight and leave it running:
 
 ```sh
-# one-shot check: exit 0 = all healthy, exit 1 = something is stalled
+# one-shot check: exit 0 = no stall detected, exit 1 = something is stalled, exit 2 = tool error
 uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --once
 
 # continuous, 10-min poll (launch in the background; it runs until killed)
 uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
 ```
 
-Quiet polls print `ok, tracking N: <jobid>(<samples>) ...`; a stalled job prints one `STALLED <jobid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
+Quiet polls print `no stall detected, tracking N: <stepid>(<samples>) ...`, or `collecting history` when a step lacks a 15-minute baseline. A stalled step prints one `STALLED <stepid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
 
 - It **only reports — it never cancels.** Cancelling a job with `afterok` dependents strands them, so follow the kill order above by hand.
 - **Interactive sessions are excluded by name** (`nomachine`, `gpu-hold`, `interactive`, bare `bash`/`sh`/`srun`). A renamed interactive session would get flagged — it still would not be cancelled, but don't act on the alert without checking.
-- It needs **two samples >= 15 min apart** and a job **>= 30 min old**, so expect no verdict on a fresh job for the first couple of polls.
-- A job that has never burned CPU is never flagged: startup NFS staging is legitimately ~0% CPU, so the check requires the job to have previously demonstrated CPU progress.
+- It needs **two samples >= 15 min apart** and a step **>= 30 min old**, so expect no verdict on a fresh step for the first couple of polls.
+- Both modes persist samples in `$XDG_CACHE_HOME/viscy/watch_stalled_jobs-<user>@<hostname>.json` (default cache root: `~/.cache`), so each node keeps its own history by default; `--state-file` overrides the path. The file records the host that wrote it and refuses to load on any other, whatever its schema version: `~/.cache` is on NFS, where `flock` only excludes processes on the same node, so run the daemon and its `--once` checks on one node. A `--state-file` shared between nodes is claimed by the first host to create it (`O_EXCL`); a second host that started from the absent file fails on its first save instead of overwriting the winner's history. Repeat `--once` after at least 15 minutes. Its first invocation collects history; exit 0 does not establish that every job is healthy.
+- Histories are **per SLURM step** (`<jobid>.<step>` from `squeue -s`), judged against that step's own elapsed time rather than the job's. A `submit_benchmark_batch` chain advancing to its next `srun` step, or a requeue reusing a step id, starts a fresh history with that step's own clocks; the previous step's CPU cannot establish progress for the new one. A step first seen mid-allocation is judged on its cumulative CPU over its own age, so a watcher started late still catches a step that was already hung. Only `.extern` is skipped: `.batch` is tracked like any other step, because `submit_benchmark_batch --parallel` and `run_eval_direct.slurm` run their compute directly in the batch script with no `srun` step; for `srun`-based jobs the batch step never burns CPU, so it never qualifies.
+- A step that has not burned CPU **over a window of at least 30 minutes** is never flagged: startup NFS staging is legitimately ~0% CPU, and a short import-time burst must not qualify a step either. Qualification uses cumulative CPU over the step's age at the first sample taken once the step is >= 30 min old (whether or not that is the first sample), or CPU since first sight (only once >= 30 min have elapsed). A step that once qualified stays qualified through a long idle.
 - `--user` defaults to `alex.kalinin`; `sstat` only works on your own running jobs, so it cannot watch someone else's.
 
 **Predict wall limits are per family, sized from measurement** (`launcher_profiles/`):
