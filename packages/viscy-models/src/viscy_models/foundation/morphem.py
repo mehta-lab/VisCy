@@ -18,6 +18,11 @@ class MorphEmModel(nn.Module):
     ----------
     model_name : str
         HuggingFace id (``"CaicedoLab/MorphEm"``) or a local snapshot dir.
+    revision : str | None
+        Hub commit SHA (or tag) to load. MorphEm ships its ViT as
+        ``trust_remote_code`` Python, so an unpinned id would execute
+        whatever is at the repository head on a cache miss. Ignored for a
+        local snapshot dir.
     img_size : int
         Spatial size inputs are resized to, by default 224.
     freeze : bool
@@ -29,6 +34,7 @@ class MorphEmModel(nn.Module):
     def __init__(
         self,
         model_name: str,
+        revision: str | None = None,
         img_size: int = 224,
         freeze: bool = True,
         projection: nn.Module | None = None,
@@ -48,7 +54,7 @@ class MorphEmModel(nn.Module):
         if not isinstance(getattr(transformers.PreTrainedModel, "all_tied_weights_keys", None), dict):
             transformers.PreTrainedModel.all_tied_weights_keys = {}
 
-        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_name, revision=revision, trust_remote_code=True)
         self.target_size = (img_size, img_size)
         self.projection = projection
         # Expose embed dim for foundation-wrapper parity (dynaclr foundation_engine

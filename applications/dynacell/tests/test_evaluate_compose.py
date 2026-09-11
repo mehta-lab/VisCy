@@ -18,6 +18,7 @@ CLI calls by passing ``hydra.searchpath`` overrides to ``compose``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,13 @@ def _compose_eval_cfg(overrides: list[str], config_name: str = "eval") -> DictCo
     with initialize_config_module(config_module="dynacell.evaluation._configs", version_base="1.2"):
         cfg = compose(config_name=config_name, overrides=[*overrides, _searchpath_override()])
     return cfg
+
+
+def test_default_eval_pins_morphem_to_a_hub_commit() -> None:
+    """The morphem group must carry a full commit SHA: the model is trust_remote_code."""
+    cfg = _compose_eval_cfg([])
+    assert cfg.feature_extractor.morphem.pretrained_model_name == "CaicedoLab/MorphEm"
+    assert re.fullmatch(r"[0-9a-f]{40}", cfg.feature_extractor.morphem.revision)
 
 
 # -- Layer 1: compose + hook produces correct resolved values ---------------

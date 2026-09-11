@@ -356,7 +356,7 @@ class MorphEmFeatureExtractor:
     # would cancel under the per-image z-score.
     PREPROCESS_VERSION = "per_image_norm_v2"
 
-    def __init__(self, pretrained_model_name: str, img_size: int = 224):
+    def __init__(self, pretrained_model_name: str, revision: str | None = None, img_size: int = 224):
         """Load MorphEm from a HuggingFace hub id (or local snapshot dir).
 
         Parameters
@@ -364,12 +364,15 @@ class MorphEmFeatureExtractor:
         pretrained_model_name :
             HuggingFace id (``"CaicedoLab/MorphEm"``) or a local snapshot
             directory; resolved from the shared ``HF_HUB_CACHE``.
+        revision :
+            Hub commit SHA to pin the ``trust_remote_code`` model to. The
+            eval config sets it; ``None`` (hub head) is only for ad-hoc use.
         img_size :
             Spatial size the model interpolates inputs to, by default 224.
         """
         _require_morphem()
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = MorphEmModel(model_name=pretrained_model_name, img_size=img_size, freeze=True)
+        self.model = MorphEmModel(model_name=pretrained_model_name, revision=revision, img_size=img_size, freeze=True)
         self.model.to(device)
         self.model.eval()
         self.device = device

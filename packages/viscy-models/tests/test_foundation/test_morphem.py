@@ -53,7 +53,15 @@ def test_load_passes_trust_remote_code(captured_load):
     model = MorphEmModel(model_name="CaicedoLab/MorphEm")
     assert captured_load["name"] == "CaicedoLab/MorphEm"
     assert captured_load["kwargs"]["trust_remote_code"] is True
+    assert captured_load["kwargs"]["revision"] is None
     assert model.embed_dim == _EMBED_DIM
+
+
+def test_load_forwards_pinned_revision(captured_load):
+    """A pinned Hub commit reaches ``from_pretrained`` so the remote code is frozen."""
+    MorphEmModel(model_name="CaicedoLab/MorphEm", revision="0e8d58787421f83f975634d72420d85c5dfc9c2c")
+    assert captured_load["kwargs"]["revision"] == "0e8d58787421f83f975634d72420d85c5dfc9c2c"
+    assert captured_load["kwargs"]["trust_remote_code"] is True
 
 
 def test_preprocess_2d_normalizes_and_resizes(captured_load):

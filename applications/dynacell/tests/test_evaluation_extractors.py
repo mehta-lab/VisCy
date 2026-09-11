@@ -106,9 +106,10 @@ def test_dinov3_preprocess_version_is_v3() -> None:
 class _StubMorphEm(torch.nn.Module):
     """Stand-in for ``MorphEmModel`` that skips the HF load entirely."""
 
-    def __init__(self, model_name: str, img_size: int = 224, freeze: bool = True) -> None:
+    def __init__(self, model_name: str, revision: str | None = None, img_size: int = 224, freeze: bool = True) -> None:
         super().__init__()
         self.model_name = model_name
+        self.revision = revision
 
     def preprocess_2d(self, x: torch.Tensor) -> torch.Tensor:
         return x
@@ -133,6 +134,13 @@ def test_morphem_extract_features_batch(monkeypatch: pytest.MonkeyPatch) -> None
     images = [np.zeros((64, 64), dtype=np.float32) for _ in range(3)]
     out = extractor.extract_features_batch(images, batch_size=2)
     assert tuple(out.shape) == (3, 384)
+
+
+def test_morphem_extractor_forwards_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Hub commit pin reaches ``MorphEmModel`` so trust_remote_code loads audited code."""
+    monkeypatch.setattr(eval_utils, "MorphEmModel", _StubMorphEm)
+    extractor = eval_utils.MorphEmFeatureExtractor("CaicedoLab/MorphEm", revision="0e8d5878")
+    assert extractor.model.revision == "0e8d5878"
 
 
 def test_morphem_preprocess_version() -> None:
@@ -233,3 +241,21 @@ def test_morphem_null_name_soft_skips_in_load_eval_models() -> None:
     assert models.morphem is None
     assert models.morphem_model_name is None
     assert models.morphem_preprocess_version is None
+
+
+def test_load_eval_models_pins_morphem_to_the_configured_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``feature_extractor.morphem.revision`` is what the extractor loads, not the hub head."""
+    from omegaconf import OmegaConf
+
+    from dynacell.evaluation.model_loader import LoadFlags, load_eval_models
+
+    monkeypatch.setattr(eval_utils, "MorphEmModel", _StubMorphEm)
+    config = OmegaConf.create(
+        {
+            "target_name": "nucleus",
+            "feature_extractor": {"morphem": {"pretrained_model_name": "CaicedoLab/MorphEm", "revision": "0e8d5878"}},
+        }
+    )
+    models = load_eval_models(config, flags=LoadFlags(masks=False, morphem=True))
+    assert models.morphem_model_name == "CaicedoLab/MorphEm"
+    assert models.morphem.model.revision == "0e8d5878"

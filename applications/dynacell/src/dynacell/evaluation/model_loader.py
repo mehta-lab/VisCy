@@ -162,7 +162,10 @@ def load_eval_models(config: DictConfig, *, flags: LoadFlags | None = None) -> E
         morphem_cfg = config.feature_extractor.morphem
         if morphem_cfg.pretrained_model_name is not None:
             morphem_model_name = str(morphem_cfg.pretrained_model_name)
-            morphem = MorphEmFeatureExtractor(pretrained_model_name=morphem_model_name)
+            morphem = MorphEmFeatureExtractor(
+                pretrained_model_name=morphem_model_name,
+                revision=morphem_cfg.revision,
+            )
 
     return EvalModels(
         seg_model=seg_model,

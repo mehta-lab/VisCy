@@ -181,8 +181,10 @@ feature_extractor:
   # MorphEm (CaicedoLab/MorphEm, DINO ViT-S/16 on microscopy). The
   # feature_extractor/morphem group (in defaults) overrides this to the hub
   # id; `pretrained_model_name: null` is the explicit-disable path.
+  # `revision` pins the trust_remote_code snapshot (set by the group).
   morphem:
     pretrained_model_name: null
+    revision: null
 
 use_gpu: true
 compute_microssim: true
