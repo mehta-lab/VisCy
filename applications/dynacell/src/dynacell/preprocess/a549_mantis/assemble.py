@@ -15,8 +15,9 @@ conditions together. Used as the training corpus when downstream models
 expect a single data_path; per-condition ozx stores remain the canonical
 eval inputs.
 
-Invoked by ``preprocessing/dynacell-a549/3-assemble-pool/assemble_pool.py``
-and the ``dynacell-paper preprocess assemble-pool`` CLI.
+Driven by the packaged ``_configs/preprocess/dynacell/a549_assemble_pool.yaml``
+loaded with :func:`dynacell.preprocess.load_preprocess_config` and passed to
+:func:`assemble_pool`; there is no ``dynacell`` CLI subcommand for it.
 """
 
 import contextlib

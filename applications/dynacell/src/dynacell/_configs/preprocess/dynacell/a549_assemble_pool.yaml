@@ -1,7 +1,11 @@
 # A549 mantis pool assembly.
 #
-# Consumed by preprocessing/dynacell-a549/3-assemble-pool/assemble_pool.py
-# and `dynacell-paper preprocess assemble-pool`.
+# Consumed by `dynacell.preprocess.a549_mantis.assemble.assemble_pool`,
+# which takes this file as its DictConfig (see its docstring for the key
+# contract). There is no `dynacell preprocess assemble-pool` CLI; run it
+# directly:
+#   cfg = load_preprocess_config(Path(".../a549_assemble_pool.yaml"))
+#   assemble_pool(cfg)
 #
 # Produces one HCS store per (target, condition, split) under
 # <output_root>/<split>/<TARGET>_<CONDITION>.<ext>. Position naming is
