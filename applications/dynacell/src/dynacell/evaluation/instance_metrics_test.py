@@ -1,6 +1,8 @@
 """Tests for the instance average-precision wrapper (real cubic, CPU)."""
 
 import numpy as np
+import pandas as pd
+from omegaconf import OmegaConf
 
 from dynacell.evaluation.instance_metrics import (
     DEFAULT_IOU_THRESHOLDS,
@@ -8,6 +10,7 @@ from dynacell.evaluation.instance_metrics import (
     instance_average_precision,
     mean_instance_dice,
 )
+from dynacell.evaluation.pipeline import save_metrics
 
 
 def _two_squares(shape=(16, 16)) -> np.ndarray:
@@ -119,3 +122,36 @@ def test_relabel_preserves_object_count_for_ap():
     result = instance_average_precision(lab.copy(), lab)
     assert result["n_gt"] == 1 and result["n_pred"] == 1
     assert result["mAP"] == 1.0
+
+
+def test_instance_ap_is_written_to_mask_metrics_csv(tmp_path):
+    """Instance AP lands in ``mask_metrics.csv`` — there is no ``instance_ap*.csv``.
+
+    Globbing for a nonexistent ``instance_ap*.csv`` returns zero hits for every
+    family, including long-evaluated ones, which reads as "AP was never computed"
+    rather than "wrong filename". Pin the actual location so that mistake is a
+    test failure instead of a wrong conclusion about the corpus.
+    """
+    lab = _two_squares()
+    row = instance_average_precision(lab, lab)
+    config = OmegaConf.create(
+        {
+            "save": {
+                "save_dir": str(tmp_path),
+                "mask_csv_filename": "mask_metrics.csv",
+                "mask_metrics_filename": "mask_metrics.npy",
+                "pixel_csv_filename": "pixel_metrics.csv",
+                "pixel_metrics_filename": "pixel_metrics.npy",
+                "feature_csv_filename": "feature_metrics.csv",
+                "feature_metrics_filename": "feature_metrics.npy",
+            }
+        }
+    )
+    save_metrics(config, mask_metrics=[{"FOV": "0/0/0", "Timepoint": 0, **row}])
+
+    assert not list(tmp_path.glob("instance_ap*.csv"))
+    written = tmp_path / "mask_metrics.csv"
+    assert written.is_file()
+    columns = set(pd.read_csv(written).columns)
+    assert {f"AP_{t:.2f}" for t in DEFAULT_IOU_THRESHOLDS} <= columns
+    assert {"mAP", "instance_dice"} <= columns

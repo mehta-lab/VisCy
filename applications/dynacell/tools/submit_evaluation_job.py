@@ -34,22 +34,22 @@ from pathlib import Path
 
 import yaml
 
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     DEFAULT_EVAL_RUN_ROOT as _DEFAULT_RUN_ROOT,
 )
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     ORGANELLE_EVAL_TARGET as _ORGANELLE_EVAL_TARGET,
 )
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
+    eval_leaf,
+)
+from dynacell.evaluation.paths import (
     eval_predict_set_group as _eval_predict_set_group,
 )
-from dynacell.evaluation.save_paths import (
-    eval_save_dir,
-)
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     extract_predict_output_store as _extract_output_store,
 )
-from dynacell.evaluation.save_paths import (
+from dynacell.evaluation.paths import (
     paper_key as _paper_key,
 )
 
@@ -79,7 +79,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "directory under which `resolved/` provenance lands. "
-            f"Default: derived from save_dir's grandparent, fallback {_DEFAULT_RUN_ROOT}."
+            f"Default: derived from save_dir's parent, fallback {_DEFAULT_RUN_ROOT}."
         ),
     )
     ap.add_argument(
@@ -112,14 +112,16 @@ def submit(argv: list[str] | None = None) -> int:
     benchmark = composed.get("benchmark") or {}
     organelle = benchmark.get("organelle")
     code_model = benchmark.get("model_name")
-    trained_on = benchmark.get("trained_on")
+    # Transitional: predict leaves still carry `trained_on`; accept either key until
+    # the predict-leaf codemod renames it to `train_set`.
+    train_set = benchmark.get("train_set") or benchmark.get("trained_on")
     dataset_ref = benchmark.get("dataset_ref") or {}
     dataset_name = dataset_ref.get("dataset")
     dataset_target = dataset_ref.get("target")
-    if not organelle or not code_model or not trained_on:
+    if not organelle or not code_model or not train_set:
         raise SystemExit(
-            f"{leaf_path}: missing benchmark.{{organelle, model_name, trained_on}} "
-            f"(got organelle={organelle!r}, model_name={code_model!r}, trained_on={trained_on!r})"
+            f"{leaf_path}: missing benchmark.{{organelle, model_name, train_set}} "
+            f"(got organelle={organelle!r}, model_name={code_model!r}, train_set={train_set!r})"
         )
     if not dataset_name:
         raise SystemExit(f"{leaf_path}: missing benchmark.dataset_ref.dataset (needed to pick eval predict_set group)")
@@ -151,8 +153,7 @@ def submit(argv: list[str] | None = None) -> int:
     # trailing condition for a549; the bare ipsc_confocal predict leaf is iPSC.
     leaf_stem = leaf_path.stem  # predict__a549_mantis_mock
     # CellDiff iPSC predict configs are variant-suffixed (`__iterative`,
-    # `__sliding_window`, `__denoise`); save_paths collapses them to one paper
-    # key, so all three resolve to the same test_plate="ipsc" eval dir.
+    # `__sliding_window`, `__denoise`); all three parse to test_plate="ipsc".
     if leaf_stem == "predict__ipsc_confocal" or leaf_stem.startswith("predict__ipsc_confocal__"):
         test_plate = "ipsc"
     elif leaf_stem.endswith("_mock"):
@@ -167,11 +168,15 @@ def submit(argv: list[str] | None = None) -> int:
             f"(expected predict__ipsc_confocal[__<variant>].yml or predict__*_{{mock,denv,zikv}}.yml)"
         )
 
-    save_dir = eval_save_dir(
+    # Map the predict-leaf test plate to the canonical (test_set, condition) pair.
+    test_set = "ipsc" if test_plate == "ipsc" else "a549"
+    condition = None if test_plate == "ipsc" else test_plate
+    save_dir = eval_leaf(
         organelle=organelle,
-        code_model=code_model,
-        train_set=trained_on,
-        test_plate=test_plate,
+        model=code_model,
+        train_set=train_set,
+        test_set=test_set,
+        condition=condition,
     )
 
     # job_name: EVAL_<ORG>_<MODEL_PAPER>_<TRAIN>_<PLATE>.
@@ -179,16 +184,17 @@ def submit(argv: list[str] | None = None) -> int:
         "ipsc_confocal": "IPSC",
         "a549_mantis": "A549",
         "joint_ipsc_confocal_a549_mantis": "JOINT",
-    }[trained_on]
+    }[train_set]
     plate_upper = "IPSC" if test_plate == "ipsc" else test_plate.upper()
     job_name = f"EVAL_{organelle.upper()}_{_paper_key(code_model).upper()}_{train_key_short}_{plate_upper}"
 
-    # run_root: prefer save_dir's grandparent if it exists; else flag; else default.
+    # run_root: prefer save_dir's parent (the canonical <organelle>/<model>/<train_set>
+    # dir) if it exists; else flag; else default.
     if args.run_root is not None:
         run_root = args.run_root
     else:
-        grandparent = save_dir.parent.parent
-        run_root = grandparent if grandparent.exists() else _DEFAULT_RUN_ROOT
+        parent = save_dir.parent
+        run_root = parent if parent.exists() else _DEFAULT_RUN_ROOT
 
     overrides: dict[str, object] = {
         "predict_set": predict_set_group,

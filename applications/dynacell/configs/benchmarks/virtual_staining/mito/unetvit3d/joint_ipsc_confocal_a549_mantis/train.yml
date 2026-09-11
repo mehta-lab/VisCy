@@ -29,7 +29,7 @@ trainer:
   logger:
     init_args:
       name: UNetViT3D_JOINT_TOMM20
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/unetvit3d
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/unetvit3d
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -37,16 +37,21 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/unetvit3d/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/unetvit3d/checkpoints
 
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
   target_channel: Structure
   z_window_size: 13
-  batch_size: 4
+  # batch_size=2 + num_samples=2 -> 4 GPU samples/step, matching the single-set
+  # unetvit3d (batch=4, num_samples=2). BatchedConcatDataModule does NOT divide
+  # by num_samples (see CLAUDE.md), so joint.batch_size = single/num_samples.
+  batch_size: 2
   num_workers: 4
   yx_patch_size: [512, 512]
   split_ratio: 0.8
@@ -127,11 +132,11 @@ data:
       - class_path: viscy_data.hcs.HCSDataModule
         init_args:
           <<: *hcs_init_args
-          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/TOMM20_all.zarr
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/TOMM20_all.zarr
 
 launcher:
   job_name: UNetViT3D_JOINT_TOMM20
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/tomm20/unetvit3d
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/unetvit3d
   # Joint preloads two stores (iPSC + A549 pool) into /dev/shm; the default
   # 256G cap is too tight (256G iPSC mem + ~50G A549 + worker peak OOMs).
   # 512G is the smallest tier that fits joint preload + worker overhead.

@@ -1,0 +1,33 @@
+# A549 mantis splits — 2024_10_31_A549_SEC61_ZIKV_DENV
+#
+# Per plan: 4 DENV + 0 ZIKV test picks for this plate.
+# Deterministic rule: within each (well, marker, condition) group, sort
+# positions lexicographically and take the first N for test.
+#
+# Available positions after Airtable ∩ zarr:
+#   C/2 (ZIKV, 6): all → train (plan says 0 ZIKV test)
+#   C/4 (DENV, 6): first 4 → test, remaining 2 → train
+
+experiment: 2024_10_31_A549_SEC61_ZIKV_DENV
+targets:
+  sec61b:
+    train:
+    - C/2/000000
+    - C/2/000001
+    - C/2/001000
+    - C/2/001001
+    - C/2/002000
+    - C/2/002001
+    - C/3/000000
+    - C/3/000001
+    - C/3/001000
+    - C/3/001001
+    - C/3/002000
+    - C/3/002001
+    - C/4/002000
+    - C/4/002001
+    test:
+    - C/4/000000
+    - C/4/000001
+    - C/4/001000
+    - C/4/001001

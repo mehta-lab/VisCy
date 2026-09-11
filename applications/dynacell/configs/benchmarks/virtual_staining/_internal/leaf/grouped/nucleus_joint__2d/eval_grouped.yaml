@@ -1,0 +1,266 @@
+# @package _global_
+# Focused sibling of grouped/nucleus_joint: ONLY the in-focus 2D conditions --
+# fnet2d + FCMAE-2D (unext2_2d, vscyto2d) + celldiff_2d + pix2pix2d
+# x {ipsc, a549 mock/denv/zikv} = 20.
+# Condition blocks are copied verbatim from a generate_grouped_eval_configs.py run,
+# so they stay byte-identical to what the canonical bucket would emit -- only the
+# selection is narrowed.
+#
+# celldiff_2d was folded in on 2026-08-04, once its predicts finished. It was held
+# out until then because the generator's only freshness gate is pred_path.is_dir(),
+# which passes on a partially-written store (measured 4813 of 5787 chunk files on a
+# live nucleus/celldiff_2d/ipsc/a549__denv). The gate applied by hand instead was a
+# per-store chunk count against the fnet2d store for the same organelle/pool/bucket,
+# required to match exactly. The complete size is a property of (organelle, bucket),
+# not a constant: 4270-4300 on the iPSC buckets and 5211-5787 on the A549 ones, and
+# er/a549__denv is the low outlier at 5211 in EVERY pool. That one was confirmed
+# against two further fully-evaluated models (both FCMAE-2D arms, also 5211, same 12
+# FOVs) so it is the true size and not a shortfall shared with the reference -- which
+# a fnet2d-relative gate cannot see by itself. Plus sacct COMPLETED 0:0 on all 48
+# CELLDiff2D_PRED jobs.
+#
+# pix2pix2d was folded in on 2026-08-05, once its 48 predicts finished (all COMPLETED
+# 0:0). Held out for the same reason, but gated harder than celldiff_2d was: per array,
+# the expected chunk count = prod(ceil(shape / chunks)) read analytically from that
+# array's own zarr.json, compared against the files actually present. That catches a
+# truncated write inside a position without needing a reference family at all, which
+# is what a fnet2d-relative count could not do. It is paired with a position-set
+# comparison against a family already known complete, because a store missing whole
+# FOVs is internally self-consistent and its own metadata can never reveal the gap.
+# All 48 passed both checks: 100 positions per iPSC bucket, 12 per A549 bucket, every
+# array fully chunked (.tmp/pix2pix2d/verify_predict_stores.py).
+#
+# Why a sibling instead of folding the 2D models into the canonical bucket:
+#   1. The generator sets force_recompute.final_metrics: true, so the canonical
+#      bucket's already-evaluated 3D conditions would ALL recompute, not cache-skip.
+#   2. Fairness. The global pixel metrics (PCC/SSIM/FSC/PSNR/Spectral_PCC),
+#      MicroMS3IM and the CP regionprops are computed over the FULL 3D volume,
+#      while per-cell similarity, the deep features (DINOv3/DynaCLR/CellDINO/
+#      MorphEm) and instance AP are focus-restricted (pipeline.py). Only the
+#      focus-restricted families are a fair 2D-vs-3D comparison -- a per-z 2D model
+#      is penalised by the volume-reconstruction columns for planes it never
+#      targeted (2d-infocus-vs-models.md 1a). The full-3D columns are still
+#      computed here as diagnostics; they are NOT publishable as 2D-vs-3D.
+#
+# force_recompute.final_metrics is false here, unlike the generator's default of
+# true: fnet2d, both FCMAE-2D arms and celldiff_2d are already fully evaluated
+# (feature_metrics.csv present in all 48 of each arm's organelle x pool x bucket save
+# dirs, verified 2026-08-05), so those 16 conditions cache-skip and only the 4
+# pix2pix2d ones pay the cold deep-feature extraction. That extraction
+# still needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB nodes
+# and OOMs).
+target_name: nucleus
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: false
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+conditions:
+- name: celldiff_2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/celldiff_2d/joint/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/a549__denv
+- name: vscyto2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto2d_pretrained/joint/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__denv
+- name: unext2_2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto2d_scratch/joint/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__denv
+- name: fnet2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet2d/joint/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/a549__denv
+- name: pix2pix2d__joint__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/pix2pix2d_unetvit/joint/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__denv
+- name: celldiff_2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/celldiff_2d/joint/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/a549__mock
+- name: vscyto2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto2d_pretrained/joint/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__mock
+- name: unext2_2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto2d_scratch/joint/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__mock
+- name: fnet2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet2d/joint/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/a549__mock
+- name: pix2pix2d__joint__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/pix2pix2d_unetvit/joint/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__mock
+- name: celldiff_2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/celldiff_2d/joint/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/a549__zikv
+- name: vscyto2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto2d_pretrained/joint/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/a549__zikv
+- name: unext2_2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto2d_scratch/joint/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__zikv
+- name: fnet2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet2d/joint/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/a549__zikv
+- name: pix2pix2d__joint__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/pix2pix2d_unetvit/joint/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__zikv
+- name: celldiff_2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/celldiff_2d/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_2d/joint/ipsc
+- name: vscyto2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fcmae_vscyto2d_pretrained/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_pretrained/joint/ipsc
+- name: unext2_2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fcmae_vscyto2d_scratch/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/ipsc
+- name: fnet2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fnet2d/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d/joint/ipsc
+- name: pix2pix2d__joint__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/pix2pix2d_unetvit/joint/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/ipsc

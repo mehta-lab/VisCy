@@ -1,0 +1,50 @@
+# CellDiff-2D predict: mito trained on ipsc_confocal, tested on a549-mantis-tomm20-denv.
+# In-focus 2D track. The Z=1 checkpoint predicts over the FULL-Z 3D test
+# store with z_window_size=1 (celldiff_2d_predict overlay), emitting one
+# window per z-plane -> a full-Z prediction store the existing focus-aware
+# eval consumes unchanged.
+#
+# Source normalization is MinMaxSampled(timepoint_statistics), reproducing
+# the CellDiff-2D fit exactly — CellDiff trains on p1/p99 -> [-1,1], and a
+# mean/std source here would silently degrade every prediction.
+#
+# predict_overlap Z is 0 (see the overlay): the Z patch is 1, and
+# window_starts requires 0 <= overlap < patch.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_tomm20_denv.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_celldiff.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_tomm20_denv
+  model_name: celldiff_2d
+  experiment_id: mito__ipsc_confocal__celldiff_2d__a549_mantis_tomm20_denv
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/celldiff_2d/checkpoints/epoch=19-step=20000.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/celldiff_2d/ipsc/a549__denv/prediction.zarr
+
+launcher:
+  job_name: CELLDiff2D_PRED_TOMM20_ON_A549_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/celldiff_2d/ipsc/a549__denv

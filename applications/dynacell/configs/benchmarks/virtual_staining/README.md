@@ -169,6 +169,19 @@ save:
 
 ## Running
 
+### Train, validation, and test separation
+
+The released train and test stores are physically separate and are resolved
+from the dataset manifests; benchmark training never reads a test store. During
+`fit`, each paper baseline makes an 80/20 position-level train/validation carve
+from its resolved train store (`data.init_args.split_ratio: 0.8`). The carve is
+deterministic for a given recipe: the paper FNet3D recipe sets
+`seed_everything: 0`, while the other paper baseline recipes inherit the
+LightningCLI default of `42`. Thus validation is held out from optimization,
+but it is a reproducible per-model carve rather than one shared validation
+partition across every architecture. The manifest-defined test positions remain
+untouched until prediction and evaluation.
+
 The default `trainer.logger` in `configs/recipes/trainer/fit.yml` is
 `lightning.pytorch.loggers.WandbLogger`. Install dynacell with the
 `wandb` extra to satisfy this default (`uv add 'dynacell[wandb]'` /
@@ -296,3 +309,9 @@ Eval leaves follow the same split on the Hydra side:
   `io.gt_path`, `io.cell_segmentation_path`, `io.gt_channel_name`,
   `io.pred_channel_name`, `io.gt_cache_dir`, and
   `pixel_metrics.spacing` from the manifest.
+
+## Navigation
+
+- Up: [benchmarks](../README.md)
+- See also: `_internal/leaf/grouped/` [bucket summary](_internal/leaf/grouped/README.md) ·
+  eval-pipeline internals in [dynacell.evaluation](../../../src/dynacell/evaluation/README.md)

@@ -45,6 +45,13 @@ class PatchGAN3D(nn.Module):
         channel. Default is 64.
     use_spectral_norm : bool, optional
         If True, apply ``spectral_norm`` to every conv. Default is True.
+    preserve_z : bool, optional
+        If True, layers 1-4 take ``kernel_size=(1, 4, 4)``, ``padding=(0, 1, 1)``
+        and unit Z stride, so the Z extent passes through untouched. Required
+        at ``Z=1``: the default cubic ``kernel_size=4`` with ``padding=1``
+        gives a padded Z extent of 3 against a size-4 kernel, which raises.
+        Leave False for 3D, where it is the published topology. Default is
+        False.
 
     Returns
     -------
@@ -59,6 +66,7 @@ class PatchGAN3D(nn.Module):
         in_channels: int = 2,
         base_channels: int = 64,
         use_spectral_norm: bool = True,
+        preserve_z: bool = False,
     ) -> None:
         super().__init__()
         c1 = base_channels
@@ -66,9 +74,16 @@ class PatchGAN3D(nn.Module):
         c3 = base_channels * 4
         c4 = base_channels * 8
 
+        # Z geometry of layers 1-4. The 3D branch reproduces the published
+        # cubic kernel exactly; the Z-preserving branch collapses the kernel
+        # and padding on that axis and drops the Z stride of layers 3-4.
+        kernel = (1, 4, 4) if preserve_z else 4
+        padding = (0, 1, 1) if preserve_z else 1
+        stride_z = 1 if preserve_z else 2
+
         self.layer1 = nn.Sequential(
             _maybe_spectral_norm(
-                nn.Conv3d(in_channels, c1, kernel_size=4, stride=(1, 2, 2), padding=1),
+                nn.Conv3d(in_channels, c1, kernel_size=kernel, stride=(1, 2, 2), padding=padding),
                 use_spectral_norm,
             ),
             nn.LeakyReLU(0.2, inplace=True),
@@ -76,7 +91,7 @@ class PatchGAN3D(nn.Module):
 
         self.layer2 = nn.Sequential(
             _maybe_spectral_norm(
-                nn.Conv3d(c1, c2, kernel_size=4, stride=(1, 2, 2), padding=1),
+                nn.Conv3d(c1, c2, kernel_size=kernel, stride=(1, 2, 2), padding=padding),
                 use_spectral_norm,
             ),
             nn.InstanceNorm3d(c2, affine=True),
@@ -85,7 +100,7 @@ class PatchGAN3D(nn.Module):
 
         self.layer3 = nn.Sequential(
             _maybe_spectral_norm(
-                nn.Conv3d(c2, c3, kernel_size=4, stride=(2, 2, 2), padding=1),
+                nn.Conv3d(c2, c3, kernel_size=kernel, stride=(stride_z, 2, 2), padding=padding),
                 use_spectral_norm,
             ),
             nn.InstanceNorm3d(c3, affine=True),
@@ -94,7 +109,7 @@ class PatchGAN3D(nn.Module):
 
         self.layer4 = nn.Sequential(
             _maybe_spectral_norm(
-                nn.Conv3d(c3, c4, kernel_size=4, stride=(2, 2, 2), padding=1),
+                nn.Conv3d(c3, c4, kernel_size=kernel, stride=(stride_z, 2, 2), padding=padding),
                 use_spectral_norm,
             ),
             nn.InstanceNorm3d(c4, affine=True),
@@ -153,6 +168,10 @@ class MultiScalePatchGAN3D(nn.Module):
     use_spectral_norm : bool, optional
         If True, apply spectral normalization to every conv in each scale.
         Default is True.
+    preserve_z : bool, optional
+        Forwarded to every :class:`PatchGAN3D`. Set True for a Z-preserving
+        (``Z=1``) discriminator. The inter-scale pooling is already
+        YX-only, so no other change is needed. Default is False.
 
     Returns
     -------
@@ -166,6 +185,7 @@ class MultiScalePatchGAN3D(nn.Module):
         base_channels: int = 64,
         num_scales: int = 2,
         use_spectral_norm: bool = True,
+        preserve_z: bool = False,
     ) -> None:
         super().__init__()
         if num_scales < 1:
@@ -177,6 +197,7 @@ class MultiScalePatchGAN3D(nn.Module):
                     in_channels=in_channels,
                     base_channels=base_channels,
                     use_spectral_norm=use_spectral_norm,
+                    preserve_z=preserve_z,
                 )
                 for _ in range(num_scales)
             ]

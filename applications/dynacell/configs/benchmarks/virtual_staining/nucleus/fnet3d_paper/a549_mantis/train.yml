@@ -53,7 +53,7 @@ trainer:
   logger:
     init_args:
       name: FNet3D_A549_NUCL_paper
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fnet3d_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_paper
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -61,14 +61,16 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fnet3d_paper/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_paper/checkpoints
 
 launcher:
   job_name: FNet3DPaper_A549_NUCL
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549_mantis/nucl/fnet3d_paper
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fnet3d_paper
   # 512G to match the shared headroom convention across the fnet3d
   # leaves on a549/joint workloads. mmap_preload after the BasicIndexer
   # fix peaks at ~75 GB for H2B_all alone (single-set) or ~185 GB for

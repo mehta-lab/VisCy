@@ -1,0 +1,54 @@
+# FCMAE-2D Scratch (UNeXt2-2D) predict: er trained on ipsc_confocal,
+# tested on a549-mantis-sec61b-mock. In-focus 2D track. Runs the 2D model over the
+# full-Z 3D test store (z_window_size=1 -> one window per z-plane;
+# the writer keys each output to its z-index) so the existing
+# focus-aware eval consumes the result unchanged.
+#
+# Source normalization reproduces the fit overlay exactly
+# (Phase3D fov_statistics mean/std); a mismatch here would
+# silently degrade every prediction.
+#
+# ckpt_path pins the lowest-val-loss retained checkpoint of the
+# 2026-08-01 revived fit (the earlier cohort froze at init under
+# 16-mixed and its checkpoints are NOT usable). Submit with
+# `--ckpt best` to re-resolve against the live best at submit time.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_sec61b_mock.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_sec61b_mock
+  model_name: fcmae_vscyto2d_scratch
+  experiment_id: er__ipsc_confocal__fcmae_vscyto2d_scratch__a549_mantis_sec61b_mock
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto2d_scratch/checkpoints/epoch=14-step=6330-loss=0.552.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch/ipsc/a549__mock/prediction.zarr
+
+launcher:
+  job_name: FCMAE2D_Scratch_PRED_SEC61B_ON_A549_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fcmae_vscyto2d_scratch/ipsc/a549__mock

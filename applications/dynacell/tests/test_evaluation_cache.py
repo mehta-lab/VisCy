@@ -16,7 +16,6 @@ from dynacell.evaluation.cache import (  # noqa: E402
     StaleCacheError,
     cache_paths,
     check_cache_identity,
-    ckpt_sha256_12,
     diff_artifact_params,
     encoder_config_sha256_12,
     load_manifest,
@@ -462,6 +461,34 @@ def test_write_and_read_features_roundtrip(tmp_path: Path, kind: str, extras: di
     np.testing.assert_array_equal(loaded, feats)
 
 
+def test_read_features_drops_stale_dimension(tmp_path: Path) -> None:
+    """A stale-dimension entry (recipe change / partial rebuild) reads back as None.
+
+    The group records its feature dim from the latest non-empty write; an
+    existing entry whose column count disagrees is treated as a cache miss so
+    the caller recomputes it at the current recipe instead of crashing later on
+    an opaque pred-vs-GT dimension mismatch.
+    """
+    paths = cache_paths(tmp_path)
+    # Old-recipe 58-col entry, then a current-recipe 22-col entry: the group's
+    # recorded feature dim becomes 22, so the 58-col entry is now stale.
+    write_features(paths, "cp", "A/1/0", 0, np.ones((5, 58), dtype=np.float32))
+    write_features(paths, "cp", "A/1/1", 0, np.ones((5, 22), dtype=np.float32))
+
+    assert read_features(paths, "cp", "A/1/0", 0) is None  # stale -> recompute
+    current = read_features(paths, "cp", "A/1/1", 0)
+    assert current is not None and current.shape == (5, 22)
+
+
+def test_read_features_keeps_empty_sentinel(tmp_path: Path) -> None:
+    """The zero-cell ``(0, 0)`` sentinel is exempt from the dimension check."""
+    paths = cache_paths(tmp_path)
+    write_features(paths, "cp", "A/1/0", 0, np.ones((5, 22), dtype=np.float32))  # records dim=22
+    write_features(paths, "cp", "A/1/1", 0, np.empty((0, 0), dtype=np.float32))  # zero-cell slot
+    loaded = read_features(paths, "cp", "A/1/1", 0)
+    assert loaded is not None and loaded.shape == (0, 0)
+
+
 def test_read_features_missing_returns_none(tmp_path: Path) -> None:
     """Unwritten (position, timepoint) reads back as None."""
     paths = cache_paths(tmp_path)
@@ -528,100 +555,6 @@ def test_write_mask_rejects_wrong_ndim(tmp_path: Path) -> None:
     paths = cache_paths(tmp_path)
     with pytest.raises(ValueError, match="must be 4-D"):
         write_mask(paths, "er", "A/1/0", np.zeros((2, 3, 4), dtype=bool))
-
-
-def test_ckpt_sha256_12(tmp_path: Path) -> None:
-    """Returns the first 12 hex chars of sha256; differs for different content."""
-    file_a = tmp_path / "a.ckpt"
-    file_b = tmp_path / "b.ckpt"
-    file_a.write_bytes(b"model-weights-a")
-    file_b.write_bytes(b"model-weights-b")
-
-    h_a = ckpt_sha256_12(file_a)
-    h_b = ckpt_sha256_12(file_b)
-    assert len(h_a) == 12
-    assert len(h_b) == 12
-    assert h_a != h_b
-    assert ckpt_sha256_12(file_a) == h_a  # deterministic
-
-
-def test_ckpt_sha256_12_writes_and_reuses_sidecar(tmp_path: Path, monkeypatch) -> None:
-    """First call writes ``<ckpt>.sha256``; second call skips the hash."""
-    import hashlib as _hashlib
-
-    ckpt = tmp_path / "last.ckpt"
-    ckpt.write_bytes(b"weights")
-    h1 = ckpt_sha256_12(ckpt)
-    sidecar = tmp_path / "last.ckpt.sha256"
-    assert sidecar.exists()
-    written = sidecar.read_text().strip()
-    assert written[:12] == h1
-    assert len(written) == 64
-
-    calls = {"n": 0}
-    real_sha256 = _hashlib.sha256
-
-    def tracking_sha256(*args, **kwargs):
-        calls["n"] += 1
-        return real_sha256(*args, **kwargs)
-
-    monkeypatch.setattr("dynacell.evaluation.cache.hashlib.sha256", tracking_sha256)
-    h2 = ckpt_sha256_12(ckpt)
-    assert h2 == h1
-    assert calls["n"] == 0
-
-
-def test_ckpt_sha256_12_recomputes_when_sidecar_older(tmp_path: Path) -> None:
-    """Newer ckpt mtime invalidates the sidecar and forces a recompute."""
-    import os
-
-    ckpt = tmp_path / "last.ckpt"
-    ckpt.write_bytes(b"weights-v1")
-    h1 = ckpt_sha256_12(ckpt)
-
-    ckpt.write_bytes(b"weights-v2")
-    sidecar = tmp_path / "last.ckpt.sha256"
-    old = sidecar.stat().st_mtime
-    os.utime(ckpt, (old + 10, old + 10))
-
-    h2 = ckpt_sha256_12(ckpt)
-    assert h2 != h1
-    assert sidecar.read_text().strip()[:12] == h2
-
-
-def test_ckpt_sha256_12_ignores_corrupt_sidecar(tmp_path: Path) -> None:
-    """Non-hex sidecar is treated as missing and recomputed."""
-    ckpt = tmp_path / "last.ckpt"
-    ckpt.write_bytes(b"weights")
-    sidecar = tmp_path / "last.ckpt.sha256"
-    sidecar.write_text("not-a-hex-digest\n")
-    # Match ckpt mtime so the mtime check passes and we exercise the hex guard.
-    import os
-
-    st = ckpt.stat()
-    os.utime(sidecar, (st.st_mtime, st.st_mtime))
-
-    h = ckpt_sha256_12(ckpt)
-    assert all(c in "0123456789abcdef" for c in h)
-    assert len(h) == 12
-    assert sidecar.read_text().strip()[:12] == h
-
-
-def test_ckpt_sha256_12_read_only_dir(tmp_path: Path) -> None:
-    """Read-only parent dir does not raise; digest still returned."""
-    import os
-
-    ckpt_dir = tmp_path / "frozen"
-    ckpt_dir.mkdir()
-    ckpt = ckpt_dir / "last.ckpt"
-    ckpt.write_bytes(b"weights")
-    os.chmod(ckpt_dir, 0o555)
-    try:
-        h = ckpt_sha256_12(ckpt)
-        assert len(h) == 12
-        assert not (ckpt_dir / "last.ckpt.sha256").exists()
-    finally:
-        os.chmod(ckpt_dir, 0o755)
 
 
 def test_encoder_config_sha256_12_key_order_invariant() -> None:

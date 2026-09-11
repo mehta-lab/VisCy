@@ -1,0 +1,24 @@
+split_version: '1'
+random_seed: 0
+source_stores:
+- /hpc/projects/comp.micro/mantis/mantis_paper_data_release/dynacell/HEK/figure_3_flipped_crop32_z64.zarr
+selection_criteria:
+  source: mantis paper release figure_3 (OpenCell targets), well KRAS
+  qc: >-
+    All 4 figure_3 FOVs pass QC (good signal, good registration) per Confluence
+    MUG/5539627037. The figure_3 nucleus (HIST2H2BE) and ER (SEC61B) wells fail
+    QC (misregistration, lower half out of focus) and are not part of this
+    registry.
+  role: >-
+    Evaluation-only third-cell-type probe. No HEK training was performed, so
+    there is no train split and the manifest defines no train store.
+train:
+  count: 0
+  fovs: []
+test:
+  count: 4
+  fovs:
+  - 0/KRAS/000000
+  - 0/KRAS/000001
+  - 0/KRAS/001000
+  - 0/KRAS/001001

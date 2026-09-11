@@ -32,11 +32,43 @@ TRAIN_LEAVES = [
     ("mito", "fcmae_vscyto3d_pretrained"),
     ("nucleus", "celldiff"),
     ("nucleus", "fnet3d_paper"),
+    ("nucleus", "fnet3d_bigpatch"),
+    ("nucleus", "fnet3d_vscyto3daug"),
     ("nucleus", "unetvit3d"),
     ("membrane", "celldiff"),
     ("membrane", "fnet3d_paper"),
     ("membrane", "unetvit3d"),
 ]
+
+# A549-trained train leaves. Kept separate from TRAIN_LEAVES because that list's
+# tests hardcode the ``ipsc_confocal`` train-set directory. The Phase 17
+# temporal-sampling arms exist only for a549_mantis: they read timepoint-subset
+# copies of the A549 pooled stores, which have no iPSC counterpart.
+A549_TRAIN_LEAVES = [
+    ("nucleus", "fnet3d_paper"),
+    ("nucleus", "fnet3d_t01"),
+    ("nucleus", "fnet3d_tspread"),
+    ("er", "fnet3d_paper"),
+    ("er", "fnet3d_t01"),
+    ("er", "fnet3d_tspread"),
+]
+
+# Phase 15 FNet3D patch-vs-augmentation arms. Both overfit after an early val-loss
+# minimum, so their predict leaves must pin a monitored checkpoint rather than
+# `last.ckpt` — which is neither their best nor (checkpoint writes stopped hours
+# before both jobs ended) their final state.
+_PATCH_AUG_ARMS = ("fnet3d_bigpatch", "fnet3d_vscyto3daug")
+
+# Phase 17 arm -> the timepoint-subset store it must read. The whole ablation rests
+# on the two arms differing in nothing but this path, so a copy-paste slip here
+# (both arms pointing at the same store, or at the full pooled store) would silently
+# turn the comparison into a no-op.
+_TEMPORAL_ARM_STORE = {
+    ("nucleus", "fnet3d_t01"): "/mantis_v1/train/H2B_t01.zarr",
+    ("nucleus", "fnet3d_tspread"): "/mantis_v1/train/H2B_tspread.zarr",
+    ("er", "fnet3d_t01"): "/mantis/train/SEC61B_t01.zarr",
+    ("er", "fnet3d_tspread"): "/mantis/train/SEC61B_tspread.zarr",
+}
 
 PREDICT_LEAVES = [
     (organelle, model) for organelle in ("er", "mito", "nucleus", "membrane") for model in ("celldiff", "unetvit3d")
@@ -187,6 +219,17 @@ _EXPECTED_DATA_HPARAMS = {
     "fcmae_vscyto3d_scratch": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 4},
     "fcmae_vscyto3d_pretrained": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 4},
     "fnet3d_paper": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
+    # FNet3D patch/augmentation ablation (nucleus, iPSC-trained, bf16-mixed).
+    # Arm A (bigpatch): larger 384^2 patch, FNet flip-only augs. Arm B
+    # (vscyto3daug): same 384^2 patch, full VSCyto3D augmentation stack.
+    # Identical geometry + batch so the pair isolates the augmentation effect.
+    "fnet3d_bigpatch": {"batch_size": 8, "z_window_size": 32, "yx_patch_size": [384, 384], "num_workers": 4},
+    "fnet3d_vscyto3daug": {"batch_size": 8, "z_window_size": 32, "yx_patch_size": [384, 384], "num_workers": 4},
+    # FNet3D temporal-sampling ablation (Phase 17): the arms reuse the fnet3d_paper
+    # data overlay untouched, so they MUST compose its hparams exactly — the only
+    # intended delta between them and the baseline is data_path.
+    "fnet3d_t01": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
+    "fnet3d_tspread": {"batch_size": 48, "z_window_size": 32, "yx_patch_size": [64, 64], "num_workers": 8},
     "unext2": {"batch_size": 32, "z_window_size": 20, "yx_patch_size": [384, 384], "num_workers": 8},
 }
 
@@ -212,6 +255,246 @@ def test_data_overlay_split_preserves_hparams(organelle: str, model: str) -> Non
     # BatchedRandFlipd pair (no val_gpu_augmentations); the others have a
     # longer affine+intensity stack.
     assert ia["gpu_augmentations"], f"{organelle}/{model}: gpu_augmentations missing after split"
+
+
+@pytest.mark.parametrize("organelle,model", A549_TRAIN_LEAVES)
+def test_a549_train_leaf_composes_with_expected_hparams(organelle: str, model: str) -> None:
+    """A549-trained fit leaves compose and keep their model's data hparams."""
+    leaf = BENCHMARKS / organelle / model / "a549_mantis" / "train.yml"
+    cfg = load_composed_config(leaf)
+    t = cfg["trainer"]
+    assert t["accelerator"] == "gpu"
+    assert t["devices"] in (1, 4)
+    assert t["logger"]["init_args"]["project"] == "dynacell"
+    ia = cfg["data"]["init_args"]
+    for key, value in _EXPECTED_DATA_HPARAMS[model].items():
+        assert ia[key] == value, f"{organelle}/{model}: data.init_args.{key} = {ia[key]!r}, expected {value!r}"
+
+
+@pytest.mark.parametrize("model", _PATCH_AUG_ARMS)
+def test_patch_aug_arm_predicts_pin_a_monitored_checkpoint(model: str) -> None:
+    """The Phase 15 arms' predict leaves pin a best-val checkpoint, never `last.ckpt`.
+
+    Both arms' validation loss rises after an early minimum, so `last.ckpt` would
+    silently predict from a worse model — and their checkpoint writes stopped hours
+    before the jobs ended, so it is not even the final state. Every predict leaf for
+    an arm must also agree on one checkpoint, so the four test sets are scored
+    against the same model.
+    """
+    leaves = sorted((BENCHMARKS / "nucleus" / model / "ipsc_confocal").glob("predict__*.yml"))
+    assert leaves, f"{model}: no predict leaves found"
+    pinned = set()
+    for leaf in leaves:
+        ckpt = yaml.safe_load(leaf.read_text())["model"]["init_args"]["ckpt_path"]
+        assert "last" not in Path(ckpt).name, f"{model}/{leaf.name}: pins {Path(ckpt).name}"
+        assert f"/{model}/checkpoints/" in ckpt, f"{model}/{leaf.name}: ckpt is not this arm's: {ckpt}"
+        pinned.add(ckpt)
+    assert len(pinned) == 1, f"{model}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
+
+
+def test_patch_aug_arms_do_not_share_a_checkpoint() -> None:
+    """Arm A and Arm B predict from different checkpoints (the aug comparison is real)."""
+    pinned = {
+        model: yaml.safe_load(
+            (BENCHMARKS / "nucleus" / model / "ipsc_confocal" / "predict__ipsc_confocal.yml").read_text()
+        )["model"]["init_args"]["ckpt_path"]
+        for model in _PATCH_AUG_ARMS
+    }
+    assert len(set(pinned.values())) == len(_PATCH_AUG_ARMS), f"arms share a checkpoint: {pinned}"
+
+
+@pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
+def test_temporal_arm_reads_its_own_subset_store(organelle: str, model: str) -> None:
+    """Each Phase 17 arm points at its own timepoint-subset store, not the pool.
+
+    The ablation's entire signal is the difference between the two arms' training
+    frames. If both arms resolved to the same ``data_path`` — or to the full
+    ``*_all.zarr`` — the fits would be duplicates and the comparison meaningless,
+    with nothing else in the config to reveal it.
+    """
+    leaf = BENCHMARKS / organelle / model / "a549_mantis" / "train.yml"
+    cfg = load_composed_config(leaf)
+    data_path = cfg["data"]["init_args"]["data_path"]
+    assert data_path.endswith(_TEMPORAL_ARM_STORE[(organelle, model)]), (
+        f"{organelle}/{model}: data_path {data_path!r} does not end with {_TEMPORAL_ARM_STORE[(organelle, model)]!r}"
+    )
+    assert cfg["benchmark"]["model_name"] == model
+
+
+@pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
+def test_temporal_arm_predicts_compose_against_the_three_a549_conditions(organelle: str, model: str) -> None:
+    """Each Phase 17 arm has one predict leaf per A549 condition, wired to its own arm.
+
+    The 12 leaves are the ablation's only valid cross-arm comparison (the arms
+    validate on different frames, so ``loss/validate`` cannot arbitrate), so a
+    mis-wired ``output_store`` or a leaf pointing at a sibling arm's checkpoint would
+    quietly compare a model against itself.
+
+    ER predictions land under plain ``a549``, NOT ``a549__deconv``. The deconv token
+    is a **retired mislabel**, not a convention: the raw-flip retrain produced raw
+    ``Structure`` checkpoints (there has never been a deconv ER checkpoint) while the
+    predict leaves kept a deconv-marked ``output_store``, so the 2026-07-20 audit
+    re-tokenized ``a549__deconv -> a549`` on disk. ER a549-trained predictions now
+    really do live at ``er/<model>/a549/``. Several older ER predict leaves still carry
+    the stale token in YAML and are out of sync with disk — do not copy them.
+    """
+    gene = {"nucleus": "h2b", "er": "sec61b"}[organelle]
+    train_seg = "a549"
+    leaves = sorted((BENCHMARKS / organelle / model / "a549_mantis").glob("predict__a549_mantis_*.yml"))
+    assert len(leaves) == 3, f"{organelle}/{model}: expected 3 A549 predict leaves, got {[p.name for p in leaves]}"
+    for leaf in leaves:
+        cond = leaf.stem.rsplit("_", 1)[1]
+        cfg = load_composed_config(leaf)
+        assert cfg["benchmark"]["model_name"] == model
+        assert cfg["benchmark"]["predict_set"] == f"a549_mantis_{gene}_{cond}"
+        store = cfg["trainer"]["callbacks"][0]["init_args"]["output_store"]
+        assert store == (
+            f"/hpc/projects/virtual_staining/training/dynacell/{organelle}/{model}/"
+            f"{train_seg}/a549__{cond}/prediction.zarr"
+        ), f"{organelle}/{model}/{leaf.name}: unexpected output_store {store!r}"
+
+
+@pytest.mark.parametrize("organelle,model", sorted(_TEMPORAL_ARM_STORE))
+def test_temporal_arm_predicts_pin_a_monitored_checkpoint(organelle: str, model: str) -> None:
+    """Phase 17 predict leaves pin a monitored checkpoint in their OWN arm's dir.
+
+    Unlike the Phase 15 arms (which overfit), these arms' val curves are merely
+    noisy — epoch-to-epoch IQR 0.066-0.237, larger than the entire second-half
+    trend — so ``last.ckpt`` lands at an arbitrary point in the jitter rather than at
+    a worse model per se. nucleus/fnet3d_t01's ``last`` sat at val 0.166 against a
+    retained best of 0.078. Either way, pinning ``last`` is wrong.
+
+    Existence on disk is deliberately NOT asserted: the pins are provisional while
+    the fits run and ``save_top_k: 4`` rotates files out, and submission passes
+    ``--ckpt best``, which uses only the parent directory from this path.
+    """
+    leaves = sorted((BENCHMARKS / organelle / model / "a549_mantis").glob("predict__*.yml"))
+    assert leaves, f"{organelle}/{model}: no predict leaves found"
+    pinned = set()
+    for leaf in leaves:
+        ckpt = yaml.safe_load(leaf.read_text())["model"]["init_args"]["ckpt_path"]
+        assert "last" not in Path(ckpt).name, f"{organelle}/{model}/{leaf.name}: pins {Path(ckpt).name}"
+        assert f"/{organelle}/{model}/checkpoints/" in ckpt, (
+            f"{organelle}/{model}/{leaf.name}: ckpt is not this arm's: {ckpt}"
+        )
+        pinned.add(ckpt)
+    assert len(pinned) == 1, f"{organelle}/{model}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
+
+
+def test_temporal_arms_do_not_share_a_checkpoint() -> None:
+    """Within an organelle, the two temporal arms predict from different checkpoints."""
+    for organelle in ("nucleus", "er"):
+        gene = {"nucleus": "h2b", "er": "sec61b"}[organelle]
+        pinned = {
+            model: yaml.safe_load(
+                (BENCHMARKS / organelle / model / "a549_mantis" / f"predict__a549_mantis_{gene}_mock.yml").read_text()
+            )["model"]["init_args"]["ckpt_path"]
+            for model in ("fnet3d_t01", "fnet3d_tspread")
+        }
+        assert len(set(pinned.values())) == 2, f"{organelle}: arms share a checkpoint: {pinned}"
+
+
+# Brightfield-input ablation: (organelle, model) arms that must differ from their
+# ipsc_confocal phase baseline in the INPUT CHANNEL AND NOTHING ELSE. `Phase3D` in
+# these stores is reconstructed from `Brightfield` by waveorder, so the arm measures
+# whether that reconstruction is load-bearing -- which only holds if every other
+# hyperparameter matches.
+#
+# Two train sets, wired differently on purpose: the iPSC arms get Brightfield from
+# `dataset_ref.source_channel` (the aics-hipsc manifest owns the channel), while the
+# A549 arms set `source_channel` directly in their train-set fragment, because the
+# condition-pooled A549 train stores are not in the manifest registry and the
+# resolver hook is a partial-ref no-op there. Both paths are covered.
+_BRIGHTFIELD_TRAIN_SETS = [("ipsc_confocal", "ipsc_confocal_brightfield"), ("a549_mantis", "a549_mantis_brightfield")]
+_BRIGHTFIELD_ARMS = [
+    (organelle, model, phase_dir, bf_dir)
+    for organelle in ("nucleus", "er")
+    for model in ("fnet3d_paper", "celldiff")
+    for phase_dir, bf_dir in _BRIGHTFIELD_TRAIN_SETS
+]
+
+
+@pytest.mark.parametrize("organelle,model,phase_dir,bf_dir", _BRIGHTFIELD_ARMS)
+def test_brightfield_arm_differs_from_its_phase_baseline_only_in_the_input_channel(
+    organelle: str, model: str, phase_dir: str, bf_dir: str, monkeypatch
+) -> None:
+    """The bf arm's composed data config equals its baseline under Brightfield->Phase3D.
+
+    This is the ablation's validity check, and it catches a specific trap: for
+    ``er/fnet3d_paper`` the live transform values come from
+    ``data_overlays/fnet3d_paper_fit.yml``, which composes AFTER
+    ``targets/er_sec61b.yml`` and replaces all three lists wholesale. Re-deriving the
+    bf leaf's lists from the target fragment instead would silently switch Structure
+    from mean/std to median/iqr, the crop from 32x32x64x64 to 13x624x624 and
+    num_samples from 8 to 2 -- three confounds with nothing in the config to reveal
+    them. Any drift in batch_size, z_window_size, patch size, normalization stats or
+    augmentation stack fails here too.
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+    bf = load_composed_config(
+        BENCHMARKS / organelle / model / bf_dir / "train.yml",
+        resolver=_dynacell_ref_resolver,
+    )
+    phase = load_composed_config(
+        BENCHMARKS / organelle / model / phase_dir / "train.yml",
+        resolver=_dynacell_ref_resolver,
+    )
+
+    assert bf["data"]["init_args"]["source_channel"] == "Brightfield", (
+        f"{organelle}/{model}/{bf_dir}: resolved source_channel="
+        f"{bf['data']['init_args']['source_channel']!r} -- the ablation is a no-op"
+    )
+    assert phase["data"]["init_args"]["source_channel"] == "Phase3D"
+    # Same store on both sides: only the channel read out of it changes.
+    assert bf["data"]["init_args"]["data_path"] == phase["data"]["init_args"]["data_path"]
+
+    def _rekey(obj: object) -> object:
+        """Substitute Brightfield -> Phase3D everywhere so the two become comparable."""
+        if isinstance(obj, dict):
+            return {k: _rekey(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_rekey(v) for v in obj]
+        return "Phase3D" if obj == "Brightfield" else obj
+
+    assert _rekey(bf["data"]) == phase["data"], (
+        f"{organelle}/{model}/{bf_dir}: bf and phase data configs differ by more than the input channel"
+    )
+    # Model and trainer halves must be untouched (same recipe, same schedule, same steps).
+    assert bf["model"] == phase["model"], f"{organelle}/{model}/{bf_dir}: model config drifted"
+    for key in ("precision", "max_steps", "max_epochs", "devices", "strategy"):
+        assert bf["trainer"].get(key) == phase["trainer"].get(key), (
+            f"{organelle}/{model}/{bf_dir}: trainer.{key} drifted"
+        )
+    # Resource overrides must carry over: the fnet3d arms need the baseline's 512G
+    # mmap_preload headroom, and losing it would OOM-kill the worker in validation.
+    assert bf["launcher"]["sbatch"].get("mem") == phase["launcher"]["sbatch"].get("mem")
+    assert bf["launcher"]["sbatch"]["time"] == phase["launcher"]["sbatch"]["time"]
+
+
+# Brightfield train-set dir -> the canonical token its artifacts must live under.
+_BF_CKPT_TOKEN = {"ipsc_confocal_brightfield": "/ipsc__bf/", "a549_mantis_brightfield": "/a549__bf/"}
+
+
+@pytest.mark.parametrize("organelle,model,phase_dir,bf_dir", _BRIGHTFIELD_ARMS)
+def test_brightfield_arm_writes_to_its_own_canonical_tree(
+    organelle: str, model: str, phase_dir: str, bf_dir: str
+) -> None:
+    """Checkpoints land under the ``*__bf`` token, never in the phase baseline's tree.
+
+    Sharing a ``dirpath`` with the baseline would have the two arms overwrite each
+    other's checkpoints -- the failure mode would be a corrupted comparison, not an error.
+    """
+    bf = load_composed_config(BENCHMARKS / organelle / model / bf_dir / "train.yml")
+    phase = load_composed_config(BENCHMARKS / organelle / model / phase_dir / "train.yml")
+    ckpt = next(
+        c["init_args"]["dirpath"]
+        for c in bf["trainer"]["callbacks"]
+        if c["class_path"].endswith("ModelCheckpoint") and "dirpath" in c.get("init_args", {})
+    )
+    token = _BF_CKPT_TOKEN[bf_dir]
+    assert token in ckpt, f"{organelle}/{model}/{bf_dir}: checkpoint dirpath is not under {token}: {ckpt}"
+    assert bf["launcher"]["run_root"] != phase["launcher"]["run_root"]
+    assert bf["trainer"]["logger"]["init_args"]["name"] != phase["trainer"]["logger"]["init_args"]["name"]
 
 
 # -- dataset_ref resolver integration tests -------------------------------
@@ -271,10 +554,10 @@ def test_migrated_target_predict_resolves_to_test_store(organelle: str, model: s
 
 # The a549_mantis predict leaf was split per treatment condition into
 # predict__a549_mantis_{mock,denv,zikv}.yml. Each condition points at the
-# condition-pooled test store in mantis_v1/test/. Per-organelle the gene
-# slug differs: er → SEC61B, mito → TOMM20, nucleus → H2B, membrane → CAAX.
-# The condition flag in the store filename is mock → "_mock", denv →
-# "_DENV", zikv → "_ZIKV".
+# condition-pooled test store in mantis/test/. Per-organelle the store
+# stem differs: er → SEC61B, mito → TOMM20; nucleus + membrane share the
+# merged dual_nucl_memb store. The condition flag in the store filename is
+# mock → "_mock", denv → "_DENV", zikv → "_ZIKV".
 #
 # Each cross-eval cell → (organelle, model, condition, gene_slug,
 # target_channel, store_filename). dataset_ref.dataset is
@@ -297,7 +580,8 @@ _A549_PREDICT_EXPECTATIONS = [
         condition,
         gene_slug,
         target_channel,
-        f"mantis_v1/test/{gene_upper}{_A549_CONDITION_SUFFIX[condition]}.ozx",
+        f"mantis/test/{'dual_nucl_memb' if gene_slug in ('h2b', 'caax') else gene_upper}"
+        f"{_A549_CONDITION_SUFFIX[condition]}.zarr",
     )
     for organelle, (gene_slug, gene_upper, target_channel) in _A549_GENE_INFO.items()
     for model in ("celldiff", "unetvit3d")
@@ -448,7 +732,7 @@ def test_joint_train_leaf_composes() -> None:
 
     # Child ordering + paths.
     assert children[0]["init_args"]["data_path"].endswith("ipsc/dataset_v4/train/SEC61B.zarr")
-    assert children[1]["init_args"]["data_path"].endswith("a549/mantis_v1/train/SEC61B_all.zarr")
+    assert children[1]["init_args"]["data_path"].endswith("a549/mantis/train/SEC61B_all.zarr")
 
     # Launcher: single GPU matches topology, SLURM invariant holds.
     assert cfg["launcher"]["mode"] == "fit"
@@ -532,6 +816,25 @@ def test_joint_train_smoke_leaf_composes() -> None:
 _HARDWARE_4GPU_CONSTRAINT = "h100|h200"
 _HARDWARE_4GPU_GPUS = frozenset(_HARDWARE_4GPU_CONSTRAINT.split("|"))
 
+# A100 is the hard exclusion (NCCL); the >=80 GB floor is a proxy for "cannot
+# OOM", so a leaf that has MEASURED its per-rank peak may widen below it. Only
+# these leaves may, and only onto these cards.
+#
+# pix2pix2d_unetvit: 13.3 GiB/rank at batch_size 4, measured on the interactive
+# A40 (44.7 GiB usable) -- 3.4x headroom on the smallest card admitted. Each fit
+# is ~35 min wall (verified: job 35148927 COMPLETED 0:0 in 34:38 at 40/40
+# epochs), so the point of widening is backfill: 12 short 4-GPU jobs queueing
+# only for Hopper serialize behind the 4-day and 7-day fits that also want it.
+# All three added cards can satisfy --nodes=1 --gpus=4 in the gpu partition
+# (gpu-c-1 8xa40, gpu-b-[1-6] 4xa6000, gpu-g-2 4xl40s; gpu-g-1 has 3 l40s and is
+# simply never selected).
+_WIDE_GPU_TRAIN_LEAVES = frozenset(
+    f"{organelle}/pix2pix2d_unetvit/{pool}/train.yml"
+    for organelle in ("nucleus", "membrane", "er", "mito")
+    for pool in ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
+)
+_WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})
+
 
 def _all_train_leaves() -> list[Path]:
     """All ``train*.yml`` leaves under benchmarks/virtual_staining/ except _internal/."""
@@ -548,15 +851,140 @@ def test_4gpu_train_leaves_inherit_a100_exclude(leaf: Path) -> None:
     big-memory GAN but must not re-admit A100 (or the <80 GB cards) or unset
     it. Adding a new 4-GPU leaf that loosens the constraint picks this up
     automatically.
+
+    Leaves in ``_WIDE_GPU_TRAIN_LEAVES`` may additionally admit the <80 GB cards
+    named in ``_WIDE_GPU_EXTRA``, having measured a per-rank peak that fits them.
+    A100 stays excluded for those too: its exclusion is about NCCL, not memory,
+    so no measurement can license it.
     """
     cfg = load_composed_config(leaf)
     if cfg["trainer"]["devices"] != 4:
         pytest.skip(f"single-GPU leaf: {leaf.relative_to(BENCHMARKS)}")
+    rel = str(leaf.relative_to(BENCHMARKS))
     constraint = cfg["launcher"]["sbatch"].get("constraint")
     selected = frozenset(constraint.split("|")) if constraint else frozenset()
-    assert selected and selected <= _HARDWARE_4GPU_GPUS, (
+    allowed = _HARDWARE_4GPU_GPUS
+    if rel in _WIDE_GPU_TRAIN_LEAVES:
+        allowed = allowed | _WIDE_GPU_EXTRA
+        assert selected & _HARDWARE_4GPU_GPUS, (
+            f"{rel}: widened to {constraint!r} but dropped every Hopper card. A measured "
+            f"widening adds cards, it does not trade Hopper away."
+        )
+    assert selected and selected <= allowed, (
         f"{leaf.relative_to(BENCHMARKS)}: 4-GPU leaf has constraint={constraint!r}, "
-        f"expected a non-empty subset of {_HARDWARE_4GPU_CONSTRAINT!r} (must exclude A100 "
-        f"and the <80 GB cards; narrowing to e.g. 'h200' is allowed). If this leaf must run "
+        f"expected a non-empty subset of {sorted(allowed)} (must exclude A100 "
+        f"and, unless the leaf is in _WIDE_GPU_TRAIN_LEAVES with a measured per-rank peak, "
+        f"the <80 GB cards; narrowing to e.g. 'h200' is allowed). If this leaf must run "
         f"on A100, override with `--override launcher.sbatch.constraint=null`."
     )
+
+
+# Wall limit each hardware profile is expected to contribute, sized from measured
+# runtimes over Slurm's retention window. Keyed by profile rather than by leaf so
+# a leaf that composes the wrong profile fails loudly here.
+#
+# hardware_h200_single is shared with 40 *fit* leaves, so its 4-day value is not a
+# predict measurement and must not be re-tuned from one. The 41 predict leaves on
+# it are all FCMAE/VSCyto3D variants that complete in under an hour, so the loose
+# cap costs little -- a known gap, recorded rather than silently excluded.
+_PREDICT_PROFILE_TIME: dict[str, str] = {
+    "hardware_predict_any_gpu.yml": "2-00:00:00",
+    "hardware_predict_celldiff.yml": "7-00:00:00",
+    "hardware_h200_single.yml": "4-00:00:00",
+}
+
+
+def _all_predict_leaves() -> list[Path]:
+    """All ``predict*.yml`` leaves under benchmarks/virtual_staining/ except _internal/."""
+    return sorted(p for p in BENCHMARKS.rglob("predict*.yml") if "_internal" not in p.parts)
+
+
+def _composed_hardware_profile(leaf: Path) -> str:
+    """Return the single hardware profile filename a predict leaf composes."""
+    base = yaml.safe_load(leaf.read_text())["base"]
+    profiles = [Path(entry).name for entry in base if "launcher_profiles/hardware" in entry]
+    assert len(profiles) == 1, f"{leaf}: expected exactly one hardware profile, got {profiles}"
+    return profiles[0]
+
+
+@pytest.mark.parametrize("leaf", _all_predict_leaves(), ids=lambda p: str(p.relative_to(BENCHMARKS)))
+def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
+    """Every predict leaf carries the wall limit sized for its model family.
+
+    CELL-Diff is iterative diffusion and runs 5.8-95.6 h; every other family tops
+    out at 21.9 h. One shared cap cannot serve both -- at 4 days CELL-Diff
+    TIMEOUTed eight times on 2026-07-19, and at 2 days it would fail always.
+
+    Data-driven so a new leaf cannot quietly inherit a limit that does not fit
+    it. A new slow family gets its own profile; do not raise a shared cap to
+    cover it, or the cap stops bounding anything.
+
+    ``celldiff_2d`` counts as CELL-Diff here: it runs the same 100-step
+    iterative ODE with the same velocity-anchored tiling, just at Z=1 over the
+    full-Z test store (one window per plane). Its wall need is unmeasured, so it
+    inherits the 7-day CELL-Diff cap rather than getting a speculative profile of
+    its own -- tighten it to a dedicated profile once real runs give a number.
+    """
+    profile = _composed_hardware_profile(leaf)
+    assert profile in _PREDICT_PROFILE_TIME, (
+        f"{leaf.relative_to(BENCHMARKS)}: unknown hardware profile {profile!r}. Add it to "
+        f"_PREDICT_PROFILE_TIME with a measured wall limit."
+    )
+    is_celldiff = any(part.startswith("celldiff") for part in leaf.parts)
+    assert is_celldiff == (profile == "hardware_predict_celldiff.yml"), (
+        f"{leaf.relative_to(BENCHMARKS)}: celldiff={is_celldiff} but profile={profile!r}. "
+        f"CELL-Diff predicts must use hardware_predict_celldiff.yml and nothing else may."
+    )
+    time_limit = load_composed_config(leaf)["launcher"]["sbatch"]["time"]
+    assert time_limit == _PREDICT_PROFILE_TIME[profile], (
+        f"{leaf.relative_to(BENCHMARKS)}: composed time={time_limit!r}, but {profile} is "
+        f"expected to contribute {_PREDICT_PROFILE_TIME[profile]!r}."
+    )
+
+
+# The only fits that have ever hit a wall limit: all eight joint FCMAE leaves, at
+# hardware_4gpu.yml's 4 days. ER/mito TIMEOUTed twice each (measured 1.58-1.82
+# ep/h, 110-126 h to reach max_epochs=200); nucleus/membrane TIMEOUTed once each
+# (1.22-1.40 ep/h, 143-164 h), jobs 31822521, 33631899, 31822536 and 31822529,
+# every one with elapsed 4-00:00:11 to 4-00:00:29 against a 4-00:00:00 limit. So
+# all eight sit on hardware_4gpu_long.yml (7 days) instead. Every other 4-GPU
+# leaf finishes inside 4 days; a 7-day 4-GPU H100/H200 allocation backfills far
+# worse, so this list should grow only on evidence.
+_LONG_WALL_TRAIN_LEAVES = frozenset(
+    f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
+    for organelle in ("er", "mito", "nucleus", "membrane")
+    for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
+)
+_LONG_WALL_TIME = "7-00:00:00"
+_DEFAULT_4GPU_TIME = "4-00:00:00"
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    [p for p in _all_train_leaves() if "smoke" not in p.name],
+    ids=lambda p: str(p.relative_to(BENCHMARKS)),
+)
+def test_only_measured_slow_fits_get_the_long_wall(leaf: Path) -> None:
+    """The 7-day wall is reserved for fits measured to need more than 4 days.
+
+    Guards both directions: the eight joint FCMAE leaves must keep it (all eight
+    TIMEOUTed without it, ending at 150/200, 108/200, 81/200, 70/200, 102/200,
+    86/200, 114/200 and 118/200 epochs), and no other 4-GPU leaf may pick it up,
+    since the longer request schedules materially worse on the H100/H200 pool.
+
+    Smoke leaves are excluded: they override `time` via wall_smoke.yml.
+    """
+    rel = str(leaf.relative_to(BENCHMARKS))
+    cfg = load_composed_config(leaf)
+    time_limit = cfg["launcher"]["sbatch"]["time"]
+    if rel in _LONG_WALL_TRAIN_LEAVES:
+        assert time_limit == _LONG_WALL_TIME, (
+            f"{rel}: time={time_limit!r}, expected {_LONG_WALL_TIME!r}. This fit needs "
+            f"~110-164 h for max_epochs=200 and TIMEOUTed at 4 days."
+        )
+    elif cfg["trainer"]["devices"] == 4:
+        assert time_limit == _DEFAULT_4GPU_TIME, (
+            f"{rel}: time={time_limit!r}, expected {_DEFAULT_4GPU_TIME!r}. Only leaves in "
+            f"_LONG_WALL_TRAIN_LEAVES may use the 7-day wall; add one only with a measured "
+            f"epochs/h rate showing it cannot finish in 4 days."
+        )

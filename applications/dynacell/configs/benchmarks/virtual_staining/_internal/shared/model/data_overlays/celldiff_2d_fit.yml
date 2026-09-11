@@ -1,0 +1,78 @@
+# CellDiff-2D fit-time HCS data hparams for the in-focus 2D benchmark
+# track. Split out from model_overlays/celldiff_2d_fit.yml so the
+# model+trainer half there stays composable by joint-dataset
+# (BatchedConcatDataModule) leaves that author their own data: block.
+#
+# Mirrors data_overlays/celldiff_fit.yml but flattens Z onto the offline
+# `_focus.zarr` 5-plane in-focus slab stores (z_window_size=1, each window
+# one plane), following the same convention as
+# data_overlays/fcmae_vscyto2d_fit.yml:
+#   - z_window_size: 13 -> 1
+#   - BatchedRandAffined rotate_range [3.14,0,0] -> [0,0,0] (rotation about
+#     axis 0 mixes Y and Z, which is degenerate at Z=1)
+#   - BatchedRandAffined scale_range Z [0.7,1.3] -> [1,1] (kornia affine
+#     scale is an absolute factor, so 1.0 is the no-op, not 0)
+#   - safe_crop_size / roi_size [8,512,512] -> [1,512,512]
+#   - BatchedRandGaussianSmoothd sigma_z [0.25,0.75] -> [0,0]
+# XY augmentation policy (shear/scale/contrast/intensity/noise/smooth) is
+# kept identical to the 3D overlay so 2D-vs-3D isolates geometry.
+#
+# batch_size stays 4, matching the 3D CellDiff leaf. Measured peak on an
+# A40 (44.7 GiB) at [1,512,512] with bf16 autocast + AdamW: bs=4 -> 14.7 GiB
+# (33%), bs=8 -> 28.2 GiB (63%), bs=16 -> OOM. hardware_gpu_any_long sets
+# `constraint: null`, so a leaf can land on a 24 GB card — bs=8 would not
+# fit there. Raise batch_size only together with a >=48 GB constraint.
+data:
+  init_args:
+    z_window_size: 1
+    batch_size: 4
+    num_workers: 4
+    yx_patch_size: [512, 512]
+    gpu_augmentations:
+      # GPU: affine on oversized patch → center crop to final 1×512×512.
+      # safe_crop_size clamps scale so the sheared/scaled source always
+      # covers the 512px crop, eliminating zero-corner artifacts.
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.8
+          rotate_range: [0, 0, 0]
+          shear_range: [0.0, 0.05, 0.05]
+          scale_range: [[1, 1], [0.5, 1.5], [0.5, 1.5]]
+          safe_crop_size: [1, 512, 512]
+          safe_crop_coverage: 0.9
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [1, 512, 512]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 0.3
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0, 0]
+    val_gpu_augmentations:
+      # CellDiff requires exact input_spatial_size (fixed ViT positional
+      # embeddings). DivisibleCropd is insufficient — must center-crop to
+      # exactly the model input size.
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [1, 512, 512]

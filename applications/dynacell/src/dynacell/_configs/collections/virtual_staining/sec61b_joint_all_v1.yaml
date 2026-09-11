@@ -1,0 +1,806 @@
+name: sec61b_joint_all_v1
+description: Joint frozen benchmark collection for target 'sec61b' across 5 source
+  datasets. Channels and FOV membership captured from the live train/test zarr stores
+  at freeze time.
+provenance:
+  airtable_base_id: null
+  airtable_query: null
+  record_ids: []
+  created_at: '2026-04-24T19:29:05.345825+00:00'
+  created_by: Alex Kalinin <alex.kalinin@czbiohub.org>
+experiments:
+- name: sec61b_hipsc_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B.zarr
+  channels:
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Nuclei
+    marker: Nuclei
+    wells: []
+  - name: Membrane
+    marker: Membrane
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.108
+  pixel_size_z_um: 0.29
+  exclude_fovs: []
+- name: sec61b_hipsc_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/test_cropped/SEC61B.zarr
+  channels:
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Nuclei
+    marker: Nuclei
+    wells: []
+  - name: Membrane
+    marker: Membrane
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.108
+  pixel_size_z_um: 0.29
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2024_10_31_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_31_A549_SEC61_ZIKV_DENV/train/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2024_10_31_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_10_31_A549_SEC61_ZIKV_DENV/test/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2024_11_07_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_07_A549_SEC61_DENV/train/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2024_11_07_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2024_11_07_A549_SEC61_DENV/test/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2025_07_24_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/train/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2025_07_24_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/test/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2025_08_26_train
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/train/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+- name: sec61b_a549_mantis_2025_08_26_test
+  data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/2025_08_26_A549_SEC61_TOMM20_ZIKV/test/SEC61B.zarr
+  channels:
+  - name: Phase3D
+    marker: Phase3D
+    wells: []
+  - name: Brightfield
+    marker: Brightfield
+    wells: []
+  - name: Structure
+    marker: SEC61B
+    wells: []
+  perturbation_wells: null
+  interval_minutes: null
+  start_hpi: null
+  marker: SEC61B
+  organelle: er
+  pixel_size_xy_um: 0.1494
+  pixel_size_z_um: 0.174
+  exclude_fovs: []
+train_fovs:
+- sec61b_hipsc_train/4/38452/5161
+- sec61b_hipsc_train/4/38452/5165
+- sec61b_hipsc_train/4/38452/5177
+- sec61b_hipsc_train/4/38452/5184
+- sec61b_hipsc_train/4/38452/5194
+- sec61b_hipsc_train/4/38452/5198
+- sec61b_hipsc_train/4/38464/5157
+- sec61b_hipsc_train/4/38464/5159
+- sec61b_hipsc_train/4/38464/5176
+- sec61b_hipsc_train/4/38464/5179
+- sec61b_hipsc_train/4/38464/5181
+- sec61b_hipsc_train/4/38464/5186
+- sec61b_hipsc_train/4/38464/5190
+- sec61b_hipsc_train/4/38464/5199
+- sec61b_hipsc_train/4/38464/5202
+- sec61b_hipsc_train/4/38465/5164
+- sec61b_hipsc_train/4/38465/5171
+- sec61b_hipsc_train/4/38465/5191
+- sec61b_hipsc_train/4/38465/5195
+- sec61b_hipsc_train/4/38465/5197
+- sec61b_hipsc_train/4/38466/5155
+- sec61b_hipsc_train/4/38466/5168
+- sec61b_hipsc_train/4/38466/5188
+- sec61b_hipsc_train/4/38466/5192
+- sec61b_hipsc_train/4/38466/5193
+- sec61b_hipsc_train/4/38466/5196
+- sec61b_hipsc_train/4/39124/5221
+- sec61b_hipsc_train/4/39124/5223
+- sec61b_hipsc_train/4/39124/5247
+- sec61b_hipsc_train/4/39124/5258
+- sec61b_hipsc_train/4/39124/5280
+- sec61b_hipsc_train/4/39125/5264
+- sec61b_hipsc_train/4/39126/5229
+- sec61b_hipsc_train/4/39127/5283
+- sec61b_hipsc_train/4/39128/5219
+- sec61b_hipsc_train/4/39128/5260
+- sec61b_hipsc_train/4/39128/5272
+- sec61b_hipsc_train/4/39136/5225
+- sec61b_hipsc_train/4/39136/5234
+- sec61b_hipsc_train/4/39136/5236
+- sec61b_hipsc_train/4/39136/5239
+- sec61b_hipsc_train/4/39137/5243
+- sec61b_hipsc_train/4/39137/5266
+- sec61b_hipsc_train/4/39137/5274
+- sec61b_hipsc_train/4/39137/5277
+- sec61b_hipsc_train/4/39138/5256
+- sec61b_hipsc_train/4/39138/5262
+- sec61b_hipsc_train/4/39138/5270
+- sec61b_hipsc_train/4/39139/5220
+- sec61b_hipsc_train/4/39139/5244
+- sec61b_hipsc_train/4/39139/5249
+- sec61b_hipsc_train/4/39139/5250
+- sec61b_hipsc_train/4/39140/5222
+- sec61b_hipsc_train/4/39140/5232
+- sec61b_hipsc_train/4/39140/5240
+- sec61b_hipsc_train/4/39222/5288
+- sec61b_hipsc_train/4/39222/5291
+- sec61b_hipsc_train/4/39222/5298
+- sec61b_hipsc_train/4/39222/5303
+- sec61b_hipsc_train/4/39222/5324
+- sec61b_hipsc_train/4/39224/5294
+- sec61b_hipsc_train/4/39224/5302
+- sec61b_hipsc_train/4/39224/5307
+- sec61b_hipsc_train/4/39224/5321
+- sec61b_hipsc_train/4/39224/5326
+- sec61b_hipsc_train/4/39224/5332
+- sec61b_hipsc_train/4/39232/5278
+- sec61b_hipsc_train/4/39232/5318
+- sec61b_hipsc_train/4/39232/5323
+- sec61b_hipsc_train/4/39232/5330
+- sec61b_hipsc_train/4/39233/5299
+- sec61b_hipsc_train/4/39233/5309
+- sec61b_hipsc_train/4/39233/5322
+- sec61b_hipsc_train/4/39236/5316
+- sec61b_hipsc_train/4/39236/5317
+- sec61b_hipsc_train/4/40084/5359
+- sec61b_hipsc_train/4/40084/5380
+- sec61b_hipsc_train/4/40084/5407
+- sec61b_hipsc_train/4/40084/5429
+- sec61b_hipsc_train/4/40085/5371
+- sec61b_hipsc_train/4/40085/5383
+- sec61b_hipsc_train/4/40085/5389
+- sec61b_hipsc_train/4/40086/5401
+- sec61b_hipsc_train/4/40087/5377
+- sec61b_hipsc_train/4/40087/5405
+- sec61b_hipsc_train/4/40087/5428
+- sec61b_hipsc_train/4/40088/5365
+- sec61b_hipsc_train/4/40088/5368
+- sec61b_hipsc_train/4/40088/5392
+- sec61b_hipsc_train/4/40088/5398
+- sec61b_hipsc_train/4/40088/5403
+- sec61b_hipsc_train/4/40088/5417
+- sec61b_hipsc_train/4/40088/5422
+- sec61b_hipsc_train/4/40088/5424
+- sec61b_hipsc_train/4/40088/5430
+- sec61b_hipsc_train/4/40098/5386
+- sec61b_hipsc_train/4/40098/5409
+- sec61b_hipsc_train/4/40098/5427
+- sec61b_hipsc_train/4/40180/5447
+- sec61b_hipsc_train/4/40180/5461
+- sec61b_hipsc_train/4/40180/5475
+- sec61b_hipsc_train/4/40180/5497
+- sec61b_hipsc_train/4/40181/5435
+- sec61b_hipsc_train/4/40181/5441
+- sec61b_hipsc_train/4/40181/5443
+- sec61b_hipsc_train/4/40181/5481
+- sec61b_hipsc_train/4/40182/5432
+- sec61b_hipsc_train/4/40182/5433
+- sec61b_hipsc_train/4/40182/5455
+- sec61b_hipsc_train/4/40182/5498
+- sec61b_hipsc_train/4/40184/5439
+- sec61b_hipsc_train/4/40184/5457
+- sec61b_hipsc_train/4/40194/5459
+- sec61b_hipsc_train/4/40194/5463
+- sec61b_hipsc_train/4/40195/5436
+- sec61b_hipsc_train/4/40195/5483
+- sec61b_hipsc_train/4/40195/5489
+- sec61b_hipsc_train/4/40195/5491
+- sec61b_hipsc_train/4/40375/4566
+- sec61b_hipsc_train/4/40375/4599
+- sec61b_hipsc_train/4/40375/4608
+- sec61b_hipsc_train/4/40376/4563
+- sec61b_hipsc_train/4/40376/4584
+- sec61b_hipsc_train/4/40376/4605
+- sec61b_hipsc_train/4/40376/4607
+- sec61b_hipsc_train/4/40376/4609
+- sec61b_hipsc_train/4/40385/4557
+- sec61b_hipsc_train/4/40385/4559
+- sec61b_hipsc_train/4/40385/4578
+- sec61b_hipsc_train/4/40385/4593
+- sec61b_hipsc_train/4/40385/4614
+- sec61b_hipsc_train/4/40386/4580
+- sec61b_hipsc_train/4/40386/4611
+- sec61b_hipsc_train/4/40386/4613
+- sec61b_hipsc_train/4/40387/4561
+- sec61b_hipsc_train/4/40387/4582
+- sec61b_hipsc_train/4/40387/4586
+- sec61b_hipsc_train/4/40387/4595
+- sec61b_hipsc_train/4/40387/4597
+- sec61b_hipsc_train/4/40388/4574
+- sec61b_hipsc_train/4/40388/4588
+- sec61b_hipsc_train/4/40468/4620
+- sec61b_hipsc_train/4/40468/4650
+- sec61b_hipsc_train/4/40468/4653
+- sec61b_hipsc_train/4/40468/4655
+- sec61b_hipsc_train/4/40469/4641
+- sec61b_hipsc_train/4/40469/4666
+- sec61b_hipsc_train/4/40469/4673
+- sec61b_hipsc_train/4/40470/4615
+- sec61b_hipsc_train/4/40470/4616
+- sec61b_hipsc_train/4/40470/4671
+- sec61b_hipsc_train/4/40470/4675
+- sec61b_hipsc_train/4/40470/4677
+- sec61b_hipsc_train/4/40471/4632
+- sec61b_hipsc_train/4/40471/4657
+- sec61b_hipsc_train/4/40471/4664
+- sec61b_hipsc_train/4/40481/4622
+- sec61b_hipsc_train/4/40481/4633
+- sec61b_hipsc_train/4/40481/4647
+- sec61b_hipsc_train/4/40481/4668
+- sec61b_hipsc_train/4/40483/4617
+- sec61b_hipsc_train/4/40483/4619
+- sec61b_hipsc_train/4/40483/4629
+- sec61b_hipsc_train/4/40484/4618
+- sec61b_hipsc_train/4/40484/4626
+- sec61b_hipsc_train/4/40484/4663
+- sec61b_hipsc_train/4/40960/4625
+- sec61b_hipsc_train/4/40960/4628
+- sec61b_hipsc_train/4/40960/4640
+- sec61b_hipsc_train/4/40960/4654
+- sec61b_hipsc_train/4/40960/4656
+- sec61b_hipsc_train/4/40960/4674
+- sec61b_hipsc_train/4/40960/4678
+- sec61b_hipsc_train/4/40961/4635
+- sec61b_hipsc_train/4/40961/4669
+- sec61b_hipsc_train/4/40962/4676
+- sec61b_hipsc_train/4/40964/4623
+- sec61b_hipsc_train/4/40964/4631
+- sec61b_hipsc_train/4/40964/4649
+- sec61b_hipsc_train/4/40964/4660
+- sec61b_hipsc_train/4/40964/4667
+- sec61b_hipsc_train/4/40964/4672
+- sec61b_hipsc_train/4/41044/4843
+- sec61b_hipsc_train/4/41044/4847
+- sec61b_hipsc_train/4/41044/4851
+- sec61b_hipsc_train/4/41044/4876
+- sec61b_hipsc_train/4/41044/4895
+- sec61b_hipsc_train/4/41045/4853
+- sec61b_hipsc_train/4/41045/4873
+- sec61b_hipsc_train/4/41045/4889
+- sec61b_hipsc_train/4/41045/4893
+- sec61b_hipsc_train/4/41046/4900
+- sec61b_hipsc_train/4/41047/4845
+- sec61b_hipsc_train/4/41047/4882
+- sec61b_hipsc_train/4/41047/4883
+- sec61b_hipsc_train/4/41047/4902
+- sec61b_hipsc_train/4/41057/4860
+- sec61b_hipsc_train/4/41057/4864
+- sec61b_hipsc_train/4/41057/4875
+- sec61b_hipsc_train/4/41057/4877
+- sec61b_hipsc_train/4/41057/4896
+- sec61b_hipsc_train/4/41058/4855
+- sec61b_hipsc_train/4/41058/4879
+- sec61b_hipsc_train/4/41058/4897
+- sec61b_hipsc_train/4/41058/4899
+- sec61b_hipsc_train/4/41059/4841
+- sec61b_hipsc_train/4/41059/4867
+- sec61b_hipsc_train/4/41059/4884
+- sec61b_hipsc_train/4/41059/4888
+- sec61b_hipsc_train/4/41059/4890
+- sec61b_hipsc_train/4/41059/4892
+- sec61b_hipsc_train/4/41060/4859
+- sec61b_hipsc_train/4/41060/4862
+- sec61b_hipsc_train/4/41060/4878
+- sec61b_hipsc_train/4/41060/4880
+- sec61b_hipsc_train/4/41060/4881
+- sec61b_hipsc_train/4/41060/4894
+- sec61b_hipsc_train/4/41060/4898
+- sec61b_hipsc_train/4/41237/4813
+- sec61b_hipsc_train/4/41237/4826
+- sec61b_hipsc_train/4/41237/4840
+- sec61b_hipsc_train/4/41237/4842
+- sec61b_hipsc_train/4/41237/4861
+- sec61b_hipsc_train/4/41237/4865
+- sec61b_hipsc_train/4/41237/4870
+- sec61b_hipsc_train/4/41238/4815
+- sec61b_hipsc_train/4/41238/4816
+- sec61b_hipsc_train/4/41238/4819
+- sec61b_hipsc_train/4/41238/4827
+- sec61b_hipsc_train/4/41238/4839
+- sec61b_hipsc_train/4/41238/4844
+- sec61b_hipsc_train/4/41238/4874
+- sec61b_hipsc_train/4/41239/4817
+- sec61b_hipsc_train/4/41239/4824
+- sec61b_hipsc_train/4/41239/4830
+- sec61b_hipsc_train/4/41239/4833
+- sec61b_hipsc_train/4/41239/4836
+- sec61b_hipsc_train/4/41239/4838
+- sec61b_hipsc_train/4/41240/4814
+- sec61b_hipsc_train/4/41240/4820
+- sec61b_hipsc_train/4/41240/4821
+- sec61b_hipsc_train/4/41240/4825
+- sec61b_hipsc_train/4/41240/4831
+- sec61b_hipsc_train/4/41240/4852
+- sec61b_hipsc_train/4/41240/4858
+- sec61b_hipsc_train/4/41240/4866
+- sec61b_hipsc_train/4/41249/4835
+- sec61b_hipsc_train/4/41249/4837
+- sec61b_hipsc_train/4/41249/4868
+- sec61b_hipsc_train/4/41335/4810
+- sec61b_hipsc_train/4/41347/4804
+- sec61b_hipsc_train/4/41347/4808
+- sec61b_hipsc_train/4/41347/4812
+- sec61b_hipsc_train/4/41348/4805
+- sec61b_hipsc_train/4/41348/4806
+- sec61b_hipsc_train/4/41348/4807
+- sec61b_hipsc_train/4/41348/4811
+- sec61b_hipsc_train/4/41428/4714
+- sec61b_hipsc_train/4/41428/4723
+- sec61b_hipsc_train/4/41428/4737
+- sec61b_hipsc_train/4/41428/4739
+- sec61b_hipsc_train/4/41430/4722
+- sec61b_hipsc_train/4/41430/4732
+- sec61b_hipsc_train/4/41430/4733
+- sec61b_hipsc_train/4/41430/4741
+- sec61b_hipsc_train/4/41430/4742
+- sec61b_hipsc_train/4/41432/4716
+- sec61b_hipsc_train/4/41432/4719
+- sec61b_hipsc_train/4/41432/4720
+- sec61b_hipsc_train/4/41432/4724
+- sec61b_hipsc_train/4/41432/4726
+- sec61b_hipsc_train/4/41432/4740
+- sec61b_hipsc_train/4/41441/4721
+- sec61b_hipsc_train/4/41441/4727
+- sec61b_hipsc_train/4/41441/4728
+- sec61b_hipsc_train/4/41441/4731
+- sec61b_hipsc_train/4/41441/4734
+- sec61b_hipsc_train/4/41441/4735
+- sec61b_hipsc_train/4/41908/5019
+- sec61b_hipsc_train/4/41908/5021
+- sec61b_hipsc_train/4/41908/5043
+- sec61b_hipsc_train/4/41908/5098
+- sec61b_hipsc_train/4/41908/5099
+- sec61b_hipsc_train/4/41909/5025
+- sec61b_hipsc_train/4/41909/5035
+- sec61b_hipsc_train/4/41909/5046
+- sec61b_hipsc_train/4/41909/5082
+- sec61b_hipsc_train/4/41909/5084
+- sec61b_hipsc_train/4/41909/5092
+- sec61b_hipsc_train/4/41909/5096
+- sec61b_hipsc_train/4/41910/5017
+- sec61b_hipsc_train/4/41910/5023
+- sec61b_hipsc_train/4/41910/5033
+- sec61b_hipsc_train/4/41910/5093
+- sec61b_hipsc_train/4/41911/5015
+- sec61b_hipsc_train/4/41911/5029
+- sec61b_hipsc_train/4/41911/5055
+- sec61b_hipsc_train/4/41911/5064
+- sec61b_hipsc_train/4/41911/5079
+- sec61b_hipsc_train/4/41911/5080
+- sec61b_hipsc_train/4/41911/5086
+- sec61b_hipsc_train/4/41911/5094
+- sec61b_hipsc_train/4/41912/5039
+- sec61b_hipsc_train/4/41912/5041
+- sec61b_hipsc_train/4/41912/5052
+- sec61b_hipsc_train/4/41912/5074
+- sec61b_hipsc_train/4/41912/5095
+- sec61b_hipsc_train/4/42197/5020
+- sec61b_hipsc_train/4/42197/5026
+- sec61b_hipsc_train/4/42197/5030
+- sec61b_hipsc_train/4/42197/5036
+- sec61b_hipsc_train/4/42197/5075
+- sec61b_hipsc_train/4/42199/5032
+- sec61b_hipsc_train/4/42199/5045
+- sec61b_hipsc_train/4/42199/5063
+- sec61b_hipsc_train/4/42199/5066
+- sec61b_hipsc_train/4/42199/5069
+- sec61b_hipsc_train/4/42200/5016
+- sec61b_hipsc_train/4/42200/5028
+- sec61b_hipsc_train/4/42200/5038
+- sec61b_hipsc_train/4/42211/5018
+- sec61b_hipsc_train/4/42211/5024
+- sec61b_hipsc_train/4/42211/5051
+- sec61b_hipsc_train/4/42211/5053
+- sec61b_hipsc_train/4/42211/5057
+- sec61b_hipsc_train/42/136118/15182
+- sec61b_hipsc_train/42/136118/15269
+- sec61b_hipsc_train/42/136118/16846
+- sec61b_hipsc_train/42/136119/14226
+- sec61b_hipsc_train/42/136119/14227
+- sec61b_hipsc_train/42/136119/15430
+- sec61b_hipsc_train/42/136119/15573
+- sec61b_hipsc_train/42/136120/15452
+- sec61b_hipsc_train/42/136120/15958
+- sec61b_hipsc_train/42/136120/16873
+- sec61b_hipsc_train/42/136121/15700
+- sec61b_hipsc_train/42/136121/16618
+- sec61b_hipsc_train/42/136121/17149
+- sec61b_hipsc_train/42/136122/16832
+- sec61b_hipsc_train/42/136122/16883
+- sec61b_hipsc_train/42/136122/16987
+- sec61b_hipsc_train/42/136122/17182
+- sec61b_hipsc_train/42/136124/15667
+- sec61b_hipsc_train/42/136124/15715
+- sec61b_hipsc_train/42/136126/15932
+- sec61b_hipsc_train/42/136126/16322
+- sec61b_hipsc_train/42/138024/15523
+- sec61b_hipsc_train/42/138024/15890
+- sec61b_hipsc_train/42/138024/16225
+- sec61b_hipsc_train/42/138024/16287
+- sec61b_hipsc_train/42/138024/16991
+- sec61b_hipsc_train/42/138025/15979
+- sec61b_hipsc_train/42/138025/16227
+- sec61b_hipsc_train/42/138025/16897
+- sec61b_hipsc_train/42/138025/17204
+- sec61b_hipsc_train/42/138025/17241
+- sec61b_hipsc_train/42/138026/15744
+- sec61b_hipsc_train/42/138026/16036
+- sec61b_hipsc_train/42/138026/16240
+- sec61b_hipsc_train/42/138026/17153
+- sec61b_hipsc_train/42/138026/17201
+- sec61b_hipsc_train/42/138026/17206
+- sec61b_hipsc_train/42/138026/17257
+- sec61b_hipsc_train/42/138027/17190
+- sec61b_hipsc_train/42/138027/17231
+- sec61b_hipsc_train/42/138027/17262
+- sec61b_hipsc_train/42/138028/15886
+- sec61b_hipsc_train/42/138028/16174
+- sec61b_hipsc_train/42/138028/16396
+- sec61b_hipsc_train/42/138028/17142
+- sec61b_hipsc_train/42/138028/17192
+- sec61b_hipsc_train/42/138028/17244
+- sec61b_hipsc_train/42/138030/15632
+- sec61b_hipsc_train/42/138030/15792
+- sec61b_hipsc_train/42/138030/15894
+- sec61b_hipsc_train/42/138032/15614
+- sec61b_hipsc_train/42/138032/15851
+- sec61b_hipsc_train/42/138032/16266
+- sec61b_hipsc_train/42/138032/16928
+- sec61b_hipsc_train/42/138032/17205
+- sec61b_hipsc_train/42/138032/17209
+- sec61b_hipsc_train/42/138033/17171
+- sec61b_hipsc_train/42/138033/17255
+- sec61b_hipsc_train/42/138037/15612
+- sec61b_hipsc_train/42/138037/16696
+- sec61b_hipsc_train/42/138037/17203
+- sec61b_hipsc_train/42/138037/17223
+- sec61b_hipsc_train/42/138044/15587
+- sec61b_hipsc_train/42/138044/16757
+- sec61b_hipsc_train/42/138044/17236
+- sec61b_hipsc_train/42/138045/15540
+- sec61b_hipsc_train/42/138045/15558
+- sec61b_hipsc_train/42/138045/15684
+- sec61b_hipsc_train/42/138045/15786
+- sec61b_hipsc_train/42/138045/16126
+- sec61b_hipsc_train/42/138045/16159
+- sec61b_hipsc_train/42/138045/16598
+- sec61b_hipsc_train/42/138045/17164
+- sec61b_hipsc_train/42/138045/17234
+- sec61b_hipsc_train/42/138045/17242
+- sec61b_hipsc_train/42/138045/17256
+- sec61b_hipsc_train/42/138247/17207
+- sec61b_hipsc_train/42/138249/16356
+- sec61b_hipsc_train/42/138249/17200
+- sec61b_hipsc_train/42/138251/15688
+- sec61b_hipsc_train/42/138251/15760
+- sec61b_hipsc_train/42/138251/15918
+- sec61b_hipsc_train/42/138251/16722
+- sec61b_hipsc_train/42/138251/16982
+- sec61b_hipsc_train/42/138251/17191
+- sec61b_hipsc_train/42/138253/15957
+- sec61b_hipsc_train/42/138253/16263
+- sec61b_hipsc_train/42/138253/16587
+- sec61b_hipsc_train/42/138253/16799
+- sec61b_hipsc_train/42/138253/16955
+- sec61b_hipsc_train/42/138257/16247
+- sec61b_hipsc_train/42/138257/16292
+- sec61b_hipsc_train/42/138257/16306
+- sec61b_hipsc_train/42/138257/16480
+- sec61b_hipsc_train/42/138257/17221
+- sec61b_hipsc_train/42/138261/15887
+- sec61b_hipsc_train/42/138261/16083
+- sec61b_hipsc_train/42/138261/16860
+- sec61b_a549_mantis_2024_10_31_train/C/2/000000
+- sec61b_a549_mantis_2024_10_31_train/C/2/000001
+- sec61b_a549_mantis_2024_10_31_train/C/2/001000
+- sec61b_a549_mantis_2024_10_31_train/C/2/001001
+- sec61b_a549_mantis_2024_10_31_train/C/2/002000
+- sec61b_a549_mantis_2024_10_31_train/C/2/002001
+- sec61b_a549_mantis_2024_10_31_train/C/4/002000
+- sec61b_a549_mantis_2024_10_31_train/C/4/002001
+- sec61b_a549_mantis_2024_11_07_train/B/1/001000
+- sec61b_a549_mantis_2024_11_07_train/B/1/001001
+- sec61b_a549_mantis_2024_11_07_train/B/3/001000
+- sec61b_a549_mantis_2024_11_07_train/B/3/001001
+- sec61b_a549_mantis_2025_07_24_train/A/1/002000
+- sec61b_a549_mantis_2025_07_24_train/A/1/002001
+- sec61b_a549_mantis_2025_08_26_train/A/1/001001
+- sec61b_a549_mantis_2025_08_26_train/A/1/001002
+- sec61b_a549_mantis_2025_08_26_train/A/1/002000
+- sec61b_a549_mantis_2025_08_26_train/A/1/002001
+- sec61b_a549_mantis_2025_08_26_train/A/1/002002
+- sec61b_a549_mantis_2025_08_26_train/B/1/002000
+- sec61b_a549_mantis_2025_08_26_train/B/1/002001
+- sec61b_a549_mantis_2025_08_26_train/B/1/002002
+test_fovs:
+- sec61b_hipsc_test/4/38452/5187
+- sec61b_hipsc_test/4/38452/5201
+- sec61b_hipsc_test/4/38452/5203
+- sec61b_hipsc_test/4/38464/5173
+- sec61b_hipsc_test/4/38465/5189
+- sec61b_hipsc_test/4/38466/5200
+- sec61b_hipsc_test/4/39124/5286
+- sec61b_hipsc_test/4/39125/5224
+- sec61b_hipsc_test/4/39126/5289
+- sec61b_hipsc_test/4/39128/5230
+- sec61b_hipsc_test/4/39128/5254
+- sec61b_hipsc_test/4/39137/5252
+- sec61b_hipsc_test/4/39138/5268
+- sec61b_hipsc_test/4/39140/5293
+- sec61b_hipsc_test/4/39222/5281
+- sec61b_hipsc_test/4/39222/5311
+- sec61b_hipsc_test/4/39232/5329
+- sec61b_hipsc_test/4/39233/5304
+- sec61b_hipsc_test/4/39233/5313
+- sec61b_hipsc_test/4/39233/5327
+- sec61b_hipsc_test/4/39236/5305
+- sec61b_hipsc_test/4/40084/5357
+- sec61b_hipsc_test/4/40084/5415
+- sec61b_hipsc_test/4/40085/5421
+- sec61b_hipsc_test/4/40086/5362
+- sec61b_hipsc_test/4/40181/5434
+- sec61b_hipsc_test/4/40181/5451
+- sec61b_hipsc_test/4/40181/5453
+- sec61b_hipsc_test/4/40195/5479
+- sec61b_hipsc_test/4/40196/5471
+- sec61b_hipsc_test/4/40375/4612
+- sec61b_hipsc_test/4/40376/4568
+- sec61b_hipsc_test/4/40376/4601
+- sec61b_hipsc_test/4/40376/4604
+- sec61b_hipsc_test/4/40385/4565
+- sec61b_hipsc_test/4/40385/4572
+- sec61b_hipsc_test/4/40385/4576
+- sec61b_hipsc_test/4/40385/4610
+- sec61b_hipsc_test/4/40386/4603
+- sec61b_hipsc_test/4/40386/4606
+- sec61b_hipsc_test/4/40387/4570
+- sec61b_hipsc_test/4/40388/4591
+- sec61b_hipsc_test/4/40468/4624
+- sec61b_hipsc_test/4/40471/4659
+- sec61b_hipsc_test/4/40471/4661
+- sec61b_hipsc_test/4/40471/4679
+- sec61b_hipsc_test/4/40481/4627
+- sec61b_hipsc_test/4/40483/4621
+- sec61b_hipsc_test/4/40483/4637
+- sec61b_hipsc_test/4/40483/4644
+- sec61b_hipsc_test/4/40960/4630
+- sec61b_hipsc_test/4/40961/4665
+- sec61b_hipsc_test/4/40964/4643
+- sec61b_hipsc_test/4/41044/4869
+- sec61b_hipsc_test/4/41044/4891
+- sec61b_hipsc_test/4/41046/4849
+- sec61b_hipsc_test/4/41047/4885
+- sec61b_hipsc_test/4/41057/4887
+- sec61b_hipsc_test/4/41059/4886
+- sec61b_hipsc_test/4/41060/4901
+- sec61b_hipsc_test/4/41238/4828
+- sec61b_hipsc_test/4/41239/4823
+- sec61b_hipsc_test/4/41239/4832
+- sec61b_hipsc_test/4/41240/4818
+- sec61b_hipsc_test/4/41240/4834
+- sec61b_hipsc_test/4/41335/4803
+- sec61b_hipsc_test/4/41348/4809
+- sec61b_hipsc_test/4/41428/4713
+- sec61b_hipsc_test/4/41428/4718
+- sec61b_hipsc_test/4/41428/4743
+- sec61b_hipsc_test/4/41430/4744
+- sec61b_hipsc_test/4/41432/4729
+- sec61b_hipsc_test/4/41441/4725
+- sec61b_hipsc_test/4/41908/5037
+- sec61b_hipsc_test/4/41908/5061
+- sec61b_hipsc_test/4/41909/5071
+- sec61b_hipsc_test/4/41910/5031
+- sec61b_hipsc_test/4/41910/5058
+- sec61b_hipsc_test/4/41910/5088
+- sec61b_hipsc_test/4/41911/5027
+- sec61b_hipsc_test/4/42199/5048
+- sec61b_hipsc_test/4/42211/5034
+- sec61b_hipsc_test/42/136118/14223
+- sec61b_hipsc_test/42/136118/14225
+- sec61b_hipsc_test/42/136118/16503
+- sec61b_hipsc_test/42/136119/16504
+- sec61b_hipsc_test/42/136120/14221
+- sec61b_hipsc_test/42/136120/14224
+- sec61b_hipsc_test/42/136120/14228
+- sec61b_hipsc_test/42/136120/15747
+- sec61b_hipsc_test/42/136124/16127
+- sec61b_hipsc_test/42/138024/17222
+- sec61b_hipsc_test/42/138026/17232
+- sec61b_hipsc_test/42/138028/15839
+- sec61b_hipsc_test/42/138028/17202
+- sec61b_hipsc_test/42/138032/15577
+- sec61b_hipsc_test/42/138044/15777
+- sec61b_hipsc_test/42/138045/16692
+- sec61b_hipsc_test/42/138251/17249
+- sec61b_hipsc_test/42/138253/15966
+- sec61b_a549_mantis_2024_10_31_test/C/4/000000
+- sec61b_a549_mantis_2024_10_31_test/C/4/000001
+- sec61b_a549_mantis_2024_10_31_test/C/4/001000
+- sec61b_a549_mantis_2024_10_31_test/C/4/001001
+- sec61b_a549_mantis_2024_11_07_test/B/1/000000
+- sec61b_a549_mantis_2024_11_07_test/B/1/000001
+- sec61b_a549_mantis_2024_11_07_test/B/2/000000
+- sec61b_a549_mantis_2024_11_07_test/B/2/000001
+- sec61b_a549_mantis_2024_11_07_test/B/2/001000
+- sec61b_a549_mantis_2024_11_07_test/B/2/001001
+- sec61b_a549_mantis_2024_11_07_test/B/3/000000
+- sec61b_a549_mantis_2024_11_07_test/B/3/000001
+- sec61b_a549_mantis_2024_11_07_test/C/2/000000
+- sec61b_a549_mantis_2024_11_07_test/C/2/000001
+- sec61b_a549_mantis_2024_11_07_test/C/2/001000
+- sec61b_a549_mantis_2024_11_07_test/C/2/001001
+- sec61b_a549_mantis_2025_07_24_test/A/1/000000
+- sec61b_a549_mantis_2025_07_24_test/A/1/000001
+- sec61b_a549_mantis_2025_07_24_test/A/1/001000
+- sec61b_a549_mantis_2025_07_24_test/A/1/001001
+- sec61b_a549_mantis_2025_07_24_test/A/2/000000
+- sec61b_a549_mantis_2025_07_24_test/A/2/000001
+- sec61b_a549_mantis_2025_07_24_test/A/2/001000
+- sec61b_a549_mantis_2025_07_24_test/A/2/001001
+- sec61b_a549_mantis_2025_07_24_test/A/2/002000
+- sec61b_a549_mantis_2025_07_24_test/A/2/002001
+- sec61b_a549_mantis_2025_08_26_test/A/1/000000
+- sec61b_a549_mantis_2025_08_26_test/A/1/000001
+- sec61b_a549_mantis_2025_08_26_test/A/1/000002
+- sec61b_a549_mantis_2025_08_26_test/A/1/001000
+- sec61b_a549_mantis_2025_08_26_test/B/1/000000
+- sec61b_a549_mantis_2025_08_26_test/B/1/000001
+- sec61b_a549_mantis_2025_08_26_test/B/1/000002
+- sec61b_a549_mantis_2025_08_26_test/B/1/001000
+- sec61b_a549_mantis_2025_08_26_test/B/1/001001
+- sec61b_a549_mantis_2025_08_26_test/B/1/001002

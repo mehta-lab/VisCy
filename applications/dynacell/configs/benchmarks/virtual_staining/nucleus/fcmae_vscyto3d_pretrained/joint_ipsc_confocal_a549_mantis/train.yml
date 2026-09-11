@@ -22,7 +22,7 @@
 base:
   - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu_long.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -46,7 +46,7 @@ trainer:
   logger:
     init_args:
       name: FCMAE_VSCyto3D_Pretrained_JOINT_NUCL
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fcmae_vscyto3d_pretrained
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto3d_pretrained
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -54,10 +54,12 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fcmae_vscyto3d_pretrained/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto3d_pretrained/checkpoints
 
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
@@ -152,4 +154,4 @@ data:
 
 launcher:
   job_name: FCMAE_VSCyto3D_Pretrained_JOINT_NUCL
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/nucl/fcmae_vscyto3d_pretrained
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto3d_pretrained

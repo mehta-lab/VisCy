@@ -173,3 +173,10 @@ def test_dims_mismatch_raises():
     """len(dims) != len(num_res_block) + 1 raises ValueError."""
     with pytest.raises(ValueError, match="len\\(dims\\)"):
         _make_base(dims=(16, 32, 64), num_res_block=(1,))
+
+
+def test_forward_non_5d_input_raises():
+    """A non-5D input raises a clear ValueError, not a confusing Conv3d channel error."""
+    model = _make_base()
+    with pytest.raises(ValueError, match="Expected 5D input"):
+        model(torch.randn(2, 1, 16, 16))  # 4D: a squeezed Z dim

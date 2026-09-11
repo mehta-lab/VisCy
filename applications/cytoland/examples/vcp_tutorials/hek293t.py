@@ -56,9 +56,10 @@ On Windows, the files can be downloaded manually from the URLs.
 
 # %%
 # Install the modular Cytoland/VisCy packages required for this example
-# See the [repository](https://github.com/mehta-lab/VisCy) for more details
+# `cytoland` and `viscy-utils` are not yet on PyPI, so they are installed from
+# the GitHub monorepo (their siblings resolve from PyPI automatically).
 # Here stackview and ipycanvas are installed for visualization
-# !pip install -U cytoland viscy stackview ipycanvas==0.11
+# !pip install "viscy-utils @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=packages/viscy-utils" "cytoland @ git+https://github.com/mehta-lab/VisCy.git#subdirectory=applications/cytoland" stackview ipycanvas==0.11
 
 # %%
 # Restart kernel if running in Google Colab

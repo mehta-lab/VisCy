@@ -10,21 +10,41 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PIXEL_METRICS = ["PCC", "SSIM", "NRMSE", "PSNR", "Spectral_PCC", "MicroMS3IM"]
+# SSIM / NRMSE / PSNR are each reported in both scalings, adjacent so the pair
+# reads as one comparison: the bare column is scale-sensitive (per-input min-max)
+# and ``SI_*`` is scale-invariant (least-squares affine fit to the target). Listing
+# only one would show a scaling without naming it.
+PIXEL_METRICS = [
+    "PCC",
+    "SSIM",
+    "SI_SSIM",
+    "NRMSE",
+    "SI_NRMSE",
+    "PSNR",
+    "SI_PSNR",
+    "Spectral_PCC",
+    "MicroMS3IM",
+]
 MASK_METRICS = ["Dice", "IoU", "Precision", "Recall"]
 FEATURE_METRICS = [
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
     "CP_FID",
     "DINOv3_FID",
     "DynaCLR_FID",
+    "CellDINO_FID",
+    "MorphEm_FID",
 ]
 
 HIGHER_IS_BETTER = {
     "PCC",
     "SSIM",
+    "SI_SSIM",
     "PSNR",
+    "SI_PSNR",
     "Spectral_PCC",
     "MicroMS3IM",
     "Dice",
@@ -35,6 +55,8 @@ HIGHER_IS_BETTER = {
     "CP_Median_Cosine_Similarity",
     "DINOv3_Median_Cosine_Similarity",
     "DynaCLR_Median_Cosine_Similarity",
+    "CellDINO_Median_Cosine_Similarity",
+    "MorphEm_Median_Cosine_Similarity",
 }
 
 
@@ -91,8 +113,7 @@ def aggregate_metrics(
     """
     if metrics is None:
         metrics = [c for c in df.columns if c not in ("FOV", "Timepoint")]
-    agg = df[metrics].agg(["mean", "std"])
-    return agg
+    return df[metrics].agg(["mean", "std"])
 
 
 def load_and_aggregate(

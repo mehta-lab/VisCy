@@ -4,19 +4,7 @@
 
 VisCy is a **uv workspace monorepo** for virtual staining and computational microscopy. Sub-packages live under `packages/`.
 
-## Repo Layout
-
-```
-pyproject.toml              # Root config (ruff, pytest, uv workspace)
-packages/
-  viscy-data/               # Data loading and Lightning DataModules
-  viscy-models/             # Neural network architectures
-  viscy-transforms/         # Image transforms
-src/viscy/                  # Umbrella package (re-exports)
-applications/               # Self-contained research applications
-```
-
-### Packages vs Applications
+## Packages vs Applications
 
 - **Shared code belongs in `packages/`**, not in applications.
 - **Applications must not import from each other.** If two applications need the same logic, move it to an existing package or create a new one.
@@ -29,16 +17,6 @@ applications/               # Self-contained research applications
 ### Environment Setup
 
 Use `uv` package manager. Run commands with `uv run <command>`. Edit `pyproject.toml` to modify dependencies and sync to update `uv.lock`.
-
-```sh
-uv venv -p 3.13
-uv sync --all-packages --all-extras
-```
-
-If `uv` is not installed:
-```sh
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
 On HPC, symlink the uv cache out of your home directory first:
 ```sh
@@ -77,6 +55,68 @@ When the user says "cancel all jobs," scope it to **batch jobs only**, never the
 
 **Subagent prompts for job status:** ask for completeness vs config, not just liveness. A prompt like "check the liveness of wandb run X" returns `state: finished` for a SIGTERM'd run and reads as success. Phrase it as "is run X complete relative to its configured `max_epochs`, and what was the exit reason (clean finish, scancel, OOM, timeout, exception)?"
 
+### Hung-but-allocated jobs
+
+**A job can finish its work and never exit.** Job `35083019_0` (a `pix2pix3d` predict) wrote its last chunk at 2026-07-30 19:20, then held an A6000 + 32 CPUs + 256 GB for **17.5 h** doing nothing. `squeue` shows `RUNNING` with a climbing wall clock — indistinguishable from healthy compute — and the rich progress bar only reaches `.out` at exit, so the log looks normal too. Measured rate: 1 in 509 allocations over 26 days.
+
+**The discriminator is CPU time, and only its derivative.** Across those 509 allocations every healthy job spent CPU at >= 0.93x wall; the hung one sat at 0.561 with a *zero* incremental rate. Absolute ratio alone is useless (a 16-CPU fit runs at ~7.8x wall), so compare two samples: `sstat -j <id> -a -P --format=JobID,AveCPU` — `-P` is mandatory, the default width truncates to `10-15:41:+` and misparses.
+
+**A full-looking output store plus a `RUNNING` job is NOT this signature.** On a
+re-predict launched with `--overwrite`, the writer rewrites chunks in place and the previous
+run's chunks stay on disk, so the store reads 100% complete from the first second — 36 of 36
+CellDiff-2D predicts looked finished-but-hung this way on 2026-09-11 while every one was
+healthy at a 1.01x incremental CPU rate. Judge on the CPU derivative above, never on "the
+output looks done"; see *Re-predict completeness* in `applications/dynacell/CLAUDE.md` for
+the mtime-based gate. In the same direction, a single `find -newermt '-20 minutes'` returning
+nothing is not evidence of a stall either: `/hpc` attribute caching hides fresh writes from a
+login node, and listing real mtimes (`find -printf '%T@ %p' | sort -rn`) showed writes
+seconds old at the same moment.
+
+**Using the stall watchdog.** `applications/dynacell/tools/watch_stalled_jobs.py` automates exactly that comparison. Start it whenever a campaign has long jobs in flight and leave it running:
+
+```sh
+# one-shot check: exit 0 = no stall detected, exit 1 = something is stalled, exit 2 = tool error
+uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --once
+
+# continuous, 10-min poll (launch in the background; it runs until killed)
+uv run --no-sync python applications/dynacell/tools/watch_stalled_jobs.py --interval 600
+```
+
+Quiet polls print `no stall detected, tracking N: <stepid>(<samples>) ...`, or `collecting history` when a step lacks a 15-minute baseline. A stalled step prints one `STALLED <stepid> <name> on <node>: wall Xh, cpu Yh, burned Z core-s/s over the last Wh` line per poll. Reading it:
+
+- It **only reports — it never cancels.** Cancelling a job with `afterok` dependents strands them, so follow the kill order above by hand.
+- **Interactive sessions are excluded by name** (`nomachine`, `gpu-hold`, `interactive`, bare `bash`/`sh`/`srun`). A renamed interactive session would get flagged — it still would not be cancelled, but don't act on the alert without checking.
+- It needs **two samples >= 15 min apart** and a step **>= 30 min old**, so expect no verdict on a fresh step for the first couple of polls.
+- Both modes persist samples in `$XDG_CACHE_HOME/viscy/watch_stalled_jobs-<user>@<hostname>.json` (default cache root: `~/.cache`), so each node keeps its own history by default; `--state-file` overrides the path. The file records the host that wrote it and refuses to load on any other, whatever its schema version: `~/.cache` is on NFS, where `flock` only excludes processes on the same node, so run the daemon and its `--once` checks on one node. A `--state-file` shared between nodes is claimed by the first host to create it (`O_EXCL`); a second host that started from the absent file fails on its first save instead of overwriting the winner's history. Repeat `--once` after at least 15 minutes. Its first invocation collects history; exit 0 does not establish that every job is healthy.
+- Histories are **per SLURM step** (`<jobid>.<step>` from `squeue -s`), judged against that step's own elapsed time rather than the job's. A `submit_benchmark_batch` chain advancing to its next `srun` step, or a requeue reusing a step id, starts a fresh history with that step's own clocks; the previous step's CPU cannot establish progress for the new one. A step first seen mid-allocation is judged on its cumulative CPU over its own age, so a watcher started late still catches a step that was already hung. Only `.extern` is skipped: `.batch` is tracked like any other step, because `submit_benchmark_batch --parallel` and `run_eval_direct.slurm` run their compute directly in the batch script with no `srun` step; for `srun`-based jobs the batch step never burns CPU, so it never qualifies.
+- A step that has not burned CPU **over a window of at least 30 minutes** is never flagged: startup NFS staging is legitimately ~0% CPU, and a short import-time burst must not qualify a step either. Qualification uses cumulative CPU over the step's age at the first sample taken once the step is >= 30 min old (whether or not that is the first sample), or CPU since first sight (only once >= 30 min have elapsed). A step that once qualified stays qualified through a long idle.
+- `--user` defaults to `alex.kalinin`; `sstat` only works on your own running jobs, so it cannot watch someone else's.
+
+**Predict wall limits are per family, sized from measurement** (`launcher_profiles/`):
+
+| Profile | `time` | Basis |
+|---|---|---|
+| `hardware_predict_any_gpu.yml` | 2 days | longest single-pass predict measured 21.9 h |
+| `hardware_predict_celldiff.yml` | 7 days | CELL-Diff runs 5.8-95.6 h; 8 predicts TIMEOUTed at the old 4-day cap on 2026-07-19 |
+| `hardware_h200_single.yml` | 4 days | **shared with 40 fit leaves** — do not re-tune from predict data |
+
+A new slow family gets its **own profile**; raising a shared cap to cover it makes the cap meaningless. `test_predict_leaf_wall_limit_matches_its_family` pins all 421 predict leaves to this table, and `generate_hek_predict_configs.py` picks the profile from `_HARDWARE_PROFILE` so regeneration cannot revert it.
+
+**Fit wall limits, same rule.** `hardware_4gpu.yml` is 4 days; `hardware_4gpu_long.yml` is 7 days and carries **only** the four joint ER/mito FCMAE leaves, which each TIMEOUTed twice at 4 days. Measured 1.58-1.82 epochs/h ⇒ 110-126 h for `max_epochs: 200`. Joint fits are the slow case because they pool iPSC + A549, roughly doubling steps per epoch. A 7-day 4-GPU H100/H200 request backfills materially worse, so `test_only_measured_slow_fits_get_the_long_wall` guards both directions — add a leaf only with a measured epochs/h rate.
+
+**Measure epochs/h from consecutive retained checkpoint mtimes**, not wall time ÷ steps. Each `epoch=N-step=M.ckpt` is an `(epoch, wall-clock)` pair, and two intervals inside one allocation cross-check each other (the ER-pretrained fit reproduced to three digits). Note `save_top_k` means the highest *retained* epoch is a best-by-monitor epoch, not progress — read `epoch` out of `last.ckpt` for that (`torch.load(..., mmap=True)`).
+
+**Two traps when killing one:**
+- **Lightning swallows SIGTERM.** `signal_connector.py` installs a handler that logs `Received SIGTERM` / `Bypassing SIGTERM` and sets a flag — it does not exit. `scancel` alone cannot stop a Lightning process outside its training loop; it dies on the KILL escalation (`ExitCode 0:9`), which took ~6 min here.
+- **Clear dependents' `Dependency=` BEFORE `scancel`**, or `afterok` chains land in `DependencyNeverSatisfied` permanently. `scontrol update JobId=<dep> Dependency=` to drop it, or `Dependency=afterok:<other>` to re-point the chain.
+
+**Forensics — capture this BEFORE cancelling, or the cause is unknowable:**
+1. `grep State /proc/<pid>/status` and `cat /proc/<pid>/task/*/wchan` (both readable without root, `ptrace_scope=0` here). `State: D` names an uninterruptible storage/driver call; `S` means a Python-level block.
+2. `py-spy dump --pid <pid>` (`uv tool install py-spy`) gives the full Python stack. If it errors `Failed to find python version from target process`, that is *itself* the answer: the process already reached interpreter finalization, so `trainer.predict()` returned and the writer's `plate.close()` completed.
+3. **Do not rely on SIGABRT + `PYTHONFAULTHANDLER=1`** — verified to produce no dump once the interpreter is finalizing.
+
+**Known unbounded wait in the predict teardown path:** zarr 3.2.1 `core/sync.py:89` registers `cleanup_resources` via `atexit`, which calls `_executor.shutdown(wait=True)` with no timeout — one stuck `zarr_pool` thread blocks interpreter exit forever at 0% CPU. (The same function caps its io-thread join at `timeout=0.2` "to avoid hanging"; the executor shutdown was left unbounded.) That is the proximate frame, but not the whole story here: a pure Python join still lets the SIGTERM handler run and log, and job `35083019_0` never logged it, so the terminal block was a C-level uninterruptible call underneath.
+
 ### Joint vs single-set training batch semantics
 
 `HCSDataModule` and `BatchedConcatDataModule` produce the same number of GPU samples per training step — but the YAML `batch_size` value that gets there is **different by a factor of `num_samples`**. Easy to misread either by skimming.
@@ -98,22 +138,7 @@ Examples (verified against the `applications/dynacell/configs/benchmarks/virtual
 
 When in doubt, read both `train_dataloader` overrides directly — they are short. Don't infer from comments alone.
 
-### Common Commands
-
-```sh
-uvx ruff check packages/        # lint
-uvx ruff check --fix packages/  # lint + auto-fix
-uvx ruff format packages/       # format
-uv run pytest                    # all tests
-```
-
 ### Testing
-
-```sh
-uv run pytest                          # all tests
-uv run pytest packages/viscy-data/     # single package (data)
-uv run pytest packages/viscy-models/   # single package (models)
-```
 
 Prefer `{file}_test.py` in the same directory as `{file}.py`, unless there are import issues, in which case use `tests/`.
 
@@ -137,10 +162,6 @@ Prefer `{file}_test.py` in the same directory as `{file}.py`, unless there are i
 
 ### Code Style
 
-- Docstrings use **numpy style** (`convention = "numpy"`).
-- Lint rules: `D, E, F, I, NPY, PD, W`.
-- `D` rules are ignored in `**/tests/**` and notebooks.
-- Format: double quotes, spaces, 120 char line length.
 - Use a subagent to run tests and complex bash commands, especially those expected to return complex output.
 - Run independent tasks (multi-file edits across separate concerns, cross-cutting verifications, distinct review angles) in parallel via concurrent subagents in a single message. Subagent startup overhead is negligible relative to sequential blocking. Only sequence subagents when a later task needs an earlier task's output.
 
@@ -187,17 +208,7 @@ Ask yourself if your test is actually covering the true function.
 
 ### Coding Philosophy
 
-#### 1. Think Before Coding
-
-Don't assume. Don't hide confusion. Surface tradeoffs.
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-#### 2. Simplicity First
+#### 1. Simplicity First
 
 Minimum code that solves the problem. Nothing speculative.
 
@@ -208,7 +219,7 @@ Minimum code that solves the problem. Nothing speculative.
 - If you write 200 lines and it could be 50, rewrite it.
 - Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-#### 3. Surgical Changes
+#### 2. Surgical Changes
 
 Touch only what you must. Clean up only your own mess.
 
@@ -223,18 +234,3 @@ When your changes create orphans:
 - Don't remove pre-existing dead code unless asked.
 
 The test: every changed line should trace directly to the user's request.
-
-#### 4. Goal-Driven Execution
-
-Define success criteria. Loop until verified.
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.

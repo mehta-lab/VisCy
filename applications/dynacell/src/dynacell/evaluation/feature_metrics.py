@@ -115,7 +115,15 @@ def _bootstrap_prc(
     from both ``pred`` and ``target``, rebuilds the k-NN manifolds on
     those resamples, and calls ``prc_features_to_metric`` (PRC
     convention: ``features_1=generated, features_2=real``).
+
+    Returns all-NaN when a resample cannot support the ``prc_neighborhood``
+    k-NN radius (``prc_bootstrap_size <= prc_neighborhood``) — the manifold
+    is undefined there, and torch-fidelity's ``topk`` would raise. Matches
+    how :func:`_fid` / :func:`_kid` NaN out on cohorts too small to score.
     """
+    if prc_bootstrap_size <= prc_neighborhood:
+        nan = float("nan")
+        return nan, nan, nan, nan, nan, nan
     rng = np.random.default_rng(rng_seed)
     precisions = np.empty(prc_bootstrap_subsets, dtype=np.float64)
     recalls = np.empty(prc_bootstrap_subsets, dtype=np.float64)
@@ -214,7 +222,13 @@ def compute_feature_similarity(
     prc_bootstrap_subsets : int
         Number of bootstrap resamples for Precision / Recall / F1.
     prc_bootstrap_size : int, optional
-        Per-resample size; defaults to ``min(n_pred, n_target)``.
+        Per-resample size; defaults to ``min(n_pred, n_target)``. PRC is
+        NaN'd when it does not exceed ``prc_neighborhood`` (the k-NN
+        manifold is undefined below k+1 rows).
+    mind_num_projections : int
+        Number of random projections for MIND.
+    rng_seed : int
+        Seed shared across KID, PRC bootstrap, and MIND.
 
     Notes
     -----
@@ -226,10 +240,6 @@ def compute_feature_similarity(
     the paper script. They are still directly comparable across models /
     plates / conditions evaluated with the same bootstrap scheme — but
     do not compare them to non-bootstrap PRC tables.
-    mind_num_projections : int
-        Number of random projections for MIND.
-    rng_seed : int
-        Seed shared across KID, PRC bootstrap, and MIND.
     """
     keys = (
         f"{prefix}_FID",

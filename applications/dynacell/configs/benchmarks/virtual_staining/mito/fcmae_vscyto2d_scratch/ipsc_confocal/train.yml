@@ -1,0 +1,72 @@
+# FCMAE-2D (FullyConvolutionalMAE, pretraining=False) random-init baseline
+# on mito/TOMM20, in-focus 2D benchmark track, iPSC confocal. Scratch
+# control for the fcmae_vscyto2d_pretrained (VSCyto2D) counterpart — the
+# two leaves are identical except this one does NOT load pretrained encoder
+# weights. Mirror of the 3D mito/fcmae_vscyto3d_scratch/ipsc_confocal fit
+# leaf. target_channel == "Structure" matches the FCMAE-2D data overlay's
+# RandWeightedCropd keys, so no augmentation override is needed here.
+#
+# The 3D ipsc leaf resolves data_path/source_channel/target_channel from
+# the manifest via benchmark.dataset_ref, which points at the NON-focus
+# TOMM20.zarr. The 2D track reads the offline 5-plane in-focus slab store
+# TOMM20_focus.zarr instead, so the resolver is disabled here
+# (dataset_ref: null) and the three data fields are declared inline —
+# the resolver hook raises on any data.init_args field co-declared with a
+# full dataset_ref. source_channel/target_channel reproduce the resolver's
+# manifest output (Phase3D / Structure).
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: ipsc_confocal
+  model_name: fcmae_vscyto2d_scratch
+  experiment_id: mito__ipsc_confocal__fcmae_vscyto2d_scratch
+  # Disable the manifest resolver: the 2D track reads the offline focus
+  # store, not the manifest-registered TOMM20.zarr. dataset_ref: null makes
+  # the compose hook a no-op so data fields can be declared inline.
+  dataset_ref: null
+
+data:
+  init_args:
+    # iPSC in-focus slab store + channels — resolver disabled above.
+    source_channel: Phase3D
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/TOMM20_focus.zarr
+
+trainer:
+  logger:
+    init_args:
+      name: FCMAE_VSCyto2D_Scratch_iPSC_TOMM20
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fcmae_vscyto2d_scratch
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fcmae_vscyto2d_scratch/checkpoints
+
+launcher:
+  job_name: FCMAE_VSCyto2D_Scratch_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/fcmae_vscyto2d_scratch
+  # 5-plane focus stores put the dense mmap buffer at ~5-11 GiB, so the 256G in
+  # hardware_gpu_any_long.yml is inherited 3D scale and just queues slower. Set
+  # here, not in the model overlay: the hardware profile composes AFTER the
+  # overlay and would override it. (Applied live via scontrol 2026-07-23; a
+  # resubmit silently re-requested 256G until this was baked.)
+  sbatch:
+    mem: "128G"

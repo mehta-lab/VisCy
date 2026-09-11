@@ -1,0 +1,45 @@
+# A549 mantis platemap — 2026_03_26_A549_CAAX_H2B_DENV_ZIKV
+#
+# First mantis_v2 plate: lateral spacing 0.116 µm/px (mantis_v1 uses
+# 0.1494 µm/px). Carries h2b (Nuclei) + caax (Membrane) targets that
+# are unique to v2 — no v1 plate has them.
+#
+# Native t = 11 frames at 120-min stride from hpi=5.0 → frames cover
+# hpi {5, 7, ..., 25}. The grid clamp at [5, 23] drops the last frame
+# during assembly (10 output frames per FOV).
+#
+# Channel mapping confirmed by data team 2026-04-26:
+#   raw mCherry EX561 EM600-37 → caax (Membrane)
+#   raw Cy5 EX639 EM698-70     → h2b  (Nuclei)
+#
+# Airtable refresh 2026-04-26 returned 3 well-level H2B rows only; no
+# CAAX rows and no FOV-level rows. The splits ship without an
+# Airtable-derived FOV-level biology-QC filter for this plate; see the
+# header comment in splits/2026_03_26_A549_CAAX_H2B_DENV_ZIKV.yaml.
+
+experiment: 2026_03_26_A549_CAAX_H2B_DENV_ZIKV
+run_dir: run_20260423_102349
+zarr_filename: 2026_03_26_A549_CAAX_H2B_DENV_ZIKV.zarr
+
+native_delta_t_min: 120
+hpi_start: 5.0
+native_t: 11
+
+wells:
+  B/2:
+    condition: mock
+    gene_channel_map:
+      "raw mCherry EX561 EM600-37": caax
+      "raw Cy5 EX639 EM698-70": h2b
+  B/3:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "raw mCherry EX561 EM600-37": caax
+      "raw Cy5 EX639 EM698-70": h2b
+  B/4:
+    condition: ZIKV
+    moi: 5
+    gene_channel_map:
+      "raw mCherry EX561 EM600-37": caax
+      "raw Cy5 EX639 EM698-70": h2b

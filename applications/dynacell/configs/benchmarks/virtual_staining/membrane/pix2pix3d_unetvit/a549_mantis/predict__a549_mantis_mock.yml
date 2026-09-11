@@ -23,7 +23,7 @@ model:
   init_args:
     # Best loss/validate_ema checkpoint of the modernized Run-D 40ep A549
     # membrane run (job 33674784, best at epoch 37, validate_ema=0.3792).
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/a549_mantis/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints/epoch=37-step=82080.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/membrane/pix2pix3d_unetvit/checkpoints/epoch=37-step=82080.ckpt
 
 data:
   init_args:
@@ -42,8 +42,13 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/memb_pix2pix3d_unetvit_a549trained__caax_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/a549/a549__mock/prediction.zarr
+        # Take each plane from the depth window centred on it instead of the mean
+        # of all 8 covering windows: that mean halves mid-band power (0.045 ->
+        # 0.021 of ground truth on an in-domain membrane FOV) and cancels none of
+        # the XY lattice, since all 8 share one XY grid.
+        z_reduction: center
 
 launcher:
   job_name: pix2pix3d_unetvit_A549TR_PRED_MEMB_caax_mock
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/pix2pix3d_unetvit/a549/a549__mock

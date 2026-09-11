@@ -1,0 +1,35 @@
+# @package _global_
+# Narrowed sibling of grouped/mitochondria_hek_a549xy: ONLY the joint VSCyto3D
+# condition, whose prediction was rewritten on 2026-09-08. Globals are copied
+# from that parent (cross-condition probe off, TOMM70A marker) -- NOT from the
+# membrane HEK rescore leaf, whose predicted-nuclei seeding does not apply here:
+# mito routes to the classical aicssegmentation Workflow_tomm20.
+#
+# The other five conditions in the parent are unchanged.
+#
+# Submit with EVERY pred_* force_recompute flag, same reason as the sibling leaves.
+target_name: mitochondria
+compute_feature_metrics: true
+use_gpu: true
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: vscyto3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-tomm70a-a549xy
+      target: tomm70a
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+# No-model floor, last — see the membrane sibling.

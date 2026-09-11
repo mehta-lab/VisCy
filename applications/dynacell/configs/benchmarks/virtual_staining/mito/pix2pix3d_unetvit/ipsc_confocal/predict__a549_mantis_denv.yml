@@ -17,7 +17,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: REPLACE_ME_WITH_PRODUCTION_CHECKPOINT_PATH
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/mito/pix2pix3d_unetvit/checkpoints/epoch=20-step=67200-loss=0.730.ckpt
 
 data:
   init_args:
@@ -36,8 +36,13 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_pix2pix3d_unetvit__tomm20_denv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/a549__denv/prediction.zarr
+        # Take each plane from the depth window centred on it instead of the mean
+        # of all 8 covering windows: that mean halves mid-band power (0.045 ->
+        # 0.021 of ground truth on an in-domain membrane FOV) and cancels none of
+        # the XY lattice, since all 8 share one XY grid.
+        z_reduction: center
 
 launcher:
   job_name: pix2pix3d_unetvit_PRED_TOMM20_ON_A549_tomm20_denv
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/a549__denv

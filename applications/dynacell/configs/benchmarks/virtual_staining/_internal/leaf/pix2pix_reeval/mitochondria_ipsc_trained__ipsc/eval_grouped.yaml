@@ -1,0 +1,37 @@
+# @package _global_
+# pix2pix3d re-eval leaf: single condition 'pix2pix3d__ipsc_trained__ipsc' lifted from
+# grouped/mitochondria_ipsc_trained. This arm had no prediction at all before the
+# fix batch (the iPSC-trained mito pix2pix predicts were generated 2026-07-28/29),
+# so this is a first evaluation rather than a re-eval; the pred-side force flags
+# are kept identical to the other 44 leaves so every pix2pix cell in the tables
+# comes from one pipeline. GT-side flags stay false: the GT cache is prewarmed
+# and read-only here.
+target_name: mitochondria
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+  pred_masks: true
+  pred_cp: true
+  pred_dinov3: true
+  pred_dynaclr: true
+  pred_celldino: true
+  pred_morphem: true
+  pred_instances: true
+conditions:
+- name: pix2pix3d__ipsc_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: tomm20
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/mito/pix2pix3d_unetvit/ipsc/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/mito/pix2pix3d_unetvit/ipsc/ipsc

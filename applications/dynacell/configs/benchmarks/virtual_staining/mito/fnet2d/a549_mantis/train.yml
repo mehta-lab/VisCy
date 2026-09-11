@@ -1,0 +1,56 @@
+# FNet2D (FNet3D run Z-preserving at Z=1) fit on mitochondria (TOMM20 marker)
+# — A549 mantis-lightsheet pooled (mock + DENV + ZIKV), in-focus 2D track.
+# Mirror of the 3D mito/fnet3d_paper/a549_mantis fit leaf, flattened onto the
+# offline 5-plane in-focus slab store TOMM20_all_focus.zarr (z_window_size=1
+# emits one in-focus window per plane). target_channel == Structure, so the
+# fnet2d data overlay's default norms/augs (already [1,64,64]) apply unchanged.
+base:
+  - ../../../_internal/shared/model/train_sets/a549_mantis.yml
+  - ../../../_internal/shared/model/targets/mito_tomm20.yml
+  - ../../../_internal/shared/model/data_overlays/fnet2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: mito
+  train_set: a549_mantis
+  model_name: fnet2d
+  experiment_id: mito__a549_mantis__fnet2d
+
+trainer:
+  logger:
+    init_args:
+      name: FNet2D_A549_TOMM20
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fnet2d
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fnet2d/checkpoints
+
+data:
+  init_args:
+    # A549 pooled in-focus slab store + target_channel — no resolver in this
+    # train_set.
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/TOMM20_all_focus.zarr
+
+launcher:
+  job_name: FNet2D_A549_TOMM20
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/mito/fnet2d
+  # 128G: the in-focus slab store is a 5-plane slice of the full-Z 3D store
+  # (~1/4 the Z), so the 512G headroom the 3D leaf needed for mmap_preload
+  # is wasteful and delays scheduling.
+  sbatch:
+    mem: "128G"

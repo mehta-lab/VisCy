@@ -1,6 +1,6 @@
 """Generate the frozen pixel-metrics parity fixture.
 
-Run once (with GPU) to pin the pre-migration numerical baseline:
+Run with a GPU to pin the numerical baseline:
 
     uv run python applications/dynacell/tests/data/_generate_pixel_metrics_golden.py
 
@@ -22,6 +22,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import cubic
 import iohub.ngff as ngff
 import numpy as np
 import torch
@@ -92,6 +93,13 @@ def main() -> None:
         _spacing=_SPACING,
         _pin_dynacell_commit=git_sha,
         _pin_torch_version=torch.__version__,
+        # The spectral metrics are cubic-version-sensitive (0.7.0 -> 0.9.0a1
+        # moved Spectral_PCC by 1.9% and rescaled XY_FSC by spacing_z/spacing_x),
+        # and GPU reduction order can shift a scalar by ~1e-4 across devices.
+        # Record both so a future parity failure is diagnosable from the fixture
+        # rather than by bisecting environments.
+        _pin_cubic_version=cubic.__version__,
+        _pin_gpu=torch.cuda.get_device_name(0) if use_gpu else "cpu",
     )
     print(f"Saved: {_OUT}  ({_OUT.stat().st_size / 1e6:.1f} MB)")
 

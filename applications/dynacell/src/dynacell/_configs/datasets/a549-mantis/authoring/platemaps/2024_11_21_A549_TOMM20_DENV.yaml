@@ -1,0 +1,37 @@
+# A549 mantis platemap — 2024_11_21_A549_TOMM20_DENV
+#
+# Derived from configs/datasets/a549-mantis/airtable/2024_11_21_A549_TOMM20_DENV.json
+# intersected with dynacell zarr positions under run_20260327_101055.
+#
+# All 16 Airtable rows match all 16 zarr positions exactly. Wells: B/1, B/3
+# (TOMM20 mock); B/2, C/2 (TOMM20 DENV).
+#
+# Target: TOMM20 (mitochondria) on GFP cube.
+
+experiment: 2024_11_21_A549_TOMM20_DENV
+run_dir: run_20260327_101055
+zarr_filename: 2024_11_21_A549_TOMM20_DENV.zarr
+
+native_delta_t_min: 10
+hpi_start: 4.0
+native_t: 111
+
+wells:
+  B/1:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  B/2:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  B/3:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  C/2:
+    condition: DENV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20

@@ -1,0 +1,115 @@
+# @package _global_
+# Focused sibling of grouped/nucleus_ipsc_bf_trained: ONLY the 8 brightfield
+# patch-vs-augmentation conditions (fnet3d_bigpatch, fnet3d_vscyto3daug x
+# {ipsc, a549 mock/denv/zikv}). Condition blocks are copied verbatim from a
+# generate_grouped_eval_configs.py run, so they stay byte-identical to what the
+# canonical bucket would emit -- only the selection is narrowed.
+#
+# These arms close the gap the brightfield readout left open: the published bf
+# comparison ran on FNet3D's own recipe, which sec:fnet_patch_aug_ablation shows
+# is the broken rung, so brightfield on a healthy recipe was never measured.
+#
+# Why not just run the canonical 16-condition bucket: the generator sets
+# force_recompute.final_metrics: true, so the 8 already-evaluated bf conditions
+# (celldiff_r2_iterative, fnet3d_paper) would NOT cache-skip -- they would all
+# recompute, and re-scoring published numbers under a possibly different metric
+# pin is a researcher decision, not a side effect of adding two arms.
+#
+# All 8 conditions are brand new, so nothing is cached and the cold deep-feature
+# extraction needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB
+# nodes and OOMs).
+target_name: nucleus
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+conditions:
+- name: fnet3d_bigpatch__ipsc_bf_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_bigpatch/ipsc__bf/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/a549__denv
+- name: fnet3d_vscyto3daug__ipsc_bf_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-denv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__denv
+- name: fnet3d_bigpatch__ipsc_bf_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_bigpatch/ipsc__bf/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/a549__mock
+- name: fnet3d_vscyto3daug__ipsc_bf_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-mock
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__mock
+- name: fnet3d_bigpatch__ipsc_bf_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_bigpatch/ipsc__bf/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/a549__zikv
+- name: fnet3d_vscyto3daug__ipsc_bf_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-h2b-zikv
+      target: h2b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/a549__zikv
+- name: fnet3d_bigpatch__ipsc_bf_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fnet3d_bigpatch/ipsc__bf/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_bigpatch/ipsc__bf/ipsc
+- name: fnet3d_vscyto3daug__ipsc_bf_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: nucleus
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fnet3d_vscyto3daug/ipsc__bf/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_vscyto3daug/ipsc__bf/ipsc

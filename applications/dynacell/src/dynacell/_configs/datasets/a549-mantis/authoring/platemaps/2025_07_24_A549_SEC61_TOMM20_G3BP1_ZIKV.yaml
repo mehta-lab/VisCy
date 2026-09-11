@@ -1,0 +1,41 @@
+# A549 mantis platemap — 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
+#
+# Derived from configs/datasets/a549-mantis/airtable/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.json
+# intersected with dynacell zarr positions under run_20260324_220448.
+# All 36 Airtable rows match all 36 zarr positions exactly.
+#
+# Wells:
+#   A/1 (SEC61B mock), A/2 (SEC61B ZIKV)
+#   B/1 (TOMM20 mock), B/2 (TOMM20 ZIKV)
+#   C/1 (G3BP1  mock), C/2 (G3BP1  ZIKV)  — OMITTED per plan (G3BP1 not a
+#     benchmark target here).
+#
+# Targets: SEC61B (ER) and TOMM20 (mitochondria) on GFP cube.
+
+experiment: 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV
+run_dir: run_20260324_220448
+zarr_filename: 2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+
+native_delta_t_min: 30
+hpi_start: 3.5
+native_t: 60
+
+wells:
+  A/1:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  A/2:
+    condition: ZIKV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": sec61b
+  B/1:
+    condition: mock
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20
+  B/2:
+    condition: ZIKV
+    moi: 5
+    gene_channel_map:
+      "GFP EX488 EM525-45": tomm20

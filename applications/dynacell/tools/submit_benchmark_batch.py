@@ -86,6 +86,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from submit_benchmark_job import bind_prediction_run
 
 from dynacell._compose_hook import _dynacell_ref_resolver
 from viscy_utils.compose import deep_merge, load_composed_config
@@ -376,6 +377,8 @@ def _compose_leaves(
         if "launcher" not in composed:
             raise SystemExit(f"{leaf}: missing required 'launcher:' block")
         launcher = composed.pop("launcher")
+        if launcher.get("mode") == "predict":
+            bind_prediction_run(composed)
         bench = composed.pop("benchmark", None) or {}
         exp_id = bench.get("experiment_id")
         if not exp_id:
@@ -437,13 +440,40 @@ def _write_resolved_configs(
     exp_ids: list[str],
     resolved_dir: Path,
     timestamp: str,
+    *,
+    preview_only: bool = False,
 ) -> list[Path]:
-    """Write each composed config to ``{resolved_dir}/{exp_id}__{timestamp}.yml``."""
-    resolved_dir.mkdir(parents=True, exist_ok=True)
+    """Write each composed config to ``{resolved_dir}/{exp_id}__{timestamp}.yml``.
+
+    Parameters
+    ----------
+    composed_list : list of dict
+        Fully composed leaf configs, one per leaf.
+    exp_ids : list of str
+        Experiment ids used to name each resolved file.
+    resolved_dir : pathlib.Path
+        Destination under the bucket's ``launcher.run_root``.
+    timestamp : str
+        Shared submission timestamp, so one invocation's files sort together.
+    preview_only : bool
+        Return the paths the files *would* take without creating the directory
+        or writing anything. ``--print-script`` promises "no writes", and the
+        run_root it renders is often a share the caller cannot write -- on a CI
+        runner ``/hpc`` does not exist at all. Matches the preview contract
+        ``submit_benchmark_job.py`` already documents.
+
+    Returns
+    -------
+    list of pathlib.Path
+        One resolved-config path per leaf, in input order.
+    """
+    if not preview_only:
+        resolved_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
     for composed, exp_id in zip(composed_list, exp_ids):
         p = resolved_dir / f"{exp_id}__{timestamp}.yml"
-        p.write_text(yaml.safe_dump(composed, default_flow_style=False))
+        if not preview_only:
+            p.write_text(yaml.safe_dump(composed, default_flow_style=False))
         paths.append(p)
     return paths
 
@@ -455,11 +485,16 @@ def _render_serial_sbatch(
     head_env: dict,
     resolved_paths: list[Path],
 ) -> str:
-    """Render ``sbatch_template_batch.sbatch`` with N srun invocations in series."""
+    """Render ``sbatch_template_batch.sbatch`` with N srun invocations in series.
+
+    Each step carries ``--cpu-bind=none``; see ``sbatch_template.sbatch`` for the
+    fragmented-mask failure it avoids. These steps are single-rank predicts, so
+    no per-rank NUMA pinning is given up.
+    """
     invocations = "\n\n".join(
         (
             f"echo '[batch] step {i + 1}/{len(resolved_paths)}: {p.name}'\n"
-            f"srun uv run python -m dynacell predict --config {p}"
+            f"srun --cpu-bind=none uv run python -m dynacell predict --config {p}"
         )
         for i, p in enumerate(resolved_paths)
     )
@@ -688,8 +723,15 @@ def submit(argv: list[str] | None = None) -> int:
         base_job_name = args.job_name or (bucket_launchers[0].get("job_name", "predict") + "_batch")
         job_name = f"{base_job_name}_g{bucket_idx}" if len(buckets) > 1 else base_job_name
 
-        resolved_paths = _write_resolved_configs(bucket_composed, bucket_exp_ids, bucket_resolved_dir, timestamp)
-        bucket_slurm_dir.mkdir(parents=True, exist_ok=True)
+        resolved_paths = _write_resolved_configs(
+            bucket_composed,
+            bucket_exp_ids,
+            bucket_resolved_dir,
+            timestamp,
+            preview_only=args.print_script,
+        )
+        if not args.print_script:
+            bucket_slurm_dir.mkdir(parents=True, exist_ok=True)
 
         # --parallel P>1: split this bucket's leaves into ceil(N/P) chunks,
         # each chunk gets its own sbatch with P concurrent backgrounded

@@ -1,0 +1,11 @@
+# Predict set: HEK293T mantis TOMM70A (mitochondria) in the a549xy geometry
+# (XY resampled to the A549 0.1494 um pitch, Z native 0.205 um).
+# data_path resolves to the test store in predict mode via dataset_ref.
+# Evaluation-only third-cell-type probe: the manifest defines no train store.
+benchmark:
+  predict_set: hek_mantis_tomm70a_a549xy
+  dataset_ref:
+    dataset: hek-mantis-tomm70a-a549xy
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args: {}

@@ -9,6 +9,7 @@ import copy
 import inspect
 import itertools
 import logging
+from collections.abc import Callable
 from typing import Literal, Sequence
 
 import numpy as np
@@ -19,6 +20,7 @@ from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
+from dynacell.tiling import window_starts
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
 from viscy_models.celldiff import CELLDiffNet, UNetViT3D
@@ -45,6 +47,20 @@ _ARCHITECTURE: dict[str, type[nn.Module]] = {
     "UNeXt2": UNeXt2,
     "fcmae": FullyConvolutionalMAE,
 }
+
+
+def _ckpt_state_dict(ckpt_path: str) -> dict[str, Tensor]:
+    """Load only the ``state_dict`` of a Lightning checkpoint onto CPU."""
+    return torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+
+
+def _record_val_loss(
+    losses: list[list[tuple[Tensor, int]]], dataloader_idx: int, loss: Tensor, batch_size: int
+) -> None:
+    """Append ``(loss, batch_size)`` to ``losses[dataloader_idx]``, growing the list first."""
+    while len(losses) <= dataloader_idx:
+        losses.append([])
+    losses[dataloader_idx].append((loss, batch_size))
 
 
 def _aggregate_validation_losses(
@@ -115,6 +131,340 @@ def _center_crop_to_shape(tensor: Tensor, spatial_shape: tuple[int, ...]) -> Ten
     return tensor[tuple(slices)]
 
 
+def _blend_weight(
+    patch_spatial: tuple[int, ...],
+    device: torch.device,
+    dtype: torch.dtype,
+    eps: float = 1e-3,
+) -> Tensor:
+    """Separable raised-cosine (Hann) taper over one window, floored at ``eps``.
+
+    Weight is ~1 at the window centre and falls smoothly to ``eps`` at its
+    faces, so a window contributes least exactly where it knows least (its
+    own border) and adjacent windows cross-fade instead of butt-joining.
+
+    The ``eps`` floor keeps every weight strictly positive, which matters for
+    two reasons: the normalization in
+    :func:`_sliding_window_inference` cannot divide by zero, and voxels that
+    only ever fall on a window face (the volume's outer border) still get
+    their value from the one window that covers them.
+
+    Parameters
+    ----------
+    patch_spatial : tuple of int
+        Window size per spatial dimension.
+    device : torch.device
+        Device for the returned tensor.
+    dtype : torch.dtype
+        Dtype for the returned tensor.
+    eps : float
+        Lower bound on the taper.
+
+    Returns
+    -------
+    Tensor
+        Weight of shape ``(1, 1, *patch_spatial)``.
+    """
+    weight = torch.ones([1, 1, *patch_spatial], device=device, dtype=dtype)
+    for axis, size in enumerate(patch_spatial):
+        if size <= 1:
+            continue
+        index = torch.arange(size, device=device, dtype=dtype)
+        taper = (0.5 - 0.5 * torch.cos(2 * torch.pi * (index + 0.5) / size)).clamp_min(eps)
+        shape = [1, 1] + [1] * len(patch_spatial)
+        shape[2 + axis] = size
+        weight = weight * taper.reshape(shape)
+    return weight
+
+
+def _sliding_window_inference(
+    forward_fn: Callable[[Tensor], Tensor],
+    source: Tensor,
+    patch_spatial: tuple[int, ...],
+    overlap_size: tuple[int, int, int] = (4, 256, 256),
+    blend: Literal["cosine", "uniform"] = "cosine",
+) -> Tensor:
+    """Tile ``source`` into ``patch_spatial`` windows, run ``forward_fn`` per tile, blend overlaps.
+
+    Fixed-input-size generators (the ViT ``UNetViT3D``) cannot run a forward
+    pass on a volume larger than their trained spatial size. This slides
+    ``patch_spatial`` windows over the ``(D, H, W)`` extent of ``source`` and
+    combines predictions in overlapping regions, yielding a prediction with the
+    same spatial shape as ``source``. The channel dimension is taken from the
+    forward output (``out_channels`` may differ from ``source``'s in_channels).
+
+    Overlaps are combined as a weighted mean ``sum(w * out) / sum(w)``.
+
+    ``blend='uniform'`` uses ``w = 1`` everywhere, i.e. a plain average over
+    the windows covering each voxel. That prints visible seams: the number of
+    covering windows changes abruptly across a window face (on a 640x960 FOV
+    with patch 512 / overlap 256 the count steps 1->2->3->2->1), so wherever
+    adjacent windows disagree the count change appears as a step. Measured on
+    an A549 TOMM20 prediction, the mean absolute row-to-row step at the y=128
+    window edge was 7.4x its local median, versus 1.0x for the ground truth.
+
+    ``blend='cosine'`` (default) weights each window by :func:`_blend_weight`,
+    which cross-fades neighbours and removed those spikes entirely
+    (7.4x -> 1.0x at y=128; 5.4x -> 1.3x at x=256), while slightly improving
+    agreement with ground truth. Prefer it unless reproducing a legacy
+    prediction exactly.
+
+    Because the combination is a *normalized* weighted mean, both modes are
+    identical wherever a single window covers a voxel -- in particular the
+    whole volume when ``source`` matches ``patch_spatial`` (the 512x512 iPSC
+    test set), where neither mode changes anything.
+
+    Parameters
+    ----------
+    forward_fn : Callable
+        Maps one ``(B, C, *patch_spatial)`` tile to ``(B, out_channels, *patch_spatial)``.
+    source : Tensor
+        Input tensor of shape ``(B, C, D, H, W)``.
+    patch_spatial : tuple of int
+        Per-dimension window size ``(pd, ph, pw)`` (the model's ``input_spatial_size``).
+    overlap_size : tuple of int
+        Overlap in ``(D, H, W)`` between adjacent windows.
+    blend : {"cosine", "uniform"}
+        Overlap weighting, as described above.
+
+    Returns
+    -------
+    Tensor
+        Prediction with the same spatial shape as ``source``.
+
+    Raises
+    ------
+    ValueError
+        If ``blend`` is not one of the two supported modes.
+    """
+    if blend not in ("cosine", "uniform"):
+        raise ValueError(f"Unknown blend {blend!r}; choose 'cosine' or 'uniform'.")
+    n_spatial = 3
+    patch = tuple(patch_spatial)
+    start_lists = window_starts(tuple(source.shape[-3:]), patch, overlap_size)
+
+    # Accumulators are allocated lazily from the first patch output so their
+    # channel dimension matches the model's out_channels (which can differ
+    # from source's in_channels, e.g. 1 phase in -> 2 target out).
+    prediction_sum: Tensor | None = None
+    weight_sum: Tensor | None = None
+    weight: Tensor | None = None
+    output_dtype: torch.dtype | None = None
+
+    with torch.no_grad():
+        for starts in itertools.product(*start_lists):
+            slicer: list = [slice(None)] * source.ndim
+            for i, st in enumerate(starts):
+                slicer[-(n_spatial - i)] = slice(st, st + patch[i])
+            patch_out = forward_fn(source[tuple(slicer)])
+            if prediction_sum is None:
+                output_dtype = patch_out.dtype
+                out_shape = list(source.shape)
+                out_shape[1] = patch_out.shape[1]
+                # FP16 Hann products can underflow at corners, and overlapping
+                # predictions can overflow before the normalized mean is taken.
+                accumulation_dtype = torch.promote_types(patch_out.dtype, torch.float32)
+                prediction_sum = torch.zeros(out_shape, device=source.device, dtype=accumulation_dtype)
+                weight_sum = torch.zeros(out_shape, device=source.device, dtype=accumulation_dtype)
+                weight = (
+                    _blend_weight(patch, source.device, accumulation_dtype)
+                    if blend == "cosine"
+                    else torch.ones([1, 1, *patch], device=source.device, dtype=accumulation_dtype)
+                )
+            # Fused multiply-accumulate into the view; promotes half-precision
+            # patches to the accumulation dtype without a temporary.
+            prediction_sum[tuple(slicer)].addcmul_(patch_out, weight)
+            weight_sum[tuple(slicer)] += weight
+
+    if prediction_sum is None:
+        raise RuntimeError("sliding window produced no patches")
+    if not torch.all(weight_sum > 0):
+        raise RuntimeError("sliding window left uncovered voxels")
+    return prediction_sum.div_(weight_sum).to(output_dtype)
+
+
+def _phase_shift_average(
+    forward_fn: Callable[[Tensor], Tensor],
+    source: Tensor,
+    patch_spatial: tuple[int, ...],
+    overlap_size: tuple[int, int, int],
+    offsets: Sequence[int],
+    blend: Literal["cosine", "uniform"] = "cosine",
+) -> Tensor:
+    """Average tiled predictions over YX shifts of the analysis grid.
+
+    ``UNet3DBase`` decoders upsample with
+    ``ConvTranspose3d(kernel_size=3, stride=2)``. Kernel 3 is not divisible by
+    stride 2, so the overlap between kernel placements is uneven and each
+    upsample imprints a 2-periodic modulation; three stacked upsamples put
+    energy at 2, 4 and 8 px (Odena et al., "Deconvolution and Checkerboard
+    Artifacts", 2016). ``UNetViT3D`` adds a second lattice at 32 px, where the
+    ViT bottleneck's ``unpatchify`` lays independently projected token blocks
+    side by side.
+
+    Both are present IN distribution, not only out of it. On an iPSC-trained
+    membrane prediction of an iPSC FOV -- fully in-domain -- folding the mean
+    ``|gradient|`` profile by index mod 32 and splitting it into harmonics
+    gives these relative amplitudes, with ground truth as the floor:
+
+    ================  ======  ======  ======  ======  ======
+    pure component      P32     P16      P8      P4      P2
+    ================  ======  ======  ======  ======  ======
+    prediction        0.063   0.100   0.076   0.134   0.330
+    ground truth      0.025   0.011   0.004   0.002   0.002
+    excess             2.5x    8.9x   19.9x   66.8x  215.7x
+    ================  ======  ======  ======  ======  ======
+
+    Most of the lattice *energy* sits at the short periods, but the 32 px
+    component is what a reader sees as blocks: it is a coherent step between
+    adjacent token cells, and it survives the downsampling any figure applies
+    to a 512 px field, while the 2-8 px components average away. Out of
+    distribution all of it grows.
+
+    Both lattices are fixed relative to the *window* origin, not to the
+    specimen, so predicting on a shifted grid moves them relative to the image
+    while real structure stays put. Averaging shifts ``o_k`` scales a
+    period-``P`` lattice by ``|sum_k exp(2*pi*i*o_k/P)| / len(o)``: zero is
+    exact cancellation, one means the offsets are all congruent mod ``P`` and
+    the lattice is fully *reinforced*.
+
+    It is tempting to pick offsets that zero that factor at 32, since 32 px is
+    the visible period. Do not -- it is the wrong objective, because the
+    offsets must serve every period at once and the short ones carry the
+    energy. Measured in-domain (iPSC-trained membrane on iPSC; modulation
+    depth of the 32-bin fold, ground-truth floor 0.0705 at P32 and 0.0041 at
+    P4; 16 passes each):
+
+    ==================  ===========  ==========  ========  =======  ======
+    offsets             phasor @32   phasor @4   depth@32  depth@4     PCC
+    ==================  ===========  ==========  ========  =======  ======
+    (none)                        -           -    0.9866   0.5304  0.5378
+    (0, 8, 16, 24)            0.000       1.000    0.6412   0.4966  0.5423
+    (0, 10, 16, 26)           0.000       0.000    0.5911   0.3787  0.5423
+    (0, 5, 11, 22)            0.241       0.000    0.2402   0.0184  0.5406
+    ==================  ===========  ==========  ========  =======  ======
+
+    The two sets that cancel P32 *exactly* come out two to three times worse
+    than the one that does not, because both are congruent mod 8 (and
+    ``(0, 8, 16, 24)`` mod 4 and mod 2 as well), so they reinstate the
+    high-amplitude short-period components while removing the low-amplitude
+    32 px one. ``(0, 5, 11, 22)`` zeroes P2 and P4 exactly and holds P8/P16/P32
+    at ~0.21-0.27, which is the best available compromise at four offsets --
+    no four-offset set gets the worst case over {4, 8, 16, 32} below 0.27.
+    Prefer it, and re-measure before trusting any replacement: the phasor
+    factor ranks candidates, it does not rank outcomes.
+
+    Pass the offsets as explicit ``(dy, dx)`` PAIRS to avoid paying for the
+    outer product. The lattice is separable to first order -- a component that
+    depends on ``y mod P``, one on ``x mod P``, and a smaller cross term -- so
+    four pairs whose ``dy`` values and ``dx`` values are each the full offset
+    set give every axis the same four residues the 16-combination product does,
+    at a quarter of the cost. Measured on the same FOV and plane:
+
+    ==============================  ======  ========  =======  ======
+    offsets                         passes  depth@32  depth@4     PCC
+    ==============================  ======  ========  =======  ======
+    (none)                               1    0.9866   0.5304  0.5378
+    outer product of (0,5,11,22)        16    0.2402   0.0184  0.5406
+    (0,0) (5,11) (11,22) (22,5)          4    0.2338   0.0172  0.5414
+    (0,11) (5,22) (11,0) (22,5)          4    0.2239   0.0190  0.5407
+    (0,0) (5,5) (11,11) (22,22)          4    0.2495   0.0174  0.5391
+    ==============================  ======  ========  =======  ======
+
+    Every 4-pass set matches the 16-pass product within measurement noise, and
+    the two off-diagonal ones edge it out -- the diagonal set is marginally the
+    weakest at period 32, which is the cross term it fails to decorrelate.
+
+    Cost is ``len(offsets) ** 2`` passes for a flat offset list and
+    ``len(offsets)`` for pairs, which is the only reason this is opt-in rather
+    than the default: it improved PCC in every case measured (in-domain
+    membrane 0.5378 -> 0.5406, out-of-distribution ER 0.246 -> 0.272), and the
+    one case where it slightly *lowered* it was in-domain A549 TOMM20
+    (0.533 -> 0.528), where the mean over correlated predictions costs a little
+    sharpness. Turn it on for any figure panel where the token grid is visible.
+
+    Parameters
+    ----------
+    forward_fn : Callable
+        Maps one ``(B, C, *patch_spatial)`` tile to ``(B, out_channels, *patch_spatial)``.
+    source : Tensor
+        Input tensor of shape ``(B, C, D, H, W)``.
+    patch_spatial : tuple of int
+        Per-dimension window size ``(pd, ph, pw)``.
+    overlap_size : tuple of int
+        Overlap in ``(D, H, W)`` between adjacent windows.
+    offsets : Sequence of int or Sequence of (int, int)
+        Non-negative YX shifts in pixels. Plain ints are expanded to the outer
+        product over both axes; ``(dy, dx)`` pairs are used as given. A single
+        zero offset reduces to a plain tiled prediction.
+    blend : {"cosine", "uniform"}
+        Overlap weighting passed to :func:`_sliding_window_inference`.
+
+    Returns
+    -------
+    Tensor
+        Prediction with the same spatial shape as ``source``.
+
+    Raises
+    ------
+    ValueError
+        If ``offsets`` is empty, mixes scalars with pairs, contains a negative
+        value, or its largest shift is too big for reflect padding of this
+        input.
+    """
+    if not len(offsets):
+        raise ValueError("offsets must contain at least one shift")
+    scalars = [isinstance(o, (int, np.integer)) for o in offsets]
+    if not all(scalars) and any(scalars):
+        raise ValueError(f"offsets must be all scalars or all (dy, dx) pairs, got {tuple(offsets)}")
+    if all(scalars):
+        shifts = list(itertools.product(offsets, offsets))
+    else:
+        shifts = [tuple(o) for o in offsets]  # type: ignore[misc]
+        if any(len(o) != 2 for o in shifts):
+            raise ValueError(f"paired offsets must each be (dy, dx), got {tuple(offsets)}")
+    flat = [c for pair in shifts for c in pair]
+    if min(flat) < 0:
+        raise ValueError(f"offsets must be non-negative, got {tuple(offsets)}")
+    margin = max(flat)
+    if margin == 0:
+        return _sliding_window_inference(forward_fn, source, patch_spatial, overlap_size, blend=blend)
+
+    height, width = source.shape[-2], source.shape[-1]
+    # torch reflect padding requires pad < extent on every padded axis.
+    if margin >= min(height, width):
+        raise ValueError(
+            f"largest offset {margin} must be smaller than the input YX extent "
+            f"({height}, {width}) for reflect padding; use smaller offsets."
+        )
+    # Reflect-pad by `margin` so every shifted grid still covers the whole FOV.
+    # Z is untouched: the window already spans the full Z extent it is given.
+    padded = F.pad(source, (margin, margin, margin, margin, 0, 0), mode="reflect")
+
+    total: Tensor | None = None
+    output_dtype: torch.dtype | None = None
+    for offset_y, offset_x in shifts:
+        # `sub` starts at `offset` in padded coordinates, so the original FOV
+        # sits at `margin - offset` within it, and each window origin lands at
+        # a different phase relative to the specimen.
+        sub = padded[..., offset_y : offset_y + height + margin, offset_x : offset_x + width + margin]
+        out = _sliding_window_inference(forward_fn, sub, patch_spatial, overlap_size, blend=blend)
+        crop = out[
+            ...,
+            margin - offset_y : margin - offset_y + height,
+            margin - offset_x : margin - offset_x + width,
+        ]
+        if total is None:
+            # `_sliding_window_inference` returns the model's dtype, so N
+            # half-precision crops overflow before the mean is taken. Sum in
+            # at least float32 (float64 stays float64) and cast back once.
+            output_dtype = crop.dtype
+            total = crop.to(torch.promote_types(crop.dtype, torch.float32))
+        else:
+            total = total + crop
+    return (total / len(shifts)).to(output_dtype)
+
+
 class DynacellUNet(LightningModule):
     """Supervised regression U-Net for benchmark virtual staining.
 
@@ -137,6 +487,21 @@ class DynacellUNet(LightningModule):
     example_input_yx_shape : Sequence[int]
         YX shape for example input (used by FNet3D for graph logging).
         Ignored when the model provides ``input_spatial_size``.
+    predict_blend : {"cosine", "uniform"}
+        How overlapping windows are combined when
+        ``predict_method='sliding_window'``. ``"cosine"`` (default)
+        cross-fades neighbours with a raised-cosine taper; ``"uniform"``
+        takes a plain average and leaves visible seams where the number of
+        covering windows changes. See :func:`_sliding_window_inference`.
+        Has no effect when a single window covers the input.
+    predict_phase_shifts : Sequence[int] | Sequence[tuple[int, int]] | None
+        When set, average the prediction over these YX grid shifts to
+        suppress the decoder's checkerboard and (for ``UNetViT3D``) the ViT
+        token lattice; see :func:`_phase_shift_average` for which offsets
+        cancel which period and for the accuracy trade-off.
+        ``((0, 0), (5, 11), (11, 22), (22, 5))`` suppresses both at four
+        passes; a flat ``(0, 5, 11, 22)`` measures the same but costs the
+        outer product, sixteen. Off by default.
     ckpt_path : str | None
         Path to a checkpoint to load **weights only** at construction time.
         Intended for inference (predict/test), not training resumption —
@@ -169,6 +534,8 @@ class DynacellUNet(LightningModule):
         example_input_yx_shape: Sequence[int] = (256, 256),
         predict_method: Literal["full_image", "sliding_window"] = "full_image",
         predict_overlap: tuple[int, int, int] = (4, 256, 256),
+        predict_blend: Literal["cosine", "uniform"] = "cosine",
+        predict_phase_shifts: Sequence[int] | Sequence[tuple[int, int]] | None = None,
         ckpt_path: str | None = None,
         encoder_only: bool = False,
     ) -> None:
@@ -189,6 +556,8 @@ class DynacellUNet(LightningModule):
         self.log_samples_per_batch = log_samples_per_batch
         self.predict_method = predict_method
         self.predict_overlap = predict_overlap
+        self.predict_blend = predict_blend
+        self.predict_phase_shifts = predict_phase_shifts
 
         self.training_step_outputs: list = []
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
@@ -217,13 +586,13 @@ class DynacellUNet(LightningModule):
                 raise ValueError("DynacellUNet(encoder_only=True) requires ckpt_path to be set")
             if not isinstance(self.model, FullyConvolutionalMAE):
                 raise ValueError(f"encoder_only is only supported for architecture='fcmae', got {architecture!r}")
-            state_dict = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            state_dict = _ckpt_state_dict(ckpt_path)
             prefix = "model.encoder."
             encoder_weights = {k.removeprefix(prefix): v for k, v in state_dict.items() if k.startswith(prefix)}
             self.model.encoder.load_state_dict(encoder_weights, strict=True)
             _logger.info(f"Loaded {len(encoder_weights)} encoder parameters from {ckpt_path}")
         elif ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+            self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
@@ -300,9 +669,7 @@ class DynacellUNet(LightningModule):
         target: Tensor = batch["target"]
         pred = self.forward(source)
         loss = self._compute_loss(pred, target, batch)
-        if dataloader_idx + 1 > len(self.validation_losses):
-            self.validation_losses.append([])
-        self.validation_losses[dataloader_idx].append((loss.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -377,7 +744,8 @@ class DynacellUNet(LightningModule):
     def predict_sliding_window(self, source: Tensor, overlap_size: tuple[int, int, int] = (4, 256, 256)) -> Tensor:
         """Run sliding-window inference over a large input volume.
 
-        Overlapping regions are averaged across all covering patches.
+        Overlapping regions are combined with the cosine cross-fade described
+        in :func:`_sliding_window_inference`, per ``self.predict_blend``.
 
         Parameters
         ----------
@@ -391,55 +759,22 @@ class DynacellUNet(LightningModule):
         Tensor
             Prediction with the same spatial shape as ``source``.
         """
-        spatial = source.shape[-3:]
-        patch_spatial = tuple(self.model.input_spatial_size)
-        n_spatial = 3
-        overlap = tuple(overlap_size)
-
-        for i in range(n_spatial):
-            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
-            if S < P:
-                raise ValueError(f"spatial dim {i} size {S} must be >= patch size {P}")
-            if not (0 <= ov < P):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs {P})")
-
-        # Accumulators are allocated lazily from the first patch output so
-        # their channel dimension matches the model's out_channels (which can
-        # differ from source's in_channels, e.g. 1 phase in -> 2 target out).
-        prediction_sum: Tensor | None = None
-        prediction_count: Tensor | None = None
-
-        start_lists = []
-        for i in range(n_spatial):
-            S, P, ov = spatial[i], patch_spatial[i], overlap[i]
-            stride = P - ov
-            last = S - P
-            starts = [0]
-            while starts[-1] + stride < last:
-                starts.append(starts[-1] + stride)
-            if starts[-1] != last:
-                starts.append(last)
-            start_lists.append(starts)
-
-        with torch.no_grad():
-            for starts in itertools.product(*start_lists):
-                slicer: list = [slice(None)] * source.ndim
-                for i, st in enumerate(starts):
-                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
-                patch_out = self.forward(source[tuple(slicer)])
-                if prediction_sum is None:
-                    out_shape = list(source.shape)
-                    out_shape[1] = patch_out.shape[1]
-                    prediction_sum = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
-                    prediction_count = torch.zeros(out_shape, device=source.device, dtype=patch_out.dtype)
-                prediction_sum[tuple(slicer)] += patch_out
-                prediction_count[tuple(slicer)] += 1
-
-        if prediction_sum is None:
-            raise RuntimeError("sliding window produced no patches")
-        if not torch.all(prediction_count > 0):
-            raise RuntimeError("sliding window left uncovered voxels")
-        return prediction_sum / prediction_count
+        if self.predict_phase_shifts:
+            return _phase_shift_average(
+                self.forward,
+                source,
+                tuple(self.model.input_spatial_size),
+                overlap_size,
+                self.predict_phase_shifts,
+                blend=self.predict_blend,
+            )
+        return _sliding_window_inference(
+            self.forward,
+            source,
+            tuple(self.model.input_spatial_size),
+            overlap_size,
+            blend=self.predict_blend,
+        )
 
 
 class DynacellFlowMatching(LightningModule):
@@ -535,7 +870,7 @@ class DynacellFlowMatching(LightningModule):
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"])
+            self.load_state_dict(_ckpt_state_dict(ckpt_path))
 
     def training_step(self, batch: dict, batch_idx: int) -> Tensor:
         """Compute flow-matching training loss for one batch.
@@ -582,9 +917,7 @@ class DynacellFlowMatching(LightningModule):
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
         loss = self.model(phase, target)
-        if dataloader_idx + 1 > len(self._validation_losses):
-            self._validation_losses.append([])
-        self._validation_losses[dataloader_idx].append((loss.detach(), phase.shape[0]))
+        _record_val_loss(self._validation_losses, dataloader_idx, loss.detach(), phase.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             loss,
@@ -775,10 +1108,31 @@ class DynacellGAN(LightningModule):
     example_input_yx_shape : Sequence of int
         YX shape used to build ``example_input_array`` for graph logging
         when the generator does not advertise an ``input_spatial_size``.
-    predict_method : {"full_image"}
-        Prediction method. Only ``"full_image"`` is supported.
+    predict_method : {"full_image", "sliding_window"}
+        Prediction method. ``"full_image"`` runs the generator on the whole
+        input (requires the input to match the generator's ``input_spatial_size``).
+        ``"sliding_window"`` tiles inputs larger than ``input_spatial_size`` into
+        overlapping windows and averages them — needed for the fixed-size ViT
+        generator on test volumes larger than its trained crop (e.g. the
+        640x960 A549 test set vs the 512x512 training crop).
     predict_overlap : tuple of int
-        Reserved for future tiled inference; currently unused at predict.
+        Overlap in ``(D, H, W)`` between adjacent windows when
+        ``predict_method='sliding_window'``; ignored for ``'full_image'``.
+    predict_blend : {"cosine", "uniform"}
+        How overlapping windows are combined when
+        ``predict_method='sliding_window'``. ``"cosine"`` (default)
+        cross-fades neighbours with a raised-cosine taper; ``"uniform"``
+        takes a plain average and leaves visible seams where the number of
+        covering windows changes. See :func:`_sliding_window_inference`.
+        Has no effect when a single window covers the input.
+    predict_phase_shifts : Sequence of int or Sequence of (int, int) or None
+        When set, average the prediction over these YX grid shifts to
+        suppress the decoder's checkerboard and the ViT token lattice; see
+        :func:`_phase_shift_average` for which offsets cancel which period
+        and for the accuracy trade-off.
+        ``((0, 0), (5, 11), (11, 22), (22, 5))`` suppresses both at four
+        passes; a flat ``(0, 5, 11, 22)`` measures the same but costs the
+        outer product, sixteen. Off by default.
     ckpt_path : str or None
         Optional path to a Lightning checkpoint to load weights from at
         construction time. Loaded with ``strict=False`` so pre-modernization
@@ -814,8 +1168,10 @@ class DynacellGAN(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (512, 512),
-        predict_method: Literal["full_image"] = "full_image",
+        predict_method: Literal["full_image", "sliding_window"] = "full_image",
         predict_overlap: tuple[int, int, int] = (4, 256, 256),
+        predict_blend: Literal["cosine", "uniform"] = "cosine",
+        predict_phase_shifts: Sequence[int] | Sequence[tuple[int, int]] | None = None,
         ckpt_path: str | None = None,
     ) -> None:
         super().__init__()
@@ -866,6 +1222,8 @@ class DynacellGAN(LightningModule):
         self.log_samples_per_batch = log_samples_per_batch
         self.predict_method = predict_method
         self.predict_overlap = predict_overlap
+        self.predict_blend = predict_blend
+        self.predict_phase_shifts = predict_phase_shifts
 
         # D-step counter for lazy R1 schedule. self.global_step would
         # advance by 2 per training_step (D opt + G opt) so it can't be used
@@ -907,7 +1265,40 @@ class DynacellGAN(LightningModule):
         self.example_input_array = torch.rand(1, in_channels, d, h, w)
 
         if ckpt_path is not None:
-            state = torch.load(ckpt_path, weights_only=True, map_location="cpu")["state_dict"]
+            state = _ckpt_state_dict(ckpt_path)
+            # A checkpoint carrying an EMA shadow that this instance did not build
+            # must not lose it. EMA construction above is gated on ``ema_kimg``, a
+            # *training* hyperparameter a predict config has no reason to carry, so
+            # a predict run that omitted it silently discarded every
+            # generator_ema.* tensor under strict=False and fell through to the raw
+            # generator in ``_inference_generator``. That is exactly what happened
+            # to the pix2pix3d benchmark: checkpoints were selected on
+            # ``loss/validate_ema`` (the ModelCheckpoint monitor in the
+            # train_4gpu_modernized leaves) and then evaluated with the non-EMA
+            # weights, with only a warning in the job's stderr to say so.
+            #
+            # Build the shadow from the checkpoint's own keys, before the load, so
+            # the EMA tensors land in it on the single pass. At inference only the
+            # shadow's *existence* matters; requiring every predict config to
+            # restate a decay constant the checkpoint already records is what made
+            # the silent drop possible.
+            #
+            # Deliberately NOT adopted from the checkpoint: ``use_ema_at_predict``.
+            # Which generator runs stays an explicit config decision — inferring it
+            # here would flip every existing predict arm on its next run, the same
+            # class of silent change this guard exists to end.
+            ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
+            if ema_keys_in_ckpt and self.generator_ema is None:
+                self.generator_ema = copy.deepcopy(self.generator)
+                self.generator_ema.requires_grad_(False)
+                _logger.info(
+                    "Checkpoint %s carries %d generator_ema.* tensors; built the EMA "
+                    "shadow from them (ema_kimg absent from this config). "
+                    "use_ema_at_predict=%s selects which generator runs.",
+                    ckpt_path,
+                    ema_keys_in_ckpt,
+                    self.use_ema_at_predict,
+                )
             # strict=False: pre-modernization checkpoints don't carry
             # generator_ema.* / _lecam_ema_* keys. Filter missing-key warnings
             # to expected-missing prefixes; anything else is a genuine
@@ -939,7 +1330,6 @@ class DynacellGAN(LightningModule):
             # future buffer added to generator_ema that an old ckpt lacks) —
             # silently half-seeding would produce nonsense at the partial layers.
             if self.generator_ema is not None:
-                ema_keys_in_ckpt = sum(1 for k in state if k.startswith("generator_ema."))
                 ema_keys_expected = len(self.generator_ema.state_dict())
                 if ema_keys_in_ckpt == 0:
                     self.generator_ema.load_state_dict(self.generator.state_dict())
@@ -1227,9 +1617,7 @@ class DynacellGAN(LightningModule):
         # Raw generator pass (always).
         pred_raw = self.generator(source)
         l1_raw = F.l1_loss(pred_raw, target)
-        if dataloader_idx + 1 > len(self.validation_losses_raw):
-            self.validation_losses_raw.append([])
-        self.validation_losses_raw[dataloader_idx].append((l1_raw.detach(), source.shape[0]))
+        _record_val_loss(self.validation_losses_raw, dataloader_idx, l1_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
             l1_raw,
@@ -1242,9 +1630,7 @@ class DynacellGAN(LightningModule):
             with torch.no_grad():
                 pred_ema = self.generator_ema(source)
             l1_ema = F.l1_loss(pred_ema, target)
-            if dataloader_idx + 1 > len(self.validation_losses_ema):
-                self.validation_losses_ema.append([])
-            self.validation_losses_ema[dataloader_idx].append((l1_ema.detach(), source.shape[0]))
+            _record_val_loss(self.validation_losses_ema, dataloader_idx, l1_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
                 l1_ema,
@@ -1294,6 +1680,19 @@ class DynacellGAN(LightningModule):
 
     def configure_optimizers(self):
         """Build two AdamW optimizers + WarmupCosine schedulers via the shared helper."""
+        # __init__ adopts an EMA shadow from a checkpoint's own generator_ema.* keys
+        # even when the config omits ema_kimg -- a deliberate predict-side affordance
+        # (2bfa636b), since at inference only the shadow's existence matters. Training
+        # does need the decay constant: training_step computes
+        # 0.5 ** (bs / max(self.ema_kimg * 1000.0, 1e-8)) and would raise TypeError on
+        # step 1, after the allocation is already burned. Fail here instead -- Lightning
+        # calls this only under TrainerFn.FITTING, so predict is untouched.
+        if self.generator_ema is not None and self.ema_kimg is None:
+            raise ValueError(
+                "ckpt_path carries generator_ema.* tensors but this fit config sets no "
+                "ema_kimg, so the EMA shadow has no decay constant to update with. Set "
+                "ema_kimg to continue the EMA, or drop ckpt_path if the shadow is not wanted."
+            )
         [opt_g], [sch_g] = configure_adamw_scheduler(
             self,
             self.generator,
@@ -1355,9 +1754,32 @@ class DynacellGAN(LightningModule):
         source = batch["source"]
         original_shape = source.shape[2:]
         source = self._predict_pad(source)
+        # Inference uses EMA generator when available (and use_ema_at_predict=True).
+        generator = self._inference_generator()
         if self.predict_method == "full_image":
-            # Inference uses EMA generator when available (and use_ema_at_predict=True).
-            prediction = self._inference_generator()(source)
+            prediction = generator(source)
+        elif self.predict_method == "sliding_window":
+            # The ViT generator is fixed at input_spatial_size; tile larger
+            # inputs (e.g. the 640x960 A549 test) into overlapping windows.
+            if self.predict_phase_shifts:
+                prediction = _phase_shift_average(
+                    generator,
+                    source,
+                    tuple(generator.input_spatial_size),
+                    self.predict_overlap,
+                    self.predict_phase_shifts,
+                    blend=self.predict_blend,
+                )
+            else:
+                prediction = _sliding_window_inference(
+                    generator,
+                    source,
+                    tuple(generator.input_spatial_size),
+                    self.predict_overlap,
+                    blend=self.predict_blend,
+                )
         else:
-            raise ValueError(f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image'.")
+            raise ValueError(
+                f"Unknown predict_method: {self.predict_method!r}. Choose 'full_image' or 'sliding_window'."
+            )
         return _center_crop_to_shape(prediction, original_shape)

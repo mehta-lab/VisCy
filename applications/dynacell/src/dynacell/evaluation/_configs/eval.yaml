@@ -9,6 +9,7 @@ defaults:
   - optional feature_extractor/dinov3: lvd1689m
   - optional feature_extractor/dynaclr: default
   - optional feature_extractor/celldino: default
+  - optional feature_extractor/morphem: default
   - optional leaf: null
 
 # Placeholder so struct-mode merges accept benchmark.dataset_ref contributions
@@ -20,24 +21,48 @@ benchmark: null
 target_name: ???
 
 # Nucleus/membrane organelle-mask segmenter. `supermodel` = segmenter-model-zoo
-# SuperModel (default, unchanged behavior). `cellpose` = GPU Cellpose-SAM + fnet
-# pre/post (nucleus only). `cellpose_watershed` = whole-cell (membrane only):
-# GPU Cellpose-SAM nuclei seeds + membrane EDT watershed. The cellpose /
-# cellpose_watershed backends with compute_instance_ap=true add instance mAP
-# (cubic average_precision) to mask_metrics; labels cache under
-# instance_masks/<target>__<backend>.zarr.
+# SuperModel (default binary-mask backend, unchanged behavior). `cpdino` = GPU-resident
+# Cellpose-DINO ViT-L (recommended instance backend): raw image + cellpose normalize
+# (no CLAHE), segments nucleus (direct) or whole-cell (from the membrane channel + nucleus
+# carve). `cellpose` = legacy Cellpose-SAM + fnet CLAHE pre/post (nucleus only).
+# `cellpose_watershed` = legacy whole-cell (membrane only): Cellpose-SAM nuclei seeds +
+# membrane EDT watershed. The cpdino / cellpose / cellpose_watershed backends with
+# compute_instance_ap=true add instance mAP (cubic average_precision) to mask_metrics;
+# labels cache under instance_masks/<target>__<backend>.zarr.
 segmentation:
-  backend: supermodel  # supermodel | cellpose (nucleus) | cellpose_watershed (whole-cell)
+  backend: supermodel  # supermodel | cpdino (nucleus + whole-cell) | cellpose | cellpose_watershed
   dimension: 2d        # 2d | 3d — instance backends only (3d = full-volume do_3D)
-  slice_selection: frac    # frac | sharpest | focus — picks the 2d plane (dimension=2d)
+  slice_selection: focus   # frac | sharpest | focus — picks the 2d plane (dimension=2d)
   slice_fraction: 0.30     # fractional Z depth when slice_selection=frac
-  # slice_selection=focus picks the in-focus plane per FOV (single slice, no slab).
-  # The plane comes from precomputed focus_slice zattrs when present, else it is
-  # computed on the fly from the phase channel and cached in io.gt_cache_dir (so it
-  # works on read-only published .ozx). Estimator params live in the `focus:` block.
+  # slice_selection=focus picks the in-focus plane per FOV. focus_anchor selects how:
+  #   nucleus_area (default) — the plane of maximum nuclear foreground area (widest
+  #     cross-section, Otsu on the GT nucleus channel). Robust to the confocal phase
+  #     speckle / basal-membrane edge artifacts that pull the spectral estimator to the
+  #     stack caps; the nuclear equator is also where the membrane draws clean polygons,
+  #     so one anchor serves nucleus + whole-cell. No store reads/zattrs needed.
+  #   phase_midband (legacy) — waveorder transverse-band estimator on focus_channel_name;
+  #     plane from precomputed focus_slice zattrs / gt-cache / compute-from-phase (works
+  #     on read-only .ozx). Estimator params live in the `focus:` block.
+  # focus_slab_halfwidth MIPs a +/-hw slab centered on the plane (0 = single slice), so a
+  # +/-1 plane error is harmless and near-plane nuclei are completed.
+  focus_anchor: nucleus_area
+  focus_slab_halfwidth: 1
   focus_channel_name: Phase3D
   nuclei_channel_name: null  # GT-plate channel for watershed seeds (cellpose_watershed only)
-  # Nucleus Cellpose-SAM params (the cellpose path + the cellpose_watershed seeds).
+  # Cellpose-DINO (cpdino) params — the recommended instance backend for both nucleus
+  # (direct) and whole-cell (membrane + nucleus carve). Faithful to the cpv4 validation:
+  # the raw in-focus slice is passed to cellpose with normalize=true (its own percentile
+  # stretch) and NO CLAHE/downscale. cpv4 used cellpose's default min_size (15) for both
+  # channels, so cpdino keeps one value for nucleus and cell.
+  cpdino:
+    model_name: cpdino     # Cellpose-DINO ViT-L (cellpose>=4.2)
+    normalize: true        # cellpose 1st/99th-percentile stretch (no external CLAHE)
+    flow_threshold: 0.4
+    cellprob_threshold: 0.0
+    min_size: 15           # cellpose default spurious-instance filter (px/vox)
+    stitch_threshold: 0.0  # 2D single in-focus slice; >0 only for a 2D-per-plane 3D run
+    subtract_nuclei: true  # whole-cell: carve the nucleus footprint -> cytoplasm-only
+  # Nucleus Cellpose-SAM params (the legacy cellpose path + the cellpose_watershed seeds).
   cellpose:
     target_voxel_um: 0.58  # isotropic grid the nuclei are segmented on (always)
     cellprob_threshold: 0.0
@@ -67,7 +92,11 @@ io:
   cell_segmentation_path: null  # required iff compute_feature_metrics=true
   gt_cache_dir: null  # required for precompute-gt and require_complete_cache=true
   pred_cache_dir: null  # optional prediction-side artifact cache for masks/features
-  pred_channel_name: ???  # e.g. Structure_prediction
+  pred_channel_name: ???  # e.g. Structure_prediction (auto-derived from the manifest)
+  pred_is_source: false   # no-model floor: read the manifest source channel (e.g. Phase3D)
+                          # as the "prediction" and score the raw input against the GT.
+                          # pred_channel_name -> source_channel; pred_path defaults to the
+                          # GT store (source + target share one store), so positions match.
   gt_channel_name: ???    # e.g. Structure / Membrane / Nuclei
   nuclei_gt_path: null  # cellpose_watershed only: store holding the GT nuclei seed channel
                         # (segmentation.nuclei_channel_name). null = read from gt_path (iPSC
@@ -106,7 +135,7 @@ feature_metrics:
   cp:
     norm: {p_lo: 1.0, p_hi: 99.0}   # robust percentile-clip before extraction
     glcm:                           # opt-in Haralick texture; needs cubic.feature.glcm_features
-      enabled: false
+      enabled: true
       levels: 32
       distances: [1]
   # In-focus slab for the 2D deep-feature crops + per-cell similarity. When
@@ -116,7 +145,7 @@ feature_metrics:
   # taken from GT and applied to the prediction (slice-by-slice). Does NOT affect
   # CP regionprops (those stay 3D).
   focus_slab:
-    enabled: false
+    enabled: true
     halfwidth: 2          # 2*halfwidth+1 planes (h=1-2 ≈ 3-5 planes is the sweet spot)
     channel_name: Phase3D
 
@@ -149,6 +178,13 @@ feature_extractor:
     weights_path: null
     img_size: 224
     patch_size: 16
+  # MorphEm (CaicedoLab/MorphEm, DINO ViT-S/16 on microscopy). The
+  # feature_extractor/morphem group (in defaults) overrides this to the hub
+  # id; `pretrained_model_name: null` is the explicit-disable path.
+  # `revision` pins the trust_remote_code snapshot (set by the group).
+  morphem:
+    pretrained_model_name: null
+    revision: null
 
 use_gpu: true
 compute_microssim: true
@@ -194,6 +230,8 @@ force_recompute:
   pred_dinov3: false
   pred_dynaclr: false
   pred_celldino: false
+  gt_morphem: false
+  pred_morphem: false
   gt_instances: false
   pred_instances: false
   final_metrics: false

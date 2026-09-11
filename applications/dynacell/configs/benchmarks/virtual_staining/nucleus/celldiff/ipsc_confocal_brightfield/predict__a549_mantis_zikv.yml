@@ -1,0 +1,59 @@
+# CELLDiffBF predict: nucleus trained on ipsc_confocal_brightfield, BRIGHTFIELD input,
+# predicting against a549_mantis_h2b_zikv.
+#
+# Brightfield-input ablation arm of
+# nucleus/celldiff/ipsc_confocal/predict__a549*.yml. Every field is copied
+# from that phase baseline; the only differences are the input channel
+# (dataset_ref.source_channel + the normalization key), the checkpoint, and the
+# on-disk identity (train_set token `ipsc__bf`).
+#
+# save_top_k: -1 with no monitor on this arm, so the checkpoint is the FINAL
+# epoch chosen explicitly, matching how the phase baseline pinned its own.
+#
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
+# `nucleus` target_id from targets/nucleus.yml so the resolver finds it.
+
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_zikv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_celldiff.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal_brightfield
+  predict_set: a549_mantis_h2b_zikv
+  model_name: celldiff
+  experiment_id: nucleus__ipsc_confocal_brightfield__celldiff__a549_mantis_h2b_zikv
+  dataset_ref:
+    source_channel: Brightfield
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/celldiff_r2/checkpoints/epoch=19-step=128000.ckpt
+    predict_method: iterative
+    predict_overlap: [4, 256, 256]
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Brightfield]
+          level: timepoint_statistics
+    augmentations: []
+    z_window_size: 48
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2_iterative/ipsc__bf/a549__zikv/prediction.zarr
+
+launcher:
+  job_name: CELLDiffBF_PRED_NUCL_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2_iterative/ipsc__bf/a549__zikv

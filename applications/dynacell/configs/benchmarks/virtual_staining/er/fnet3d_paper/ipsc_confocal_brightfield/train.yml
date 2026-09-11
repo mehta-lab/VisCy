@@ -1,0 +1,79 @@
+# FNet3D paper-baseline fit on ER (SEC61B marker) — AICS iPSC confocal, BRIGHTFIELD input.
+#
+# Brightfield-input ablation arm of er/fnet3d_paper/ipsc_confocal/train.yml. Every
+# hyperparameter is identical to that baseline; the only change is the model input
+# channel (Brightfield instead of the Phase3D volume reconstructed from it), which
+# enters via train_sets/ipsc_confocal_brightfield.yml's dataset_ref.source_channel.
+#
+# ⚠ The three lists below are copied from the COMPOSED baseline, not from
+# targets/er_sec61b.yml. data_overlays/fnet3d_paper_fit.yml composes after the target
+# fragment and replaces all three lists wholesale, so the live values differ from the
+# target's on three axes: Structure is mean/std (not median/iqr), crops are 32x64x64
+# (not 13x624x624), and num_samples is 8 (not 2). Re-deriving these from the target
+# fragment would silently change three hyperparameters and invalidate the comparison.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_brightfield.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal_brightfield
+  model_name: fnet3d_paper
+  experiment_id: er__ipsc_confocal_brightfield__fnet3d_paper
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Brightfield, Structure]
+          w_key: Structure
+          spatial_size: [32, 64, 64]
+          num_samples: 8
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Brightfield, Structure]
+          roi_size: [32, 64, 64]
+
+trainer:
+  logger:
+    init_args:
+      name: FNet3D_iPSCbf_SEC61B_paper
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/er/fnet3d_paper
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/er/fnet3d_paper/checkpoints
+
+launcher:
+  job_name: FNet3DPaperBF_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/er/fnet3d_paper

@@ -11,8 +11,51 @@ base:
   - ../../../../../../recipes/topology/single_gpu.yml
 model:
   init_args:
-    predict_method: full_image
+    # Every modernized (Run-D) checkpoint carries 201 generator_ema.* tensors and
+    # picked its best epoch on loss/validate_ema. DynacellGAN used to build the EMA
+    # shadow only when ema_kimg was set, so an overlay that omitted it made
+    # strict=False drop all 201 at load and inference fell back to the raw
+    # generator -- 149 predict runs logged exactly that:
+    #   DynacellGAN predict: using raw generator
+    #   (ema_kimg=None, use_ema_at_predict=True, generator_ema=absent)
+    # Every Pix2Pix3D number published before 2026-07-30 was produced that way.
+    # engine.py now builds the shadow from the checkpoint's own generator_ema.*
+    # keys, so ema_kimg is no longer needed here -- it is a training constant, and
+    # restating it in predict configs is what let the drop go unnoticed.
+    #
+    # use_ema_at_predict stays explicit (engine.py deliberately does NOT adopt it
+    # from the checkpoint) and is now true: the EMA weights are the ones the
+    # recipe selected checkpoints on, so they are what the benchmark should
+    # report. This is the campaign flip -- it changes every Pix2Pix3D number, and
+    # is paired with a full re-predict + re-eval, not a config-only edit. The raw
+    # arm's metrics are preserved in the B0 CSV snapshot and in git.
+    use_ema_at_predict: true
+    # ViT generator is fixed at 512x512; the A549 test set is 640x960, so tile
+    # into overlapping 512x512 windows (single tile on the 512x512 iPSC test).
+    predict_method: sliding_window
     predict_overlap: [4, 256, 256]
+    # predict_blend defaults to "cosine", which cross-fades the overlaps. The
+    # old plain-average behaviour ("uniform") left step discontinuities where
+    # the window count changes -- on a 640x960 FOV the y=128 edge measured 7.4x
+    # its local median step, vs 1.0x for ground truth. Predictions written
+    # before that default landed carry those seams.
+    #
+    # Shift averaging suppresses the two lattices the cosine blend does not
+    # touch: the decoder's ConvTranspose checkerboard (2/4/8 px) and the ViT
+    # bottleneck's token grid (32 px). Both are present IN distribution on
+    # every organelle, not only in the A549-trained-on-iPSC panels -- the 32 px
+    # grid is the block structure visible in figure panels, because it survives
+    # the downsampling a figure applies to a 512 px field while the short
+    # periods average away. In-domain modulation depth (iPSC-trained membrane on
+    # iPSC, ground-truth floor 0.0705 at P32 and 0.0041 at P4):
+    #   none            depth@32 0.9866  depth@4 0.5304  PCC 0.5378
+    #   these 4 shifts  depth@32 0.2338  depth@4 0.0172  PCC 0.5414
+    # Written as (dy, dx) PAIRS, which costs 4 tiled passes; a flat
+    # [0, 5, 11, 22] is expanded to its outer product and costs 16 for the same
+    # result. Do NOT swap in offsets that merely zero the period-32 phasor --
+    # those are congruent mod 8 and reinstate the short periods, measuring two
+    # to three times worse. See engine._phase_shift_average.
+    predict_phase_shifts: [[0, 0], [5, 11], [11, 22], [22, 5]]
 data:
   init_args:
     z_window_size: 8

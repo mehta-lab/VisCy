@@ -30,12 +30,12 @@ class EvalModels:
         SuperModel returned by ``prepare_segmentation_model``. May be None
         when ``io.require_complete_cache=true`` short-circuits the load
         or when ``LoadFlags.masks=False``.
-    dinov3, dynaclr, celldino : Any | None
+    dinov3, dynaclr, celldino, morphem : Any | None
         Deep feature extractor instances. Each is None when its
-        ``LoadFlags`` gate is False, or (for celldino) when its
-        ``weights_path`` is unset.
+        ``LoadFlags`` gate is False, or (for celldino/morphem) when its
+        ``weights_path`` / ``pretrained_model_name`` is unset.
     dinov3_model_name, dynaclr_ckpt_path, dynaclr_encoder_cfg,
-    celldino_weights_path : str | dict | None
+    celldino_weights_path, morphem_model_name : str | dict | None
         Identity tags consumed by ``init_cache_context``. Stay None when
         the corresponding extractor was not loaded.
     """
@@ -44,13 +44,16 @@ class EvalModels:
     dinov3: Any | None
     dynaclr: Any | None
     celldino: Any | None
+    morphem: Any | None
     dinov3_model_name: str | None
     dynaclr_ckpt_path: str | None
     dynaclr_encoder_cfg: dict[str, Any] | None
     celldino_weights_path: str | None
+    morphem_model_name: str | None
     dinov3_preprocess_version: str | None = None
     dynaclr_preprocess_version: str | None = None
     celldino_preprocess_version: str | None = None
+    morphem_preprocess_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class LoadFlags:
     dinov3: bool = False
     dynaclr: bool = False
     celldino: bool = False
+    morphem: bool = False
 
     @classmethod
     def for_evaluate(cls, config: DictConfig) -> LoadFlags:
@@ -74,11 +78,12 @@ class LoadFlags:
 
         Masks always on (``prepare_segmentation_model`` handles its own
         ``require_complete_cache`` short-circuit). Extractors gated as a
-        group by ``config.compute_feature_metrics``; celldino additionally
-        soft-skips inside the loader when its ``weights_path`` is null.
+        group by ``config.compute_feature_metrics``; celldino/morphem
+        additionally soft-skip inside the loader when their
+        ``weights_path`` / ``pretrained_model_name`` is null.
         """
         ext_on = bool(config.compute_feature_metrics)
-        return cls(masks=True, dinov3=ext_on, dynaclr=ext_on, celldino=ext_on)
+        return cls(masks=True, dinov3=ext_on, dynaclr=ext_on, celldino=ext_on, morphem=ext_on)
 
 
 def load_eval_models(config: DictConfig, *, flags: LoadFlags | None = None) -> EvalModels:
@@ -115,6 +120,7 @@ def load_eval_models(config: DictConfig, *, flags: LoadFlags | None = None) -> E
         CellDinoFeatureExtractor,
         DinoV3FeatureExtractor,
         DynaCLRFeatureExtractor,
+        MorphEmFeatureExtractor,
     )
 
     if flags is None:
@@ -126,9 +132,11 @@ def load_eval_models(config: DictConfig, *, flags: LoadFlags | None = None) -> E
     dynaclr_ckpt_path: str | None = None
     dynaclr_encoder_cfg: dict[str, Any] | None = None
     celldino_weights_path: str | None = None
+    morphem_model_name: str | None = None
     dinov3 = None
     dynaclr = None
     celldino = None
+    morphem = None
 
     if flags.dinov3:
         dinov3_model_name = config.feature_extractor.dinov3.pretrained_model_name
@@ -150,19 +158,30 @@ def load_eval_models(config: DictConfig, *, flags: LoadFlags | None = None) -> E
                 img_size=int(celldino_cfg.img_size),
                 patch_size=int(celldino_cfg.patch_size),
             )
+    if flags.morphem:
+        morphem_cfg = config.feature_extractor.morphem
+        if morphem_cfg.pretrained_model_name is not None:
+            morphem_model_name = str(morphem_cfg.pretrained_model_name)
+            morphem = MorphEmFeatureExtractor(
+                pretrained_model_name=morphem_model_name,
+                revision=morphem_cfg.revision,
+            )
 
     return EvalModels(
         seg_model=seg_model,
         dinov3=dinov3,
         dynaclr=dynaclr,
         celldino=celldino,
+        morphem=morphem,
         dinov3_model_name=dinov3_model_name,
         dynaclr_ckpt_path=dynaclr_ckpt_path,
         dynaclr_encoder_cfg=dynaclr_encoder_cfg,
         celldino_weights_path=celldino_weights_path,
+        morphem_model_name=morphem_model_name,
         dinov3_preprocess_version=DinoV3FeatureExtractor.PREPROCESS_VERSION if dinov3 is not None else None,
         dynaclr_preprocess_version=DynaCLRFeatureExtractor.PREPROCESS_VERSION if dynaclr is not None else None,
         celldino_preprocess_version=CellDinoFeatureExtractor.PREPROCESS_VERSION if celldino is not None else None,
+        morphem_preprocess_version=MorphEmFeatureExtractor.PREPROCESS_VERSION if morphem is not None else None,
     )
 
 
@@ -173,9 +192,11 @@ def _identity_kwargs(models: EvalModels) -> dict[str, Any]:
         "dynaclr_ckpt_path": models.dynaclr_ckpt_path,
         "dynaclr_encoder_cfg": models.dynaclr_encoder_cfg,
         "celldino_weights_path": models.celldino_weights_path,
+        "morphem_model_name": models.morphem_model_name,
         "dinov3_preprocess_version": models.dinov3_preprocess_version,
         "dynaclr_preprocess_version": models.dynaclr_preprocess_version,
         "celldino_preprocess_version": models.celldino_preprocess_version,
+        "morphem_preprocess_version": models.morphem_preprocess_version,
     }
 
 

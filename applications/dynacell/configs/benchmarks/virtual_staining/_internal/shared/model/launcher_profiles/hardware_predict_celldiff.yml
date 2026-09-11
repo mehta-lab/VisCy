@@ -1,0 +1,29 @@
+# Hardware profile: single GPU, no vendor constraint, for CELL-Diff predict.
+# Pair with recipes/topology/single_gpu.yml.
+#
+# Identical to hardware_predict_any_gpu.yml except for `time`. CELL-Diff is
+# iterative-diffusion inference, so it costs one to two orders of magnitude more
+# wall time per volume than the single-pass regressors and even than the
+# pix2pix3d GAN: measured 5.8-95.6 h for a completed A549-target predict, versus
+# a 21.9 h maximum across every other family.
+#
+# 95.6 h against the old shared 4-day (96 h) cap was not headroom, it was a
+# coin flip. Eight CELL-Diff predicts hit TIMEOUT at exactly 4-00:00:xx on
+# 2026-07-19 (job ids 34880975/34880977/34880978, 34881099, 34881103/34881104/
+# 34881105, 34881175 -- SEC61B, TOMM20 and NUCL), each losing four days of GPU
+# and leaving a partial prediction.zarr behind.
+#
+# 7 days is ~1.75x the longest run that has ever completed. Over-provisioning
+# here only costs backfill priority (the gpu partition's MaxTime is 180 days),
+# whereas under-provisioning costs four days plus a re-predict. Hangs are no
+# longer this limit's job to catch -- see tools/watch_stalled_jobs.py.
+launcher:
+  sbatch:
+    partition: gpu
+    nodes: 1
+    ntasks_per_node: 1
+    cpus_per_task: 32
+    gpus: 1
+    mem: "256G"
+    constraint: null
+    time: "7-00:00:00"
