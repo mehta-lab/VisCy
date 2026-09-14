@@ -617,7 +617,11 @@ class DynacellUNet(LightningModule):
                     f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
                     f"Use SpotlightLoss or remove fg_mask_key from the data config."
                 )
-            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
+            # Re-binarize: hcs.py patches fg_mask into gpu_augmentations, and the
+            # affine resamples it with bilinear interpolation, so the mask arrives
+            # with fractional values on any arm whose augmentation stack resamples.
+            # Flip-only stacks are unaffected; this keeps the two cases identical.
+            return self.loss_function(pred, target, fg_mask=(batch["fg_mask"] > 0.5).float())
         return self.loss_function(pred, target)
 
     def training_step(self, batch: Sample, batch_idx: int) -> Tensor:
