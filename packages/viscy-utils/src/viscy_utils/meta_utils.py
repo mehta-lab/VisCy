@@ -1,5 +1,7 @@
 """Normalization metadata generation for OME-Zarr datasets."""
 
+import logging
+
 import iohub.ngff as ngff
 import numpy as np
 from iohub.core.config import TensorStoreConfig
@@ -8,6 +10,21 @@ from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
 from viscy_utils.mp_utils import get_val_stats
+
+try:
+    # cubic is how the rest of the codebase reaches the GPU (see
+    # dynacell.evaluation.metrics): its proxies dispatch on the INPUT ARRAY's
+    # device, so the same call runs cupyx on a cupy array and scipy on a numpy
+    # one. Optional here because viscy-utils does not depend on cubic; it ships
+    # in dynacell's `eval` and `preprocess` extras.
+    import torch
+    from cubic.cuda import ascupy, asnumpy
+    from cubic.scipy import ndimage as _cubic_ndimage
+except ImportError:  # pragma: no cover - exercised by the CPU-only environments
+    ascupy = None
+
+_logger = logging.getLogger(__name__)
+_BACKEND: str | None = None
 
 
 def write_meta_field(position, metadata, field_name, subfield_name):
@@ -56,6 +73,58 @@ def _grid_sample(position, grid_spacing, channel_index):
     ``data_copy_concurrency``.
     """
     return position["0"].native[:, channel_index, :, ::grid_spacing, ::grid_spacing].read().result()
+
+
+def smooth_median(array, size):
+    """Median-filter ``array``, on the GPU when cubic and a device are available.
+
+    The mask pass in :func:`generate_fg_masks` spends essentially all of its
+    time here. Measured on a (44, 624, 924) float32 volume with the (1, 3, 3)
+    footprint cell.zarr actually uses, on an A40:
+
+        scipy.ndimage.median_filter                         5.44 s
+        cubic.scipy.ndimage.median_filter via ascupy        0.03 s
+
+    Routing through ``cubic.scipy.ndimage`` rather than calling cupyx directly
+    is the codebase convention (``dynacell.evaluation.metrics`` does the same):
+    the proxy dispatches on the input array's device, so uploading with
+    ``ascupy`` selects the GPU implementation and passing plain numpy selects
+    SciPy, with one call site either way.
+
+    A median filter selects an existing element rather than computing a new
+    one, so there is no floating-point reassociation and the backends agree
+    exactly -- pinned by a test on both footprints used here.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Input array.
+    size : tuple of int
+        Filter footprint, one entry per axis of ``array``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Filtered array, on the host, with the input's dtype and shape.
+    """
+    global _BACKEND
+    if ascupy is None:
+        if _BACKEND is None:
+            _BACKEND = "scipy"
+            _logger.info("median filter: cubic not installed, using SciPy on the CPU")
+        return median_filter(array, size=size)
+    # Gate the upload on an actual device, as metrics.py does: cubic imports
+    # cleanly without cupy/cucim and ascupy would raise "GPU requested but not
+    # available". Falling through to numpy keeps cubic's own CPU path.
+    if not torch.cuda.is_available():
+        if _BACKEND is None:
+            _BACKEND = "cubic-cpu"
+            _logger.info("median filter: no CUDA device, using cubic's CPU path")
+        return asnumpy(_cubic_ndimage.median_filter(array, size=size))
+    if _BACKEND is None:
+        _BACKEND = "cubic-gpu"
+        _logger.info("median filter: using cubic on the GPU")
+    return asnumpy(_cubic_ndimage.median_filter(ascupy(array), size=size))
 
 
 def generate_normalization_metadata(
@@ -114,7 +183,7 @@ def generate_normalization_metadata(
                 fov_stats = get_val_stats(samples)
                 if compute_otsu:
                     otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index)
-                    smoothed = median_filter(otsu_samples, size=(1, 1, 3, 3))
+                    smoothed = smooth_median(otsu_samples, size=(1, 1, 3, 3))
                     flat = smoothed.ravel()
                     # Otsu's method is undefined for constant-valued inputs.
                     # Use the constant value itself so generate_fg_masks marks
@@ -223,5 +292,5 @@ def generate_fg_masks(
 
                 for t in range(t_total):
                     data = img_arr[t, ch_idx].astype(np.float32)
-                    smoothed = median_filter(data, size=(1, 3, 3))
+                    smoothed = smooth_median(data, size=(1, 3, 3))
                     mask_arr[t, ch_idx] = (smoothed >= otsu_threshold).astype(np.uint8)

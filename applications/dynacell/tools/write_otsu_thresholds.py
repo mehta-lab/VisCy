@@ -39,11 +39,10 @@ import sys
 
 from iohub import ngff
 from iohub.core.config import TensorStoreConfig
-from scipy.ndimage import median_filter
 from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
-from viscy_utils.meta_utils import _grid_sample, write_meta_field
+from viscy_utils.meta_utils import _grid_sample, smooth_median, write_meta_field
 
 _OTSU_KEY = "otsu_threshold"
 
@@ -69,7 +68,7 @@ def compute_otsu_threshold(position: ngff.Position, channel_index: int, grid_spa
         ``generate_fg_masks`` mark the whole FOV as foreground-free).
     """
     samples = _grid_sample(position, grid_spacing, channel_index)
-    smoothed = median_filter(samples, size=(1, 1, 3, 3))
+    smoothed = smooth_median(samples, size=(1, 1, 3, 3))
     flat = smoothed.ravel()
     if flat.min() == flat.max():
         return float(flat.min())
