@@ -51,8 +51,22 @@ _MODEL_DIRS: tuple[str, ...] = (
     "fcmae_vscyto3d_pretrained",
     "celldiff",
     "pix2pix3d_unetvit",
+    # Spotlight-loss arms. Narrower than the rest of the roster -- see _MODEL_SCOPE.
+    "fnet3d_spotlight",
+    "pix2pix3d_unetvit_spotlight",
 )
 _TRAIN_DIRS: tuple[str, ...] = ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
+
+# Models that do not span the full (organelle x train pool) grid. Absent from this
+# map means "every tuple", which is the case for the original four. The spotlight
+# campaign fit only iPSC-trained nucleus + membrane, and HEK only evaluates
+# membrane and mito, so exactly one tuple overlaps. Without this restriction the
+# generator would raise FileNotFoundError on the other five per family and exit 1,
+# turning a green tool red.
+_MODEL_SCOPE: dict[str, frozenset[tuple[str, str]]] = {
+    "fnet3d_spotlight": frozenset({("membrane", "ipsc_confocal")}),
+    "pix2pix3d_unetvit_spotlight": frozenset({("membrane", "ipsc_confocal")}),
+}
 
 # organelle config dir -> (manifest target key, eval-side target fragment)
 _ORGANELLES: dict[str, tuple[str, str]] = {
@@ -87,6 +101,8 @@ _JOB_STEM: dict[str, str] = {
     "fcmae_vscyto3d_pretrained": "VSCYTO3D",
     "celldiff": "CELLDIFF",
     "pix2pix3d_unetvit": "PIX2PIX3D",
+    "fnet3d_spotlight": "FNET3D_SPOTLIGHT",
+    "pix2pix3d_unetvit_spotlight": "PIX2PIX3D_SPOTLIGHT",
 }
 _TRAIN_STEM: dict[str, str] = {"ipsc": "IPSCTR", "a549": "A549TR", "joint": "JOINTTR"}
 
@@ -100,6 +116,10 @@ _HARDWARE_PROFILE: dict[str, str] = {
     "fcmae_vscyto3d_pretrained": "hardware_predict_any_gpu.yml",
     "celldiff": "hardware_predict_celldiff.yml",
     "pix2pix3d_unetvit": "hardware_predict_any_gpu.yml",
+    # Spotlight changes the training objective only; inference cost is identical
+    # to the baseline family, so each takes its baseline's profile.
+    "fnet3d_spotlight": "hardware_predict_any_gpu.yml",
+    "pix2pix3d_unetvit_spotlight": "hardware_predict_any_gpu.yml",
 }
 
 
@@ -313,6 +333,9 @@ def main(argv: list[str] | None = None) -> int:
     for organelle in _ORGANELLES:
         for model_dir in _MODEL_DIRS:
             for train_dir in _TRAIN_DIRS:
+                scope = _MODEL_SCOPE.get(model_dir)
+                if scope is not None and (organelle, train_dir) not in scope:
+                    continue
                 try:
                     leaf_path, text = build_leaf(organelle, model_dir, train_dir)
                 except (FileNotFoundError, ValueError) as exc:
