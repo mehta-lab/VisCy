@@ -1,0 +1,37 @@
+# FNet2D Spotlight-loss fit overlay — model + trainer only.
+#
+# Identical to fnet2d_fit.yml except `loss_function`. The whole point of
+# this arm is a matched comparison against the fnet2d baseline, so
+# lr / schedule / precision / max_steps must NOT drift from it. If you change
+# anything else here you have changed what the comparison measures.
+#
+# Mirrors fnet3d_spotlight_fit.yml but binds the fnet2d model recipe
+# (in_stack_depth=1, downsample_z=false), exactly as fnet2d_fit.yml mirrors
+# fnet3d_paper_fit.yml.
+#
+# Spotlight = masked MSE (supervision restricted to foreground voxels) + soft
+# Dice on tunable-sigmoid-thresholded predictions. Kalinin et al. 2025,
+# arXiv:2507.05383. Requires the leaf to set `data.init_args.fg_mask_key` and
+# to Otsu-centre the TARGET normalization — see the train leaves.
+base:
+  - ../../../../../../recipes/models/fnet2d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+seed_everything: 0
+model:
+  init_args:
+    loss_function:
+      class_path: viscy_utils.losses.SpotlightLoss
+      init_args:
+        lambda_mse: 0.5
+        sigmoid_k: -0.95
+        # NO fg_threshold. It is dead config here: SpotlightLoss.forward
+        # short-circuits on `if fg_mask is not None`, and the leaf sets
+        # fg_mask_key, so the threshold is never consulted. Setting 0.0 would
+        # imply the mask is derived at runtime from the target, which it is not
+        # — it is read from the store.
+    lr: 0.001
+    schedule: Constant
+trainer:
+  precision: 32-true
+  max_steps: 200000

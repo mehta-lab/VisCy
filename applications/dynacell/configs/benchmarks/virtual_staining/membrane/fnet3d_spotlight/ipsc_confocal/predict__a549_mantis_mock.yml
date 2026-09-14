@@ -1,0 +1,58 @@
+# SPOTLIGHT ARM. Mechanical copy of the fnet3d_paper predict leaf: spotlight
+# changes the training objective only, so inference, the predict model overlay
+# and the Phase3D-only predict normalization are all identical to the baseline.
+# Only model_name / experiment_id / ckpt_path / output_store / run_root /
+# job_name differ.
+#
+# ⚠ ckpt_path names `last.ckpt` as a PLACEHOLDER -- the fit has not run yet.
+# It is authored rather than left blank because `--ckpt best` resolves the
+# checkpoint DIRECTORY from this field and exits if it is missing. Always
+# submit with `--ckpt best`, and re-bake this path afterwards.
+#
+# FNet3D paper-baseline predict: membrane trained on iPSC, predicting against a549-mantis-caax-mock test.
+# A549 manifest keys membrane by gene (`caax`); override the iPSC-side `membrane`
+# target_id from targets/membrane.yml so the resolver finds the caax target on
+# a549-mantis-caax-mock.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_caax_mock.yml
+  - ../../../_internal/shared/model/targets/membrane.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: membrane
+  trained_on: ipsc_confocal
+  predict_set: a549_mantis_caax_mock
+  model_name: fnet3d_spotlight
+  experiment_id: membrane__ipsc_confocal__fnet3d_spotlight__a549_mantis_caax_mock
+  # Override the iPSC-side `membrane` target to a549's gene-keyed `caax`.
+  dataset_ref:
+    target: caax
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/membrane/fnet3d_spotlight/checkpoints/last.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_spotlight/ipsc/a549__mock/prediction.zarr
+
+launcher:
+  job_name: FNet3DSpotlight_PRED_MEMB_ON_A549_MOCK
+  run_root: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_spotlight/ipsc/a549__mock

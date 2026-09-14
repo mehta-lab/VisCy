@@ -1,0 +1,48 @@
+# pix2pix2d_unetvit Spotlight fit overlay — in-focus 2D benchmark track.
+#
+# Identical to pix2pix2d_unetvit_fit.yml except `recon_loss`. Everything else
+# must stay pinned to that file: the arm exists to isolate the reconstruction
+# objective against the Run-D pix2pix2d baseline. That baseline carries its
+# three Run-D deltas (lambda_l1: 10.0, lecam_gamma: 0.3, max_epochs: 40) HERE
+# rather than in the leaf, unlike the 3D family — so they are repeated below
+# and the spotlight leaves must NOT restate them.
+#
+# `recon_loss` replaces the L1 term UNDER the existing `lambda_l1` weight,
+# which was tuned for L1's magnitude. See
+# pix2pix3d_unetvit_spotlight_fit_ddp_modernized.yml for the calibration risk
+# this creates and how it is monitored.
+#
+# Read pix2pix2d_unetvit_fit.yml for the rationale behind every other knob
+# here (Run-D vs LSGAN, 4-GPU topology, the bf16-mixed / GradScaler argument,
+# warmup_steps, seed_everything). None of it is restated.
+base:
+  - ../../../../../../recipes/models/pix2pix2d_unetvit.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/ddp_4gpu_gan.yml
+model:
+  init_args:
+    loss_type: nonsat
+    lambda_adv: 1.0
+    r1_gamma: 10.0
+    r2_gamma: 0.0
+    r1_every: 16
+    ema_kimg: 10.0
+    lecam_gamma: 0.3
+    lecam_decay: 0.9
+    lambda_l1: 10.0
+    use_ema_at_predict: true
+    lr_g: 2.0e-4
+    lr_d: 2.0e-4
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+    recon_loss:
+      class_path: viscy_utils.losses.SpotlightLoss
+      init_args:
+        lambda_mse: 0.5
+        sigmoid_k: -0.95
+        # NO fg_threshold — inert when the leaf sets fg_mask_key; see
+        # fnet3d_spotlight_fit.yml for why setting it would be misleading.
+trainer:
+  precision: bf16-mixed
+  max_epochs: 40
