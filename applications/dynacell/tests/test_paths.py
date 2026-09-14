@@ -400,6 +400,17 @@ def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
         # celldiff_2d must not collapse onto the 3D celldiff/celldiff_r2 keys —
         # prefix matching on the CellDiff family would otherwise truncate it.
         ("celldiff_2d", "celldiff_2d"),
+        # Spotlight arms: same hazard class. Each is a longer key than its own
+        # baseline, so longest-prefix must pick the spotlight key rather than
+        # collapsing the arm onto the baseline it is being compared against.
+        ("fnet3d_spotlight", "fnet3d_spotlight"),
+        ("fnet2d_spotlight", "fnet2d_spotlight"),
+        ("pix2pix3d_unetvit_spotlight", "pix2pix3d_unetvit_spotlight"),
+        ("pix2pix2d_unetvit_spotlight", "pix2pix2d_unetvit_spotlight"),
+        # `fnet3d_paper_spotlight` is the WRONG token (baseline dir + suffix): it
+        # collapses onto fnet3d_paper. Pinned so the correct run-dir token above
+        # cannot be "simplified" into it later.
+        ("fnet3d_paper_spotlight", "fnet3d_paper"),
     ],
 )
 def test_canonical_model_name(run_dir_name: str, expected: str) -> None:

@@ -64,6 +64,13 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fnet2d": "fnet2d",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
+    # Spotlight-loss arms (iPSC-trained nucleus + membrane). Must agree with
+    # PAPER_KEY in dynacell.evaluation.paths -- test_paper_key_maps_agree_on_overlap
+    # pins the two maps against each other.
+    "fnet3d_spotlight": "fnet3d_spotlight",
+    "fnet2d_spotlight": "fnet2d_spotlight",
+    "pix2pix3d_unetvit_spotlight": "pix2pix3d_spotlight",
+    "pix2pix2d_unetvit_spotlight": "pix2pix2d_spotlight",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -112,6 +119,14 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto2d_pretrained",
     "fnet2d",
     "pix2pix2d_unetvit",
+    # Spotlight-loss arms. Deterministic for the same reason their baselines are;
+    # spotlight changes the training objective only, never inference. Matching here
+    # is exact, so every on-disk run-dir token must appear verbatim or
+    # _split_model_variant raises "unknown model code-name" when predictions land.
+    "fnet3d_spotlight",
+    "fnet2d_spotlight",
+    "pix2pix3d_unetvit_spotlight",
+    "pix2pix2d_unetvit_spotlight",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff_2d", "celldiff")
 """CellDiff-family model tokens, longest first so prefix matching does not

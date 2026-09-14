@@ -187,6 +187,17 @@ PAPER_KEY: dict[str, str] = {
     "fnet2d": "fnet2d",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
+    # Spotlight-loss arms (masked MSE + soft-Dice, Otsu-centred target), iPSC-trained
+    # nucleus + membrane. Each is a recipe variant of the baseline directly above it,
+    # so it needs its own key: `canonical_model_name` resolves by LONGEST PREFIX, and
+    # without these entries `fnet2d_spotlight` silently collapses onto `fnet2d`,
+    # `pix2pix{2,3}d_unetvit_spotlight` onto their baselines, and the arms write into
+    # the baselines' eval/cache dirs. The paper keys drop `_unetvit`, matching
+    # `pix2pix3d_unetvit` -> `pix2pix3d`.
+    "fnet3d_spotlight": "fnet3d_spotlight",
+    "fnet2d_spotlight": "fnet2d_spotlight",
+    "pix2pix3d_unetvit_spotlight": "pix2pix3d_spotlight",
+    "pix2pix2d_unetvit_spotlight": "pix2pix2d_spotlight",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
