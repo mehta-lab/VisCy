@@ -1,9 +1,10 @@
 # Mode recipe: Spotlight foreground-aware loss (Kalinin et al. 2025).
 # Cross-cutting: sets loss, fg_mask_key, nonzero filtering, AND
-# Otsu-centered normalization.  fg_threshold: 0.0 is valid ONLY
-# because normalizations use subtrahend: otsu_threshold.
+# Otsu-centered normalization. The Otsu-centred target is what makes 0 the
+# FG/BG boundary in the model's output space -- which the Dice term needs
+# regardless of fg_threshold, since that field is inert here (see below).
 #
-# Requires: viscy preprocess --compute_otsu --compute_fg_masks
+# Requires: viscy preprocess --compute_otsu true --compute_fg_masks true
 #
 # Base ordering: this mode must come AFTER the data recipe in the
 # base: list so that its normalizations replace the data default.
@@ -14,6 +15,10 @@ model:
       init_args:
         lambda_mse: 0.5
         sigmoid_k: -0.95
+        # INERT while data.fg_mask_key is set below: forward() short-circuits
+        # on `if fg_mask is not None`, so the mask from the store defines
+        # foreground and this threshold is never consulted. It applies only if
+        # fg_mask_key is removed. Same for data.nonzero_threshold.
         fg_threshold: 0.0
 data:
   init_args:
