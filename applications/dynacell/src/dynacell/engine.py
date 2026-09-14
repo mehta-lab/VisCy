@@ -1060,7 +1060,16 @@ class DynacellGAN(LightningModule):
     discriminator_config : dict or None
         Keyword arguments forwarded to :class:`MultiScalePatchGAN3D`.
     lambda_l1 : float
-        Weight of the L1 reconstruction loss in the generator objective.
+        Weight of the reconstruction loss in the generator objective. Named for
+        the L1 default; it weights whatever ``recon_loss`` is.
+    recon_loss : nn.Module or None
+        Generator reconstruction criterion. ``None`` (default) uses
+        :class:`torch.nn.L1Loss`, which is what every published pix2pix family
+        trained with. A loss accepting ``fg_mask`` (e.g.
+        :class:`viscy_utils.losses.SpotlightLoss`) receives the batch's
+        foreground mask. Note ``lambda_l1`` was tuned against L1's magnitude, so
+        a swapped loss on a different scale re-balances the generator objective
+        against the adversarial term — watch ``loss/g_recon_*_train``.
     loss_type : {"lsgan", "nonsat", "rpgan"}
         Adversarial loss family. Default ``"lsgan"`` matches the
         pre-modernization recipe. ``"nonsat"`` is the StyleGAN2 default;
@@ -1155,6 +1164,7 @@ class DynacellGAN(LightningModule):
         generator_config: dict | None = None,
         discriminator_config: dict | None = None,
         lambda_l1: float = 100.0,
+        recon_loss: nn.Module | None = None,
         loss_type: Literal["lsgan", "nonsat", "rpgan"] = "lsgan",
         lambda_adv: float = 1.0,
         r1_gamma: float = 0.0,
@@ -1182,7 +1192,13 @@ class DynacellGAN(LightningModule):
         # Lightning's manual-optimization API: required because the GAN
         # alternates two optimizers per training_step.
         self.automatic_optimization = False
-        self.save_hyperparameters(ignore=["ckpt_path"])
+        # recon_loss is ignored for the same reason loss_function is on DynacellUNet:
+        # an nn.Module in hparams gets pickled into the checkpoint, and
+        # VisCyCLI._parse_ckpt_path lets checkpoint hparams win on non-fit
+        # subcommands for any key the predict leaf does not declare. A single
+        # pickled class also makes torch.load(weights_only=True) — which
+        # _ckpt_state_dict uses — raise for the whole file.
+        self.save_hyperparameters(ignore=["ckpt_path", "recon_loss"])
 
         net_class = _ARCHITECTURE.get(architecture)
         if net_class is None:
@@ -1206,6 +1222,17 @@ class DynacellGAN(LightningModule):
             )
         self.generator = net_class(**(generator_config or {}))
         self.discriminator = MultiScalePatchGAN3D(**(discriminator_config or {}))
+
+        # Generator reconstruction term. Default keeps the published behaviour
+        # (plain L1 under lambda_l1); SpotlightLoss swaps in under the same weight.
+        self.recon_loss = recon_loss if recon_loss is not None else nn.L1Loss()
+        # Cache fg_mask compatibility to avoid per-batch inspect.signature(),
+        # mirroring DynacellUNet.
+        _recon_sig = inspect.signature(self.recon_loss.forward)
+        self._recon_accepts_fg_mask = "fg_mask" in _recon_sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in _recon_sig.parameters.values()
+        )
+        self._recon_returns_components = "return_components" in _recon_sig.parameters
 
         self.lambda_l1 = lambda_l1
         self.loss_type = loss_type
@@ -1434,6 +1461,47 @@ class DynacellGAN(LightningModule):
             raise ValueError("RpGAN G loss requires fresh d_real logits; got None.")
         return rpgan_g_loss(d_real, d_fake)
 
+    def _compute_recon(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, dict[str, Tensor]]:
+        """Compute the generator reconstruction term, with fg_mask when present.
+
+        Returns the scalar term and any per-component breakdown the loss exposes
+        (empty for plain L1). The components come from the loss itself rather
+        than being re-derived here: they are the campaign's only monitor on
+        whether ``lambda_l1`` still balances the adversarial term after the
+        objective is swapped, and a re-derivation would silently fork from what
+        is actually optimized.
+
+        Parameters
+        ----------
+        pred : Tensor
+            Generator output.
+        target : Tensor
+            Ground truth.
+        batch : Sample
+            The batch, read for an optional ``fg_mask``.
+
+        Returns
+        -------
+        tuple of (Tensor, dict of str to Tensor)
+            Scalar reconstruction loss and its components.
+        """
+        if "fg_mask" not in batch:
+            return self.recon_loss(pred, target), {}
+        if not self._recon_accepts_fg_mask:
+            raise TypeError(
+                f"{type(self.recon_loss).__name__} does not accept 'fg_mask'. "
+                f"Use SpotlightLoss or remove fg_mask_key from the data config."
+            )
+        # Re-binarize: the mask rides through the same gpu_augmentations as the
+        # image (hcs.py patches it into the list), and the affine resamples with
+        # bilinear interpolation, so ~40% of voxels arrive with fractional
+        # weight. SpotlightLoss would then compute a soft-weighted mean and a
+        # soft-vs-soft Dice — different semantics from the flip-only FNet arms.
+        fg_mask = (batch["fg_mask"] > 0.5).float()
+        if not self._recon_returns_components:
+            return self.recon_loss(pred, target, fg_mask=fg_mask), {}
+        return self.recon_loss(pred, target, fg_mask=fg_mask, return_components=True)
+
     def training_step(self, batch: Sample, batch_idx: int) -> None:
         """Run one alternating D/G optimization step.
 
@@ -1529,8 +1597,8 @@ class DynacellGAN(LightningModule):
             adv_loss = self._adv_g_loss(d_real_for_g, d_fake_for_g)
         else:
             adv_loss = self._adv_g_loss(None, d_fake_for_g)
-        l1_loss = F.l1_loss(pred, target)
-        g_loss = self.lambda_adv * adv_loss + self.lambda_l1 * l1_loss
+        recon_train, recon_components = self._compute_recon(pred, target, batch)
+        g_loss = self.lambda_adv * adv_loss + self.lambda_l1 * recon_train
         opt_g.zero_grad(set_to_none=True)
         self.manual_backward(g_loss)
         opt_g.step()
@@ -1571,8 +1639,13 @@ class DynacellGAN(LightningModule):
             "loss/d_train": d_loss,
             "loss/g_train": g_loss,
             "loss/g_adv_train": adv_loss,
-            "loss/g_l1_train": l1_loss,
+            # Key kept as `g_l1_train` even when recon_loss is not L1: renaming it
+            # would break the existing dashboards and three engine tests. It now
+            # carries whatever reconstruction term is configured, which is why the
+            # components below are logged alongside it rather than instead of it.
+            "loss/g_l1_train": recon_train,
         }
+        log_payload.update({f"loss/g_recon_{name}_train": value for name, value in recon_components.items()})
         self.log_dict(
             log_payload,
             on_step=True,
@@ -1590,7 +1663,7 @@ class DynacellGAN(LightningModule):
             self.log("reg/r2", r2_value.detach(), on_step=True, on_epoch=True, sync_dist=False)
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
-        """Compute generator L1 validation loss(es) and capture samples.
+        """Compute generator reconstruction validation loss(es) and capture samples.
 
         Always runs the raw generator forward and accumulates into
         ``validation_losses_raw`` (drives the back-compat ``loss/validate``
@@ -1614,17 +1687,20 @@ class DynacellGAN(LightningModule):
         Returns
         -------
         Tensor
-            Scalar L1 loss on this batch (raw generator).
+            Scalar reconstruction loss on this batch (raw generator). This is
+            whatever ``recon_loss`` is configured to be, matching the objective
+            the G step optimizes — otherwise ``monitor: loss/validate_ema``
+            would select checkpoints against a different objective.
         """
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         # Raw generator pass (always).
         pred_raw = self.generator(source)
-        l1_raw = F.l1_loss(pred_raw, target)
-        _record_val_loss(self.validation_losses_raw, dataloader_idx, l1_raw.detach(), source.shape[0])
+        recon_raw, _ = self._compute_recon(pred_raw, target, batch)
+        _record_val_loss(self.validation_losses_raw, dataloader_idx, recon_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
-            l1_raw,
+            recon_raw,
             sync_dist=True,
             batch_size=source.shape[0],
         )
@@ -1633,11 +1709,11 @@ class DynacellGAN(LightningModule):
         if self.generator_ema is not None:
             with torch.no_grad():
                 pred_ema = self.generator_ema(source)
-            l1_ema = F.l1_loss(pred_ema, target)
-            _record_val_loss(self.validation_losses_ema, dataloader_idx, l1_ema.detach(), source.shape[0])
+            recon_ema, _ = self._compute_recon(pred_ema, target, batch)
+            _record_val_loss(self.validation_losses_ema, dataloader_idx, recon_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
-                l1_ema,
+                recon_ema,
                 sync_dist=True,
                 batch_size=source.shape[0],
             )
@@ -1651,7 +1727,7 @@ class DynacellGAN(LightningModule):
             self.validation_step_outputs.extend(
                 detach_sample((source, target, pred_for_samples), self.log_samples_per_batch)
             )
-        return l1_raw
+        return recon_raw
 
     def on_train_epoch_end(self) -> None:
         """Log accumulated training image samples and reset the buffer."""

@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pytest
 import torch
+import torch.nn.functional as F
 from iohub.ngff import open_ome_zarr
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from dynacell.engine import DynacellFlowMatching, DynacellUNet
+from dynacell.engine import DynacellFlowMatching, DynacellGAN, DynacellUNet
 from viscy_data.hcs import HCSDataModule
 from viscy_utils.callbacks.prediction_writer import HCSPredictionWriter
 from viscy_utils.compose import load_composed_config
@@ -65,6 +66,18 @@ CELLDIFF_TEST_NET_CONFIG = {
 }
 
 CELLDIFF_TEST_TRANSPORT_CONFIG = {"path_type": "Linear", "prediction": "velocity"}
+
+# Discriminator for GAN tests, sized against VIT_TEST_CONFIG's 32x32 YX.
+# num_scales=1 (single-scale, no downsampled second pass) is required here:
+# MultiScalePatchGAN3D's second scale operates on a (1, 2, 2)-avg-pooled
+# 16x16 input, which collapses to 1x1x1 by its fourth conv and raises in
+# InstanceNorm3d. num_scales=2 needs >=64x64 (see test_engine.py's
+# GAN_DISC_TEST_CONFIG), which tiny_hcs_zarr's 32x32 images don't provide.
+GAN_DISC_TEST_CONFIG = {
+    "in_channels": 2,
+    "base_channels": 8,
+    "num_scales": 1,
+}
 
 
 # ---- Synthetic tests (CPU) ----
@@ -224,6 +237,123 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
     trainer.fit(module, datamodule=datamodule)
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
+
+
+# ---- DynacellGAN + swappable recon_loss (CPU) ----
+
+
+def test_dynacell_gan_spotlight_recon_fast_dev_run(tmp_path, tiny_hcs_zarr):
+    """DynacellGAN + UNetViT3D + SpotlightLoss recon_loss trains for 1 batch.
+
+    Builds the store the same way as ``test_spotlight_with_fg_mask_fast_dev_run``
+    (real ``generate_fg_masks`` output read through ``HCSDataModule``'s
+    ``fg_mask_key``), so the mask reaches ``DynacellGAN._compute_recon`` through
+    the real data path rather than a synthetic batch.
+    """
+    generate_fg_masks(tiny_hcs_zarr, channel_names=["Fluorescence"])
+    seed_everything(42)
+    module = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=VIT_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        recon_loss=SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95),
+        log_batches_per_epoch=0,
+    )
+    datamodule = HCSDataModule(
+        data_path=str(tiny_hcs_zarr),
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=8,
+        batch_size=2,
+        num_workers=0,
+        split_ratio=0.5,
+        yx_patch_size=(32, 32),
+        fg_mask_key="fg_mask",
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(module, datamodule=datamodule)
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+    assert "loss/g_recon_masked_mse_train" in trainer.callback_metrics
+    assert "loss/g_recon_dice_train" in trainer.callback_metrics
+    assert torch.isfinite(trainer.callback_metrics["loss/g_recon_masked_mse_train"])
+    assert torch.isfinite(trainer.callback_metrics["loss/g_recon_dice_train"])
+
+
+def test_dynacell_gan_default_recon_matches_l1():
+    """No recon_loss configured computes exactly ``F.l1_loss``, not just an
+    ``isinstance`` check on the default."""
+    seed_everything(0)
+    module = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=VIT_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    pred = torch.randn(2, 1, 8, 32, 32)
+    target = torch.randn(2, 1, 8, 32, 32)
+    recon, components = module._compute_recon(pred, target, {})
+    assert components == {}
+    assert torch.equal(recon, F.l1_loss(pred, target))
+
+
+def test_dynacell_gan_default_recon_rejects_fg_mask():
+    """Default L1 recon_loss + a batch carrying fg_mask raises TypeError
+    naming the loss class, matching DynacellUNet's ``_compute_loss`` contract."""
+    module = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=VIT_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+    )
+    pred = torch.randn(2, 1, 8, 32, 32)
+    target = torch.randn(2, 1, 8, 32, 32)
+    batch = {"fg_mask": torch.ones(2, 1, 8, 32, 32)}
+    with pytest.raises(TypeError, match="L1Loss"):
+        module._compute_recon(pred, target, batch)
+
+
+def test_dynacell_gan_ckpt_excludes_recon_loss_from_hparams(tmp_path, _SyntheticDataModule):
+    """SpotlightLoss must not leak into the checkpoint's ``hyper_parameters``.
+
+    An "it reloads fine" assertion alone would pass even if ``ignore=["recon_loss"]``
+    were dropped from ``save_hyperparameters``: SpotlightLoss holds only plain
+    floats, so it round-trips through pickle regardless. This asserts directly
+    against the saved hparams dict, and separately confirms the checkpoint loads
+    under ``torch.load(..., weights_only=True)`` -- what
+    ``dynacell.engine._ckpt_state_dict`` uses -- which raises if any class (a
+    pickled loss module) made it into the file.
+    """
+    seed_everything(0)
+    module = DynacellGAN(
+        architecture="UNetViT3D",
+        generator_config=VIT_TEST_CONFIG,
+        discriminator_config=GAN_DISC_TEST_CONFIG,
+        recon_loss=SpotlightLoss(lambda_mse=0.5, sigmoid_k=-0.95),
+        log_batches_per_epoch=0,
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(module, datamodule=_SyntheticDataModule(depth=8, height=32, width=32))
+    ckpt_path = tmp_path / "gan.ckpt"
+    trainer.save_checkpoint(ckpt_path)
+
+    checkpoint = torch.load(ckpt_path, map_location="cpu")
+    assert "recon_loss" not in checkpoint["hyper_parameters"]
+
+    checkpoint_weights_only = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    assert "recon_loss" not in checkpoint_weights_only["hyper_parameters"]
 
 
 # ---- Predict integration tests (CPU) ----
