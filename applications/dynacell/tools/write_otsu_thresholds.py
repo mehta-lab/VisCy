@@ -39,40 +39,35 @@ import sys
 
 from iohub import ngff
 from iohub.core.config import TensorStoreConfig
-from skimage.filters import threshold_otsu
 from tqdm import tqdm
 
-from viscy_utils.meta_utils import _grid_sample, smooth_median, write_meta_field
+from viscy_utils.meta_utils import _grid_sample, otsu_threshold_from_volume, write_meta_field
 
 _OTSU_KEY = "otsu_threshold"
 
 
-def compute_otsu_threshold(position: ngff.Position, channel_index: int, grid_spacing: int) -> float:
+def compute_otsu_threshold(position: ngff.Position, channel_index: int) -> float:
     """Compute one FOV's Otsu threshold exactly as ``generate_normalization_metadata`` does.
+
+    Delegates to :func:`viscy_utils.meta_utils.otsu_threshold_from_volume` rather
+    than reimplementing the recipe, so this tool cannot drift from the stock
+    preprocess pass -- the whole point of the tool is that the value it writes is
+    the one the pipeline would have written.
 
     Parameters
     ----------
     position : ngff.Position
-        Position node to sample.
+        Position node to read.
     channel_index : int
         Index of the channel within the store's channel list.
-    grid_spacing : int
-        Stride of the sampling grid. Denser than the statistics grid to capture
-        inter-cell gaps; the stock default is 8.
 
     Returns
     -------
     float
         The Otsu threshold, or the constant value itself for a constant input
-        (Otsu is undefined there, and returning the constant makes
-        ``generate_fg_masks`` mark the whole FOV as foreground-free).
+        (Otsu is undefined there).
     """
-    samples = _grid_sample(position, grid_spacing, channel_index)
-    smoothed = smooth_median(samples, size=(1, 1, 3, 3))
-    flat = smoothed.ravel()
-    if flat.min() == flat.max():
-        return float(flat.min())
-    return float(threshold_otsu(flat))
+    return otsu_threshold_from_volume(_grid_sample(position, 1, channel_index))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,7 +75,6 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("store", help="Path to the HCS OME-Zarr training store.")
     ap.add_argument("--channel", action="append", required=True, dest="channels", help="Target channel (repeatable).")
-    ap.add_argument("--otsu-grid-spacing", type=int, default=8, help="Sampling stride; stock default 8.")
     ap.add_argument("--num-workers", type=int, default=8, help="tensorstore data_copy_concurrency.")
     ap.add_argument("--dry-run", action="store_true", help="Compute and report; write nothing.")
     ap.add_argument("--undo", action="store_true", help="Delete the key instead of writing it.")
@@ -130,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
                     if stats.pop(_OTSU_KEY, None) is None:
                         continue
                 else:
-                    stats[_OTSU_KEY] = compute_otsu_threshold(pos, index, args.otsu_grid_spacing)
+                    stats[_OTSU_KEY] = compute_otsu_threshold(pos, index)
                 if args.dry_run:
                     if written < 3:
                         print(f"  [dry-run] {name}/{channel}: {_OTSU_KEY}={stats.get(_OTSU_KEY)}")
