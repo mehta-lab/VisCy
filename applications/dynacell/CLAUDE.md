@@ -248,8 +248,9 @@ Every investigation, ablation, probe or planning effort gets **one directory**
 outputs, logs and any derived stores, plus a `README.md` stating purpose, status, layout and
 when it can go. The directory is gitignored (`applications/dynacell/.gitignore`), so nothing in
 it is tracked; code that outgrows an experiment is promoted into `tools/` or `src/` with tests.
-Do not put this material in the session scratchpad, `/hpc/mydata/alex.kalinin/.tmp/`, or
-`~/.claude/plans/` — those are not discoverable from the repo. First entry:
+Do not leave this material in the session scratchpad or `~/.claude/plans/` (neither is
+discoverable from the repo), and never at the `/hpc/mydata/alex.kalinin/` root — it belongs
+to the project that produced it (see the top-level CLAUDE.md). First entry:
 `2026-09-14_lite-benchmark-plan/` (DynaCell-lite research plan and phase-0 checks).
 
 ## Repository boundary: paper artifacts do not belong here
