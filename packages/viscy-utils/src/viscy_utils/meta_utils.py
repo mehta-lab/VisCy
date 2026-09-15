@@ -6,7 +6,7 @@ import iohub.ngff as ngff
 import numpy as np
 from iohub.core.config import TensorStoreConfig
 from scipy.ndimage import median_filter
-from skimage.filters import threshold_otsu
+from skimage.filters import gaussian, threshold_otsu
 from tqdm import tqdm
 
 from viscy_utils.mp_utils import get_val_stats
@@ -20,11 +20,12 @@ try:
     import torch
     from cubic.cuda import ascupy, asnumpy
     from cubic.scipy import ndimage as _cubic_ndimage
+    from cubic.skimage import filters as _cubic_filters
 except ImportError:  # pragma: no cover - exercised by the CPU-only environments
     ascupy = None
 
 _logger = logging.getLogger(__name__)
-_BACKEND: str | None = None
+_BACKEND: dict[str, str] = {}
 
 
 def write_meta_field(position, metadata, field_name, subfield_name):
@@ -75,6 +76,23 @@ def _grid_sample(position, grid_spacing, channel_index):
     return position["0"].native[:, channel_index, :, ::grid_spacing, ::grid_spacing].read().result()
 
 
+def _select_backend(op: str) -> str:
+    """Pick the array backend for ``op``, logging the choice once per operation."""
+    if ascupy is None:
+        chosen = "scipy"
+    # Gate the upload on an actual device, as metrics.py does: cubic imports
+    # cleanly without cupy/cucim and ascupy would raise "GPU requested but not
+    # available". Falling through to numpy keeps cubic's own CPU path.
+    elif not torch.cuda.is_available():
+        chosen = "cubic-cpu"
+    else:
+        chosen = "cubic-gpu"
+    if _BACKEND.get(op) != chosen:
+        _BACKEND[op] = chosen
+        _logger.info("%s: using the %s backend", op, chosen)
+    return chosen
+
+
 def smooth_median(array, size):
     """Median-filter ``array``, on the GPU when cubic and a device are available.
 
@@ -107,29 +125,113 @@ def smooth_median(array, size):
     numpy.ndarray
         Filtered array, on the host, with the input's dtype and shape.
     """
-    global _BACKEND
-    if ascupy is None:
-        if _BACKEND is None:
-            _BACKEND = "scipy"
-            _logger.info("median filter: cubic not installed, using SciPy on the CPU")
+    backend = _select_backend("median filter")
+    if backend == "scipy":
         return median_filter(array, size=size)
-    # Gate the upload on an actual device, as metrics.py does: cubic imports
-    # cleanly without cupy/cucim and ascupy would raise "GPU requested but not
-    # available". Falling through to numpy keeps cubic's own CPU path.
-    if not torch.cuda.is_available():
-        if _BACKEND is None:
-            _BACKEND = "cubic-cpu"
-            _logger.info("median filter: no CUDA device, using cubic's CPU path")
+    if backend == "cubic-cpu":
         return asnumpy(_cubic_ndimage.median_filter(array, size=size))
-    if _BACKEND is None:
-        _BACKEND = "cubic-gpu"
-        _logger.info("median filter: using cubic on the GPU")
     return asnumpy(_cubic_ndimage.median_filter(ascupy(array), size=size))
 
 
-def generate_normalization_metadata(
-    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32, compute_otsu=False, otsu_grid_spacing=8
-):
+def smooth_gaussian(array, sigma):
+    """Gaussian-blur ``array``, on the GPU when cubic and a device are available.
+
+    Used only to pick the Otsu threshold, never to build the mask: blurring
+    this hard makes the intensity histogram separable but smears object
+    boundaries, so the threshold it yields is applied to the median-filtered
+    image instead. Measured against binarized cpdino segmentations on the 100
+    ``dataset_v4/test_cropped`` positions (nucleus, mean over positions):
+
+        threshold from median 5^3 alone, applied to median 5^3      IoU 0.7292
+        threshold from median 5^3 + this blur, applied to median    IoU 0.7647
+        same threshold, applied to the blurred image instead        IoU 0.7288
+
+    Unlike :func:`smooth_median`, a Gaussian computes new values by weighted
+    summation, so GPU and CPU results are close but not bit-identical; the
+    tests assert a tolerance rather than equality.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Input array.
+    sigma : float or tuple of float
+        Standard deviation, scalar for all axes or one entry per axis.
+
+    Returns
+    -------
+    numpy.ndarray
+        Blurred array, on the host, with the input's shape.
+    """
+    backend = _select_backend("gaussian filter")
+    if backend == "scipy":
+        return gaussian(array, sigma=sigma, preserve_range=True)
+    if backend == "cubic-cpu":
+        return asnumpy(_cubic_filters.gaussian(array, sigma=sigma, preserve_range=True))
+    return asnumpy(_cubic_filters.gaussian(ascupy(array), sigma=sigma, preserve_range=True))
+
+
+_OTSU_MEDIAN_SIZE = 5
+_OTSU_BLUR_SIGMA = 5.0
+
+
+def otsu_threshold_from_volume(volume_tzyx):
+    """Compute one FOV's Otsu threshold from a full-resolution ``(T, Z, Y, X)`` volume.
+
+    This is the recipe of the original Spotlight implementation
+    (``norm_threshold`` in the fnet_astr_vpa notebooks, which resolves to
+    ``cubic``'s ``downscale_and_filter(downscale_factor=1, filter_size=5)`` then
+    ``get_threshold_otsu``): a 5x5x5 median cube at full resolution, a sigma=5
+    Gaussian, then Otsu. Both filters span Z. On the strongly anisotropic iPSC
+    stacks that matters a lot -- restricting them to the plane scores worse
+    than the decimated recipe they replace -- so the footprints are kept
+    isotropic in voxels rather than matched to physical spacing.
+
+    Measured against binarized cpdino segmentations, nucleus channel, scored on
+    each sample's own ``nucleus_area`` focus plane (mean IoU / recall), on two
+    datasets with very different voxel geometry -- iPSC ``test_cropped`` (100
+    positions, z=0.290 / xy=0.108) and A549 ``dual_nucl_memb_mock`` (36
+    position-timepoint samples, z=0.174 / xy=0.1494):
+
+                                                   iPSC             A549
+        decimate ::8 + median (1, 3, 3), previous   0.7086 / 0.7309  0.7406 / 0.7558
+        this recipe, applied to the median volume   0.7647 / 0.7862  0.7713 / 0.7916
+        both footprints restricted to XY            0.6967 / 0.7135  --
+
+    Otsu erodes on both: precision stays at 0.94-0.97 while recall sits near
+    0.76, so the masks are shrunken versions of the truth rather than
+    mislocated ones, and this recipe buys back recall at near-flat precision.
+
+    ``_OTSU_BLUR_SIGMA`` is the published value, deliberately NOT tuned. A
+    larger blur scores substantially better on both datasets (iPSC 0.8713 at
+    sigma=30 and still climbing, A549 0.8649 peaking at sigma=20), but the
+    optimum is dataset-specific and does not follow from voxel spacing -- a
+    spacing-derived sigma was measured and refuted. Tuning it would also mean
+    fitting a training-time parameter on the split the models are scored on,
+    which biases the Spotlight arms specifically, since the baselines never
+    read ``fg_mask``. Tune it on a held-out non-eval split or not at all.
+
+    The threshold is pooled over every timepoint and Z plane, so a position
+    gets one scalar per channel.
+
+    Parameters
+    ----------
+    volume_tzyx : numpy.ndarray
+        Full-resolution ``(T, Z, Y, X)`` volume for a single channel.
+
+    Returns
+    -------
+    float
+        The Otsu threshold, or the constant value itself for a constant input,
+        for which Otsu is undefined.
+    """
+    median = smooth_median(volume_tzyx, size=(1,) + (_OTSU_MEDIAN_SIZE,) * 3)
+    flat = smooth_gaussian(median, sigma=(0,) + (_OTSU_BLUR_SIGMA,) * 3).ravel()
+    if flat.min() == flat.max():
+        return float(flat.min())
+    return float(threshold_otsu(flat))
+
+
+def generate_normalization_metadata(zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32, compute_otsu=False):
     """Generate pixel intensity metadata for normalization.
 
     Normalization values are recorded in the image-level metadata in the
@@ -148,10 +250,6 @@ def generate_normalization_metadata(
     compute_otsu : bool, optional
         Whether to compute Otsu thresholds for foreground estimation,
         by default False. Required for Spotlight loss.
-    otsu_grid_spacing : int, optional
-        Grid spacing for Otsu sampling, by default 8. Denser than the
-        default ``grid_spacing=32`` to capture inter-cell gaps. A median
-        filter is applied before thresholding to smooth noise.
     """
     with ngff.open_ome_zarr(
         zarr_dir,
@@ -182,16 +280,10 @@ def generate_normalization_metadata(
                 dataset_sample_values.append(samples)
                 fov_stats = get_val_stats(samples)
                 if compute_otsu:
-                    otsu_samples = _grid_sample(pos, otsu_grid_spacing, channel_index)
-                    smoothed = smooth_median(otsu_samples, size=(1, 1, 3, 3))
-                    flat = smoothed.ravel()
-                    # Otsu's method is undefined for constant-valued inputs.
-                    # Use the constant value itself so generate_fg_masks marks
-                    # nothing as foreground (no meaningful structure to supervise).
-                    if flat.min() == flat.max():
-                        fov_stats["otsu_threshold"] = float(flat.min())
-                    else:
-                        fov_stats["otsu_threshold"] = float(threshold_otsu(flat))
+                    # Full resolution: the sigma=5 blur below is defined in source
+                    # pixels, so thresholding a decimated grid would scale it by the
+                    # stride and erase the effect.
+                    fov_stats["otsu_threshold"] = otsu_threshold_from_volume(_grid_sample(pos, 1, channel_index))
                 fov_statistics = {"fov_statistics": fov_stats}
                 fov_timepoint_statistics = {}
                 for t in range(num_timepoints):
@@ -233,9 +325,12 @@ def generate_fg_masks(
     """Precompute binary foreground masks from Otsu thresholds.
 
     For each FOV and specified channel, loads the full-resolution image one
-    timepoint at a time, smooths with the same median filter used for Otsu
-    thresholding, and writes the binary mask as a zarr array alongside the
-    image data.
+    timepoint at a time, smooths with the same 5x5x5 median cube that
+    :func:`otsu_threshold_from_volume` thresholds on, and writes the binary
+    mask as a zarr array alongside the image data. The Gaussian is deliberately
+    not repeated here: it is what makes the histogram separable enough to pick
+    a threshold, but applying that threshold to the blurred image smears object
+    boundaries and scores worse than applying it to the median alone.
 
     Requires ``generate_normalization_metadata`` with ``compute_otsu=True``
     to have been run first (Otsu thresholds must be stored in zattrs).
@@ -292,5 +387,5 @@ def generate_fg_masks(
 
                 for t in range(t_total):
                     data = img_arr[t, ch_idx].astype(np.float32)
-                    smoothed = smooth_median(data, size=(1, 3, 3))
+                    smoothed = smooth_median(data, size=_OTSU_MEDIAN_SIZE)
                     mask_arr[t, ch_idx] = (smoothed >= otsu_threshold).astype(np.uint8)

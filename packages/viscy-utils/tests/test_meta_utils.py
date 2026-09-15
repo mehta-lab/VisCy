@@ -103,9 +103,7 @@ def test_normalization_metadata_keys(small_hcs_dataset):
 
 def test_compute_otsu_stores_threshold(bimodal_hcs_dataset):
     """compute_otsu=True stores otsu_threshold in fov_statistics."""
-    generate_normalization_metadata(
-        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
-    )
+    generate_normalization_metadata(bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True)
 
     with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
         for _, fov in plate.positions():
@@ -117,9 +115,7 @@ def test_compute_otsu_stores_threshold(bimodal_hcs_dataset):
 
 def test_compute_otsu_threshold_separates_bimodal(bimodal_hcs_dataset):
     """Otsu threshold on bimodal fluorescence falls between the two modes."""
-    generate_normalization_metadata(
-        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
-    )
+    generate_normalization_metadata(bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True)
 
     with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
         for _, fov in plate.positions():
@@ -141,9 +137,7 @@ def test_compute_otsu_false_omits_threshold(small_hcs_dataset):
 
 def test_generate_fg_masks_stores_mask(bimodal_hcs_dataset):
     """generate_fg_masks stores a uint8 binary mask array per position."""
-    generate_normalization_metadata(
-        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
-    )
+    generate_normalization_metadata(bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True)
     generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
     with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
@@ -158,9 +152,7 @@ def test_generate_fg_masks_stores_mask(bimodal_hcs_dataset):
 
 def test_generate_fg_masks_separates_bimodal(bimodal_hcs_dataset):
     """Fluorescence mask marks the bright half as foreground."""
-    generate_normalization_metadata(
-        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
-    )
+    generate_normalization_metadata(bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True)
     generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
     with open_ome_zarr(bimodal_hcs_dataset, mode="r") as plate:
@@ -181,9 +173,7 @@ def test_generate_fg_masks_requires_otsu(bimodal_hcs_dataset):
 
 def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
     """generate_fg_masks raises FileExistsError on re-run."""
-    generate_normalization_metadata(
-        bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True, otsu_grid_spacing=4
-    )
+    generate_normalization_metadata(bimodal_hcs_dataset, num_workers=1, grid_spacing=GRID_SPACING, compute_otsu=True)
     generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
 
     with pytest.raises(FileExistsError):
