@@ -6,6 +6,7 @@ import iohub.ngff as ngff
 import numpy as np
 from iohub.core.config import TensorStoreConfig
 from scipy.ndimage import median_filter
+from skimage.exposure import equalize_adapthist
 from skimage.filters import gaussian, threshold_otsu
 from tqdm import tqdm
 
@@ -20,6 +21,7 @@ try:
     import torch
     from cubic.cuda import ascupy, asnumpy
     from cubic.scipy import ndimage as _cubic_ndimage
+    from cubic.skimage import exposure as _cubic_exposure
     from cubic.skimage import filters as _cubic_filters
 except ImportError:  # pragma: no cover - exercised by the CPU-only environments
     ascupy = None
@@ -168,6 +170,93 @@ def smooth_gaussian(array, sigma):
     if backend == "cubic-cpu":
         return asnumpy(_cubic_filters.gaussian(array, sigma=sigma, preserve_range=True))
     return asnumpy(_cubic_filters.gaussian(ascupy(array), sigma=sigma, preserve_range=True))
+
+
+_CLAHE_TILE = (50, 120, 120)
+_CLAHE_CLIP_LIMIT = 0.015
+_CLAHE_PERCENTILE = 0.1
+
+
+def equalize_clahe(array, tile_shape=_CLAHE_TILE, clip_limit=_CLAHE_CLIP_LIMIT, nbins=256):
+    """Contrast-limited adaptive histogram equalization, on the GPU when available.
+
+    ``equalize_adapthist`` takes a tile SIZE, but the number of tiles is what has
+    to adapt: the established config computes ``shape // (50, 120, 120)`` so tiles
+    stay roughly constant in pixels across differently-shaped stacks. That floors
+    to zero in Z for a 44-plane stack, so it is clamped to at least one tile.
+
+    The input is percentile-clipped to ``[0, 1]`` first because
+    ``equalize_adapthist`` rejects float input outside ``[-1, 1]``. Clipping at
+    ``_CLAHE_PERCENTILE`` rather than min-max keeps one bright speck from
+    compressing the rest of the volume toward zero.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Input ``(Z, Y, X)`` volume.
+    tile_shape : tuple of int
+        Target tile size in voxels; the tile COUNT is derived from it.
+    clip_limit : float
+        Contrast-limiting threshold.
+    nbins : int
+        Histogram bins.
+
+    Returns
+    -------
+    numpy.ndarray
+        Equalized volume in ``[0, 1]`` -- a different intensity space from the
+        input, so a threshold taken here is not comparable to a raw one.
+    """
+    lo, hi = np.percentile(array, (_CLAHE_PERCENTILE, 100 - _CLAHE_PERCENTILE))
+    scaled = np.clip((array - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+    n_tiles = tuple(max(int(dim // tile), 1) for dim, tile in zip(array.shape, tile_shape))
+    kernel = tuple(int(dim // n) for dim, n in zip(array.shape, n_tiles))
+    backend = _select_backend("clahe")
+    if backend == "scipy":
+        return equalize_adapthist(scaled, kernel_size=kernel, clip_limit=clip_limit, nbins=nbins)
+    device = scaled if backend == "cubic-cpu" else ascupy(scaled)
+    return asnumpy(_cubic_exposure.equalize_adapthist(device, kernel_size=kernel, clip_limit=clip_limit, nbins=nbins))
+
+
+def foreground_mask_from_volume(volume_zyx):
+    """Binary foreground mask for one ``(Z, Y, X)`` volume.
+
+    The binarization path of the original Spotlight runs
+    (``scripts/blastoid/preprocess.py::read_preprocess`` in the fnet_astr_vpa
+    repo): CLAHE, then ``otsu_binarize(filter_size=5)`` -- a 5x5x5 median cube and
+    ``threshold_otsu``, with no Gaussian, since CLAHE already separates the
+    histogram. Foreground extraction is a preprocessing choice and not part of
+    the Spotlight loss, so this is free to differ from :func:`otsu_threshold_from_volume`,
+    which still supplies the raw-space ``otsu_threshold`` that ``NormalizeSampled``
+    subtracts.
+
+    Measured against binarized cpdino segmentations, nucleus channel, on each
+    sample's own ``nucleus_area`` focus plane (mean IoU / recall):
+
+                                          iPSC             A549
+        median 5^3 + gaussian, raw space  0.7637 / 0.7851  0.7713 / 0.7916
+        this recipe                       0.8262 / 0.8539  0.8898 / 0.9654
+
+    A Gaussian on top of CLAHE was measured and rejected: it helps iPSC (0.8644)
+    but hurts A549 (0.8807), while no-blur improves both. The repo's cleanup step
+    (``min_obj_size=100``, ``max_hole_size=25``) was measured as a no-op here
+    (+0.0003 and +0.0000) and is omitted.
+
+    Parameters
+    ----------
+    volume_zyx : numpy.ndarray
+        Full-resolution single-channel volume.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask of the input's shape.
+    """
+    equalized = smooth_median(equalize_clahe(volume_zyx), size=_OTSU_MEDIAN_SIZE)
+    flat = equalized.ravel()
+    if flat.min() == flat.max():
+        return np.zeros(volume_zyx.shape, dtype=bool)
+    return equalized >= float(threshold_otsu(flat, nbins=256))
 
 
 _OTSU_MEDIAN_SIZE = 5
@@ -325,15 +414,16 @@ def generate_fg_masks(
     """Precompute binary foreground masks from Otsu thresholds.
 
     For each FOV and specified channel, loads the full-resolution image one
-    timepoint at a time, smooths with the same 5x5x5 median cube that
-    :func:`otsu_threshold_from_volume` thresholds on, and writes the binary
-    mask as a zarr array alongside the image data. The Gaussian is deliberately
-    not repeated here: it is what makes the histogram separable enough to pick
-    a threshold, but applying that threshold to the blurred image smears object
-    boundaries and scores worse than applying it to the median alone.
+    timepoint at a time and binarizes it with
+    :func:`foreground_mask_from_volume`, writing the result as a zarr array
+    alongside the image data.
 
-    Requires ``generate_normalization_metadata`` with ``compute_otsu=True``
-    to have been run first (Otsu thresholds must be stored in zattrs).
+    Does NOT read ``otsu_threshold``. That value is computed in raw intensity
+    units for ``NormalizeSampled`` to subtract, whereas this pass thresholds in
+    CLAHE's equalized ``[0, 1]`` space, so the two are not interchangeable and
+    the mask is deliberately not derivable from the stored scalar. Running
+    ``generate_normalization_metadata`` with ``compute_otsu=True`` is still
+    required for Spotlight, but for normalization rather than for masking.
 
     Parameters
     ----------
@@ -381,11 +471,7 @@ def generate_fg_masks(
                 mask_arr[:, c] = 1
 
             # Compute and write target channel masks per timepoint
-            for ch_name, ch_idx in zip(channel_names, channel_indices):
-                norm = pos.zattrs["normalization"][ch_name]["fov_statistics"]
-                otsu_threshold = norm["otsu_threshold"]
-
+            for ch_idx in channel_indices:
                 for t in range(t_total):
                     data = img_arr[t, ch_idx].astype(np.float32)
-                    smoothed = smooth_median(data, size=_OTSU_MEDIAN_SIZE)
-                    mask_arr[t, ch_idx] = (smoothed >= otsu_threshold).astype(np.uint8)
+                    mask_arr[t, ch_idx] = foreground_mask_from_volume(data).astype(np.uint8)
