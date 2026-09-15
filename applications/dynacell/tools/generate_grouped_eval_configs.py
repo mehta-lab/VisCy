@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Generate grouped eval leaf configs for the re-eval campaign.
 
-Walks ``{ipsc,a549}/{predictions,joint_predictions}`` under the dynacell
-training tree, parses prediction-zarr filenames into canonical identities
-``(organelle, model, variant, train_set, test_set, condition)``, dedupes
-across the two directories preferring ``joint_predictions/``, and emits
-12 production grouped-eval leaves plus a 13th sanity-probe leaf under
+Walks the canonical prediction layout
+``<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr`` under the
+dynacell training tree, recovers each canonical identity
+``(organelle, model, variant, train_set, test_set, condition)`` via
+``paths.key_from_prediction_store`` (the inverse of ``paths.prediction_store``),
+and emits 12 production grouped-eval leaves plus a 13th sanity-probe leaf under
 ``applications/dynacell/configs/benchmarks/virtual_staining/_internal/leaf/grouped/``.
 
 The leaf shape mirrors existing single-condition leaves: ``# @package
@@ -31,31 +32,38 @@ from pathlib import Path
 
 import yaml
 
+from dynacell.evaluation import paths
+from dynacell.evaluation.paths import PAPER_KEY, eval_leaf, pred_cache_dir
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 _DYNACELL_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell")
 
-# Code → paper name (per dynacell/CLAUDE.md table).
+# Campaign model registry (membership gate for the instance-AP opt-out + the
+# drift-guard tests against paths.PAPER_KEY). Paper display names come from the
+# authoritative paths.PAPER_KEY; this map's values are kept for the drift check.
 _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_scratch": "unext2",
     "fcmae_vscyto3d_pretrained": "vscyto3d",
     "fnet3d_paper": "fnet3d",
+    "fnet3d_bigpatch": "fnet3d_bigpatch",
+    "fnet3d_vscyto3daug": "fnet3d_vscyto3daug",
+    # FNet3D temporal-sampling ablation (Phase 17): equal frame budgets, early
+    # window vs spread over the whole time course.
+    "fnet3d_t01": "fnet3d_t01",
+    "fnet3d_tspread": "fnet3d_tspread",
     "unetvit3d": "unetvit3d",
     "pix2pix3d_unetvit": "pix2pix3d",
     "celldiff": "celldiff",
     "celldiff_r2": "celldiff_r2",
-}
-
-# File-prefix → logical organelle key.
-_ORG_PREFIX_TO_ORGANELLE: dict[str, str] = {
-    "sec61b": "er",
-    "tomm20": "mitochondria",
-    "nucl": "nucleus",
-    "nucleus": "nucleus",
-    "memb": "membrane",
-    "membrane": "membrane",
+    # In-focus 2D track (2D-vs-3D benchmark).
+    "fcmae_vscyto2d_scratch": "unext2_2d",
+    "fcmae_vscyto2d_pretrained": "vscyto2d",
+    "fnet2d": "fnet2d",
+    "celldiff_2d": "celldiff_2d",
+    "pix2pix2d_unetvit": "pix2pix2d",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -84,18 +92,80 @@ _A549_SLUG_TEMPLATE: dict[str, str] = {
 
 _IPSC_SLUG = "aics-hipsc"
 
-_A549_CONDITIONS: tuple[str, ...] = ("mock", "denv", "zikv")
 _CELLDIFF_VARIANTS: tuple[str, ...] = ("iterative", "sliding_window", "denoise")
 _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_scratch",
     "fcmae_vscyto3d_pretrained",
     "fnet3d_paper",
+    "fnet3d_bigpatch",
+    "fnet3d_vscyto3daug",
+    "fnet3d_t01",
+    "fnet3d_tspread",
     "unetvit3d",
     "pix2pix3d_unetvit",
+    # In-focus 2D track — deterministic like their 3D counterparts (no diffusion
+    # sampling), so the same single-pass zarr-name parser handles them.
+    # pix2pix2d_unetvit belongs here for the same reason pix2pix3d_unetvit does:
+    # a GAN generator is a single deterministic forward at inference, and the
+    # sampling variants this tuple guards against are CellDiff's.
+    "fcmae_vscyto2d_scratch",
+    "fcmae_vscyto2d_pretrained",
+    "fnet2d",
+    "pix2pix2d_unetvit",
 )
-_CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff")  # r2 first so longest match wins
-_TRAIN_SETS: tuple[str, ...] = ("ipsc_trained", "joint", "a549_trained")
+_CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff_2d", "celldiff")
+"""CellDiff-family model tokens, longest first so prefix matching does not
+truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``."""
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
+
+# Canonical on-disk organelle roots to walk. The generator keeps ``mitochondria``
+# as its internal spelling (so _A549_GENE / _IPSC_TARGET_KEY / _ORGANELLES / bucket
+# dir names are unchanged); only the walk boundary reverse-maps ``mito`` -> it.
+_CANONICAL_ORGANELLE_ROOTS: tuple[str, ...] = ("er", "mito", "nucleus", "membrane")
+_CANONICAL_ORG_TO_INTERNAL: dict[str, str] = {"mito": "mitochondria"}
+
+# Test sets this campaign buckets. `paths.py` knows more of them (the `hek`
+# third-cell-type probe), and the canonical prediction tree is shared across
+# branches, so the walk filters on this rather than taking whatever appears on
+# disk. Everything downstream — bucket keys, benchmark_dataset_ref,
+# _gt_cache_dir_for — assumes ipsc/a549, so widening it needs those too.
+_DEFAULT_TEST_SETS: frozenset[str] = frozenset({"ipsc", "a549"})
+
+# Canonical train_set token -> generator bucket label. The FULL canonical token
+# (carrying deconv provenance: a549__deconv, joint__legacy_deconvgt) drives the
+# on-disk save_dir/pred_cache paths; the bucket label groups leaves and builds
+# condition_name.
+# The ``__bf`` tokens get their OWN buckets, unlike ``a549__deconv`` above. That
+# entry is a misleading precedent: deconv provenance marks how the *target* was
+# produced from the same ``Phase3D`` input, so folding it into ``a549_trained``
+# groups like with like. ``__bf`` is a different *input channel* (raw Brightfield
+# instead of the waveorder Phase3D reconstruction it is derived from), so folding
+# it in would collide a brightfield and a phase prediction on the same
+# ``canonical_identity`` and make one silently shadow the other.
+# ⚠ Literal order is load-bearing: it is the ONLY source of bucket emission and
+# README row order (see _TRAIN_SETS below). Reordering these entries is safe for
+# every lookup — the table is read only via .get(), .values() and sorted() — but it
+# reshuffles the generated README.
+_CANONICAL_TRAIN_SET_TO_BUCKET: dict[str, str] = {
+    "ipsc": "ipsc_trained",
+    "joint": "joint",
+    "joint__legacy_deconvgt": "joint",
+    "a549": "a549_trained",
+    "a549__deconv": "a549_trained",
+    "ipsc__bf": "ipsc_bf_trained",
+    "a549__bf": "a549_bf_trained",
+}
+
+# Bucket labels to emit, DERIVED so the set cannot drift from the table above.
+# ``main`` and ``emit_readme`` iterate _ORGANELLES x _TRAIN_SETS, so a label the
+# table registers but this tuple omits parses fine, lands in ``buckets``, and is
+# then never written — no error, not even the "skipping empty bucket" line. That is
+# exactly how the brightfield buckets stayed invisible after 5a25142e registered
+# them. Deriving makes the omission unrepresentable rather than merely tested for.
+# ``dict.fromkeys`` dedupes the many-to-one labels while preserving first-occurrence
+# order. Empty buckets are normal and skipped by ``main`` (the bf buckets only exist
+# for nucleus/ER, so mitochondria/membrane emit nothing).
+_TRAIN_SETS: tuple[str, ...] = tuple(dict.fromkeys(_CANONICAL_TRAIN_SET_TO_BUCKET.values()))
 
 # Instance average-precision (AP_0.50..0.95 / mAP / instance_dice) is defined only
 # for the two organelles with a cell-instance interpretation, and it is computed in
@@ -105,31 +175,7 @@ _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 # instances. ER/mito have no cell instances, so they keep the semantic (supermodel)
 # mask path with no instance metrics.
 _INSTANCE_ORGANELLES: frozenset[str] = frozenset({"nucleus", "membrane"})
-_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
-
-# Known stale or duplicate-named zarrs to skip entirely.
-_SKIP_FILENAMES: frozenset[str] = frozenset(
-    {
-        # May-5 Memb CellDiff joint zarrs (ep~13 stale; superseded by *_celldiff_r2_*).
-        "memb_celldiff_mock.zarr",
-        "memb_celldiff_denv.zarr",
-        "memb_celldiff_zikv.zarr",
-        # Legacy aliases (same content under canonical fnet3d_paper / fcmae_vscyto3d_scratch names).
-        "sec61b_fnet3d.zarr",
-        "sec61b_unext2.zarr",
-    }
-)
-
-# Non-zarr scaffolding to ignore when walking prediction dirs.
-_IGNORE_NAMES: frozenset[str] = frozenset(
-    {
-        "checkpoints",
-        "slurm",
-        "resolved",
-        "_stale",
-        "_smoke_gate11",
-    }
-)
+_INSTANCE_BACKEND: dict[str, str] = {"nucleus": "cpdino", "membrane": "cpdino"}
 
 # Required GT-cache backbone shas (post-refactor).
 _REQUIRED_GT_CACHE_BACKBONES: frozenset[str] = frozenset(
@@ -159,10 +205,10 @@ class ParsedZarr:
     organelle: str
     model: str
     variant: str | None
-    train_set: str
+    train_set: str  # bucket label: ipsc_trained | a549_trained | joint
+    train_set_canonical: str  # full canonical token (carries deconv provenance)
     test_set: str
     condition: str | None  # mock | denv | zikv for A549, None for iPSC
-    is_legacy_form: bool  # True if filename used `__<gene>_<cond>` form
 
     @property
     def model_variant(self) -> str:
@@ -171,8 +217,8 @@ class ParsedZarr:
 
     @property
     def paper_name(self) -> str:
-        """Paper-side display name for the model (per dynacell/CLAUDE.md)."""
-        return _CODE_TO_PAPER[self.model]
+        """Paper-side display name for the model (authoritative ``paths.PAPER_KEY``)."""
+        return PAPER_KEY[self.model]
 
     @property
     def paper_variant(self) -> str:
@@ -181,159 +227,73 @@ class ParsedZarr:
 
     @property
     def canonical_identity(self) -> tuple:
-        """Hashable dedupe key across ``predictions/`` and ``joint_predictions/``."""
+        """Hashable identity per canonical prediction-store path.
+
+        Uses ``train_set_canonical`` (not the bucket label) so raw ``a549`` and
+        ``a549__deconv`` ER/mito predictions stay distinct — the on-disk layout
+        guarantees exactly one prediction.zarr per identity.
+        """
         return (
             self.organelle,
             self.model,
             self.variant,
-            self.train_set,
+            self.train_set_canonical,
             self.test_set,
             self.condition,
         )
 
 
 # ---------------------------------------------------------------------------
-# Filename parsing
+# Prediction-store path parsing
 # ---------------------------------------------------------------------------
 
 
-def _strip_known_suffix(stem: str, candidates: tuple[str, ...]) -> tuple[str, str | None]:
-    """Return ``(prefix, matched)`` if any of ``candidates`` is a trailing ``_<x>`` suffix.
-
-    Longest match wins so e.g. ``celldiff_r2_iterative`` beats ``celldiff_r2``.
-    """
-    for cand in sorted(candidates, key=len, reverse=True):
-        token = f"_{cand}"
-        if stem.endswith(token):
-            return stem[: -len(token)], cand
-    return stem, None
-
-
-def _starts_with_prefix(stem: str, prefixes: tuple[str, ...]) -> tuple[str | None, str]:
-    """Return ``(matched_prefix, remainder)`` if stem begins with one of ``prefixes``."""
-    for cand in sorted(prefixes, key=len, reverse=True):
-        token = f"{cand}_"
-        if stem.startswith(token):
-            return cand, stem[len(token) :]
-    return None, stem
-
-
 def parse_zarr_name(zarr_path: Path, dynacell_root: Path = _DYNACELL_ROOT) -> ParsedZarr:
-    """Parse a prediction zarr path into a :class:`ParsedZarr`.
+    """Parse a canonical prediction-store path into a :class:`ParsedZarr`.
 
-    Raises ``ValueError`` on unrecognized grammar.
+    The identity is recovered from the directory grammar
+    ``<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr`` via
+    :func:`paths.key_from_prediction_store` (the single source of the path
+    grammar) — never from a zarr filename. Raises ``ValueError`` on a
+    non-canonical/legacy path, an unknown model dir, an unknown CellDiff
+    variant, or a train_set that is valid in ``paths.py`` but out of scope for
+    the grouped campaign (e.g. the ablation tokens). The ``__bf`` tokens ARE in
+    scope — they map to their own ``{ipsc,a549}_bf_trained`` buckets.
     """
-    name = zarr_path.name
-    if not name.endswith(".zarr"):
-        raise ValueError(f"not a .zarr: {zarr_path}")
-    stem = name[: -len(".zarr")]
-
-    # Decide test_set from directory tree.
-    rel = zarr_path.relative_to(dynacell_root)
-    parts = rel.parts
-    if parts[0] == "ipsc":
-        test_set = "ipsc"
-    elif parts[0] == "a549":
-        test_set = "a549"
-    else:
-        raise ValueError(f"unknown dataset root for {zarr_path}: parts={parts}")
-
-    # Identify whether this is a joint_predictions/ home.
-    if parts[1] in ("joint_predictions",):
-        in_joint_dir = True
-    elif parts[1] in ("predictions",):
-        in_joint_dir = False
-    else:
-        raise ValueError(f"unexpected predictions subdir for {zarr_path}: {parts[1]!r}")
-
-    # Identify the organelle prefix.
-    organelle_prefix, after_org = _starts_with_prefix(stem, tuple(_ORG_PREFIX_TO_ORGANELLE))
-    if organelle_prefix is None:
-        raise ValueError(f"unknown prediction zarr grammar (no organelle prefix): {name}")
-    organelle = _ORG_PREFIX_TO_ORGANELLE[organelle_prefix]
-
-    is_legacy_form = False
-    condition: str | None = None
-    train_set_filename: str | None = None
-
-    if test_set == "ipsc":
-        # iPSC test grammar (no condition token).
-        # Modern: <org>_<model>[_<variant>][_jointtrained|_a549trained]
-        body, train_set_filename = _strip_known_suffix(after_org, ("jointtrained", "a549trained"))
-        # Now ``body`` is <model>[_<variant>].
-    else:
-        # A549 test grammar — has trailing condition token.
-        body = after_org
-        # First check legacy form: <model_variant>__<gene>_<cond>
-        # Find the `__` if present.
-        if "__" in body:
-            # Split once on `__`.
-            left, _, right = body.partition("__")
-            if right.count("_") != 1:
-                raise ValueError(
-                    f"legacy `__` form expects exactly `<gene>_<cond>` after `__`, got {right!r} in {name}"
-                )
-            gene_token, cond_token = right.split("_", 1)
-            if cond_token not in _A549_CONDITIONS:
-                raise ValueError(f"unknown A549 condition {cond_token!r} in {name}")
-            # The `__<gene>` suffix carries the A549 marker for the organelle, which
-            # may differ from the left-hand organelle prefix: ER/mito coincide
-            # (sec61b/tomm20), but nucleus uses `h2b` and membrane uses `caax`
-            # (e.g. nucl_pix2pix3d_unetvit__h2b_mock). Validate against the canonical
-            # organelle->gene map rather than the prefix.
-            if gene_token != _A549_GENE[organelle]:
-                raise ValueError(
-                    f"legacy `__` form gene mismatch: organelle={organelle!r} expects "
-                    f"gene={_A549_GENE[organelle]!r}, got {gene_token!r} in {name}"
-                )
-            # The train_set infix (if any) sits on the left of `__`, before the
-            # gene/condition suffix: nucl_<model>_a549trained__h2b_<cond>. Dihan's
-            # original ER/mito legacy zarrs were iPSC-trained (no infix), so this
-            # strip is a no-op there.
-            body, train_set_filename = _strip_known_suffix(left, ("jointtrained", "a549trained"))
-            condition = cond_token
-            is_legacy_form = True
-        else:
-            # Modern A549 form: <model_variant>[_jointtrained|_a549trained]_<cond>
-            # Trailing _<cond> first.
-            body, cond_token = _strip_known_suffix(body, _A549_CONDITIONS)
-            if cond_token is None:
-                raise ValueError(f"unknown A549 condition (trailing token) in {name}")
-            condition = cond_token
-            body, train_set_filename = _strip_known_suffix(body, ("jointtrained", "a549trained"))
-
-    # Resolve train_set from filename infix + directory.
-    if in_joint_dir:
-        train_set = "joint"
-    elif train_set_filename == "jointtrained":
-        train_set = "joint"
-    elif train_set_filename == "a549trained":
-        train_set = "a549_trained"
-    elif train_set_filename is None:
-        train_set = "ipsc_trained"
-    else:
-        raise ValueError(f"unhandled train_set filename infix {train_set_filename!r} in {name}")
-
-    # Now ``body`` is the model_variant. Split into (model, variant).
-    model, variant = _split_model_variant(body, name)
-
+    key = paths.key_from_prediction_store(zarr_path, dynacell_root)
+    organelle = _CANONICAL_ORG_TO_INTERNAL.get(key.organelle, key.organelle)
+    model, variant = _split_model_variant(key.model, str(zarr_path))
+    # ``key.train_set`` is already paths-valid; a token that is not a campaign
+    # bucket (ablations, a549__bf, ...) is out of scope, not a crash. Raise the
+    # documented ValueError so the instance-AP coverage audit can catch it and
+    # report it alongside the other out-of-scope predictions instead of dying on
+    # a bare KeyError.
+    bucket = _CANONICAL_TRAIN_SET_TO_BUCKET.get(key.train_set)
+    if bucket is None:
+        raise ValueError(
+            f"train_set {key.train_set!r} in {zarr_path} is valid in paths.py but is not a "
+            f"grouped-campaign bucket (in scope: {sorted(_CANONICAL_TRAIN_SET_TO_BUCKET)})"
+        )
     return ParsedZarr(
         pred_path=zarr_path,
         organelle=organelle,
         model=model,
         variant=variant,
-        train_set=train_set,
-        test_set=test_set,
-        condition=condition,
-        is_legacy_form=is_legacy_form,
+        train_set=bucket,
+        train_set_canonical=key.train_set,
+        test_set=key.test_set,
+        condition=key.condition,
     )
 
 
 def _split_model_variant(body: str, full_name: str) -> tuple[str, str | None]:
-    """Resolve ``body`` into ``(model, variant)``.
+    """Resolve a model-dir name ``body`` into ``(model, variant)``.
 
-    ``body`` is the substring between the organelle prefix and any
-    train_set/condition tokens — i.e. the model + optional variant.
+    ``body`` is the canonical model directory name (``key.model`` from the
+    prediction-store path) — i.e. the model + optional variant. R1 CellDiff
+    variant dirs (``celldiff_iterative`` / ``celldiff_denoise`` /
+    ``celldiff_sliding_window`` / bare ``celldiff``) collapse to model
+    ``celldiff`` here, then get dropped by :data:`_SKIP_MODELS`.
 
     Variants only exist for CellDiff models. Deterministic models have
     ``variant=None`` and ``body`` is the full model code-name.
@@ -369,67 +329,63 @@ _SKIP_MODELS: frozenset[str] = frozenset(
     }
 )
 
-# Prediction families owned by the separate vscyto3d-ablations eval track, not
-# this grouped campaign. They have their own single-condition eval__*.yaml
-# leaves under leaf/<org>/fcmae_vscyto3d_pretrained_{randinit,cytoland,
-# infectionft}/, leaf/<org>/vscyto3d_{cytolandft,infectionft_dynacellft}/, and
-# the dual nucleus+membrane predicts under _dual_nucl_memb/ — all driven by
-# tools/run_eval_direct.slurm. Skip them during the walk rather than crash on
-# grammar this parser does not model (the ``dual_`` prefix and ablation infixes).
-# Substring match is sufficient: ``_cytoland`` also covers ``_cytolandft`` and
-# ``_infectionft`` also covers ``_infectionft_dynacellft``.
-_ABLATION_NAME_TOKENS: tuple[str, ...] = ("_randinit", "_cytoland", "_infectionft")
 
+def leaf_test_set(leaf: str) -> str:
+    """Return the test-set token of a ``<test>[__<cond>]`` leaf segment.
 
-def _is_ablation_track_zarr(name: str) -> bool:
-    """Return True if ``name`` is a vscyto3d-ablations / dual prediction zarr.
-
-    These belong to the standalone ablation eval leaves, not the grouped
-    re-eval campaign, so :func:`walk_predictions` skips them instead of
-    passing them to :func:`parse_zarr_name` (which would raise).
+    A deliberate cheap prefix read rather than ``paths._parse_leaf_suffix``: this
+    runs BEFORE :func:`parse_zarr_name`, so an out-of-scope test set must be
+    *filterable* rather than raise. An unrecognized segment returns itself, which
+    no test-set filter accepts, so it is skipped like any other out-of-scope leaf.
     """
-    if name.startswith("dual_"):
-        return True
-    return any(token in name for token in _ABLATION_NAME_TOKENS)
+    return leaf.split("__", 1)[0]
 
 
-def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
-    """Walk ``{ipsc,a549}/{predictions,joint_predictions}/`` and parse all zarrs.
+def walk_predictions(
+    dynacell_root: Path = _DYNACELL_ROOT,
+    test_sets: frozenset[str] = _DEFAULT_TEST_SETS,
+) -> list[ParsedZarr]:
+    """Discover every canonical prediction zarr under the 4 organelle roots.
 
-    Dedupes by canonical identity, preferring ``joint_predictions/`` when
-    the same identity appears in both directories. Drops zarrs whose parsed
-    ``model`` matches :data:`_SKIP_MODELS`.
+    Iterates ``<organelle>/<model>/<train_set>/<test>[__<cond>]/prediction.zarr``
+    for ``er, mito, nucleus, membrane`` and parses each into a :class:`ParsedZarr`.
+    Drops R1 CellDiff (``model`` in :data:`_SKIP_MODELS`). The canonical layout
+    guarantees exactly one prediction.zarr per identity, so a duplicate
+    ``canonical_identity`` is a layout violation and raises (never silently
+    prefers one). The legacy ``{predictions,joint_predictions}`` dirs are NOT
+    read.
+
+    ``test_sets`` gates which leaves are considered, defaulting to the campaign's
+    :data:`_DEFAULT_TEST_SETS`. This is a load-bearing guard, not a convenience:
+    the canonical tree is SHARED across branches and campaigns, so a prediction
+    written for a probe on another test set (the ``hek__<arm>`` third-cell-type
+    leaves) would otherwise be picked up here, bucketed by ``(organelle,
+    train_set)`` into the 12 committed campaign leaves, and fed to
+    ``benchmark_dataset_ref`` / ``_gt_cache_dir_for``, which key off the A549
+    condition vocabulary and would fail the whole generation run. Opt such a probe
+    in explicitly instead.
     """
     by_identity: dict[tuple, ParsedZarr] = {}
-    for dataset in ("ipsc", "a549"):
-        for subdir in ("predictions", "joint_predictions"):
-            root = dynacell_root / dataset / subdir
-            if not root.is_dir():
+    for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
+        root = dynacell_root / organelle_root
+        if not root.is_dir():
+            continue
+        # Bounded 3-level glob, NOT rglob("prediction.zarr"): rglob descends into
+        # every zarr's chunk tree (minutes per organelle); the canonical layout is
+        # exactly <model>/<train_set>/<test>/prediction.zarr.
+        for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
+            if leaf_test_set(zarr_path.parent.name) not in test_sets:
                 continue
-            for entry in sorted(root.iterdir()):
-                if entry.name in _IGNORE_NAMES:
-                    continue
-                if entry.name.startswith("_") or entry.name.startswith("."):
-                    # Scaffolding / smoke fixtures (e.g. _smoke_gate11, _stale).
-                    continue
-                if not entry.name.endswith(".zarr"):
-                    continue
-                if entry.name in _SKIP_FILENAMES:
-                    continue
-                if _is_ablation_track_zarr(entry.name):
-                    continue
-                if not entry.is_dir():
-                    continue
-                parsed = parse_zarr_name(entry, dynacell_root=dynacell_root)
-                if parsed.model in _SKIP_MODELS:
-                    continue
-                existing = by_identity.get(parsed.canonical_identity)
-                if existing is None:
-                    by_identity[parsed.canonical_identity] = parsed
-                else:
-                    # Prefer joint_predictions/ path on collision.
-                    if "joint_predictions" in parsed.pred_path.parts:
-                        by_identity[parsed.canonical_identity] = parsed
+            parsed = parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
+            if parsed.model in _SKIP_MODELS:
+                continue
+            existing = by_identity.get(parsed.canonical_identity)
+            if existing is not None:
+                raise ValueError(
+                    f"duplicate canonical identity {parsed.canonical_identity} from "
+                    f"{existing.pred_path} and {parsed.pred_path}"
+                )
+            by_identity[parsed.canonical_identity] = parsed
     return list(by_identity.values())
 
 
@@ -437,53 +393,34 @@ def walk_predictions(dynacell_root: Path = _DYNACELL_ROOT) -> list[ParsedZarr]:
 # Save_dir + pred_cache_dir derivation
 # ---------------------------------------------------------------------------
 
-# Parent dir per (test_set, train_set) — per plan Decision #1.
-_PARENT_DIR: dict[tuple[str, str], str] = {
-    ("ipsc", "ipsc_trained"): "evaluations_with_embeddings",
-    ("ipsc", "a549_trained"): "evaluations_a549trained_with_embeddings",
-    ("ipsc", "joint"): "evaluations_jointtrained_with_embeddings",
-    ("a549", "ipsc_trained"): "evaluations_with_embeddings",
-    ("a549", "a549_trained"): "evaluations_a549trained_with_embeddings",
-    ("a549", "joint"): "evaluations_jointtrained_with_embeddings",
-}
-
-# Eval dir name infix per train_set.
-_DIR_INFIX: dict[str, str] = {
-    "ipsc_trained": "",
-    "a549_trained": "_a549trained",
-    "joint": "_jointtrained",
-}
-
 
 def save_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Return the canonical campaign save_dir for ``parsed``."""
-    parent = _PARENT_DIR[(parsed.test_set, parsed.train_set)]
-    infix = _DIR_INFIX[parsed.train_set]
-    if parsed.test_set == "ipsc":
-        eval_name = f"eval_{parsed.paper_variant}{infix}_{parsed.organelle}"
-    else:
-        eval_name = f"eval_{parsed.paper_variant}{infix}_{parsed.organelle}_{parsed.condition}"
-    return dynacell_root / parsed.test_set / parent / eval_name
+    """Return the canonical eval leaf dir for ``parsed`` (see ``paths.eval_leaf``).
+
+    Uses the FULL canonical train_set token (``train_set_canonical``) so ER/mito
+    deconv provenance (``a549__deconv`` / ``joint__legacy_deconvgt``) is preserved
+    in the on-disk path rather than collapsed to the lossy bucket label.
+    """
+    return eval_leaf(
+        organelle=parsed.organelle,
+        model=parsed.model_variant,
+        train_set=parsed.train_set_canonical,
+        test_set=parsed.test_set,
+        condition=parsed.condition,
+        data_root=dynacell_root,
+    )
 
 
 def pred_cache_dir_for(parsed: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Return canonical pred_cache_dir (see plan "Pred cache layout").
-
-    The trailing segment is organelle-namespaced. A given
-    ``(train_set, model_variant)`` is evaluated once per organelle, and the four
-    organelles' prediction zarrs differ, so they must not share a cache dir.
-    A549 namespaces via the gene marker (``sec61b``/``tomm20``/``h2b``/``caax``)
-    plus the plate condition. iPSC has no plate condition, so it namespaces by
-    the logical organelle. A bare ``ipsc`` segment collapses all four organelles
-    onto one dir: the first to run wins the manifest's ``pred.plate_path`` and
-    every other organelle then raises StaleCacheError.
-    """
-    if parsed.test_set == "ipsc":
-        cond_seg = f"{parsed.organelle}_ipsc"
-    else:
-        gene = _A549_GENE[parsed.organelle]
-        cond_seg = f"{gene}_{parsed.condition}"
-    return dynacell_root / parsed.test_set / "eval_cache_pred" / parsed.train_set / parsed.model_variant / cond_seg
+    """Return the canonical pred-side feature cache dir (see ``paths.pred_cache_dir``)."""
+    return pred_cache_dir(
+        organelle=parsed.organelle,
+        model=parsed.model_variant,
+        train_set=parsed.train_set_canonical,
+        test_set=parsed.test_set,
+        condition=parsed.condition,
+        data_root=dynacell_root,
+    )
 
 
 def benchmark_dataset_ref(parsed: ParsedZarr) -> dict[str, str]:
@@ -602,16 +539,27 @@ def build_leaf_yaml(
         body["compute_instance_ap"] = True
         seg: dict = {"backend": _INSTANCE_BACKEND[organelle]}
         if organelle == "membrane":
+            # Carved cytoplasm-shape metrics are canonical (6aedf52f): inherit
+            # the eval.yaml subtract_nuclei=true default — do NOT re-add a
+            # subtract_nuclei=false override here (that restores whole-cell).
             seg["nuclei_channel_name"] = "Nuclei"
-            # Whole-cell AP must score the FULL cell, not the carved cytoplasm
-            # shell: with shared GT-nuclei seeds both GT and pred share an
-            # identical nucleus core, so carving it (the eval.yaml default
-            # subtract_nuclei=true) leaves only the IoU-brittle cytoplasm
-            # boundary and collapses AP@0.50 to ~0.04 even in-distribution.
-            seg["watershed"] = {"subtract_nuclei": False}
         body["segmentation"] = seg
     condition_blocks: list[dict] = []
+    # Collision guard: raw ``a549`` and ``a549__deconv`` ER/mito preds both fall in
+    # the ``a549_trained`` bucket and produce the SAME condition_name (built from the
+    # bucket label), yet carry distinct save_dir / train_set_canonical. Fail loud on
+    # such a pair rather than silently overwrite one leaf condition with the other.
+    seen_condition_names: dict[str, str] = {}
     for parsed in conditions:
+        cname = condition_name(parsed)
+        prior_canonical = seen_condition_names.get(cname)
+        if prior_canonical is not None and prior_canonical != parsed.train_set_canonical:
+            raise ValueError(
+                f"condition_name collision in bucket ({organelle}, {train_set}): {cname!r} maps "
+                f"to distinct train_set_canonical {prior_canonical!r} and {parsed.train_set_canonical!r} "
+                f"(raw a549 vs a549__deconv provenance) — distinct save_dirs, same leaf condition"
+            )
+        seen_condition_names[cname] = parsed.train_set_canonical
         io_block: dict = {
             "pred_path": str(parsed.pred_path),
             "pred_cache_dir": str(pred_cache_dir_for(parsed, dynacell_root)),
@@ -621,7 +569,7 @@ def build_leaf_yaml(
         if organelle == "membrane" and parsed.test_set == "a549":
             io_block["nuclei_gt_path"] = a549_nuclei_store(parsed.condition)
         block = {
-            "name": condition_name(parsed),
+            "name": cname,
             "benchmark": {"dataset_ref": benchmark_dataset_ref(parsed)},
             "io": io_block,
             "save": {"save_dir": str(save_dir_for(parsed, dynacell_root))},
@@ -646,18 +594,18 @@ def emit_leaf_file(out_path: Path, body: dict, organelle: str, train_set: str, c
 def emit_probe_leaf(out_path: Path, parsed_pool: list[ParsedZarr], dynacell_root: Path = _DYNACELL_ROOT) -> int:
     """Pick a small subset covering every code path, redirect all save_dirs to /tmp.
 
-    ER is chosen as the target organelle because it has both modern and
-    legacy ``__<gene>_<cond>`` filename forms on A549 — so the probe
-    exercises every code path the production leaves will hit. Up to 6
-    conditions are picked covering distinct ``(train_set, test_set,
-    is_legacy_form)`` keys.
+    ER is chosen as the target organelle because its train_sets carry deconv
+    provenance (``a549__deconv`` + ``joint__legacy_deconvgt``) alongside the raw
+    ``ipsc`` pool — the widest span of canonical train_set tokens — so the probe
+    exercises every code path the production leaves will hit. One condition per
+    distinct ``(train_set_canonical, test_set)`` key is picked.
     """
     target_org = "er"
     candidates = [p for p in parsed_pool if p.organelle == target_org]
-    seen_patterns: set[tuple[str, str, bool]] = set()
+    seen_patterns: set[tuple[str, str]] = set()
     deduped: list[ParsedZarr] = []
     for p in candidates:
-        key = (p.train_set, p.test_set, p.is_legacy_form)
+        key = (p.train_set_canonical, p.test_set)
         if key in seen_patterns:
             continue
         if not p.pred_path.is_dir():
@@ -740,9 +688,17 @@ def main(argv: list[str] | None = None) -> int:
         help="suppress emission of conditions whose canonical save_dir already has "
         "a 74-col feature_metrics.csv (saves wall but leaves canonical paths empty)",
     )
+    ap.add_argument(
+        "--test-sets",
+        default=",".join(sorted(_DEFAULT_TEST_SETS)),
+        help="comma-separated test sets to bucket (default: %(default)s). Predictions on "
+        "any other test set in the shared canonical tree are skipped; widening this "
+        "also needs benchmark_dataset_ref and _gt_cache_dir_for to handle them",
+    )
     args = ap.parse_args(argv)
 
-    parsed_pool = walk_predictions(args.dynacell_root)
+    test_sets = frozenset(t.strip() for t in args.test_sets.split(",") if t.strip())
+    parsed_pool = walk_predictions(args.dynacell_root, test_sets=test_sets)
     print(f"[gen] parsed {len(parsed_pool)} prediction zarrs after dedupe")
 
     # Group by (organelle, train_set).
@@ -758,7 +714,7 @@ def main(argv: list[str] | None = None) -> int:
                 p.condition or "",
                 p.model,
                 p.variant or "",
-                p.is_legacy_form,
+                p.train_set_canonical,
             )
         )
 

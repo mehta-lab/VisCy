@@ -52,5 +52,5 @@ def test_wrong_spatial_raises(small_config):
 def test_indivisible_patch_size_raises(small_config):
     """Constructor rejects spatial sizes not divisible by patch_size after downsampling."""
     # D=10: after 2 downsamples at stride (1,2,2), latent D=10, not divisible by patch_size=4
-    with pytest.raises(ValueError, match="not divisible by patch_size"):
+    with pytest.raises(ValueError, match="not divisible by its patch extent"):
         UNetViT3D(**{**small_config, "input_spatial_size": [10, 64, 64]})

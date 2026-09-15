@@ -13,7 +13,7 @@ force_recompute:
   final_metrics: true
 compute_instance_ap: true
 segmentation:
-  backend: cellpose
+  backend: cpdino
 conditions:
 - name: celldiff_r2__joint__a549_denv
   benchmark:
@@ -21,197 +21,197 @@ conditions:
       dataset: a549-mantis-h2b-denv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_celldiff_r2_denv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/celldiff_r2/h2b_denv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/celldiff_r2/joint/a549__denv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_nucleus_denv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/a549__denv
 - name: vscyto3d__joint__a549_denv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-denv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_pretrained_jointtrained_denv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fcmae_vscyto3d_pretrained/h2b_denv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto3d_pretrained/joint/a549__denv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_vscyto3d_jointtrained_nucleus_denv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/a549__denv
 - name: unext2__joint__a549_denv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-denv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_fcmae_vscyto3d_scratch_jointtrained_denv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fcmae_vscyto3d_scratch/h2b_denv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto3d_scratch/joint/a549__denv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_unext2_jointtrained_nucleus_denv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/a549__denv
 - name: fnet3d__joint__a549_denv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-denv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_fnet3d_paper_jointtrained_denv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fnet3d_paper/h2b_denv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_paper/joint/a549__denv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_fnet3d_jointtrained_nucleus_denv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/a549__denv
 - name: pix2pix3d__joint__a549_denv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-denv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_denv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/pix2pix3d_unetvit/h2b_denv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/pix2pix3d_unetvit/joint/a549__denv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_pix2pix3d_jointtrained_nucleus_denv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__denv
 - name: celldiff_r2__joint__a549_mock
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-mock
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_celldiff_r2_mock.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/celldiff_r2/h2b_mock
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/celldiff_r2/joint/a549__mock
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_nucleus_mock
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/a549__mock
 - name: vscyto3d__joint__a549_mock
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-mock
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_pretrained_jointtrained_mock.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fcmae_vscyto3d_pretrained/h2b_mock
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto3d_pretrained/joint/a549__mock
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_vscyto3d_jointtrained_nucleus_mock
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/a549__mock
 - name: unext2__joint__a549_mock
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-mock
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_fcmae_vscyto3d_scratch_jointtrained_mock.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fcmae_vscyto3d_scratch/h2b_mock
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto3d_scratch/joint/a549__mock
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_unext2_jointtrained_nucleus_mock
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/a549__mock
 - name: fnet3d__joint__a549_mock
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-mock
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_fnet3d_paper_jointtrained_mock.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fnet3d_paper/h2b_mock
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_paper/joint/a549__mock
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_fnet3d_jointtrained_nucleus_mock
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/a549__mock
 - name: pix2pix3d__joint__a549_mock
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-mock
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_mock.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/pix2pix3d_unetvit/h2b_mock
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/pix2pix3d_unetvit/joint/a549__mock
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_pix2pix3d_jointtrained_nucleus_mock
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__mock
 - name: celldiff_r2__joint__a549_zikv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-zikv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_celldiff_r2_zikv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/celldiff_r2/h2b_zikv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/celldiff_r2/joint/a549__zikv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_nucleus_zikv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/a549__zikv
 - name: vscyto3d__joint__a549_zikv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-zikv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/nucl_fcmae_vscyto3d_pretrained_jointtrained_zikv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fcmae_vscyto3d_pretrained/h2b_zikv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto3d_pretrained/joint/a549__zikv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_vscyto3d_jointtrained_nucleus_zikv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/a549__zikv
 - name: unext2__joint__a549_zikv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-zikv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_fcmae_vscyto3d_scratch_jointtrained_zikv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fcmae_vscyto3d_scratch/h2b_zikv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fcmae_vscyto3d_scratch/joint/a549__zikv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_unext2_jointtrained_nucleus_zikv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/a549__zikv
 - name: fnet3d__joint__a549_zikv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-zikv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_fnet3d_paper_jointtrained_zikv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/fnet3d_paper/h2b_zikv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/fnet3d_paper/joint/a549__zikv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_fnet3d_jointtrained_nucleus_zikv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/a549__zikv
 - name: pix2pix3d__joint__a549_zikv
   benchmark:
     dataset_ref:
       dataset: a549-mantis-h2b-zikv
       target: h2b
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/a549/joint_predictions/nucl_pix2pix3d_unetvit__h2b_zikv.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/joint/pix2pix3d_unetvit/h2b_zikv
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/nucleus/pix2pix3d_unetvit/joint/a549__zikv
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/a549/evaluations_jointtrained_with_embeddings/eval_pix2pix3d_jointtrained_nucleus_zikv
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/a549__zikv
 - name: celldiff_r2__joint__ipsc
   benchmark:
     dataset_ref:
       dataset: aics-hipsc
       target: nucleus
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_celldiff_r2.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/celldiff_r2/nucleus_ipsc
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/celldiff_r2/joint/ipsc
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_celldiff_r2_jointtrained_nucleus
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/celldiff_r2/joint/ipsc
 - name: vscyto3d__joint__ipsc
   benchmark:
     dataset_ref:
       dataset: aics-hipsc
       target: nucleus
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/predictions/nucl_fcmae_vscyto3d_pretrained_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fcmae_vscyto3d_pretrained/nucleus_ipsc
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fcmae_vscyto3d_pretrained/joint/ipsc
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_vscyto3d_jointtrained_nucleus
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_pretrained/joint/ipsc
 - name: unext2__joint__ipsc
   benchmark:
     dataset_ref:
       dataset: aics-hipsc
       target: nucleus
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_fcmae_vscyto3d_scratch_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fcmae_vscyto3d_scratch/nucleus_ipsc
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fcmae_vscyto3d_scratch/joint/ipsc
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_unext2_jointtrained_nucleus
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto3d_scratch/joint/ipsc
 - name: fnet3d__joint__ipsc
   benchmark:
     dataset_ref:
       dataset: aics-hipsc
       target: nucleus
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_fnet3d_paper_jointtrained.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/fnet3d_paper/nucleus_ipsc
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/fnet3d_paper/joint/ipsc
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_fnet3d_jointtrained_nucleus
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/joint/ipsc
 - name: pix2pix3d__joint__ipsc
   benchmark:
     dataset_ref:
       dataset: aics-hipsc
       target: nucleus
   io:
-    pred_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/joint_predictions/nucl_pix2pix3d_unetvit.zarr
-    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/joint/pix2pix3d_unetvit/nucleus_ipsc
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/nucleus/pix2pix3d_unetvit/joint/ipsc
   save:
-    save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_jointtrained_with_embeddings/eval_pix2pix3d_jointtrained_nucleus
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix3d_unetvit/joint/ipsc

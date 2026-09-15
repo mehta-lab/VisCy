@@ -39,12 +39,33 @@ dependencies = [
   "viscy-transforms",
   "viscy-utils",
 ]
+# Croissant 1.1 RAI metadata authoring/validation for the open-data release.
+optional-dependencies.croissant = [
+  "mlcroissant>=1.1",
+]
+# Open-data packaging/upload (dynacell.distribution): verify.py reads S3 via
+# boto3; sync.py shells out to the AWS CLI (installed out of band).
+optional-dependencies.distribution = [
+  "boto3",
+]
 optional-dependencies.eval = [
   "accelerate>=1.13",
   "aicsmlsegment",
   "aicssegmentation",
-  "cellpose",
-  "cubic==0.7",
+  # cpdino (Cellpose-DINO ViT-L) instance segmentation requires cellpose>=4.2
+  # (adds the DINO backbones + `pretrained_model="cpdino"`) and its dinov3 backbone.
+  "cellpose>=4.2",
+  # cubic 0.8.0a2 added device-resident segment_cellpose for all Cellpose v4
+  # models (SAM + DINO). v0.9.0a1 is the metric-correctness release (PR #53,
+  # "repository-wide bug sweep"): `ssim` now honours `normalize` instead of
+  # silently dropping it into **kwargs, `scale_invariant` raises when combined
+  # with `normalize`/`normalization` rather than returning a quietly wrong
+  # number, and the FSC/spectral, MicroSSIM, MS-SSIM, feature (KID/FID) and
+  # average_precision modules were rewritten. Every pixel/feature metric in the
+  # benchmark can move across this pin, so it is paired with a full re-eval --
+  # do not bump it casually. Tag, not a bare commit.
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a1",
+  "dinov3 @ git+https://github.com/facebookresearch/dinov3",
   "dynaclr",
   "hydra-core>=1.2",
   "iohub>=0.3.6",
@@ -76,9 +97,14 @@ optional-dependencies.eval_gpu = [
   "cucim-cu13",
   "cupy-cuda13x",
 ]
+# Dataset assembly / authoring library (dynacell.preprocess): assemble->cubic,
+# selection->waveorder, segmentation->cellpose (cellpose imported lazily).
 optional-dependencies.preprocess = [
+  "cellpose>=4.2",
+  "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a1",
   "iohub>=0.3.6",
   "tqdm",
+  "waveorder",
 ]
 optional-dependencies.report = [
   "hydra-core>=1.2",

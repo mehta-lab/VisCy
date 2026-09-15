@@ -12,12 +12,13 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import zarr
 from omegaconf import DictConfig, OmegaConf
 
 from dynacell.evaluation.cache import (
@@ -27,7 +28,6 @@ from dynacell.evaluation.cache import (
     built_at_now,
     cache_paths,
     check_cache_identity,
-    ckpt_sha256_12,
     diff_artifact_params,
     encoder_config_sha256_12,
     feature_slug,
@@ -51,6 +51,7 @@ from dynacell.evaluation.metrics import (
     features_from_crops,
 )
 from dynacell.evaluation.runtime import region_timer
+from viscy_utils.prediction_metadata import checkpoint_sha256_12
 
 _MASK_CHANNEL_BY_SIDE = {"gt": "target_seg", "pred": "prediction_seg"}
 
@@ -77,6 +78,7 @@ class _CacheContext:
     patch_size: int
     _: KW_ONLY
     partial_walk: bool = False
+    excluded_walk: bool = False
     use_gpu: bool = True
     backend: str = "supermodel"
     compute_instance_ap: bool = False
@@ -84,6 +86,8 @@ class _CacheContext:
     slice_selection: str = "frac"
     slice_fraction: float = 0.30
     focus_channel_name: str | None = None
+    focus_anchor: str = "nucleus_area"
+    focus_slab_halfwidth: int = 0
     focus_slab_enabled: bool = False
     focus_estimator_params: dict[str, float] = field(default_factory=dict)
     nuclei_channel_name: str | None = None
@@ -91,6 +95,7 @@ class _CacheContext:
     iou_thresholds: list[float] = field(default_factory=lambda: list(DEFAULT_IOU_THRESHOLDS))
     cellpose_params: dict[str, Any] = field(default_factory=dict)
     watershed_params: dict[str, Any] = field(default_factory=dict)
+    cpdino_params: dict[str, Any] = field(default_factory=dict)
     cp_feature_version: str | None = None
     cp_norm: dict[str, Any] = field(default_factory=dict)
     cp_glcm: dict[str, Any] = field(default_factory=dict)
@@ -98,9 +103,11 @@ class _CacheContext:
     dynaclr_ckpt_sha12: str | None = None
     dynaclr_encoder_sha12: str | None = None
     celldino_weights_sha12: str | None = None
+    morphem_model_name: str | None = None
     dinov3_preprocess_version: str | None = None
     dynaclr_preprocess_version: str | None = None
     celldino_preprocess_version: str | None = None
+    morphem_preprocess_version: str | None = None
     _manifest_dirty: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -157,6 +164,11 @@ def _resolve_force(force: DictConfig) -> dict[str, bool]:
         "pred_dinov3": all_flag or bool(force.pred_dinov3),
         "pred_dynaclr": all_flag or bool(force.pred_dynaclr),
         "pred_celldino": all_flag or bool(force.pred_celldino),
+        # morphem keys are read via OmegaConf.select (not direct attribute access)
+        # so resolved/grouped/benchmark configs composed before these keys existed
+        # don't ConfigAttributeError on the missing key — same pattern as instances.
+        "gt_morphem": all_flag or bool(OmegaConf.select(force, "gt_morphem", default=False)),
+        "pred_morphem": all_flag or bool(OmegaConf.select(force, "pred_morphem", default=False)),
         "gt_instances": all_flag or bool(OmegaConf.select(force, "gt_instances", default=False)),
         "pred_instances": all_flag or bool(OmegaConf.select(force, "pred_instances", default=False)),
         "final_metrics": all_flag or bool(force.final_metrics),
@@ -171,9 +183,11 @@ def init_cache_context(
     dynaclr_ckpt_path: str | None = None,
     dynaclr_encoder_cfg: dict[str, Any] | None = None,
     celldino_weights_path: str | None = None,
+    morphem_model_name: str | None = None,
     dinov3_preprocess_version: str | None = None,
     dynaclr_preprocess_version: str | None = None,
     celldino_preprocess_version: str | None = None,
+    morphem_preprocess_version: str | None = None,
 ) -> _CacheContext:
     """Open and validate the *side*-specific artifact cache for the run.
 
@@ -196,8 +210,11 @@ def init_cache_context(
     celldino_weights_path
         CELL-DINO ``.pth`` state_dict path; ``None`` when the CELL-DINO
         backbone is not configured.
+    morphem_model_name
+        MorphEm HuggingFace id (model-name-keyed cache, like DINOv3);
+        ``None`` when the MorphEm backbone is not configured.
     dinov3_preprocess_version, dynaclr_preprocess_version,
-    celldino_preprocess_version
+    celldino_preprocess_version, morphem_preprocess_version
         Per-extractor preprocess-recipe version tags (e.g.
         ``"self_normalize_v1"``). On a known mismatch against the cached
         manifest entry, the corresponding ``force_recompute.<side>_<kind>``
@@ -213,16 +230,23 @@ def init_cache_context(
     patch_size = int(config.feature_metrics.patch_size)
     use_gpu = bool(getattr(config, "use_gpu", True))
     partial_walk = OmegaConf.select(config, "limit_positions", default=None) is not None
+    # ``io.exclude_fov_names`` also produces a partial walk, but it must not take
+    # the hard-raise path above: its purpose is evaluating the finished FOVs of a
+    # partially-run predict, where a full walk is impossible by construction. The
+    # walk is still partial, so the manifest may not advance its identity stamp
+    # over FOVs this run never touched -- see ``_update_manifest_entry``.
+    excluded_walk = bool(OmegaConf.select(config, "io.exclude_fov_names", default=None))
 
-    dynaclr_ckpt_sha12 = ckpt_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
+    dynaclr_ckpt_sha12 = checkpoint_sha256_12(dynaclr_ckpt_path) if dynaclr_ckpt_path is not None else None
     dynaclr_encoder_sha12 = encoder_config_sha256_12(dynaclr_encoder_cfg) if dynaclr_encoder_cfg is not None else None
-    celldino_weights_sha12 = ckpt_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
+    celldino_weights_sha12 = checkpoint_sha256_12(celldino_weights_path) if celldino_weights_path is not None else None
 
     cache_dir_key, plate_key, channel_key = _SIDE_IO_KEYS[side]
     cache_dir = OmegaConf.select(config, f"io.{cache_dir_key}", default=None)
 
     cellpose_cfg = OmegaConf.select(config, "segmentation.cellpose", default=None)
     watershed_cfg = OmegaConf.select(config, "segmentation.watershed", default=None)
+    cpdino_cfg = OmegaConf.select(config, "segmentation.cpdino", default=None)
     cp_norm_cfg = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
     cp_glcm_cfg = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
 
@@ -254,6 +278,9 @@ def init_cache_context(
             celldino_preprocess_version = (
                 (celldino_preprocess_version + focus_tag) if celldino_preprocess_version else None
             )
+            morphem_preprocess_version = (
+                (morphem_preprocess_version + focus_tag) if morphem_preprocess_version else None
+            )
     # The GT nuclei seeds (cellpose_watershed) come from io.nuclei_gt_path when set
     # (a separate store, e.g. A549 H2B_*.ozx), else from the GT membrane plate
     # (io.gt_path, e.g. iPSC cell.zarr). Record the actual source in the cache
@@ -268,6 +295,7 @@ def init_cache_context(
         spacing=spacing,
         patch_size=patch_size,
         partial_walk=partial_walk,
+        excluded_walk=excluded_walk,
         use_gpu=use_gpu,
         backend=OmegaConf.select(config, "segmentation.backend", default="supermodel"),
         compute_instance_ap=bool(OmegaConf.select(config, "compute_instance_ap", default=False)),
@@ -275,6 +303,8 @@ def init_cache_context(
         slice_selection=slice_selection,
         slice_fraction=float(OmegaConf.select(config, "segmentation.slice_fraction", default=0.30)),
         focus_channel_name=OmegaConf.select(config, "segmentation.focus_channel_name", default=None),
+        focus_anchor=str(OmegaConf.select(config, "segmentation.focus_anchor", default="nucleus_area")),
+        focus_slab_halfwidth=int(OmegaConf.select(config, "segmentation.focus_slab_halfwidth", default=0)),
         focus_slab_enabled=slab_cfg is not None,
         focus_estimator_params=focus_estimator_params,
         nuclei_channel_name=OmegaConf.select(config, "segmentation.nuclei_channel_name", default=None),
@@ -284,6 +314,7 @@ def init_cache_context(
         ),
         cellpose_params=(OmegaConf.to_container(cellpose_cfg, resolve=True) if cellpose_cfg is not None else {}),
         watershed_params=(OmegaConf.to_container(watershed_cfg, resolve=True) if watershed_cfg is not None else {}),
+        cpdino_params=(OmegaConf.to_container(cpdino_cfg, resolve=True) if cpdino_cfg is not None else {}),
         cp_feature_version=CP_FEATURE_VERSION,
         cp_norm=(OmegaConf.to_container(cp_norm_cfg, resolve=True) if cp_norm_cfg is not None else {}),
         cp_glcm=(OmegaConf.to_container(cp_glcm_cfg, resolve=True) if cp_glcm_cfg is not None else {}),
@@ -291,9 +322,11 @@ def init_cache_context(
         dynaclr_ckpt_sha12=dynaclr_ckpt_sha12,
         dynaclr_encoder_sha12=dynaclr_encoder_sha12,
         celldino_weights_sha12=celldino_weights_sha12,
+        morphem_model_name=morphem_model_name,
         dinov3_preprocess_version=dinov3_preprocess_version,
         dynaclr_preprocess_version=dynaclr_preprocess_version,
         celldino_preprocess_version=celldino_preprocess_version,
+        morphem_preprocess_version=morphem_preprocess_version,
     )
 
     if cache_dir is None:
@@ -390,6 +423,12 @@ def _auto_invalidate_on_preprocess_version_mismatch(ctx: _CacheContext) -> None:
         ),
         ("dynaclr", "dynaclr_features", ctx.dynaclr_preprocess_version, ctx.dynaclr_ckpt_sha12),
         ("celldino", "celldino_features", ctx.celldino_preprocess_version, ctx.celldino_weights_sha12),
+        (
+            "morphem",
+            "morphem_features",
+            ctx.morphem_preprocess_version,
+            feature_slug(ctx.morphem_model_name) if ctx.morphem_model_name is not None else None,
+        ),
     ]
     for kind, section_key, current_version, sub_key in checks:
         if current_version is None or sub_key is None:
@@ -533,6 +572,16 @@ def _auto_invalidate_on_artifact_param_mismatch(ctx: _CacheContext) -> None:
                 (),
             )
         )
+    if ctx.morphem_model_name is not None:
+        checks.append(
+            (
+                "morphem",
+                f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]",
+                artifacts.get("morphem_features", {}).get(feature_slug(ctx.morphem_model_name)),
+                {"model_name": ctx.morphem_model_name, "patch_size": ctx.patch_size, **ctx.source_tag},
+                (),
+            )
+        )
 
     for kind, artifact_label, entry, current, numeric_keys in checks:
         mismatches = diff_artifact_params(entry, current, numeric_keys=numeric_keys)
@@ -563,13 +612,40 @@ def _raise_if_require_complete(ctx: _CacheContext, artifact: str, pos_name: str,
         raise StaleCacheError(f"{artifact} cache miss at {where} and io.require_complete_cache=true")
 
 
-def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict) -> None:
-    """Walk-and-create nested dict path, then shallow-merge *entry* into leaf."""
+def _update_manifest_entry(manifest: dict, keys: list[str], entry: dict, *, preserve_identity: bool = False) -> None:
+    """Walk-and-create nested dict path, then shallow-merge *entry* into leaf.
+
+    Parameters
+    ----------
+    manifest : dict
+        In-memory cache manifest being mutated.
+    keys : list of str
+        Nested path under ``artifacts`` to the entry.
+    entry : dict
+        Identity fields (``preprocess_version``, artifact params) for this run.
+    preserve_identity : bool
+        Set on a partial walk driven by ``io.exclude_fov_names``. The entry is
+        a store-wide claim, so a leaf that already carries an identity is left
+        untouched: stamping it with this run's version would certify FOVs the
+        walk skipped, and their stale artifacts would read back as a cache hit
+        forever. Leaving the older stamp in place costs one redundant rebuild
+        on the next full walk and keeps the invalidation honest. Identity keys
+        the recorded leaf lacks stay unset for the same reason -- unknown is
+        unknown. A leaf with no identity at all (absent, or only ``positions``)
+        is stamped with the full entry even on an excluded walk: there is
+        nothing to preserve, and leaving it bare would make every later run an
+        all-keys mismatch -- a perpetual recompute of the walked FOVs, or a
+        :class:`StaleCacheError` under ``io.require_complete_cache`` /
+        ``limit_positions``. That stamp is only honest when the artifact holds
+        nothing but this run's own write; callers establish that with
+        :func:`_check_identity_bootstrap` before computing.
+    """
     current = manifest.setdefault("artifacts", {})
     for key in keys[:-1]:
         current = current.setdefault(key, {})
     leaf = current.setdefault(keys[-1], {})
-    leaf.update(entry)
+    if not preserve_identity or not (leaf.keys() - {"positions"}):
+        leaf.update(entry)
 
 
 def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
@@ -582,6 +658,76 @@ def _add_position(manifest: dict, keys: list[str], pos_name: str) -> None:
     positions = current.setdefault("positions", [])
     if pos_name not in positions:
         positions.append(pos_name)
+
+
+def _check_identity_bootstrap(
+    ctx: _CacheContext,
+    keys: list[str],
+    *,
+    artifact_label: str,
+    force_key: str,
+    writing: set[str],
+    stored: Callable[[], set[str]],
+) -> None:
+    """Refuse to stamp a bare manifest leaf over cache data of unknown identity.
+
+    Only an excluded walk (``io.exclude_fov_names``) is concerned, and only while
+    the leaf at *keys* carries no identity -- absent, or ``positions`` alone.
+    :func:`_update_manifest_entry` would then stamp this run's full identity, and
+    that stamp is a store-wide claim: every slot under the leaf reads back as a
+    hit for this identity, FOVs the walk skipped included. It is honest only when
+    the artifact is provably free of other data: no recorded ``positions`` and
+    nothing in the backing store beyond *writing*, the slots this run is about to
+    (re)write. A positions-only leaf is the residue of the pre-fix excluded walk;
+    slots with no manifest at all are what a builder stopped before its deferred
+    flush leaves behind. Both hold data of unknown identity, and it is not
+    recovered here: the operator rebuilds on a full walk or starts a fresh cache.
+
+    Call it before the FOV's compute so a refusal wastes no work. *stored*
+    enumerates the artifact's backing store (every array of a feature group,
+    every position directory of a mask plate) and is called only once the
+    excluded walk finds the leaf bare: a full walk never pays for the scan, and
+    once the first stamp lands in ``ctx.manifest`` the leaf has an identity, so
+    later FOVs of the same run return here without touching the store.
+    """
+    if not ctx.excluded_walk:
+        return
+    leaf = ctx.manifest.get("artifacts", {})
+    for key in keys:
+        leaf = leaf.get(key, {})
+    if leaf.keys() - {"positions"}:
+        return
+    recorded = list(leaf.get("positions") or [])
+    foreign = sorted(stored() - writing)
+    if not recorded and not foreign:
+        return
+    details = []
+    if recorded:
+        details.append(f"manifest lists positions {recorded[:5]} without an identity")
+    if foreign:
+        details.append(f"store holds slots {foreign[:5]} outside this write")
+    raise StaleCacheError(
+        f"{artifact_label}: the cache holds data of unknown identity ({'; '.join(details)}) and an excluded walk "
+        f"(io.exclude_fov_names) cannot certify it. Rebuild it on a full walk -- run once without "
+        f"io.exclude_fov_names and with force_recompute.{force_key}=true -- or use a fresh cache directory."
+    )
+
+
+def _plate_positions(plate_path: Path) -> set[str]:
+    """``row/col/fov`` names present on disk in one HCS cache plate (empty when the plate is absent).
+
+    Reads the directory tree rather than the plate metadata so a position a
+    crashed writer left half-created (see ``cache._is_position_malformed``) still
+    counts as data of unknown identity.
+    """
+    return {p.relative_to(plate_path).as_posix() for p in plate_path.glob("*/*/*") if p.is_dir()}
+
+
+def _feature_slots(group: zarr.Group | None) -> set[str]:
+    """``{pos_name}/t{t}`` keys of every array in an open feature group (empty when the store is absent)."""
+    if group is None:
+        return set()
+    return {path for path, node in group.members(max_depth=None) if isinstance(node, zarr.Array)}
 
 
 @contextlib.contextmanager
@@ -699,12 +845,23 @@ def _fov_masks(
             ctx.manifest,
             ["organelle_masks", manifest_key],
             manifest_entry,
+            preserve_identity=ctx.excluded_walk,
         )
         _add_position(ctx.manifest, ["organelle_masks", manifest_key], pos_name)
         ctx.mark_manifest_dirty()
 
     def _write_masks(masks: np.ndarray) -> None:
         write_mask(ctx.paths, ctx.target_name, pos_name, masks, channel_name=channel_name, backend=ctx.backend)
+
+    def _check_bootstrap() -> None:
+        _check_identity_bootstrap(
+            ctx,
+            ["organelle_masks", manifest_key],
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={pos_name},
+            stored=lambda: _plate_positions(ctx.paths.mask_plate(ctx.target_name, ctx.backend)),
+        )
 
     # Cache disabled — compute fresh, no locking, no caching.
     if not ctx.enabled:
@@ -714,6 +871,7 @@ def _fov_masks(
     # cache-miss writer for the same slot, then overwrite.
     if ctx.force[force_key]:
         with _pos_write_lock(ctx, f"{ctx.side}_masks_{ctx.target_name}", pos_name):
+            _check_bootstrap()
             masks = _compute_masks()
             _write_masks(masks)
             _record_write()
@@ -732,6 +890,7 @@ def _fov_masks(
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
+        _check_bootstrap()
         masks = _compute_masks()
         _write_masks(masks)
         _record_write()
@@ -740,21 +899,50 @@ def _fov_masks(
 
 def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
     """Return the cache-identity dict for a side's instance-label artifact."""
+    # cpdino keys on its own param block (raw image + normalize=True, no CLAHE), NOT the
+    # cellpose robust-clip/CLAHE params — so a cpdino cache never aliases a cellpose one
+    # even beyond the ``__{backend}`` stem separation.
+    if ctx.backend == "cpdino":
+        # ``subtract_nuclei`` gates the whole-cell nucleus carve only -- it is stripped
+        # before reaching the segmenter (see _CPDINO_NON_INFER_KEYS), and the nucleus
+        # path never reads it. Record it only where it is active, the same convention
+        # applied to slice_fraction below and to the nuclei_channel/nuclei_path block.
+        seg_params = {
+            k: v for k, v in ctx.cpdino_params.items() if k != "subtract_nuclei" or ctx.target_name == "membrane"
+        }
+    else:
+        seg_params = ctx.cellpose_params
     identity: dict[str, Any] = {
-        **ctx.cellpose_params,
+        **seg_params,
         "dimension": ctx.dimension,
         "slice_selection": ctx.slice_selection,
-        "slice_fraction": ctx.slice_fraction,
         **ctx.source_tag,
     }
+    # Only ``slice_selection='frac'`` reads slice_fraction (pipeline.py passes it to
+    # slice_index solely on that branch; 'focus' resolves the plane from the focus
+    # estimate and 'sharpest' from the image). Recording it unconditionally made every
+    # focus-mode identity depend on a value that cannot change the masks — so the
+    # instance-AP leaves' vestigial ``slice_fraction: 0.5/0.3`` silently keyed separate
+    # caches for identical artifacts, and dropping that dead key would have "invalidated"
+    # caches that were never actually stale. Same convention as the focus block below:
+    # record a param only where it is active, leaving the other modes' identities stable.
+    if ctx.slice_selection == "frac":
+        identity["slice_fraction"] = ctx.slice_fraction
     # slice_selection='focus' picks the 2D plane from this channel's focus estimate,
     # so it must be part of the identity (only when active, to leave frac/sharpest
     # identities byte-stable). Analog of the backend fix in #445. The plane also
     # depends on the focus-compute params (na_det/lambda_ill/pixel_size), so record
     # them too — otherwise a focus-param change reuses a stale in-focus plane.
     if ctx.slice_selection == "focus":
-        identity["focus_channel_name"] = ctx.focus_channel_name
-        identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
+        # The plane depends on the anchor method + slab width. Record both so a change to
+        # either invalidates the cached masks. The phase-midband estimator params only
+        # matter for that anchor — record them only then, so the nucleus_area identity
+        # stays clean (and old phase-anchor caches, which lack focus_anchor, miss).
+        identity["focus_anchor"] = ctx.focus_anchor
+        identity["focus_slab_halfwidth"] = ctx.focus_slab_halfwidth
+        if ctx.focus_anchor == "phase_midband":
+            identity["focus_channel_name"] = ctx.focus_channel_name
+            identity.update({f"focus_{k}": v for k, v in ctx.focus_estimator_params.items()})
     if ctx.backend == "cellpose_watershed":
         # Whole-cell labels also depend on the watershed params and the GT nuclei
         # seeds; record the GT nuclei (path, channel) so a pred-side identity
@@ -762,6 +950,15 @@ def _instance_identity(ctx: _CacheContext) -> dict[str, Any]:
         identity = {
             **identity,
             **ctx.watershed_params,
+            "nuclei_channel": ctx.nuclei_channel_name,
+            "nuclei_path": ctx.nuclei_plate_path,
+        }
+    if ctx.backend == "cpdino" and ctx.target_name == "membrane":
+        # Whole-cell cpdino carves out the GT nucleus footprint, so the labels depend on
+        # the GT nuclei source (like watershed) — record it so a pred-side identity
+        # captures that cross-side dependency.
+        identity = {
+            **identity,
             "nuclei_channel": ctx.nuclei_channel_name,
             "nuclei_path": ctx.nuclei_plate_path,
         }
@@ -851,8 +1048,18 @@ def _fov_instances(
     def _write(labels: np.ndarray) -> None:
         write_instance_mask(ctx.paths, ctx.target_name, pos_name, labels, backend=ctx.backend)
 
+    def _check_bootstrap() -> None:
+        _check_identity_bootstrap(
+            ctx,
+            manifest_keys,
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={pos_name},
+            stored=lambda: _plate_positions(ctx.paths.instance_mask_plate(ctx.target_name, ctx.backend)),
+        )
+
     def _record_write() -> None:
-        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry)
+        _update_manifest_entry(ctx.manifest, manifest_keys, manifest_entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
 
@@ -862,6 +1069,7 @@ def _fov_instances(
     lock_tag = f"{ctx.side}_instances_{ctx.target_name}"
     if ctx.force[force_key]:
         with _pos_write_lock(ctx, lock_tag, pos_name):
+            _check_bootstrap()
             labels = _compute()
             _write(labels)
             _record_write()
@@ -876,6 +1084,7 @@ def _fov_instances(
         if cached is not None:
             return _validate_cached_shape(cached)
         _raise_if_require_complete(ctx, artifact_label, pos_name)
+        _check_bootstrap()
         labels = _compute()
         _write(labels)
         _record_write()
@@ -895,7 +1104,7 @@ def instance_cache_hit(ctx: _CacheContext, pos_name: str) -> bool:
     return read_instance_mask(ctx.paths, ctx.target_name, pos_name, backend=ctx.backend) is not None
 
 
-def _seg_spacing(ctx: _CacheContext) -> tuple[float, ...]:
+def seg_spacing(ctx: _CacheContext) -> tuple[float, ...]:
     """Spacing tuple for the segmentation call: ``(z, y, x)`` in 3-D, ``(y, x)`` in 2-D."""
     return tuple(ctx.spacing) if ctx.dimension == "3d" else tuple(ctx.spacing[-2:])
 
@@ -915,7 +1124,7 @@ def fov_nucleus_instances(
     from dynacell.evaluation.segmentation_cellpose import segment_nucleus_instances
 
     is3d = ctx.dimension == "3d"
-    spacing = _seg_spacing(ctx)
+    spacing = seg_spacing(ctx)
 
     def compute_t(t: int) -> np.ndarray:
         return segment_nucleus_instances(nuc_stack[t], spacing, model, do_3d=is3d, **ctx.cellpose_params)
@@ -941,10 +1150,79 @@ def fov_whole_cell_instances(
     """
     from dynacell.evaluation.segmentation_whole_cell import segment_whole_cell
 
-    spacing = _seg_spacing(ctx)
+    spacing = seg_spacing(ctx)
 
     def compute_t(t: int) -> np.ndarray:
         return segment_whole_cell(memb_stack[t], nuc_stack[t], seed_stack[t], spacing, **ctx.watershed_params)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
+
+
+_CPDINO_NON_INFER_KEYS = frozenset({"model_name", "subtract_nuclei"})
+"""cpdino config keys that are not forwarded to ``segment_cpdino_instances``:
+``model_name`` selects the model at load time, ``subtract_nuclei`` gates the whole-cell
+carve. Everything else (normalize / flow / cellprob / min_size / stitch_threshold) is a
+segmenter inference kwarg."""
+
+
+def cpdino_infer_kwargs(ctx: _CacheContext) -> dict[str, Any]:
+    """Inference kwargs for ``segment_cpdino_instances`` from the ``segmentation.cpdino`` block."""
+    return {k: v for k, v in ctx.cpdino_params.items() if k not in _CPDINO_NON_INFER_KEYS}
+
+
+def fov_cpdino_nucleus_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    nuc_stack: np.ndarray,
+    model,
+) -> np.ndarray:
+    """Return cached/computed nucleus instance labels for one FOV (``backend=cpdino``).
+
+    *nuc_stack* is the per-side nucleus stack — ``(T, Y, X)`` in 2-D (already sliced) or
+    ``(T, Z, Y, X)`` in 3-D. Each timepoint is segmented independently with
+    :func:`dynacell.evaluation.segmentation_cpdino.segment_cpdino_instances` (raw image +
+    cellpose ``normalize=True``, no CLAHE). Returns ``(T, D, H, W)`` uint16.
+    """
+    from dynacell.evaluation.segmentation_cpdino import segment_cpdino_instances
+
+    is3d = ctx.dimension == "3d"
+    spacing = seg_spacing(ctx)
+    infer = cpdino_infer_kwargs(ctx)
+
+    def compute_t(t: int) -> np.ndarray:
+        return segment_cpdino_instances(nuc_stack[t], spacing, model, do_3d=is3d, **infer)
+
+    return _fov_instances(ctx, pos_name=pos_name, ref_stack=nuc_stack, compute_t=compute_t)
+
+
+def fov_cpdino_whole_cell_instances(
+    ctx: _CacheContext,
+    pos_name: str,
+    memb_stack: np.ndarray,
+    seed_stack: np.ndarray | None,
+    model,
+) -> np.ndarray:
+    """Return cached/computed whole-cell instance labels (``backend=cpdino``, membrane).
+
+    cpdino segments the whole cell directly from *memb_stack* (raw membrane fluorescence,
+    ``(T, Y, X)`` 2-D or ``(T, Z, Y, X)`` 3-D); the GT-nucleus footprint *seed_stack*
+    (uint16 cpdino nucleus instances, same shape) is carved out when
+    ``segmentation.cpdino.subtract_nuclei`` is set. Returns ``(T, D, H, W)`` uint16.
+    *seed_stack* is only read on the compute path; pass ``None`` only when the cache is
+    guaranteed to hit (see :func:`instance_cache_hit`).
+    """
+    from dynacell.evaluation.segmentation_cpdino import segment_whole_cell_cpdino
+
+    is3d = ctx.dimension == "3d"
+    spacing = seg_spacing(ctx)
+    infer = cpdino_infer_kwargs(ctx)
+    subtract = bool(ctx.cpdino_params.get("subtract_nuclei", True))
+
+    def compute_t(t: int) -> np.ndarray:
+        seed = seed_stack[t] if seed_stack is not None else None
+        return segment_whole_cell_cpdino(
+            memb_stack[t], seed, spacing, model, subtract_nuclei=subtract, do_3d=is3d, **infer
+        )
 
     return _fov_instances(ctx, pos_name=pos_name, ref_stack=memb_stack, compute_t=compute_t)
 
@@ -973,6 +1251,7 @@ def _load_or_compute_feature_timepoints(
     t_count: int,
     force_key: str,
     artifact_label: str,
+    manifest_keys: list[str],
     cache_kwargs: dict[str, Any],
     compute_fn,
 ) -> tuple[list[np.ndarray], bool]:
@@ -981,7 +1260,9 @@ def _load_or_compute_feature_timepoints(
     Reads from the backing zarr group lockless (concurrent readers are
     safe on append-only feature zarrs); only acquires the per-FOV write
     lock when at least one timepoint is missing or force-recompute is
-    set. Returns ``(per_t_features, manifest_updated)``.
+    set. Before the first compute, :func:`_check_identity_bootstrap` refuses
+    an excluded walk that would stamp the bare leaf at *manifest_keys* over
+    slots of unknown identity. Returns ``(per_t_features, manifest_updated)``.
     """
     if not ctx.enabled:
         return [np.asarray(compute_fn(t)) for t in range(t_count)], False
@@ -997,7 +1278,7 @@ def _load_or_compute_feature_timepoints(
                 for t in range(t_count):
                     per_t[t] = read_features_from_group(group, pos_name, t)
 
-    pending = [t for t in range(t_count) if per_t[t] is None] if not force_recompute else list(range(t_count))
+    pending = list(range(t_count)) if force_recompute else [t for t in range(t_count) if per_t[t] is None]
     if not pending:
         return per_t, False  # type: ignore[return-value]
 
@@ -1011,6 +1292,14 @@ def _load_or_compute_feature_timepoints(
         _pos_write_lock(ctx, lock_tag, pos_name),
         open_features_group(ctx.paths, kind, mode="a", **cache_kwargs) as group,
     ):
+        _check_identity_bootstrap(
+            ctx,
+            manifest_keys,
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={f"{pos_name}/t{t}" for t in pending},
+            stored=lambda: _feature_slots(group),
+        )
         for t in pending:
             if not force_recompute:
                 # A concurrent writer may have populated this slot between
@@ -1045,6 +1334,7 @@ def fov_cp_features(
         t_count=image_arr.shape[0],
         force_key=f"{ctx.side}_cp",
         artifact_label=f"{ctx.label_prefix}cp_features",
+        manifest_keys=["cp_features"],
         cache_kwargs={},
         compute_fn=lambda t: cp_regionprops(
             image_arr[t],
@@ -1065,7 +1355,7 @@ def fov_cp_features(
             "built_at": built_at_now(),
             **_cp_identity(ctx),
         }
-        _update_manifest_entry(ctx.manifest, ["cp_features"], entry)
+        _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, ["cp_features"], pos_name)
         ctx.mark_manifest_dirty()
 
@@ -1159,6 +1449,23 @@ def _deep_feature_cache_metadata(
         }
         if ctx.celldino_preprocess_version is not None:
             entry["preprocess_version"] = ctx.celldino_preprocess_version
+    elif kind == "morphem":
+        if ctx.morphem_model_name is None:
+            raise ValueError("morphem_model_name is required for MorphEm feature caching")
+        force_key = f"{ctx.side}_morphem"
+        artifact_label = f"{ctx.label_prefix}morphem_features[{ctx.morphem_model_name}]"
+        cache_kwargs = {"model_name": ctx.morphem_model_name}
+        slug = feature_slug(ctx.morphem_model_name)
+        manifest_keys = ["morphem_features", slug]
+        entry = {
+            "path": f"features/morphem/{slug}.zarr",
+            "model_name": ctx.morphem_model_name,
+            "patch_size": ctx.patch_size,
+            **ctx.source_tag,
+            "built_at": built_at_now(),
+        }
+        if ctx.morphem_preprocess_version is not None:
+            entry["preprocess_version"] = ctx.morphem_preprocess_version
     else:
         raise ValueError(f"Unknown deep-feature kind: {kind!r}")
     return force_key, artifact_label, cache_kwargs, manifest_keys, entry
@@ -1182,12 +1489,13 @@ def _fov_deep_features(
         t_count=image_arr.shape[0],
         force_key=force_key,
         artifact_label=artifact_label,
+        manifest_keys=manifest_keys,
         cache_kwargs=cache_kwargs,
         compute_fn=compute_fn,
     )
 
     if ctx.enabled and manifest_updated:
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry)
+        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
 
@@ -1375,12 +1683,21 @@ def _flush_kind(
     flat: list[np.ndarray] = [c for _, _, crops in items for c in crops]
     counts = [len(crops) for _, _, crops in items]
 
-    with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
-        feats = features_from_crops(flat, extractor)
-
     cache_kwargs = _kind_cache_kwargs(ctx, kind)
     lock_tag = _kind_lock_tag(kind, cache_kwargs)
-    _, _, _, manifest_keys, entry = _deep_feature_cache_metadata(ctx, kind)
+    force_key, artifact_label, _, manifest_keys, entry = _deep_feature_cache_metadata(ctx, kind)
+    with open_features_group(ctx.paths, kind, mode="r", **cache_kwargs) as group:
+        _check_identity_bootstrap(
+            ctx,
+            manifest_keys,
+            artifact_label=artifact_label,
+            force_key=force_key,
+            writing={f"{pos_name}/t{t}" for pos_name, t, _ in items},
+            stored=lambda: _feature_slots(group),
+        )
+
+    with region_timer(f"precompute_{ctx.side}_{kind}", "<precompute>"):
+        feats = features_from_crops(flat, extractor)
 
     by_pos: dict[str, list[tuple[int, np.ndarray]]] = {}
     cursor = 0
@@ -1402,7 +1719,7 @@ def _flush_kind(
         ):
             for t, chunk in ts_chunks:
                 write_features_to_group(group, pos_name, t, chunk)
-        _update_manifest_entry(ctx.manifest, manifest_keys, entry)
+        _update_manifest_entry(ctx.manifest, manifest_keys, entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, manifest_keys, pos_name)
         ctx.mark_manifest_dirty()
     # Manifest persistence is deferred to the caller (after batcher.drain()).

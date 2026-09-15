@@ -1,0 +1,60 @@
+# FNet3DPaperBF predict: nucleus trained on ipsc_confocal_brightfield, BRIGHTFIELD input,
+# predicting against a549_mantis_h2b_denv.
+#
+# Brightfield-input ablation arm of
+# nucleus/fnet3d_paper/ipsc_confocal/predict__a549*.yml. Every field is copied
+# from that phase baseline; the only differences are the input channel
+# (dataset_ref.source_channel + the normalization key), the checkpoint, and the
+# on-disk identity (train_set token `ipsc__bf`).
+#
+# Checkpoint is the loss/validate-monitored best: 0.7935, at parity with the
+# phase baseline's 0.7932 (epoch 226). Read from the monitored ModelCheckpoint
+# callback in last.ckpt -- that file also carries an unmonitored `latest-*`
+# callback whose best_model_path is just the final step.
+#
+# A549 manifest keys nucleus by gene (`h2b`); override the iPSC-side
+# `nucleus` target_id from targets/nucleus.yml so the resolver finds it.
+
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_denv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fnet3d_paper_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: ipsc_confocal_brightfield
+  predict_set: a549_mantis_h2b_denv
+  model_name: fnet3d_paper
+  experiment_id: nucleus__ipsc_confocal_brightfield__fnet3d_paper__a549_mantis_h2b_denv
+  dataset_ref:
+    source_channel: Brightfield
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/fnet3d_paper/checkpoints/epoch=208-step=180994-loss=0.794.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Brightfield]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/ipsc__bf/a549__denv/prediction.zarr
+
+launcher:
+  job_name: FNet3DPaperBF_PRED_NUCL_ON_A549_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet3d_paper/ipsc__bf/a549__denv

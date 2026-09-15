@@ -1,0 +1,68 @@
+# Shared FCMAE-2D (FullyConvolutionalMAE, pretraining=False) fit overlay
+# for the in-focus 2D benchmark track. Geometry is the published VSCyto2D
+# recipe (applications/cytoland/examples/configs/recipes/models/fcmae_2d.yml,
+# plan M5): in_stack_depth=1, stem_kernel_size=[1,2,2]. Used by both
+# fcmae_vscyto2d_scratch and fcmae_vscyto2d_pretrained leaves —
+# encoder_only + ckpt_path are set only in the pretrained leaf so init is
+# the only difference between the two (lr drops to 0.0002 there,
+# mirroring cytoland vscyto2d finetuning).
+#
+# Mirrors model_overlays/fcmae_vscyto3d_fit.yml but with 2D geometry and
+# single-GPU topology:
+#   - stem_kernel_size [5,4,4] -> [1,2,2], in_stack_depth 15 -> 1
+#   - topology ddp_4gpu -> single_gpu (2D nets are light; a Phase-B
+#     throughput decision — see plan §2d). No explicit DDPStrategy /
+#     find_unused_parameters / 3h-timeout block is needed at single-device
+#     (SingleDeviceStrategy has no DDP reducer, so FCMAE pretraining=False
+#     unused decoder/head paths are fine). If a later throughput probe
+#     switches this to DDP, re-add the fcmae_vscyto3d_fit.yml
+#     DDPStrategy(find_unused_parameters=true, timeout="3:00:00") block.
+#
+# HCS data hparams (bs=16, z=1, yx=384, flattened augs) live in
+# data_overlays/fcmae_vscyto2d_fit.yml; single-store train leaves compose
+# both, joint (BatchedConcatDataModule) leaves compose only this one and
+# author data: themselves.
+base:
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+model:
+  class_path: dynacell.engine.DynacellUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      encoder_blocks: [3, 3, 9, 3]
+      encoder_drop_path_rate: 0.1
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [1, 2, 2]
+      in_stack_depth: 1
+      pretraining: false
+    loss_function:
+      class_path: viscy_utils.losses.MixedLoss
+      init_args:
+        l1_alpha: 0.5
+        l2_alpha: 0.0
+        ms_dssim_alpha: 0.5
+    lr: 0.0004
+    schedule: WarmupCosine
+    # Phase-B TODO: re-size warmup_steps to ~1 epoch once the focus-store
+    # FOV count is known (single-GPU bs=16 at z_window_size=1 emits ~5
+    # windows/FOV/T, so steps/epoch differ from the 3D 4-GPU baseline).
+    warmup_steps: 4000
+    warmup_multiplier: 1e-3
+trainer:
+  # bf16, NOT fp16, and deliberately different from the 3D FCMAE overlay.
+  # fp16-mixed installs a GradScaler, which converts a NaN *gradient* into a
+  # silently skipped optimizer step: the forward and the logged loss stay finite
+  # while the scale halves, and once it reaches 0.0 every step is skipped for the
+  # rest of the run. That is exactly how the first 24 FCMAE-2D fits reached
+  # `epoch 199/200` with their weights still at initialization and `COMPLETED 0:0`.
+  # bf16 has no scaler and needs none (same ~8-bit exponent range as fp32), so a
+  # NaN gradient shows up as a non-finite loss instead of as silence.
+  # `OptimizerHealthCheck` (injected into every fit by viscy_utils.cli) catches
+  # both shapes; this makes the loud one the default. Depth=1 is the regime where
+  # the bf16 SSIM variance cancellation bites, so do NOT revert to 16-mixed.
+  precision: bf16-mixed
+  max_epochs: 200

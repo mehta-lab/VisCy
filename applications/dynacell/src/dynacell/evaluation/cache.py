@@ -22,11 +22,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
-FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino"]
+FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -83,6 +84,10 @@ class CachePaths:
     def celldino_features(self, weights_sha12: str) -> Path:
         """Return the zarr group path for CELL-DINO features keyed by *weights_sha12*."""
         return self.features_dir / "celldino" / f"{weights_sha12}.zarr"
+
+    def morphem_features(self, model_name: str) -> Path:
+        """Return the zarr group path for MorphEm features of *model_name*."""
+        return self.features_dir / "morphem" / f"{feature_slug(model_name)}.zarr"
 
 
 def cache_paths(cache_dir: Path | str) -> CachePaths:
@@ -261,6 +266,24 @@ def built_at_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _read_position_channel0(plate_path: Path, pos_name: str, dtype: npt.DTypeLike) -> np.ndarray | None:
+    """Read channel 0 of one position as ``(T, D, H, W)`` cast to *dtype*.
+
+    Returns ``None`` when the plate file or the position is absent (a cache miss).
+    """
+    if not plate_path.exists():
+        return None
+    with open_ome_zarr(plate_path, mode="r") as plate:
+        try:
+            position = plate[pos_name]
+        except KeyError:
+            return None
+        # copy=False: the read already materialized a fresh array and the on-disk
+        # dtype normally matches, so the cast is a no-op the caller shouldn't pay
+        # a second full-array copy for.
+        return np.asarray(position.data[:, 0]).astype(dtype, copy=False)
+
+
 def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str = "supermodel") -> np.ndarray | None:
     """Read cached organelle masks for a single position.
 
@@ -270,16 +293,7 @@ def read_mask(paths: CachePaths, target_name: str, pos_name: str, backend: str =
         Bool array of shape ``(T, D, H, W)``, or ``None`` if the plate or
         position is absent.
     """
-    plate_path = paths.mask_plate(target_name, backend)
-    if not plate_path.exists():
-        return None
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            return None
-        data = np.asarray(position.data[:, 0]).astype(bool)
-    return data
+    return _read_position_channel0(paths.mask_plate(target_name, backend), pos_name, bool)
 
 
 def _is_position_malformed(plate_path: Path, pos_name: str) -> bool:
@@ -309,35 +323,21 @@ def _rewrite_inner_array(pos_dir: Path, data: np.ndarray) -> None:
     pos_group.create_array("0", data=data)
 
 
-def write_mask(
-    paths: CachePaths,
-    target_name: str,
-    pos_name: str,
-    masks: np.ndarray,
-    *,
-    channel_name: str = _MASK_CHANNEL,
-    backend: str = "supermodel",
+def _write_position_channel0(
+    plate_path: Path, pos_name: str, arr: np.ndarray, dtype: npt.DTypeLike, channel_name: str
 ) -> None:
-    """Append masks for a single position to the ``{target_name}.zarr`` plate.
+    """Write ``arr`` ``(T, D, H, W)`` as channel 0 of one position, creating the plate if needed.
 
-    Parameters
-    ----------
-    paths
-        Cache paths.
-    target_name
-        Organelle name (used as the mask plate's filename stem).
-    pos_name
-        HCS position name in ``row/col/fov`` form.
-    masks
-        Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
-    channel_name
-        OME-Zarr channel label to write for this mask plate.
+    Casts to *dtype* only after the rank check, so the common mistake here — passing
+    a 5-D ``(T, C, D, H, W)`` array — raises without first copying it.
+
+    Repairs the partial-write signature in place (see :func:`_is_position_malformed`)
+    rather than through the plate API, which cannot recover from that state.
     """
-    if masks.ndim != 4:
-        raise ValueError(f"masks must be 4-D (T, D, H, W); got shape {masks.shape}")
-    plate_path = paths.mask_plate(target_name, backend)
+    if arr.ndim != 4:
+        raise ValueError(f"array must be 4-D (T, D, H, W); got shape {arr.shape}")
     plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = masks.astype(bool)[:, None]  # (T, 1, D, H, W)
+    data = arr.astype(dtype, copy=False)[:, None]  # (T, 1, D, H, W); write-only, so a view is fine
     if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
         _rewrite_inner_array(plate_path / pos_name, data)
         return
@@ -361,6 +361,35 @@ def write_mask(
         position.create_image("0", data)
 
 
+def write_mask(
+    paths: CachePaths,
+    target_name: str,
+    pos_name: str,
+    masks: np.ndarray,
+    *,
+    channel_name: str = _MASK_CHANNEL,
+    backend: str = "supermodel",
+) -> None:
+    """Append masks for a single position to the ``{target_name}.zarr`` plate.
+
+    Parameters
+    ----------
+    paths
+        Cache paths.
+    target_name
+        Organelle name (used as the mask plate's filename stem).
+    pos_name
+        HCS position name in ``row/col/fov`` form.
+    masks
+        Bool array of shape ``(T, D, H, W)`` — one channel per timepoint.
+    channel_name
+        OME-Zarr channel label to write for this mask plate.
+    backend
+        Segmentation backend (selects the plate filename infix).
+    """
+    _write_position_channel0(paths.mask_plate(target_name, backend), pos_name, masks, bool, channel_name)
+
+
 _INSTANCE_MASK_CHANNEL = "instance_seg"
 
 
@@ -373,16 +402,7 @@ def read_instance_mask(paths: CachePaths, target_name: str, pos_name: str, backe
         uint16 array of shape ``(T, D, H, W)`` (2-D runs are stored with
         ``D=1``), or ``None`` if the plate or position is absent.
     """
-    plate_path = paths.instance_mask_plate(target_name, backend)
-    if not plate_path.exists():
-        return None
-    with open_ome_zarr(plate_path, mode="r") as plate:
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            return None
-        data = np.asarray(position.data[:, 0]).astype(np.uint16)
-    return data
+    return _read_position_channel0(paths.instance_mask_plate(target_name, backend), pos_name, np.uint16)
 
 
 def write_instance_mask(
@@ -413,32 +433,7 @@ def write_instance_mask(
     backend
         Segmentation backend (selects the plate filename infix).
     """
-    if labels.ndim != 4:
-        raise ValueError(f"labels must be 4-D (T, D, H, W); got shape {labels.shape}")
-    plate_path = paths.instance_mask_plate(target_name, backend)
-    plate_path.parent.mkdir(parents=True, exist_ok=True)
-    data = labels.astype(np.uint16)[:, None]  # (T, 1, D, H, W)
-    if plate_path.exists() and _is_position_malformed(plate_path, pos_name):
-        _rewrite_inner_array(plate_path / pos_name, data)
-        return
-    mode = "r+" if plate_path.exists() else "w"
-    with open_ome_zarr(
-        plate_path,
-        mode=mode,
-        layout="hcs",
-        channel_names=[channel_name],
-        version="0.5",
-    ) as plate:
-        row, col, fov = pos_name.split("/")
-        try:
-            position = plate[pos_name]
-        except KeyError:
-            position = plate.create_position(row, col, fov)
-        try:
-            del position["0"]
-        except KeyError:
-            pass
-        position.create_image("0", data)
+    _write_position_channel0(paths.instance_mask_plate(target_name, backend), pos_name, labels, np.uint16, channel_name)
 
 
 def _features_group_path(
@@ -464,25 +459,60 @@ def _features_group_path(
         if weights_sha12 is None:
             raise ValueError("weights_sha12 is required for kind='celldino'")
         return paths.celldino_features(weights_sha12)
+    if kind == "morphem":
+        if model_name is None:
+            raise ValueError("model_name is required for kind='morphem'")
+        return paths.morphem_features(model_name)
     raise ValueError(f"Unknown feature kind: {kind!r}")
 
 
+# Group-level attribute recording the artifact's per-cell feature dimension.
+# Lets reads detect and drop stale entries left by a recipe change or an
+# interrupted partial rebuild (a feature group holding arrays of mixed column
+# counts) so the caller recomputes them at the current recipe instead of
+# crashing later on an opaque pred-vs-GT dimension mismatch.
+_FEATURE_DIM_ATTR = "feature_dim"
+
+
 def read_features_from_group(group, pos_name: str, t: int) -> np.ndarray | None:
-    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group."""
+    """Read one ``(n_cells, feature_dim)`` array from an already-open feature group.
+
+    Returns ``None`` (treated as a cache miss → recompute) when the stored
+    array's feature dimension disagrees with the group's recorded
+    :data:`_FEATURE_DIM_ATTR` — i.e. a stale entry from a different recipe or a
+    partially-rebuilt cache. The zero-cell ``(0, 0)`` sentinel is exempt (it
+    carries no column count). Groups written before this attribute existed have
+    no recorded dim, so no entry is dropped (bootstrap-safe).
+    """
     key = f"{pos_name}/t{t}"
     if key not in group:
         return None
-    return np.asarray(group[key])
+    arr = np.asarray(group[key])
+    expected = group.attrs.get(_FEATURE_DIM_ATTR)
+    if expected is not None and arr.ndim == 2 and arr.shape[1] > 0 and arr.shape[1] != int(expected):
+        return None
+    return arr
 
 
 def write_features_to_group(group, pos_name: str, t: int, features: np.ndarray) -> None:
-    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group."""
+    """Write one ``(n_cells, feature_dim)`` array to an already-open feature group.
+
+    Records the artifact's feature dimension in :data:`_FEATURE_DIM_ATTR` from
+    the first non-empty write (and updates it if a later write carries a
+    different dim — the current recipe is authoritative, and stale entries from
+    the old dim then fail the read-side check and get recomputed). The
+    zero-cell ``(0, 0)`` sentinel never sets the attribute.
+    """
     if features.ndim != 2:
         raise ValueError(f"features must be 2-D (n_cells, feature_dim); got shape {features.shape}")
     key = f"{pos_name}/t{t}"
     if key in group:
         del group[key]
     group.create_array(key, data=np.asarray(features))
+    if features.shape[0] > 0 and features.shape[1] > 0:
+        dim = int(features.shape[1])
+        if group.attrs.get(_FEATURE_DIM_ATTR) != dim:
+            group.attrs[_FEATURE_DIM_ATTR] = dim
 
 
 @contextmanager
@@ -555,38 +585,6 @@ def write_features(
         paths, kind, mode="a", model_name=model_name, ckpt_sha12=ckpt_sha12, weights_sha12=weights_sha12
     ) as group:
         write_features_to_group(group, pos_name, t, features)
-
-
-def ckpt_sha256_12(path: Path | str) -> str:
-    """Return the first 12 hex chars of the sha256 of the file at *path*.
-
-    On repeated calls for the same checkpoint, reads the digest from a
-    ``<path>.sha256`` sidecar file when present and newer than the
-    checkpoint, avoiding a multi-GB re-read. Writes the sidecar after a
-    fresh hash; silently tolerates read-only parent directories and NFS
-    flakes by falling back to recompute.
-    """
-    ckpt = Path(path)
-    sidecar = ckpt.with_suffix(ckpt.suffix + ".sha256")
-    try:
-        if sidecar.stat().st_mtime >= ckpt.stat().st_mtime:
-            digest = sidecar.read_text().strip()
-            if len(digest) >= 12 and all(c in "0123456789abcdef" for c in digest[:12]):
-                return digest[:12]
-    except OSError:
-        pass
-    hasher = hashlib.sha256()
-    with open(ckpt, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            hasher.update(chunk)
-    digest = hasher.hexdigest()
-    try:
-        tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
-        tmp.write_text(digest + "\n")
-        tmp.replace(sidecar)
-    except OSError:
-        pass
-    return digest[:12]
 
 
 def encoder_config_sha256_12(encoder_cfg: dict[str, Any]) -> str:

@@ -22,7 +22,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/tomm20/fnet3d_paper/checkpoints/epoch=132-step=183008.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/mito/fnet3d_paper/checkpoints/epoch=139-step=192640.ckpt
 
 data:
   init_args:
@@ -39,8 +39,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/tomm20_fnet3d_paper_jointtrained_denv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint/a549__denv/prediction.zarr
 
 launcher:
   job_name: FNet3DPaper_PRED_TOMM20_JOINTTR_DENV
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/mito/fnet3d_paper/joint/a549__denv

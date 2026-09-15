@@ -1,0 +1,21 @@
+# @package _global_
+# Phase baseline (no model): the raw Phase3D input scored as the "prediction"
+# against the iPSC membrane GT. cpdino segments the phase image into whole cells
+# and carves the GT nucleus (subtract_nuclei default). iPSC nuclei live in the same
+# cell.zarr, so no separate nuclei_gt_path. io.pred_is_source reads Phase3D and
+# defaults io.pred_path to the GT store (cell.zarr).
+defaults:
+  - override /target: membrane
+  - override /predict_set: ipsc_confocal
+
+io:
+  pred_is_source: true
+
+compute_feature_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei
+
+save:
+  save_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/evaluations_with_embeddings/eval_phase_membrane

@@ -14,6 +14,7 @@ import itertools
 import torch
 from torch import Tensor, nn
 
+from dynacell.tiling import window_starts
 from viscy_models.celldiff import CELLDiffNet
 from viscy_models.celldiff.modules.transport import Sampler, create_transport
 
@@ -170,13 +171,65 @@ class CELLDiff3DVS(nn.Module):
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
+        start_lists = window_starts(spatial, patch_spatial, (0, 0, 0))
+
+        in_ch = self.net.inconv.in_channels
+        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        out = torch.empty(out_shape, device=phase.device, dtype=phase.dtype)
+        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+
+        with torch.no_grad():
+            for starts in itertools.product(*start_lists):
+                slicer = [slice(None)] * phase.dim()
+                for i, st in enumerate(starts):
+                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
+                phase_patch = phase[tuple(slicer)]
+                xt = self._noise_like_target(phase_patch)
+
+                def fn(
+                    xt_: Tensor,
+                    t_: Tensor,
+                    _p: Tensor = phase_patch,
+                ) -> Tensor:
+                    return self.net(xt_, _p, t_)
+
+                out[tuple(slicer)] = sample_fn(xt, fn)[-1]
+
+        return out
+
+    def generate_sliding_window_trajectory(self, phase: Tensor, num_steps: int = 100) -> Tensor:
+        """Generate the full ODE trajectory via tiled sliding window (stride == patch size).
+
+        Like :meth:`generate_sliding_window`, but retains **every** ODE
+        integration step instead of only the final one. Each non-overlapping
+        patch is integrated independently with fresh Gaussian noise; step ``i``
+        is at the same ODE time across all patches, so assembling by step index
+        yields a spatially-complete volume per step.
+
+        Parameters
+        ----------
+        phase : Tensor
+            Phase contrast input of shape ``(B, 1, D, H, W)``.
+        num_steps : int
+            Number of ODE integration steps per patch.
+
+        Returns
+        -------
+        Tensor
+            All intermediate ODE states of shape
+            ``(num_steps, B, in_channels, D, H, W)``. Index 0 is pure Gaussian
+            noise; index ``-1`` is the final prediction.
+        """
+        spatial = tuple(phase.shape[-3:])
+        patch_spatial = tuple(self.net.input_spatial_size)
+        n_spatial = 3
 
         for i in range(n_spatial):
             if spatial[i] < patch_spatial[i]:
                 raise ValueError(f"spatial dim {i} ({spatial[i]}) must be >= patch dim ({patch_spatial[i]})")
 
         in_ch = self.net.inconv.in_channels
-        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        out_shape = (num_steps, *phase.shape[:-4], in_ch, *phase.shape[-3:])
         out = torch.empty(out_shape, device=phase.device, dtype=phase.dtype)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
 
@@ -203,7 +256,8 @@ class CELLDiff3DVS(nn.Module):
                 ) -> Tensor:
                     return self.net(xt_, _p, t_)
 
-                out[tuple(slicer)] = sample_fn(xt, fn)[-1]
+                # (num_steps, B, C, pd, ph, pw); prepend step axis to the slicer.
+                out[(slice(None), *slicer)] = sample_fn(xt, fn)
 
         return out
 
@@ -249,6 +303,96 @@ class CELLDiff3DVS(nn.Module):
             If ``path_type`` is not ``"Linear"`` or ``prediction`` is not
             ``"velocity"``, since the anchoring formula is path-specific.
         """
+        if self.path_type != "Linear" or self.prediction != "velocity":
+            raise NotImplementedError(
+                "generate_iterative only supports Linear path with velocity prediction, "
+                f"got path_type={self.path_type!r}, prediction={self.prediction!r}"
+            )
+
+        spatial = tuple(phase.shape[-3:])
+        patch_spatial = tuple(self.net.input_spatial_size)
+        n_spatial = 3
+        start_lists = window_starts(spatial, patch_spatial, overlap_size)
+
+        in_ch = self.net.inconv.in_channels
+        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        out = torch.full(out_shape, float("nan"), device=phase.device, dtype=phase.dtype)
+        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+
+        with torch.no_grad():
+            for starts in itertools.product(*start_lists):
+                slicer = [slice(None)] * phase.dim()
+                for i, st in enumerate(starts):
+                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
+
+                phase_patch = phase[tuple(slicer)]
+                out_patch = out[tuple(slicer)].clone()
+                xt = self._noise_like_target(phase_patch)
+                known_mask = ~torch.isnan(out_patch)
+
+                def fn(
+                    xt_: Tensor,
+                    t_: Tensor,
+                    _p: Tensor = phase_patch,
+                    _out: Tensor = out_patch,
+                    _mask: Tensor = known_mask,
+                ) -> Tensor:
+                    v = self.net(xt_, _p, t_)
+                    # Infer x0 from the Linear-path formula: x0 = xt - t*v.
+                    t_exp = t_.reshape(t_.shape[0], *([1] * (xt_.dim() - 1)))
+                    x0_ = xt_ - t_exp * v
+                    # Velocity that integrates x0 exactly to the known target: v = x1 - x0.
+                    v_out = _out - x0_
+                    # Use the anchored velocity in the overlap region, free velocity elsewhere.
+                    return torch.where(_mask, v_out, v)
+
+                patch_out = sample_fn(xt, fn)[-1]
+                out[tuple(slicer)] = patch_out
+
+        return out
+
+    def generate_iterative_trajectory(
+        self,
+        phase: Tensor,
+        num_steps: int = 100,
+        overlap_size: int | tuple[int, ...] = 256,
+    ) -> Tensor:
+        """Generate the full ODE trajectory via overlapping sliding window with velocity anchoring.
+
+        Like :meth:`generate_iterative`, but retains **every** ODE integration
+        step instead of only the final one. Patches are still processed
+        sequentially; each patch's overlap region is anchored toward the
+        **final** output of previously-completed patches (identical anchoring to
+        :meth:`generate_iterative`), and the whole per-step trajectory of each
+        patch is written into the output. Overlapping voxels are last-write-wins
+        across patches, matching :meth:`generate_iterative`. Step ``i`` is at the
+        same ODE time across all patches, so assembling by step index yields a
+        spatially-complete volume per step.
+
+        Parameters
+        ----------
+        phase : Tensor
+            Phase contrast input of shape ``(B, 1, D, H, W)``.
+        num_steps : int
+            Number of ODE integration steps per patch.
+        overlap_size : int or tuple of int
+            Overlap in each spatial dimension ``(od, oh, ow)``.
+            A single int applies the same overlap to all three dimensions.
+
+        Returns
+        -------
+        Tensor
+            All intermediate ODE states of shape
+            ``(num_steps, B, in_channels, D, H, W)``. Index 0 is pure Gaussian
+            noise; index ``-1`` is the final prediction (equal to
+            :meth:`generate_iterative`).
+
+        Raises
+        ------
+        NotImplementedError
+            If ``path_type`` is not ``"Linear"`` or ``prediction`` is not
+            ``"velocity"``, since the anchoring formula is path-specific.
+        """
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
@@ -269,13 +413,17 @@ class CELLDiff3DVS(nn.Module):
 
         if self.path_type != "Linear" or self.prediction != "velocity":
             raise NotImplementedError(
-                "generate_iterative only supports Linear path with velocity prediction, "
+                "generate_iterative_trajectory only supports Linear path with velocity prediction, "
                 f"got path_type={self.path_type!r}, prediction={self.prediction!r}"
             )
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        # `out` holds the FINAL values used for anchoring (as in generate_iterative);
+        # `out_traj` accumulates every ODE step across the whole volume.
         out = torch.full(out_shape, float("nan"), device=phase.device, dtype=phase.dtype)
+        traj_shape = (num_steps, *out_shape)
+        out_traj = torch.empty(traj_shape, device=phase.device, dtype=phase.dtype)
         sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
 
         start_lists: list[list[int]] = []
@@ -320,10 +468,153 @@ class CELLDiff3DVS(nn.Module):
                     # Use the anchored velocity in the overlap region, free velocity elsewhere.
                     return torch.where(_mask, v_out, v)
 
-                patch_out = sample_fn(xt, fn)[-1]
-                out[tuple(slicer)] = patch_out
+                traj = sample_fn(xt, fn)  # (num_steps, B, C, pd, ph, pw)
+                out_traj[(slice(None), *slicer)] = traj
+                out[tuple(slicer)] = traj[-1]
 
-        return out
+        return out_traj
+
+    def generate_iterative_denoise_trajectory(
+        self,
+        phase: Tensor,
+        num_steps: int = 100,
+        overlap_size: int | tuple[int, ...] = 256,
+    ) -> Tensor:
+        """Return the per-step denoised clean-target estimate ``x1`` of the iterative ODE.
+
+        Runs the identical overlapping-window, velocity-anchored ODE integration
+        as :meth:`generate_iterative` (the underlying prediction is unchanged),
+        but at every returned ODE node ``i`` records the network's **denoised
+        estimate of the clean target** rather than the raw ODE state ``xt``.
+
+        For the Linear path with velocity prediction the flow satisfies
+        ``xt = (1 - t) * x0 + t * x1`` with velocity ``v = x1 - x0``. Solving for
+        the clean target gives
+
+            ``x1 = xt + (1 - t) * v``
+
+        which is the exact complement of the noise estimate ``x0 = xt - t * v``
+        used for anchoring in :meth:`generate_iterative`. ``v`` here is the
+        **raw** network velocity ``net(xt, phase, t)`` (not the anchored velocity
+        used to drive the solver). At ``t = 0`` (step 1) this is the one-step
+        denoise-from-noise estimate; at ``t = 1`` (last step) ``(1 - t) = 0`` so
+        the estimate equals the final ODE state, i.e. the final prediction.
+
+        Parameters
+        ----------
+        phase : Tensor
+            Phase contrast input of shape ``(B, 1, D, H, W)``.
+        num_steps : int
+            Number of ODE integration steps per patch.
+        overlap_size : int or tuple of int
+            Overlap in each spatial dimension ``(od, oh, ow)``.
+            A single int applies the same overlap to all three dimensions.
+
+        Returns
+        -------
+        Tensor
+            Per-step clean-target estimates of shape
+            ``(num_steps, B, in_channels, D, H, W)``. Index 0 is the one-step
+            denoise-from-noise estimate; index ``-1`` equals the final prediction.
+
+        Raises
+        ------
+        NotImplementedError
+            If ``path_type`` is not ``"Linear"`` or ``prediction`` is not
+            ``"velocity"``, since the ``x1`` formula is path-specific.
+        """
+        spatial = tuple(phase.shape[-3:])
+        patch_spatial = tuple(self.net.input_spatial_size)
+        n_spatial = 3
+
+        if isinstance(overlap_size, int):
+            overlap = (overlap_size,) * n_spatial
+        else:
+            overlap = tuple(overlap_size)
+            if len(overlap) != n_spatial:
+                raise ValueError("overlap_size must be int or a 3-tuple")
+
+        for i in range(n_spatial):
+            s_i, p_i, ov = spatial[i], patch_spatial[i], overlap[i]
+            if s_i < p_i:
+                raise ValueError(f"spatial dim {i} ({s_i}) must be >= patch dim ({p_i})")
+            if not (0 <= ov < p_i):
+                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {ov} vs patch {p_i})")
+
+        if self.path_type != "Linear" or self.prediction != "velocity":
+            raise NotImplementedError(
+                "generate_iterative_denoise_trajectory only supports Linear path with velocity "
+                f"prediction, got path_type={self.path_type!r}, prediction={self.prediction!r}"
+            )
+
+        in_ch = self.net.inconv.in_channels
+        out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
+        # `out` holds the FINAL values used for anchoring (as in generate_iterative);
+        # `out_traj` accumulates the per-step x1 (clean-target) estimate.
+        out = torch.full(out_shape, float("nan"), device=phase.device, dtype=phase.dtype)
+        traj_shape = (num_steps, *out_shape)
+        out_traj = torch.empty(traj_shape, device=phase.device, dtype=phase.dtype)
+        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps)
+        # ODE node times for the Linear+velocity config: linspace(0, 1, num_steps).
+        t_grid = torch.linspace(0.0, 1.0, num_steps, device=phase.device, dtype=phase.dtype)
+
+        start_lists: list[list[int]] = []
+        for i in range(n_spatial):
+            s_i, p_i, ov = spatial[i], patch_spatial[i], overlap[i]
+            stride = p_i - ov
+            last = s_i - p_i
+            starts = [0]
+            while True:
+                nxt = starts[-1] + stride
+                if nxt >= last:
+                    break
+                starts.append(nxt)
+            if starts[-1] != last:
+                starts.append(last)
+            start_lists.append(starts)
+
+        with torch.no_grad():
+            for starts in itertools.product(*start_lists):
+                slicer = [slice(None)] * phase.dim()
+                for i, st in enumerate(starts):
+                    slicer[-(n_spatial - i)] = slice(st, st + patch_spatial[i])
+
+                phase_patch = phase[tuple(slicer)]
+                out_patch = out[tuple(slicer)].clone()
+                xt = self._noise_like_target(phase_patch)
+                known_mask = ~torch.isnan(out_patch)
+                batch_size = phase_patch.shape[0]
+
+                def fn(
+                    xt_: Tensor,
+                    t_: Tensor,
+                    _p: Tensor = phase_patch,
+                    _out: Tensor = out_patch,
+                    _mask: Tensor = known_mask,
+                ) -> Tensor:
+                    v = self.net(xt_, _p, t_)
+                    # Infer x0 from the Linear-path formula: x0 = xt - t*v.
+                    t_exp = t_.reshape(t_.shape[0], *([1] * (xt_.dim() - 1)))
+                    x0_ = xt_ - t_exp * v
+                    # Velocity that integrates x0 exactly to the known target: v = x1 - x0.
+                    v_out = _out - x0_
+                    # Use the anchored velocity in the overlap region, free velocity elsewhere.
+                    return torch.where(_mask, v_out, v)
+
+                # Raw ODE state trajectory (drives the prediction, kept for anchoring).
+                traj = sample_fn(xt, fn)  # (num_steps, B, C, pd, ph, pw)
+
+                # Per node, the clean-target estimate x1 = xt + (1 - t) * v with the RAW
+                # network velocity at that node (re-evaluated; dopri5 nodes are dense-output
+                # interpolants at t_grid, so this is the true velocity field at each node).
+                for i in range(num_steps):
+                    t_i = t_grid[i]
+                    v_i = self.net(traj[i], phase_patch, t_i.expand(batch_size))
+                    out_traj[(i, *slicer)] = traj[i] + (1.0 - t_i) * v_i
+
+                out[tuple(slicer)] = traj[-1]
+
+        return out_traj
 
     def denoise_sliding_window(
         self,
@@ -359,37 +650,12 @@ class CELLDiff3DVS(nn.Module):
         spatial = tuple(phase.shape[-3:])
         patch_spatial = tuple(self.net.input_spatial_size)
         n_spatial = 3
-
-        if isinstance(overlap_size, int):
-            overlap = (overlap_size,) * n_spatial
-        else:
-            overlap = tuple(overlap_size)
-            if len(overlap) != n_spatial:
-                raise ValueError("overlap_size must be int or a 3-tuple")
-
-        for i in range(n_spatial):
-            S, P, Ov = spatial[i], patch_spatial[i], overlap[i]
-            if S < P:
-                raise ValueError(f"spatial dim {i} ({S}) must be >= patch dim ({P})")
-            if not (0 <= Ov < P):
-                raise ValueError(f"overlap at dim {i} must satisfy 0 <= overlap < patch (got {Ov} vs {P})")
+        start_lists = window_starts(spatial, patch_spatial, overlap_size)
 
         in_ch = self.net.inconv.in_channels
         out_shape = (*phase.shape[:-4], in_ch, *phase.shape[-3:])
         prediction_sum = torch.zeros(out_shape, device=phase.device, dtype=phase.dtype)
         prediction_count = torch.zeros(out_shape, device=phase.device, dtype=phase.dtype)
-
-        start_lists: list[list[int]] = []
-        for i in range(n_spatial):
-            S, P, Ov = spatial[i], patch_spatial[i], overlap[i]
-            stride = P - Ov
-            last = S - P
-            starts = [0]
-            while starts[-1] + stride < last:
-                starts.append(starts[-1] + stride)
-            if starts[-1] != last:
-                starts.append(last)
-            start_lists.append(starts)
 
         with torch.no_grad():
             for starts in itertools.product(*start_lists):

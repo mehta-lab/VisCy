@@ -16,7 +16,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 | `utils.py` | `DinoV3FeatureExtractor`, `DynaCLRFeatureExtractor`, `CellDinoFeatureExtractor`, plot helpers. |
 | `_configs/*.yaml` | Hydra schemas: `eval.yaml`, `precompute.yaml`, `eval_grouped.yaml`. |
 
-Other files (`io.py`, `formatting.py`, `spectral_pcc/`) house readers and bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are now backed by `cubic.metrics`.
+`paths.py` is the canonical artifact-path grammar (checkpoints, prediction stores, eval leaves); `spectral_pcc/` holds bead/PSF diagnostics. Pixel metrics (PCC, SSIM, NRMSE, PSNR) are backed by `cubic.metrics`.
 
 ## Inputs
 
@@ -131,7 +131,7 @@ GT caches are reusable across model checkpoints for the same `(gt_path, gt_chann
 
 `manifest.yaml` is **not source-controlled** — it lives in the shared cache root, is rewritten by the pipeline on every cache-mutating run (timestamps, FOV position lists, absolute HPC paths to the per-model feature zarrs it indexes), and is fully derivable from this code + the raw inputs. A deleted or corrupted manifest is a recompute cost (run `dynacell precompute-gt` or a normal eval), not a loss of source-of-truth state.
 
-Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR `ckpt_sha256_12` is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
+Identity: `(cache_schema_version, plate_path, channel_name, cell_segmentation_path)`. Identity mismatches raise `StaleCacheError` — the cache directory must be wiped and re-primed. The DynaCLR checkpoint hash (`viscy_utils.prediction_metadata.checkpoint_sha256_12`) is memoized to a `<ckpt>.sha256` sidecar; touch or replace the checkpoint and the hash recomputes.
 
 Per-artifact params (`cp_features.spacing`, `dinov3_features.patch_size`, `dynaclr_features.{checkpoint_sha256_12, encoder_config_sha256_12, patch_size}`, `celldino_features.{weights_sha256_12, patch_size}`, `organelle_masks.target_name`, plus per-extractor `preprocess_version`) are softer: a mismatch emits a warning and sets the matching `force_recompute.<side>_<kind>=True` so the artifact is recomputed and the manifest entry is rewritten with the current values. This self-heal path runs at `init_cache_context` time and covers the common "I bumped spacing / patch_size / preprocess recipe" workflow without forcing operators to wipe each cache by hand.
 
@@ -305,3 +305,9 @@ uv pip install -e "applications/dynacell[eval]"
 `dynacell evaluate` and `dynacell precompute-gt` default `HF_HUB_CACHE` to a team-shared directory on project storage when they detect a repo checkout, so gated HF models (DINOv3) download once per team. The default path is set in `dynacell/__main__.py` (`_DEFAULT_SHARED_HF_CACHE`); other sites override it via the `DYNACELL_SHARED_HF_CACHE` env var. Pre-set `HF_HUB_CACHE` and the auto-setter backs off.
 
 We use `HF_HUB_CACHE` (not `HF_HOME`) because `HF_HOME` relocates the auth token file too, breaking per-user gated-repo ACLs. `HF_HUB_CACHE` only relocates weights/datasets; tokens stay per-user. First-time setup: one team member with gated-repo access (see [DINOv3 on HF](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m)) runs any eval command to trigger the download; everyone else reuses the shared weights afterward — those reads don't hit HF and don't need a token.
+
+## Navigation
+
+- Up: [dynacell](../README.md)
+- See also: GPU-dispatch (`cubic`) conventions in [CLAUDE.md](CLAUDE.md) · eval-leaf composition in the
+  [benchmarks README](../../../configs/benchmarks/virtual_staining/README.md).

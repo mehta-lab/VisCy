@@ -1,0 +1,66 @@
+# @package _global_
+# Grouped leaf: CELL-Diff arm of the HEK293T membrane (KRAS) probe, a549xy geometry.
+#
+# Split out of membrane_hek_a549xy so the six regression rows are not gated behind
+# CELL-Diff's predicts, which are ~25x slower per FOV (iterative flow matching,
+# one full-depth window per FOV). Both leaves read the same manifest gt_cache_dir,
+# so whichever runs second finds the GT features already warm and only pays for
+# its own prediction side. Every option below matches the sibling exactly — the
+# rows must be comparable.
+#
+# Path tokens differ by training pool, which is a CELL-Diff convention rather than
+# a checkpoint difference: iPSC-trained writes under celldiff_r2_iterative, A549-
+# and joint-trained under celldiff_r2.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+# Carved cpdino whole-cell, seeded by a PREDICTED nucleus channel (the HEK release
+# ships none). Rationale, caveats and the seed provenance live in the sibling
+# membrane_hek_a549xy/eval_grouped.yaml — keep these four settings in lockstep
+# with it or the rows stop being comparable.
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei_prediction
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: celldiff_r2__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_r2_iterative/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/celldiff_r2_iterative/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_r2_iterative/ipsc/hek__a549xy
+- name: celldiff_r2__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_r2/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/celldiff_r2/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_r2/a549/hek__a549xy
+- name: celldiff_r2__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_r2/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/celldiff_r2/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/celldiff_r2/joint/hek__a549xy

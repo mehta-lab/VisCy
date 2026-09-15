@@ -5,6 +5,8 @@ fluorescence virtual staining.  Architecture: CNN encoder with skip connections,
 transformer bottleneck, CNN decoder with skip connections.
 """
 
+from collections.abc import Sequence
+
 import torch
 from torch import Tensor
 
@@ -50,8 +52,10 @@ class UNetViT3D(UNet3DBase):
         Feed-forward output dropout rate.
     num_hidden_layers : int
         Number of transformer blocks in the bottleneck.
-    patch_size : int
-        Cubic patch size for the 3D patch embedding.
+    patch_size : int | Sequence[int]
+        Cubic patch size for the 3D patch embedding, or per-axis
+        ``(D, H, W)`` extents. Use ``(1, p, p)`` at ``D=1`` for the
+        Z-preserving 2D configuration.
     """
 
     def __init__(
@@ -67,7 +71,7 @@ class UNetViT3D(UNet3DBase):
         dropout: float = 0.0,
         final_dropout: float = 0.0,
         num_hidden_layers: int = 2,
-        patch_size: int = 4,
+        patch_size: int | Sequence[int] = 4,
     ) -> None:
         if input_spatial_size is None:
             input_spatial_size = [8, 512, 512]

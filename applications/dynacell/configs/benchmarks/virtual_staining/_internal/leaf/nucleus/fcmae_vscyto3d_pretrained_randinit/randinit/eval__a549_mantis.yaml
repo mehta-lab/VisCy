@@ -15,7 +15,7 @@ benchmark:
 compute_feature_metrics: true
 compute_instance_ap: true
 segmentation:
-  backend: cellpose
+  backend: cpdino
 
 conditions:
   - name: a549_mock

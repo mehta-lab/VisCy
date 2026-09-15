@@ -17,7 +17,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/ipsc/sec61b/unetvit3d/checkpoints/last.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/unetvit3d/checkpoints/epoch=19-step=108160.ckpt
 
 data:
   init_args:
@@ -36,8 +36,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_unetvit3d__sec61b_denv.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/unetvit3d/ipsc/a549__denv/prediction.zarr
 
 launcher:
   job_name: UNetViT3D_PRED_SEC61B_ON_A549_sec61b_denv
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/unetvit3d/ipsc/a549__denv

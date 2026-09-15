@@ -41,7 +41,7 @@ trainer:
   logger:
     init_args:
       name: pix2pix3d_unetvit_JOINT_MEMB_4gpu_modernized_lambdaL1_10_lecam_40ep
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/pix2pix3d_unetvit
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -49,10 +49,12 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate_ema
+        filename: "epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/pix2pix3d_unetvit/checkpoints
 
 # Child HCSDataModule init_args shared across both datasets (only data_path
 # differs). `_`-prefixed top-level keys are stripped by load_composed_config
@@ -150,7 +152,7 @@ data:
 
 launcher:
   job_name: pix2pix3d_unetvit_JOINT_MEMB_4gpu_modernized_lambdaL1_10_lecam_40ep
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/memb/pix2pix3d_unetvit_modernized_lambdaL1_10_lecam_40ep
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/membrane/pix2pix3d_unetvit
   # pix2pix3d GAN (UNetViT3D G + multiscale-patch D, large 3D crops) OOMs on
   # 80 GB h100; needs h200 (141 GB). Narrow the hardware_4gpu h100|h200 default.
   sbatch:

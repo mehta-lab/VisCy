@@ -1,0 +1,54 @@
+# Model recipe: pix2pix2d_unetvit — the UNetViT generator + multi-scale
+# PatchGAN discriminator run Z-preserving at Z=1 for the in-focus 2D
+# benchmark track.
+#
+# Mirrors recipes/models/pix2pix3d_unetvit.yml but:
+#   - generator input_spatial_size: [8, 512, 512] -> [1, 512, 512]
+#   - generator patch_size:         4             -> [1, 4, 4]
+#   - discriminator preserve_z:     (absent)      -> true
+#
+# The generator needed NO new code. UNetViT3D already builds with
+# downsample_z=False (encoder strides (1, 2, 2)) and its ViTBottleneck3D
+# already takes per-axis patch extents, because the CellDiff-2D track added
+# that in 0126fe6f and both models share the bottleneck. Measured: the 3D
+# config is 78.1M params and round-trips [8, 512, 512]; this one is 65.3M and
+# round-trips [1, 512, 512]. A cubic patch_size=4 at D=1 raises a clear
+# divisibility error rather than silently reshaping.
+#
+# The DISCRIMINATOR is what blocked Z=1, and it is a real edit: PatchGAN3D
+# layers 1-4 used a *cubic* kernel_size=4 with padding=1, so a size-1 Z axis
+# pads to 3 against a size-4 kernel and torch raises "Kernel size can't be
+# greater than actual input size". Only layer 5 had been written Z-safe as
+# (1, 4, 4)/(0, 1, 1). preserve_z=True collapses the kernel and padding on Z
+# for layers 1-4 and drops the Z stride of layers 3-4, so Z passes through
+# untouched instead of merely being tolerated. preserve_z=False reproduces the
+# published 3D topology bit-for-bit, pinned by
+# test_patchgan3d_preserve_z_leaves_the_3d_topology_untouched.
+#
+# The inter-scale pooling was already YX-only (avg_pool3d kernel (1, 2, 2)),
+# so the multi-scale wrapper needed nothing beyond forwarding the flag.
+#
+# lambda_l1 = 100.0 is held at the 3D value; every training-recipe knob
+# (loss_type, lr, R1, EMA) lives in the fit overlay, as it does for 3D.
+model:
+  class_path: dynacell.engine.DynacellGAN
+  init_args:
+    architecture: UNetViT3D
+    generator_config:
+      input_spatial_size: [1, 512, 512]
+      in_channels: 1
+      out_channels: 1
+      dims: [64, 128, 256, 256]
+      num_res_block: [2, 2, 2]
+      hidden_size: 512
+      num_heads: 8
+      dim_head: 64
+      num_hidden_layers: 8
+      patch_size: [1, 4, 4]
+    discriminator_config:
+      in_channels: 2
+      base_channels: 64
+      num_scales: 2          # multi-scale D (pix2pixHD-style); set 1 to ablate
+      use_spectral_norm: true
+      preserve_z: true       # required at Z=1; see the header
+    lambda_l1: 100.0

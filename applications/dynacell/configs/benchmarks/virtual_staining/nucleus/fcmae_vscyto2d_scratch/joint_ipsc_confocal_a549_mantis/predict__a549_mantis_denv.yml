@@ -1,0 +1,58 @@
+# FCMAE-2D Scratch (UNeXt2-2D) predict: nucleus trained on joint_ipsc_confocal_a549_mantis,
+# tested on a549-mantis-h2b-denv. In-focus 2D track. Runs the 2D model over the
+# full-Z 3D test store (z_window_size=1 -> one window per z-plane;
+# the writer keys each output to its z-index) so the existing
+# focus-aware eval consumes the result unchanged.
+#
+# Source normalization reproduces the fit overlay exactly
+# (Phase3D fov_statistics mean/std); a mismatch here would
+# silently degrade every prediction.
+#
+# ckpt_path pins the lowest-val-loss retained checkpoint of the
+# 2026-08-01 revived fit (the earlier cohort froze at init under
+# 16-mixed and its checkpoints are NOT usable). Submit with
+# `--ckpt best` to re-resolve against the live best at submit time.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_denv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: a549_mantis_h2b_denv
+  model_name: fcmae_vscyto2d_scratch
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__fcmae_vscyto2d_scratch__a549_mantis_h2b_denv
+  # A549 keys nucleus by gene (`h2b`); override the iPSC-side
+  # target_id so the resolver finds it on a549_mantis_h2b_denv.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/fcmae_vscyto2d_scratch/checkpoints/epoch=50-step=40800-loss=0.711.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__denv/prediction.zarr
+
+launcher:
+  job_name: FCMAE2D_Scratch_PRED_JOINT_NUCL_ON_A549_DENV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/fcmae_vscyto2d_scratch/joint/a549__denv

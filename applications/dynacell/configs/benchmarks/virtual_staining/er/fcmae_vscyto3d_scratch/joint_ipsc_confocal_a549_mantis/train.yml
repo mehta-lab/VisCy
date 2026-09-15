@@ -17,7 +17,7 @@
 base:
   - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_fit.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu_long.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -34,7 +34,7 @@ trainer:
   logger:
     init_args:
       name: FCMAE_VSCyto3D_Scratch_JOINT_SEC61B
-      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fcmae_vscyto3d_scratch
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fcmae_vscyto3d_scratch
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -42,10 +42,12 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
         every_n_epochs: 1
         save_top_k: 5
         save_last: true
-        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fcmae_vscyto3d_scratch/checkpoints
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fcmae_vscyto3d_scratch/checkpoints
 
 _hcs_init_args: &hcs_init_args
   source_channel: Phase3D
@@ -135,8 +137,8 @@ data:
       - class_path: viscy_data.hcs.HCSDataModule
         init_args:
           <<: *hcs_init_args
-          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/SEC61B_all.zarr
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/SEC61B_all.zarr
 
 launcher:
   job_name: FCMAE_VSCyto3D_Scratch_JOINT_SEC61B
-  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint_ipsc_confocal_a549_mantis/sec61b/fcmae_vscyto3d_scratch
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/er/fcmae_vscyto3d_scratch
