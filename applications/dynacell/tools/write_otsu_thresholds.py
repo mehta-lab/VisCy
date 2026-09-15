@@ -28,6 +28,22 @@ statistic byte-for-byte. ``generate_fg_masks`` reads
 ``normalization.<channel>.fov_statistics.otsu_threshold`` and so runs unmodified
 afterwards.
 
+``--threshold-from PARENT`` computes each threshold on a different store's
+matching position instead of this one's. ``cell_focus.zarr`` needs it: the recipe
+smooths across Z with a 5x5x5 median and a sigma=5 Gaussian, and a 5-plane slab
+has no Z to accumulate over, so estimating there inverts the recipe's effect.
+Measured over 60 positions, mean foreground on the focus store's own masks:
+
+                                  Nuclei          Membrane
+    on disk (old recipe)          0.3319          0.2496 (2 FOVs under 2%)
+    new recipe on the 5 planes    0.3317          0.2189 (2 FOVs under 2%)
+    new recipe on the parent      0.3846          0.1861 (0 FOVs under 2%)
+
+The slab is a verbatim voxel copy of the parent, so the parent is the same
+specimen on the same intensity scale -- and sharing one estimate keeps the 2D
+arms (which train on the focus store) and the 3D arms (which train on the
+parent) from being handed masks built by differently-behaving operators.
+
 Rollback is the inverse and is exact: delete the one key per (position, channel).
 ``--undo`` does it.
 """
@@ -36,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import ExitStack
 
 from iohub import ngff
 from iohub.core.config import TensorStoreConfig
@@ -70,6 +87,31 @@ def compute_otsu_threshold(position: ngff.Position, channel_index: int) -> float
     return otsu_threshold_from_volume(_grid_sample(position, 1, channel_index))
 
 
+def _resolve_source(plate, parent, name, pos):
+    """Return the position the threshold is computed on, and its channel list.
+
+    Raises rather than falling back when the parent lacks the position: a silent
+    per-position fallback would give the store two different threshold recipes,
+    which is the exact asymmetry --threshold-from exists to remove.
+    """
+    if parent is None:
+        return pos, plate.channel_names
+    if name not in _parent_names(parent):
+        raise KeyError(f"position {name!r} is absent from the --threshold-from store")
+    return parent[name], parent.channel_names
+
+
+def _parent_names(parent):
+    """Position names of the parent plate, cached on the plate object.
+
+    iohub's Plate.__contains__ returns False for a valid nested "row/col/fov"
+    path that indexes fine, so membership has to be tested against the list.
+    """
+    if not hasattr(parent, "_cached_position_names"):
+        parent._cached_position_names = {n for n, _ in parent.positions()}
+    return parent._cached_position_names
+
+
 def main(argv: list[str] | None = None) -> int:
     """Write (or remove) ``otsu_threshold`` across every position of a store."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -78,20 +120,37 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--num-workers", type=int, default=8, help="tensorstore data_copy_concurrency.")
     ap.add_argument("--dry-run", action="store_true", help="Compute and report; write nothing.")
     ap.add_argument("--undo", action="store_true", help="Delete the key instead of writing it.")
+    ap.add_argument(
+        "--threshold-from",
+        default=None,
+        help="Compute each threshold on this store's matching position instead of the target's.",
+    )
     args = ap.parse_args(argv)
 
     mode = "r" if args.dry_run else "r+"
-    with ngff.open_ome_zarr(
-        args.store,
-        mode=mode,
-        implementation="tensorstore",
-        implementation_config=TensorStoreConfig(data_copy_concurrency=args.num_workers),
-    ) as plate:
+    config = TensorStoreConfig(data_copy_concurrency=args.num_workers)
+    with ExitStack() as stack:
+        plate = stack.enter_context(
+            ngff.open_ome_zarr(args.store, mode=mode, implementation="tensorstore", implementation_config=config)
+        )
+        parent = None
+        if args.threshold_from is not None:
+            parent = stack.enter_context(
+                ngff.open_ome_zarr(
+                    args.threshold_from, mode="r", implementation="tensorstore", implementation_config=config
+                )
+            )
+            print(f"  thresholds computed on {args.threshold_from}")
         missing = [c for c in args.channels if c not in plate.channel_names]
         if missing:
             print(f"[FAIL] channels not in store: {missing}; have {plate.channel_names}", file=sys.stderr)
             return 2
         indices = {c: plate.channel_names.index(c) for c in args.channels}
+        if parent is not None:
+            missing_parent = [c for c in args.channels if c not in parent.channel_names]
+            if missing_parent:
+                print(f"[FAIL] channels not in --threshold-from store: {missing_parent}", file=sys.stderr)
+                return 2
         positions = list(plate.positions())
 
         # Refuse a partial store outright. _collate_norm_meta takes its stat-key set
@@ -114,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
 
         written = 0
         for name, pos in tqdm(positions, desc="undo" if args.undo else "otsu"):
-            for channel, index in indices.items():
+            for channel in indices:
                 # write_meta_field merges at the CHANNEL level but replaces the whole
                 # sub-dict it is handed, so pass fov_statistics back in full: that is
                 # what makes this additive. dataset_statistics, timepoint_statistics,
@@ -124,7 +183,8 @@ def main(argv: list[str] | None = None) -> int:
                     if stats.pop(_OTSU_KEY, None) is None:
                         continue
                 else:
-                    stats[_OTSU_KEY] = compute_otsu_threshold(pos, index)
+                    source, source_channels = _resolve_source(plate, parent, name, pos)
+                    stats[_OTSU_KEY] = compute_otsu_threshold(source, source_channels.index(channel))
                 if args.dry_run:
                     if written < 3:
                         print(f"  [dry-run] {name}/{channel}: {_OTSU_KEY}={stats.get(_OTSU_KEY)}")

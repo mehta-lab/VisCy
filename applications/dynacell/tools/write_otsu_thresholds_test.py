@@ -181,3 +181,87 @@ def test_constant_fov_uses_the_constant_itself(tmp_path: Path, constant: float) 
     with open_ome_zarr(store, mode="r") as plate:
         _, pos = next(iter(plate.positions()))
         assert pos.zattrs["normalization"]["Nuclei"]["fov_statistics"]["otsu_threshold"] == constant
+
+
+def _make_parent(path: Path, positions: tuple[str, ...] = ("A/1/0", "A/2/0"), offset: float = 400.0) -> None:
+    """Build a parent store whose pixels differ, so a borrowed threshold is distinguishable."""
+    rng = np.random.default_rng(7)
+    with open_ome_zarr(path, layout="hcs", mode="w-", channel_names=_CHANNELS) as plate:
+        plate.zattrs.update({"normalization": _norm_block()})
+        for name in positions:
+            row, col, fov = name.split("/")
+            # Same structure as _make_store but a much brighter blob, so Otsu lands
+            # somewhere the slab's own pixels could never put it.
+            data = rng.normal(100.0, 5.0, size=(1, len(_CHANNELS), 12, 32, 32)).astype(np.float32)
+            data[:, :, :, 8:24, 8:24] += offset
+            pos = plate.create_position(row, col, fov)
+            pos.create_image("0", data, chunks=(1, 1, 12, 32, 32))
+            pos.zattrs.update({"normalization": _norm_block()})
+
+
+def _thresholds(path: Path, channel: str = "Nuclei") -> dict[str, float]:
+    with open_ome_zarr(path, mode="r") as plate:
+        return {n: p.zattrs["normalization"][channel]["fov_statistics"]["otsu_threshold"] for n, p in plate.positions()}
+
+
+def test_threshold_from_uses_the_parents_pixels(tmp_path: Path) -> None:
+    """--threshold-from must write the PARENT's threshold, not the target's own."""
+    store, parent = tmp_path / "slab.zarr", tmp_path / "parent.zarr"
+    _make_store(store)
+    _make_parent(parent, offset=1200.0)
+
+    own = tmp_path / "own.zarr"
+    _make_store(own)
+    assert main([str(own), "--channel", "Nuclei"]) == 0
+    assert main([str(store), "--channel", "Nuclei", "--threshold-from", str(parent)]) == 0
+
+    borrowed, native = _thresholds(store), _thresholds(own)
+    assert set(borrowed) == set(native)
+    # The parent's blob is 3x brighter, so its split sits far above the slab's.
+    for name, value in borrowed.items():
+        assert value > native[name] * 1.5, (name, value, native[name])
+
+
+def test_threshold_from_still_preserves_every_other_statistic(tmp_path: Path) -> None:
+    """Borrowing the threshold must not make the write any less additive."""
+    store, parent = tmp_path / "slab.zarr", tmp_path / "parent.zarr"
+    _make_store(store)
+    _make_parent(parent)
+    before = _read_norm(store)
+
+    assert main([str(store), "--channel", "Nuclei", "--threshold-from", str(parent)]) == 0
+
+    after = _read_norm(store)
+    for node, channels in after.items():
+        for channel, levels in channels.items():
+            for level, stats in levels.items():
+                expected = dict(before[node][channel][level])
+                if level == "fov_statistics" and channel == "Nuclei" and node != "":
+                    expected["otsu_threshold"] = stats["otsu_threshold"]
+                assert stats == expected, (node, channel, level)
+
+
+def test_threshold_from_raises_when_the_parent_lacks_a_position(tmp_path: Path) -> None:
+    """A per-position fallback would silently mix two recipes, so it must raise."""
+    store, parent = tmp_path / "slab.zarr", tmp_path / "parent.zarr"
+    _make_store(store, positions=("A/1/0", "A/2/0"))
+    _make_parent(parent, positions=("A/1/0",))
+
+    with pytest.raises(KeyError, match="absent from the --threshold-from store"):
+        main([str(store), "--channel", "Nuclei", "--threshold-from", str(parent)])
+
+
+def test_threshold_from_rejects_a_parent_missing_the_channel(tmp_path: Path) -> None:
+    """Exit 2 rather than writing a threshold computed on the wrong channel."""
+    store, parent = tmp_path / "slab.zarr", tmp_path / "narrow.zarr"
+    _make_store(store)
+    rng = np.random.default_rng(3)
+    with open_ome_zarr(parent, layout="hcs", mode="w-", channel_names=["Phase3D"]) as plate:
+        plate.zattrs.update({"normalization": {"Phase3D": {"fov_statistics": dict(_SENTINEL_STATS)}}})
+        for name in ("A/1/0", "A/2/0"):
+            row, col, fov = name.split("/")
+            pos = plate.create_position(row, col, fov)
+            pos.create_image("0", rng.normal(100.0, 5.0, (1, 1, 12, 32, 32)).astype(np.float32))
+            pos.zattrs.update({"normalization": {"Phase3D": {"fov_statistics": dict(_SENTINEL_STATS)}}})
+
+    assert main([str(store), "--channel", "Nuclei", "--threshold-from", str(parent)]) == 2
