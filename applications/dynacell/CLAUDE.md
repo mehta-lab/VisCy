@@ -241,6 +241,17 @@ For local foreground runs, `tools/predict_local.sh --parallel N` backgrounds on
 the current host's GPU (2-up confirmed on the A40 interactive node) — a different
 path from the sbatch helper's `--parallel`.
 
+## `experiments/` — investigations, ablations and checks (gitignored)
+
+Every investigation, ablation, probe or planning effort gets **one directory**
+`experiments/YYYY-MM-DD_<brief-name>/` (date = when it started), holding its plan, scripts,
+outputs, logs and any derived stores, plus a `README.md` stating purpose, status, layout and
+when it can go. The directory is gitignored (`applications/dynacell/.gitignore`), so nothing in
+it is tracked; code that outgrows an experiment is promoted into `tools/` or `src/` with tests.
+Do not put this material in the session scratchpad, `/hpc/mydata/alex.kalinin/.tmp/`, or
+`~/.claude/plans/` — those are not discoverable from the repo. First entry:
+`2026-09-14_lite-benchmark-plan/` (DynaCell-lite research plan and phase-0 checks).
+
 ## Repository boundary: paper artifacts do not belong here
 
 **This repo owns data packaging, model training and evaluation. Every paper table
