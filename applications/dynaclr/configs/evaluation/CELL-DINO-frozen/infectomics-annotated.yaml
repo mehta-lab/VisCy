@@ -1,0 +1,37 @@
+# Evaluation config: CELL-DINO-frozen × infectomics-annotated (Wave 1, baseline).
+#
+# CELL-DINO-frozen uses the channel-adaptive ViT-L/16 weights pretrained on
+# Human Protein Atlas single-cell fluorescence — biology-trained but
+# *non-temporal* and *non-DynaCLR*. Tests whether microscopy SSL pretraining
+# alone matches DynaCLR's contrastive recipe.
+#
+# `ckpt_path: null` — CELL-DINO weights are loaded from the local .pth in
+# CellDinoModel.__init__. The eval orchestrator omits `ckpt_path` from the
+# generated predict YAML so Lightning skips checkpoint restoration.
+#
+# Submit:
+#   sbatch applications/dynaclr/configs/evaluation/CELL-DINO-frozen/run_infectomics_annotated.sh
+
+base:
+  - ../recipes/predict.yml
+  - ../recipes/reduce.yml
+  - ../recipes/plot_infectomics.yml
+  - ../recipes/linear_classifiers_infectomics.yml
+  - ../recipes/infectomics-annotated.yml
+
+training_config: /hpc/mydata/eduardo.hirata/repos/viscy/applications/dynaclr/configs/evaluation/CELL-DINO-frozen/training_config_cell_dino_frozen.yaml
+ckpt_path: null
+output_dir: /hpc/projects/organelle_phenotyping/models/CELL-DINO-frozen/evaluations/infectomics-annotated/
+
+# CELL-DINO ViT-L/16 is 302M params (~10× ConvNeXt-tiny). Lower batch_size
+# from the recipe default (400) to keep activations within a single H100/A100.
+# 1024-dim cls embeddings (vs 768) also push downstream PHATE memory up.
+predict:
+  batch_size: 64
+  num_workers: 4
+  precision: 32-true
+  devices: 1
+
+# Publish to its own sub-registry so the LC bundle is identifiable.
+linear_classifiers:
+  publish_dir: /hpc/projects/organelle_phenotyping/models/linear_classifiers/CELL-DINO-frozen/infectomics/

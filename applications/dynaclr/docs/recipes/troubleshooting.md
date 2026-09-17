@@ -1,148 +1,76 @@
-# Recipe: Troubleshooting DynaCLR
+# Troubleshoot DynaCLR workflows
 
-Common issues and how to fix them.
+Start with the smallest command that resolves configuration without launching a
+full job.
 
-## Startup and configuration
+| Stage | Check |
+| --- | --- |
+| Cell index | Run `build-cell-index` with `--num-workers 1`, then `preprocess-cell-index`. |
+| Training | Run `dynaclr fit ... --trainer.fast_dev_run=true`. |
+| Evaluation | Run `dynaclr prepare-eval-configs -c <config>`. |
+| Embeddings | Run `dynaclr info <embeddings.zarr>`. |
 
-### "Duplicate experiment name"
+## Data and index errors
 
-```
-ValueError: Duplicate experiment name 'my_exp'. Each experiment must have a unique name.
-```
+### Missing or multiple tracking CSVs
 
-Each experiment in `experiments.yml` needs a unique `name` field.
+Every included image FOV must have exactly one CSV at
+`{tracks_path}/{row}/{column}/{fov}/*.csv`. The minimum columns are
+`track_id`, `t`, `y`, and `x`.
 
-### "channel_names mismatch"
+### Channel not found in zarr
 
-```
-ValueError: Experiment 'my_exp': channel_names mismatch.
-Expected (from config): ['Phase3D', 'GFP'], got (from zarr): ['Phase', 'GFP']
-```
+`channels[].name` in the collection must exactly match the OME-Zarr channel
+metadata. `channels[].marker` is a semantic output label and does not need to
+match the physical name.
 
-The `channel_names` in your YAML must exactly match the zarr metadata. Check:
+### Missing focus or normalization fields
 
-```python
-from iohub.ngff import open_ome_zarr
-plate = open_ome_zarr("my_experiment.zarr", mode="r")
-pos = next(iter(plate.positions()))[1]
-print(pos.channel_names)
-```
+Run the [AI-ready dataset workflow](../DAGs/ai_ready_datasets.md), rebuild the
+cell index, and rerun `preprocess-cell-index`. Training should consume the
+preprocessed parquet, not the raw index.
 
-### "source_channel entries not found in channel_names"
+### Very few valid anchors
 
-Your `source_channel` list references channels not in `channel_names`.
-Every entry in `source_channel` must be a member of `channel_names`.
+Check track length, lineage identifiers, imaging interval, and `tau_range`.
+Temporal lookup requires another observation in the same positive group within
+the per-experiment frame range.
 
+## Training errors
 
-### "No training experiments remaining after splitting"
+### Tensor channel or shape mismatch
 
-All your experiments ended up in `val_experiments`. Make sure at least one
-experiment name in `experiments.yml` is **not** listed in `val_experiments`.
+Make `model.init_args.encoder.init_args.in_channels` agree with
+`data.init_args.channels_per_sample`. Copy crop, z-reduction, and stack-depth
+settings from a maintained config with the same model dimensionality.
 
-## Data loading
+### GPU out of memory
 
-### "No tracking CSV in ..., skipping"
+Reduce `batch_size` first, then patch size or z extraction depth. Confirm mixed
+precision is enabled when supported. Re-run the fast development check after
+each change.
 
-The expected CSV file is missing. Check that your tracking CSVs follow the
-directory structure:
+### DDP stalls
 
-```
-{tracks_path}/{row}/{col}/{fov_idx}/something.csv
-```
+Use a maintained topology recipe and SLURM wrapper. Confirm all ranks receive
+the same number of batches and that a custom sampler is not being replaced by
+Lightning's distributed sampler.
 
-The loader globs for `*.csv` in each FOV directory.
+## Prediction and evaluation errors
 
-### Slow startup
+### Prediction hangs while opening zarr
 
-If `MultiExperimentIndex` takes minutes to initialize, use a pre-built
-cell index parquet:
+Use `--num-workers 0` with `dynaclr predict-triplet`.
 
-```bash
-dynaclr build-cell-index experiments.yml cell_index.parquet
-```
+### Embeddings are not comparable
 
-Then add to your training config:
+Verify checkpoint, feature key, normalization, patch size, z handling, and
+pixel-size rescaling. Outputs from different checkpoints or representation keys
+are different feature spaces.
 
-```yaml
-data:
-  init_args:
-    cell_index_path: /path/to/cell_index.parquet
-```
+### Annotation join produces missing labels
 
-See `build-cell-index.md`.
-
-### "valid_anchors" is very small
-
-Valid anchors require that for each cell observation, at least one other
-observation from the **same lineage** exists within `tau_range` frames.
-
-Common causes:
-- `tau_range` is too narrow for the imaging interval
-- Tracks are very short (few timepoints)
-- No lineage links (`parent_track_id` column missing or all NaN)
-
-Check your tau conversion:
-
-```python
-from dynaclr.data.experiment import ExperimentRegistry
-registry = ExperimentRegistry.from_yaml("experiments.yml")
-for exp in registry.experiments:
-    min_f, max_f = registry.tau_range_frames(exp.name, (0.5, 2.0))
-    print(f"{exp.name}: tau_range_frames = ({min_f}, {max_f})")
-```
-
-## Training
-
-### Out of memory (OOM)
-
-Reduce memory usage in order of impact:
-
-1. **Reduce `yx_patch_size`** — e.g., `[256, 256]` instead of `[384, 384]`
-2. **Reduce `batch_size`** — halving batch size roughly halves GPU memory
-3. **Reduce `z_window`** — fewer Z-slices = smaller input volume
-4. **Reduce `in_stack_depth`** — must match `z_window`
-5. **Use `precision: 16-mixed`** — mixed precision halves activation memory
-
-### Loss is NaN
-
-- Check that normalizations produce finite values (no division by zero)
-- Ensure `temperature` in `NTXentHCL` is not too small (typical: 0.05-0.1)
-- Verify your image data doesn't contain NaN or Inf values
-
-### Loss plateaus early
-
-- Try lower `temperature` (sharper contrastive objective)
-- Increase `beta` in `NTXentHCL` (harder negative mining)
-- Ensure `channel_dropout_prob` isn't too high — the model needs to see
-  fluorescence often enough to learn from it
-- Check that `stratify_by: condition` is set — imbalanced conditions can
-  cause the model to collapse to trivial solutions
-
-### DDP hangs
-
-- Set `export NCCL_DEBUG=INFO` to see communication logs
-- Ensure all GPUs can see each other (`nvidia-smi` on compute node)
-- Check that `use_distributed_sampler: false` is set (FlexibleBatchSampler
-  handles DDP internally)
-
-## Prediction and evaluation
-
-### Embeddings look random / poor quality
-
-- **Match normalizations exactly** between training and inference configs
-- **Match `final_yx_patch_size`** — using a different crop size changes the
-  effective receptive field
-- Ensure you're loading the correct checkpoint (`ckpt_path`)
-- Check that `source_channel` order matches training (positional alignment)
-
-### Linear classifier accuracy is low
-
-- Verify annotation quality — check for label noise or ambiguous categories
-- Try `use_pca: true` with `n_pca_components: 32` to reduce noise
-- Ensure `class_weight: balanced` is set for imbalanced label distributions
-- Increase `max_iter` if the solver doesn't converge
-
-### "KeyError: fov_name" when applying classifier
-
-Annotations CSV must have a `fov_name` column that matches the FOV naming
-convention in the embeddings zarr (e.g., `A/1/0`).
+Normalize `fov_name` values and provide either `(fov_name, id)` or
+`(fov_name, t, track_id)` in both annotations and embedding `obs`. Duplicate
+keys also require `y` and `x` for spatial disambiguation. See the
+[annotation contract](../linear_classifiers/annotations_and_linear_classifiers.md).

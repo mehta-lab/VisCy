@@ -1,0 +1,29 @@
+# Stage B — train the SAME-MODALITY SEC61B classifier from the witness-GMM labels.
+#
+# Complement to 02_stage_b_train_phase.yml (teacher/student). Here the classifier is
+# trained on the SAME SEC61B embeddings the labels were computed from — a logistic
+# classifier over the organelle channel that reproduces its own witness-GMM labels.
+# Its purpose is a like-for-like comparison with the Phase3D classifier: same model
+# type (StandardScaler + LR C=1.0, class_weight=balanced), same labels, same split,
+# differing only by the input channel (SEC61B GFP vs Phase3D).
+#
+# Run: dynaclr run-linear-classifiers -c 02_stage_b_train_sec61b.yml
+
+embeddings_path: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/predictions/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/epoch105-step84800/SEC61B.zarr"
+output_dir: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/witness_gmm_phase_classifier/stage_b_sec61b"
+
+label_source: annotations
+annotations:
+  - experiment: "2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV"
+    path: "/hpc/projects/organelle_phenotyping/datasets/2026_07_01_A549_SEC61B_TOMM20_G3BP1_ZIKV/2-phenotyping/witness_gmm_phase_classifier/labels/SEC61B_organelle_remodeling_state.csv"
+tasks:
+  - task: organelle_remodeling_state
+    marker_filters: [SEC61B]
+use_scaling: true
+use_pca: false
+split_train_data: 0.8
+random_seed: 42
+split_groups_by:
+  - experiment
+  - fov_name
+  - track_id

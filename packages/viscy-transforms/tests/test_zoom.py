@@ -36,6 +36,21 @@ def test_batched_zoomd():
     assert result["label"].shape == expected_shape
 
 
+def test_batched_zoomd_exact_size_avoids_scale_rounding():
+    """Explicit size must avoid PyTorch scale-factor flooring (154 -> 159)."""
+    data = {"image": torch.rand(1, 1, 1, 154, 154)}
+    transform = BatchedZoomd(
+        keys=["image"],
+        scale_factor=None,
+        size=(1, 160, 160),
+        mode="nearest-exact",
+    )
+
+    result = transform(data)
+
+    assert result["image"].shape == (1, 1, 1, 160, 160)
+
+
 def test_batched_zoom_roundtrip():
     """Test roundtrip zoom (2x then 0.5x) returns close to original."""
     batch_size = 4

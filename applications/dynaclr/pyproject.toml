@@ -53,8 +53,10 @@ dependencies = [
 optional-dependencies.eval = [
   "anndata",
   "dtaidistance",
+  "joblib",
   "natsort",
   "phate",
+  "pot",
   "scikit-learn",
   "statsmodels",
   "umap-learn",

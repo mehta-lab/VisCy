@@ -7,9 +7,31 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dynaclr.evaluation.mmd.compute_mmd import run_mmd_analysis, run_mmd_pooled
-from dynaclr.evaluation.mmd.config import ComparisonSpec, MMDEvalConfig, MMDPooledConfig, MMDSettings
-from viscy_utils.evaluation.mmd import compute_mmd_unbiased, median_heuristic, mmd_permutation_test
+from dynaclr.evaluation.mmd.compute_mmd import (
+    run_mmd_analysis,
+    run_mmd_combined,
+    run_mmd_over_time,
+    run_mmd_pooled,
+)
+from dynaclr.evaluation.mmd.config import (
+    ComparisonSpec,
+    MMDCombinedConfig,
+    MMDEvalConfig,
+    MMDOverTimeConfig,
+    MMDPooledConfig,
+    MMDRepresentationConfig,
+    MMDSettings,
+)
+from dynaclr.evaluation.mmd.representation import (
+    fit_pca_for_explained_variance,
+    prepare_mmd_representation,
+)
+from viscy_utils.evaluation.mmd import (
+    compute_mmd_unbiased,
+    median_heuristic,
+    mmd_permutation_test,
+    witness_function,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -130,6 +152,41 @@ def test_compute_mmd_unbiased_symmetric():
     Y = rng.normal(1, 1, (100, 8))
     bw = median_heuristic(X, Y)
     assert abs(compute_mmd_unbiased(X, Y, bw) - compute_mmd_unbiased(Y, X, bw)) < 1e-10
+
+
+def test_witness_function_separates_distributions():
+    """Witness scores are positive for X-like points and negative for Y-like points."""
+    rng = np.random.default_rng(6)
+    X = rng.normal(0.0, 1.0, (200, 8))
+    Y = rng.normal(5.0, 1.0, (200, 8))
+    query = np.vstack([X, Y])
+    scores = witness_function(query, X, Y)
+    assert scores.shape == (len(query),)
+    assert scores[: len(X)].mean() > 0 > scores[len(X) :].mean()
+
+
+def test_witness_function_antisymmetric():
+    """Swapping X and Y negates the witness scores."""
+    rng = np.random.default_rng(7)
+    X = rng.normal(0.0, 1.0, (100, 8))
+    Y = rng.normal(3.0, 1.0, (100, 8))
+    query = rng.normal(1.5, 1.0, (50, 8))
+    bw = median_heuristic(X, Y)
+    w_xy = witness_function(query, X, Y, bandwidth=bw)
+    w_yx = witness_function(query, Y, X, bandwidth=bw)
+    assert np.allclose(w_xy, -w_yx, atol=1e-6)
+
+
+def test_witness_function_chunking_invariant():
+    """Chunk size does not change the result."""
+    rng = np.random.default_rng(8)
+    X = rng.normal(0.0, 1.0, (120, 8))
+    Y = rng.normal(2.0, 1.0, (120, 8))
+    query = rng.normal(1.0, 1.0, (77, 8))
+    bw = median_heuristic(X, Y)
+    small = witness_function(query, X, Y, bandwidth=bw, chunk_size=10)
+    large = witness_function(query, X, Y, bandwidth=bw, chunk_size=1000)
+    assert np.allclose(small, large, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +484,80 @@ def _save_adata_zarr(adata: ad.AnnData, path: str) -> None:
     adata.write_zarr(path)
 
 
+def test_run_mmd_combined_keeps_all_marker_stores(tmp_path):
+    """Separate marker stores for one experiment must not overwrite each other."""
+    paths = []
+    for exp_index, experiment in enumerate(["exp_a", "exp_b"]):
+        for marker_index, marker in enumerate(["SEC61B", "TOMM20"]):
+            rng = np.random.default_rng(exp_index * 10 + marker_index)
+            obs = pd.DataFrame(
+                {
+                    "experiment": [experiment] * 30,
+                    "marker": [marker] * 30,
+                    "perturbation": ["uninfected"] * 30,
+                }
+            )
+            adata = ad.AnnData(X=rng.normal(size=(30, 8)).astype(np.float32), obs=obs)
+            store = str(tmp_path / f"{experiment}_{marker}.zarr")
+            _save_adata_zarr(adata, store)
+            paths.append(store)
+
+    result = run_mmd_combined(
+        MMDCombinedConfig(
+            input_paths=paths,
+            output_dir=str(tmp_path / "out"),
+            mmd=MMDSettings(n_permutations=10, min_cells=10),
+        )
+    )
+
+    assert set(result["marker"]) == {"SEC61B", "TOMM20"}
+    assert len(result) == 2
+
+
+def test_run_mmd_over_time_uses_pre_lot_coordinates(tmp_path):
+    """Pre/post results must use matching scaler/PCA coordinates."""
+    raw_paths = []
+    corrected_paths = []
+    for index, experiment in enumerate(["exp_a", "exp_b"]):
+        rng = np.random.default_rng(index)
+        obs = pd.DataFrame(
+            {
+                "experiment": [experiment] * 30,
+                "marker": ["SEC61B"] * 30,
+                "perturbation": ["uninfected"] * 30,
+            }
+        )
+
+        raw_path = str(tmp_path / f"{experiment}_raw.zarr")
+        _save_adata_zarr(
+            ad.AnnData(X=rng.normal(size=(30, 7)).astype(np.float32), obs=obs.copy()),
+            raw_path,
+        )
+        raw_paths.append(raw_path)
+
+        corrected = ad.AnnData(
+            X=rng.normal(size=(30, 3)).astype(np.float32),
+            obs=obs.copy(),
+        )
+        corrected.obsm["X_pre_lot"] = rng.normal(size=(30, 3)).astype(np.float32)
+        corrected_path = str(tmp_path / f"{experiment}_corrected.zarr")
+        _save_adata_zarr(corrected, corrected_path)
+        corrected_paths.append(corrected_path)
+
+    result = run_mmd_over_time(
+        MMDOverTimeConfig(
+            input_paths=raw_paths,
+            corrected_paths=corrected_paths,
+            output_dir=str(tmp_path / "out"),
+            mmd=MMDSettings(n_permutations=10, min_cells=10),
+        )
+    )
+
+    assert set(result["correction"]) == {"pre", "post"}
+    assert set(result.loc[result["correction"] == "pre", "embedding_key"]) == {"X_pre_lot"}
+    assert set(result.loc[result["correction"] == "post", "embedding_key"]) == {"X"}
+
+
 def test_run_mmd_pooled_columns(tmp_path):
     """run_mmd_pooled returns expected columns including activity_zscore and q_value."""
     adata1 = _make_adata(n_cells=200, seed=0)
@@ -480,3 +611,87 @@ def test_run_mmd_pooled_condition_aliases(tmp_path):
     )
     df = run_mmd_pooled(cfg)
     assert not df["mmd2"].isna().all(), "Expected valid MMD after condition alias remapping"
+
+
+# ---------------------------------------------------------------------------
+# Biological MMD representation tests
+# ---------------------------------------------------------------------------
+
+
+def test_biological_mmd_representation_defaults():
+    cfg = _cfg()
+    assert cfg.representation.normalization == "control_mad"
+    assert cfg.representation.pca_variance == pytest.approx(0.80)
+    # Cross-dataset batch-effect MMD intentionally has no self-normalization.
+    assert not hasattr(MMDCombinedConfig(input_paths=["a", "b"], output_dir="/tmp"), "representation")
+
+
+def test_fit_pca_for_explained_variance_selects_minimum_components():
+    rng = np.random.default_rng(123)
+    latent = rng.normal(size=(500, 2))
+    mixing = rng.normal(size=(2, 12))
+    x = latent @ mixing + 0.01 * rng.normal(size=(500, 12))
+    fit = fit_pca_for_explained_variance(x, 0.80, marker="TOMM20")
+    selected = fit.components.shape[0]
+    assert fit.realized_variance >= 0.80
+    if selected > 1:
+        assert fit.cumulative_explained_variance[selected - 2] < 0.80
+    assert fit.transform(x).shape == (len(x), selected)
+
+
+def test_prepare_mmd_representation_defaults_and_artifacts(tmp_path):
+    adata = _make_adata(n_cells=400, n_features=12)
+    prepared = prepare_mmd_representation(
+        np.asarray(adata.X),
+        adata.obs,
+        MMDRepresentationConfig(),
+        artifact_dir=tmp_path,
+    )
+    assert prepared.label == "control_mad_pca80"
+    assert set(prepared.n_components_by_marker) == {"Phase3D", "TOMM20"}
+    assert prepared.features.shape[0] == adata.n_obs
+    assert prepared.features.shape[1] <= adata.n_vars
+    assert (tmp_path / "control_mad_summary.csv").exists()
+    assert (tmp_path / "marker_pca_summary.csv").exists()
+    assert (tmp_path / "marker_pca_scree.csv").exists()
+    assert (tmp_path / "run_info.json").exists()
+
+
+def test_prepare_mmd_representation_raw_opt_out():
+    adata = _make_adata(n_cells=200, n_features=8)
+    prepared = prepare_mmd_representation(
+        np.asarray(adata.X),
+        adata.obs,
+        MMDRepresentationConfig(normalization="none", pca_variance=None),
+    )
+    assert prepared.label == "none"
+    assert np.array_equal(prepared.features, np.asarray(adata.X))
+    assert set(prepared.n_components_by_marker.values()) == {adata.n_vars}
+
+
+def test_run_mmd_analysis_records_representation():
+    adata = _make_adata(n_cells=300, n_features=10)
+    normalized = run_mmd_analysis(adata, _cfg(mmd=_SETTINGS_FAST))
+    assert set(normalized["representation"]) == {"control_mad_pca80"}
+    assert normalized["n_components"].notna().all()
+
+    raw_cfg = _cfg(
+        mmd=_SETTINGS_FAST,
+        representation=MMDRepresentationConfig(
+            normalization="none",
+            pca_variance=None,
+        ),
+    )
+    raw = run_mmd_analysis(adata, raw_cfg)
+    assert set(raw["representation"]) == {"none"}
+    assert set(raw["n_components"]) == {adata.n_vars}
+
+
+def test_representation_fit_honors_noncondition_qc_filter(tmp_path):
+    adata = _make_adata(n_cells=240, n_features=8)
+    adata.obs["qc"] = "keep"
+    adata.obs.iloc[:20, adata.obs.columns.get_loc("qc")] = "drop"
+    cfg = _cfg(mmd=_SETTINGS_FAST, obs_filter={"qc": "keep"})
+    run_mmd_analysis(adata, cfg, representation_artifact_dir=tmp_path)
+    summary = pd.read_csv(tmp_path / "control_mad_summary.csv")
+    assert int(summary["n_cells"].sum()) == adata.n_obs - 20

@@ -8,7 +8,10 @@ import pandas as pd
 import pytest
 
 from dynaclr.evaluation.evaluate_config import AnnotationSource, LinearClassifiersStepConfig, TaskSpec
-from dynaclr.evaluation.linear_classifiers.orchestrated import run_linear_classifiers
+from dynaclr.evaluation.linear_classifiers.orchestrated import (
+    _build_labeled_adata,
+    run_linear_classifiers,
+)
 
 
 def _make_embeddings_zarr(
@@ -76,14 +79,13 @@ def _make_annotations(
 ) -> Path:
     """Create a synthetic annotation CSV with infection_state and organelle_state labels.
 
-    fov_name is stored as the first path component only (e.g. "A/1/FOV0" → "A"),
-    matching what load_annotation_anndata extracts from obs via .str.split("/").str[0].
+    fov_name keeps the full normalized path (e.g. "A/1/FOV0"), matching
+    ``load_annotation_anndata`` on both the embedding and annotation sides.
     """
     labels = ["uninfected" if i % 3 != 0 else "infected" for i in range(len(fov_names))]
-    # Extract first path component to match the join key in load_annotation_anndata
-    fov_first = [str(f).split("/")[0] for f in fov_names]
+    fov_normalized = [str(f).strip("/") for f in fov_names]
     data: dict = {
-        "fov_name": fov_first,
+        "fov_name": fov_normalized,
         "t": ts,
         "track_id": track_ids,
         "infection_state": labels,
@@ -164,6 +166,55 @@ def test_run_linear_classifiers_single_zarr_mode(tmp_path):
     # auto-expand to Phase3D and TOMM20 → 2 rows
     assert len(results) == 2
     assert set(results["marker_filter"].tolist()) == {"Phase3D", "TOMM20"}
+
+
+def test_control_pseudolabels_add_all_true_control_rows(tmp_path):
+    """Control-well cells extend manual perturbed-well infection labels."""
+    zarr_path = tmp_path / "embeddings.zarr"
+    adata = _make_embeddings_zarr(zarr_path, experiment="exp_A")
+    perturbed = adata.obs["perturbation"] == "ZIKV"
+    ann = _make_annotations(
+        tmp_path,
+        "exp_A",
+        adata.obs.loc[perturbed, "fov_name"].tolist(),
+        adata.obs.loc[perturbed, "t"].tolist(),
+        adata.obs.loc[perturbed, "track_id"].tolist(),
+    )
+    config = LinearClassifiersStepConfig(
+        annotations=[AnnotationSource(experiment="exp_A", path=str(ann))],
+        tasks=[TaskSpec(task="infection_state")],
+        control_pseudolabels={"infection_state": "uninfected"},
+    )
+
+    labeled = _build_labeled_adata(config, adata, "infection_state", None)
+
+    assert labeled is not None
+    assert labeled.n_obs == adata.n_obs
+    controls = labeled.obs["perturbation"] == "uninfected"
+    assert controls.sum() == (~perturbed).sum()
+    assert (labeled.obs.loc[controls, "infection_state"] == "uninfected").all()
+    assert "infected" in set(labeled.obs.loc[~controls, "infection_state"])
+
+
+def test_control_pseudolabels_reject_conflicting_control_annotation(tmp_path):
+    """A declared control row cannot carry a positive manual infection label."""
+    zarr_path = tmp_path / "embeddings.zarr"
+    adata = _make_embeddings_zarr(zarr_path, experiment="exp_A")
+    ann = _make_annotations(
+        tmp_path,
+        "exp_A",
+        adata.obs["fov_name"].tolist(),
+        adata.obs["t"].tolist(),
+        adata.obs["track_id"].tolist(),
+    )
+    config = LinearClassifiersStepConfig(
+        annotations=[AnnotationSource(experiment="exp_A", path=str(ann))],
+        tasks=[TaskSpec(task="infection_state")],
+        control_pseudolabels={"infection_state": "uninfected"},
+    )
+
+    with pytest.raises(ValueError, match="labels conflicting"):
+        _build_labeled_adata(config, adata, "infection_state", None)
 
 
 def test_run_linear_classifiers_fallback_join_no_id(tmp_path):

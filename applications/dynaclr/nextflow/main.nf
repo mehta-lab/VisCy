@@ -13,6 +13,13 @@
 //       --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
 //       -resume
 //
+//   # Evaluation from pre-computed embeddings (skips predict/split)
+//   nextflow run applications/dynaclr/nextflow/main.nf -entry eval_from_embeddings \
+//       --eval_config /path/to/eval_config.yaml \
+//       --embeddings_glob '/hpc/projects/intracellular_dashboard/organelle_dynamics/*/2-phenotyping/predictions/MODEL/RUN/CKPT/*.zarr' \
+//       --workspace_dir /hpc/mydata/eduardo.hirata/repos/viscy \
+//       -resume
+//
 //   # Training preprocessing (collection → parquet)
 //   nextflow run applications/dynaclr/nextflow/main.nf -entry training_preprocessing \
 //       --collection_yaml /path/to/collection.yml \
@@ -26,6 +33,7 @@
 nextflow.enable.dsl = 2
 
 include { EVALUATION              } from './workflows/evaluation'
+include { EVAL_FROM_EMBEDDINGS    } from './workflows/eval_from_embeddings'
 include { TRAINING_PREPROCESSING  } from './workflows/training_preprocessing'
 
 
@@ -36,6 +44,7 @@ workflow {
 
     Use one of:
       -entry evaluation              (requires --eval_config)
+      -entry eval_from_embeddings    (requires --eval_config, --embeddings_glob)
       -entry training_preprocessing  (requires --collection_yaml, --parquet_out)
     """.stripIndent()
 }
@@ -50,6 +59,21 @@ workflow evaluation {
         error "ERROR: --eval_config is required for -entry evaluation"
     }
     EVALUATION(file(params.eval_config), params.workspace_dir)
+}
+
+
+workflow eval_from_embeddings {
+    if (!params.eval_config) {
+        error "ERROR: --eval_config is required for -entry eval_from_embeddings"
+    }
+    if (!params.embeddings_glob) {
+        error "ERROR: --embeddings_glob is required for -entry eval_from_embeddings"
+    }
+    EVAL_FROM_EMBEDDINGS(
+        file(params.eval_config),
+        params.embeddings_glob,
+        params.workspace_dir
+    )
 }
 
 

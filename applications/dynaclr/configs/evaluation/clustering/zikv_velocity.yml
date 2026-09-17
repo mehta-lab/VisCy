@@ -1,0 +1,29 @@
+# PHATE + diffusion-pseudotime + velocity maps for the phenotype-flow analysis (§6).
+#
+# Discover whether cells follow an ordered control -> remodel progression:
+#   - PHATE layout (preserves trajectory geometry, unlike UMAP which fragmented it),
+#   - diffusion pseudotime rooted at control-well cells (annotation-free),
+#   - measured velocity from single-cell tracks (UMAP(t+1)-UMAP(t) analog, but on PHATE),
+#   - validation: Spearman(pseudotime, real t) should be strongly positive.
+#
+# Runs the three markers requested: viral_sensor, Phase3D, G3BP1.
+# See .ed_planning/dynaclr/clustering/PLAN.md §6.
+
+random_seed: 42
+output_dir: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800/clustering_pop
+
+# control_ref subtracts the per-timepoint control-well centroid before differencing
+# the velocity, removing background drift shared by all cells. Probed 2026-07-15:
+# it HELPS the organelle channel (G3BP1 infected-only coherence 0.018 -> 0.052, ~3x)
+# but slightly HURTS the reporter (viral_sensor 0.030 -> 0.021), whose motion is
+# already mostly infection signal. So: on for organelle/label-free, off for reporter.
+datasets:
+  - marker: viral_sensor
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800/embeddings/2025_07_24_A549_viral_sensor_ZIKV.zarr
+    control_ref: false
+  - marker: Phase3D
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800/embeddings/2025_07_24_A549_Phase3D_ZIKV.zarr
+    control_ref: true
+  - marker: G3BP1
+    embeddings: /hpc/projects/organelle_phenotyping/models/DynaCLR-2D-MIP-BagOfChannels/2d-mip-ntxent-t0p2-lr2e5-bs256-192to160-zext11-single-marker-fix-shuffler/evaluations/infectomics-annotated_epoch105_step84800/embeddings/2025_07_24_A549_G3BP1_ZIKV.zarr
+    control_ref: true
