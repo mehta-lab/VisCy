@@ -569,6 +569,7 @@ class DynacellUNet(LightningModule):
         self._loss_accepts_fg_mask = "fg_mask" in sig.parameters or any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
+        self._loss_returns_components = "return_components" in sig.parameters
 
         # Build example_input_array for graph logging (TensorBoard/W&B).
         in_channels = model_config.get("in_channels") or 1
@@ -609,20 +610,35 @@ class DynacellUNet(LightningModule):
         """
         return self.model(x)
 
-    def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> Tensor:
-        """Compute loss, optionally passing fg_mask to the loss function."""
-        if "fg_mask" in batch:
-            if not self._loss_accepts_fg_mask:
-                raise TypeError(
-                    f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
-                    f"Use SpotlightLoss or remove fg_mask_key from the data config."
-                )
-            # Re-binarize: hcs.py patches fg_mask into gpu_augmentations, and the
-            # affine resamples it with bilinear interpolation, so the mask arrives
-            # with fractional values on any arm whose augmentation stack resamples.
-            # Flip-only stacks are unaffected; this keeps the two cases identical.
-            return self.loss_function(pred, target, fg_mask=(batch["fg_mask"] > 0.5).float())
-        return self.loss_function(pred, target)
+    def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, dict[str, Tensor]]:
+        """Compute loss, optionally passing fg_mask to the loss function.
+
+        Returns the components alongside the scalar so the Spotlight terms can
+        be logged separately. They come from the loss itself rather than being
+        re-derived here: a second derivation would silently fork from the
+        objective actually being optimized, which is the one thing that makes
+        the logged numbers worthless for calibration.
+
+        Returns
+        -------
+        tuple of (Tensor, dict of str to Tensor)
+            Scalar loss and its components (empty for a plain criterion).
+        """
+        if "fg_mask" not in batch:
+            return self.loss_function(pred, target), {}
+        if not self._loss_accepts_fg_mask:
+            raise TypeError(
+                f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
+                f"Use SpotlightLoss or remove fg_mask_key from the data config."
+            )
+        # Re-binarize: hcs.py patches fg_mask into gpu_augmentations, and the
+        # affine resamples it with bilinear interpolation, so the mask arrives
+        # with fractional values on any arm whose augmentation stack resamples.
+        # Flip-only stacks are unaffected; this keeps the two cases identical.
+        fg_mask = (batch["fg_mask"] > 0.5).float()
+        if not self._loss_returns_components:
+            return self.loss_function(pred, target, fg_mask=fg_mask), {}
+        return self.loss_function(pred, target, fg_mask=fg_mask, return_components=True)
 
     def training_step(self, batch: Sample, batch_idx: int) -> Tensor:
         """Execute a single training step.
@@ -642,7 +658,7 @@ class DynacellUNet(LightningModule):
         source = batch["source"]
         target = batch["target"]
         pred = self.forward(source)
-        loss = self._compute_loss(pred, target, batch)
+        loss, components = self._compute_loss(pred, target, batch)
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
         self.log(
@@ -655,6 +671,19 @@ class DynacellUNet(LightningModule):
             sync_dist=True,
             batch_size=source.shape[0],
         )
+        # Unweighted Spotlight terms, mirroring `loss/g_recon_*_train` on the GAN
+        # path. Without these the fused scalar cannot say whether the Dice term
+        # is contributing anything, which is what the lambda_mse choice rests on.
+        for name, value in components.items():
+            self.log(
+                f"loss/{name}_train",
+                value,
+                on_step=True,
+                on_epoch=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=source.shape[0],
+            )
         return loss
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
@@ -672,7 +701,7 @@ class DynacellUNet(LightningModule):
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         pred = self.forward(source)
-        loss = self._compute_loss(pred, target, batch)
+        loss, _ = self._compute_loss(pred, target, batch)
         _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",

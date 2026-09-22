@@ -237,6 +237,51 @@ def test_spotlight_with_fg_mask_fast_dev_run(tmp_path, tiny_hcs_zarr):
     trainer.fit(module, datamodule=datamodule)
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
+    # The fused scalar cannot say whether the Dice term contributes anything,
+    # which is what the lambda_mse choice rests on. Mirrors the GAN path's
+    # ``loss/g_recon_*_train`` assertions below.
+    assert "loss/masked_mse_train" in trainer.callback_metrics
+    assert "loss/dice_train" in trainer.callback_metrics
+    assert torch.isfinite(trainer.callback_metrics["loss/masked_mse_train"])
+    assert torch.isfinite(trainer.callback_metrics["loss/dice_train"])
+
+
+def test_dynacell_unet_logged_components_reconstruct_the_fused_loss():
+    """The logged terms are the ones actually summed, not a re-derivation.
+
+    Re-deriving masked_mse/dice in the engine would let them drift from the
+    objective being optimized while still looking plausible on a dashboard.
+    Pinning ``lambda*mse + (1-lambda)*dice == total`` catches that fork.
+    """
+    seed_everything(0)
+    lambda_mse = 0.5
+    module = DynacellUNet(
+        architecture="FNet3D",
+        model_config=FNET_TEST_CONFIG,
+        loss_function=SpotlightLoss(lambda_mse=lambda_mse, sigmoid_k=-0.95),
+    )
+    pred = torch.randn(2, 1, 4, 32, 32)
+    target = torch.randn(2, 1, 4, 32, 32)
+    mask = torch.zeros(2, 1, 4, 32, 32)
+    mask[..., :16, :] = 1.0
+    total, components = module._compute_loss(pred, target, {"fg_mask": mask})
+    assert set(components) == {"masked_mse", "dice"}
+    expected = lambda_mse * components["masked_mse"] + (1 - lambda_mse) * components["dice"]
+    torch.testing.assert_close(total, expected)
+
+
+def test_dynacell_unet_plain_criterion_reports_no_components():
+    """A criterion without ``return_components`` still returns the pair, empty."""
+    module = DynacellUNet(
+        architecture="FNet3D",
+        model_config=FNET_TEST_CONFIG,
+        loss_function=torch.nn.MSELoss(),
+    )
+    pred = torch.randn(2, 1, 4, 32, 32)
+    target = torch.randn(2, 1, 4, 32, 32)
+    loss, components = module._compute_loss(pred, target, {})
+    assert components == {}
+    torch.testing.assert_close(loss, F.mse_loss(pred, target))
 
 
 # ---- DynacellGAN + swappable recon_loss (CPU) ----
