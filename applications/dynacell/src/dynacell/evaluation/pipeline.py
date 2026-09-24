@@ -1446,6 +1446,19 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         f"nuclei_gt_path store is missing positions {sorted(missing_nuclei)!r} "
                         "(cellpose_watershed reads GT-nuclei seeds there, matched by position name)"
                     )
+            # Every per-timepoint artifact is indexed by its own store's t, so a
+            # T-subset prediction (or a lite GT against a full-T segmentation store)
+            # would score frame k against frame k of a different frame list. Compare
+            # per position: T legitimately varies across FOVs within one store.
+            # Shape metadata only — no array is read.
+            for (pos_name, pos_pred), (_, pos_gt), (_, pos_seg) in zip(pred_positions, gt_positions, seg_positions):
+                t_counts = {"pred": pos_pred.data.shape[0], "gt": pos_gt.data.shape[0]}
+                if pos_seg is not None:
+                    t_counts["seg"] = pos_seg.data.shape[0]
+                if nuclei_by_name is not None:
+                    t_counts["nuclei"] = nuclei_by_name[pos_name].data.shape[0]
+                if len(set(t_counts.values())) > 1:
+                    raise ValueError(f"Timepoint count mismatch at position {pos_name!r}: {t_counts}")
 
             # Leaf-level MicroMS3IM calibration: fit α once on a random
             # subsample of (FOV, t) volumes and reuse the fitted sim for
