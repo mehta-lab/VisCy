@@ -1,0 +1,28 @@
+# Roster for tools/generate_spotlight_v2_eval_configs.py (plan: ~/.claude/plans/spotlight-v2.md).
+# One wave = one set of buckets, spotlight_v2_<organelle>_<leaf>__<wave>. Append a NEW wave for
+# new arms (segaux, seed replicates, fcmae_vscyto3d_scratch_v2, clipped stores) so re-running it
+# never re-scores an earlier wave's conditions. Entries are paths.PAPER_KEY model tokens; the
+# store defaults to the canonical <organelle>/<model>/ipsc/<leaf>/prediction.zarr. Per entry,
+# `leaves: [...]` narrows the test legs and `pred_paths: {<leaf>: <path>}` points at a
+# non-canonical store.
+leaves: [ipsc, a549__mock, a549__denv, a549__zikv]
+waves:
+  # Stage 0d/0e: the 8 baselines + the 4 v1 Spotlight arms. fcmae_vscyto3d_scratch is the April
+  # model (ep 111/200 nucleus, 147/200 membrane), a placeholder until the fresh retrain lands as
+  # fcmae_vscyto3d_scratch_v2 in a later wave. celldiff_r2_iterative is the celldiff/ipsc_confocal
+  # leaf (checkpoints under .../celldiff_r2/).
+  stage0:
+    nucleus: &stage0_models
+      - fnet2d
+      - fnet3d_paper
+      - fcmae_vscyto2d_scratch
+      - fcmae_vscyto3d_scratch
+      - pix2pix2d_unetvit
+      - pix2pix3d_unetvit
+      - celldiff_2d
+      - celldiff_r2_iterative
+      - fnet2d_spotlight
+      - fnet3d_spotlight
+      - pix2pix2d_unetvit_spotlight
+      - pix2pix3d_unetvit_spotlight
+    membrane: *stage0_models
