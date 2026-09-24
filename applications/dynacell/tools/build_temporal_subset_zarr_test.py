@@ -48,7 +48,18 @@ def _make_store(path: Path, frames_per_position: list[int]) -> None:
     zattrs the real A549 pools have, on the same 2 h / 5 hpi grid.
     """
     with open_ome_zarr(path, layout="hcs", mode="w-", channel_names=_CHANNELS, version="0.5") as plate:
-        plate.zattrs.update({"plate_id": "synthetic_temporal"})
+        plate.zattrs.update(
+            {
+                "plate_id": "synthetic_temporal",
+                "normalization": {
+                    ch: {
+                        "dataset_statistics": {"mean": 0.0, "std": 1.0},
+                        "timepoint_statistics": {str(t): {"mean": float(t)} for t in range(max(frames_per_position))},
+                    }
+                    for ch in _CHANNELS
+                },
+            }
+        )
         for ordinal, n_frames in enumerate(frames_per_position):
             data = np.empty((n_frames, len(_CHANNELS), _Z, _Y, _X), dtype=np.float32)
             for t in range(n_frames):
@@ -68,6 +79,14 @@ def _make_store(path: Path, frames_per_position: list[int]) -> None:
                     "grid_stride_h": 2.0,
                     "hpi_values": [5.0 + 2.0 * t for t in range(n_frames)],
                     "native_frame_indices": list(range(n_frames)),
+                    # The iPSC test stores carry this block; the planes encode (ordinal, t).
+                    "focus_slice": {
+                        "Phase3D": {
+                            "fov_statistics": {"z_focus_mean": -1.0, "z_focus_std": -1.0},
+                            "per_timepoint": {str(t): 100 * ordinal + t for t in range(n_frames)},
+                            "dataset_statistics": {"z_focus_mean": 2.0},
+                        }
+                    },
                     "normalization": {
                         ch: {
                             "fov_statistics": {"mean": float(ordinal), "std": 1.0},
@@ -243,3 +262,68 @@ def test_cli_builds_and_verifies(tmp_path: Path) -> None:
     with open_ome_zarr(dest, mode="r") as dst:
         assert [name for name, _ in dst.positions()] == ["0/0/fov0000", "0/0/fov0001"]
         assert dst["0/0/fov0000"].data.shape[0] == 2
+
+
+def test_spread_subset_rekeys_focus_slice_and_narrows_normalization(tmp_path: Path) -> None:
+    """focus_slice planes follow the kept frames; dropped channels lose their stats."""
+    source = tmp_path / "src.zarr"
+    dest = tmp_path / "dst.zarr"
+    _make_store(source, [10] * 3)
+    summary = build_temporal_subset_zarr(source, dest, channels=["Phase3D", "Nuclei"], mode="spread", n_timepoints=5)
+    with open_ome_zarr(dest, mode="r") as dst:
+        for ordinal, (name, pos) in enumerate(dst.positions()):
+            kept = summary.kept[name]
+            focus = pos.zattrs["focus_slice"]["Phase3D"]
+            planes = [100 * ordinal + t for t in kept]
+            assert focus["per_timepoint"] == {str(new): z for new, z in enumerate(planes)}
+            assert focus["fov_statistics"] == {
+                "z_focus_mean": float(np.mean(planes)),
+                "z_focus_std": float(np.std(planes)),
+            }
+            assert focus["dataset_statistics"] == {"z_focus_mean": 2.0}
+            assert set(pos.zattrs["normalization"]) == {"Phase3D", "Nuclei"}
+        plate_norm = dict(dst.zattrs)["normalization"]
+        assert all(set(levels) == {"dataset_statistics"} for levels in plate_norm.values())
+
+
+def test_position_subset_keeps_source_ordinals(tmp_path: Path) -> None:
+    """Filtering positions must not change which frames the survivors keep."""
+    source = tmp_path / "src.zarr"
+    full = tmp_path / "full.zarr"
+    sub = tmp_path / "sub.zarr"
+    _make_store(source, [10] * 4)
+    full_summary = build_temporal_subset_zarr(source, full, channels=_CHANNELS, mode="spread", n_timepoints=2)
+    wanted = ["0/0/fov0003", "0/0/fov0001"]
+    sub_summary = build_temporal_subset_zarr(
+        source, sub, channels=_CHANNELS, mode="spread", n_timepoints=2, positions=wanted
+    )
+    assert list(sub_summary.kept) == ["0/0/fov0001", "0/0/fov0003"]
+    assert sub_summary.kept == {name: full_summary.kept[name] for name in sub_summary.kept}
+    verify_temporal_subset(source, sub, sub_summary)
+    with open_ome_zarr(sub, mode="r") as dst:
+        assert [name for name, _ in dst.positions()] == ["0/0/fov0001", "0/0/fov0003"]
+        assert dict(dst.zattrs)["temporal_subset"]["positions"] == sorted(wanted)
+
+
+@pytest.mark.parametrize("positions", [["0/0/fov0009"], [], ["0/0/fov0000", "0/0/fov0000"]])
+def test_bad_position_list_raises(tmp_path: Path, positions: list[str]) -> None:
+    """Unknown, empty or repeated names are refused before anything is written."""
+    source = tmp_path / "src.zarr"
+    dest = tmp_path / "dst.zarr"
+    _make_store(source, [2] * 2)
+    with pytest.raises(ValueError, match="positions"):
+        build_temporal_subset_zarr(source, dest, channels=_CHANNELS, mode="early", n_timepoints=1, positions=positions)
+    assert not dest.exists()
+
+
+def test_cli_positions_file(tmp_path: Path) -> None:
+    """--positions-file restricts the CLI build to the listed names."""
+    source = tmp_path / "src.zarr"
+    dest = tmp_path / "dst.zarr"
+    listing = tmp_path / "positions.txt"
+    _make_store(source, [1] * 3)
+    listing.write_text("0/0/fov0002\n0/0/fov0000\n")
+    argv = ["--source", str(source), "--dest", str(dest), "--channels", *_CHANNELS]
+    assert main([*argv, "--mode", "early", "--n-timepoints", "1", "--positions-file", str(listing)]) == 0
+    with open_ome_zarr(dest, mode="r") as dst:
+        assert [name for name, _ in dst.positions()] == ["0/0/fov0000", "0/0/fov0002"]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-r"""Build a timepoint-subset OME-Zarr from an A549 pooled train store (Phase 17).
+r"""Build a timepoint- and position-subset OME-Zarr (Phase 17 train arms, DynaCell-lite test stores).
 
 Phase 17 of the A549 campaign asks whether the benchmark's **temporal diversity**
 carries training signal at a **fixed frame budget**. The comparison is two FNet3D
@@ -43,10 +43,27 @@ Re-keyed
     that ``SlidingWindowDataset._resolve_timepoint_norm_meta`` indexes with the
     **new** ``t``. Copied verbatim it would silently point frame 0 of a ``spread``
     store at the parent's frame-0 stats. It is re-keyed to the new indices.
+    ``focus_slice.<channel>.per_timepoint`` is the same kind of ``{t_index: z}``
+    map, read by the eval's focus-plane lookup with the **new** ``t``; it is
+    re-keyed the same way, and its ``fov_statistics`` are recomputed over the kept
+    frames so they describe the planes actually present.
 Subset
     Per-timepoint temporal metadata (``hpi_values``, ``native_frame_indices``,
     ``tick_hpi_values``) is filtered to the kept indices, so ``hpi_values`` keeps
     naming the real hours-post-infection of the frames actually present.
+    Position ``normalization`` is narrowed to the copied channels.
+Dropped
+    Plate-level ``normalization.<channel>.timepoint_statistics``: it is keyed by the
+    source frame index, but under ``--mode spread`` each position keeps different
+    source frames, so no re-keying of a plate-level map is correct.
+
+Position subset
+---------------
+``--positions`` keeps only the named positions (full ``row/col/fov`` names). The
+``spread`` rule still uses each position's ordinal in the SOURCE plate, so a
+position keeps the same frames whether or not the others are filtered out. This is
+what builds the DynaCell-lite iPSC stores (50 of 100 positions, ``--mode early
+--n-timepoints 1`` on T=1 stores keeps every frame).
 
 Layout is zarr v3 / OME-Zarr v0.5 end to end via :func:`iohub.open_ome_zarr`, and
 source chunking is preserved.
@@ -187,7 +204,43 @@ def _custom_zattrs(node) -> dict:
     return {k: v for k, v in dict(node.zattrs).items() if k != _OME_METADATA_KEY}
 
 
-def _subset_position_zattrs(custom: dict, kept: list[int], n_frames: int) -> dict:
+def _subset_focus_slice(focus: dict, kept: list[int]) -> dict:
+    """Re-key ``focus_slice.<channel>.per_timepoint`` and recompute its ``fov_statistics``.
+
+    Parameters
+    ----------
+    focus : dict
+        The source position's ``focus_slice`` block, ``{channel: {level: ...}}``.
+    kept : list of int
+        Source timepoint indices being copied, in destination order.
+
+    Returns
+    -------
+    dict
+        ``focus_slice`` for the destination position. ``dataset_statistics`` is
+        copied verbatim (it describes the source plate, like ``normalization``).
+
+    Raises
+    ------
+    KeyError
+        If ``per_timepoint`` has no entry for a kept index.
+    """
+    out = {}
+    for channel, levels in focus.items():
+        new_levels = dict(levels)
+        per_t = levels.get("per_timepoint")
+        if per_t is not None:
+            planes = [per_t[str(old)] for old in kept]
+            new_levels["per_timepoint"] = {str(new): z for new, z in enumerate(planes)}
+            new_levels["fov_statistics"] = {
+                "z_focus_mean": float(np.mean(planes)),
+                "z_focus_std": float(np.std(planes)),
+            }
+        out[channel] = new_levels
+    return out
+
+
+def _subset_position_zattrs(custom: dict, kept: list[int], n_frames: int, channels: list[str] | None = None) -> dict:
     """Filter per-timepoint zattrs and re-key ``timepoint_statistics`` to new indices.
 
     Parameters
@@ -198,6 +251,9 @@ def _subset_position_zattrs(custom: dict, kept: list[int], n_frames: int) -> dic
         Source timepoint indices being copied, in destination order.
     n_frames : int
         Source timepoint count, used to recognize per-timepoint lists by length.
+    channels : list of str, optional
+        Copied channel names; position ``normalization`` is narrowed to them.
+        ``None`` keeps every channel's statistics.
 
     Returns
     -------
@@ -220,6 +276,9 @@ def _subset_position_zattrs(custom: dict, kept: list[int], n_frames: int) -> dic
         # differently-shaped list (e.g. figure axis ticks) is copied untouched.
         if isinstance(values, list) and len(values) == n_frames:
             out[key] = [values[t] for t in kept]
+    focus = out.get("focus_slice")
+    if focus is not None:
+        out["focus_slice"] = _subset_focus_slice(focus, kept)
     norm = out.get("normalization")
     if norm is not None:
         out["normalization"] = {
@@ -232,6 +291,19 @@ def _subset_position_zattrs(custom: dict, kept: list[int], n_frames: int) -> dic
                 for level, stats in levels.items()
             }
             for channel, levels in norm.items()
+            if channels is None or channel in channels
+        }
+    return out
+
+
+def _subset_plate_zattrs(custom: dict) -> dict:
+    """Drop plate-level ``timepoint_statistics``; keep every other plate zattr verbatim."""
+    out = dict(custom)
+    norm = out.get("normalization")
+    if norm is not None:
+        out["normalization"] = {
+            channel: {level: stats for level, stats in levels.items() if level != "timepoint_statistics"}
+            for channel, levels in norm.items()
         }
     return out
 
@@ -243,6 +315,7 @@ def build_temporal_subset_zarr(
     channels: list[str],
     mode: str,
     n_timepoints: int,
+    positions: list[str] | None = None,
 ) -> SubsetSummary:
     """Write a timepoint-subset copy of an HCS store, keeping every position.
 
@@ -259,6 +332,9 @@ def build_temporal_subset_zarr(
         Timepoint selection rule.
     n_timepoints : int
         Timepoints to keep per position.
+    positions : list of str, optional
+        Full ``row/col/fov`` names of the positions to copy, in any order; the
+        destination keeps source plate order. ``None`` copies every position.
 
     Returns
     -------
@@ -271,7 +347,8 @@ def build_temporal_subset_zarr(
         If ``dest_path`` already exists.
     ValueError
         If ``mode`` is unknown, ``n_timepoints < 1``, a requested channel is absent,
-        the source has no positions, or a copied volume contains NaN.
+        the source has no positions, ``positions`` is empty, repeats a name or names a
+        position the source lacks, or a copied volume contains NaN.
     """
     source_path = Path(source_path)
     dest_path = Path(dest_path)
@@ -289,13 +366,20 @@ def build_temporal_subset_zarr(
         if missing:
             raise ValueError(f"channels {missing} not in {source_path} channels {list(src.channel_names)}")
         ch_idx = [src.channel_names.index(c) for c in channels]
-        positions = list(src.positions())
-        if not positions:
+        src_positions = list(src.positions())
+        if not src_positions:
             raise ValueError(f"{source_path} has no positions")
+        if positions is not None:
+            wanted = set(positions)
+            if not positions or len(wanted) != len(positions):
+                raise ValueError(f"positions must be a non-empty list of distinct names, got {positions!r}")
+            unknown = wanted - {name for name, _ in src_positions}
+            if unknown:
+                raise ValueError(f"positions {sorted(unknown)} not in {source_path}")
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with open_ome_zarr(dest_path, layout="hcs", mode="w-", channel_names=list(channels), version="0.5") as dst:
-            plate_custom = _custom_zattrs(src)
+            plate_custom = _subset_plate_zattrs(_custom_zattrs(src))
             if plate_custom:
                 dst.zattrs.update(plate_custom)
             dst.zattrs.update(
@@ -305,11 +389,16 @@ def build_temporal_subset_zarr(
                         "mode": mode,
                         "n_timepoints": n_timepoints,
                         "channels": list(channels),
+                        "positions": None if positions is None else sorted(positions),
                     }
                 }
             )
 
-            for ordinal, (name, pos) in enumerate(positions):
+            # The ordinal is the SOURCE plate ordinal, so the spread rule picks the
+            # same frames for a position whether or not the others are filtered out.
+            for ordinal, (name, pos) in enumerate(src_positions):
+                if positions is not None and name not in wanted:
+                    continue
                 n_frames = pos.data.shape[0]
                 kept = (
                     early_timepoints(n_frames, n_timepoints)
@@ -329,7 +418,7 @@ def build_temporal_subset_zarr(
                     chunks=src_chunks,
                     transform=[TransformationMeta(type="scale", scale=list(pos.scale))],
                 )
-                pos_custom = _subset_position_zattrs(_custom_zattrs(pos), kept, n_frames)
+                pos_custom = _subset_position_zattrs(_custom_zattrs(pos), kept, n_frames, list(channels))
                 pos_custom["temporal_subset"] = {
                     "source_store": str(source_path),
                     "mode": mode,
@@ -441,6 +530,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--mode", required=True, choices=("early", "spread"), help="timepoint selection rule")
     ap.add_argument("--n-timepoints", type=int, default=2, help="timepoints to keep per position (default: 2)")
+    ap.add_argument(
+        "--positions-file",
+        type=Path,
+        help="text file with one full row/col/fov position name per line; copy only those (default: all)",
+    )
     ap.add_argument("--skip-verify", action="store_true", help="skip the byte-equality re-read pass")
     args = ap.parse_args(argv)
 
@@ -451,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
         channels=args.channels,
         mode=args.mode,
         n_timepoints=args.n_timepoints,
+        positions=args.positions_file.read_text().split() if args.positions_file else None,
     )
     if not args.skip_verify:
         verify_temporal_subset(args.source, args.dest, summary)
