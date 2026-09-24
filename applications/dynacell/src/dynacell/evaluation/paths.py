@@ -45,6 +45,13 @@ from pathlib import Path
 MODELS_ROOT = Path("/hpc/projects/comp.micro/virtual_staining/models/dynacell")
 DATA_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell")
 
+# DynaCell-lite: a sibling root holding the lite test stores and everything derived
+# from them (predictions, eval dirs, GT and pred caches). Every grammar builder takes
+# ``data_root``, so lite artifacts use the unchanged grammar under this root — no
+# test-set token, and no walker over DATA_ROOT can pick them up. See
+# tools/generate_lite_benchmark_configs.py.
+LITE_DATA_ROOT = Path("/hpc/projects/virtual_staining/training/dynacell_lite")
+
 # Legacy default retained for callers still passing the old constant name.
 _DEFAULT_DATA_ROOT = DATA_ROOT
 DEFAULT_EVAL_RUN_ROOT = DATA_ROOT / "eval_runs"
@@ -185,6 +192,12 @@ PAPER_KEY: dict[str, str] = {
     "fcmae_vscyto2d_scratch": "unext2_2d",
     "fcmae_vscyto2d_pretrained": "vscyto2d",
     "fnet2d": "fnet2d",
+    # Voxel-matched FNet-2D ablation (nucleus + ER, iPSC-trained): identical to
+    # fnet2d except batch_size 48 -> 1536, so each step supervises the same
+    # number of target voxels as fnet3d_paper (48 x 32 planes). MUST be its own
+    # key: canonical_model_name() prefix-matches, so without it this run dir
+    # resolves to fnet2d and its eval outputs land in the baseline's dirs.
+    "fnet2d_voxelmatched": "fnet2d_voxelmatched",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
     # Spotlight-loss arms (masked MSE + soft-Dice, Otsu-centred target), iPSC-trained
