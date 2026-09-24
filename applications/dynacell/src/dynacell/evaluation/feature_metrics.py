@@ -194,12 +194,18 @@ def compute_feature_similarity(
     mind_num_projections: int = 1000,
     rng_seed: int = 2020,
     use_gpu: bool = False,
+    compute_fid: bool = True,
+    compute_prc: bool = True,
+    compute_mind: bool = True,
 ) -> dict[str, float]:
     """Compute dataset-level feature-similarity metrics for one prefix.
 
     Returns the FID / KID (mean + std) / Precision / Recall / F1 (each
     mean + bootstrap std) / MIND / median cosine similarity dict keyed
     by ``f"{prefix}_<METRIC>"``. Empty / single-row inputs return all-NaN.
+    A metric switched off by its ``compute_*`` flag is neither computed nor
+    keyed, on the empty-input path too, so the key set depends only on the
+    flags. KID and median cosine are always computed.
 
     Parameters
     ----------
@@ -229,6 +235,12 @@ def compute_feature_similarity(
         Number of random projections for MIND.
     rng_seed : int
         Seed shared across KID, PRC bootstrap, and MIND.
+    use_gpu : bool
+        Route MIND through CUDA when available.
+    compute_fid, compute_prc, compute_mind : bool
+        Per-metric switches. ``False`` omits ``{prefix}_FID``; the six
+        ``{prefix}_Precision/Recall/F1`` (+ ``_std``) keys; or
+        ``{prefix}_MIND`` respectively.
 
     Notes
     -----
@@ -241,17 +253,20 @@ def compute_feature_similarity(
     plates / conditions evaluated with the same bootstrap scheme — but
     do not compare them to non-bootstrap PRC tables.
     """
-    keys = (
-        f"{prefix}_FID",
-        f"{prefix}_KID",
-        f"{prefix}_KID_std",
+    prc_keys = (
         f"{prefix}_Precision",
         f"{prefix}_Precision_std",
         f"{prefix}_Recall",
         f"{prefix}_Recall_std",
         f"{prefix}_F1",
         f"{prefix}_F1_std",
-        f"{prefix}_MIND",
+    )
+    keys = (
+        *((f"{prefix}_FID",) if compute_fid else ()),
+        f"{prefix}_KID",
+        f"{prefix}_KID_std",
+        *(prc_keys if compute_prc else ()),
+        *((f"{prefix}_MIND",) if compute_mind else ()),
         f"{prefix}_Median_Cosine_Similarity",
     )
     if pred.size == 0 or target.size == 0:
@@ -262,28 +277,20 @@ def compute_feature_similarity(
     pred = np.asarray(pred, dtype=np.float32)
     target = np.asarray(target, dtype=np.float32)
 
-    fid = _fid(pred, target)
-    kid_mean, kid_std = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
-    bootstrap_size = prc_bootstrap_size or min(pred.shape[0], target.shape[0])
-    p_mean, p_std, r_mean, r_std, f_mean, f_std = _bootstrap_prc(
-        pred, target, prc_neighborhood, prc_bootstrap_subsets, bootstrap_size, rng_seed
-    )
-    mind = _mind(pred, target, mind_num_projections, rng_seed, use_gpu=use_gpu)
-    cos = _median_cosine_similarity(pred, target)
-
-    return {
-        f"{prefix}_FID": fid,
-        f"{prefix}_KID": kid_mean,
-        f"{prefix}_KID_std": kid_std,
-        f"{prefix}_Precision": p_mean,
-        f"{prefix}_Precision_std": p_std,
-        f"{prefix}_Recall": r_mean,
-        f"{prefix}_Recall_std": r_std,
-        f"{prefix}_F1": f_mean,
-        f"{prefix}_F1_std": f_std,
-        f"{prefix}_MIND": mind,
-        f"{prefix}_Median_Cosine_Similarity": cos,
-    }
+    # Insertion order matches ``keys`` so the CSV column order is unchanged
+    # when every flag is on.
+    out: dict[str, float] = {}
+    if compute_fid:
+        out[f"{prefix}_FID"] = _fid(pred, target)
+    out[f"{prefix}_KID"], out[f"{prefix}_KID_std"] = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
+    if compute_prc:
+        bootstrap_size = prc_bootstrap_size or min(pred.shape[0], target.shape[0])
+        prc = _bootstrap_prc(pred, target, prc_neighborhood, prc_bootstrap_subsets, bootstrap_size, rng_seed)
+        out.update(zip(prc_keys, prc, strict=True))
+    if compute_mind:
+        out[f"{prefix}_MIND"] = _mind(pred, target, mind_num_projections, rng_seed, use_gpu=use_gpu)
+    out[f"{prefix}_Median_Cosine_Similarity"] = _median_cosine_similarity(pred, target)
+    return out
 
 
 def compute_feature_similarity_pairwise(
@@ -293,16 +300,18 @@ def compute_feature_similarity_pairwise(
     kid_subsets: int = 100,
     kid_subset_size: int = 1000,
     rng_seed: int = 2020,
+    compute_fid: bool = True,
 ) -> dict[str, float]:
     """Per-(FOV, timepoint) variant: FID, KID mean + std, cosine only.
 
     PRC and MIND are dataset-level metrics; running them per-timepoint
     on ~50-cell cohorts is uninformative (the manifold is too sparse
     and the bootstrap variance dominates). Returns the four-column dict
-    keyed by ``f"{prefix}_<METRIC>"``.
+    keyed by ``f"{prefix}_<METRIC>"``; ``compute_fid=False`` drops
+    ``{prefix}_FID`` (not computed, not keyed) and leaves three.
     """
     keys = (
-        f"{prefix}_FID",
+        *((f"{prefix}_FID",) if compute_fid else ()),
         f"{prefix}_KID",
         f"{prefix}_KID_std",
         f"{prefix}_Median_Cosine_Similarity",
@@ -315,13 +324,9 @@ def compute_feature_similarity_pairwise(
     pred = np.asarray(pred, dtype=np.float32)
     target = np.asarray(target, dtype=np.float32)
 
-    fid = _fid(pred, target)
-    kid_mean, kid_std = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
-    cos = _median_cosine_similarity(pred, target)
-
-    return {
-        f"{prefix}_FID": fid,
-        f"{prefix}_KID": kid_mean,
-        f"{prefix}_KID_std": kid_std,
-        f"{prefix}_Median_Cosine_Similarity": cos,
-    }
+    out: dict[str, float] = {}
+    if compute_fid:
+        out[f"{prefix}_FID"] = _fid(pred, target)
+    out[f"{prefix}_KID"], out[f"{prefix}_KID_std"] = _kid(pred, target, kid_subsets, kid_subset_size, rng_seed)
+    out[f"{prefix}_Median_Cosine_Similarity"] = _median_cosine_similarity(pred, target)
+    return out
