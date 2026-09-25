@@ -12,7 +12,7 @@ r"""Check F: compare lite eval outputs against the full benchmark restricted to 
 3. Rankings: per metric, Spearman of lite vs full-restricted across systems in each
    (bucket, train_set).
 
-Nucleus only: the lite GT stores below carry the nucleus target.
+The lite GT store per (organelle, bucket) is the one its lite manifest's target reads.
 
 Run::
 
@@ -33,17 +33,27 @@ from scipy.stats import spearmanr
 from dynacell.evaluation.feature_metrics import _kid, _median_cosine_similarity
 from dynacell.evaluation.paths import DATA_ROOT, LITE_DATA_ROOT
 
-ORG = "nucleus"
 MODELS = ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch", "fnet3d_paper", "unetvit3d")
 TRAINS = ("ipsc", "a549")
-ROW_METRICS = {"pixel_metrics.csv": ["SI_SSIM", "Spectral_PCC", "PCC"], "mask_metrics.csv": ["instance_dice", "dice"]}
+ROW_METRICS = {"pixel_metrics.csv": ["SI_SSIM", "Spectral_PCC", "PCC"], "mask_metrics.csv": ["instance_dice", "Dice"]}
 DEEP = {"celldino": "CellDINO", "dinov3": "DINOv3", "dynaclr": "DynaCLR", "morphem": "MorphEm"}
-LITE_GT = {
-    "ipsc": "ipsc/dataset_v4/test_cropped/cell.zarr",
-    "a549__mock": "a549/mantis/test/dual_nucl_memb_mock.zarr",
-    "a549__denv": "a549/mantis/test/dual_nucl_memb_DENV.zarr",
-    "a549__zikv": "a549/mantis/test/dual_nucl_memb_ZIKV.zarr",
+# Organelle -> (iPSC GT store stem, A549 GT store stem); A549 stores are <stem>_<mock|DENV|ZIKV>.zarr.
+_GT_STEMS: dict[str, tuple[str, str]] = {
+    "nucleus": ("cell", "dual_nucl_memb"),
+    "membrane": ("cell", "dual_nucl_memb"),
+    "er": ("SEC61B", "SEC61B"),
+    "mito": ("TOMM20", "TOMM20"),
 }
+_A549_COND: dict[str, str] = {"a549__mock": "mock", "a549__denv": "DENV", "a549__zikv": "ZIKV"}
+
+
+def lite_gt_stores(organelle: str) -> dict[str, str]:
+    """Return ``{bucket: lite GT store path relative to the lite root}`` for one organelle."""
+    ipsc, a549 = _GT_STEMS[organelle]
+    return {
+        "ipsc": f"ipsc/dataset_v4/test_cropped/{ipsc}.zarr",
+        **{bucket: f"a549/mantis/test/{a549}_{cond}.zarr" for bucket, cond in _A549_COND.items()},
+    }
 
 
 def frame_map(gt_store: Path) -> dict[tuple[str, int], int]:
@@ -151,13 +161,15 @@ def dataset_level(lite_dir: Path, full_dir: Path, fmap: dict[tuple[str, int], in
     return rows
 
 
-def compare(out: Path, lite_root: Path = LITE_DATA_ROOT, data_root: Path = DATA_ROOT) -> None:
+def compare(organelle: str, out: Path, lite_root: Path = LITE_DATA_ROOT, data_root: Path = DATA_ROOT) -> None:
     """Write ``per_row.csv``, ``dataset_level.csv``, ``ranks.csv`` and ``meta.json`` to ``out``.
 
     Every (model, train_set, bucket) with a lite ``feature_metrics.csv`` is compared.
 
     Parameters
     ----------
+    organelle : str
+        Eval-tree organelle directory: ``nucleus``, ``membrane``, ``er`` or ``mito``.
     out : Path
         Output directory (created).
     lite_root : Path
@@ -167,12 +179,12 @@ def compare(out: Path, lite_root: Path = LITE_DATA_ROOT, data_root: Path = DATA_
     """
     out.mkdir(parents=True, exist_ok=True)
     row_recs, ds_recs = [], []
-    for bucket, gt_rel in LITE_GT.items():
+    for bucket, gt_rel in lite_gt_stores(organelle).items():
         fmap = frame_map(lite_root / gt_rel)
         for model in MODELS:
             for train in TRAINS:
-                lite_dir = lite_root / ORG / model / train / bucket
-                full_dir = data_root / ORG / model / train / bucket
+                lite_dir = lite_root / organelle / model / train / bucket
+                full_dir = data_root / organelle / model / train / bucket
                 if not (lite_dir / "feature_metrics.csv").exists():
                     continue
                 tag = {"bucket": bucket, "model": model, "train": train}
@@ -217,11 +229,12 @@ def compare(out: Path, lite_root: Path = LITE_DATA_ROOT, data_root: Path = DATA_
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and run :func:`compare`."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--organelle", required=True, choices=sorted(_GT_STEMS))
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--lite-root", type=Path, default=LITE_DATA_ROOT)
     ap.add_argument("--data-root", type=Path, default=DATA_ROOT)
     args = ap.parse_args(argv)
-    compare(args.out, args.lite_root, args.data_root)
+    compare(args.organelle, args.out, args.lite_root, args.data_root)
     return 0
 
 
