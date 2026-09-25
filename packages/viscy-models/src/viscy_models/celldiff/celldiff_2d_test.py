@@ -67,3 +67,16 @@ def test_z1_patch_grid_drops_the_z_axis() -> None:
     # 3 downsamples of stride (1, 2, 2): 64 -> 8, then patch 4 -> 2
     assert net.bottleneck.latent_grid_size == [1, 2, 2]
     assert net.bottleneck.img_pos_embed.shape[1] == 4
+
+
+def test_cond_channels_widens_the_conditioning_conv_only() -> None:
+    """Extra conditioning channels (C-cond) are accepted and every other shape is unchanged."""
+    spatial = [1, 32, 32]
+    base = CELLDiffNet(input_spatial_size=spatial, patch_size=[1, 4, 4], **_NET_KWARGS)
+    net = CELLDiffNet(input_spatial_size=spatial, patch_size=[1, 4, 4], cond_channels=2, **_NET_KWARGS)
+    widened = {name for name, p in net.state_dict().items() if p.shape != base.state_dict()[name].shape}
+    assert widened == {"_cond_inconv.weight"}
+    out = net(torch.randn(2, 1, *spatial), cond=torch.randn(2, 2, *spatial), t=torch.rand(2))
+    assert out.shape == (2, 1, *spatial)
+    with pytest.raises(ValueError, match="cond must have 2 channel"):
+        net(torch.randn(2, 1, *spatial), cond=torch.randn(2, 1, *spatial), t=torch.rand(2))

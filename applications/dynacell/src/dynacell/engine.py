@@ -20,6 +20,7 @@ from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
+from dynacell.mask_conditioning import CondMaskSource, MaskCorruption, binarize_mask, encode_mask
 from dynacell.tiling import window_starts
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
@@ -124,10 +125,41 @@ def _require_fg_mask(batch: Sample) -> Tensor:
     """Return the batch's ``fg_mask`` or raise naming the missing config."""
     if "fg_mask" not in batch:
         raise KeyError(
-            "seg_aux is set but the batch has no 'fg_mask'. Set fg_mask_key on the datamodule "
-            "(the store needs a generate_fg_masks array) or drop seg_aux."
+            "seg_aux or mask_mode is set but the batch has no 'fg_mask'. Set fg_mask_key on the "
+            "datamodule (the store needs a generate_fg_masks array) or drop seg_aux / mask_mode."
         )
     return batch["fg_mask"]
+
+
+def _check_mask_mode_args(
+    mask_mode: str | None,
+    net_kwargs: dict,
+    seg_aux: SegAuxDice | None,
+    mask_velocity_weight: float,
+    mask_dice_weight: float,
+    mask_corruption: MaskCorruption | None,
+    cond_mask_source: CondMaskSource | None,
+) -> None:
+    """Reject ``mask_mode`` settings that would be silently ignored or ambiguous."""
+    if mask_mode not in (None, "joint", "cond"):
+        raise ValueError(f"mask_mode must be None, 'joint' or 'cond', got {mask_mode!r}")
+    if mask_mode != "joint" and (mask_velocity_weight != 1.0 or mask_dice_weight != 0.0):
+        raise ValueError("mask_velocity_weight and mask_dice_weight apply only to mask_mode='joint'.")
+    if mask_mode != "cond" and (mask_corruption is not None or cond_mask_source is not None):
+        raise ValueError("mask_corruption and cond_mask_source apply only to mask_mode='cond'.")
+    cond_channels = net_kwargs.get("cond_channels", 1)
+    if mask_mode == "cond" and cond_channels < 2:
+        raise ValueError(f"mask_mode='cond' needs net_config.cond_channels >= 2 (phase + mask), got {cond_channels}")
+    if mask_mode != "cond" and cond_channels != 1:
+        raise ValueError(f"net_config.cond_channels={cond_channels} needs mask_mode='cond'.")
+    if mask_mode == "joint":
+        if seg_aux is not None:
+            raise ValueError("mask_mode='joint' scores the generated mask channel; use mask_dice_weight, not seg_aux.")
+        if mask_velocity_weight < 0 or mask_dice_weight < 0:
+            raise ValueError(
+                f"mask weights must be >= 0, got mask_velocity_weight={mask_velocity_weight}, "
+                f"mask_dice_weight={mask_dice_weight}"
+            )
 
 
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
@@ -951,7 +983,30 @@ class DynacellFlowMatching(LightningModule):
         Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
     seg_aux_t0 : float
         Fraction of the time range, nearest the data end, in which ``seg_aux``
-        applies.
+        applies; it gates the C-joint mask Dice the same way.
+    mask_mode : {"joint", "cond"} or None
+        Segmentation inside the generative process (Spotlight v2 Stage 1b);
+        ``None`` is the baseline. Both variants take the mask from the batch's
+        ``fg_mask`` (binarized at 0.5) during fit, encoded ``{0, 1} -> {-1, 1}``
+        like the ``MinMaxSampled`` target. ``"joint"`` (C-joint): the flow
+        generates ``[image, mask]`` (``net_config.in_channels`` = 2 x target
+        channels); the loss is ``velocity_image + mask_velocity_weight *
+        velocity_mask + mask_dice_weight * dice``; ``loss/validate`` is
+        ``velocity_image`` alone, and prediction returns only the image half.
+        ``"cond"`` (C-cond): the mask is a conditioning channel after phase
+        (``net_config.cond_channels`` = 2): ``fg_mask`` corrupted by
+        ``mask_corruption`` in training, clean ``fg_mask`` in validation, and
+        ``cond_mask_source`` in prediction.
+    mask_velocity_weight : float
+        C-joint weight of the mask-channel velocity loss.
+    mask_dice_weight : float
+        C-joint weight of the gated soft Dice on the mask channel's one-step
+        estimate (see :meth:`~dynacell.celldiff_wrapper.CELLDiff3DVS.joint_mask_losses`).
+    mask_corruption : MaskCorruption or None
+        C-cond training-only mask corruption; ``None`` trains on the clean mask.
+    cond_mask_source : CondMaskSource or None
+        C-cond predict-time mask source; required to predict with
+        ``mask_mode="cond"``.
     """
 
     def __init__(
@@ -973,16 +1028,45 @@ class DynacellFlowMatching(LightningModule):
         seg_aux: SegAuxDice | None = None,
         seg_aux_weight: float = 0.0,
         seg_aux_t0: float = 0.7,
+        mask_mode: Literal["joint", "cond"] | None = None,
+        mask_velocity_weight: float = 1.0,
+        mask_dice_weight: float = 0.0,
+        mask_corruption: MaskCorruption | None = None,
+        cond_mask_source: CondMaskSource | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(
-            ignore=["predict_method", "predict_overlap", "num_generate_steps", "num_log_steps", "ckpt_path", "seg_aux"]
+            ignore=[
+                "predict_method",
+                "predict_overlap",
+                "num_generate_steps",
+                "num_log_steps",
+                "ckpt_path",
+                "seg_aux",
+                "mask_corruption",
+                "cond_mask_source",
+            ]
         )
         if seg_aux is None and seg_aux_weight != 0.0:
             raise ValueError(f"seg_aux_weight={seg_aux_weight} has no effect without seg_aux.")
-        net = CELLDiffNet(**(net_config or {}))
-        self.model = CELLDiff3DVS(net, **(transport_config or {}), seg_aux=seg_aux, seg_aux_t0=seg_aux_t0)
+        net_kwargs = net_config or {}
+        _check_mask_mode_args(
+            mask_mode, net_kwargs, seg_aux, mask_velocity_weight, mask_dice_weight, mask_corruption, cond_mask_source
+        )
+        net = CELLDiffNet(**net_kwargs)
+        self.model = CELLDiff3DVS(
+            net,
+            **(transport_config or {}),
+            seg_aux=seg_aux,
+            seg_aux_t0=seg_aux_t0,
+            joint_mask=mask_mode == "joint",
+        )
         self.seg_aux_weight = seg_aux_weight
+        self.mask_mode = mask_mode
+        self.mask_velocity_weight = mask_velocity_weight
+        self.mask_dice_weight = mask_dice_weight
+        self.mask_corruption = mask_corruption
+        self.cond_mask_source = cond_mask_source
         self.lr = lr
         self.schedule = schedule
         self.warmup_steps = warmup_steps
@@ -997,6 +1081,7 @@ class DynacellFlowMatching(LightningModule):
         self._training_step_outputs: list = []
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
         self._validation_dice_losses: list[list[tuple[Tensor, int]]] = []
+        self._validation_mask_velocity_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
         if ckpt_path is not None:
             self.load_state_dict(_ckpt_state_dict(ckpt_path))
@@ -1018,18 +1103,7 @@ class DynacellFlowMatching(LightningModule):
         """
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
-        if self.model.seg_aux is None:
-            loss = self.model(phase, target)
-            components: dict[str, Tensor] = {}
-        else:
-            base, aux = self.model(phase, target, _require_fg_mask(batch))
-            loss = base + self.seg_aux_weight * aux["dice"]
-            components = {
-                "base": base,
-                "dice": aux["dice"],
-                "dice_n_valid": aux["n_valid"],
-                "dice_n_gated": aux["n_gated"],
-            }
+        loss, _, components = self._flow_losses(batch, corrupt=True)
         self.log(
             "loss/train",
             loss,
@@ -1054,24 +1128,80 @@ class DynacellFlowMatching(LightningModule):
             self._training_step_outputs.extend(detach_sample((phase, target), self.log_samples_per_batch))
         return loss
 
+    def _conditioning(self, batch: dict, corrupt: bool) -> Tensor:
+        """Return the network conditioning: phase, plus the encoded mask for C-cond.
+
+        ``corrupt`` applies ``mask_corruption``; only the training step sets it.
+        """
+        phase: Tensor = batch["source"]
+        if self.mask_mode != "cond":
+            return phase
+        mask = binarize_mask(_require_fg_mask(batch))
+        if corrupt and self.mask_corruption is not None:
+            mask = self.mask_corruption(mask)
+        return torch.cat([phase, encode_mask(mask).to(phase.dtype)], dim=1)
+
+    def _flow_losses(self, batch: dict, corrupt: bool) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
+        """Compute the training objective, its baseline-comparable part, and components.
+
+        Returns
+        -------
+        tuple of (Tensor, Tensor, dict of str to Tensor)
+            The weighted objective; the image velocity loss that
+            ``loss/validate`` reports (the whole objective for the baseline);
+            and the unweighted terms to log (empty for the baseline).
+        """
+        target: Tensor = batch["target"]
+        if self.mask_mode == "joint":
+            out = self.model.joint_mask_losses(batch["source"], target, _require_fg_mask(batch))
+            base = out["velocity_image"]
+            loss = base + self.mask_velocity_weight * out["velocity_mask"] + self.mask_dice_weight * out["dice"]
+            components = {
+                "base": base,
+                "mask_velocity": out["velocity_mask"],
+                "dice": out["dice"],
+                "dice_n_valid": out["n_valid"],
+                "dice_n_gated": out["n_gated"],
+            }
+            return loss, base, components
+        cond = self._conditioning(batch, corrupt)
+        if self.model.seg_aux is None:
+            loss = self.model(cond, target)
+            return loss, loss, {}
+        base, aux = self.model(cond, target, _require_fg_mask(batch))
+        components = {
+            "base": base,
+            "dice": aux["dice"],
+            "dice_n_valid": aux["n_valid"],
+            "dice_n_gated": aux["n_gated"],
+        }
+        return base + self.seg_aux_weight * aux["dice"], base, components
+
     def validation_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> None:
-        """Capture validation samples and optionally compute loss."""
+        """Capture validation samples and optionally compute loss.
+
+        C-cond conditions on the uncorrupted ``fg_mask`` here.
+        """
         if batch_idx == 0 and self._val_log_batch is None:
             n = self.log_samples_per_batch
             self._val_log_batch = (
-                batch["source"][:n].clone(),
+                self._conditioning(batch, corrupt=False)[:n].clone(),
                 batch["target"][:n].clone(),
             )
         if not self.compute_validation_loss:
             return
         phase: Tensor = batch["source"]
-        target: Tensor = batch["target"]
-        if self.model.seg_aux is None:
-            loss = self.model(phase, target)
-        else:
-            # loss/validate stays velocity-only; the gated Dice is logged apart.
-            loss, aux = self.model(phase, target, _require_fg_mask(batch))
-            _record_val_loss(self._validation_dice_losses, dataloader_idx, aux["dice"].detach(), phase.shape[0])
+        # loss/validate stays the image velocity loss; aux terms are logged apart.
+        _, loss, components = self._flow_losses(batch, corrupt=False)
+        if "dice" in components:
+            _record_val_loss(self._validation_dice_losses, dataloader_idx, components["dice"].detach(), phase.shape[0])
+        if "mask_velocity" in components:
+            _record_val_loss(
+                self._validation_mask_velocity_losses,
+                dataloader_idx,
+                components["mask_velocity"].detach(),
+                phase.shape[0],
+            )
         _record_val_loss(self._validation_losses, dataloader_idx, loss.detach(), phase.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
@@ -1100,14 +1230,23 @@ class DynacellFlowMatching(LightningModule):
             self.log("loss/validate", _aggregate_validation_losses(self._validation_losses), sync_dist=True)
         if self._validation_dice_losses:
             self.log("loss/validate_dice", _aggregate_validation_losses(self._validation_dice_losses), sync_dist=True)
+        if self._validation_mask_velocity_losses:
+            self.log(
+                "loss/validate_mask_velocity",
+                _aggregate_validation_losses(self._validation_mask_velocity_losses),
+                sync_dist=True,
+            )
         self._validation_losses.clear()
         self._validation_dice_losses.clear()
+        self._validation_mask_velocity_losses.clear()
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
 
         Pads source if smaller than ``input_spatial_size``, dispatches to
         the configured predict method, then crops back to the original shape.
+        C-cond appends the encoded ``cond_mask_source`` mask to the source;
+        C-joint returns only the image half of the generated channels.
 
         Parameters
         ----------
@@ -1125,6 +1264,11 @@ class DynacellFlowMatching(LightningModule):
         """
         source: Tensor = batch["source"]
         original_shape = source.shape[2:]
+        if self.mask_mode == "cond":
+            if self.cond_mask_source is None:
+                raise ValueError("mask_mode='cond' needs cond_mask_source to predict.")
+            mask = self.cond_mask_source.read(batch["index"], tuple(original_shape)).to(source)
+            source = torch.cat([source, encode_mask(mask)], dim=1)
 
         # Pad source if any spatial dim is smaller than input_spatial_size.
         patch_size = self.model.net.input_spatial_size
@@ -1166,6 +1310,8 @@ class DynacellFlowMatching(LightningModule):
                 "Choose 'denoise', 'generate', 'sliding_window', or 'iterative'."
             )
 
+        if self.mask_mode == "joint":
+            prediction = prediction[:, : self.model.net.inconv.in_channels // 2]
         return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
 
     def configure_optimizers(self):
