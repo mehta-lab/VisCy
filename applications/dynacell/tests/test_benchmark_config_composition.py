@@ -497,6 +497,70 @@ def test_brightfield_arm_writes_to_its_own_canonical_tree(
     assert bf["trainer"]["logger"]["init_args"]["name"] != phase["trainer"]["logger"]["init_args"]["name"]
 
 
+# Voxel-matched FNet-2D ablation: arms that must differ from their fnet2d baseline
+# in batch_size AND NOTHING ELSE (plus run name/paths). fnet2d and fnet3d_paper
+# already match on steps and samples/step, but 3D samples are 32 planes deep; the
+# arm raises the 2D batch so both supervise the same number of target planes per step.
+_VOXEL_MATCHED_ORGANELLES = ("nucleus", "er")
+
+
+@pytest.mark.parametrize("organelle", _VOXEL_MATCHED_ORGANELLES)
+def test_voxel_matched_fnet2d_differs_from_fnet2d_only_in_batch_size(organelle: str, monkeypatch) -> None:
+    """The arm equals fnet2d except batch_size, which equals fnet3d_paper's planes/step.
+
+    The parity target is derived from the composed fnet3d_paper leaf rather than
+    hard-coded, so a change to either FNet config's batch or z window breaks the
+    ablation loudly instead of silently turning it into a mismatched comparison.
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+
+    def _load(model: str) -> dict:
+        return load_composed_config(
+            BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml",
+            resolver=_dynacell_ref_resolver,
+        )
+
+    arm, base, three_d = _load("fnet2d_voxelmatched"), _load("fnet2d"), _load("fnet3d_paper")
+    arm_ia, base_ia, d3_ia = arm["data"]["init_args"], base["data"]["init_args"], three_d["data"]["init_args"]
+
+    # The substantive delta: equal target planes per optimizer step as fnet3d_paper.
+    assert arm_ia["z_window_size"] == base_ia["z_window_size"] == 1
+    assert arm_ia["batch_size"] * arm_ia["z_window_size"] == d3_ia["batch_size"] * d3_ia["z_window_size"], (
+        f"{organelle}: {arm_ia['batch_size']}x{arm_ia['z_window_size']} planes/step != "
+        f"fnet3d_paper {d3_ia['batch_size']}x{d3_ia['z_window_size']}"
+    )
+    assert arm_ia["batch_size"] != base_ia["batch_size"], f"{organelle}: ablation is a no-op"
+    # Same XY patch as both baselines, so per-plane supervision is comparable.
+    assert arm_ia["yx_patch_size"] == base_ia["yx_patch_size"] == d3_ia["yx_patch_size"]
+
+    # Everything else in data must be the baseline's: store, channels, norms, crop
+    # sampler (num_samples), augmentations, workers.
+    arm_data = copy.deepcopy(arm["data"])
+    arm_data["init_args"]["batch_size"] = base_ia["batch_size"]
+    assert arm_data == base["data"], f"{organelle}: data config differs from fnet2d by more than batch_size"
+    assert arm["model"] == base["model"], f"{organelle}: model config drifted"
+    for key in ("precision", "max_steps", "max_epochs", "devices", "strategy"):
+        assert arm["trainer"].get(key) == base["trainer"].get(key), f"{organelle}: trainer.{key} drifted"
+    assert arm["launcher"]["sbatch"].get("mem") == base["launcher"]["sbatch"].get("mem")
+    assert arm["launcher"]["sbatch"]["time"] == base["launcher"]["sbatch"]["time"]
+
+
+@pytest.mark.parametrize("organelle", _VOXEL_MATCHED_ORGANELLES)
+def test_voxel_matched_fnet2d_writes_to_its_own_tree(organelle: str) -> None:
+    """Checkpoints, run root and wandb name never collide with the fnet2d baseline."""
+    arm = load_composed_config(BENCHMARKS / organelle / "fnet2d_voxelmatched" / "ipsc_confocal" / "train.yml")
+    base = load_composed_config(BENCHMARKS / organelle / "fnet2d" / "ipsc_confocal" / "train.yml")
+    ckpt = next(
+        c["init_args"]["dirpath"]
+        for c in arm["trainer"]["callbacks"]
+        if c["class_path"].endswith("ModelCheckpoint") and "dirpath" in c.get("init_args", {})
+    )
+    assert "/fnet2d_voxelmatched/" in ckpt, f"{organelle}: checkpoint dirpath not in the arm's tree: {ckpt}"
+    assert arm["launcher"]["run_root"] != base["launcher"]["run_root"]
+    assert arm["trainer"]["logger"]["init_args"]["name"] != base["trainer"]["logger"]["init_args"]["name"]
+    assert arm["benchmark"]["model_name"] == "fnet2d_voxelmatched"
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 

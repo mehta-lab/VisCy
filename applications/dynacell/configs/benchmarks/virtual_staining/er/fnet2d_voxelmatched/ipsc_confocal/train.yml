@@ -1,0 +1,67 @@
+# Voxel-matched FNet-2D ablation — ER (SEC61B), iPSC-trained.
+#
+# IDENTICAL to er/fnet2d/ipsc_confocal/train.yml except batch_size
+# 48 -> 1536 (and the run name/paths). fnet2d and fnet3d_paper already match on
+# optimizer steps (max_steps 200000), samples/step (48), 64x64 XY patch, flip-only
+# augs, lr, loss and fp32 — but fnet3d_paper's samples are 32 planes deep, so it
+# supervises 48 x 32 = 1536 target planes per step against fnet2d's 48.
+# 1536 = 48 x 32 closes that 32x gap. num_samples stays 8 (same crop sampler),
+# so each step draws 1536 / 8 = 192 single-plane windows.
+#
+# Question it answers: does 3D beat 2D on the budget-matched FNet pair because of
+# z-CONTEXT, or because it saw 32x more supervised voxels? If this arm closes the
+# gap to fnet3d_paper, it was supervision; if it stays at fnet2d, it was context.
+# Caveat: a 32x larger batch at the same constant lr also changes the optimizer's
+# gradient noise, so this is a voxel-matched arm, not a pure-supervision control.
+#
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/fnet2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: fnet2d_voxelmatched
+  experiment_id: er__ipsc_confocal__fnet2d_voxelmatched
+  # Disable the manifest resolver: the 2D track reads the offline focus
+  # store, not the manifest-registered SEC61B.zarr. dataset_ref: null makes
+  # the compose hook a no-op so data fields can be declared inline.
+  dataset_ref: null
+
+data:
+  init_args:
+    # 48 x 32 — voxel parity with fnet3d_paper (see header).
+    batch_size: 1536
+    # iPSC in-focus slab store + channels — resolver disabled above.
+    source_channel: Phase3D
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B_focus.zarr
+
+trainer:
+  logger:
+    init_args:
+      name: FNet2D_VoxMatch_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet2d_voxelmatched
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet2d_voxelmatched/checkpoints
+
+launcher:
+  job_name: FNet2DVoxMatch_iPSC_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet2d_voxelmatched
