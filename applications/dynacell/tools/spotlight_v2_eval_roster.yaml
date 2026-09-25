@@ -26,6 +26,14 @@ waves:
       - pix2pix2d_unetvit_spotlight
       - pix2pix3d_unetvit_spotlight
     membrane: *stage0_models
+  # Stage 1, first finished predicts (2026-09-25): pix2pix2d arms, scored ahead of wave1 so they
+  # do not wait on its slow 3D/CellDiff stores. Generate with --wave wave1a.
+  wave1a:
+    nucleus:
+      - pix2pix2d_unetvit_segaux
+      - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
+    membrane:
+      - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
   # Stage 0b/0c/0g + Stage 1 first wave (leaves from tools/generate_spotlight_v2_leaves.py).
   # Stores do not exist yet: do NOT run the generator on this wave until every predict has
   # COMPLETED -- its store gate refuses absent or partial stores. Seed replicates and the
@@ -38,7 +46,6 @@ waves:
       - fnet3d_paper_segaux
       - fcmae_vscyto2d_scratch_segaux
       - fcmae_vscyto3d_scratch_segaux
-      - pix2pix2d_unetvit_segaux
       - pix2pix3d_unetvit_segaux
       - celldiff_2d_segaux
       - celldiff_segaux_iterative
@@ -47,7 +54,6 @@ waves:
       - {model: fnet2d_seed1, leaves: [ipsc]}
       - {model: fnet3d_paper_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
-      - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
       - {model: celldiff_2d_seed1, leaves: [ipsc]}
       # Stage 1b (nucleus only for now): mask in the generative process.
       - celldiff_2d_cjoint
@@ -67,7 +73,6 @@ waves:
       - pix2pix3d_unetvit_v2
       - {model: fnet2d_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
-      - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
       - {model: celldiff_2d_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_jointsteps, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_l1, leaves: [ipsc]}
