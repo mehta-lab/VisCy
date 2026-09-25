@@ -561,6 +561,59 @@ def test_voxel_matched_fnet2d_writes_to_its_own_tree(organelle: str) -> None:
     assert arm["benchmark"]["model_name"] == "fnet2d_voxelmatched"
 
 
+_FNET2D_PREDICT_FILES = (
+    "predict__ipsc_confocal.yml",
+    "predict__a549_mantis_mock.yml",
+    "predict__a549_mantis_denv.yml",
+    "predict__a549_mantis_zikv.yml",
+)
+
+
+@pytest.mark.parametrize("predict_file", _FNET2D_PREDICT_FILES)
+@pytest.mark.parametrize("organelle", _VOXEL_MATCHED_ORGANELLES)
+def test_voxel_matched_fnet2d_predict_differs_from_fnet2d_only_in_identity(
+    organelle: str, predict_file: str, monkeypatch
+) -> None:
+    """Each arm predict leaf is its fnet2d sibling with only the arm's identity swapped.
+
+    Same test store, overlay (z_window_size=1 over full Z) and normalization, so the
+    only difference the eval can see is the checkpoint. Output store, run root and
+    ckpt must sit in the arm's own tree, or the arm would overwrite / re-score fnet2d.
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
+    arm_dir = BENCHMARKS / organelle / "fnet2d_voxelmatched" / "ipsc_confocal"
+    base_dir = BENCHMARKS / organelle / "fnet2d" / "ipsc_confocal"
+    arm = load_composed_config(arm_dir / predict_file, resolver=_dynacell_ref_resolver)
+    base = load_composed_config(base_dir / predict_file, resolver=_dynacell_ref_resolver)
+
+    ckpt = arm["model"]["init_args"]["ckpt_path"]
+    assert f"/{organelle}/fnet2d_voxelmatched/checkpoints/" in ckpt, f"ckpt is not this arm's: {ckpt}"
+    assert "last" not in Path(ckpt).name, f"pins {Path(ckpt).name}"
+    store = arm["trainer"]["callbacks"][0]["init_args"]["output_store"]
+    base_store = base["trainer"]["callbacks"][0]["init_args"]["output_store"]
+    assert store == base_store.replace(f"/{organelle}/fnet2d/", f"/{organelle}/fnet2d_voxelmatched/")
+    assert store != base_store
+    assert arm["benchmark"]["model_name"] == "fnet2d_voxelmatched"
+
+    for cfg, other in ((arm, base), (base, arm)):
+        cfg["model"]["init_args"]["ckpt_path"] = None
+        cfg["trainer"]["callbacks"][0]["init_args"]["output_store"] = None
+        for key in ("model_name", "experiment_id"):
+            cfg["benchmark"][key] = None
+        for key in ("job_name", "run_root"):
+            cfg["launcher"][key] = None
+    assert arm == base
+
+
+@pytest.mark.parametrize("organelle", _VOXEL_MATCHED_ORGANELLES)
+def test_voxel_matched_fnet2d_predicts_agree_on_one_checkpoint(organelle: str) -> None:
+    """All four test sets are scored against the same arm checkpoint."""
+    leaves = sorted((BENCHMARKS / organelle / "fnet2d_voxelmatched" / "ipsc_confocal").glob("predict__*.yml"))
+    assert [p.name for p in leaves] == sorted(_FNET2D_PREDICT_FILES)
+    pinned = {yaml.safe_load(p.read_text())["model"]["init_args"]["ckpt_path"] for p in leaves}
+    assert len(pinned) == 1, f"{organelle}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 

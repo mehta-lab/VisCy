@@ -1,0 +1,47 @@
+# FNet2D voxel-matched predict: er (SEC61B) trained on ipsc_confocal, tested on iPSC confocal.
+# Voxel-matched FNet-2D ablation arm (batch 48 -> 1536 = fnet3d_paper's planes/step);
+# otherwise identical to the fnet2d leaf of the same name, including the fnet2d_predict
+# overlay (full-Z store, z_window_size=1) and Phase3D fov_statistics normalization.
+# ckpt_path is a PROVISIONAL pin: the fit is still running and save_top_k rotates
+# files out. Submit with --ckpt best (uses only the parent dir), or re-bake after the
+# fit completes (tools/bake_best_ckpt.py).
+base:
+  - ../../../_internal/shared/model/predict_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/model_overlays/fnet2d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  trained_on: ipsc_confocal
+  predict_set: ipsc_confocal
+  model_name: fnet2d_voxelmatched
+  experiment_id: er__ipsc_confocal__fnet2d_voxelmatched__ipsc_confocal
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet2d_voxelmatched/checkpoints/epoch=1049-step=8400-loss=0.883.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/ipsc/prediction.zarr
+
+launcher:
+  job_name: FNet2DVoxMatch_PRED_SEC61B
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/ipsc
