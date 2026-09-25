@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import generate_spotlight_v2_eval_configs
 import numpy as np
 import pytest
 import yaml
@@ -138,3 +139,19 @@ def test_main_refuses_to_write_when_a_store_is_incomplete(tmp_path: Path) -> Non
     out = tmp_path / "leaves"
     assert main(["--roster", str(roster), "--out-root", str(out)]) == 1
     assert not out.exists()
+
+
+def test_wave_filter_gates_and_writes_only_the_named_wave(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """--wave skips an unfinished wave's stores instead of failing on them."""
+    gt = tmp_path / "gt.zarr"
+    _write_plate(gt, [("A", "1", "0")], (1, 1, 3, 8, 8))
+    monkeypatch.setattr(generate_spotlight_v2_eval_configs, "gt_test_store", lambda parsed: gt)
+    done = {"model": "fnet2d", "leaves": ["ipsc"], "pred_paths": {"ipsc": str(gt)}}
+    pending = {"model": "fnet3d_paper", "leaves": ["ipsc"], "pred_paths": {"ipsc": str(tmp_path / "x.zarr")}}
+    roster = _write_roster(tmp_path, {"done": {"nucleus": [done]}, "pending": {"nucleus": [pending]}})
+    out = tmp_path / "leaves"
+    assert main(["--roster", str(roster), "--out-root", str(out), "--dry-run"]) == 1
+    assert main(["--roster", str(roster), "--out-root", str(out), "--wave", "done"]) == 0
+    assert sorted(p.name for p in out.iterdir()) == ["spotlight_v2_nucleus_ipsc__done"]
+    with pytest.raises(ValueError, match="not in roster"):
+        main(["--roster", str(roster), "--out-root", str(out), "--wave", "nope"])

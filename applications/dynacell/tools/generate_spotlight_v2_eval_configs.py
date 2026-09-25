@@ -42,6 +42,7 @@ Usage::
 
     uv run --no-sync python applications/dynacell/tools/generate_spotlight_v2_eval_configs.py --dry-run
     uv run --no-sync python applications/dynacell/tools/generate_spotlight_v2_eval_configs.py
+    uv run --no-sync python applications/dynacell/tools/generate_spotlight_v2_eval_configs.py --wave wave1a
 """
 
 from __future__ import annotations
@@ -277,9 +278,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--roster", type=Path, default=DEFAULT_ROSTER, help="roster YAML (default: %(default)s)")
     ap.add_argument("--out-root", type=Path, default=_LEAF_OUT_ROOT, help="leaf root (default: %(default)s)")
     ap.add_argument("--dry-run", action="store_true", help="gate stores and print buckets; write nothing")
+    ap.add_argument(
+        "--wave",
+        action="append",
+        help="gate and write only this wave (repeatable; default: every wave). Waves whose stores "
+        "are still being predicted would otherwise fail the gate for the whole roster.",
+    )
     args = ap.parse_args(argv)
 
+    # Load the whole roster so the one-wave-per-condition check still spans every wave.
     rows = load_roster(args.roster)
+    if args.wave:
+        unknown = set(args.wave) - {row[0] for row in rows}
+        if unknown:
+            raise ValueError(f"--wave {sorted(unknown)} not in roster {args.roster}")
+        rows = [row for row in rows if row[0] in args.wave]
     parsed_rows = [parsed_row(organelle, model, leaf, pred) for _, organelle, model, leaf, pred in rows]
     # Listing ~5k chunk files per store is NFS-latency bound; threads overlap it.
     with ThreadPoolExecutor(_GATE_WORKERS) as pool:
