@@ -1,0 +1,79 @@
+# @package _global_
+# Focused sibling of grouped/er_ipsc_trained__2d: ONLY the voxel-matched
+# FNet-2D ablation arm (fnet2d_voxelmatched, batch 48 -> 1536 = fnet3d_paper's
+# planes/step) x {ipsc, a549 mock/denv/zikv} = 4.
+# Condition blocks come from generate_grouped_eval_configs.py's own parse_zarr_name +
+# build_leaf_yaml, fed the output_store of each predict leaf in
+# er/fnet2d_voxelmatched/ipsc_confocal/ (built by
+# experiments/2026-09-24_fnet2d-voxelmatched-smoke/build_eval_buckets.py).
+#
+# Top-level settings, including force_recompute, are copied from the __2d sibling so
+# the arm is scored exactly as its fnet2d baseline was. Compare on the
+# focus-restricted metrics only; the full-3D columns are diagnostics (see the __2d
+# leaf header).
+#
+# GATE before running: pred_path.is_dir() passes on a half-written store. Require
+# sacct COMPLETED 0:0 on all predicts AND per-array chunk counts equal to
+# prod(ceil(shape / chunks)) AND the position set equal to the fnet2d sibling store's.
+#
+# Run with --constraint a100_80|h100_80|h200 (cold deep-feature extraction OOMs on
+# 40 GB cards).
+target_name: er
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+  pred_masks: true
+  pred_cp: true
+  pred_dinov3: true
+  pred_dynaclr: true
+  pred_celldino: true
+  pred_morphem: true
+  pred_instances: true
+conditions:
+- name: fnet2d_voxelmatched__ipsc_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet2d_voxelmatched/ipsc/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/a549__denv
+- name: fnet2d_voxelmatched__ipsc_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-mock
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet2d_voxelmatched/ipsc/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/a549__mock
+- name: fnet2d_voxelmatched__ipsc_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-zikv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet2d_voxelmatched/ipsc/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/a549__zikv
+- name: fnet2d_voxelmatched__ipsc_trained__ipsc
+  benchmark:
+    dataset_ref:
+      dataset: aics-hipsc
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/ipsc/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/ipsc/eval_cache_pred/er/fnet2d_voxelmatched/ipsc/ipsc
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet2d_voxelmatched/ipsc/ipsc
