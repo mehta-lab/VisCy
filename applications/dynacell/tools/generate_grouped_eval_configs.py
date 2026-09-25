@@ -96,6 +96,11 @@ _CODE_TO_PAPER: dict[str, str] = {
     "celldiff_2d_ccond": "celldiff_2d_ccond",
     "celldiff_cjoint": "celldiff_cjoint",
     "celldiff_ccond": "celldiff_ccond",
+    # Stage 2 #1 self-consistent seg-aux arms; same agreement rule with PAPER_KEY.
+    "fnet2d_segauxself": "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself": "unext2_2d_segauxself",
+    "pix2pix2d_unetvit_segauxself": "pix2pix2d_segauxself",
+    "celldiff_2d_segauxself": "celldiff_2d_segauxself",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -168,8 +173,12 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto2d_scratch_jointsteps",
     "fcmae_vscyto2d_scratch_l1",
     "fcmae_vscyto2d_scratch_safecrop",
+    "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself",
+    "pix2pix2d_unetvit_segauxself",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = (
+    "celldiff_2d_segauxself",
     "celldiff_2d_segaux",
     "celldiff_2d_cjoint",
     "celldiff_2d_ccond",

@@ -138,6 +138,7 @@ _CELLDIFF_ARM_MODELS: tuple[str, ...] = (
     "celldiff_segaux_iterative",
     "celldiff_cjoint_iterative",
     "celldiff_ccond_iterative",
+    "celldiff_2d_segauxself",
     "celldiff_2d_segaux",
     "celldiff_2d_cjoint",
     "celldiff_2d_ccond",
@@ -265,6 +266,12 @@ PAPER_KEY: dict[str, str] = {
     "celldiff_cjoint_iterative": "celldiff_cjoint_iterative",
     "celldiff_ccond": "celldiff_ccond",
     "celldiff_ccond_iterative": "celldiff_ccond_iterative",
+    # Stage 2 #1: `_segauxself` = `_segaux` with SegAuxDice(label="target"), the
+    # self-consistent reference whose minimum is pred == target (2D families).
+    "fnet2d_segauxself": "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself": "unext2_2d_segauxself",
+    "pix2pix2d_unetvit_segauxself": "pix2pix2d_segauxself",
+    "celldiff_2d_segauxself": "celldiff_2d_segauxself",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

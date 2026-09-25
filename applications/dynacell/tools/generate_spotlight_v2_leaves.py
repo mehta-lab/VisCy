@@ -136,6 +136,9 @@ SAFE_CROP_COVERAGE = 0.9
 _UNEXT2_2D_DATA_OVERLAY = BENCHMARKS / "_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml"
 
 
+SEGAUXSELF_BASELINES: tuple[str, ...] = ("fnet2d", "fcmae_vscyto2d_scratch", "pix2pix2d_unetvit", "celldiff_2d")
+
+
 @dataclass(frozen=True)
 class Baseline:
     """Where a baseline model's leaves, checkpoints and prediction stores live."""
@@ -204,10 +207,15 @@ ARMS: tuple[Arm, ...] = (
     *(Arm("fcmae_vscyto2d_scratch", s, ("membrane",), a549=False) for s in ("jointsteps", "l1", "safecrop")),
     # Stage 1b, nucleus first: segmentation inside the generative process.
     *(Arm(m, s, ("nucleus",), a549=True) for s in ("cjoint", "ccond") for m in ("celldiff_2d", "celldiff")),
+    # Stage 2 #1: the segaux arm with a self-consistent Dice reference (2D families first).
+    *(Arm(m, "segauxself", ORGANELLES, a549=True) for m in SEGAUXSELF_BASELINES),
 )
 
 _DESCRIPTION: dict[str, str] = {
     "segaux": "data fg_mask_key: fg_mask; model seg_aux (SegAuxDice c=0.1) + seg_aux_weight (+ seg_aux_t0 for flow)",
+    "segauxself": "data fg_mask_key: fg_mask; model seg_aux (SegAuxDice c=0.1, label=target) + the segaux "
+    "arm's seg_aux_weight (+ seg_aux_t0 for flow). One field from the segaux arm: the Dice reference is the "
+    "target through the same sigmoid, so the term is zero at pred == target",
     "seed1": "seed_everything: 1",
     "v2": "nothing (fresh retrain of the baseline recipe under its own run root)",
     "jointsteps": f"trainer max_epochs: {JOINTSTEPS_MAX_EPOCHS}. Step budget matched to the joint membrane run, "
@@ -285,7 +293,7 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
             )
         return _PREDICT_RENAMES, frozenset()
     recipe: set[str] = set()
-    if arm.suffix == "segaux":
+    if arm.suffix in ("segaux", "segauxself"):
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
         if BASELINES[arm.baseline].engine == "flow":
             recipe.add("model.init_args.seg_aux_t0")
@@ -345,10 +353,14 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     """Apply the arm's recipe delta to a fit-leaf dict in place."""
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
-    if arm.suffix == "segaux":
+    if arm.suffix in ("segaux", "segauxself"):
         data_args["fg_mask_key"] = "fg_mask"
-        model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": {"c": SEG_AUX_C}}
-        model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, arm.model)]
+        seg_args: dict[str, Any] = {"c": SEG_AUX_C}
+        if arm.suffix == "segauxself":
+            seg_args["label"] = "target"
+        model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": seg_args}
+        # segauxself reuses the segaux arm's calibrated weight so the two differ by the label only.
+        model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, f"{arm.baseline}_segaux")]
         if BASELINES[arm.baseline].engine == "flow":
             model_args["seg_aux_t0"] = SEG_AUX_T0
     elif arm.suffix == "seed1":

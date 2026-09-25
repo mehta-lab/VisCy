@@ -892,7 +892,7 @@ _WIDE_GPU_TRAIN_LEAVES = (
         # keep the baseline's bs=4 per-rank footprint and its measured opt-out.
         f"{organelle}/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
         for organelle in ("nucleus", "membrane")
-        for suffix in ("segaux", "seed1")
+        for suffix in ("segaux", "segauxself", "seed1")
     )
 )
 _WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})

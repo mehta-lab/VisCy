@@ -72,6 +72,10 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "celldiff_cjoint_iterative",
     "celldiff_ccond",
     "celldiff_ccond_iterative",
+    "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself",
+    "pix2pix2d_unetvit_segauxself",
+    "celldiff_2d_segauxself",
 )
 
 # ---------------------------------------------------------------------------

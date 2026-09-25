@@ -12,6 +12,7 @@ from generate_spotlight_v2_leaves import (
     BENCHMARKS,
     POOL,
     SEG_AUX_WEIGHTS,
+    SEGAUXSELF_BASELINES,
     Arm,
     allowed_diff,
     build_fit,
@@ -35,13 +36,24 @@ def test_committed_leaves_match_the_generator() -> None:
 
 
 def test_leaf_counts_per_arm() -> None:
-    """36 fits and 108 predicts: segaux 16+64, seed1 9+9, v2 4+16, probes 3+3, cjoint/ccond 2+8 each."""
+    """44 fits, 140 predicts: segaux 16+64, segauxself 8+32, seed1 9+9, v2 4+16, probes 3+3, cjoint/ccond 2+8."""
     leaves = build_leaves()
     fits = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name == "train.yml")
     predicts = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name != "train.yml")
-    assert fits == {"segaux": 16, "seed1": 9, "v2": 4, "jointsteps": 1, "l1": 1, "safecrop": 1, "cjoint": 2, "ccond": 2}
+    assert fits == {
+        "segaux": 16,
+        "segauxself": 8,
+        "seed1": 9,
+        "v2": 4,
+        "jointsteps": 1,
+        "l1": 1,
+        "safecrop": 1,
+        "cjoint": 2,
+        "ccond": 2,
+    }
     assert predicts == {
         "segaux": 64,
+        "segauxself": 32,
         "seed1": 9,
         "v2": 16,
         "jointsteps": 1,
@@ -147,3 +159,16 @@ def test_ccond_predict_reads_the_same_leg_fnet_segaux_mask() -> None:
         assert "fg_mask_key" not in cfg.get("data", {}).get("init_args", {})
         n += 1
     assert n == 8
+
+
+@pytest.mark.parametrize("organelle", ["nucleus", "membrane"])
+@pytest.mark.parametrize("baseline", SEGAUXSELF_BASELINES)
+def test_segauxself_differs_from_segaux_by_the_dice_label_only(baseline: str, organelle: str) -> None:
+    """Composed, the segauxself fit equals the segaux fit except SegAuxDice label and the run identity."""
+    load = lambda suffix: load_composed_config(  # noqa: E731
+        BENCHMARKS / organelle / f"{baseline}_{suffix}" / POOL / "train.yml", resolver=_dynacell_ref_resolver
+    )
+    segaux, segauxself = load("segaux"), load("segauxself")
+    renames, _ = allowed_diff(Arm(baseline, "segauxself", (organelle,), a549=False), "fit")
+    assert changed_keys(segaux, segauxself) - renames == {"model.init_args.seg_aux.init_args.label"}
+    assert segauxself["model"]["init_args"]["seg_aux"]["init_args"]["label"] == "target"
