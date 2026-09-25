@@ -71,6 +71,31 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fnet2d_spotlight": "fnet2d_spotlight",
     "pix2pix3d_unetvit_spotlight": "pix2pix3d_spotlight",
     "pix2pix2d_unetvit_spotlight": "pix2pix2d_spotlight",
+    # Spotlight v2 first wave (tools/generate_spotlight_v2_leaves.py). Same agreement
+    # rule with PAPER_KEY. `celldiff_segaux` is the model; its store dir
+    # `celldiff_segaux_iterative` splits into (celldiff_segaux, iterative).
+    "fnet2d_segaux": "fnet2d_segaux",
+    "fnet3d_paper_segaux": "fnet3d_segaux",
+    "fcmae_vscyto2d_scratch_segaux": "unext2_2d_segaux",
+    "fcmae_vscyto3d_scratch_segaux": "unext2_segaux",
+    "pix2pix2d_unetvit_segaux": "pix2pix2d_segaux",
+    "pix2pix3d_unetvit_segaux": "pix2pix3d_segaux",
+    "celldiff_2d_segaux": "celldiff_2d_segaux",
+    "celldiff_segaux": "celldiff_segaux",
+    "fnet2d_seed1": "fnet2d_seed1",
+    "fnet3d_paper_seed1": "fnet3d_seed1",
+    "fcmae_vscyto2d_scratch_seed1": "unext2_2d_seed1",
+    "pix2pix2d_unetvit_seed1": "pix2pix2d_seed1",
+    "celldiff_2d_seed1": "celldiff_2d_seed1",
+    "fcmae_vscyto3d_scratch_v2": "unext2_v2",
+    "pix2pix3d_unetvit_v2": "pix2pix3d_v2",
+    "fcmae_vscyto2d_scratch_jointsteps": "unext2_2d_jointsteps",
+    "fcmae_vscyto2d_scratch_l1": "unext2_2d_l1",
+    "fcmae_vscyto2d_scratch_safecrop": "unext2_2d_safecrop",
+    "celldiff_2d_cjoint": "celldiff_2d_cjoint",
+    "celldiff_2d_ccond": "celldiff_2d_ccond",
+    "celldiff_cjoint": "celldiff_cjoint",
+    "celldiff_ccond": "celldiff_ccond",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -127,10 +152,39 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet2d_spotlight",
     "pix2pix3d_unetvit_spotlight",
     "pix2pix2d_unetvit_spotlight",
+    # Spotlight v2 first wave: deterministic for the same reason as their baselines.
+    "fnet2d_segaux",
+    "fnet3d_paper_segaux",
+    "fcmae_vscyto2d_scratch_segaux",
+    "fcmae_vscyto3d_scratch_segaux",
+    "pix2pix2d_unetvit_segaux",
+    "pix2pix3d_unetvit_segaux",
+    "fnet2d_seed1",
+    "fnet3d_paper_seed1",
+    "fcmae_vscyto2d_scratch_seed1",
+    "pix2pix2d_unetvit_seed1",
+    "fcmae_vscyto3d_scratch_v2",
+    "pix2pix3d_unetvit_v2",
+    "fcmae_vscyto2d_scratch_jointsteps",
+    "fcmae_vscyto2d_scratch_l1",
+    "fcmae_vscyto2d_scratch_safecrop",
 )
-_CELLDIFF_MODELS: tuple[str, ...] = ("celldiff_r2", "celldiff_2d", "celldiff")
+_CELLDIFF_MODELS: tuple[str, ...] = (
+    "celldiff_2d_segaux",
+    "celldiff_2d_cjoint",
+    "celldiff_2d_ccond",
+    "celldiff_2d_seed1",
+    "celldiff_segaux",
+    "celldiff_cjoint",
+    "celldiff_ccond",
+    "celldiff_r2",
+    "celldiff_2d",
+    "celldiff",
+)
 """CellDiff-family model tokens, longest first so prefix matching does not
-truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``."""
+truncate ``celldiff_r2``/``celldiff_2d`` down to bare ``celldiff``, nor the
+Spotlight-v2 arms (``celldiff_2d_segaux``, ``celldiff_segaux``, ...) onto the
+baseline whose token they extend (which would misread ``segaux`` as a variant)."""
 _ORGANELLES: tuple[str, ...] = ("er", "mitochondria", "nucleus", "membrane")
 
 # Canonical on-disk organelle roots to walk. The generator keeps ``mitochondria``

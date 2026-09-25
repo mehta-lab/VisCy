@@ -19,6 +19,8 @@ import itertools
 from pathlib import Path
 
 import pytest
+from generate_grouped_eval_configs import _split_model_variant
+from generate_spotlight_v2_leaves import ARMS
 
 from dynacell.evaluation.paths import (
     MODELS_ROOT,
@@ -40,6 +42,37 @@ from dynacell.evaluation.paths import (
 )
 
 _DATA_ROOT = "/hpc/projects/virtual_staining/training/dynacell"
+
+# Spotlight-v2 first-wave model tokens (tools/generate_spotlight_v2_leaves.py), written
+# out so a generator change that renames an arm fails here instead of silently
+# re-keying its eval dirs. `celldiff_segaux_iterative` is the CellDiff-3D store dir.
+_SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
+    "fnet2d_segaux",
+    "fnet3d_paper_segaux",
+    "fcmae_vscyto2d_scratch_segaux",
+    "fcmae_vscyto3d_scratch_segaux",
+    "pix2pix2d_unetvit_segaux",
+    "pix2pix3d_unetvit_segaux",
+    "celldiff_2d_segaux",
+    "celldiff_segaux",
+    "celldiff_segaux_iterative",
+    "fnet2d_seed1",
+    "fnet3d_paper_seed1",
+    "fcmae_vscyto2d_scratch_seed1",
+    "pix2pix2d_unetvit_seed1",
+    "celldiff_2d_seed1",
+    "fcmae_vscyto3d_scratch_v2",
+    "pix2pix3d_unetvit_v2",
+    "fcmae_vscyto2d_scratch_jointsteps",
+    "fcmae_vscyto2d_scratch_l1",
+    "fcmae_vscyto2d_scratch_safecrop",
+    "celldiff_2d_cjoint",
+    "celldiff_2d_ccond",
+    "celldiff_cjoint",
+    "celldiff_cjoint_iterative",
+    "celldiff_ccond",
+    "celldiff_ccond_iterative",
+)
 
 # ---------------------------------------------------------------------------
 # Canonical tuple enumeration
@@ -411,10 +444,61 @@ def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
         # collapses onto fnet3d_paper. Pinned so the correct run-dir token above
         # cannot be "simplified" into it later.
         ("fnet3d_paper_spotlight", "fnet3d_paper"),
+        # Spotlight v2 first wave: every arm token extends its baseline's, so each
+        # must resolve to itself, never to the baseline it is compared against.
+        *((m, m) for m in _SPOTLIGHT_V2_MODELS),
     ],
 )
 def test_canonical_model_name(run_dir_name: str, expected: str) -> None:
     assert canonical_model_name(run_dir_name) == expected
+
+
+def test_spotlight_v2_models_match_the_leaf_generator() -> None:
+    """The pinned v2 token list is exactly what the leaf generator emits (plus the 3D store dir)."""
+    emitted = {arm.model for arm in ARMS} | {arm.store_dir for arm in ARMS}
+    assert emitted == set(_SPOTLIGHT_V2_MODELS)
+
+
+@pytest.mark.parametrize(
+    ("model_name", "run_dir", "expected"),
+    [
+        # A leaf that kept the baseline's model_name still resolves to the arm its
+        # checkpoint dir belongs to -- the bare-celldiff / celldiff_2d fallbacks must
+        # not capture it.
+        ("celldiff", "celldiff_segaux", "celldiff_segaux"),
+        ("celldiff_segaux", "celldiff_segaux", "celldiff_segaux"),
+        ("celldiff_2d", "celldiff_2d_segaux", "celldiff_2d_segaux"),
+        ("celldiff_2d", "celldiff_2d_seed1", "celldiff_2d_seed1"),
+        ("celldiff", "celldiff_cjoint", "celldiff_cjoint"),
+        ("celldiff", "celldiff_ccond", "celldiff_ccond"),
+        ("celldiff_2d", "celldiff_2d_cjoint", "celldiff_2d_cjoint"),
+        ("celldiff_2d", "celldiff_2d_ccond", "celldiff_2d_ccond"),
+        # Baselines are unchanged.
+        ("celldiff", "celldiff_r2", "celldiff_r2"),
+        ("celldiff_2d", "celldiff_2d", "celldiff_2d"),
+        # Non-CellDiff arms resolve from their ckpt run-dir segment.
+        ("fnet2d", "fnet2d_segaux", "fnet2d_segaux"),
+        ("fcmae_vscyto3d_scratch", "fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_v2"),
+        ("pix2pix3d_unetvit", "pix2pix3d_unetvit_segaux", "pix2pix3d_unetvit_segaux"),
+    ],
+)
+def test_resolve_model_spotlight_v2_arm_not_collapsed(model_name: str, run_dir: str, expected: str) -> None:
+    ckpt = f"{_MODELS_ROOT_STR}/ipsc/nucleus/{run_dir}/checkpoints/last.ckpt"
+    assert resolve_model({"model_name": model_name, "train_set": "ipsc_confocal"}, ckpt) == expected
+
+
+def test_spotlight_v2_celldiff_store_dir_splits_into_model_and_variant() -> None:
+    """The grouped parser reads each v2 store dir as the arm, not as a baseline variant."""
+    assert _split_model_variant("celldiff_segaux_iterative", "x") == ("celldiff_segaux", "iterative")
+    assert _split_model_variant("celldiff_2d_segaux", "x") == ("celldiff_2d_segaux", None)
+    assert _split_model_variant("celldiff_2d_seed1", "x") == ("celldiff_2d_seed1", None)
+    assert _split_model_variant("celldiff_cjoint_iterative", "x") == ("celldiff_cjoint", "iterative")
+    assert _split_model_variant("celldiff_ccond_iterative", "x") == ("celldiff_ccond", "iterative")
+    assert _split_model_variant("celldiff_2d_cjoint", "x") == ("celldiff_2d_cjoint", None)
+    assert _split_model_variant("celldiff_2d_ccond", "x") == ("celldiff_2d_ccond", None)
+    for model in _SPOTLIGHT_V2_MODELS:
+        if not model.startswith("celldiff"):
+            assert _split_model_variant(model, "x") == (model, None)
 
 
 def test_canonical_model_name_unknown_raises() -> None:
