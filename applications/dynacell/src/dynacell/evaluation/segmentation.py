@@ -127,18 +127,19 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
             img = _smooth_nucleus_input(img)
         mask = seg_model.apply_on_single_zstack(img[None, ...])
 
-    elif target_name == "nucleoli":
+    elif target_name in ("nucleoli", "lysosomes", "er", "mitochondria"):
         _require_aicssegmentation()
-        mask = Workflow_npm1(img, output_type="array")
-    elif target_name == "lysosomes":
-        _require_aicssegmentation()
-        mask = Workflow_lamp1(img, output_type="array")
-    elif target_name == "er":
-        _require_aicssegmentation()
-        mask = Workflow_sec61b(img, output_type="array")
-    elif target_name == "mitochondria":
-        _require_aicssegmentation()
-        mask = Workflow_tomm20(img, output_type="array")
+        # The aicssegmentation workflows normalize their input IN PLACE (intensity_normalization
+        # clips to [m - a*s, m + b*s]). Callers pass views of the GT / prediction volumes they go
+        # on to score, so without a copy a cold mask cache silently scores a clipped GT.
+        img = np.array(img, copy=True)
+        workflow = {
+            "nucleoli": Workflow_npm1,
+            "lysosomes": Workflow_lamp1,
+            "er": Workflow_sec61b,
+            "mitochondria": Workflow_tomm20,
+        }[target_name]
+        mask = workflow(img, output_type="array")
     else:
         raise ValueError(f"Unsupported target_name: {target_name}")
 
