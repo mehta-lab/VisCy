@@ -11,9 +11,18 @@ For every (sample, channel) patch:
 - ``s = c * (median(target | fg) - median(target | bg))``: the knee width
   relative to the patch's own foreground/background contrast.
 - ``p = sigmoid((pred - tau) / s)``: bounded, with non-zero gradient everywhere.
-- ``dice = 1 - 2 * sum(p * m) / (sum(p**2) + sum(m**2) + eps)``.
+- ``dice = 1 - 2 * sum(p * r) / (sum(p**2) + sum(r**2) + eps)``, where the
+  reference ``r`` is the binary mask (``label="mask"``) or the target through
+  the same sigmoid, ``sigmoid((target - tau) / s)`` (``label="target"``).
 
-``tau`` and ``s`` are computed from the target without gradient.
+``tau``, ``s`` and ``r`` are computed from the target without gradient.
+
+With ``label="mask"`` the loss is not zero at ``pred == target`` wherever the
+mask is not a threshold of the target (0.07-0.25 on the iPSC baselines'
+validation patches, 2026-09-24), so it also pulls the prediction toward the
+mask. ``label="target"`` keeps the mask's role in setting ``tau``, ``s`` and
+patch validity but is minimised exactly at ``pred == target``: it isolates a
+segmentation-shaped penalty from that pull.
 """
 
 import torch
@@ -100,16 +109,22 @@ class SegAuxDice(nn.Module):
         Knee width as a fraction of the patch's foreground/background contrast.
     eps : float
         Dice denominator stabilizer, and the floor on the knee width.
+    label : {"mask", "target"}
+        Dice reference: the binary foreground mask, or the target soft-thresholded
+        like the prediction (self-consistent; zero loss at ``pred == target``).
     """
 
-    def __init__(self, c: float = 0.1, eps: float = 1e-6) -> None:
+    def __init__(self, c: float = 0.1, eps: float = 1e-6, label: str = "mask") -> None:
         super().__init__()
         if c <= 0:
             raise ValueError(f"c must be > 0, got {c}")
         if eps <= 0:
             raise ValueError(f"eps must be > 0, got {eps}")
+        if label not in ("mask", "target"):
+            raise ValueError(f"label must be 'mask' or 'target', got {label!r}")
         self.c = c
         self.eps = eps
+        self.label = label
 
     def per_channel(self, pred: Tensor, target: Tensor, fg_mask: Tensor) -> tuple[Tensor, Tensor]:
         """Compute the Dice loss per (sample, channel) and which entries are valid.
@@ -152,9 +167,13 @@ class SegAuxDice(nn.Module):
                 # width so invalid entries stay finite and the mask-multiply in
                 # forward() can zero them (inf * 0 would be NaN).
                 s = torch.where(valid, self.c * contrast, torch.ones_like(contrast)).clamp(min=self.eps)
+                if self.label == "target":
+                    ref = torch.sigmoid((flat_t - tau.unsqueeze(-1)) / s.unsqueeze(-1))
+                else:
+                    ref = mask
             p = torch.sigmoid((pred_f - tau.unsqueeze(-1)) / s.unsqueeze(-1))
-            inter = (p * mask).sum(-1)
-            denom = (p * p).sum(-1) + fg_count + self.eps
+            inter = (p * ref).sum(-1)
+            denom = (p * p).sum(-1) + (ref * ref).sum(-1) + self.eps
             dice = 1.0 - 2.0 * inter / denom
         return dice.reshape(b, c), valid.reshape(b, c)
 

@@ -145,3 +145,39 @@ def test_autocast_computes_in_float32(dtype):
 def test_shape_mismatch_raises():
     with pytest.raises(ValueError, match="share a shape"):
         SegAuxDice()(torch.zeros(1, 1, 4, 4), torch.zeros(1, 1, 4, 4), torch.zeros(1, 1, 4, 5))
+
+
+def _mask_disagrees_with_target(shape: tuple[int, ...] = (2, 1, 1, 32, 32)) -> tuple[torch.Tensor, torch.Tensor]:
+    """Box target plus a bright blob outside the mask: the mask is not a threshold of the target."""
+    target, mask = _blob_batch(shape)
+    target[..., -6:, -6:] += 2.0
+    return target, mask
+
+
+def test_target_label_is_minimised_at_pred_equals_target():
+    """label='target' is ~0 with zero gradient at pred == target, where label='mask' has a floor."""
+    target, mask = _mask_disagrees_with_target()
+    floor = SegAuxDice(label="mask")(target.clone(), target, mask)
+    pred = target.clone().requires_grad_(True)
+    loss = SegAuxDice(label="target")(pred, target, mask)
+    loss.backward()
+    assert floor > 0.05
+    assert loss < 1e-4
+    assert pred.grad.abs().max() < 1e-4
+    g = torch.Generator().manual_seed(1)
+    perturbed = target + 0.5 * torch.randn(target.shape, generator=g)
+    assert SegAuxDice(label="target")(perturbed, target, mask) > 10 * loss
+
+
+def test_target_label_keeps_the_mask_validity_rule():
+    """The mask still decides which patches count: an empty mask is excluded under either label."""
+    target, mask = _blob_batch((2, 1, 1, 16, 16))
+    mask[0] = 0.0
+    for label in ("mask", "target"):
+        _, valid = SegAuxDice(label=label).per_channel(target, target, mask)
+        assert valid.tolist() == [[False], [True]]
+
+
+def test_unknown_label_raises():
+    with pytest.raises(ValueError, match="label"):
+        SegAuxDice(label="soft")
