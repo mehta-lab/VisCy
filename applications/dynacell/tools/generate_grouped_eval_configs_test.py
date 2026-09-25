@@ -128,6 +128,15 @@ from generate_grouped_eval_configs import (  # noqa: E402
             "membrane/pix2pix3d_unetvit/ipsc/a549__denv/prediction.zarr",
             ("membrane", "pix2pix3d_unetvit", None, "ipsc_trained", "ipsc", "a549", "denv"),
         ),
+        # Voxel-matched FNet-2D ablation: parses as its own model, never as fnet2d.
+        (
+            "nucleus/fnet2d_voxelmatched/ipsc/ipsc/prediction.zarr",
+            ("nucleus", "fnet2d_voxelmatched", None, "ipsc_trained", "ipsc", "ipsc", None),
+        ),
+        (
+            "er/fnet2d_voxelmatched/ipsc/a549__mock/prediction.zarr",
+            ("er", "fnet2d_voxelmatched", None, "ipsc_trained", "ipsc", "a549", "mock"),
+        ),
     ],
 )
 def test_parse_zarr_name(rel: str, expect: tuple) -> None:
