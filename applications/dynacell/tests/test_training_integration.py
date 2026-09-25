@@ -485,7 +485,10 @@ def test_unet_seg_aux_fast_dev_run(tmp_path, tiny_hcs_zarr, case):
         ["loss/train", "loss/base_train", "loss/dice_train", "loss/validate", "loss/validate_dice"],
     )
     assert metrics["loss/dice_n_valid_train"] > 0
-    assert 0.0 < metrics["loss/dice_train"] < 1.0
+    # An untrained net's output sits many knee widths from tau on this synthetic
+    # store (the contrast knee is narrow), so the soft Dice can round to exactly 1;
+    # the gradient path below tau is covered by the SegAuxDice unit tests.
+    assert 0.0 < metrics["loss/dice_train"] <= 1.0
 
 
 def test_unet_seg_aux_none_is_bit_identical_to_the_base_path(tiny_hcs_zarr):

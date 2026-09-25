@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from viscy_utils.losses import SegAuxDice
-from viscy_utils.losses.seg_aux import _quantile_sorted
+from viscy_utils.losses.seg_aux import _masked_median, _quantile_sorted
 
 
 def _blob_batch(shape: tuple[int, ...], seed: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
@@ -36,7 +36,8 @@ def test_gradient_nonzero_for_foreground_far_below_tau():
     target, mask = _blob_batch((1, 1, 1, 32, 32))
     flat = target.flatten()
     tau = torch.quantile(flat, 1 - mask.mean())
-    s = 0.1 * (torch.quantile(flat, 0.75) - torch.quantile(flat, 0.25))
+    fg = mask.flatten() > 0.5
+    s = 0.1 * (flat[fg].median() - flat[~fg].median())
     pred = target.clone()
     fg_idx = (0, 0, 0, 10, 10)
     assert mask[fg_idx] == 1
@@ -54,6 +55,21 @@ def test_affine_invariance(a, b):
     ref = loss_fn(pred, target, mask)
     moved = loss_fn(a * pred + b, a * target + b, mask)
     torch.testing.assert_close(moved, ref, rtol=1e-4, atol=1e-5)
+
+
+def test_masked_median_matches_torch_on_selection():
+    g = torch.Generator().manual_seed(7)
+    values = torch.randn(4, 101, generator=g)
+    keep = torch.rand(4, 101, generator=g) > 0.6
+    got = _masked_median(values, keep)
+    want = torch.stack([torch.quantile(v[k], 0.5) for v, k in zip(values, keep)])
+    torch.testing.assert_close(got, want)
+
+
+def test_mask_darker_than_background_is_excluded():
+    target, mask = _blob_batch((1, 1, 1, 32, 32))
+    loss, comps = SegAuxDice()(target.clone(), -target, mask, return_components=True)
+    assert comps["n_valid"] == 0
 
 
 def test_empty_and_full_masks_are_excluded():
