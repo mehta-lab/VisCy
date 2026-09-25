@@ -691,6 +691,10 @@ class HCSDataModule(LightningDataModule):
         """
         if isinstance(batch, Tensor):
             return batch
+        # Masks travel host-side in their stored dtype (uint8) to keep worker
+        # and pinned buffers small; augmentations and losses expect float.
+        if "fg_mask" in batch and not batch["fg_mask"].is_floating_point():
+            batch["fg_mask"] = batch["fg_mask"].float()
         if self.trainer and self.trainer.training and self._gpu_augmentations is not None:
             batch = self._gpu_augmentations(batch)
         elif (
