@@ -874,15 +874,26 @@ _HARDWARE_4GPU_GPUS = frozenset(_HARDWARE_4GPU_CONSTRAINT.split("|"))
 # All three added cards can satisfy --nodes=1 --gpus=4 in the gpu partition
 # (gpu-c-1 8xa40, gpu-b-[1-6] 4xa6000, gpu-g-2 4xl40s; gpu-g-1 has 3 l40s and is
 # simply never selected).
-_WIDE_GPU_TRAIN_LEAVES = frozenset(
-    f"{organelle}/pix2pix2d_unetvit/{pool}/train.yml"
-    for organelle in ("nucleus", "membrane", "er", "mito")
-    for pool in ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
-) | frozenset(
-    # The pix2pix2d spotlight arms carry the same measured per-rank peak as the
-    # baseline they copy (13.3 GiB at bs=4), so they inherit the same opt-out.
-    f"{organelle}/pix2pix2d_unetvit_spotlight/ipsc_confocal/train.yml"
-    for organelle in ("nucleus", "membrane")
+_WIDE_GPU_TRAIN_LEAVES = (
+    frozenset(
+        f"{organelle}/pix2pix2d_unetvit/{pool}/train.yml"
+        for organelle in ("nucleus", "membrane", "er", "mito")
+        for pool in ("ipsc_confocal", "a549_mantis", "joint_ipsc_confocal_a549_mantis")
+    )
+    | frozenset(
+        # The pix2pix2d spotlight arms carry the same measured per-rank peak as the
+        # baseline they copy (13.3 GiB at bs=4), so they inherit the same opt-out.
+        f"{organelle}/pix2pix2d_unetvit_spotlight/ipsc_confocal/train.yml"
+        for organelle in ("nucleus", "membrane")
+    )
+    | frozenset(
+        # Spotlight-v2 pix2pix2d arms (generate_spotlight_v2_leaves.py): the segaux arm adds
+        # only a per-patch Dice term and the seed replicate only changes the seed, so both
+        # keep the baseline's bs=4 per-rank footprint and its measured opt-out.
+        f"{organelle}/pix2pix2d_unetvit_{suffix}/ipsc_confocal/train.yml"
+        for organelle in ("nucleus", "membrane")
+        for suffix in ("segaux", "seed1")
+    )
 )
 _WIDE_GPU_EXTRA = frozenset({"a40", "a6000", "l40s"})
 
@@ -1005,6 +1016,16 @@ _LONG_WALL_TRAIN_LEAVES = frozenset(
     f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
     for organelle in ("er", "mito", "nucleus", "membrane")
     for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
+) | frozenset(
+    # Spotlight-v2 UNeXt2-3D iPSC fits from scratch (fresh v2 baseline + its segaux arm).
+    # Measured on the April iPSC runs of the same 4-GPU recipe, consecutive checkpoint
+    # mtimes within one allocation (2026-04-30): nucleus e96 00:39:27 -> e98 01:38:24
+    # = 2.04 ep/h, e98 -> e111 08:09:59 = 1.99 ep/h; membrane e134 09:21:15 -> e136
+    # 10:21:36 = 1.99 ep/h, e146 15:52:49 -> e147 16:22:49 = 2.00 ep/h. 200 epochs at
+    # ~2.0 ep/h is ~100 h, over the 96 h default.
+    f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
+    for organelle in ("nucleus", "membrane")
+    for suffix in ("v2", "segaux")
 )
 _LONG_WALL_TIME = "7-00:00:00"
 _DEFAULT_4GPU_TIME = "4-00:00:00"
@@ -1031,7 +1052,7 @@ def test_only_measured_slow_fits_get_the_long_wall(leaf: Path) -> None:
     if rel in _LONG_WALL_TRAIN_LEAVES:
         assert time_limit == _LONG_WALL_TIME, (
             f"{rel}: time={time_limit!r}, expected {_LONG_WALL_TIME!r}. This fit needs "
-            f"~110-164 h for max_epochs=200 and TIMEOUTed at 4 days."
+            f"~100-164 h for max_epochs=200 (joint leaves TIMEOUTed at 4 days)."
         )
     elif cfg["trainer"]["devices"] == 4:
         assert time_limit == _DEFAULT_4GPU_TIME, (

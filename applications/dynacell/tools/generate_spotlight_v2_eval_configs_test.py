@@ -36,8 +36,8 @@ def _write_plate(path: Path, positions: list[tuple[str, str, str]], shape: tuple
 
 
 def test_default_roster_rows_and_bucket_layout() -> None:
-    """The stage-0 roster expands to 96 rows in 8 buckets of 12 conditions."""
-    rows = load_roster(DEFAULT_ROSTER)
+    """The stage-0 wave expands to 96 rows in 8 buckets of 12 conditions (later waves are separate)."""
+    rows = [row for row in load_roster(DEFAULT_ROSTER) if row[0] == "stage0"]
     # 12 models x 2 organelles x 4 test legs, one bucket per (wave, organelle, leaf).
     assert len(rows) == 96
     buckets = build_buckets(rows)
