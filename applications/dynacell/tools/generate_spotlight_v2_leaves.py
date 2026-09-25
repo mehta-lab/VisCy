@@ -13,8 +13,8 @@ Arms (``<baseline>_<suffix>``):
 - ``segaux`` -- 8 models x nucleus/membrane. Data gains ``fg_mask_key: fg_mask``
   (NOT v1's ``min_nonzero_fraction``, which changes patch sampling); the model gains
   ``seg_aux: SegAuxDice(c=0.1)`` and ``seg_aux_weight`` (flow models also
-  ``seg_aux_t0: 0.7``). ``seg_aux_weight: 1.0`` is a placeholder until the
-  per-family gradient-norm calibration exists. The base loss, normalization,
+  ``seg_aux_t0: 0.7``). ``seg_aux_weight`` comes from SEG_AUX_WEIGHTS, the
+  per-cell gradient-norm calibration. The base loss, normalization,
   sampling, precision, budget and monitored metric are the baseline's, and
   ``loss/validate`` stays base-only in all three engines, so ``--ckpt best`` selects
   on the baseline's criterion. The CellDiff-3D arm's checkpoints go to
@@ -89,13 +89,40 @@ A549_PREDICTS: tuple[str, ...] = (
 )
 SEG_AUX_C = 0.1
 SEG_AUX_T0 = 0.7
-SEG_AUX_WEIGHT_PLACEHOLDER = 1.0
+# seg_aux_weight per (organelle, arm): the median over 20 seeded val batches of
+# ||grad base|| / ||grad Dice|| at each BASELINE checkpoint (contrast knee, c=0.1),
+# rounded to 2 significant figures, so the Dice term starts with the same gradient
+# norm as the usual loss. It varies 0.36-16 even within a family, hence per cell.
+# Source: experiments/2026-09-24_spotlight-v2/calibration/summary.csv (w_star_contrast).
+SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
+    ("nucleus", "fnet2d_segaux"): 2.9,
+    ("nucleus", "fnet3d_paper_segaux"): 1.9,
+    ("nucleus", "fcmae_vscyto2d_scratch_segaux"): 0.73,
+    ("nucleus", "fcmae_vscyto3d_scratch_segaux"): 0.82,
+    ("nucleus", "pix2pix2d_unetvit_segaux"): 16.0,
+    ("nucleus", "pix2pix3d_unetvit_segaux"): 2.5,
+    ("nucleus", "celldiff_2d_segaux"): 2.5,
+    ("nucleus", "celldiff_segaux"): 1.4,
+    ("membrane", "fnet2d_segaux"): 0.63,
+    ("membrane", "fnet3d_paper_segaux"): 2.2,
+    ("membrane", "fcmae_vscyto2d_scratch_segaux"): 0.36,
+    ("membrane", "fcmae_vscyto3d_scratch_segaux"): 0.86,
+    ("membrane", "pix2pix2d_unetvit_segaux"): 1.2,
+    ("membrane", "pix2pix3d_unetvit_segaux"): 3.1,
+    ("membrane", "celldiff_2d_segaux"): 0.58,
+    ("membrane", "celldiff_segaux"): 1.0,
+}
+# C-joint's mask Dice has no baseline to calibrate against (the baseline has no
+# mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
+MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
+    ("nucleus", "celldiff_2d_cjoint"): 2.5,
+    ("nucleus", "celldiff_cjoint"): 1.4,
+}
 JOINTSTEPS_MAX_EPOCHS = 320
 LONG_WALL_MODELS: frozenset[str] = frozenset({"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux"})
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
 SAFE_CROP_SIZE = [1, 384, 384]
-MASK_DICE_WEIGHT_PLACEHOLDER = 1.0
 MASK_VELOCITY_WEIGHT = 1.0
 # C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction
 # for the same test leg, thresholded at a val-tuned t. The store path is the
@@ -314,14 +341,14 @@ def _safecrop_gpu_augmentations() -> list[dict]:
     return augs
 
 
-def _apply_recipe(arm: Arm, cfg: dict) -> None:
+def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     """Apply the arm's recipe delta to a fit-leaf dict in place."""
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
     if arm.suffix == "segaux":
         data_args["fg_mask_key"] = "fg_mask"
         model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": {"c": SEG_AUX_C}}
-        model_args["seg_aux_weight"] = SEG_AUX_WEIGHT_PLACEHOLDER
+        model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, arm.model)]
         if BASELINES[arm.baseline].engine == "flow":
             model_args["seg_aux_t0"] = SEG_AUX_T0
     elif arm.suffix == "seed1":
@@ -339,7 +366,7 @@ def _apply_recipe(arm: Arm, cfg: dict) -> None:
         data_args["fg_mask_key"] = "fg_mask"
         model_args.setdefault("net_config", {})["in_channels"] = 2
         model_args["mask_mode"] = "joint"
-        model_args["mask_dice_weight"] = MASK_DICE_WEIGHT_PLACEHOLDER
+        model_args["mask_dice_weight"] = MASK_DICE_WEIGHTS[(organelle, arm.model)]
         model_args["mask_velocity_weight"] = MASK_VELOCITY_WEIGHT
         model_args["seg_aux_t0"] = SEG_AUX_T0
     elif arm.suffix == "ccond":
@@ -372,7 +399,7 @@ def build_fit(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
     )
     cfg["launcher"]["job_name"] = f"{cfg['launcher']['job_name']}_{arm.suffix}"
     cfg["launcher"]["run_root"] = _replace_segment(cfg["launcher"]["run_root"], base.ckpt_dir, arm.model)
-    _apply_recipe(arm, cfg)
+    _apply_recipe(arm, organelle, cfg)
     if arm.model in LONG_WALL_MODELS:
         walls = [i for i, entry in enumerate(cfg["base"]) if entry.endswith(_WALL_4GPU)]
         if len(walls) != 1:
@@ -441,15 +468,6 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
 
 def _render(cfg: dict, header: str) -> str:
     text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)
-    pending = (
-        "    # calibrated value pending: 1.0 is a PLACEHOLDER. Set it per family from the\n"
-        "    # gradient-norm calibration (plan: 'w calibration') before submitting this fit.\n"
-    )
-    for weight_line in (
-        f"    seg_aux_weight: {SEG_AUX_WEIGHT_PLACEHOLDER}\n",
-        f"    mask_dice_weight: {MASK_DICE_WEIGHT_PLACEHOLDER}\n",
-    ):
-        text = text.replace(weight_line, pending + weight_line)
     threshold_line = f"        threshold: {CCOND_THRESHOLD_PLACEHOLDER}\n"
     text = text.replace(
         threshold_line,

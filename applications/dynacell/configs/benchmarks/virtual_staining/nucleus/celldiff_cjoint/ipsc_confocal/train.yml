@@ -43,8 +43,6 @@ model:
     net_config:
       in_channels: 2
     mask_mode: joint
-    # calibrated value pending: 1.0 is a PLACEHOLDER. Set it per family from the
-    # gradient-norm calibration (plan: 'w calibration') before submitting this fit.
-    mask_dice_weight: 1.0
+    mask_dice_weight: 1.4
     mask_velocity_weight: 1.0
     seg_aux_t0: 0.7

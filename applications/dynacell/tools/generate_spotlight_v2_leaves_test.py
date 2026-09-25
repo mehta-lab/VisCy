@@ -11,7 +11,7 @@ from generate_spotlight_v2_leaves import (
     BASELINES,
     BENCHMARKS,
     POOL,
-    SEG_AUX_WEIGHT_PLACEHOLDER,
+    SEG_AUX_WEIGHTS,
     Arm,
     allowed_diff,
     build_fit,
@@ -103,7 +103,7 @@ def test_segaux_composes_with_the_engine_args_and_keeps_the_baseline_recipe(base
     base_cfg = load_composed_config(base_leaf, resolver=_dynacell_ref_resolver)
     args = arm_cfg["model"]["init_args"]
     assert args["seg_aux"] == {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": {"c": 0.1}}
-    assert args["seg_aux_weight"] == SEG_AUX_WEIGHT_PLACEHOLDER
+    assert args["seg_aux_weight"] == SEG_AUX_WEIGHTS[("membrane", f"{baseline}_segaux")]
     assert arm_cfg["data"]["init_args"]["fg_mask_key"] == "fg_mask"
     assert "min_nonzero_fraction" not in arm_cfg["data"]["init_args"]
     for key in ("loss_function", "recon_loss", "lambda_l1", "lecam_gamma", "ema_kimg"):
