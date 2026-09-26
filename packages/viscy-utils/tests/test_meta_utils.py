@@ -1,8 +1,10 @@
+import warnings
+
 import numpy as np
 import pytest
 from iohub import open_ome_zarr
 
-from viscy_utils.meta_utils import generate_fg_masks, generate_normalization_metadata
+from viscy_utils.meta_utils import foreground_mask_from_volume, generate_fg_masks, generate_normalization_metadata
 
 GRID_SPACING = 8
 
@@ -209,3 +211,11 @@ def test_generate_fg_masks_no_overwrite(bimodal_hcs_dataset):
 
     with pytest.raises(FileExistsError):
         generate_fg_masks(bimodal_hcs_dataset, channel_names=["Fluorescence"])
+
+
+def test_constant_volume_gives_an_empty_mask_without_warnings():
+    """A blank timepoint is all background, reached by the explicit guard rather than a NaN."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        mask = foreground_mask_from_volume(np.full((4, 64, 64), 3.0, dtype=np.float32))
+    assert mask.dtype == bool and mask.shape == (4, 64, 64) and not mask.any()

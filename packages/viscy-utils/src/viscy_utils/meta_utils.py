@@ -252,6 +252,10 @@ def foreground_mask_from_volume(volume_zyx):
     numpy.ndarray
         Boolean mask of the input's shape.
     """
+    # A constant volume (e.g. a blank timepoint) has no structure to segment, and
+    # its percentile range is zero, which CLAHE's rescale would divide by.
+    if volume_zyx.min() == volume_zyx.max():
+        return np.zeros(volume_zyx.shape, dtype=bool)
     equalized = smooth_median(equalize_clahe(volume_zyx), size=_OTSU_MEDIAN_SIZE)
     flat = equalized.ravel()
     if flat.min() == flat.max():
