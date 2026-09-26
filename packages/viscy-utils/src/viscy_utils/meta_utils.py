@@ -4,6 +4,7 @@ import logging
 
 import iohub.ngff as ngff
 import numpy as np
+import torch
 from iohub.core.config import TensorStoreConfig
 from scipy.ndimage import median_filter
 from skimage.exposure import equalize_adapthist
@@ -18,7 +19,6 @@ try:
     # device, so the same call runs cupyx on a cupy array and scipy on a numpy
     # one. Optional here because viscy-utils does not depend on cubic; it ships
     # in dynacell's `eval` and `preprocess` extras.
-    import torch
     from cubic.cuda import ascupy, asnumpy
     from cubic.scipy import ndimage as _cubic_ndimage
     from cubic.skimage import exposure as _cubic_exposure
