@@ -52,6 +52,14 @@ def test_feature_less_stamp_matches_only_a_feature_less_run(tmp_path):
     assert not metrics_provenance_matches(tmp_path, cp_reference_sha256="abc")
 
 
+def test_feature_less_run_ignores_the_cp_key(tmp_path):
+    """compute_feature_metrics=false reuses no CP value, so a missing or foreign hash is irrelevant."""
+    (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
+    assert metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
+    write_metrics_provenance(tmp_path, cp_reference_sha256="abc")
+    assert metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
+
+
 def test_other_cp_reference_is_not_a_match(tmp_path):
     """CP values scored in another reference are not reusable after a rebuild."""
     write_metrics_provenance(tmp_path, cp_reference_sha256="old")
@@ -59,9 +67,9 @@ def test_other_cp_reference_is_not_a_match(tmp_path):
 
 
 def test_stamp_predating_cp_reference_is_not_a_match(tmp_path):
-    """A sidecar written before the CP reference existed carries no hash and never matches."""
+    """A sidecar written before the CP reference existed carries no hash; a CP-scoring run refuses it."""
     (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
-    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256="abc")
 
 
 def test_missing_sidecar_is_not_a_match(tmp_path):

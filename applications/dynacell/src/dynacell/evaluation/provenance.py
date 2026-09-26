@@ -118,15 +118,17 @@ def metrics_provenance_matches(save_dir: Path, *, cp_reference_sha256: str | Non
     save_dir : pathlib.Path
         Directory holding the metric CSV/NPY files.
     cp_reference_sha256 : str or None
-        Content hash of the CP reference the current run would score in
-        (``None`` when it computes no feature metrics). A sidecar written before
-        the CP reference existed carries no such key and never matches.
+        Content hash of the CP reference the current run would score in, or
+        ``None`` when it computes no feature metrics -- then no CP value is
+        reused and the recorded hash (or its absence) is irrelevant. When given,
+        a sidecar written before the CP reference existed carries no such key
+        and never matches.
 
     Returns
     -------
     bool
-        True when the recorded ``cubic`` version equals the installed one and
-        the recorded CP reference hash equals ``cp_reference_sha256``.
+        True when the recorded ``cubic`` version equals the installed one and,
+        if ``cp_reference_sha256`` is given, the recorded hash equals it.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -135,4 +137,6 @@ def metrics_provenance_matches(save_dir: Path, *, cp_reference_sha256: str | Non
     recorded = payload.get("versions", {}).get("cubic")
     if recorded != version("cubic"):
         return False
+    if cp_reference_sha256 is None:
+        return True
     return "cp_reference_sha256" in payload and payload["cp_reference_sha256"] == cp_reference_sha256
