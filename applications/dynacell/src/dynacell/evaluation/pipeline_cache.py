@@ -51,6 +51,7 @@ from dynacell.evaluation.metrics import (
     cp_regionprops,
     deep_features,
     features_from_crops,
+    round_device_dependent_cp_columns,
 )
 from dynacell.evaluation.runtime import region_timer
 from viscy_utils.prediction_metadata import checkpoint_sha256_12
@@ -1433,7 +1434,8 @@ def fov_cp_features(
     StaleCacheError
         If the cache's recorded CP column names differ from the running code's.
     """
-    check_cp_cache_feature_names(ctx, active_cp_feature_names(bool((ctx.cp_glcm or {}).get("enabled", False))))
+    names = active_cp_feature_names(bool((ctx.cp_glcm or {}).get("enabled", False)))
+    check_cp_cache_feature_names(ctx, names)
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
         kind="cp",
@@ -1453,6 +1455,11 @@ def fov_cp_features(
         ),
     )
 
+    # Load-time migration: a CPU-built cache predates the min/max rounding in
+    # cp_regionprops, so round cache hits the same way (a no-op on GPU-built slots
+    # and on the fresh computes, which are already rounded).
+    per_t = [round_device_dependent_cp_columns(feats, names) for feats in per_t]
+
     if ctx.enabled and manifest_updated:
         # Identity params (version/norm/glcm) come from _cp_identity so the
         # written entry matches the read-time check in
@@ -1464,7 +1471,7 @@ def fov_cp_features(
             # Column names, so a consumer (the CP reference) can check them by name.
             # Not part of the identity: caches written before this key stay valid and
             # have their names read back by cached_cp_feature_names.
-            "cp_feature_names": list(active_cp_feature_names(bool((ctx.cp_glcm or {}).get("enabled", False)))),
+            "cp_feature_names": list(names),
         }
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, ["cp_features"], pos_name)

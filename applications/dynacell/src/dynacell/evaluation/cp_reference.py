@@ -70,9 +70,9 @@ from dynacell.evaluation.feature_select import (
     DEFAULT_UNIQUE_CUT,
     select_gt_features,
 )
-from dynacell.evaluation.metrics import CP_FEATURE_VERSION, active_cp_feature_names
+from dynacell.evaluation.metrics import CP_FEATURE_VERSION, active_cp_feature_names, round_device_dependent_cp_columns
 from dynacell.evaluation.paths import cp_reference_path
-from dynacell.evaluation.pipeline_cache import cp_recipe_identity
+from dynacell.evaluation.pipeline_cache import cached_cp_feature_names, cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
 CP_REFERENCE_SCHEMA = 5
@@ -337,7 +337,10 @@ def _read_gt_cp_blocks(
 
     Returns ``(blocks, record, missing)``: ``missing`` lists the ``pos/t`` slots the
     cache does not hold. Raises on a malformed store or slot (non-3-D position,
-    wrong column count, no CP cache at all).
+    wrong column count, no CP cache at all). Each block's intensity_min/max are
+    rounded to float32 by :func:`round_device_dependent_cp_columns`, locating the
+    columns by the names the cache's manifest entry records, so a CPU-built cache
+    reads as the GPU-equivalent one.
     """
     with open_ome_zarr(gt_path, mode="r") as plate:
         shapes = {name: (int(pos.data.shape[0]), int(pos.data.shape[2])) for name, pos in plate.positions()}
@@ -347,6 +350,7 @@ def _read_gt_cp_blocks(
     with open_features_group(ctx.paths, "cp", mode="r") as group:
         if group is None:
             raise StaleCacheError(f"no CP feature cache at {ctx.paths.cp_features()}")
+        cached_names = cached_cp_feature_names(ctx.manifest["artifacts"]["cp_features"])
         for pos_name, (t_count, z_depth) in sorted(shapes.items()):
             if z_depth < 2:
                 raise ValueError(f"{gt_path}/{pos_name} has Z={z_depth}; CP regionprops are 3-D")
@@ -362,7 +366,7 @@ def _read_gt_cp_blocks(
                     raise StaleCacheError(f"{pos_name}/t{t} has {feats.shape[1]} CP columns, expected {n_features}")
                 finite = np.isfinite(feats).all(axis=1)
                 n_dropped += int((~finite).sum())
-                blocks[(pos_name, t)] = feats[finite]
+                blocks[(pos_name, t)] = round_device_dependent_cp_columns(feats[finite], cached_names)
     record = {"positions": sorted(shapes), "n_timepoints": n_timepoints, "n_cells_dropped_nonfinite": n_dropped}
     return blocks, record, missing
 
