@@ -1833,12 +1833,26 @@ def save_metrics(
     *,
     cp_reference_sha256: str | None,
 ):
-    """Save metrics to files.
+    """Save metric rows as CSV + NPY (and plots), then stamp ``metrics_provenance.json``.
 
-    ``cp_reference_sha256`` is the hash of the CP reference the run SCORED with
-    (``DatasetCPSpace.reference_sha256``; ``None`` without feature metrics). It is
-    passed in rather than re-read here, so a reference rebuilt mid-run cannot be
-    stamped on values it did not produce.
+    Parameters
+    ----------
+    config : DictConfig
+        Eval config (``save.*`` filenames and ``save.save_dir``,
+        ``compute_feature_metrics``).
+    pixel_metrics, mask_metrics, feature_metrics : list of dict, optional
+        Per-(FOV, timepoint) rows; an empty or ``None`` family is skipped.
+    cp_reference_sha256 : str or None
+        Hash of the CP reference the run SCORED with
+        (``DatasetCPSpace.reference_sha256``), ``None`` without feature metrics.
+        Passed in rather than re-read here, so a reference rebuilt mid-run cannot
+        be stamped on values it did not produce.
+
+    Raises
+    ------
+    ValueError
+        If ``cp_reference_sha256`` is given without feature metrics, or missing
+        with them.
     """
     if config.compute_feature_metrics != (cp_reference_sha256 is not None):
         raise ValueError(

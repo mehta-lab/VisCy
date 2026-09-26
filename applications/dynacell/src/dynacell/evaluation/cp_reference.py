@@ -500,6 +500,13 @@ class DatasetCPSpace:
 
         Lite datasets are exempt: they score a subset of the parent's cells, and
         :meth:`CPReference.for_dataset` already required the parent to be recorded.
+        A value-only GT change with the same count passes; see :meth:`check_gt_cache`.
+
+        Parameters
+        ----------
+        n_gt_cells : int
+            Finite GT CP rows the eval scored, summed over every position and
+            timepoint, before the pairwise pred/GT non-finite drop.
 
         Raises
         ------
