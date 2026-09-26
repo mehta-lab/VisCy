@@ -22,13 +22,48 @@ import pandas as pd
 import pytest
 from lite_subset_sim import System, load_systems, mmd2_from_features, poly3_features, poly_kernel
 
+from dynacell.evaluation.cp_reference import (
+    DatasetFit,
+    cp_sidecar_payload,
+    fit_cp_reference,
+    load_cp_reference,
+    write_cp_reference,
+)
 from dynacell.evaluation.feature_metrics import _kid, _median_cosine_similarity
 
 _BLOCKS = [("A/1/0", 0), ("A/1/0", 1), ("A/1/1", 0), ("A/1/1", 1), ("A/1/2", 0), ("A/1/2", 1)]
 _CELLS_PER_BLOCK = [7, 12, 9, 15, 5, 11]
 _D_DEEP = 6
 _D_CP = 5
-_CP_KEEP = [True, False, True, True, True]
+_DATASET = "synthetic-set"
+
+
+def _write_reference(path: Path) -> dict:
+    """Fit a real CP reference whose mask drops column 1 and whose scaler is far from the eval's cells.
+
+    The reference GT is offset and rescaled relative to the eval dir's cells, so the
+    reference transform and the retired per-side z-score give clearly different KIDs.
+    """
+    rng = np.random.default_rng(99)
+    gt = rng.normal(size=(200, _D_CP)) * 2.0 + 3.0
+    gt[:, 1] = 0.0  # constant -> dropped by the GT-only variance filter
+    fit = DatasetFit(
+        dataset=_DATASET,
+        cells=gt,
+        record={"positions": sorted({f for f, _ in _BLOCKS}), "gt_cache_dir": None, "cp_cache_built_at": None},
+        in_mask_fit=True,
+    )
+    payload = fit_cp_reference(
+        [fit], target_name="nucleus", feature_names=tuple(f"f{i}" for i in range(_D_CP)), cp_identity={}
+    )
+    write_cp_reference(payload, path)
+    return payload
+
+
+def _reference_transform(payload: dict, x: np.ndarray) -> np.ndarray:
+    """Apply the pipeline's CP transform spelled out from the payload: mask, then this dataset's scaler."""
+    scaler = payload["scalers"][_DATASET]
+    return (x[:, np.array(payload["keep_mask"])] - np.array(scaler["mean"])) / np.array(scaler["std"])
 
 
 def _pipeline_kid(pred: np.ndarray, gt: np.ndarray) -> float:
@@ -36,8 +71,8 @@ def _pipeline_kid(pred: np.ndarray, gt: np.ndarray) -> float:
     return _kid(pred, gt, 100, 1000, 2020)[0]
 
 
-def _write_eval_dir(path: Path, seed: int) -> dict[str, dict[str, np.ndarray]]:
-    """Write a synthetic eval dir and return its per-cell arrays keyed by extractor token.
+def _write_eval_dir(path: Path, seed: int, reference: Path) -> dict[str, dict[str, np.ndarray]]:
+    """Write a synthetic eval dir scored in ``reference`` and return its per-cell arrays by extractor token.
 
     Pred embeddings are GT shifted and rescaled, so every KID is well away from zero.
     """
@@ -61,7 +96,8 @@ def _write_eval_dir(path: Path, seed: int) -> dict[str, dict[str, np.ndarray]]:
                 path / "embeddings" / f"{side}_{tok}_single_cell_embeddings.npz", embeddings=arr, fov=fov, timepoint=tp
             )
         cells[tok] = {"pred": pred, "gt": gt, "fov": fov, "timepoint": tp}
-    (path / "cp_selected_feature_mask.json").write_text(json.dumps({"keep_mask": _CP_KEEP}))
+    space = load_cp_reference(reference, target_name="nucleus").for_dataset(_DATASET)
+    (path / "cp_selected_feature_mask.json").write_text(json.dumps(cp_sidecar_payload(space)))
     return cells
 
 
@@ -74,17 +110,19 @@ def _cells_of(cells: dict[str, np.ndarray], sel: np.ndarray) -> tuple[np.ndarray
     return cells["pred"][idx], cells["gt"][idx]
 
 
-def _zscore(x: np.ndarray) -> np.ndarray:
-    """Z-score each column as the pipeline does for GLCM+ features."""
+def _per_side_zscore(x: np.ndarray) -> np.ndarray:
+    """Apply the retired GLCM+ transform (each side by its own stats); used only to show discrimination."""
     return (x - x.mean(0)) / (x.std(0) + 1e-8)
 
 
 @pytest.fixture
-def system(tmp_path: Path) -> tuple[System, dict[str, dict[str, np.ndarray]]]:
-    """One synthetic system over :data:`_BLOCKS` plus its explicit cell arrays."""
+def system(tmp_path: Path) -> tuple[System, dict[str, dict[str, np.ndarray]], dict]:
+    """One synthetic system over :data:`_BLOCKS`, its explicit cell arrays, and its CP reference payload."""
+    reference = tmp_path / "nucleus.json"
+    payload = _write_reference(reference)
     path = tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc"
-    cells = _write_eval_dir(path, seed=0)
-    return System(path, _BLOCKS), cells
+    cells = _write_eval_dir(path, seed=0, reference=reference)
+    return System(path, _BLOCKS), cells, payload
 
 
 def test_poly3_feature_map_reproduces_the_kernel() -> None:
@@ -102,22 +140,26 @@ def test_poly3_feature_map_reproduces_the_kernel() -> None:
 @pytest.mark.parametrize("sel", [np.arange(len(_BLOCKS)), np.array([1, 2, 5])], ids=["all", "subset"])
 def test_block_sum_kid_matches_pipeline_kid(system, sel: np.ndarray) -> None:
     """Block-sum deep KID and direct GLCM+ KID equal ``feature_metrics._kid`` on the same cells."""
-    sysobj, cells = system
+    sysobj, cells, payload = system
     out = sysobj.metrics(sel)
     pred, gt = _cells_of(cells["dinov3"], sel)
     assert out["DINOv3_KID"] == pytest.approx(_pipeline_kid(pred, gt), rel=1e-4)
     assert out["DINOv3_MedCos"] == pytest.approx(_median_cosine_similarity(pred, gt), rel=1e-10)
     assert out["n_cells"] == len(pred)
-    pred, gt = _cells_of(cells["cp"], sel)
-    pred, gt = _zscore(pred[:, _CP_KEEP]), _zscore(gt[:, _CP_KEEP])
-    assert out["CP_KID"] == pytest.approx(_pipeline_kid(pred, gt), rel=1e-4)
-    # Guard against a vacuous pass: both estimates are far from zero (z-scored GLCM+ KID can be negative).
+    raw_pred, raw_gt = _cells_of(cells["cp"], sel)
+    expected = _pipeline_kid(_reference_transform(payload, raw_pred), _reference_transform(payload, raw_gt))
+    assert out["CP_KID"] == pytest.approx(expected, rel=1e-4)
+    # Guard against a vacuous pass: both estimates are far from zero, and the retired per-side
+    # z-score on the same cells gives a clearly different CP KID.
     assert out["DINOv3_KID"] > 0.1 and abs(out["CP_KID"]) > 0.01
+    mask = np.array(payload["keep_mask"])
+    old = _pipeline_kid(_per_side_zscore(raw_pred[:, mask]), _per_side_zscore(raw_gt[:, mask]))
+    assert out["CP_KID"] != pytest.approx(old, rel=0.1)
 
 
 def test_multiset_weights_equal_brute_force_duplication(system) -> None:
     """A block drawn twice scores exactly as if its cells were physically duplicated."""
-    sysobj, cells = system
+    sysobj, cells, payload = system
     sel = np.array([0, 0, 1, 3, 3, 3, 5])
     out = sysobj.metrics(sel)
     pred, gt = _cells_of(cells["dinov3"], sel)
@@ -126,7 +168,7 @@ def test_multiset_weights_equal_brute_force_duplication(system) -> None:
     assert out["DINOv3_MedCos"] == pytest.approx(float(np.median(cos)), rel=1e-12)
     cp_pred, cp_gt = _cells_of(cells["cp"], sel)
     assert out["CP_KID"] == pytest.approx(
-        _pipeline_kid(_zscore(cp_pred[:, _CP_KEEP]), _zscore(cp_gt[:, _CP_KEEP])), rel=1e-4
+        _pipeline_kid(_reference_transform(payload, cp_pred), _reference_transform(payload, cp_gt)), rel=1e-4
     )
     assert out["SI_SSIM"] == pytest.approx(float(np.mean(sysobj.row_vals["SI_SSIM"][sel])), rel=1e-12)
     # Guard against a vacuous pass: the multiset differs from the plain set of its blocks.
@@ -135,7 +177,7 @@ def test_multiset_weights_equal_brute_force_duplication(system) -> None:
 
 def test_kid_is_nan_below_the_pipeline_minimum(system) -> None:
     """Under 16 cells both the block-sum KID and the pipeline KID are NaN; at 16+ neither is."""
-    sysobj, cells = system
+    sysobj, cells, _ = system
     small = np.array([4])  # 5 cells
     out = sysobj.metrics(small)
     assert np.isnan(out["DINOv3_KID"]) and np.isnan(out["CP_KID"])
@@ -147,8 +189,10 @@ def test_kid_is_nan_below_the_pipeline_minimum(system) -> None:
 
 def test_load_systems_keeps_only_the_common_rows(tmp_path: Path) -> None:
     """Systems whose row sets differ are scored on the intersection."""
+    reference = tmp_path / "nucleus.json"
+    _write_reference(reference)
     for model in ("fnet3d_paper", "unetvit3d"):
-        _write_eval_dir(tmp_path / "nucleus" / model / "ipsc" / "ipsc", seed=2)
+        _write_eval_dir(tmp_path / "nucleus" / model / "ipsc" / "ipsc", seed=2, reference=reference)
     px = tmp_path / "nucleus" / "unetvit3d" / "ipsc" / "ipsc" / "pixel_metrics.csv"
     pd.read_csv(px).iloc[:-1].to_csv(px, index=False)
     systems, blocks = load_systems("nucleus", "ipsc", ["fnet3d_paper", "unetvit3d"], data_root=tmp_path)
@@ -159,7 +203,9 @@ def test_load_systems_keeps_only_the_common_rows(tmp_path: Path) -> None:
 def test_misaligned_embeddings_raise(tmp_path: Path) -> None:
     """Pred and GT embeddings from different cells are refused, not skipped."""
     path = tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc"
-    _write_eval_dir(path, seed=3)
+    reference = tmp_path / "nucleus.json"
+    _write_reference(reference)
+    _write_eval_dir(path, seed=3, reference=reference)
     npz = path / "embeddings" / "gt_dinov3_single_cell_embeddings.npz"
     with np.load(npz) as z:
         arrays = dict(z)

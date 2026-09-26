@@ -141,6 +141,13 @@ feature_metrics:
       enabled: true
       levels: 32
       distances: [1]
+    # Per-target CP reference: one GT-only feature mask (pooled over iPSC + A549
+    # mock/denv/zikv) + one GT mean/std per test set (lite -> its parent's), applied to
+    # BOTH pred and GT so every model is scored in the same CP space. Keyed by
+    # benchmark.dataset_ref.dataset. null -> registry default
+    # DATA_ROOT/cp_reference/<target_name>.json (lite evals use it too).
+    # Build with applications/dynacell/tools/build_cp_reference.py --target <target>.
+    reference_path: null
   # In-focus slab for the 2D deep-feature crops + per-cell similarity. When
   # enabled, the max-Z projection is restricted to a band centered on the phase
   # focus plane (read from focus_slice zattrs; write via precompute-gt build.focus)

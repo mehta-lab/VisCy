@@ -18,10 +18,10 @@ prebuilt mask caches) is a follow-up CPU integration test — see the plan
 from __future__ import annotations
 
 import importlib
+import inspect
 import pickle
 
 import numpy as np
-import pytest
 
 
 def _live_pipeline_module():
@@ -135,22 +135,6 @@ def test_fov_result_pickle_handles_empty_backbones():
     assert restored.celldino.gt_feats == []
 
 
-def test_cp_dropzero_zscore_raises_on_dim_mismatch():
-    """Mismatched pred/GT CP dims raise an actionable StaleCacheError, not IndexError.
-
-    A stale CP cache built with a different recipe (e.g. a GLCM toggle or a
-    CP_FEATURE_VERSION change without a rebuild) used to crash _cp_dropzero_zscore
-    with a cryptic boolean-index IndexError; it must instead name the remedy.
-    """
-    pipeline = _live_pipeline_module()
-    from dynacell.evaluation.cache import StaleCacheError
-
-    pred = np.ones((4, 58), dtype=np.float32)
-    gt = np.ones((4, 22), dtype=np.float32)
-    with pytest.raises(StaleCacheError, match="CP feature dimension mismatch"):
-        pipeline._cp_dropzero_zscore(pred, gt)
-
-
 def test_aggregate_fov_result_extends_backbone_lists():
     """Aggregator must extend each backbone's six lists with worker contributions."""
     pipeline = _live_pipeline_module()
@@ -204,3 +188,57 @@ def test_aggregate_fov_result_extends_backbone_lists():
         assert len(bb.gt_fovs) == 2
         assert len(bb.pred_ts) == 2
         assert len(bb.gt_ts) == 2
+
+
+def test_worker_run_fov_hands_the_cp_space_to_process_one_fov(tmp_path, monkeypatch):
+    """``_worker_run_fov`` forwards the parent's CP space, and the space survives the pickle hop.
+
+    Under ``executor=process`` the parent ships the verified CP space with every
+    submission; the worker must score with that object, not reload or drop it.
+    """
+    from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, load_cp_reference, write_cp_reference
+
+    from ._eval_fixtures import build_eval_config, make_hcs_plate
+
+    pipeline = _live_pipeline_module()
+    names = tuple(f"f{i}" for i in range(5))
+    fit = DatasetFit(
+        dataset="ds",
+        cells=np.random.default_rng(0).standard_normal((40, 5)),
+        record={"positions": ["A/1/0"], "gt_cache_dir": None, "cp_cache_built_at": None},
+        in_mask_fit=True,
+    )
+    write_cp_reference(
+        fit_cp_reference([fit], target_name="er", feature_names=names, cp_identity={}), tmp_path / "er.json"
+    )
+    cp_space = pickle.loads(pickle.dumps(load_cp_reference(tmp_path / "er.json", target_name="er").for_dataset("ds")))
+
+    make_hcs_plate(tmp_path / "pred.zarr", "prediction", seed=0, n_positions=1)
+    make_hcs_plate(tmp_path / "gt.zarr", "target", seed=1, n_positions=1)
+    config = build_eval_config(
+        tmp_path / "pred.zarr",
+        tmp_path / "gt.zarr",
+        tmp_path / "g",
+        tmp_path / "p",
+        tmp_path,
+        executor="process",
+        fov_workers=1,
+    )
+    seen = {}
+    signature = inspect.signature(pipeline._process_one_fov)
+
+    def _capture(*args, **kwargs):
+        seen["cp_space"] = signature.bind(*args, **kwargs).arguments["cp_space"]
+        return "result"
+
+    monkeypatch.setattr(pipeline, "_worker_setup", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "_process_one_fov", _capture)
+    monkeypatch.setattr(pipeline, "flush_manifest", lambda ctx: None)
+    monkeypatch.setitem(pipeline._WORKER_STATE, "cache_ctx", None)
+    monkeypatch.setitem(pipeline._WORKER_STATE, "pred_cache_ctx", None)
+    for key in ("seg_model", "dinov3", "dynaclr", "celldino", "morphem"):
+        monkeypatch.setitem(pipeline._WORKER_STATE, key, None)
+
+    assert pipeline._worker_run_fov(config, "A/1/0", 0, None, cp_space) == "result"
+    assert seen["cp_space"] is cp_space
+    np.testing.assert_array_equal(seen["cp_space"].mean, cp_space.mean)

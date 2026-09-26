@@ -24,6 +24,9 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 - `io.gt_path` — fluorescence ground truth (channel: `io.gt_channel_name`)
 - `io.cell_segmentation_path` — *optional* precomputed cell segmentation HCS OME-Zarr. Required when `compute_feature_metrics=true` or when building CP/DINOv3/DynaCLR/CELL-DINO cache entries. Position layout must match GT/pred 1:1.
 - `io.gt_cache_dir`, `io.pred_cache_dir` — *optional* artifact cache directories; must be distinct. See [Caches](#caches).
+- `feature_metrics.cp.reference_path` — the target's CP (GLCM+) reference, required when `compute_feature_metrics=true`. `null` (default) resolves to `DATA_ROOT/cp_reference/<target_name>.json` for full and lite evals alike. The reference holds one feature mask chosen on GT cells only, pooled over iPSC + A549 mock/denv/zikv, and one GT mean/std per test set (keyed by `benchmark.dataset_ref.dataset`; HEK gets its own, lite reuses its parent's). Every eval applies the mask and its dataset's scaler to pred AND GT. The eval refuses a partial position walk, and refuses to score unless its staged GT CP cells match the reference's fit for that dataset: the same GT-finite cell count exactly, and every CP feature's raw GT mean/std within a relative tolerance of 1e-6 (`GT_MOMENT_RTOL`). A re-cache that reproduces the cells passes, including a GPU recompute (reproducible only to ~1e-15) and a CPU-vs-GPU recompute (up to ~4e-8, measured). It is a moments gate, not a content hash: a change that moves any feature's GT mean/std by more than the tolerance fails, but permuting values within a column, moving cells between blocks, or a single-cell change below about n × 1e-6 std passes. When the GT CP cache is already complete, the check also runs before the FOV loop. Build the reference from existing GT caches with `tools/build_cp_reference.py --target <target>`; `--verify` re-applies the same check to the current caches. `metrics_provenance.json` stamps the per-dataset `cp_space_sha256`: the mask, feature names, recipe, and that dataset's scaler, recorded GT position set, GT cell count and GT moments. A rebuild therefore invalidates only the eval dirs whose own dataset's CP space changed; adding or refitting another dataset leaves them reusable. The `cp_selected_feature_mask.json` sidecar records the same per-dataset hash.
+  - GLCM+ (CP) space in two lines: one feature mask selected on GT cells only, pooled over the target's iPSC + A549 mock/denv/zikv test sets; then each test set's own GT mean/std standardizes pred and GT alike, so offsets and scale errors relative to that test set's GT stay visible.
+  - GLCM+ median cosine is invariant to contraction toward the GT mean: for `pred = mean + 0.5·(GT − mean)`, every pred/GT cell pair is parallel after the shared scaler and the median cosine is exactly 1.0000, while KID catches it (reviewer-measured on real cells: KID 0.194 vs a pred==GT floor of −0.041; reproduced on synthetic cells in `cp_reference_test.py`). Cosine measures direction only; over-smoothing toward the mean shows up in KID, not cosine.
 
 ## Quick start
 
@@ -35,7 +38,7 @@ uv run dynacell evaluate \
   save.save_dir=/hpc/.../eval_fnet3d_sec61b
 ```
 
-Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N`.
+Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N compute_feature_metrics=false`: CP feature metrics are scored in a reference fit on the full GT cell set, so a partial position walk with feature metrics on raises.
 
 ## Submission tooling
 
@@ -109,7 +112,7 @@ Canonical leaves at `configs/benchmarks/virtual_staining/<org>/<model>/<train_se
 uv run dynacell evaluate leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal
 ```
 
-Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1` for smoke).
+Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1 compute_feature_metrics=false` for smoke).
 
 ## Caches
 

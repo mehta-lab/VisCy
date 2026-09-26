@@ -38,10 +38,39 @@ def test_installed_versions_records_cubic():
 
 
 def test_roundtrip_matches_running_environment(tmp_path):
-    write_metrics_provenance(tmp_path)
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc")
     payload = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
     assert payload["versions"]["cubic"] == version("cubic")
-    assert metrics_provenance_matches(tmp_path)
+    assert payload["cp_reference_sha256"] == "ref-abc"
+    assert payload["cp_space_sha256"] == "abc"
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256="abc")
+
+
+def test_feature_less_stamp_matches_only_a_feature_less_run(tmp_path):
+    """A run without feature metrics stamps ``None``; a CP-scoring run must not reuse it."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None)
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256="abc")
+
+
+def test_feature_less_run_ignores_the_cp_key(tmp_path):
+    """compute_feature_metrics=false reuses no CP value, so a missing or foreign hash is irrelevant."""
+    (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-abc", cp_space_sha256="abc")
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+
+
+def test_other_cp_reference_is_not_a_match(tmp_path):
+    """CP values scored in another reference are not reusable after a rebuild."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256="ref-old", cp_space_sha256="old")
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256="new")
+
+
+def test_stamp_predating_cp_reference_is_not_a_match(tmp_path):
+    """A sidecar written before the CP reference existed carries no hash; a CP-scoring run refuses it."""
+    (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256="abc")
 
 
 def test_missing_sidecar_is_not_a_match(tmp_path):
@@ -50,16 +79,16 @@ def test_missing_sidecar_is_not_a_match(tmp_path):
     Every cache written before the stamp existed is exactly the ambiguous
     0.8.0a2-or-0.9.0a1 case that has to be recomputed.
     """
-    assert not metrics_provenance_matches(tmp_path)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
 
 
 def test_foreign_cubic_version_is_not_a_match(tmp_path):
-    write_metrics_provenance(tmp_path)
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None)
     path = tmp_path / PROVENANCE_FILENAME
     payload = json.loads(path.read_text())
     payload["versions"]["cubic"] = "0.8.0a2"
     path.write_text(json.dumps(payload))
-    assert not metrics_provenance_matches(tmp_path)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
 
 
 def test_check_cubic_pin_accepts_the_declared_version():
@@ -73,3 +102,15 @@ def test_check_cubic_pin_rejects_a_mismatch(monkeypatch):
     monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.8.0a2")
     with pytest.raises(RuntimeError, match="not comparable across"):
         check_cubic_pin()
+
+
+def test_stamp_without_a_cp_space_binding_is_not_a_match(tmp_path):
+    """A stamp carrying only the whole-reference hash (no dataset binding) is refused by a CP-scoring run."""
+    payload = {"versions": {"cubic": version("cubic")}, "cp_reference_sha256": "abc"}
+    (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps(payload))
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256="abc")
+
+
+def test_half_a_cp_stamp_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="both be given or both be None"):
+        write_metrics_provenance(tmp_path, cp_reference_sha256="abc", cp_space_sha256=None)

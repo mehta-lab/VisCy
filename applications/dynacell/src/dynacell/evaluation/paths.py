@@ -960,6 +960,32 @@ def pred_cache_dir(
     return Path(data_root) / test_set / subroot / organelle / model / train_set / leaf
 
 
+def cp_reference_path(target_name: str, data_root: str | Path = DATA_ROOT) -> Path:
+    """Return the registry path of a target's CP (GLCM+) reference.
+
+    ``DATA_ROOT/cp_reference/<target_name>.json``. Keyed by the eval
+    ``target_name`` (``mitochondria``, not the grammar's ``mito``), since that is
+    what an eval config carries. Lite evals use this same ``DATA_ROOT`` path, never
+    ``LITE_DATA_ROOT``: one reference holds the mask and every test set's scaler,
+    and a lite dataset reuses its parent's scaler. See
+    :mod:`dynacell.evaluation.cp_reference`, which also owns the set of targets
+    that have a reference.
+
+    Parameters
+    ----------
+    target_name : str
+        Eval target (``nucleus``/``membrane``/``er``/``mitochondria``).
+    data_root : str or pathlib.Path, optional
+        Registry root. Defaults to :data:`DATA_ROOT`.
+
+    Returns
+    -------
+    pathlib.Path
+        The reference JSON path.
+    """
+    return Path(data_root) / "cp_reference" / f"{target_name}.json"
+
+
 def metrics_repo_dir(
     organelle: str,
     model: str,

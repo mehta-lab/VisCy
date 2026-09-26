@@ -452,14 +452,50 @@ _CP_GLCM_FEATURE_NAMES: tuple[str, ...] = tuple(f"glcm_{key}" for key in _GLCM_P
 # :func:`pipeline_cache._auto_invalidate_on_artifact_param_mismatch`.
 CP_FEATURE_VERSION = "v2_dist_texture"
 
+#: The CP column order each recipe version wrote, frozen as literals (GLCM on; with
+#: GLCM off the ``glcm_*`` columns are absent). CP caches written before the feature
+#: names were recorded in the manifest carry only ``cp_feature_version`` +
+#: ``cp_glcm_enabled``, and this table reads their exact column order back from
+#: those -- no re-cache needed. It is deliberately NOT derived from
+#: :func:`active_cp_feature_names`: a reorder of the live tuples without a version
+#: bump then disagrees with this table (and fails its test), instead of
+#: silently re-labelling old caches (see tests/test_cp_feature_names.py).
+CP_FEATURE_NAMES_BY_VERSION: dict[str, tuple[str, ...]] = {
+    "v2_dist_texture": (
+        "intensity_mean",
+        "intensity_std",
+        "intensity_min",
+        "intensity_max",
+        "p10",
+        "p25",
+        "p50",
+        "p75",
+        "p90",
+        "iqr",
+        "skewness",
+        "kurtosis",
+        "gradient_mean",
+        "gradient_std",
+        "laplacian_var",
+        "glcm_contrast",
+        "glcm_dissimilarity",
+        "glcm_homogeneity",
+        "glcm_ASM",
+        "glcm_energy",
+        "glcm_correlation",
+        "glcm_entropy",
+    ),
+}
+
 
 def active_cp_feature_names(glcm_enabled: bool) -> tuple[str, ...]:
     """Return the ordered CP column names for the active config.
 
     The schema is GLCM-dependent: the base distribution/texture columns are
     always emitted; the seven ``glcm_*`` columns are appended only when GLCM is
-    enabled. Used by both the matrix assembly and the
-    ``cp_selected_feature_mask.json`` sidecar so they never drift.
+    enabled. Used by both the matrix assembly and the CP reference's recipe
+    identity (``cp_reference.cp_space``), so a reference built for another
+    column set is refused instead of silently misaligned.
     """
     if glcm_enabled:
         return _CP_BASE_FEATURE_NAMES + _CP_GLCM_FEATURE_NAMES

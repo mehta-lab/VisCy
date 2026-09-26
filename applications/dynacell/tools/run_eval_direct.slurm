@@ -16,7 +16,11 @@
 # all others invoke ``dynacell evaluate``.
 #
 # Extra positional args after the leaf path are passed verbatim as Hydra
-# overrides (e.g. ``limit_positions=2 force_recompute.final_metrics=true``).
+# overrides, e.g. a smoke run on two FOVs:
+#   ``limit_positions=2 compute_feature_metrics=false force_recompute.final_metrics=true``
+# (``compute_feature_metrics=false`` is required with ``limit_positions``: the CP
+# feature metrics are scored against a reference fit on every GT position, so a
+# partial walk with them on raises.)
 
 #SBATCH --job-name=eval_direct
 #SBATCH --time=1-00:00:00

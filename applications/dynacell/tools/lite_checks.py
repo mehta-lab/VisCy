@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import json
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +40,7 @@ from lite_subset_sim import (
     subset_keys,
 )
 
+from dynacell.evaluation.cp_reference import sidecar_cp_space
 from dynacell.evaluation.paths import DATA_ROOT
 
 E_SYSTEMS = [
@@ -205,9 +205,9 @@ def check_e(
             Y = np.asarray(np.load(g, allow_pickle=True)["embeddings"], dtype=np.float64)
             keep = np.isfinite(X).all(1) & np.isfinite(Y).all(1)
             X, Y = X[keep], Y[keep]
-            if tok == "cp":
-                mask = np.array(json.loads((path / "cp_selected_feature_mask.json").read_text())["keep_mask"], bool)
-                X, Y = X[:, mask], Y[:, mask]
+            if tok == "cp":  # the pipeline's CP space: reference mask + this dataset's GT scaler
+                space = sidecar_cp_space(path)
+                X, Y = space.transform(X), space.transform(Y)
             n_all = X.shape[0]
             if tok != "cp":  # deep extractors: precompute cell-level kernels once, slice per draw
                 K_XX, K_YY, K_XY = poly_kernel(X, X), poly_kernel(Y, Y), poly_kernel(X, Y)
@@ -215,10 +215,7 @@ def check_e(
             def kid(idx: np.ndarray) -> float:
                 m = len(idx)
                 if tok == "cp":
-                    Xs, Ys = X[idx], Y[idx]
-                    Xs = (Xs - Xs.mean(0)) / (Xs.std(0) + 1e-8)
-                    Ys = (Ys - Ys.mean(0)) / (Ys.std(0) + 1e-8)
-                    return mmd2_from_features(poly3_features(Xs), poly3_features(Ys))
+                    return mmd2_from_features(poly3_features(X[idx]), poly3_features(Y[idx]))
                 kxx, kyy, kxy = K_XX[np.ix_(idx, idx)], K_YY[np.ix_(idx, idx)], K_XY[np.ix_(idx, idx)]
                 return (kxx.sum() - np.trace(kxx) + kyy.sum() - np.trace(kyy)) / (m * (m - 1)) - 2 * kxy.sum() / (m * m)
 
