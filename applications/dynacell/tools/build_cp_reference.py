@@ -25,11 +25,12 @@ dropped and the rest stacked in the canonical order the eval hashes
 The write is atomic, and an existing reference with a different content hash is
 only replaced under ``--force`` (an identical one is left untouched).
 
-``--verify`` re-reads every dataset's GT CP cells from the current caches and
-compares their sha256 and count with the ones recorded in the reference's ``fit``
-section; it exits 1 on any mismatch. It is the offline form of the eval's content
-gate, which refuses to score a dataset whose staged GT cells no longer hash to the
-recorded value.
+``--verify`` re-reads every dataset's GT CP cells from the current caches and runs
+the eval's content gate on them: exact position set and GT-finite cell count, and
+each feature's raw mean and std within the recorded moments' tolerance
+(``GT_MOMENT_RTOL``). It exits 1 when that gate fails. An exact GT-matrix sha256
+difference is reported as information only, since GPU CP extraction is not
+bit-reproducible (differences around 1e-15).
 
 Run::
 
