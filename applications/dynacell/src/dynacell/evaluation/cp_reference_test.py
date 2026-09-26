@@ -478,3 +478,22 @@ def test_binding_covers_only_this_datasets_space(tmp_path: Path) -> None:
     floored["sha256"] = payload_sha256(floored)
     (tmp_path / "er.json").write_text(json.dumps(floored))
     assert load_cp_reference(tmp_path / "er.json", target_name="er").for_dataset("set-a").binding_sha256 != before
+
+
+def test_cosine_is_blind_to_contraction_toward_the_gt_mean_but_kid_is_not(two_sets) -> None:
+    """``pred = mean + 0.5 * (GT - mean)`` has median cosine exactly 1 after the scaler; KID still flags it.
+
+    Centering on the dataset's GT mean makes each pred/GT cell pair parallel, and
+    cosine ignores magnitude, so GLCM+ cosine measures direction only and
+    over-smoothing toward the mean shows up in KID (documented in the evaluation
+    README; the reviewer measured KID 0.194 vs a floor of -0.041 on real cells).
+    """
+    ref, _, cells = two_sets
+    gt = cells["set-a"]
+    mean = gt.mean(axis=0)
+    pred = mean + 0.5 * (gt - mean)
+    space = ref.for_dataset("set-a")
+    got = compute_feature_similarity_pairwise(space.transform(pred), space.transform(gt), "CP", compute_fid=False)
+    floor = compute_feature_similarity_pairwise(space.transform(gt), space.transform(gt), "CP", compute_fid=False)
+    assert got["CP_Median_Cosine_Similarity"] == pytest.approx(1.0, abs=1e-6)
+    assert got["CP_KID"] > floor["CP_KID"] + 0.1
