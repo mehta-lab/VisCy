@@ -606,7 +606,7 @@ class DatasetCPSpace:
         It covers the CP recipe identity, the selection criteria, the feature
         names and keep-mask, THIS dataset's scaler (mean, std, floored features --
         the parent's for a lite set, plus the lite -> parent link), and this
-        dataset's recorded GT cell count and raw moments (a lite set's own) --
+        dataset's recorded GT position set, cell count and raw moments (a lite set's own) --
         not the exact GT-matrix sha256, so GPU jitter never moves it. It deliberately
         leaves out the whole-reference hash, so adding or refitting another dataset
         of the target does not invalidate this dataset's cached eval dirs (whose
@@ -631,6 +631,7 @@ class DatasetCPSpace:
                 "std": [float(v) for v in self.std],
                 "floored_features": list(self.floored_features),
             },
+            "gt_positions": sorted(self.fit_positions),
             "gt_n_cells": self.fit_n_cells,
             "gt_moments": {"mean": [float(v) for v in self.gt_mean], "std": [float(v) for v in self.gt_std]},
         }

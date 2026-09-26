@@ -460,6 +460,9 @@ def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> 
     assert gt["set-b"] == bindings["set-b"] and gt["set-a-lite"] == bindings["set-a-lite"]
     lite_gt = rebound(lambda p: p["fit"]["lite"]["set-a-lite"]["gt_moments"]["std"].__setitem__(0, 1.0))
     assert lite_gt["set-a-lite"] != bindings["set-a-lite"] and lite_gt["set-a"] == bindings["set-a"]
+    # Same count, moments and scaler, different fit position set: the binding must move.
+    moved_pos = rebound(lambda p: p["fit"]["datasets"]["set-a"].update(positions=["Z/9/9"]))
+    assert moved_pos["set-a"] != bindings["set-a"] and moved_pos["set-b"] == bindings["set-b"]
 
 
 def test_lite_staging_uses_the_parent_scaler(two_sets, tmp_path: Path) -> None:
