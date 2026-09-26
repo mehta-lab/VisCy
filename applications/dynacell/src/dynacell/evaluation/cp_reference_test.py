@@ -618,3 +618,55 @@ def test_lite_clip_fraction_is_recorded_but_not_enforced(monkeypatch) -> None:
     monkeypatch.setattr(cp_reference, "CP_GT_CLIP_FRAC_MAX", 1e-4)  # now the parent itself is over
     with pytest.raises(ValueError, match=r"for \{'set-a': 0\.0002\}"):
         fit_cp_reference(fits, target_name="er", feature_names=_NAMES, cp_identity={})
+
+
+def _space_with_gt_beyond_the_clip(tmp_path: Path):
+    """A reference whose own GT holds one cell beyond +-z_clip (1 of 2000, under the bound); returns (space, gt)."""
+    gt = _gt(n=2000)
+    gt[0, 0] += 1e3  # one GT cell far out on f0 (kept)
+    ref, _ = _reference(tmp_path, [_fit("set-a", gt)])
+    space = ref.for_dataset("set-a")
+    assert np.abs(space.transform(gt)).max() > space.z_clip
+    return space, gt
+
+
+def test_staged_arrays_clip_both_pred_and_gt(tmp_path: Path) -> None:
+    """Dataset-level metric arrays are ``transform_clipped`` of BOTH sides, with values beyond the clip on both."""
+    space, gt = _space_with_gt_beyond_the_clip(tmp_path)
+    pred = gt.copy()
+    pred[5, 0] += 1e4  # a pred-only outlier too
+    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
+    np.testing.assert_array_equal(staged[1], space.transform_clipped(pred))
+    np.testing.assert_array_equal(staged[2], space.transform_clipped(gt))
+    assert not np.array_equal(staged[2], space.transform(gt))  # the GT clip is really active
+    assert np.abs(staged[1]).max() == np.abs(staged[2]).max() == space.z_clip
+
+
+def test_row_features_clip_both_pred_and_gt(tmp_path: Path) -> None:
+    """Per-row CP inputs are ``transform_clipped`` of BOTH sides, with values beyond the clip on both."""
+    space, gt = _space_with_gt_beyond_the_clip(tmp_path)
+    pred = gt.copy()
+    pred[5, 0] += 1e4
+    p, g = _cp_row_features(pred[:10], gt[:10], space)
+    np.testing.assert_array_equal(p, space.transform_clipped(pred[:10]))
+    np.testing.assert_array_equal(g, space.transform_clipped(gt[:10]))
+    assert np.abs(g).max() == space.z_clip and np.abs(p).max() == space.z_clip
+
+
+def test_clip_and_its_bound_are_part_of_every_binding(tmp_path: Path) -> None:
+    """Changing z_clip or the GT clip-fraction bound moves ``binding_sha256`` (the eval stamp) of every dataset."""
+    fits = [
+        _fit("set-a", _gt()),
+        _fit("set-b", _gt(seed=1)),
+        _fit("set-a-lite", _gt()[:100], in_mask_fit=False, parent="set-a"),
+    ]
+    ref, payload = _reference(tmp_path, fits)
+    names = ("set-a", "set-b", "set-a-lite")
+    before = {d: ref.for_dataset(d).binding_sha256 for d in names}
+    for key, value in (("z_clip", 25.0), ("gt_clip_frac_max", 2e-3)):
+        moved = json.loads(json.dumps(payload))
+        moved["criteria"][key] = value
+        moved["sha256"] = payload_sha256(moved)
+        (tmp_path / "er.json").write_text(json.dumps(moved))
+        again = load_cp_reference(tmp_path / "er.json", target_name="er")
+        assert all(again.for_dataset(d).binding_sha256 != before[d] for d in names), key

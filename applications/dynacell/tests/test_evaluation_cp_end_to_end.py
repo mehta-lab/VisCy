@@ -359,3 +359,27 @@ def test_clip_fraction_is_reported_per_dataset_row_and_feature(harness: Harness)
     for (fov, t), frac in per_row.items():
         sel = (emb["fov"] == fov) & (emb["timepoint"] == t)
         assert frac == pytest.approx(over[sel].any(axis=1).mean())
+
+    # KID is computed on the CLIPPED z, dataset level and per row: it equals KID on
+    # transform_clipped, and the unclipped value (1e4x larger here) would dominate.
+    from dynacell.evaluation.feature_metrics import compute_feature_similarity, compute_feature_similarity_pairwise
+
+    gt_emb = np.load(save_dir / "embeddings" / "gt_cp_single_cell_embeddings.npz")["embeddings"]
+    flags = {"compute_fid": False, "compute_prc": False, "compute_mind": False}
+    clipped = compute_feature_similarity(
+        space.transform_clipped(emb["embeddings"]), space.transform_clipped(gt_emb), "CP", **flags
+    )["CP_KID"]
+    unclipped = compute_feature_similarity(space.transform(emb["embeddings"]), space.transform(gt_emb), "CP", **flags)[
+        "CP_KID"
+    ]
+    assert row["Dataset_CP_KID"] == pytest.approx(clipped, rel=1e-9)
+    assert abs(unclipped) > 1e3 * abs(clipped)
+    for r in rows:
+        sel = (emb["fov"] == r["FOV"]) & (emb["timepoint"] == r["Timepoint"])
+        expected = compute_feature_similarity_pairwise(
+            space.transform_clipped(emb["embeddings"][sel]),
+            space.transform_clipped(gt_emb[sel]),
+            "CP",
+            compute_fid=False,
+        )["CP_KID"]
+        assert r["CP_KID"] == pytest.approx(expected, rel=1e-9)
