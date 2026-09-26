@@ -718,6 +718,20 @@ class DatasetCPSpace:
         """Return the kept columns of a raw CP matrix, standardized by this dataset's GT scaler."""
         return (self.select(x) - self.mean) / self.std
 
+    @property
+    def z_clip(self) -> float:
+        """The reference's shared-space clip, :data:`CP_Z_CLIP` at build time."""
+        return float(self.criteria["z_clip"])
+
+    def transform_clipped(self, x: np.ndarray) -> np.ndarray:
+        """Return :meth:`transform` clipped to ``+-z_clip``: the space KID/FID/cosine score in.
+
+        Applied identically to pred and GT, at dataset level and per row. The build
+        survey guarantees no GT cell of the fit is clipped, so this only bounds how far
+        one heavy-tailed predicted feature can push the cubic KID kernel.
+        """
+        return np.clip(self.transform(x), -self.z_clip, self.z_clip)
+
     def check_positions(self, positions: list[str]) -> None:
         """Refuse an eval whose GT positions are not exactly the ones the fit recorded.
 

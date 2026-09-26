@@ -576,3 +576,57 @@ def test_build_refuses_gt_beyond_the_clip(monkeypatch) -> None:
     monkeypatch.setattr(cp_reference, "CP_Z_CLIP", 2.0)
     with pytest.raises(ValueError, match="above the CP z clip 2.0"):
         fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
+
+
+def test_clip_is_a_no_op_without_outliers(two_sets, tmp_path: Path) -> None:
+    """With no |z| above the clip, the staged arrays -- and so KID/cosine -- are bit-identical to the unclipped space."""
+    ref, _, cells = two_sets
+    gt = cells["set-a"]
+    pred = 0.5 * gt + 7.0
+    space = ref.for_dataset("set-a")
+    assert np.abs(space.transform(pred)).max() < space.z_clip
+    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
+    np.testing.assert_array_equal(staged[1], space.transform(pred))
+    np.testing.assert_array_equal(staged[2], space.transform(gt))
+    unclipped = compute_feature_similarity_pairwise(space.transform(pred), space.transform(gt), "CP", compute_fid=True)
+    assert compute_feature_similarity_pairwise(staged[1], staged[2], "CP", compute_fid=True) == unclipped
+
+
+def test_one_outlier_cell_is_capped_at_the_clip(two_sets, tmp_path: Path) -> None:
+    """A pred cell at z=1000 contributes exactly what a cell AT the clip would; unclipped it dominates KID."""
+    ref, _, cells = two_sets
+    gt = cells["set-a"]
+    space = ref.for_dataset("set-a")
+    col = int(np.flatnonzero(ref.keep_mask)[0])
+
+    def pred_with_z(zval: float) -> np.ndarray:
+        pred = gt.copy()
+        pred[0, col] = space.mean[0] + zval * space.std[0]
+        return pred
+
+    def kid(pred: np.ndarray, clip: bool) -> float:
+        f = space.transform_clipped if clip else space.transform
+        return compute_feature_similarity_pairwise(f(pred), f(gt), "CP", compute_fid=False)["CP_KID"]
+
+    staged = _stage_cp_dataset_inputs(_lists(pred_with_z(1000.0), gt), space, _blocks(gt), tmp_path)
+    assert staged[1][0, 0] == space.z_clip
+    base, at_clip, huge = kid(gt, True), kid(pred_with_z(space.z_clip), True), kid(pred_with_z(1000.0), True)
+    assert huge == at_clip  # capped: 1000 scores exactly like the clip value
+    assert huge > base  # but still registers
+    # Unclipped, the one cell dominates the (unbiased, so possibly negative) estimate.
+    assert abs(kid(pred_with_z(1000.0), False) - base) > 1e3 * (huge - base)
+
+
+def test_per_row_and_dataset_paths_clip_identically(two_sets, tmp_path: Path) -> None:
+    """The per-(FOV, t) inputs are the dataset-level staged rows, clipped the same way."""
+    ref, _, cells = two_sets
+    gt = cells["set-a"]
+    space = ref.for_dataset("set-a")
+    pred = gt.copy()
+    pred[:10, np.flatnonzero(ref.keep_mask)[:2]] *= 1e4  # far outside the clip
+    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
+    half = gt.shape[0] // 2
+    row_p, row_g = _cp_row_features(pred[:half], gt[:half], space)
+    np.testing.assert_array_equal(row_p, staged[1][:half])
+    np.testing.assert_array_equal(row_g, staged[2][:half])
+    assert np.abs(row_p).max() == space.z_clip

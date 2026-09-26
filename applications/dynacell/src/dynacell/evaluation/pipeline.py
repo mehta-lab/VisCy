@@ -104,14 +104,15 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
 
 
 def _cp_row_features(pred_cp: np.ndarray, gt_cp: np.ndarray, cp_space: DatasetCPSpace) -> tuple[np.ndarray, np.ndarray]:
-    """Per-(FOV, timepoint) CP inputs: the reference mask + this dataset's GT scaler on both sides.
+    """Per-(FOV, timepoint) CP inputs: the reference mask + this dataset's GT scaler, clipped, on both sides.
 
-    The same transform as the dataset-level stage, so a per-row CP value is
+    The same transform as the dataset-level stage
+    (:meth:`DatasetCPSpace.transform_clipped`), so a per-row CP value is
     comparable across models and FOVs. Empty inputs (no cells) pass through.
     """
     if not (pred_cp.size and gt_cp.size):
         return pred_cp, gt_cp
-    return cp_space.transform(pred_cp), cp_space.transform(gt_cp)
+    return cp_space.transform_clipped(pred_cp), cp_space.transform_clipped(gt_cp)
 
 
 def _real_vs_pred_probe(
@@ -364,7 +365,7 @@ def _stage_cp_dataset_inputs(
     """Stage the dataset-level CP inputs in the reference feature space.
 
     KID/FID/cosine get the reference-masked features standardized by this
-    dataset's GT scaler (identical for pred and GT); the linear probe gets the
+    dataset's GT scaler and clipped to +-z_clip (identical for pred and GT); the linear probe gets the
     reference-masked raw features, since it fits its own per-fold scaler. Writes
     ``cp_selected_feature_mask.json`` recording which reference and scaler were
     applied.
@@ -392,8 +393,8 @@ def _stage_cp_dataset_inputs(
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
     return (
         "CP",
-        cp_space.transform(pred_cp_raw),
-        cp_space.transform(target_cp_raw),
+        cp_space.transform_clipped(pred_cp_raw),
+        cp_space.transform_clipped(target_cp_raw),
         cp_space.select(pred_cp_raw),
         cp_space.select(target_cp_raw),
         np.concatenate(cp.pred_fovs, axis=0),

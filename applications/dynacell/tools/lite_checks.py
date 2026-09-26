@@ -205,9 +205,9 @@ def check_e(
             Y = np.asarray(np.load(g, allow_pickle=True)["embeddings"], dtype=np.float64)
             keep = np.isfinite(X).all(1) & np.isfinite(Y).all(1)
             X, Y = X[keep], Y[keep]
-            if tok == "cp":  # the pipeline's CP space: reference mask + this dataset's GT scaler
+            if tok == "cp":  # the pipeline's CP space: reference mask + dataset GT scaler, clipped
                 space = sidecar_cp_space(path)
-                X, Y = space.transform(X), space.transform(Y)
+                X, Y = space.transform_clipped(X), space.transform_clipped(Y)
             n_all = X.shape[0]
             if tok != "cp":  # deep extractors: precompute cell-level kernels once, slice per draw
                 K_XX, K_YY, K_XY = poly_kernel(X, X), poly_kernel(Y, Y), poly_kernel(X, Y)
