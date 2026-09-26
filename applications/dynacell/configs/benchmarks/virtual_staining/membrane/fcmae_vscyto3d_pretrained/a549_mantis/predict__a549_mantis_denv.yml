@@ -1,8 +1,8 @@
 # FCMAE_VSCyto3D_Pretrained (VSCyto3D) predict: membrane trained on a549_mantis (caax),
 # predicting against a549-mantis-caax-denv test.
-# Best val-loss checkpoint from run 20260522-120713 (epoch 154, loss/validate=0.26533).
-# Training reached max_epochs=200; epoch 154 is the global-best val loss (epochs
-# 155-199 plateaued higher), so save_top_k kept it as the newest checkpoint.
+# Best val-loss checkpoint from run 20260522-120713: epoch 121, loss/validate=0.2651,
+# as recorded in last.ckpt's ModelCheckpoint state (monitor loss/validate, mode min)
+# and returned by submit_benchmark_job.resolve_best_ckpt. last.ckpt itself is epoch 154.
 # A549 manifest keys membrane by gene (`caax`); override the iPSC-side `membrane`
 # target_id from targets/membrane.yml so the resolver finds the caax target on
 # a549-mantis-caax-denv.

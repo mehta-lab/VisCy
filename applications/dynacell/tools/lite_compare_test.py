@@ -55,7 +55,7 @@ def _write_full_dir(path: Path) -> None:
     tps = [t for _ in range(_N_POS) for t in range(_T)]
     vals = [_row_value(i, t) for i in range(_N_POS) for t in range(_T)]
     pd.DataFrame({"FOV": fovs, "Timepoint": tps, "SI_SSIM": vals}).to_csv(path / "pixel_metrics.csv", index=False)
-    pd.DataFrame({"FOV": fovs, "Timepoint": tps, "dice": vals}).to_csv(path / "mask_metrics.csv", index=False)
+    pd.DataFrame({"FOV": fovs, "Timepoint": tps, "Dice": vals}).to_csv(path / "mask_metrics.csv", index=False)
     cell_fov = np.repeat(fovs, _CELLS_PER_FRAME)
     cell_t = np.repeat(tps, _CELLS_PER_FRAME)
     for key in DEEP:
@@ -78,7 +78,7 @@ def _write_lite_dir(path: Path, full_dir: Path, fmap: dict[tuple[str, int], int]
     vals = [_row_value(int(f[-4:]), fmap[(f, t)]) for f, t in keys]
     rows = {"FOV": fovs, "Timepoint": [t for _, t in keys]}
     pd.DataFrame({**rows, "SI_SSIM": vals}).to_csv(path / "pixel_metrics.csv", index=False)
-    pd.DataFrame({**rows, "dice": vals}).to_csv(path / "mask_metrics.csv", index=False)
+    pd.DataFrame({**rows, "Dice": vals}).to_csv(path / "mask_metrics.csv", index=False)
     kept = set(fmap.items())
     feats = {}
     for key, prefix in DEEP.items():
@@ -114,7 +114,7 @@ def test_lite_rows_match_the_full_benchmark_at_the_mapped_frames(tmp_path: Path)
     _write_lite_dir(lite_dir, full_dir, fmap)
 
     rows = {r["metric"]: r for r in per_row(lite_dir, full_dir, fmap)}
-    assert set(rows) == {"SI_SSIM", "dice"}
+    assert set(rows) == {"SI_SSIM", "Dice"}
     for r in rows.values():
         assert r["n_rows"] == _N_POS * _N_KEEP
         assert r["max_abs_diff"] == 0.0
