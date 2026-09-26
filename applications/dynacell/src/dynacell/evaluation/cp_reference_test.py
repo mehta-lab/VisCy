@@ -589,3 +589,29 @@ def test_build_accepts_a_few_gt_cells_beyond_the_clip_under_the_bound() -> None:
     criteria = payload["criteria"]
     assert criteria["gt_clip_frac_max"] == 1e-3 and "c >= 20" in criteria["rank_stability"]
     assert criteria["gt_abs_z_survey"]["max_gt_clip_frac"] == pytest.approx(1 / 5000)
+
+
+def test_lite_clip_fraction_is_recorded_but_not_enforced(monkeypatch) -> None:
+    """A lite set over the bound builds (recorded, ``enforced: false``); its parent stays enforced.
+
+    The exemption is not "lite is unchecked". Lite GT cells are a subset of the
+    parent's cells, scored in the parent's scaler, so a lite set's clipped-cell COUNT
+    is at most its parent's. The enforced parent bound therefore covers the lite set;
+    only its FRACTION can exceed the bound, as small-sample noise on fewer cells. Here
+    one parent outlier is 1/5000 of the parent (under the bound) and 1/500 of the lite
+    set (over it): the build must pass, and must refuse once the parent itself is over.
+    """
+    parent = _gt(n=5000)
+    parent[0, 0] += 1e3  # 1 of 5000 parent cells beyond the clip: 2e-4, under the bound
+    lite_cells = parent[:500]  # the same outlier in 500 lite cells: 2e-3, over the bound
+    fits = [_fit("set-a", parent), _fit("set-a-lite", lite_cells, in_mask_fit=False, parent="set-a")]
+    payload = fit_cp_reference(fits, target_name="er", feature_names=_NAMES, cp_identity={})
+    lite = payload["fit"]["lite"]["set-a-lite"]["gt_abs_z"]
+    assert lite["gt_clip_frac"] == pytest.approx(1 / 500)
+    assert lite["gt_clip_frac"] > cp_reference.CP_GT_CLIP_FRAC_MAX
+    assert lite["enforced"] is False and payload["fit"]["datasets"]["set-a"]["gt_abs_z"]["enforced"] is True
+    assert payload["criteria"]["gt_abs_z_survey"]["max_gt_clip_frac"] == pytest.approx(1 / 5000)
+
+    monkeypatch.setattr(cp_reference, "CP_GT_CLIP_FRAC_MAX", 1e-4)  # now the parent itself is over
+    with pytest.raises(ValueError, match=r"for \{'set-a': 0\.0002\}"):
+        fit_cp_reference(fits, target_name="er", feature_names=_NAMES, cp_identity={})

@@ -101,9 +101,9 @@ GT_MOMENT_ZERO_STD_ATOL = 1e-12
 CP_Z_CLIP = 20.0
 
 #: Per-dataset bound on the GT cells the clip may touch: the fraction of a dataset's GT
-#: cells with any kept-feature |z| > CP_Z_CLIP in its own scaler (lite: the parent's).
-#: :func:`fit_cp_reference` refuses to build a reference that violates it for any
-#: dataset, lite included, so it is a checked invariant, not just a recorded number.
+#: cells with any kept-feature |z| > CP_Z_CLIP in its own scaler. :func:`fit_cp_reference`
+#: refuses to build a reference that violates it for any NON-lite dataset, so it is a
+#: checked invariant. Lite datasets record their fraction with ``enforced: false``.
 CP_GT_CLIP_FRAC_MAX = 1e-3
 
 #: Why c = 20: recorded in the hashed criteria next to the clip.
@@ -568,9 +568,11 @@ def _gt_abs_z_survey(
     Raises
     ------
     ValueError
-        If any dataset's ``gt_clip_frac`` (fraction of its GT cells with any |z| >
-        :data:`CP_Z_CLIP`) exceeds :data:`CP_GT_CLIP_FRAC_MAX`: the clip would then
-        discard more GT signal than the bound allows.
+        If any non-lite dataset's ``gt_clip_frac`` (fraction of its GT cells with any
+        |z| > :data:`CP_Z_CLIP`) exceeds :data:`CP_GT_CLIP_FRAC_MAX`: the clip would
+        then discard more GT signal than the bound allows. Lite datasets are recorded
+        with ``enforced: false``: their cells are a subset of the parent's, in the
+        parent's scaler, so one extra cell on ~1000 must not brick every build.
     """
     per: dict[str, dict[str, Any]] = {}
     pooled: list[np.ndarray] = []
@@ -583,12 +585,15 @@ def _gt_abs_z_survey(
         col = int(np.unravel_index(np.argmax(z), z.shape)[1])
         per[fit.dataset] = {
             "gt_clip_frac": float((z > CP_Z_CLIP).any(axis=1).mean()),
+            # Lite GT is a subset of the parent's cells in the parent's scaler, so its fraction
+            # is small-sample noise on the parent's: recorded, never enforced.
+            "enforced": fit.parent is None,
             "max": float(z.max()),
             "p9999": float(np.quantile(z, 0.9999)),
             "max_feature": kept_names[col],
         }
         pooled.append(z.ravel())
-    over = {d: r["gt_clip_frac"] for d, r in per.items() if r["gt_clip_frac"] > CP_GT_CLIP_FRAC_MAX}
+    over = {d: r["gt_clip_frac"] for d, r in per.items() if r["enforced"] and r["gt_clip_frac"] > CP_GT_CLIP_FRAC_MAX}
     if over:
         raise ValueError(
             f"GT clip fraction above the bound {CP_GT_CLIP_FRAC_MAX} at z_clip {CP_Z_CLIP} for {over}: the clip "
@@ -600,7 +605,7 @@ def _gt_abs_z_survey(
         "p9999": float(np.quantile(np.concatenate(pooled), 0.9999)),
         "max_dataset": worst,
         "max_feature": per[worst]["max_feature"],
-        "max_gt_clip_frac": max(r["gt_clip_frac"] for r in per.values()),
+        "max_gt_clip_frac": max(r["gt_clip_frac"] for r in per.values() if r["enforced"]),
         "datasets": per,
     }
 
