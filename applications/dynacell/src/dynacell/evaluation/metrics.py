@@ -458,8 +458,9 @@ def active_cp_feature_names(glcm_enabled: bool) -> tuple[str, ...]:
 
     The schema is GLCM-dependent: the base distribution/texture columns are
     always emitted; the seven ``glcm_*`` columns are appended only when GLCM is
-    enabled. Used by both the matrix assembly and the
-    ``cp_selected_feature_mask.json`` sidecar so they never drift.
+    enabled. Used by both the matrix assembly and the CP reference's recipe
+    identity (``cp_reference.cp_space``), so a reference built for another
+    column set is refused instead of silently misaligned.
     """
     if glcm_enabled:
         return _CP_BASE_FEATURE_NAMES + _CP_GLCM_FEATURE_NAMES

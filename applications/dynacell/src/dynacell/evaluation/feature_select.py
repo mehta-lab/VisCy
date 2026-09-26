@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import numpy as np
 
-# Defaults shared with downstream consumers (e.g. the cp_selected_feature_mask
-# JSON sidecar emitted by the evaluation pipeline, and the CP reference). Keep
-# `select_gt_features`, `variance_threshold`, and `correlation_threshold`
-# keyword defaults aligned
-# with these constants so the sidecar cannot drift from the actual call.
+# Selection criteria of the per-target CP reference. `fit_cp_reference` passes
+# these explicitly and records them in the reference's `criteria` block (inside
+# its content hash), so the reference is where the applied values live. Keep the
+# `select_gt_features`, `variance_threshold` and `correlation_threshold` keyword
+# defaults aligned with them.
 DEFAULT_FREQ_CUT = 0.05
 DEFAULT_UNIQUE_CUT = 0.01
 DEFAULT_CORR_THRESHOLD = 0.9
