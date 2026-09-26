@@ -211,17 +211,25 @@ def build_fixture(root: Path):
 CP_TEST_DATASET = "synthetic-set"
 
 
-def make_cp_reference(config, path: Path, seed: int = 0, n_cells: int = 64) -> str:
+def make_cp_reference(
+    config,
+    path: Path,
+    seed: int = 0,
+    n_cells: int = 64,
+    datasets: tuple[str, ...] = (CP_TEST_DATASET,),
+    lite: dict[str, str] | None = None,
+) -> str:
     """Fit a real CP reference matching ``config``'s CP recipe and point ``config`` at it.
 
-    The GT matrix is synthetic, but the reference is built by the production
+    The GT matrices are synthetic, but the reference is built by the production
     :func:`~dynacell.evaluation.cp_reference.fit_cp_reference` with the identity and
     column names :func:`~dynacell.evaluation.cp_reference.cp_space` derives from the
-    same config. It fits one scaler, for :data:`CP_TEST_DATASET` over the plate's
-    ``A/1/{i}`` positions, and records no GT cache stamp (so the re-cache check is
-    skipped). Sets ``feature_metrics.cp`` (GLCM off unless already configured),
-    ``feature_metrics.cp.reference_path`` and ``benchmark.dataset_ref.dataset``, and
-    returns the reference's sha256.
+    same config. It fits one scaler per entry of ``datasets`` over the plate's
+    ``A/1/{i}`` positions; dataset ``i`` is drawn with offset ``10 * i`` and scale
+    ``1 + i``, so every scaler differs. ``lite`` maps lite dataset -> parent. Sets
+    ``feature_metrics.cp`` (GLCM off unless already configured),
+    ``feature_metrics.cp.reference_path`` and ``benchmark.dataset_ref.dataset``
+    (the first dataset), and returns the reference's sha256.
     """
     # Imported here like the other helpers in this file: live_pipeline_module() drops
     # every dynacell.evaluation.* module, so a top-level binding would go stale.
@@ -234,20 +242,28 @@ def make_cp_reference(config, path: Path, seed: int = 0, n_cells: int = 64) -> s
             {"norm": {"p_lo": 1.0, "p_hi": 99.0}, "glcm": {"enabled": False}, "reference_path": None},
             merge=True,
         )
-    OmegaConf.update(config, "benchmark", {"dataset_ref": {"dataset": CP_TEST_DATASET, "target": "sec61b"}}, merge=True)
+    OmegaConf.update(config, "benchmark", {"dataset_ref": {"dataset": datasets[0], "target": "sec61b"}}, merge=True)
     identity, names = cp_space(config)
-    fit = DatasetFit(
-        dataset=CP_TEST_DATASET,
-        cells=np.random.default_rng(seed).standard_normal((n_cells, len(names))),
-        record={
-            "positions": [f"A/1/{i}" for i in range(N_POSITIONS)],
-            "gt_cache_dir": None,
-            "cp_cache_built_at": None,
-        },
-        in_mask_fit=True,
-    )
+    rng = np.random.default_rng(seed)
+    fits = [
+        DatasetFit(
+            dataset=name,
+            cells=rng.standard_normal((n_cells, len(names))) * (1 + i) + 10.0 * i,
+            record={
+                "positions": [f"A/1/{p}" for p in range(N_POSITIONS)],
+                "gt_cache_dir": None,
+                "cp_cache_built_at": None,
+            },
+            in_mask_fit=True,
+        )
+        for i, name in enumerate(datasets)
+    ]
+    lite_entries = {
+        name: {"parent": parent, "gt_cache_dir": None, "cp_cache_built_at": None}
+        for name, parent in (lite or {}).items()
+    }
     payload = fit_cp_reference(
-        [fit], target_name=config.target_name, feature_names=names, cp_identity=identity, lite={}
+        fits, target_name=config.target_name, feature_names=names, cp_identity=identity, lite=lite_entries
     )
     write_cp_reference(payload, path, force=True)
     config.feature_metrics.cp.reference_path = str(path)
