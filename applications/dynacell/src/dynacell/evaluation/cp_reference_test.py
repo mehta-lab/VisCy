@@ -670,3 +670,10 @@ def test_clip_and_its_bound_are_part_of_every_binding(tmp_path: Path) -> None:
         (tmp_path / "er.json").write_text(json.dumps(moved))
         again = load_cp_reference(tmp_path / "er.json", target_name="er")
         assert all(again.for_dataset(d).binding_sha256 != before[d] for d in names), key
+
+
+def test_empty_feature_mask_is_refused() -> None:
+    """A GT pool whose every CP column is constant keeps no feature: the build refuses with a clear error."""
+    constant = np.ones((64, len(_NAMES)))
+    with pytest.raises(ValueError, match="kept no CP features"):
+        fit_cp_reference([_fit("set-a", constant)], target_name="er", feature_names=_NAMES, cp_identity={})

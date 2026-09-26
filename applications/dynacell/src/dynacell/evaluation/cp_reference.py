@@ -492,6 +492,11 @@ def fit_cp_reference(
         pooled, freq_cut=DEFAULT_FREQ_CUT, unique_cut=DEFAULT_UNIQUE_CUT, corr_threshold=DEFAULT_CORR_THRESHOLD
     )
     kept_names = [n for n, k in zip(feature_names, keep_mask, strict=True) if k]
+    if not kept_names:
+        raise ValueError(
+            f"GT-only feature selection kept no CP features out of {len(feature_names)} "
+            f"({pooled.shape[0]} pooled GT cells); a reference with an empty mask cannot score CP."
+        )
     pooled_std = pooled[:, keep_mask].std(axis=0)
     if not (pooled_std > 0).all():
         raise ValueError(f"pooled fit kept zero-variance features: {np.array(kept_names)[pooled_std == 0]}")
