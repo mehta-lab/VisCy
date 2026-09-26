@@ -39,6 +39,7 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
+    check_cp_cache_feature_names,
     cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
@@ -1351,6 +1352,11 @@ def evaluate_predictions(
         morphem_feature_extractor = models.morphem
 
         cache_ctx, pred_cache_ctx = init_cache_contexts(config, models)
+    # The CP reference masks and scales by column position: refuse a GT or pred CP
+    # cache whose columns are not the reference's, by name and order.
+    if cp_space is not None:
+        for ctx in (cache_ctx, pred_cache_ctx):
+            check_cp_cache_feature_names(ctx, cp_space.feature_names)
 
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 

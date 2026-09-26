@@ -44,7 +44,9 @@ from dynacell.evaluation.cache import (
 )
 from dynacell.evaluation.instance_metrics import DEFAULT_IOU_THRESHOLDS
 from dynacell.evaluation.metrics import (
+    CP_FEATURE_NAMES_BY_VERSION,
     CP_FEATURE_VERSION,
+    active_cp_feature_names,
     build_crops,
     cp_regionprops,
     deep_features,
@@ -1346,6 +1348,69 @@ def _load_or_compute_feature_timepoints(
     return per_t, manifest_updated  # type: ignore[return-value]
 
 
+def cached_cp_feature_names(entry: dict[str, Any]) -> tuple[str, ...]:
+    """Return the column names of a cached CP artifact, from its manifest entry.
+
+    Entries written since the names were recorded carry ``cp_feature_names``.
+    Older ones are read back exactly from the recipe they record
+    (``cp_feature_version`` + ``cp_glcm_enabled``) through the frozen
+    :data:`~dynacell.evaluation.metrics.CP_FEATURE_NAMES_BY_VERSION` table, so
+    existing caches need no re-cache.
+
+    Parameters
+    ----------
+    entry : dict
+        The manifest's ``artifacts.cp_features`` entry.
+
+    Returns
+    -------
+    tuple of str
+        Column names in cache order.
+
+    Raises
+    ------
+    StaleCacheError
+        If the entry records neither names nor a known recipe version.
+    """
+    if "cp_feature_names" in entry:
+        return tuple(entry["cp_feature_names"])
+    version = entry.get("cp_feature_version")
+    if version not in CP_FEATURE_NAMES_BY_VERSION:
+        raise StaleCacheError(
+            f"CP cache entry records no feature names and an unknown recipe {version!r}; "
+            "rebuild it with force_recompute.gt_cp/pred_cp=true"
+        )
+    names = CP_FEATURE_NAMES_BY_VERSION[version]
+    return names if entry["cp_glcm_enabled"] else tuple(n for n in names if not n.startswith("glcm_"))
+
+
+def check_cp_cache_feature_names(ctx: _CacheContext, expected: tuple[str, ...]) -> None:
+    """Refuse a CP cache whose columns are not ``expected``, by name and order.
+
+    No-op when the cache is disabled, holds no CP artifact yet, or this run
+    recomputes CP for the side (``force_recompute.<side>_cp``): then the columns
+    come from the running code, whose names the CP reference check already
+    compared.
+
+    Raises
+    ------
+    StaleCacheError
+        If the cached column names differ from ``expected``.
+    """
+    if not ctx.enabled or ctx.force[f"{ctx.side}_cp"]:
+        return
+    entry = ctx.manifest.get("artifacts", {}).get("cp_features")
+    if entry is None:
+        return
+    cached = cached_cp_feature_names(entry)
+    if cached != tuple(expected):
+        raise StaleCacheError(
+            f"{ctx.side} CP cache {ctx.paths.cp_features()} holds columns {list(cached)}, but the CP reference "
+            f"expects {list(expected)}. Masking by position would misalign them; rebuild the cache with "
+            f"force_recompute.{ctx.side}_cp=true."
+        )
+
+
 def fov_cp_features(
     ctx: _CacheContext,
     pos_name: str,
@@ -1384,6 +1449,10 @@ def fov_cp_features(
             "path": "features/cp.zarr",
             "built_at": built_at_now(),
             **_cp_identity(ctx),
+            # Column names, so a consumer (the CP reference) can check them by name.
+            # Not part of the identity: caches written before this key stay valid and
+            # have their names read back by cached_cp_feature_names.
+            "cp_feature_names": list(active_cp_feature_names(bool((ctx.cp_glcm or {}).get("enabled", False)))),
         }
         _update_manifest_entry(ctx.manifest, ["cp_features"], entry, preserve_identity=ctx.excluded_walk)
         _add_position(ctx.manifest, ["cp_features"], pos_name)

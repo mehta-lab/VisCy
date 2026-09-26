@@ -21,7 +21,13 @@ import numpy as np
 import pytest
 from iohub.ngff import open_ome_zarr
 
-from dynacell.evaluation.cache import cache_paths, open_features_group, write_features_to_group
+from dynacell.evaluation.cache import (
+    cache_paths,
+    load_manifest,
+    open_features_group,
+    save_manifest,
+    write_features_to_group,
+)
 from dynacell.evaluation.model_loader import EvalModels
 
 from ._eval_fixtures import N_POSITIONS, D, H, T, W, build_eval_config, live_pipeline_module, make_mask_cache
@@ -170,3 +176,15 @@ def test_same_count_gt_value_change_is_refused(harness: Harness) -> None:
         harness.run("moved", [g.copy() for g in harness.gt])
     assert type(err.value).__name__ == "StaleCacheError"
     assert not list(save_dir.glob("*_metrics.*")) and not (save_dir / "cp_selected_feature_mask.json").exists()
+
+
+def test_gt_cache_with_reordered_columns_is_refused(harness: Harness) -> None:
+    """A GT CP cache whose recorded column names are reordered fails before the FOV loop."""
+    paths = cache_paths(harness.root / "gt_cache")
+    manifest = load_manifest(paths)
+    names = manifest["artifacts"]["cp_features"]["cp_feature_names"]
+    names[0], names[1] = names[1], names[0]
+    save_manifest(paths, manifest)
+    with pytest.raises(Exception, match="Masking by position would misalign them") as err:
+        harness.run("reordered", [g.copy() for g in harness.gt])
+    assert type(err.value).__name__ == "StaleCacheError"

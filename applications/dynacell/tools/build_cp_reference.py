@@ -65,7 +65,7 @@ from dynacell.evaluation.cp_reference import (
     write_cp_reference,
 )
 from dynacell.evaluation.paths import cp_reference_path
-from dynacell.evaluation.pipeline_cache import init_cache_context
+from dynacell.evaluation.pipeline_cache import check_cp_cache_feature_names, init_cache_context
 
 _EVAL_YAML = Path(dynacell.evaluation.__file__).parent / "_configs" / "eval.yaml"
 _LEAVES_ROOT = Path(__file__).resolve().parents[1] / "configs/benchmarks/virtual_staining/_internal/leaf/grouped"
@@ -118,7 +118,7 @@ def lite_parent(ref: Ref) -> str | None:
 
 
 def read_dataset_fit(
-    target_name: str, ref: Ref, n_features: int, in_mask_fit: bool, parent: str | None = None
+    target_name: str, ref: Ref, feature_names: tuple[str, ...], in_mask_fit: bool, parent: str | None = None
 ) -> DatasetFit:
     """Read every finite GT CP cell of one dataset from its cache, read-only, in canonical order.
 
@@ -129,15 +129,16 @@ def read_dataset_fit(
     Raises
     ------
     StaleCacheError
-        If the cache belongs to another store or CP recipe, a ``(position,
-        timepoint)`` of the GT store is missing from it, or an entry has the wrong
-        column count.
+        If the cache belongs to another store or CP recipe, its columns are not
+        ``feature_names`` by name and order, a ``(position, timepoint)`` of the GT
+        store is missing from it, or an entry has the wrong column count.
     ValueError
         If a GT position is not a 3-D volume.
     """
     config = eval_config_for(target_name, ref)
     ctx = init_cache_context(config, side="gt")
-    cells, read = read_gt_cp_cells(ctx, Path(config.io.gt_path), n_features)
+    check_cp_cache_feature_names(ctx, feature_names)
+    cells, read = read_gt_cp_cells(ctx, Path(config.io.gt_path), len(feature_names))
     entry = ctx.manifest["artifacts"].get("cp_features")
     record = {
         "target": ref[1],
@@ -173,13 +174,13 @@ def build(target_name: str, leaves_root: Path) -> dict[str, Any]:
         if cp_space(eval_config_for(target_name, ref)) != (identity, names):
             raise ValueError(f"{ref[0]} resolves a different CP recipe than {scaler_refs[0][0]}")
 
-    fits = [read_dataset_fit(target_name, ref, len(names), ref in mask_refs) for ref in scaler_refs]
+    fits = [read_dataset_fit(target_name, ref, names, ref in mask_refs) for ref in scaler_refs]
     positions = {fit.dataset: set(fit.record["positions"]) for fit in fits}
     for ref in lite_refs:
         parent = parents[ref]
         if parent not in positions:
             raise ValueError(f"lite {ref[0]} reuses {parent}, which no grouped leaf or mask fit evaluates")
-        lite = read_dataset_fit(target_name, ref, len(names), False, parent=parent)
+        lite = read_dataset_fit(target_name, ref, names, False, parent=parent)
         extra = set(lite.record["positions"]) - positions[parent]
         if extra:
             raise ValueError(f"lite {ref[0]} has positions outside its parent {parent}: {sorted(extra)[:5]}")
@@ -206,7 +207,7 @@ def verify(target_name: str, path: Path) -> list[str]:
     ref = load_cp_reference(path, target_name=target_name)
     mismatches = []
     for name, record in sorted({**ref.fit["datasets"], **ref.fit["lite"]}.items()):
-        fit = read_dataset_fit(target_name, (name, record["target"]), len(ref.feature_names), record["in_mask_fit"])
+        fit = read_dataset_fit(target_name, (name, record["target"]), ref.feature_names, record["in_mask_fit"])
         sha256 = gt_matrix_sha256(fit.cells)
         ok = sha256 == record["gt_matrix_sha256"] and fit.cells.shape[0] == record["n_cells"]
         print(f"  {name}: {'OK' if ok else 'MISMATCH'} ({fit.cells.shape[0]} cells, sha256 {sha256[:12]})")

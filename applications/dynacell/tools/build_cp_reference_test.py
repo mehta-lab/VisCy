@@ -26,6 +26,7 @@ from iohub.ngff import open_ome_zarr
 from dynacell.evaluation.cache import (
     StaleCacheError,
     cache_paths,
+    load_manifest,
     open_features_group,
     save_manifest,
     write_features_to_group,
@@ -254,3 +255,18 @@ def test_verify_passes_on_unchanged_caches_and_fails_on_a_value_only_recache(reg
     assert main(["--target", "er", "--out", str(out), "--verify"]) == 1
     printed = capsys.readouterr().out
     assert "MISMATCH ds-h" in printed and "verify" in printed and "FAILED" in printed
+
+
+def test_cache_with_reordered_feature_names_is_refused(registry: Path) -> None:
+    """The builder refuses a GT CP cache whose recorded column names are not the recipe's, by name."""
+    _dataset(registry, "ds-a", seed=0)
+    _dataset(registry, "ds-b", seed=1)
+    paths = cache_paths(registry / "caches" / "ds-b")
+    manifest = load_manifest(paths)
+    names = list(active_cp_feature_names(True))
+    names[0], names[1] = names[1], names[0]
+    manifest["artifacts"]["cp_features"]["cp_feature_names"] = names
+    save_manifest(paths, manifest)
+    leaves = _leaves(registry, ["ds-a", "ds-b"])
+    with pytest.raises(StaleCacheError, match="Masking by position would misalign them"):
+        main(["--target", "er", "--leaves-root", str(leaves), "--out", str(registry / "x.json")])
