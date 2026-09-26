@@ -22,11 +22,18 @@ dropped the way the pipeline drops them (``drop_paired_nonfinite_rows``).
 The write is atomic, and an existing reference with a different content hash is
 only replaced under ``--force`` (an identical one is left untouched).
 
+``--verify`` re-reads each non-lite dataset's GT CP cells from the current caches
+and compares their sha256 and count with the ones recorded in the reference's
+``fit`` section; it exits 1 on any mismatch. That is the only check that catches a
+value-only GT re-cache (same cell count), which the eval's ``built_at`` and
+cell-count checks cannot see.
+
 Run::
 
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --dry-run
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er   # registry path
     uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --out /tmp/er.json
+    uv run --no-sync python applications/dynacell/tools/build_cp_reference.py --target er --verify
 """
 
 from __future__ import annotations
@@ -58,6 +65,8 @@ from dynacell.evaluation.cp_reference import (
     DatasetFit,
     cp_space,
     fit_cp_reference,
+    gt_matrix_sha256,
+    load_cp_reference,
     write_cp_reference,
 )
 from dynacell.evaluation.metrics import drop_paired_nonfinite_rows
@@ -226,6 +235,37 @@ def build(target_name: str, leaves_root: Path) -> dict[str, Any]:
     return fit_cp_reference(fits, target_name=target_name, feature_names=names, cp_identity=identity, lite=lite)
 
 
+def verify(target_name: str, path: Path) -> list[str]:
+    """Recompute every non-lite dataset's GT-matrix sha256 from the caches and compare.
+
+    Parameters
+    ----------
+    target_name : str
+        Eval target of the reference.
+    path : pathlib.Path
+        Reference JSON to verify.
+
+    Returns
+    -------
+    list of str
+        One message per dataset whose recomputed sha256 or cell count differs from
+        the recorded one; empty when all match.
+    """
+    ref = load_cp_reference(path, target_name=target_name)
+    mismatches = []
+    for name, record in sorted(ref.fit["datasets"].items()):
+        fit = read_dataset_fit(target_name, (name, record["target"]), len(ref.feature_names), record["in_mask_fit"])
+        sha256 = gt_matrix_sha256(fit.cells)
+        ok = sha256 == record["gt_matrix_sha256"] and fit.cells.shape[0] == record["n_cells"]
+        print(f"  {name}: {'OK' if ok else 'MISMATCH'} ({fit.cells.shape[0]} cells, sha256 {sha256[:12]})")
+        if not ok:
+            mismatches.append(
+                f"{name}: recorded {record['n_cells']} cells sha256 {record['gt_matrix_sha256'][:12]}, "
+                f"caches now give {fit.cells.shape[0]} cells sha256 {sha256[:12]}"
+            )
+    return mismatches
+
+
 def _summary(payload: dict[str, Any]) -> str:
     """Human-readable per-dataset summary of a payload."""
     lines = [
@@ -246,28 +286,40 @@ def _summary(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """CLI entry point."""
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point; returns the process exit code (1 when ``--verify`` finds a mismatch)."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--target", required=True, choices=sorted(MASK_FIT_DATASETS))
     parser.add_argument("--leaves-root", type=Path, default=_LEAVES_ROOT, help="grouped eval leaves to scan")
     parser.add_argument("--out", type=Path, default=None, help="output JSON (default: the registry path)")
     parser.add_argument("--dry-run", action="store_true", help="read and fit; write nothing")
     parser.add_argument("--force", action="store_true", help="replace an existing reference with a different hash")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="recompute each dataset's GT-matrix sha256 from the caches; exit 1 on mismatch",
+    )
     args = parser.parse_args(argv)
 
     out = args.out if args.out is not None else cp_reference_path(args.target)
+    if args.verify:
+        mismatches = verify(args.target, out)
+        for line in mismatches:
+            print(f"MISMATCH {line}")
+        print(f"verify {out}: {'FAILED' if mismatches else 'OK'}")
+        return 1 if mismatches else 0
     start = time.perf_counter()
     payload = build(args.target, args.leaves_root)
     print(_summary(payload))
     elapsed = time.perf_counter() - start
     if args.dry_run:
         print(f"dry run: would write {out} sha256={payload['sha256']} ({elapsed:.1f} s)")
-        return
+        return 0
     written = write_cp_reference(payload, out, force=args.force)
     status = "wrote" if written else "unchanged (identical reference)"
     print(f"{status} {out} sha256={payload['sha256']} ({elapsed:.1f} s)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

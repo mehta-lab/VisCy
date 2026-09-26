@@ -25,9 +25,12 @@ A CP reference fixes both. Per target it holds:
 Each scaler is fit on exactly the GT cells an eval of that dataset scores: every
 position and timepoint of the GT store, read from the GT CP cache, with the
 non-finite rows dropped. The reference records each dataset's position list, cell
-count, GT-matrix hash and GT-cache ``cp_features.built_at``, and an eval refuses
-to score if its GT side differs (:meth:`DatasetCPSpace.check_gt_cache`,
-:meth:`DatasetCPSpace.check_positions`, :meth:`DatasetCPSpace.check_n_cells`).
+count and GT-cache ``cp_features.built_at``, and an eval refuses to score if its
+positions or cell count differ, or the cache stamp moved
+(:meth:`DatasetCPSpace.check_positions`, :meth:`DatasetCPSpace.check_n_cells`,
+:meth:`DatasetCPSpace.check_gt_cache`). The per-dataset GT-matrix sha256 is
+recorded for audit and checked by ``build_cp_reference.py --verify``, not at eval
+time.
 
 A per-dataset std can collapse on a feature the pooled mask keeps (a feature
 that is near-constant within one test set). Such a std is floored at
@@ -156,10 +159,23 @@ def payload_sha256(payload: dict[str, Any]) -> str:
 
 
 def gt_matrix_sha256(gt: np.ndarray) -> str:
-    """Return a sha256 over a stacked GT cell matrix (shape + float64 C-order bytes).
+    """Return a sha256 over a stacked GT cell matrix.
 
-    Recorded per dataset so a later GT re-cache that changes any fitted value, or
-    the cell count, is detectable against the artifact.
+    The digest covers the shape and the float64 C-order bytes, so it changes with
+    any cell value or the cell count. It is recorded per dataset in the reference's
+    ``fit`` section for audit; the eval does not recompute it (that would mean
+    re-reading every GT cell). ``build_cp_reference.py --verify`` recomputes it from
+    the current caches and fails on a mismatch.
+
+    Parameters
+    ----------
+    gt : np.ndarray
+        ``(n_cells, n_features)`` GT CP matrix.
+
+    Returns
+    -------
+    str
+        Hex sha256 digest.
     """
     arr = np.ascontiguousarray(gt, dtype=np.float64)
     digest = hashlib.sha256(f"{arr.shape[0]}x{arr.shape[1]}:".encode())
@@ -400,6 +416,16 @@ class DatasetCPSpace:
         dataset is checked against its own cache only when the build recorded one
         (its scaler is the parent's, so a lite cache is otherwise not what the
         scaler describes); when nothing is recorded the check is skipped.
+
+        This is a best-effort re-cache signal, not a content check. ``built_at``
+        moves whenever any slot of the cache's CP artifact is rewritten, and the
+        cache-manifest merge (``pipeline_cache._merge_manifests``) takes
+        ``built_at`` from whichever writer flushes last, so it can also move
+        without a value change (a false alarm) or be restored by a concurrent
+        flush (a miss). :meth:`check_n_cells` catches a change in the GT cell
+        count; a value-only change with the same count is caught by neither, only
+        by ``build_cp_reference.py --verify``, which recomputes each dataset's
+        GT-matrix sha256 from the caches.
 
         Parameters
         ----------

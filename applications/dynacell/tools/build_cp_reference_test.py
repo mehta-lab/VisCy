@@ -241,3 +241,21 @@ def test_2d_store_is_refused(registry: Path) -> None:
     leaves = _leaves(registry, ["ds-a", "ds-b"])
     with pytest.raises(ValueError, match="CP regionprops are 3-D"):
         main(["--target", "er", "--leaves-root", str(leaves), "--out", str(registry / "x.json")])
+
+
+def test_verify_passes_on_unchanged_caches_and_fails_on_a_value_only_recache(registry: Path, capsys) -> None:
+    """``--verify`` exits 0 on the caches the reference was built from, 1 after a same-count value change.
+
+    The value-only re-cache keeps every cell count and the manifest's built_at, so the
+    eval's checks cannot see it; only the recomputed GT-matrix sha256 does.
+    """
+    leaves = _build_all(registry)
+    out = registry / "er.json"
+    main(["--target", "er", "--leaves-root", str(leaves), "--out", str(out)])
+    assert main(["--target", "er", "--out", str(out), "--verify"]) == 0
+
+    with open_features_group(cache_paths(registry / "caches" / "ds-h"), "cp", mode="a") as group:
+        write_features_to_group(group, "A/1/1", 1, np.full((5, _N_FEATURES), 2.0))  # same 5 cells, new values
+    assert main(["--target", "er", "--out", str(out), "--verify"]) == 1
+    printed = capsys.readouterr().out
+    assert "MISMATCH ds-h" in printed and "verify" in printed and "FAILED" in printed
