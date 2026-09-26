@@ -333,6 +333,28 @@ def _extend_backbone(
     bb.gt_ts.append(t_arr)
 
 
+def _gate_and_record_cp_space(
+    cp_space: DatasetCPSpace, gt_cp_blocks: dict[tuple[str, int], np.ndarray], save_dir: Path
+) -> None:
+    """Run the GT content gate and write the CP sidecar for this eval dir.
+
+    Runs whenever feature metrics are on, whether or not the prediction
+    contributed any finite CP rows, so the gate is never bypassed and every
+    feature-metrics eval dir carries its sidecar.
+
+    Parameters
+    ----------
+    cp_space : DatasetCPSpace
+        Reference bound to the eval's dataset.
+    gt_cp_blocks : dict
+        ``{(position, t): GT-finite CP rows}`` the run scored.
+    save_dir : pathlib.Path
+        Eval dir receiving the sidecar.
+    """
+    cp_space.check_gt_cells(gt_cp_blocks)
+    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(cp_sidecar_payload(cp_space), indent=2))
+
+
 def _stage_cp_dataset_inputs(
     cp: _BackboneLists,
     cp_space: DatasetCPSpace,
@@ -365,11 +387,9 @@ def _stage_cp_dataset_inputs(
     tuple
         ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
     """
-    cp_space.check_gt_cells(gt_cp_blocks)
+    _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir)
     pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
-    mask_payload = cp_sidecar_payload(cp_space)
-    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(mask_payload, indent=2))
     return (
         "CP",
         cp_space.transform(pred_cp_raw),
@@ -1766,6 +1786,8 @@ def evaluate_predictions(
 
             if parent_lists["cp"].pred_feats:
                 prefix_inputs.append(_stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir))
+            else:  # no finite pred CP rows: CP metrics are NaN, but the GT gate and sidecar still apply
+                _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir)
 
             for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]

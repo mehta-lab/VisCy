@@ -299,3 +299,26 @@ def test_a_complete_stale_gt_cache_fails_before_the_fov_loop(harness: Harness, m
     with pytest.raises(Exception, match="differ from the CP reference fit") as err:
         harness.run("early", [g.copy() for g in harness.gt])
     assert type(err.value).__name__ == "StaleCacheError"
+
+
+def test_no_finite_pred_cp_rows_still_gates_the_gt_and_writes_the_sidecar(harness: Harness, monkeypatch) -> None:
+    """A prediction whose CP rows are all non-finite leaves CP NaN, yet the GT gate and sidecar still run."""
+    real = harness.pipeline.fov_cp_features
+
+    def nan_pred_side(ctx, pos_name, image, cell_segmentation):
+        per_t = real(ctx, pos_name, image, cell_segmentation)
+        return [np.full_like(f, np.nan) for f in per_t] if ctx.side == "pred" else per_t
+
+    monkeypatch.setattr(harness.pipeline, "fov_cp_features", nan_pred_side)
+    row, _ = harness.run("nanpred", [g.copy() for g in harness.gt])
+    assert np.isnan(row["Dataset_CP_KID"])
+    assert (harness.root / "nanpred" / "cp_selected_feature_mask.json").exists()
+
+    # A GT recompute from a changed GT store bypasses the up-front cache check, so only the
+    # post-staging gate can refuse it -- and it must, even with no finite pred CP rows.
+    with open_ome_zarr(harness.root / "gt.zarr", mode="r+") as plate:
+        image = plate["A/1/1"]["0"]
+        image[1] = np.asarray(image[1]) ** 2  # non-affine: survives the per-image percentile norm
+    with pytest.raises(Exception, match="differ from the CP reference fit") as err:
+        harness.run("nanpred_moved", [g.copy() for g in harness.gt], gt_cp=True)
+    assert type(err.value).__name__ == "StaleCacheError"
