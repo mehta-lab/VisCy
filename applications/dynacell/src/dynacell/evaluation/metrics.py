@@ -638,6 +638,16 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     columns["laplacian_var"] = lapt["intensity_std"] ** 2
     if use_cuda:
         columns = {name: asnumpy(value) for name, value in columns.items()}
+    # cuCIM's GPU regionprops reduces the built-in min/max in float32, while
+    # skimage on CPU keeps float64, so these two columns alone differ by device
+    # (~1e-8 rel). That is enough to move the GT-only variance filter: a cell
+    # holding the p99 pixel has intensity_max exactly 1.0 on GPU but
+    # 1 - eps/(hi - lo) on CPU, which changes the exact-tie counts and hence the
+    # feature mask. Round both devices to float32, matching the GPU path that
+    # built every production CP cache. On GPU the values are already
+    # float32-exact, so this is a no-op there.
+    for name in ("intensity_min", "intensity_max"):
+        columns[name] = np.asarray(columns[name], dtype=np.float32).astype(np.float64)
     if glcm_enabled:
         columns.update(_per_cell_glcm(img, cell_segmentation, glcm_cfg))
 

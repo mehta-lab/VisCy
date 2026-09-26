@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import torch
 
+from dynacell.evaluation.feature_select import select_gt_features
 from dynacell.evaluation.metrics import (
     _CP_BASE_FEATURE_NAMES,
     _CP_GLCM_FEATURE_NAMES,
@@ -255,3 +256,112 @@ def test_cp_regionprops_cpu_gpu_parity() -> None:
     assert gpu.shape == cpu.shape
     assert np.isfinite(gpu).all()
     np.testing.assert_allclose(gpu, cpu, rtol=0, atol=1e-4)
+
+
+# --- device-consistent intensity_min / intensity_max --------------------------
+_MINMAX = ("intensity_min", "intensity_max")
+
+
+def _multicell_block(seed: int, scale: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """A float64 ``(4, 64, 64)`` block with 32 rectangular cells.
+
+    float64 input is what makes the devices disagree: skimage keeps float64
+    min/max, cuCIM reduces them in float32.
+    """
+    labels = np.zeros((4, 64, 64), dtype=np.int32)
+    lab = 1
+    for i in range(4):
+        for j in range(8):
+            labels[:, i * 16 + 1 : i * 16 + 15, j * 8 + 1 : j * 8 + 7] = lab
+            lab += 1
+    rng = np.random.default_rng(seed)
+    image = scale * (rng.random((4, 64, 64)) * 1000.0 + 50.0)
+    return image, labels
+
+
+def _saturated_image(seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """A float64 ``(1, 32, 32)`` image whose 4 cells each hold p99-clipped pixels.
+
+    16 of 1024 pixels (> 1%) sit at a hot value, so the p99 clip ``hi`` equals it
+    and every cell's normalized max is ``(hi - lo) / ((hi - lo) + eps)``: exactly
+    1.0 in float32, but ``1 - eps / (hi - lo)`` in float64, with ``lo`` (hence the
+    deviation) differing per image.
+    """
+    labels = np.zeros((1, 32, 32), dtype=np.int32)
+    labels[0, 1:15, 1:15] = 1
+    labels[0, 1:15, 17:31] = 2
+    labels[0, 17:31, 1:15] = 3
+    labels[0, 17:31, 17:31] = 4
+    rng = np.random.default_rng(seed)
+    image = rng.random((1, 32, 32)) * rng.uniform(10.0, 100.0)
+    for r0, c0 in ((2, 2), (2, 18), (18, 2), (18, 18)):
+        image[0, r0 : r0 + 2, c0 : c0 + 2] = 1000.0
+    return image, labels
+
+
+def _saturated_pool(use_gpu: bool) -> np.ndarray:
+    """Pool the CP matrices of 8 saturated images (32 GT rows)."""
+    glcm_cfg = {"enabled": True, "levels": 16, "distances": [1]}
+    blocks = []
+    for seed in range(8):
+        image, labels = _saturated_image(seed)
+        blocks.append(cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=use_gpu))
+    return np.concatenate(blocks, axis=0)
+
+
+@pytest.mark.skipif(not _HAS_EXTRA_PROPS, reason="needs cubic>=0.7.0a12 glcm_features + extra_properties")
+def test_cp_regionprops_cpu_minmax_float32_exact() -> None:
+    """On CPU, intensity_min/max are float32-exact, as on GPU (cuCIM float32)."""
+    image, labels = _multicell_block(seed=7)
+    glcm_cfg = {"enabled": True, "levels": 16, "distances": [1]}
+    feats = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=False)
+    idx = {n: i for i, n in enumerate(active_cp_feature_names(True))}
+    for col in _MINMAX:
+        values = feats[:, idx[col]]
+        np.testing.assert_array_equal(values, values.astype(np.float32).astype(np.float64), err_msg=col)
+
+
+@pytest.mark.skipif(not _HAS_EXTRA_PROPS, reason="needs cubic>=0.7.0a12 glcm_features + extra_properties")
+def test_cp_regionprops_cpu_saturated_max_is_exactly_one() -> None:
+    """A cell holding the p99-clipped pixel has intensity_max exactly 1.0 on CPU."""
+    pool = _saturated_pool(use_gpu=False)
+    col = active_cp_feature_names(True).index("intensity_max")
+    np.testing.assert_array_equal(pool[:, col], 1.0)
+
+
+@pytest.mark.skipif(
+    not (_HAS_EXTRA_PROPS and torch.cuda.is_available()),
+    reason="needs cubic>=0.7.0a12 + CUDA (cuCIM regionprops)",
+)
+def test_cp_regionprops_cpu_gpu_bit_equal_minmax() -> None:
+    """CPU and GPU give bit-equal intensity_min/max; every other column within 1e-12 rel."""
+    image, labels = _multicell_block(seed=8, scale=3.7)
+    glcm_cfg = {"enabled": True, "levels": 16, "distances": [1]}
+    cpu = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=False)
+    gpu = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=True)
+    assert cpu.shape == gpu.shape == (32, len(active_cp_feature_names(True)))
+    for j, name in enumerate(active_cp_feature_names(True)):
+        if name in _MINMAX:
+            np.testing.assert_array_equal(cpu[:, j], gpu[:, j], err_msg=name)
+        else:
+            np.testing.assert_allclose(cpu[:, j], gpu[:, j], rtol=1e-12, atol=0, err_msg=name)
+
+
+@pytest.mark.skipif(
+    not (_HAS_EXTRA_PROPS and torch.cuda.is_available()),
+    reason="needs cubic>=0.7.0a12 + CUDA (cuCIM regionprops)",
+)
+def test_gt_feature_mask_is_device_independent() -> None:
+    """The GT-only CP mask is the same whether the GT pool was extracted on CPU or GPU.
+
+    Every cell holds its image's p99-clipped pixel, so intensity_max is constant
+    (1.0) and the variance filter drops it. In float64 the per-image deviation
+    ``1 - eps / (hi - lo)`` would give 8 distinct values of 4 cells each, which
+    passes both variance tests and keeps the column on CPU only.
+    """
+    cpu = _saturated_pool(use_gpu=False)
+    gpu = _saturated_pool(use_gpu=True)
+    mask_cpu = select_gt_features(cpu)
+    mask_gpu = select_gt_features(gpu)
+    np.testing.assert_array_equal(mask_cpu, mask_gpu)
+    assert not mask_gpu[active_cp_feature_names(True).index("intensity_max")]
