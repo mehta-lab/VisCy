@@ -34,6 +34,20 @@ waves:
       - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
     membrane:
       - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
+  # Stage 1, second batch of finished predicts (2026-09-25): FNet-2D, UNeXt2-2D membrane
+  # (segaux, seed1, l1/safecrop probes) and pix2pix2d membrane segaux. Generate with --wave wave1b.
+  wave1b:
+    nucleus:
+      - fnet2d_segaux
+      - {model: fnet2d_seed1, leaves: [ipsc]}
+    membrane:
+      - fnet2d_segaux
+      - fcmae_vscyto2d_scratch_segaux
+      - pix2pix2d_unetvit_segaux
+      - {model: fnet2d_seed1, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_l1, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_safecrop, leaves: [ipsc]}
   # Stage 0b/0c/0g + Stage 1 first wave (leaves from tools/generate_spotlight_v2_leaves.py).
   # Stores do not exist yet: do NOT run the generator on this wave until every predict has
   # COMPLETED -- its store gate refuses absent or partial stores. Seed replicates and the
@@ -42,7 +56,6 @@ waves:
   # .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
-      - fnet2d_segaux
       - fnet3d_paper_segaux
       - fcmae_vscyto2d_scratch_segaux
       - fcmae_vscyto3d_scratch_segaux
@@ -51,7 +64,6 @@ waves:
       - celldiff_segaux_iterative
       - fcmae_vscyto3d_scratch_v2
       - pix2pix3d_unetvit_v2
-      - {model: fnet2d_seed1, leaves: [ipsc]}
       - {model: fnet3d_paper_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
       - {model: celldiff_2d_seed1, leaves: [ipsc]}
@@ -61,19 +73,12 @@ waves:
       - celldiff_cjoint_iterative
       - celldiff_ccond_iterative
     membrane:
-      - fnet2d_segaux
       - fnet3d_paper_segaux
-      - fcmae_vscyto2d_scratch_segaux
       - fcmae_vscyto3d_scratch_segaux
-      - pix2pix2d_unetvit_segaux
       - pix2pix3d_unetvit_segaux
       - celldiff_2d_segaux
       - celldiff_segaux_iterative
       - fcmae_vscyto3d_scratch_v2
       - pix2pix3d_unetvit_v2
-      - {model: fnet2d_seed1, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
       - {model: celldiff_2d_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_jointsteps, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_l1, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_safecrop, leaves: [ipsc]}
