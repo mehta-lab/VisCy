@@ -73,13 +73,15 @@ ROSTER_MODELS: tuple[str, ...] = (
     "unetvit3d",
 )
 ROSTER_TRAIN_DIRS: tuple[str, ...] = ("ipsc_confocal", "a549_mantis")
-ROSTER_ORGANELLES: tuple[str, ...] = ("nucleus",)
+ROSTER_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane", "er", "mito")
 # Predict-leaf train dir -> grouped-bucket train token.
 _BUCKET_TRAIN: dict[str, str] = {
     "ipsc_confocal": "ipsc_trained",
     "a549_mantis": "a549_trained",
     "joint_ipsc_confocal_a549_mantis": "joint",
 }
+# Config-dir organelle -> grouped-bucket organelle spelling (the buckets spell mito out).
+_BUCKET_ORGANELLE: dict[str, str] = {"mito": "mitochondria"}
 # Metrics the lite does not report (none is in the paper's selected set).
 LITE_EVAL_OVERRIDES: dict = {
     "compute_microssim": False,
@@ -330,7 +332,7 @@ def plan_outputs(organelles: tuple[str, ...], models: tuple[str, ...], train_dir
                     out[leaf_dir / f"{src.stem}{LITE_SET_SUFFIX}.yml"] = _dump(lite, src)
 
         for train_dir in train_dirs:
-            bucket = f"{organelle}_{_BUCKET_TRAIN[train_dir]}"
+            bucket = f"{_BUCKET_ORGANELLE.get(organelle, organelle)}_{_BUCKET_TRAIN[train_dir]}"
             src = _GROUPED / bucket / "eval_grouped.yaml"
             lite = lite_grouped_leaf(_load(src), predictions)
             out[_GROUPED / f"{bucket}__lite" / "eval_grouped.yaml"] = _dump(lite, src, package_global=True)

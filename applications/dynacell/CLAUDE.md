@@ -241,6 +241,38 @@ For local foreground runs, `tools/predict_local.sh --parallel N` backgrounds on
 the current host's GPU (2-up confirmed on the A40 interactive node) — a different
 path from the sbatch helper's `--parallel`.
 
+## DynaCell-lite: the fast test side for model iteration
+
+A smaller test set that reproduces the full benchmark's model orderings on the selected metrics:
+A549 keeps all 12 FOVs per condition at 5 of 10 timepoints (`build_temporal_subset_zarr.py --mode
+spread -n 5`), iPSC keeps a seeded 50 of 100 FOVs per GT store. Offline, it retains >= 0.895 of the
+model pairs the full benchmark can resolve on every non-GLCM+ selected metric; end to end, a lite eval
+reproduces the full benchmark on the same FOVs and frames to ~2e-5 (pixel) / ~6e-5 relative (deep
+KIDs), wherever the production prediction was made with current predict code (the 24 production
+UNetViT3D A549 stores predate the 2026-07-27 tiling fix and differ). Predict cost is ~0.44x on A549. Evidence: `experiments/2026-09-14_lite-benchmark-plan/PLAN.md`
+§11–§13.
+
+- **It is a separate dataset, never an override of the full one.** Every per-timepoint artifact
+  (segmentation store, GT feature cache `{pos}/t{t}`, focus cache) is indexed by its store's own `t`,
+  so sharing a cache would score subset frame k against full frame k, and a T-mismatched write
+  deletes the full cache arrays in place. The eval now refuses per-position T mismatches between
+  pred, GT, segmentation and nuclei stores.
+- **Isolation is by root.** Everything lite lives under `paths.LITE_DATA_ROOT`
+  (`/hpc/projects/virtual_staining/training/dynacell_lite`), laid out exactly like `DATA_ROOT`; use the
+  grammar functions with `data_root=LITE_DATA_ROOT`. Datasets are the `*-lite` manifests.
+- **Configs are generated, never hand-edited:** `tools/generate_lite_benchmark_configs.py` derives the
+  lite manifests, predict sets, `predict__<set>_lite.yml` leaves (same checkpoint as the production
+  leaf) and `leaf/grouped/<bucket>__lite/` eval leaves from their production siblings, and a test pins
+  the committed files to its output. To put a new model on the lite: give it a production predict
+  leaf, add its dir to `ROSTER_MODELS`, regenerate, then predict with `submit_benchmark_batch.py
+  --array --allow-mixed-directives` and evaluate with `tools/run_eval_direct.slurm
+  grouped/<bucket>__lite/eval_grouped` on a >= 80 GB GPU.
+- **Reported metrics:** si-SSIM, Spectral PCC, Dice, the five deep KIDs and cosines. GLCM+ KID is
+  dropped (biased low at lite cell counts); GLCM+ cosine is kept but flagged. MicroSSIM, FID, PRC and
+  MIND are off (`compute_microssim`, `feature_metrics.compute_{fid,prc,mind}`).
+- **A549 has no separate nuclei store**: `nuclei_gt_path` is the GT store itself, so lite membrane
+  leaves omit it and the carve reads nuclei from the lite GT store.
+
 ## `experiments/` — investigations, ablations and checks (gitignored)
 
 Every investigation, ablation, probe or planning effort gets **one directory**

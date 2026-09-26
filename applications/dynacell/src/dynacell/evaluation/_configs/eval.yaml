@@ -131,6 +131,9 @@ pixel_metrics:
 feature_metrics:
   patch_size: 256
   deep_feature_batch_threshold: 256
+  compute_fid: true   # off = no *_FID columns at all (dataset-level and per-timepoint)
+  compute_prc: true   # off = no *_Precision/_Recall/_F1 (+ _std) columns at all
+  compute_mind: true  # off = no *_MIND columns at all
   # Conventional ("CP") per-cell feature track (regionprops-based).
   cp:
     norm: {p_lo: 1.0, p_hi: 99.0}   # robust percentile-clip before extraction

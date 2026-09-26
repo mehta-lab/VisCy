@@ -592,6 +592,7 @@ def _process_one_fov(
     compute_cell_similarity = bool(OmegaConf.select(config, "compute_cell_similarity", default=False))
     cell_sim_metrics = tuple(OmegaConf.select(config, "cell_similarity.metrics", default=["pcc"]))
     cell_sim_reduce = tuple(OmegaConf.select(config, "cell_similarity.reduce", default=["mean", "median"]))
+    compute_fid = _feature_metric_flags(config)["compute_fid"]
 
     if predict_cached is not None and target_cached is not None:
         # Reuse arrays already read by _calibrate_microssim (serial mode opt-in
@@ -922,20 +923,26 @@ def _process_one_fov(
                 # columns must match the dataset-level ones the parent derives from the
                 # same map, or the two halves of a <prefix>_* family drift apart.
                 pairwise_metrics = {
-                    **compute_feature_similarity_pairwise(pred_cp_z, gt_cp_z, _COLUMN_PREFIX["cp"]),
-                    **compute_feature_similarity_pairwise(pred_dinov3, gt_dinov3_per_t[t], _COLUMN_PREFIX["dinov3"]),
-                    **compute_feature_similarity_pairwise(pred_dynaclr, gt_dynaclr_per_t[t], _COLUMN_PREFIX["dynaclr"]),
+                    **compute_feature_similarity_pairwise(
+                        pred_cp_z, gt_cp_z, _COLUMN_PREFIX["cp"], compute_fid=compute_fid
+                    ),
+                    **compute_feature_similarity_pairwise(
+                        pred_dinov3, gt_dinov3_per_t[t], _COLUMN_PREFIX["dinov3"], compute_fid=compute_fid
+                    ),
+                    **compute_feature_similarity_pairwise(
+                        pred_dynaclr, gt_dynaclr_per_t[t], _COLUMN_PREFIX["dynaclr"], compute_fid=compute_fid
+                    ),
                 }
                 if pred_celldino is not None:
                     pairwise_metrics.update(
                         compute_feature_similarity_pairwise(
-                            pred_celldino, gt_celldino_per_t[t], _COLUMN_PREFIX["celldino"]
+                            pred_celldino, gt_celldino_per_t[t], _COLUMN_PREFIX["celldino"], compute_fid=compute_fid
                         )
                     )
                 if pred_morphem is not None:
                     pairwise_metrics.update(
                         compute_feature_similarity_pairwise(
-                            pred_morphem, gt_morphem_per_t[t], _COLUMN_PREFIX["morphem"]
+                            pred_morphem, gt_morphem_per_t[t], _COLUMN_PREFIX["morphem"], compute_fid=compute_fid
                         )
                     )
                 fov_feature_metrics.append({**data_info, **pairwise_metrics})
@@ -1104,6 +1111,18 @@ def _validate_exclusions(exclude: list[str], position_names: list[str]) -> None:
                 f"{len(matched)} positions ({', '.join(matched)}). Use full "
                 "position names to disambiguate."
             )
+
+
+def _feature_metric_flags(config: DictConfig) -> dict[str, bool]:
+    """Read the ``feature_metrics.compute_{fid,prc,mind}`` switches (default on).
+
+    Returned as keyword arguments for :func:`compute_feature_similarity`. A switch
+    that is off drops that metric's columns entirely rather than NaN-filling them.
+    """
+    return {
+        name: bool(OmegaConf.select(config, f"feature_metrics.{name}", default=True))
+        for name in ("compute_fid", "compute_prc", "compute_mind")
+    }
 
 
 def _separate_nuclei_path(config: DictConfig) -> str | None:
@@ -1427,6 +1446,19 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         f"nuclei_gt_path store is missing positions {sorted(missing_nuclei)!r} "
                         "(cellpose_watershed reads GT-nuclei seeds there, matched by position name)"
                     )
+            # Every per-timepoint artifact is indexed by its own store's t, so a
+            # T-subset prediction (or a lite GT against a full-T segmentation store)
+            # would score frame k against frame k of a different frame list. Compare
+            # per position: T legitimately varies across FOVs within one store.
+            # Shape metadata only — no array is read.
+            for (pos_name, pos_pred), (_, pos_gt), (_, pos_seg) in zip(pred_positions, gt_positions, seg_positions):
+                t_counts = {"pred": pos_pred.data.shape[0], "gt": pos_gt.data.shape[0]}
+                if pos_seg is not None:
+                    t_counts["seg"] = pos_seg.data.shape[0]
+                if nuclei_by_name is not None:
+                    t_counts["nuclei"] = nuclei_by_name[pos_name].data.shape[0]
+                if len(set(t_counts.values())) > 1:
+                    raise ValueError(f"Timepoint count mismatch at position {pos_name!r}: {t_counts}")
 
             # Leaf-level MicroMS3IM calibration: fit α once on a random
             # subsample of (FOV, t) volumes and reuse the fitted sim for
@@ -1646,6 +1678,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             # rather than repeating the None checks.
             deep_kinds: list[FeatureKind] = [k for k in _BACKBONE_KEYS if k in deep_extractors]
             active_kinds: list[FeatureKind] = ["cp", *deep_kinds]
+            metric_flags = _feature_metric_flags(config)
 
             # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
             # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
@@ -1717,7 +1750,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                 # leaf comparability of the MIND column).
                 name, p_metric, t_metric, p_probe, t_probe, fov_p, fov_t = args
                 raw = {
-                    **compute_feature_similarity(p_metric, t_metric, name),
+                    **compute_feature_similarity(p_metric, t_metric, name, **metric_flags),
                     **_real_vs_pred_probe(p_probe, t_probe, fov_p, fov_t, name),
                 }
                 return {f"Dataset_{k}": v for k, v in raw.items()}
@@ -1734,11 +1767,12 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         dataset_row.update(result)
 
             # NaN-fill any prefix that had no cells (parallel pool would
-            # otherwise skip it). Cheap; runs on empty arrays.
+            # otherwise skip it). Cheap; runs on empty arrays. KID is the
+            # sentinel because it is the one family no flag can switch off.
             for name in (_COLUMN_PREFIX[k] for k in active_kinds):
-                if f"Dataset_{name}_FID" not in dataset_row:
+                if f"Dataset_{name}_KID" not in dataset_row:
                     raw = {
-                        **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name),
+                        **compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), name, **metric_flags),
                         **_real_vs_pred_probe(np.empty((0, 0)), np.empty((0, 0)), np.empty(0), np.empty(0), name),
                     }
                     dataset_row.update({f"Dataset_{k}": v for k, v in raw.items()})
@@ -1842,6 +1876,27 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         pixel_rows = np.load(save_dir / config.save.pixel_metrics_filename, allow_pickle=True).tolist()
         if not pixel_rows or not expected.issubset(pixel_rows[0]):
             return False
+    # A feature cache written with a metric switched off lacks that metric's
+    # columns entirely; once the switch is back on, it must not suppress them.
+    # Keyed per prefix off the always-present Dataset_<prefix>_KID column, so a
+    # full run (every family present for every prefix it scored) still passes.
+    if feature_ok and config.compute_feature_metrics:
+        feature_rows = np.load(save_dir / config.save.feature_metrics_filename, allow_pickle=True).tolist()
+        if feature_rows:
+            flags = _feature_metric_flags(config)
+            suffixes = [
+                *(["FID"] if flags["compute_fid"] else []),
+                *(["Precision", "Recall", "F1"] if flags["compute_prc"] else []),
+                *(["MIND"] if flags["compute_mind"] else []),
+            ]
+            columns = feature_rows[0].keys()
+            prefixes = [
+                c.removeprefix("Dataset_").removesuffix("_KID")
+                for c in columns
+                if c.startswith("Dataset_") and c.endswith("_KID")
+            ]
+            if any(f"Dataset_{prefix}_{suffix}" not in columns for prefix in prefixes for suffix in suffixes):
+                return False
     return pixel_ok and mask_ok and feature_ok
 
 
