@@ -1926,6 +1926,10 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         # must go through the scoring path so ``check_positions`` sees its GT position set.
         if config.limit_positions is not None or OmegaConf.select(config, "io.exclude_fov_names", default=None):
             return False
+        # Same position guard as the scoring path, on the GT store as it is now: a GT
+        # store replaced or extended since the fit must not hand back cached CP rows.
+        with open_ome_zarr(Path(config.io.gt_path), mode="r") as gt_plate:
+            space.check_positions([name for name, _ in gt_plate.positions()])
         current_sha256 = space.binding_sha256
     if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256):
         return False

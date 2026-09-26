@@ -22,7 +22,7 @@ from dynacell.evaluation.cache import cache_paths, load_manifest, save_manifest
 from dynacell.evaluation.model_loader import EvalModels
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
-from ._eval_fixtures import build_eval_config, live_pipeline_module, make_cp_reference
+from ._eval_fixtures import N_POSITIONS, build_eval_config, live_pipeline_module, make_cp_reference
 
 D, H, W = 3, 8, 8
 
@@ -107,6 +107,8 @@ def _feature_cache_config(tmp_path: Path, **flags: bool):
         fov_workers=1,
     )
     config.compute_feature_metrics = True
+    if not (tmp_path / "gt.zarr").exists():  # the cache-hit path checks the GT store's positions
+        _make_plate(tmp_path / "gt.zarr", "target", [2] * N_POSITIONS)
     for name, value in flags.items():
         config.feature_metrics[name] = value
     return config, make_cp_reference(config, tmp_path / "cp_reference.json")
@@ -189,6 +191,18 @@ def test_partial_walk_never_reuses_cp_rows(tmp_path: Path, key: str, value) -> N
     assert pipeline._final_metrics_cache_valid(config)
     OmegaConf.update(config, key, value)
     assert not pipeline._final_metrics_cache_valid(config)
+
+
+def test_cache_reuse_refuses_a_gt_store_extended_since_the_fit(tmp_path: Path) -> None:
+    """A GT store that gained a position the reference was not fit on is refused on the cache-hit path."""
+    pipeline = live_pipeline_module()
+    config, _ = _feature_cache_config(tmp_path)
+    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
+    assert pipeline._final_metrics_cache_valid(config)
+    with open_ome_zarr(tmp_path / "gt.zarr", mode="r+") as plate:
+        plate.create_position("A", "1", str(N_POSITIONS)).create_image("0", np.zeros((2, 1, D, H, W), dtype=np.float32))
+    with pytest.raises(ValueError):
+        pipeline._final_metrics_cache_valid(config)
 
 
 def test_cache_reuse_refuses_a_gt_recache(tmp_path: Path) -> None:
