@@ -278,6 +278,9 @@ PAPER_KEY: dict[str, str] = {
     "celldiff_2d_segauxself": "celldiff_2d_segauxself",
     # Predict-only: the pix2pix2d baseline's own last.ckpt (canonical stores: best ckpts, nucleus ep 22 / membrane ep 37).
     "pix2pix2d_unetvit_last": "pix2pix2d_last",
+    # UNeXt2-2D membrane rebuilt on the L1 recipe: seg-aux arm and its seed replicate.
+    "fcmae_vscyto2d_scratch_l1segaux": "unext2_2d_l1segaux",
+    "fcmae_vscyto2d_scratch_l1seed1": "unext2_2d_l1seed1",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

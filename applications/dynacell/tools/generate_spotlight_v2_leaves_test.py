@@ -36,9 +36,10 @@ def test_committed_leaves_match_the_generator() -> None:
 
 
 def test_leaf_counts_per_arm() -> None:
-    """Count 44 fits and 148 predicts per arm (fit+predict).
+    """Count 46 fits and 156 predicts per arm (fit+predict).
 
-    segaux 16+64, segauxself 8+32, seed1 9+9, v2 4+16, probes 3+3, cjoint/ccond 2+8 each, last 0+8.
+    segaux 16+64, segauxself 8+32, seed1 9+9, v2 4+16, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
+    l1segaux 1+4, l1seed1 1+1.
 
     The probes and seed replicates are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -55,6 +56,8 @@ def test_leaf_counts_per_arm() -> None:
         "safecrop": 1,
         "cjoint": 2,
         "ccond": 2,
+        "l1segaux": 1,
+        "l1seed1": 1,
     }
     assert predicts == {
         "segaux": 64,
@@ -63,10 +66,12 @@ def test_leaf_counts_per_arm() -> None:
         "seed1": 9,
         "v2": 16,
         "jointsteps": 1,
-        "l1": 1,
+        "l1": 4,
         "safecrop": 1,
         "cjoint": 8,
         "ccond": 8,
+        "l1segaux": 4,
+        "l1seed1": 1,
     }
 
 
@@ -194,3 +199,20 @@ def test_last_arm_predicts_the_baselines_own_checkpoint_into_its_own_store() -> 
         assert cfg["model"]["init_args"]["ckpt_path"].endswith("/pix2pix2d_unetvit/checkpoints/last.ckpt")
         store = cfg["trainer"]["callbacks"][0]["init_args"]["output_store"]
         assert "/pix2pix2d_unetvit_last/" in store and "/pix2pix2d_unetvit/" not in store
+
+
+def test_l1_arms_differ_from_the_l1_probe_by_their_own_term_only() -> None:
+    """Composed, l1segaux = l1 + the seg-aux keys and l1seed1 = l1 + the seed, nothing else."""
+    load = lambda suffix: load_composed_config(  # noqa: E731
+        BENCHMARKS / "membrane" / f"fcmae_vscyto2d_scratch_{suffix}" / POOL / "train.yml",
+        resolver=_dynacell_ref_resolver,
+    )
+    l1 = load("l1")
+    renames, _ = allowed_diff(Arm("fcmae_vscyto2d_scratch", "l1segaux", ("membrane",), a549=False), "fit")
+    seg = changed_keys(l1, load("l1segaux")) - renames
+    assert {"model.init_args.seg_aux" if k.startswith("model.init_args.seg_aux.") else k for k in seg} == {
+        "data.init_args.fg_mask_key",
+        "model.init_args.seg_aux",
+        "model.init_args.seg_aux_weight",
+    }
+    assert changed_keys(l1, load("l1seed1")) - renames == {"seed_everything"}

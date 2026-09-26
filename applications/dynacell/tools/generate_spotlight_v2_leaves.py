@@ -111,6 +111,9 @@ SEG_AUX_WEIGHTS: dict[tuple[str, str], float] = {
     ("membrane", "pix2pix3d_unetvit_segaux"): 3.1,
     ("membrane", "celldiff_2d_segaux"): 0.58,
     ("membrane", "celldiff_segaux"): 1.0,
+    # UNeXt2-2D membrane on the L1 recipe (the MixedLoss baseline is a failed fit; the l1
+    # probe trains, Dice 0.889). Calibrated on the l1 probe's best ckpt: 0.18 [0.15-0.27].
+    ("membrane", "fcmae_vscyto2d_scratch_l1segaux"): 0.18,
 }
 # C-joint's mask Dice has no baseline to calibrate against (the baseline has no
 # mask channel); it borrows the same-dim CellDiff seg-aux weight as a starting point.
@@ -205,7 +208,12 @@ ARMS: tuple[Arm, ...] = (
     Arm("fnet3d_paper", "seed1", ("nucleus",), a549=False),
     Arm("fcmae_vscyto3d_scratch", "v2", ORGANELLES, a549=True),
     Arm("pix2pix3d_unetvit", "v2", ORGANELLES, a549=True),
-    *(Arm("fcmae_vscyto2d_scratch", s, ("membrane",), a549=False) for s in ("jointsteps", "l1", "safecrop")),
+    *(Arm("fcmae_vscyto2d_scratch", s, ("membrane",), a549=False) for s in ("jointsteps", "safecrop")),
+    # The l1 probe won (Dice 0.889 vs 0.380) and is the baseline for l1segaux, so it also predicts A549.
+    Arm("fcmae_vscyto2d_scratch", "l1", ("membrane",), a549=True),
+    # The comparison rebuilt on the recipe that trains: the l1 probe is the baseline for these.
+    Arm("fcmae_vscyto2d_scratch", "l1segaux", ("membrane",), a549=True),
+    Arm("fcmae_vscyto2d_scratch", "l1seed1", ("membrane",), a549=False),
     # Stage 1b, nucleus first: segmentation inside the generative process.
     *(Arm(m, s, ("nucleus",), a549=True) for s in ("cjoint", "ccond") for m in ("celldiff_2d", "celldiff")),
     # Stage 2 #1: the segaux arm with a self-consistent Dice reference (2D families first).
@@ -228,6 +236,9 @@ _DESCRIPTION: dict[str, str] = {
     "measured from final checkpoints: baseline latest-epoch=199-step=100000 (500 steps/ep), joint "
     "latest-epoch=199-step=160000 (800 steps/ep); 320 x 500 = 160000",
     "l1": "MixedLoss l1_alpha 1.0 / l2_alpha 0.0 / ms_dssim_alpha 0.0 (L1 only)",
+    "l1segaux": "the l1 arm's MixedLoss (L1 only) + data fg_mask_key: fg_mask + model seg_aux (SegAuxDice "
+    "c=0.1) + seg_aux_weight. Its baseline is the l1 probe, from which it differs by the seg-aux term only",
+    "l1seed1": "the l1 arm's MixedLoss (L1 only) + seed_everything: 1 (noise floor for l1segaux vs l1)",
     "safecrop": f"affine safe_crop_size {SAFE_CROP_SIZE} + safe_crop_coverage {SAFE_CROP_COVERAGE}",
     "cjoint": "data fg_mask_key: fg_mask; model net_config.in_channels 2, mask_mode joint, mask_dice_weight, "
     f"mask_velocity_weight {MASK_VELOCITY_WEIGHT}, seg_aux_t0 {SEG_AUX_T0}",
@@ -309,6 +320,15 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
         recipe.add("trainer.max_epochs")
     elif arm.suffix == "l1":
         recipe.add("model.init_args.loss_function")
+    elif arm.suffix == "l1segaux":
+        recipe |= {
+            "model.init_args.loss_function",
+            "data.init_args.fg_mask_key",
+            "model.init_args.seg_aux",
+            "model.init_args.seg_aux_weight",
+        }
+    elif arm.suffix == "l1seed1":
+        recipe |= {"model.init_args.loss_function", "seed_everything"}
     elif arm.suffix == "safecrop":
         recipe.add("data.init_args.gpu_augmentations")
     elif arm.suffix == "cjoint":
@@ -373,11 +393,17 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
         cfg["seed_everything"] = 1
     elif arm.suffix == "jointsteps":
         cfg.setdefault("trainer", {})["max_epochs"] = JOINTSTEPS_MAX_EPOCHS
-    elif arm.suffix == "l1":
+    elif arm.suffix in ("l1", "l1segaux", "l1seed1"):
         model_args["loss_function"] = {
             "class_path": "viscy_utils.losses.MixedLoss",
             "init_args": {"l1_alpha": 1.0, "l2_alpha": 0.0, "ms_dssim_alpha": 0.0},
         }
+        if arm.suffix == "l1segaux":
+            data_args["fg_mask_key"] = "fg_mask"
+            model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": {"c": SEG_AUX_C}}
+            model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, arm.model)]
+        elif arm.suffix == "l1seed1":
+            cfg["seed_everything"] = 1
     elif arm.suffix == "safecrop":
         data_args["gpu_augmentations"] = _safecrop_gpu_augmentations()
     elif arm.suffix == "cjoint":
