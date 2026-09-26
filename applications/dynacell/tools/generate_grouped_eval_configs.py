@@ -101,6 +101,7 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto2d_scratch_segauxself": "unext2_2d_segauxself",
     "pix2pix2d_unetvit_segauxself": "pix2pix2d_segauxself",
     "celldiff_2d_segauxself": "celldiff_2d_segauxself",
+    "pix2pix2d_unetvit_last": "pix2pix2d_last",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -176,6 +177,7 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fnet2d_segauxself",
     "fcmae_vscyto2d_scratch_segauxself",
     "pix2pix2d_unetvit_segauxself",
+    "pix2pix2d_unetvit_last",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = (
     "celldiff_2d_segauxself",

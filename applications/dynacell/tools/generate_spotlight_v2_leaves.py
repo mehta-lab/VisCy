@@ -182,6 +182,7 @@ class Arm:
     suffix: str
     organelles: tuple[str, ...]
     a549: bool
+    fit: bool = True
 
     @property
     def model(self) -> str:
@@ -209,6 +210,10 @@ ARMS: tuple[Arm, ...] = (
     *(Arm(m, s, ("nucleus",), a549=True) for s in ("cjoint", "ccond") for m in ("celldiff_2d", "celldiff")),
     # Stage 2 #1: the segaux arm with a self-consistent Dice reference (2D families first).
     *(Arm(m, "segauxself", ORGANELLES, a549=True) for m in SEGAUXSELF_BASELINES),
+    # Predict-only: the pix2pix2d BASELINE's own last.ckpt into a v2-only store. Its canonical
+    # stores were predicted from the epoch-37 best checkpoint, while every GAN arm predicts from
+    # last.ckpt (recorded EMA val L1 does not track the weights), so arm-vs-baseline needs this.
+    Arm("pix2pix2d_unetvit", "last", ORGANELLES, a549=True, fit=False),
 )
 
 _DESCRIPTION: dict[str, str] = {
@@ -430,7 +435,8 @@ def build_predict(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
         raise ValueError(f"expected one {old!r} in experiment_id {bench['experiment_id']!r}")
     bench["experiment_id"] = bench["experiment_id"].replace(old, f"__{arm.model}__")
     bench["model_name"] = arm.model
-    cfg["model"]["init_args"]["ckpt_path"] = f"{MODELS_ROOT}/ipsc/{organelle}/{arm.model}/checkpoints/last.ckpt"
+    ckpt_dir = base.ckpt_dir if not arm.fit else arm.model
+    cfg["model"]["init_args"]["ckpt_path"] = f"{MODELS_ROOT}/ipsc/{organelle}/{ckpt_dir}/checkpoints/last.ckpt"
     writers = [cb for cb in cfg["trainer"]["callbacks"] if cb["class_path"].endswith("HCSPredictionWriter")]
     if len(writers) != 1:
         raise ValueError(f"{arm.model}/{organelle}: expected one HCSPredictionWriter, got {len(writers)}")
@@ -473,7 +479,10 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
             )
     else:
         lines.append("# Inference is identical to the baseline's; only the checkpoint, store and names differ.")
-        lines.append("# ckpt_path is a PLACEHOLDER (last.ckpt): submit with `--ckpt best`, re-bake afterwards.")
+        if not arm.fit:
+            lines.append("# Predict-only arm: the baseline's own last.ckpt, own store; submit with `--ckpt last`.")
+        else:
+            lines.append("# ckpt_path is a PLACEHOLDER (last.ckpt): submit with `--ckpt best`, re-bake afterwards.")
     lines.append("# Everything else, and the rationale for it, is the baseline leaf's.")
     return "\n".join(lines) + "\n"
 
@@ -503,7 +512,7 @@ def build_leaves(benchmarks: Path = BENCHMARKS) -> dict[Path, str]:
         for organelle in arm.organelles:
             src_dir = benchmarks / organelle / arm.baseline / POOL
             dst_dir = benchmarks / organelle / arm.model / POOL
-            jobs = [("fit", base.fit_leaf, "train.yml", build_fit)]
+            jobs = [("fit", base.fit_leaf, "train.yml", build_fit)] if arm.fit else []
             predicts = [base.ipsc_predict, *(A549_PREDICTS if arm.a549 else ())]
             jobs += [("predict", name, name, build_predict) for name in predicts]
             for kind, src_name, dst_name, build in jobs:

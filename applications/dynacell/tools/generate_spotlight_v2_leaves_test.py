@@ -36,7 +36,12 @@ def test_committed_leaves_match_the_generator() -> None:
 
 
 def test_leaf_counts_per_arm() -> None:
-    """44 fits, 140 predicts: segaux 16+64, segauxself 8+32, seed1 9+9, v2 4+16, probes 3+3, cjoint/ccond 2+8."""
+    """Count 44 fits and 148 predicts per arm (fit+predict).
+
+    segaux 16+64, segauxself 8+32, seed1 9+9, v2 4+16, probes 3+3, cjoint/ccond 2+8 each, last 0+8.
+
+    The probes and seed replicates are iPSC-only; every other arm also predicts the 3 A549 legs.
+    """
     leaves = build_leaves()
     fits = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name == "train.yml")
     predicts = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name != "train.yml")
@@ -54,6 +59,7 @@ def test_leaf_counts_per_arm() -> None:
     assert predicts == {
         "segaux": 64,
         "segauxself": 32,
+        "last": 8,
         "seed1": 9,
         "v2": 16,
         "jointsteps": 1,
@@ -126,14 +132,18 @@ def test_segaux_composes_with_the_engine_args_and_keeps_the_baseline_recipe(base
 
 
 def test_predict_leaves_point_at_the_arm_checkpoint_and_store() -> None:
-    """Predict leaves name the arm's own ckpt dir (placeholder) and store dir, never the baseline's."""
+    """Predict leaves name the arm's own store dir, never the baseline's, and the arm's own ckpt dir.
+
+    The exception is a predict-only arm (no fit), which reads its baseline's checkpoint dir.
+    """
     for path, text in build_leaves().items():
         if path.name == "train.yml":
             continue
         cfg = yaml.safe_load(text)
         model, organelle = path.parent.parent.name, path.parent.parent.parent.name
         arm = next(a for a in ARMS if a.model == model)
-        assert cfg["model"]["init_args"]["ckpt_path"].endswith(f"/ipsc/{organelle}/{model}/checkpoints/last.ckpt")
+        ckpt_dir = model if arm.fit else BASELINES[arm.baseline].ckpt_dir
+        assert cfg["model"]["init_args"]["ckpt_path"].endswith(f"/ipsc/{organelle}/{ckpt_dir}/checkpoints/last.ckpt")
         store = cfg["trainer"]["callbacks"][0]["init_args"]["output_store"]
         assert f"/{organelle}/{arm.store_dir}/ipsc/" in store
         assert store.startswith(cfg["launcher"]["run_root"] + "/")
@@ -172,3 +182,15 @@ def test_segauxself_differs_from_segaux_by_the_dice_label_only(baseline: str, or
     renames, _ = allowed_diff(Arm(baseline, "segauxself", (organelle,), a549=False), "fit")
     assert changed_keys(segaux, segauxself) - renames == {"model.init_args.seg_aux.init_args.label"}
     assert segauxself["model"]["init_args"]["seg_aux"]["init_args"]["label"] == "target"
+
+
+def test_last_arm_predicts_the_baselines_own_checkpoint_into_its_own_store() -> None:
+    """The predict-only `last` arm reads the baseline's ckpt dir but never writes the baseline's store."""
+    leaves = build_leaves()
+    last = [p for p in leaves if p.parent.parent.name == "pix2pix2d_unetvit_last"]
+    assert len(last) == 8 and not any(p.name == "train.yml" for p in last)
+    for p in last:
+        cfg = yaml.safe_load(leaves[p])
+        assert cfg["model"]["init_args"]["ckpt_path"].endswith("/pix2pix2d_unetvit/checkpoints/last.ckpt")
+        store = cfg["trainer"]["callbacks"][0]["init_args"]["output_store"]
+        assert "/pix2pix2d_unetvit_last/" in store and "/pix2pix2d_unetvit/" not in store
