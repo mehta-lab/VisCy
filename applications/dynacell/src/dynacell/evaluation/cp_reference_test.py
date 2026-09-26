@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 from dynacell.evaluation import cp_reference
 from dynacell.evaluation.cache import StaleCacheError
 from dynacell.evaluation.cp_reference import (
+    CP_Z_CLIP,
     STD_FLOOR_FRACTION,
     DatasetFit,
     fit_cp_reference,
@@ -551,3 +552,27 @@ def test_old_sidecar_survives_a_rebuild_that_leaves_its_dataset_unchanged(tmp_pa
     _reference(tmp_path, [_fit("set-a", a * 1.1), _fit("set-b", b)])  # set-a's scaler moves
     with pytest.raises(ValueError, match="CP space of set-a .* changed since the eval"):
         sidecar_cp_space(eval_dir)
+
+
+def test_build_records_the_z_clip_and_the_gt_survey(two_sets) -> None:
+    """The clip and the GT |z| survey that justifies it are hashed criteria; every dataset records its own."""
+    ref, payload, cells = two_sets
+    criteria = payload["criteria"]
+    assert criteria["z_clip"] == CP_Z_CLIP
+    survey = criteria["gt_abs_z_survey"]
+    z = np.abs(ref.for_dataset("set-b").transform(cells["set-b"]))
+    assert payload["fit"]["datasets"]["set-b"]["gt_abs_z"]["max"] == pytest.approx(z.max())
+    assert survey["max"] == max(
+        r["gt_abs_z"]["max"] for r in [*payload["fit"]["datasets"].values(), *payload["fit"]["lite"].values()]
+    )
+    assert survey["max"] < CP_Z_CLIP
+    edited = json.loads(json.dumps(payload))
+    edited["criteria"]["z_clip"] = 1e9
+    assert payload_sha256(edited) != payload["sha256"]
+
+
+def test_build_refuses_gt_beyond_the_clip(monkeypatch) -> None:
+    """If any GT cell's |z| in its own scaler exceeds the clip, the reference is not built."""
+    monkeypatch.setattr(cp_reference, "CP_Z_CLIP", 2.0)
+    with pytest.raises(ValueError, match="above the CP z clip 2.0"):
+        fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})

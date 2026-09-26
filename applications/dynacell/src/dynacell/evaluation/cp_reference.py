@@ -75,7 +75,7 @@ from dynacell.evaluation.paths import cp_reference_path
 from dynacell.evaluation.pipeline_cache import cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
-CP_REFERENCE_SCHEMA = 5
+CP_REFERENCE_SCHEMA = 6
 
 #: Sidecar each eval writes beside its metrics, naming the CP reference it scored in.
 CP_SIDECAR_FILENAME = "cp_selected_feature_mask.json"
@@ -89,6 +89,16 @@ GT_MOMENT_RTOL = 1e-6
 #: For a feature constant in the fit (std_fit == 0): |mean - mean_fit| and the staged std
 #: must both be <= GT_MOMENT_ZERO_STD_ATOL * (1 + |mean_fit|).
 GT_MOMENT_ZERO_STD_ATOL = 1e-12
+
+#: Shared-space z is clipped to +-CP_Z_CLIP on both sides before KID/FID/cosine
+#: (:meth:`DatasetCPSpace.transform_clipped`). The cubic KID kernel otherwise lets one
+#: heavy-tailed predicted feature set the metric's magnitude (a pilot A549->iPSC nucleus
+#: eval had pred glcm_ASM at z up to 239, KID 4e9). Chosen from a survey of every GT cell
+#: of every registry dataset (lite included) in its own test set's scaler: global max
+#: |z| 26.55 (er, a549-mantis-sec61b-denv, kurtosis), so 50 leaves a 1.9x margin and no GT
+#: cell is ever clipped. :func:`fit_cp_reference` re-runs that survey on every build and
+#: refuses a reference whose GT would be clipped, so the margin is a checked invariant.
+CP_Z_CLIP = 50.0
 
 #: A per-dataset std below this fraction of the feature's pooled GT std is floored to it.
 STD_FLOOR_FRACTION = 1e-3
@@ -496,6 +506,7 @@ def fit_cp_reference(
             "floored_features": [n for n, f in zip(kept_names, floored, strict=True) if f],
         }
     lite = [f for f in fits if f.parent is not None]
+    survey = _gt_abs_z_survey(fits, scalers, keep_mask, kept_names)
 
     payload: dict[str, Any] = {
         "schema": CP_REFERENCE_SCHEMA,
@@ -510,6 +521,8 @@ def fit_cp_reference(
             "mask_fit_on": "gt_only_pooled",
             "scaler_fit_on": "gt_only_per_dataset",
             "std_floor_fraction_of_pooled": STD_FLOOR_FRACTION,
+            "z_clip": CP_Z_CLIP,
+            "gt_abs_z_survey": {k: v for k, v in survey.items() if k != "datasets"},
         },
         "cp_identity": cp_identity,
         "scalers": scalers,
@@ -521,13 +534,58 @@ def fit_cp_reference(
                 "gt_matrix_sha256": gt_matrix_sha256(pooled),
                 "pooled_std": [float(v) for v in pooled_std],
             },
-            "datasets": {f.dataset: _provenance(f) for f in scaled},
-            "lite": {f.dataset: _provenance(f) for f in lite},
+            "datasets": {f.dataset: {**_provenance(f), "gt_abs_z": survey["datasets"][f.dataset]} for f in scaled},
+            "lite": {f.dataset: {**_provenance(f), "gt_abs_z": survey["datasets"][f.dataset]} for f in lite},
         },
         "created_at": datetime.now(UTC).isoformat(),
     }
     payload["sha256"] = payload_sha256(payload)
     return payload
+
+
+def _gt_abs_z_survey(
+    fits: list[DatasetFit], scalers: dict[str, dict[str, Any]], keep_mask: np.ndarray, kept_names: list[str]
+) -> dict[str, Any]:
+    """Survey |z| of every fit dataset's GT cells in its OWN test set's scaler (lite: the parent's).
+
+    Returns the global max |z|, the global p99.99 (pooled over every GT cell and kept
+    feature), where the max sits, and a per-dataset ``{max, p9999, max_feature}``.
+
+    Raises
+    ------
+    ValueError
+        If any GT |z| exceeds :data:`CP_Z_CLIP`: the clip would then discard GT
+        signal, which it must never do.
+    """
+    per: dict[str, dict[str, Any]] = {}
+    pooled: list[np.ndarray] = []
+    for fit in fits:
+        scaler = scalers[fit.parent or fit.dataset]
+        z = np.abs(
+            (np.asarray(fit.cells, dtype=np.float64)[:, keep_mask] - np.asarray(scaler["mean"]))
+            / np.asarray(scaler["std"])
+        )
+        col = int(np.unravel_index(np.argmax(z), z.shape)[1])
+        per[fit.dataset] = {
+            "max": float(z.max()),
+            "p9999": float(np.quantile(z, 0.9999)),
+            "max_feature": kept_names[col],
+        }
+        pooled.append(z.ravel())
+    worst = max(per, key=lambda d: per[d]["max"])
+    if per[worst]["max"] > CP_Z_CLIP:
+        raise ValueError(
+            f"GT cells of {worst} reach |z| {per[worst]['max']:.2f} on {per[worst]['max_feature']} in their own "
+            f"scaler, above the CP z clip {CP_Z_CLIP}; the clip must never touch GT. Raise CP_Z_CLIP (and re-survey) "
+            "or investigate the GT cache."
+        )
+    return {
+        "max": per[worst]["max"],
+        "p9999": float(np.quantile(np.concatenate(pooled), 0.9999)),
+        "max_dataset": worst,
+        "max_feature": per[worst]["max_feature"],
+        "datasets": per,
+    }
 
 
 def write_cp_reference(payload: dict[str, Any], path: Path, *, force: bool = False) -> bool:
@@ -621,7 +679,9 @@ class DatasetCPSpace:
         """
         body = {
             "cp_identity": self.cp_identity,
-            "criteria": self.criteria,
+            # The GT |z| survey summarizes EVERY dataset of the target; it is hashed in the
+            # reference but left out here, so adding a dataset keeps this binding.
+            "criteria": {k: v for k, v in self.criteria.items() if k != "gt_abs_z_survey"},
             "feature_names": list(self.feature_names),
             "keep_mask": [bool(b) for b in self.keep_mask],
             "dataset": self.dataset,
