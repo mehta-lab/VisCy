@@ -17,11 +17,11 @@ import numpy as np
 import pytest
 from iohub.ngff import open_ome_zarr
 
-from dynacell.evaluation.cache import cache_paths, save_manifest
+from dynacell.evaluation.cache import cache_paths, load_manifest, save_manifest
 from dynacell.evaluation.model_loader import EvalModels
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
-from ._eval_fixtures import CP_TEST_DATASET, build_eval_config, live_pipeline_module, make_cp_reference
+from ._eval_fixtures import build_eval_config, live_pipeline_module, make_cp_reference
 
 D, H, W = 3, 8, 8
 
@@ -286,19 +286,13 @@ def test_partial_position_walk_is_refused_for_cp(tmp_path: Path, monkeypatch) ->
 def test_gt_recache_after_the_reference_is_refused_up_front(tmp_path: Path, monkeypatch) -> None:
     """A GT CP cache whose ``built_at`` moved since the build fails before any model load."""
     pipeline = live_pipeline_module()
-    config, _ = _feature_cache_config(tmp_path)
-    save_manifest(
-        cache_paths(tmp_path / "gt_cache"),
-        {"artifacts": {"cp_features": {"path": "features/cp.zarr", "built_at": "2026-09-26T00:00:00+00:00"}}},
-    )
-    reference = json.loads((tmp_path / "cp_reference.json").read_text())
-    # Fit provenance is outside the content hash, so it can be edited without re-hashing.
-    reference["fit"]["datasets"][CP_TEST_DATASET].update(
-        gt_cache_dir=str(tmp_path / "gt_cache"), cp_cache_built_at="2026-09-01T00:00:00+00:00"
-    )
-    (tmp_path / "cp_reference.json").write_text(json.dumps(reference))
+    config, _ = _feature_cache_config(tmp_path)  # records the cache's real built_at
+    paths = cache_paths(tmp_path / "gt_cache")
+    manifest = load_manifest(paths)
+    manifest["artifacts"]["cp_features"]["built_at"] = "2099-01-01T00:00:00+00:00"  # re-cached after the build
+    save_manifest(paths, manifest)
     monkeypatch.setattr(pipeline, "load_eval_models", lambda *a, **k: pytest.fail("models loaded"))
     cp_space = pipeline.eval_cp_space(config)
-    with pytest.raises(Exception, match="was built at 2026-09-26") as err:
+    with pytest.raises(Exception, match="was built at 2099-01-01") as err:
         pipeline.evaluate_predictions(config, cp_space=cp_space)
     assert type(err.value).__name__ == "StaleCacheError"

@@ -283,8 +283,11 @@ def test_gt_recache_is_detected(tmp_path: Path) -> None:
 
 
 def test_lite_without_a_recorded_cache_skips_the_recache_check(two_sets) -> None:
+    """A lite dataset with no recorded cache stamp skips the check; a non-lite one refuses."""
     ref, _, _ = two_sets
     ref.for_dataset("set-a-lite").check_gt_cache(None)
+    with pytest.raises(ValueError, match="records no GT-cache built_at for this non-lite dataset"):
+        ref.for_dataset("set-b").check_gt_cache("/c/set-b")
 
 
 def test_staged_dataset_arrays_are_the_dataset_scaler_transform(two_sets, tmp_path: Path) -> None:

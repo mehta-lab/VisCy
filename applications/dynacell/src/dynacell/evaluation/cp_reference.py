@@ -396,10 +396,10 @@ class DatasetCPSpace:
         """Refuse an eval whose GT CP cache was re-cached after the reference was fit.
 
         Compares the eval's GT cache manifest ``cp_features.built_at`` with the one
-        recorded at build time. A lite dataset is checked against its own cache
-        only when the build recorded one (its scaler is the parent's, so a lite
-        cache is otherwise not what the scaler describes); when nothing is
-        recorded the check is skipped.
+        recorded at build time. A non-lite dataset must have one recorded. A lite
+        dataset is checked against its own cache only when the build recorded one
+        (its scaler is the parent's, so a lite cache is otherwise not what the
+        scaler describes); when nothing is recorded the check is skipped.
 
         Parameters
         ----------
@@ -409,12 +409,19 @@ class DatasetCPSpace:
         Raises
         ------
         ValueError
-            If the eval reads a different GT cache dir than the recorded one.
+            If the eval reads a different GT cache dir than the recorded one, or a
+            non-lite dataset's reference records no ``built_at``.
         StaleCacheError
             If the recorded and current ``built_at`` differ.
         """
         if self.cp_cache_built_at is None:
-            return
+            if self.is_lite:
+                return
+            raise ValueError(
+                f"{self.dataset}: the CP reference {self.reference_path} records no GT-cache built_at for this "
+                f"non-lite dataset, so a GT re-cache could not be detected. Rebuild it:\n"
+                f"  {_build_command(self.target_name)}"
+            )
         if gt_cache_dir is None or Path(gt_cache_dir) != Path(self.gt_cache_dir):
             raise ValueError(
                 f"{self.dataset}: the CP reference was fit on GT cache {self.gt_cache_dir}, "
