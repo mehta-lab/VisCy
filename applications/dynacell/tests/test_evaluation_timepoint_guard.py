@@ -18,6 +18,7 @@ import pytest
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
+from dynacell.evaluation.cp_reference import payload_sha256
 from dynacell.evaluation.model_loader import EvalModels
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
@@ -223,13 +224,13 @@ def test_cache_scored_for_another_dataset_is_invalid(tmp_path: Path) -> None:
 
 
 def test_cache_is_invalid_once_the_gt_matrix_changed(tmp_path: Path) -> None:
-    """Same numeric reference hash, but the dataset's recorded GT matrix changed: CP rows are stale."""
+    """Same scalers and mask, but the dataset's recorded GT matrix changed: CP rows are stale."""
     pipeline = live_pipeline_module()
     config, reference = _two_set_cache(pipeline, tmp_path)
     payload = json.loads(reference.read_text())
-    payload["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64  # unhashed fit provenance
+    payload["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64
+    payload["sha256"] = payload_sha256(payload)  # a legitimate rebuild re-hashes
     reference.write_text(json.dumps(payload))
-    assert pipeline.eval_cp_space(config).reference_sha256 == payload["sha256"]  # numeric hash unchanged
     assert not pipeline._final_metrics_cache_valid(config)
 
 

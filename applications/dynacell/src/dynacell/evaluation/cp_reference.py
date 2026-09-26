@@ -108,13 +108,28 @@ MASK_FIT_DATASETS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
-#: Keys excluded from the content hash. The hash covers only what changes CP numbers
-#: (recipe identity, criteria, feature names, keep-mask, every scaler's mean/std and
-#: floored features, the lite -> parent map). ``fit`` holds the fit provenance the eval
-#: checks read (positions, cell counts, GT-matrix hashes; ``built_at`` for audit), so a
-#: rebuild after a harmless GT re-cache that leaves every scaler unchanged keeps the
-#: hash and invalidates no final-metrics cache stamped with it.
-_UNHASHED_KEYS = frozenset({"sha256", "created_at", "fit"})
+#: Top-level keys excluded from the content hash.
+_UNHASHED_KEYS = frozenset({"sha256", "created_at"})
+
+#: Audit-only fields of each ``fit`` provenance record, excluded from the content hash.
+#: Everything else in ``fit`` -- positions, cell counts and GT-matrix hashes, which the
+#: content gate enforces -- is hashed, so a hand-edited gate field fails the load-time
+#: hash check. Paths and ``built_at`` are excluded because they move on a harmless GT
+#: re-cache (identical cells) or a relocation, which must not change the hash.
+_AUDIT_FIT_KEYS = frozenset({"gt_path", "gt_cache_dir", "cp_cache_path", "cp_cache_built_at"})
+
+
+def _hashed_fit(fit: dict[str, Any]) -> dict[str, Any]:
+    """Return ``fit`` without its audit-only per-dataset fields."""
+    return {
+        "mask_fit": fit["mask_fit"],
+        **{
+            group: {
+                name: {k: v for k, v in rec.items() if k not in _AUDIT_FIT_KEYS} for name, rec in fit[group].items()
+            }
+            for group in ("datasets", "lite")
+        },
+    }
 
 
 def _build_command(target_name: str) -> str:
@@ -151,7 +166,8 @@ def payload_sha256(payload: dict[str, Any]) -> str:
     Parameters
     ----------
     payload : dict
-        Reference JSON payload. ``sha256`` and ``created_at`` are ignored.
+        Reference JSON payload. ``sha256``, ``created_at`` and the audit-only ``fit``
+        fields (paths, ``cp_cache_built_at``) are ignored.
 
     Returns
     -------
@@ -159,6 +175,7 @@ def payload_sha256(payload: dict[str, Any]) -> str:
         Hex sha256 over the canonical (sorted-key, compact) JSON encoding.
     """
     body = {k: v for k, v in payload.items() if k not in _UNHASHED_KEYS}
+    body["fit"] = _hashed_fit(payload["fit"])
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -167,9 +184,9 @@ def gt_matrix_sha256(gt: np.ndarray) -> str:
 
     The digest covers the shape and the float64 C-order bytes, so it changes with
     any cell value or the cell count. It is recorded per dataset in the reference's
-    ``fit`` section for audit; the eval does not recompute it (that would mean
-    re-reading every GT cell). ``build_cp_reference.py --verify`` recomputes it from
-    the current caches and fails on a mismatch.
+    ``fit`` section; the eval recomputes it over the GT cells it stages and refuses to
+    score on a mismatch (:meth:`DatasetCPSpace.check_gt_cells`), and
+    ``build_cp_reference.py --verify`` recomputes it from the current caches.
 
     Parameters
     ----------
@@ -423,8 +440,8 @@ def write_cp_reference(payload: dict[str, Any], path: Path, *, force: bool = Fal
     bool
         ``True`` if the file was written, ``False`` if an identical reference (same
         hash AND same fit provenance) was already there (no-op). Same hash with new
-        provenance (e.g. a re-cache that moved ``built_at``, or a lite dataset's
-        record) is written without ``force``: no scaler or mask changes.
+        audit-only provenance (a re-cache that moved ``built_at``, a relocated cache
+        path) is written without ``force``: no scaler, mask or gate field changes.
 
     Raises
     ------

@@ -213,9 +213,21 @@ def test_changed_scaler_changes_the_hash() -> None:
     relinked = json.loads(json.dumps(payload))
     relinked["lite"]["set-a-lite"]["parent"] = "set-b"
     assert payload_sha256(relinked) != payload["sha256"]
-    provenance_only = json.loads(json.dumps(payload))
-    provenance_only["fit"]["datasets"]["set-b"]["n_cells"] = 1
-    assert payload_sha256(provenance_only) == payload["sha256"]
+    gate_field = json.loads(json.dumps(payload))
+    gate_field["fit"]["datasets"]["set-b"]["n_cells"] = 1  # a content-gate field is integrity-protected
+    assert payload_sha256(gate_field) != payload["sha256"]
+    audit_only = json.loads(json.dumps(payload))
+    audit_only["fit"]["datasets"]["set-b"]["cp_cache_built_at"] = "2099-01-01T00:00:00+00:00"
+    assert payload_sha256(audit_only) == payload["sha256"]
+
+
+def test_hand_edited_gate_field_fails_the_load(tmp_path: Path) -> None:
+    """Editing a recorded GT-matrix hash without re-hashing is refused at load, not trusted by the gate."""
+    payload = fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
+    payload["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64
+    (tmp_path / "er.json").write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="does not match its recorded sha256"):
+        load_cp_reference(tmp_path / "er.json", target_name="er")
 
 
 def test_write_is_atomic_and_refuses_a_different_reference(tmp_path: Path) -> None:
@@ -431,9 +443,9 @@ def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> 
     def rebound(edit) -> dict[str, str]:
         moved = json.loads(json.dumps(payload))
         edit(moved)
+        moved["sha256"] = payload_sha256(moved)  # a legitimate rebuild re-hashes
         (tmp_path / "er.json").write_text(json.dumps(moved))
         again = load_cp_reference(tmp_path / "er.json", target_name="er")
-        assert again.sha256 == ref.sha256  # provenance only: numeric hash unchanged
         return {d: again.for_dataset(d).binding_sha256 for d in bindings}
 
     assert rebound(lambda p: p["fit"]["datasets"]["set-a"].update(cp_cache_built_at="t1")) == bindings
