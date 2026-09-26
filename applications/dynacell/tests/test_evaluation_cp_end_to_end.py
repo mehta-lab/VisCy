@@ -322,3 +322,33 @@ def test_no_finite_pred_cp_rows_still_gates_the_gt_and_writes_the_sidecar(harnes
     with pytest.raises(Exception, match="differ from the CP reference fit") as err:
         harness.run("nanpred_moved", [g.copy() for g in harness.gt], gt_cp=True)
     assert type(err.value).__name__ == "StaleCacheError"
+
+
+def test_clip_fraction_is_reported_per_dataset_row_and_feature(harness: Harness) -> None:
+    """Dataset_CP_clip_frac, per-row CP_clip_frac and the sidecar's per-feature fractions match a direct count.
+
+    The prediction replaces 4 of the 16 cells with a voxel checkerboard, whose texture
+    features lie far outside the GT's, so only those cells can leave the +-z_clip band.
+    """
+    import json
+
+    blown = np.isin(harness.seg, [1, 2, 3, 4])
+    checker = (np.indices(harness.seg.shape).sum(axis=0) % 2).astype(np.float32)  # max-texture voxel pattern
+    pred = [np.where(blown, checker, g).astype(np.float32) for g in harness.gt]
+    row, config = harness.run("clipped", pred)
+    space = harness.pipeline.eval_cp_space(config)
+    save_dir = Path(config.save.save_dir)
+    emb = np.load(save_dir / "embeddings" / "pred_cp_single_cell_embeddings.npz")
+    over = np.abs(space.transform(emb["embeddings"])) > space.z_clip
+    assert 0 < row["Dataset_CP_clip_frac"] == pytest.approx(over.any(axis=1).mean())
+    sidecar = json.loads((save_dir / "cp_selected_feature_mask.json").read_text())["clip"]
+    assert sidecar["z_clip"] == space.z_clip and sidecar["pred_clip_frac"] == row["Dataset_CP_clip_frac"]
+    kept = [n for n, k in zip(space.feature_names, space.keep_mask, strict=True) if k]
+    assert sidecar["pred_clip_frac_per_feature"] == pytest.approx(dict(zip(kept, over.mean(axis=0), strict=True)))
+    _, _, rows = harness.pipeline.evaluate_predictions(
+        config, models=_stub_models(), cp_space=space
+    )  # per-row fractions: recomputed per (FOV, t) from that row's pred cells
+    per_row = {(r["FOV"], r["Timepoint"]): r["CP_clip_frac"] for r in rows}
+    for (fov, t), frac in per_row.items():
+        sel = (emb["fov"] == fov) & (emb["timepoint"] == t)
+        assert frac == pytest.approx(over[sel].any(axis=1).mean())

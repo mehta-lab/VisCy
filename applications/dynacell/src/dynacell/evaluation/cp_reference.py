@@ -732,6 +732,30 @@ class DatasetCPSpace:
         """
         return np.clip(self.transform(x), -self.z_clip, self.z_clip)
 
+    def clip_fraction(self, x: np.ndarray) -> dict[str, Any]:
+        """Return what :meth:`transform_clipped` discards on ``x``: the fraction of cells clipped.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Raw ``(n_cells, n_features)`` CP matrix (the prediction's, in the eval).
+
+        Returns
+        -------
+        dict
+            ``{"any": fraction of cells with any kept-feature |z| > z_clip,
+            "per_feature": {kept feature: fraction of cells clipped on it}}``; NaN
+            fractions for zero cells.
+        """
+        kept_names = [n for n, k in zip(self.feature_names, self.keep_mask, strict=True) if k]
+        if x.shape[0] == 0:
+            return {"any": float("nan"), "per_feature": dict.fromkeys(kept_names, float("nan"))}
+        over = np.abs(self.transform(x)) > self.z_clip
+        return {
+            "any": float(over.any(axis=1).mean()),
+            "per_feature": {n: float(v) for n, v in zip(kept_names, over.mean(axis=0), strict=True)},
+        }
+
     def check_positions(self, positions: list[str]) -> None:
         """Refuse an eval whose GT positions are not exactly the ones the fit recorded.
 

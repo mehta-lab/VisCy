@@ -335,7 +335,10 @@ def _extend_backbone(
 
 
 def _gate_and_record_cp_space(
-    cp_space: DatasetCPSpace, gt_cp_blocks: dict[tuple[str, int], np.ndarray], save_dir: Path
+    cp_space: DatasetCPSpace,
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray],
+    save_dir: Path,
+    pred_clip: dict[str, Any],
 ) -> None:
     """Run the GT content gate and write the CP sidecar for this eval dir.
 
@@ -351,9 +354,20 @@ def _gate_and_record_cp_space(
         ``{(position, t): GT-finite CP rows}`` the run scored.
     save_dir : pathlib.Path
         Eval dir receiving the sidecar.
+    pred_clip : dict
+        :meth:`DatasetCPSpace.clip_fraction` of the run's pred CP cells, recorded in
+        the sidecar so what the z-clip discarded stays inspectable per feature.
     """
     cp_space.check_gt_cells(gt_cp_blocks)
-    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(cp_sidecar_payload(cp_space), indent=2))
+    payload = {
+        **cp_sidecar_payload(cp_space),
+        "clip": {
+            "z_clip": cp_space.z_clip,
+            "pred_clip_frac": pred_clip["any"],
+            "pred_clip_frac_per_feature": pred_clip["per_feature"],
+        },
+    }
+    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(payload, indent=2))
 
 
 def _stage_cp_dataset_inputs(
@@ -361,6 +375,7 @@ def _stage_cp_dataset_inputs(
     cp_space: DatasetCPSpace,
     gt_cp_blocks: dict[tuple[str, int], np.ndarray],
     save_dir: Path,
+    pred_clip: dict[str, Any] | None = None,
 ) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Stage the dataset-level CP inputs in the reference feature space.
 
@@ -382,14 +397,19 @@ def _stage_cp_dataset_inputs(
         (:meth:`DatasetCPSpace.check_gt_cells`) before anything is written.
     save_dir : pathlib.Path
         Eval dir receiving the sidecar.
+    pred_clip : dict, optional
+        :meth:`DatasetCPSpace.clip_fraction` of the pred cells, if the caller already
+        computed it; computed here otherwise.
 
     Returns
     -------
     tuple
         ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
     """
-    _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir)
     pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+    _gate_and_record_cp_space(
+        cp_space, gt_cp_blocks, save_dir, pred_clip if pred_clip is not None else cp_space.clip_fraction(pred_cp_raw)
+    )
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
     return (
         "CP",
@@ -979,6 +999,7 @@ def _process_one_fov(
                     gt_cp_blocks[t] = gt_cp_per_t[t][np.isfinite(gt_cp_per_t[t]).all(axis=1)]
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                 pred_cp_z, gt_cp_z = _cp_row_features(pred_cp, gt_cp_t, cp_space)
+                cp_clip_frac = cp_space.clip_fraction(pred_cp)["any"] if pred_cp.size else float("nan")
                 # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
                 # columns must match the dataset-level ones the parent derives from the
                 # same map, or the two halves of a <prefix>_* family drift apart.
@@ -986,6 +1007,7 @@ def _process_one_fov(
                     **compute_feature_similarity_pairwise(
                         pred_cp_z, gt_cp_z, _COLUMN_PREFIX["cp"], compute_fid=compute_fid
                     ),
+                    f"{_COLUMN_PREFIX['cp']}_clip_frac": cp_clip_frac,
                     **compute_feature_similarity_pairwise(
                         pred_dinov3, gt_dinov3_per_t[t], _COLUMN_PREFIX["dinov3"], compute_fid=compute_fid
                     ),
@@ -1785,10 +1807,21 @@ def evaluate_predictions(
             # MADScaler can normalize per-fold.
             prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
+            # What the shared-space z-clip discards: the fraction of pred CP cells with any
+            # kept feature beyond +-z_clip (NaN without pred cells), next to Dataset_CP_KID.
+            pred_cp_all = (
+                np.concatenate(parent_lists["cp"].pred_feats, axis=0)
+                if parent_lists["cp"].pred_feats
+                else np.empty((0, len(cp_space.feature_names)))
+            )
+            pred_clip = cp_space.clip_fraction(pred_cp_all)
+            dataset_row[f"Dataset_{_COLUMN_PREFIX['cp']}_clip_frac"] = pred_clip["any"]
             if parent_lists["cp"].pred_feats:
-                prefix_inputs.append(_stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir))
+                prefix_inputs.append(
+                    _stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir, pred_clip)
+                )
             else:  # no finite pred CP rows: CP metrics are NaN, but the GT gate and sidecar still apply
-                _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir)
+                _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir, pred_clip)
 
             for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]
@@ -2019,6 +2052,11 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
                 if c.startswith("Dataset_") and c.endswith("_KID")
             ]
             if any(f"Dataset_{prefix}_{suffix}" not in columns for prefix in prefixes for suffix in suffixes):
+                return False
+            # CP rows scored before the shared-space z-clip carry no clip-fraction columns:
+            # their KID was computed unclipped, so they must be recomputed, not reused.
+            cp = _COLUMN_PREFIX["cp"]
+            if cp in prefixes and not {f"Dataset_{cp}_clip_frac", f"{cp}_clip_frac"} <= set(columns):
                 return False
     return pixel_ok and mask_ok and feature_ok
 
