@@ -83,8 +83,10 @@ CP_SIDECAR_FILENAME = "cp_selected_feature_mask.json"
 #: Content-gate tolerance on each CP feature's GT moments (see
 #: :meth:`DatasetCPSpace.check_gt_cells`): |mean - mean_fit| <= GT_MOMENT_RTOL * std_fit
 #: and |std / std_fit - 1| <= GT_MOMENT_RTOL. Measured on real data: GPU regionprops
-#: jitter is ~1e-15 relative, but a CPU-vs-GPU recompute differs by up to 4.3e-8 (std of
-#: intensity_min), only ~23x under this tolerance; a real GT change is >= ~1e-3.
+#: jitter is ~1e-15 relative, and a CPU-vs-GPU recompute differs by <= ~1e-14 now that
+#: ``cp_regionprops`` rounds intensity_min/max to float32 on both devices (before that,
+#: up to 4.3e-8 on intensity_min, only ~23x under this tolerance); a real GT change is
+#: >= ~1e-3.
 GT_MOMENT_RTOL = 1e-6
 #: For a feature constant in the fit (std_fit == 0): |mean - mean_fit| and the staged std
 #: must both be <= GT_MOMENT_ZERO_STD_ATOL * (1 + |mean_fit|).
