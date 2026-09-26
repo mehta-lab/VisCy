@@ -38,7 +38,7 @@ uv run dynacell evaluate \
   save.save_dir=/hpc/.../eval_fnet3d_sec61b
 ```
 
-Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N`.
+Add `compute_feature_metrics=true` to enable feature metrics. Smoke test on a subset of FOVs with `limit_positions=N compute_feature_metrics=false`: CP feature metrics are scored in a reference fit on the full GT cell set, so a partial position walk with feature metrics on raises.
 
 ## Submission tooling
 
@@ -112,7 +112,7 @@ Canonical leaves at `configs/benchmarks/virtual_staining/<org>/<model>/<train_se
 uv run dynacell evaluate leaf=er/celldiff/ipsc_confocal/eval__ipsc_confocal
 ```
 
-Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1` for smoke).
+Coverage: `(er, membrane, mito, nucleus) × (celldiff, unetvit3d)`. CLI overrides apply on top (e.g. `limit_positions=1 compute_feature_metrics=false` for smoke).
 
 ## Caches
 
