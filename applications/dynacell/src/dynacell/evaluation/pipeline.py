@@ -104,14 +104,15 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
 
 
 def _cp_row_features(pred_cp: np.ndarray, gt_cp: np.ndarray, cp_space: DatasetCPSpace) -> tuple[np.ndarray, np.ndarray]:
-    """Per-(FOV, timepoint) CP inputs: the reference mask + this dataset's GT scaler on both sides.
+    """Per-(FOV, timepoint) CP inputs: the reference mask + this dataset's GT scaler, clipped, on both sides.
 
-    The same transform as the dataset-level stage, so a per-row CP value is
+    The same transform as the dataset-level stage
+    (:meth:`DatasetCPSpace.transform_clipped`), so a per-row CP value is
     comparable across models and FOVs. Empty inputs (no cells) pass through.
     """
     if not (pred_cp.size and gt_cp.size):
         return pred_cp, gt_cp
-    return cp_space.transform(pred_cp), cp_space.transform(gt_cp)
+    return cp_space.transform_clipped(pred_cp), cp_space.transform_clipped(gt_cp)
 
 
 def _real_vs_pred_probe(
@@ -334,7 +335,10 @@ def _extend_backbone(
 
 
 def _gate_and_record_cp_space(
-    cp_space: DatasetCPSpace, gt_cp_blocks: dict[tuple[str, int], np.ndarray], save_dir: Path
+    cp_space: DatasetCPSpace,
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray],
+    save_dir: Path,
+    pred_clip: dict[str, Any],
 ) -> None:
     """Run the GT content gate and write the CP sidecar for this eval dir.
 
@@ -350,9 +354,25 @@ def _gate_and_record_cp_space(
         ``{(position, t): GT-finite CP rows}`` the run scored.
     save_dir : pathlib.Path
         Eval dir receiving the sidecar.
+    pred_clip : dict
+        :meth:`DatasetCPSpace.clip_fraction` of the run's pred CP cells, recorded in
+        the sidecar so what the z-clip discarded stays inspectable per feature.
     """
     cp_space.check_gt_cells(gt_cp_blocks)
-    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(cp_sidecar_payload(cp_space), indent=2))
+
+    def _json_frac(v: float) -> float | None:
+        # No pred CP rows -> NaN fraction; strict JSON has no NaN, so record null.
+        return None if np.isnan(v) else v
+
+    payload = {
+        **cp_sidecar_payload(cp_space),
+        "clip": {
+            "z_clip": cp_space.z_clip,
+            "pred_clip_frac": _json_frac(pred_clip["any"]),
+            "pred_clip_frac_per_feature": {k: _json_frac(v) for k, v in pred_clip["per_feature"].items()},
+        },
+    }
+    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(payload, indent=2, allow_nan=False))
 
 
 def _stage_cp_dataset_inputs(
@@ -360,11 +380,12 @@ def _stage_cp_dataset_inputs(
     cp_space: DatasetCPSpace,
     gt_cp_blocks: dict[tuple[str, int], np.ndarray],
     save_dir: Path,
+    pred_clip: dict[str, Any] | None = None,
 ) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Stage the dataset-level CP inputs in the reference feature space.
 
     KID/FID/cosine get the reference-masked features standardized by this
-    dataset's GT scaler (identical for pred and GT); the linear probe gets the
+    dataset's GT scaler and clipped to +-z_clip (identical for pred and GT); the linear probe gets the
     reference-masked raw features, since it fits its own per-fold scaler. Writes
     ``cp_selected_feature_mask.json`` recording which reference and scaler were
     applied.
@@ -381,19 +402,24 @@ def _stage_cp_dataset_inputs(
         (:meth:`DatasetCPSpace.check_gt_cells`) before anything is written.
     save_dir : pathlib.Path
         Eval dir receiving the sidecar.
+    pred_clip : dict, optional
+        :meth:`DatasetCPSpace.clip_fraction` of the pred cells, if the caller already
+        computed it; computed here otherwise.
 
     Returns
     -------
     tuple
         ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
     """
-    _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir)
     pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+    _gate_and_record_cp_space(
+        cp_space, gt_cp_blocks, save_dir, pred_clip if pred_clip is not None else cp_space.clip_fraction(pred_cp_raw)
+    )
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
     return (
         "CP",
-        cp_space.transform(pred_cp_raw),
-        cp_space.transform(target_cp_raw),
+        cp_space.transform_clipped(pred_cp_raw),
+        cp_space.transform_clipped(target_cp_raw),
         cp_space.select(pred_cp_raw),
         cp_space.select(target_cp_raw),
         np.concatenate(cp.pred_fovs, axis=0),
@@ -978,6 +1004,7 @@ def _process_one_fov(
                     gt_cp_blocks[t] = gt_cp_per_t[t][np.isfinite(gt_cp_per_t[t]).all(axis=1)]
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                 pred_cp_z, gt_cp_z = _cp_row_features(pred_cp, gt_cp_t, cp_space)
+                cp_clip_frac = cp_space.clip_fraction(pred_cp)["any"] if pred_cp.size else float("nan")
                 # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
                 # columns must match the dataset-level ones the parent derives from the
                 # same map, or the two halves of a <prefix>_* family drift apart.
@@ -985,6 +1012,7 @@ def _process_one_fov(
                     **compute_feature_similarity_pairwise(
                         pred_cp_z, gt_cp_z, _COLUMN_PREFIX["cp"], compute_fid=compute_fid
                     ),
+                    f"{_COLUMN_PREFIX['cp']}_clip_frac": cp_clip_frac,
                     **compute_feature_similarity_pairwise(
                         pred_dinov3, gt_dinov3_per_t[t], _COLUMN_PREFIX["dinov3"], compute_fid=compute_fid
                     ),
@@ -1784,10 +1812,21 @@ def evaluate_predictions(
             # MADScaler can normalize per-fold.
             prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
+            # What the shared-space z-clip discards: the fraction of pred CP cells with any
+            # kept feature beyond +-z_clip (NaN without pred cells), next to Dataset_CP_KID.
+            pred_cp_all = (
+                np.concatenate(parent_lists["cp"].pred_feats, axis=0)
+                if parent_lists["cp"].pred_feats
+                else np.empty((0, len(cp_space.feature_names)))
+            )
+            pred_clip = cp_space.clip_fraction(pred_cp_all)
+            dataset_row[f"Dataset_{_COLUMN_PREFIX['cp']}_clip_frac"] = pred_clip["any"]
             if parent_lists["cp"].pred_feats:
-                prefix_inputs.append(_stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir))
+                prefix_inputs.append(
+                    _stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir, pred_clip)
+                )
             else:  # no finite pred CP rows: CP metrics are NaN, but the GT gate and sidecar still apply
-                _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir)
+                _gate_and_record_cp_space(cp_space, gt_cp_blocks, save_dir, pred_clip)
 
             for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]
@@ -2018,6 +2057,11 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
                 if c.startswith("Dataset_") and c.endswith("_KID")
             ]
             if any(f"Dataset_{prefix}_{suffix}" not in columns for prefix in prefixes for suffix in suffixes):
+                return False
+            # CP rows scored before the shared-space z-clip carry no clip-fraction columns:
+            # their KID was computed unclipped, so they must be recomputed, not reused.
+            cp = _COLUMN_PREFIX["cp"]
+            if cp in prefixes and not {f"Dataset_{cp}_clip_frac", f"{cp}_clip_frac"} <= set(columns):
                 return False
     return pixel_ok and mask_ok and feature_ok
 

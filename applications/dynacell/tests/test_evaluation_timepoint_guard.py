@@ -124,8 +124,8 @@ def _write_final_caches(pipeline, save_dir: Path, feature_row: dict, config) -> 
 
 
 def _dataset_row(prefixes: tuple[str, ...], families: tuple[str, ...]) -> dict:
-    """``Dataset_<prefix>_<family>`` columns plus the always-present KID/cosine."""
-    row: dict[str, float] = {"CP_KID": 0.0}
+    """``Dataset_<prefix>_<family>`` columns plus the always-present KID/cosine (and CP's clip fractions)."""
+    row: dict[str, float] = {"CP_KID": 0.0, "CP_clip_frac": 0.0, "Dataset_CP_clip_frac": 0.0}
     for prefix in prefixes:
         for family in ("KID", "KID_std", "Median_Cosine_Similarity", *families):
             row[f"Dataset_{prefix}_{family}"] = 0.0
@@ -165,8 +165,23 @@ def test_real_full_benchmark_columns_stay_valid(tmp_path: Path) -> None:
         header = f.readline().rstrip("\n").split(",")
     pipeline = live_pipeline_module()
     config, _ = _feature_cache_config(tmp_path)
-    _write_final_caches(pipeline, tmp_path, dict.fromkeys(header, 0.0), config)
+    # A real pre-clip dir lacks the clip-fraction columns (see the next test); add them to
+    # check that the rest of the real column set still passes.
+    _write_final_caches(
+        pipeline, tmp_path, dict.fromkeys([*header, "CP_clip_frac", "Dataset_CP_clip_frac"], 0.0), config
+    )
     assert pipeline._final_metrics_cache_valid(config)
+
+
+def test_cache_scored_before_the_z_clip_is_invalid(tmp_path: Path) -> None:
+    """A feature cache without the CP clip-fraction columns was scored unclipped and must be recomputed."""
+    pipeline = live_pipeline_module()
+    config, _ = _feature_cache_config(tmp_path)
+    for missing in ("Dataset_CP_clip_frac", "CP_clip_frac"):
+        row = _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES)
+        del row[missing]
+        _write_final_caches(pipeline, tmp_path, row, config)
+        assert not pipeline._final_metrics_cache_valid(config), missing
 
 
 def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None:

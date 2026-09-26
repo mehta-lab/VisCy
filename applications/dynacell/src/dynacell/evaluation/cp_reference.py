@@ -75,7 +75,7 @@ from dynacell.evaluation.paths import cp_reference_path
 from dynacell.evaluation.pipeline_cache import cached_cp_feature_names, cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
-CP_REFERENCE_SCHEMA = 5
+CP_REFERENCE_SCHEMA = 6
 
 #: Sidecar each eval writes beside its metrics, naming the CP reference it scored in.
 CP_SIDECAR_FILENAME = "cp_selected_feature_mask.json"
@@ -91,6 +91,27 @@ GT_MOMENT_RTOL = 1e-6
 #: For a feature constant in the fit (std_fit == 0): |mean - mean_fit| and the staged std
 #: must both be <= GT_MOMENT_ZERO_STD_ATOL * (1 + |mean_fit|).
 GT_MOMENT_ZERO_STD_ATOL = 1e-12
+
+#: Shared-space z is clipped to +-CP_Z_CLIP on both sides before KID/FID/cosine
+#: (:meth:`DatasetCPSpace.transform_clipped`). The cubic KID kernel otherwise lets one
+#: heavy-tailed predicted feature set the metric's magnitude (a pilot A549->iPSC nucleus
+#: eval had pred glcm_ASM at z up to 239, KID 4e9). c = 20 was chosen by the paper owner
+#: from an offline sweep over c in {5, 8, 10, 15, 20, 30, 50, none} on the nucleus-lite
+#: pilot (see :data:`CP_Z_CLIP_RANK_STABILITY`). Surveying every registry GT cell of the
+#: full test sets in its own test set's scaler, 2 of 23,970 distinct cells exceed it (max
+#: |z| 26.55: er, a549-mantis-sec61b-denv, kurtosis); enforced max clip fraction 5.3e-4.
+CP_Z_CLIP = 20.0
+
+#: Per-dataset bound on the GT cells the clip may touch: the fraction of a dataset's GT
+#: cells with any kept-feature |z| > CP_Z_CLIP in its own scaler. :func:`fit_cp_reference`
+#: refuses to build a reference that violates it for any NON-lite dataset, so it is a
+#: checked invariant. Lite datasets record their fraction with ``enforced: false``.
+CP_GT_CLIP_FRAC_MAX = 1e-3
+
+#: Why c = 20: recorded in the hashed criteria next to the clip.
+CP_Z_CLIP_RANK_STABILITY = (
+    "cross-domain model order on the nucleus-lite pilot identical for all c >= 20 (swept 5,8,10,15,20,30,50,none)"
+)
 
 #: A per-dataset std below this fraction of the feature's pooled GT std is floored to it.
 STD_FLOOR_FRACTION = 1e-3
@@ -477,6 +498,11 @@ def fit_cp_reference(
         pooled, freq_cut=DEFAULT_FREQ_CUT, unique_cut=DEFAULT_UNIQUE_CUT, corr_threshold=DEFAULT_CORR_THRESHOLD
     )
     kept_names = [n for n, k in zip(feature_names, keep_mask, strict=True) if k]
+    if not kept_names:
+        raise ValueError(
+            f"GT-only feature selection kept no CP features out of {len(feature_names)} "
+            f"({pooled.shape[0]} pooled GT cells); a reference with an empty mask cannot score CP."
+        )
     pooled_std = pooled[:, keep_mask].std(axis=0)
     if not (pooled_std > 0).all():
         raise ValueError(f"pooled fit kept zero-variance features: {np.array(kept_names)[pooled_std == 0]}")
@@ -502,6 +528,7 @@ def fit_cp_reference(
             "floored_features": [n for n, f in zip(kept_names, floored, strict=True) if f],
         }
     lite = [f for f in fits if f.parent is not None]
+    survey = _gt_abs_z_survey(fits, scalers, keep_mask, kept_names)
 
     payload: dict[str, Any] = {
         "schema": CP_REFERENCE_SCHEMA,
@@ -516,6 +543,10 @@ def fit_cp_reference(
             "mask_fit_on": "gt_only_pooled",
             "scaler_fit_on": "gt_only_per_dataset",
             "std_floor_fraction_of_pooled": STD_FLOOR_FRACTION,
+            "z_clip": CP_Z_CLIP,
+            "gt_clip_frac_max": CP_GT_CLIP_FRAC_MAX,
+            "rank_stability": CP_Z_CLIP_RANK_STABILITY,
+            "gt_abs_z_survey": {k: v for k, v in survey.items() if k != "datasets"},
         },
         "cp_identity": cp_identity,
         "scalers": scalers,
@@ -527,13 +558,77 @@ def fit_cp_reference(
                 "gt_matrix_sha256": gt_matrix_sha256(pooled),
                 "pooled_std": [float(v) for v in pooled_std],
             },
-            "datasets": {f.dataset: _provenance(f) for f in scaled},
-            "lite": {f.dataset: _provenance(f) for f in lite},
+            "datasets": {f.dataset: {**_provenance(f), "gt_abs_z": survey["datasets"][f.dataset]} for f in scaled},
+            "lite": {f.dataset: {**_provenance(f), "gt_abs_z": survey["datasets"][f.dataset]} for f in lite},
         },
         "created_at": datetime.now(UTC).isoformat(),
     }
     payload["sha256"] = payload_sha256(payload)
     return payload
+
+
+def _gt_abs_z_survey(
+    fits: list[DatasetFit], scalers: dict[str, dict[str, Any]], keep_mask: np.ndarray, kept_names: list[str]
+) -> dict[str, Any]:
+    """Survey |z| of every fit dataset's GT cells in its OWN test set's scaler (lite: the parent's).
+
+    Returns, over the FULL (non-lite) test sets -- lite cells are subsets of their
+    parent's, so pooling them would count cells twice -- the max |z|, the p99.99
+    (pooled over every GT cell and kept feature), where the max sits, the largest
+    enforced per-dataset GT clip fraction, the number of GT cells and of those with any
+    |z| > :data:`CP_Z_CLIP`; plus, for every dataset (lite included, unenforced),
+    ``{gt_clip_frac, enforced, max, p9999, max_feature}``.
+
+    Raises
+    ------
+    ValueError
+        If any non-lite dataset's ``gt_clip_frac`` (fraction of its GT cells with any
+        |z| > :data:`CP_Z_CLIP`) exceeds :data:`CP_GT_CLIP_FRAC_MAX`: the clip would
+        then discard more GT signal than the bound allows. Lite datasets are recorded
+        with ``enforced: false``: their cells are a subset of the parent's, in the
+        parent's scaler, so one extra cell on ~1000 must not brick every build.
+    """
+    per: dict[str, dict[str, Any]] = {}
+    pooled: list[np.ndarray] = []  # full (non-lite) datasets only: lite cells duplicate their parent's
+    n_full = n_full_beyond = 0
+    for fit in fits:
+        scaler = scalers[fit.parent or fit.dataset]
+        z = np.abs(
+            (np.asarray(fit.cells, dtype=np.float64)[:, keep_mask] - np.asarray(scaler["mean"]))
+            / np.asarray(scaler["std"])
+        )
+        col = int(np.unravel_index(np.argmax(z), z.shape)[1])
+        per[fit.dataset] = {
+            "gt_clip_frac": float((z > CP_Z_CLIP).any(axis=1).mean()),
+            # Lite GT is a subset of the parent's cells in the parent's scaler, so its fraction
+            # is small-sample noise on the parent's: recorded, never enforced.
+            "enforced": fit.parent is None,
+            "max": float(z.max()),
+            "p9999": float(np.quantile(z, 0.9999)),
+            "max_feature": kept_names[col],
+        }
+        if fit.parent is None:
+            pooled.append(z.ravel())
+            n_full += z.shape[0]
+            n_full_beyond += int((z > CP_Z_CLIP).any(axis=1).sum())
+    over = {d: r["gt_clip_frac"] for d, r in per.items() if r["enforced"] and r["gt_clip_frac"] > CP_GT_CLIP_FRAC_MAX}
+    if over:
+        raise ValueError(
+            f"GT clip fraction above the bound {CP_GT_CLIP_FRAC_MAX} at z_clip {CP_Z_CLIP} for {over}: the clip "
+            "would discard too much GT signal. Revisit CP_Z_CLIP (and re-survey) or investigate the GT cache."
+        )
+    worst = max((d for d in per if per[d]["enforced"]), key=lambda d: per[d]["max"])
+    return {
+        # Over FULL test sets only, so no GT cell is counted twice through a lite subset.
+        "max": per[worst]["max"],
+        "p9999": float(np.quantile(np.concatenate(pooled), 0.9999)),
+        "max_dataset": worst,
+        "max_feature": per[worst]["max_feature"],
+        "max_gt_clip_frac": max(r["gt_clip_frac"] for r in per.values() if r["enforced"]),
+        "n_cells": n_full,
+        "n_cells_beyond_clip": n_full_beyond,
+        "datasets": per,
+    }
 
 
 def write_cp_reference(payload: dict[str, Any], path: Path, *, force: bool = False) -> bool:
@@ -627,7 +722,9 @@ class DatasetCPSpace:
         """
         body = {
             "cp_identity": self.cp_identity,
-            "criteria": self.criteria,
+            # The GT |z| survey summarizes EVERY dataset of the target; it is hashed in the
+            # reference but left out here, so adding a dataset keeps this binding.
+            "criteria": {k: v for k, v in self.criteria.items() if k != "gt_abs_z_survey"},
             "feature_names": list(self.feature_names),
             "keep_mask": [bool(b) for b in self.keep_mask],
             "dataset": self.dataset,
@@ -663,6 +760,45 @@ class DatasetCPSpace:
     def transform(self, x: np.ndarray) -> np.ndarray:
         """Return the kept columns of a raw CP matrix, standardized by this dataset's GT scaler."""
         return (self.select(x) - self.mean) / self.std
+
+    @property
+    def z_clip(self) -> float:
+        """The reference's shared-space clip, :data:`CP_Z_CLIP` at build time."""
+        return float(self.criteria["z_clip"])
+
+    def transform_clipped(self, x: np.ndarray) -> np.ndarray:
+        """Return :meth:`transform` clipped to ``+-z_clip``: the space KID/FID/cosine score in.
+
+        Applied identically to pred and GT, at dataset level and per row. The build
+        survey guarantees at most ``CP_GT_CLIP_FRAC_MAX`` of any dataset's GT cells are
+        clipped, so this mainly bounds how far one heavy-tailed predicted feature can
+        push the cubic KID kernel.
+        """
+        return np.clip(self.transform(x), -self.z_clip, self.z_clip)
+
+    def clip_fraction(self, x: np.ndarray) -> dict[str, Any]:
+        """Return what :meth:`transform_clipped` discards on ``x``: the fraction of cells clipped.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Raw ``(n_cells, n_features)`` CP matrix (the prediction's, in the eval).
+
+        Returns
+        -------
+        dict
+            ``{"any": fraction of cells with any kept-feature |z| > z_clip,
+            "per_feature": {kept feature: fraction of cells clipped on it}}``; NaN
+            fractions for zero cells.
+        """
+        kept_names = [n for n, k in zip(self.feature_names, self.keep_mask, strict=True) if k]
+        if x.shape[0] == 0:
+            return {"any": float("nan"), "per_feature": dict.fromkeys(kept_names, float("nan"))}
+        over = np.abs(self.transform(x)) > self.z_clip
+        return {
+            "any": float(over.any(axis=1).mean()),
+            "per_feature": {n: float(v) for n, v in zip(kept_names, over.mean(axis=0), strict=True)},
+        }
 
     def check_positions(self, positions: list[str]) -> None:
         """Refuse an eval whose GT positions are not exactly the ones the fit recorded.

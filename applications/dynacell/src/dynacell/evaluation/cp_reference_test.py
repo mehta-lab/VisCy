@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 from dynacell.evaluation import cp_reference
 from dynacell.evaluation.cache import StaleCacheError
 from dynacell.evaluation.cp_reference import (
+    CP_Z_CLIP,
     STD_FLOOR_FRACTION,
     DatasetFit,
     fit_cp_reference,
@@ -551,3 +552,128 @@ def test_old_sidecar_survives_a_rebuild_that_leaves_its_dataset_unchanged(tmp_pa
     _reference(tmp_path, [_fit("set-a", a * 1.1), _fit("set-b", b)])  # set-a's scaler moves
     with pytest.raises(ValueError, match="CP space of set-a .* changed since the eval"):
         sidecar_cp_space(eval_dir)
+
+
+def test_build_records_the_z_clip_and_the_gt_survey(two_sets) -> None:
+    """The clip and the GT |z| survey that justifies it are hashed criteria; every dataset records its own."""
+    ref, payload, cells = two_sets
+    criteria = payload["criteria"]
+    assert criteria["z_clip"] == CP_Z_CLIP
+    survey = criteria["gt_abs_z_survey"]
+    z = np.abs(ref.for_dataset("set-b").transform(cells["set-b"]))
+    assert payload["fit"]["datasets"]["set-b"]["gt_abs_z"]["max"] == pytest.approx(z.max())
+    assert survey["max"] == max(
+        r["gt_abs_z"]["max"] for r in [*payload["fit"]["datasets"].values(), *payload["fit"]["lite"].values()]
+    )
+    assert survey["max"] < CP_Z_CLIP
+    edited = json.loads(json.dumps(payload))
+    edited["criteria"]["z_clip"] = 1e9
+    assert payload_sha256(edited) != payload["sha256"]
+
+
+def test_build_refuses_a_dataset_whose_gt_clip_fraction_exceeds_the_bound(monkeypatch) -> None:
+    """If more than CP_GT_CLIP_FRAC_MAX of one dataset's GT cells would be clipped, the reference is not built."""
+    monkeypatch.setattr(cp_reference, "CP_Z_CLIP", 2.0)  # many GT cells of a normal sample exceed |z| = 2
+    with pytest.raises(ValueError, match=r"GT clip fraction above the bound 0\.001 at z_clip 2\.0 for \{'set-a'"):
+        fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
+
+
+def test_build_accepts_a_few_gt_cells_beyond_the_clip_under_the_bound() -> None:
+    """One GT cell beyond +-z_clip in 5000 (2e-4 <= 1e-3) is allowed, and recorded per dataset."""
+    gt = _gt(n=5000)
+    gt[0, 0] += 1e3  # one extreme cell on f0 (kept): |z| far above the clip
+    payload = fit_cp_reference([_fit("set-a", gt)], target_name="er", feature_names=_NAMES, cp_identity={})
+    rec = payload["fit"]["datasets"]["set-a"]["gt_abs_z"]
+    assert rec["gt_clip_frac"] == pytest.approx(1 / 5000)
+    assert rec["max"] > CP_Z_CLIP and rec["max_feature"] == "f0"
+    criteria = payload["criteria"]
+    assert criteria["gt_clip_frac_max"] == 1e-3 and "c >= 20" in criteria["rank_stability"]
+    assert criteria["gt_abs_z_survey"]["max_gt_clip_frac"] == pytest.approx(1 / 5000)
+
+
+def test_lite_clip_fraction_is_recorded_but_not_enforced(monkeypatch) -> None:
+    """A lite set over the bound builds (recorded, ``enforced: false``); its parent stays enforced.
+
+    The exemption is not "lite is unchecked". Lite GT cells are a subset of the
+    parent's cells, scored in the parent's scaler, so a lite set's clipped-cell COUNT
+    is at most its parent's. The enforced parent bound therefore covers the lite set;
+    only its FRACTION can exceed the bound, as small-sample noise on fewer cells. Here
+    one parent outlier is 1/5000 of the parent (under the bound) and 1/500 of the lite
+    set (over it): the build must pass, and must refuse once the parent itself is over.
+    """
+    parent = _gt(n=5000)
+    parent[0, 0] += 1e3  # 1 of 5000 parent cells beyond the clip: 2e-4, under the bound
+    lite_cells = parent[:500]  # the same outlier in 500 lite cells: 2e-3, over the bound
+    fits = [_fit("set-a", parent), _fit("set-a-lite", lite_cells, in_mask_fit=False, parent="set-a")]
+    payload = fit_cp_reference(fits, target_name="er", feature_names=_NAMES, cp_identity={})
+    lite = payload["fit"]["lite"]["set-a-lite"]["gt_abs_z"]
+    assert lite["gt_clip_frac"] == pytest.approx(1 / 500)
+    assert lite["gt_clip_frac"] > cp_reference.CP_GT_CLIP_FRAC_MAX
+    assert lite["enforced"] is False and payload["fit"]["datasets"]["set-a"]["gt_abs_z"]["enforced"] is True
+    survey = payload["criteria"]["gt_abs_z_survey"]
+    assert survey["max_gt_clip_frac"] == pytest.approx(1 / 5000)
+    # Full test sets only: the lite set's copy of the parent's outlier is not counted twice.
+    assert (survey["n_cells"], survey["n_cells_beyond_clip"]) == (5000, 1)
+
+    monkeypatch.setattr(cp_reference, "CP_GT_CLIP_FRAC_MAX", 1e-4)  # now the parent itself is over
+    with pytest.raises(ValueError, match=r"for \{'set-a': 0\.0002\}"):
+        fit_cp_reference(fits, target_name="er", feature_names=_NAMES, cp_identity={})
+
+
+def _space_with_gt_beyond_the_clip(tmp_path: Path):
+    """A reference whose own GT holds one cell beyond +-z_clip (1 of 2000, under the bound); returns (space, gt)."""
+    gt = _gt(n=2000)
+    gt[0, 0] += 1e3  # one GT cell far out on f0 (kept)
+    ref, _ = _reference(tmp_path, [_fit("set-a", gt)])
+    space = ref.for_dataset("set-a")
+    assert np.abs(space.transform(gt)).max() > space.z_clip
+    return space, gt
+
+
+def test_staged_arrays_clip_both_pred_and_gt(tmp_path: Path) -> None:
+    """Dataset-level metric arrays are ``transform_clipped`` of BOTH sides, with values beyond the clip on both."""
+    space, gt = _space_with_gt_beyond_the_clip(tmp_path)
+    pred = gt.copy()
+    pred[5, 0] += 1e4  # a pred-only outlier too
+    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
+    np.testing.assert_array_equal(staged[1], space.transform_clipped(pred))
+    np.testing.assert_array_equal(staged[2], space.transform_clipped(gt))
+    assert not np.array_equal(staged[2], space.transform(gt))  # the GT clip is really active
+    assert np.abs(staged[1]).max() == np.abs(staged[2]).max() == space.z_clip
+
+
+def test_row_features_clip_both_pred_and_gt(tmp_path: Path) -> None:
+    """Per-row CP inputs are ``transform_clipped`` of BOTH sides, with values beyond the clip on both."""
+    space, gt = _space_with_gt_beyond_the_clip(tmp_path)
+    pred = gt.copy()
+    pred[5, 0] += 1e4
+    p, g = _cp_row_features(pred[:10], gt[:10], space)
+    np.testing.assert_array_equal(p, space.transform_clipped(pred[:10]))
+    np.testing.assert_array_equal(g, space.transform_clipped(gt[:10]))
+    assert np.abs(g).max() == space.z_clip and np.abs(p).max() == space.z_clip
+
+
+def test_clip_and_its_bound_are_part_of_every_binding(tmp_path: Path) -> None:
+    """Changing z_clip or the GT clip-fraction bound moves ``binding_sha256`` (the eval stamp) of every dataset."""
+    fits = [
+        _fit("set-a", _gt()),
+        _fit("set-b", _gt(seed=1)),
+        _fit("set-a-lite", _gt()[:100], in_mask_fit=False, parent="set-a"),
+    ]
+    ref, payload = _reference(tmp_path, fits)
+    names = ("set-a", "set-b", "set-a-lite")
+    before = {d: ref.for_dataset(d).binding_sha256 for d in names}
+    for key, value in (("z_clip", 25.0), ("gt_clip_frac_max", 2e-3)):
+        moved = json.loads(json.dumps(payload))
+        moved["criteria"][key] = value
+        moved["sha256"] = payload_sha256(moved)
+        (tmp_path / "er.json").write_text(json.dumps(moved))
+        again = load_cp_reference(tmp_path / "er.json", target_name="er")
+        assert all(again.for_dataset(d).binding_sha256 != before[d] for d in names), key
+
+
+def test_empty_feature_mask_is_refused() -> None:
+    """A GT pool whose every CP column is constant keeps no feature: the build refuses with a clear error."""
+    constant = np.ones((64, len(_NAMES)))
+    with pytest.raises(ValueError, match="kept no CP features"):
+        fit_cp_reference([_fit("set-a", constant)], target_name="er", feature_names=_NAMES, cp_identity={})

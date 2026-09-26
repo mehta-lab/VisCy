@@ -121,6 +121,7 @@ def test_check_e_scores_cp_in_the_reference_space(tmp_path: Path) -> None:
     (path / "embeddings").mkdir(parents=True)
     gt = rng.normal(size=(n, d))
     pred = 0.5 * gt + 0.2 * rng.normal(size=gt.shape)
+    pred[:3, 0] += 1e3  # a few pred cells far beyond the z-clip, so an unclipped check E diverges
     fov = np.array([f"0/0/fov{i % 6:04d}" for i in range(n)])
     for side, arr in (("gt", gt), ("pred", pred)):
         np.savez(path / "embeddings" / f"{side}_cp_single_cell_embeddings.npz", embeddings=arr, fov=fov)
@@ -132,11 +133,12 @@ def test_check_e_scores_cp_in_the_reference_space(tmp_path: Path) -> None:
 
     mask = np.array(payload["keep_mask"])
     mean, std = np.array(payload["scalers"]["ds"]["mean"]), np.array(payload["scalers"]["ds"]["std"])
-    expected = mmd2_from_features(
-        poly3_features((pred[:, mask] - mean) / std), poly3_features((gt[:, mask] - mean) / std)
-    )
+    c = payload["criteria"]["z_clip"]
+    zp, zg = (pred[:, mask] - mean) / std, (gt[:, mask] - mean) / std
+    expected = mmd2_from_features(poly3_features(np.clip(zp, -c, c)), poly3_features(np.clip(zg, -c, c)))
     full = result.loc[result.extractor == "CP", "full"].iloc[0]
     assert full == pytest.approx(expected, rel=1e-10)
+    assert abs(mmd2_from_features(poly3_features(zp), poly3_features(zg))) > 10 * abs(full)  # unclipped diverges
 
     def zscore(x: np.ndarray) -> np.ndarray:
         return (x - x.mean(0)) / (x.std(0) + 1e-8)

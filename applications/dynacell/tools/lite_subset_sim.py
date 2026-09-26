@@ -16,7 +16,7 @@ gamma 1/d, coef0 1) -- identical to torch-fidelity's per-subset estimator, so it
 equals the pipeline's ``100 x min(1000, n)`` subset mean exactly when n <= 1000 and
 in expectation above that. GLCM+ (``cp``) is scored in the pipeline's CP space:
 the target's CP reference mask plus the eval dataset's GT scaler (the parent's for a
-lite dataset), both read via the run's ``cp_selected_feature_mask.json`` sidecar.
+lite dataset), clipped to the reference's z_clip, both read via the run's ``cp_selected_feature_mask.json`` sidecar.
 That transform is fixed, so it does not depend on the cell subset; CP is still
 scored directly through an exact degree-3 feature map (22-dim: cheap).
 
@@ -193,9 +193,9 @@ class System:
             ok = cell_block >= 0
             X, Y, cell_block = X[ok], Y[ok], cell_block[ok]
             if tok == "cp":
-                # pipeline: the CP reference mask + this dataset's GT scaler, on both sides.
+                # pipeline: the CP reference mask + this dataset's GT scaler, clipped, on both sides.
                 space = sidecar_cp_space(path)
-                self.cp = dict(X=space.transform(X), Y=space.transform(Y), cell_block=cell_block)
+                self.cp = dict(X=space.transform_clipped(X), Y=space.transform_clipped(Y), cell_block=cell_block)
                 continue
             # one-hot block membership (n x nb) -> block sums via M^T K M
             M = np.zeros((len(cell_block), nb))

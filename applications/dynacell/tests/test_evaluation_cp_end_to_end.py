@@ -14,6 +14,7 @@ views of the same GT cells.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import zlib
 from pathlib import Path
@@ -312,7 +313,13 @@ def test_no_finite_pred_cp_rows_still_gates_the_gt_and_writes_the_sidecar(harnes
     monkeypatch.setattr(harness.pipeline, "fov_cp_features", nan_pred_side)
     row, _ = harness.run("nanpred", [g.copy() for g in harness.gt])
     assert np.isnan(row["Dataset_CP_KID"])
-    assert (harness.root / "nanpred" / "cp_selected_feature_mask.json").exists()
+    sidecar_text = (harness.root / "nanpred" / "cp_selected_feature_mask.json").read_text()
+
+    def _reject(const: str) -> None:
+        raise ValueError(f"non-strict JSON constant {const}")
+
+    sidecar = json.loads(sidecar_text, parse_constant=_reject)  # strict JSON: no NaN/Infinity
+    assert sidecar["clip"]["pred_clip_frac"] is None
 
     # A GT recompute from a changed GT store bypasses the up-front cache check, so only the
     # post-staging gate can refuse it -- and it must, even with no finite pred CP rows.
@@ -322,3 +329,57 @@ def test_no_finite_pred_cp_rows_still_gates_the_gt_and_writes_the_sidecar(harnes
     with pytest.raises(Exception, match="differ from the CP reference fit") as err:
         harness.run("nanpred_moved", [g.copy() for g in harness.gt], gt_cp=True)
     assert type(err.value).__name__ == "StaleCacheError"
+
+
+def test_clip_fraction_is_reported_per_dataset_row_and_feature(harness: Harness) -> None:
+    """Dataset_CP_clip_frac, per-row CP_clip_frac and the sidecar's per-feature fractions match a direct count.
+
+    The prediction replaces 4 of the 16 cells with a voxel checkerboard, whose texture
+    features lie far outside the GT's, so only those cells can leave the +-z_clip band.
+    """
+    import json
+
+    blown = np.isin(harness.seg, [1, 2, 3, 4])
+    checker = (np.indices(harness.seg.shape).sum(axis=0) % 2).astype(np.float32)  # max-texture voxel pattern
+    pred = [np.where(blown, checker, g).astype(np.float32) for g in harness.gt]
+    row, config = harness.run("clipped", pred)
+    space = harness.pipeline.eval_cp_space(config)
+    save_dir = Path(config.save.save_dir)
+    emb = np.load(save_dir / "embeddings" / "pred_cp_single_cell_embeddings.npz")
+    over = np.abs(space.transform(emb["embeddings"])) > space.z_clip
+    assert 0 < row["Dataset_CP_clip_frac"] == pytest.approx(over.any(axis=1).mean())
+    sidecar = json.loads((save_dir / "cp_selected_feature_mask.json").read_text())["clip"]
+    assert sidecar["z_clip"] == space.z_clip and sidecar["pred_clip_frac"] == row["Dataset_CP_clip_frac"]
+    kept = [n for n, k in zip(space.feature_names, space.keep_mask, strict=True) if k]
+    assert sidecar["pred_clip_frac_per_feature"] == pytest.approx(dict(zip(kept, over.mean(axis=0), strict=True)))
+    _, _, rows = harness.pipeline.evaluate_predictions(
+        config, models=_stub_models(), cp_space=space
+    )  # per-row fractions: recomputed per (FOV, t) from that row's pred cells
+    per_row = {(r["FOV"], r["Timepoint"]): r["CP_clip_frac"] for r in rows}
+    for (fov, t), frac in per_row.items():
+        sel = (emb["fov"] == fov) & (emb["timepoint"] == t)
+        assert frac == pytest.approx(over[sel].any(axis=1).mean())
+
+    # KID is computed on the CLIPPED z, dataset level and per row: it equals KID on
+    # transform_clipped, and the unclipped value (1e4x larger here) would dominate.
+    from dynacell.evaluation.feature_metrics import compute_feature_similarity, compute_feature_similarity_pairwise
+
+    gt_emb = np.load(save_dir / "embeddings" / "gt_cp_single_cell_embeddings.npz")["embeddings"]
+    flags = {"compute_fid": False, "compute_prc": False, "compute_mind": False}
+    clipped = compute_feature_similarity(
+        space.transform_clipped(emb["embeddings"]), space.transform_clipped(gt_emb), "CP", **flags
+    )["CP_KID"]
+    unclipped = compute_feature_similarity(space.transform(emb["embeddings"]), space.transform(gt_emb), "CP", **flags)[
+        "CP_KID"
+    ]
+    assert row["Dataset_CP_KID"] == pytest.approx(clipped, rel=1e-9)
+    assert abs(unclipped) > 1e3 * abs(clipped)
+    for r in rows:
+        sel = (emb["fov"] == r["FOV"]) & (emb["timepoint"] == r["Timepoint"])
+        expected = compute_feature_similarity_pairwise(
+            space.transform_clipped(emb["embeddings"][sel]),
+            space.transform_clipped(gt_emb[sel]),
+            "CP",
+            compute_fid=False,
+        )["CP_KID"]
+        assert r["CP_KID"] == pytest.approx(expected, rel=1e-9)
