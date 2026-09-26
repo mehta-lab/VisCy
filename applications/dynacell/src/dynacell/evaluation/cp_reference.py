@@ -745,7 +745,9 @@ def resolve_cp_reference_path(config: DictConfig) -> Path:
     """
     override = config.feature_metrics.cp.reference_path
     if override is not None:
-        return Path(override)
+        # Absolute, so the path stamped into an eval dir's sidecar still resolves when
+        # a post-hoc tool (cross-condition probe, lite tools) runs from another cwd.
+        return Path(override).resolve()
     if config.target_name not in MASK_FIT_DATASETS:
         raise ValueError(f"no CP reference for target {config.target_name!r}; expected {sorted(MASK_FIT_DATASETS)}")
     return cp_reference_path(config.target_name)

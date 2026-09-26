@@ -255,6 +255,15 @@ def test_registry_path_is_shared_by_lite_and_full() -> None:
         resolve_cp_reference_path(config)
 
 
+def test_relative_reference_override_resolves_to_an_absolute_path(tmp_path: Path, monkeypatch) -> None:
+    """A relative override is made absolute, so the sidecar path survives a later cwd change."""
+    monkeypatch.chdir(tmp_path)
+    config = OmegaConf.create({"target_name": "er", "feature_metrics": {"cp": {"reference_path": "refs/er.json"}}})
+    path = resolve_cp_reference_path(config)
+    assert path.is_absolute()
+    assert path == tmp_path.resolve() / "refs" / "er.json"
+
+
 def test_positions_must_match_the_fit(two_sets) -> None:
     """Every dataset (lite included) must score exactly the positions its cells were recorded over."""
     ref, _, _ = two_sets
