@@ -27,6 +27,7 @@ from dynacell.evaluation.cache import (  # noqa: E402
     write_features,
     write_mask,
 )
+from dynacell.evaluation.metrics import active_cp_feature_names  # noqa: E402
 from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     _instance_identity,
     _resolve_force,
@@ -41,6 +42,10 @@ from dynacell.evaluation.pipeline_cache import (  # noqa: E402
     precompute_deep_features,
 )
 from dynacell.evaluation.provenance import write_metrics_provenance  # noqa: E402
+
+# CP stubs return the real column count: fov_cp_features rounds intensity_min/max,
+# which it locates by column name (the test config leaves GLCM off).
+_CP_WIDTH = len(active_cp_feature_names(False))
 
 
 def _make_config(**overrides: Any):
@@ -918,7 +923,7 @@ def test_fov_gt_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> None:
 
     def fake_cp(target, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
         del cell_seg, spacing, norm, glcm_cfg, use_gpu
-        return np.full((2, 3), float(target.sum()), dtype=np.float32)
+        return np.full((2, _CP_WIDTH), float(target.sum()), dtype=np.float32)
 
     # Patch the globals of fov_cp_features itself — robust against sys.modules
     # churn from other tests (e.g. test_lazy_init.py) that pop dynacell modules.
@@ -945,7 +950,7 @@ def test_fov_pred_cp_features_writes_on_miss(tmp_path: Path, monkeypatch) -> Non
 
     def fake_cp(prediction, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
         del cell_seg, spacing, norm, glcm_cfg, use_gpu
-        return np.full((2, 3), float(prediction.sum()), dtype=np.float32)
+        return np.full((2, _CP_WIDTH), float(prediction.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
 
@@ -979,7 +984,7 @@ def test_fov_cp_features_excluded_walk_seeds_identity_on_fresh_cache(tmp_path: P
 
     def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
         del cell_seg, spacing, norm, glcm_cfg, use_gpu
-        return np.full((2, 3), float(image.sum()), dtype=np.float32)
+        return np.full((2, _CP_WIDTH), float(image.sum()), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
     overrides = {f"io.{side}_cache_dir": str(tmp_path), "io.exclude_fov_names": ["A/1/1"]}
@@ -1021,7 +1026,7 @@ def test_fov_cp_features_excluded_refresh_does_not_certify_skipped_fovs(tmp_path
 
     def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
         del image, cell_seg, spacing, glcm_cfg, use_gpu
-        return np.full((2, 3), float(norm["p_lo"]), dtype=np.float32)
+        return np.full((2, _CP_WIDTH), float(norm["p_lo"]), dtype=np.float32)
 
     monkeypatch.setitem(fov_cp_features.__globals__, "cp_regionprops", fake_cp)
     image = np.zeros((2, 1, 2, 2), dtype=np.float32)
@@ -1131,7 +1136,7 @@ def test_fov_cp_features_excluded_walk_refuses_unknown_identity(tmp_path: Path, 
 
     def fake_cp(image, cell_seg, spacing, *, norm=None, glcm_cfg=None, use_gpu=True):
         del cell_seg, spacing, norm, glcm_cfg, use_gpu
-        return np.full((2, 3), float(image.sum()), dtype=np.float32)
+        return np.full((2, _CP_WIDTH), float(image.sum()), dtype=np.float32)
 
     def fail(*args, **kwargs):
         raise AssertionError("cp_regionprops must not run: the refusal precedes the compute")

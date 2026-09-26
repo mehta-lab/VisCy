@@ -1,5 +1,6 @@
 """Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -502,6 +503,59 @@ def active_cp_feature_names(glcm_enabled: bool) -> tuple[str, ...]:
     return _CP_BASE_FEATURE_NAMES
 
 
+#: CP columns whose value depends on the device that computed them. cuCIM's GPU
+#: regionprops reduces the built-in min/max in float32, while skimage on CPU keeps
+#: float64 (~1e-8 rel apart; every other column agrees to <= 1e-14). That is enough
+#: to move the GT-only variance filter: a cell holding the p99-clipped pixel has
+#: intensity_max exactly 1.0 on GPU but ``1 - eps / (hi - lo)`` on CPU, which
+#: changes the exact-tie counts and hence the feature mask.
+_DEVICE_DEPENDENT_CP_COLUMNS: tuple[str, ...] = ("intensity_min", "intensity_max")
+
+
+def round_device_dependent_cp_columns(features: np.ndarray, feature_names: Sequence[str]) -> np.ndarray:
+    """Round the device-dependent CP columns to float32, returning float64.
+
+    The single definition of the CP min/max rounding, applied both by
+    :func:`cp_regionprops` and to every CP array read from a cache. It aligns
+    CPU to GPU, the device that built every production CP cache; on GPU output
+    (already float32-exact) it is a no-op, and on a CPU-built cache it yields
+    exactly what the fixed extractor computes, so such a cache needs no
+    recompute.
+
+    Parameters
+    ----------
+    features : np.ndarray
+        ``(n_cells, n_features)`` CP matrix. A zero-row array (including the
+        ``(0, 0)`` empty-FOV cache sentinel) is returned unchanged.
+    feature_names : sequence of str
+        Column names of ``features``, in order; the columns are located by name.
+
+    Returns
+    -------
+    np.ndarray
+        A float64 copy with :data:`_DEVICE_DEPENDENT_CP_COLUMNS` rounded.
+
+    Raises
+    ------
+    ValueError
+        If ``features`` is not 2-D or its column count does not match
+        ``feature_names``.
+    """
+    features = np.asarray(features)
+    if features.ndim != 2:
+        raise ValueError(f"CP features must be 2-D (n_cells, n_features); got shape {features.shape}")
+    if features.shape[0] == 0:
+        return features
+    names = list(feature_names)
+    if features.shape[1] != len(names):
+        raise ValueError(f"CP features have {features.shape[1]} columns but {len(names)} names: {names}")
+    out = features.astype(np.float64, copy=True)
+    for name in _DEVICE_DEPENDENT_CP_COLUMNS:
+        j = names.index(name)
+        out[:, j] = out[:, j].astype(np.float32).astype(np.float64)
+    return out
+
+
 def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Drop rows where either side has any non-finite value.
 
@@ -643,7 +697,10 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
 
     if columns["intensity_mean"].shape[0] == 0:
         return np.empty((0, len(names)), dtype=float)
-    return np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1)
+    # Round min/max to float32 so CPU output matches GPU (no-op on GPU).
+    return round_device_dependent_cp_columns(
+        np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1), names
+    )
 
 
 def _cell_ssim(gt_crop, pred_crop, mask, *, min_size: int = 7) -> float:
