@@ -192,7 +192,7 @@ def build(target_name: str, leaves_root: Path) -> dict[str, Any]:
 def verify(target_name: str, path: Path) -> list[str]:
     """Re-read every dataset's (lite included) GT CP cells from the caches and apply the content gate.
 
-    The same tolerance gate the eval applies (exact cell count, per-feature GT
+    The same gate the eval applies (exact position set and cell count, per-feature GT
     moments within tolerance; ``DatasetCPSpace.gt_cells_problems``). An exact
     GT-matrix sha256 difference alone is reported as information: GPU
     recomputes move it by ~1e-15 without changing any number that matters.
@@ -213,7 +213,10 @@ def verify(target_name: str, path: Path) -> list[str]:
     mismatches = []
     for name, record in sorted({**ref.fit["datasets"], **ref.fit["lite"]}.items()):
         fit = read_dataset_fit(target_name, (name, record["target"]), ref.feature_names, record["in_mask_fit"])
-        problems = ref.for_dataset(name).gt_cells_problems(fit.cells)
+        space = ref.for_dataset(name)
+        problems = space.gt_cells_problems(fit.cells)
+        if set(fit.record["positions"]) != space.fit_positions:
+            problems.insert(0, "the cache's position set differs from the recorded fit positions")
         sha256 = gt_matrix_sha256(fit.cells)
         exact = "exact sha256 match" if sha256 == record["gt_matrix_sha256"] else "info: exact sha256 differs"
         print(f"  {name}: {'OK' if not problems else 'MISMATCH'} ({fit.cells.shape[0]} cells; {exact})")

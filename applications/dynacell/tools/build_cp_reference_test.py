@@ -31,7 +31,7 @@ from dynacell.evaluation.cache import (
     save_manifest,
     write_features_to_group,
 )
-from dynacell.evaluation.cp_reference import MASK_FIT_DATASETS, cp_space, load_cp_reference
+from dynacell.evaluation.cp_reference import MASK_FIT_DATASETS, cp_space, load_cp_reference, payload_sha256
 from dynacell.evaluation.metrics import active_cp_feature_names
 
 _N_FEATURES = len(active_cp_feature_names(True))  # eval.yaml ships GLCM on
@@ -270,3 +270,16 @@ def test_cache_with_reordered_feature_names_is_refused(registry: Path) -> None:
     leaves = _leaves(registry, ["ds-a", "ds-b"])
     with pytest.raises(StaleCacheError, match="Masking by position would misalign them"):
         main(["--target", "er", "--leaves-root", str(leaves), "--out", str(registry / "x.json")])
+
+
+def test_verify_fails_when_the_cache_positions_differ_from_the_fit(registry: Path, capsys) -> None:
+    """``--verify`` checks the position set exactly, not only cell count and moments."""
+    leaves = _build_all(registry)
+    out = registry / "er.json"
+    main(["--target", "er", "--leaves-root", str(leaves), "--out", str(out)])
+    payload = json.loads(out.read_text())
+    payload["fit"]["datasets"]["ds-h"]["positions"] = ["Z/9/9"]
+    payload["sha256"] = payload_sha256(payload)  # a rebuilt record on another position set
+    out.write_text(json.dumps(payload))
+    assert main(["--target", "er", "--out", str(out), "--verify"]) == 1
+    assert "position set differs" in capsys.readouterr().out
