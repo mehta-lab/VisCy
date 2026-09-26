@@ -571,62 +571,21 @@ def test_build_records_the_z_clip_and_the_gt_survey(two_sets) -> None:
     assert payload_sha256(edited) != payload["sha256"]
 
 
-def test_build_refuses_gt_beyond_the_clip(monkeypatch) -> None:
-    """If any GT cell's |z| in its own scaler exceeds the clip, the reference is not built."""
-    monkeypatch.setattr(cp_reference, "CP_Z_CLIP", 2.0)
-    with pytest.raises(ValueError, match="above the CP z clip 2.0"):
+def test_build_refuses_a_dataset_whose_gt_clip_fraction_exceeds_the_bound(monkeypatch) -> None:
+    """If more than CP_GT_CLIP_FRAC_MAX of one dataset's GT cells would be clipped, the reference is not built."""
+    monkeypatch.setattr(cp_reference, "CP_Z_CLIP", 2.0)  # many GT cells of a normal sample exceed |z| = 2
+    with pytest.raises(ValueError, match=r"GT clip fraction above the bound 0\.001 at z_clip 2\.0 for \{'set-a'"):
         fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
 
 
-def test_clip_is_a_no_op_without_outliers(two_sets, tmp_path: Path) -> None:
-    """With no |z| above the clip, the staged arrays -- and so KID/cosine -- are bit-identical to the unclipped space."""
-    ref, _, cells = two_sets
-    gt = cells["set-a"]
-    pred = 0.5 * gt + 7.0
-    space = ref.for_dataset("set-a")
-    assert np.abs(space.transform(pred)).max() < space.z_clip
-    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
-    np.testing.assert_array_equal(staged[1], space.transform(pred))
-    np.testing.assert_array_equal(staged[2], space.transform(gt))
-    unclipped = compute_feature_similarity_pairwise(space.transform(pred), space.transform(gt), "CP", compute_fid=True)
-    assert compute_feature_similarity_pairwise(staged[1], staged[2], "CP", compute_fid=True) == unclipped
-
-
-def test_one_outlier_cell_is_capped_at_the_clip(two_sets, tmp_path: Path) -> None:
-    """A pred cell at z=1000 contributes exactly what a cell AT the clip would; unclipped it dominates KID."""
-    ref, _, cells = two_sets
-    gt = cells["set-a"]
-    space = ref.for_dataset("set-a")
-    col = int(np.flatnonzero(ref.keep_mask)[0])
-
-    def pred_with_z(zval: float) -> np.ndarray:
-        pred = gt.copy()
-        pred[0, col] = space.mean[0] + zval * space.std[0]
-        return pred
-
-    def kid(pred: np.ndarray, clip: bool) -> float:
-        f = space.transform_clipped if clip else space.transform
-        return compute_feature_similarity_pairwise(f(pred), f(gt), "CP", compute_fid=False)["CP_KID"]
-
-    staged = _stage_cp_dataset_inputs(_lists(pred_with_z(1000.0), gt), space, _blocks(gt), tmp_path)
-    assert staged[1][0, 0] == space.z_clip
-    base, at_clip, huge = kid(gt, True), kid(pred_with_z(space.z_clip), True), kid(pred_with_z(1000.0), True)
-    assert huge == at_clip  # capped: 1000 scores exactly like the clip value
-    assert huge > base  # but still registers
-    # Unclipped, the one cell dominates the (unbiased, so possibly negative) estimate.
-    assert abs(kid(pred_with_z(1000.0), False) - base) > 1e3 * (huge - base)
-
-
-def test_per_row_and_dataset_paths_clip_identically(two_sets, tmp_path: Path) -> None:
-    """The per-(FOV, t) inputs are the dataset-level staged rows, clipped the same way."""
-    ref, _, cells = two_sets
-    gt = cells["set-a"]
-    space = ref.for_dataset("set-a")
-    pred = gt.copy()
-    pred[:10, np.flatnonzero(ref.keep_mask)[:2]] *= 1e4  # far outside the clip
-    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
-    half = gt.shape[0] // 2
-    row_p, row_g = _cp_row_features(pred[:half], gt[:half], space)
-    np.testing.assert_array_equal(row_p, staged[1][:half])
-    np.testing.assert_array_equal(row_g, staged[2][:half])
-    assert np.abs(row_p).max() == space.z_clip
+def test_build_accepts_a_few_gt_cells_beyond_the_clip_under_the_bound() -> None:
+    """One GT cell beyond +-z_clip in 5000 (2e-4 <= 1e-3) is allowed, and recorded per dataset."""
+    gt = _gt(n=5000)
+    gt[0, 0] += 1e3  # one extreme cell on f0 (kept): |z| far above the clip
+    payload = fit_cp_reference([_fit("set-a", gt)], target_name="er", feature_names=_NAMES, cp_identity={})
+    rec = payload["fit"]["datasets"]["set-a"]["gt_abs_z"]
+    assert rec["gt_clip_frac"] == pytest.approx(1 / 5000)
+    assert rec["max"] > CP_Z_CLIP and rec["max_feature"] == "f0"
+    criteria = payload["criteria"]
+    assert criteria["gt_clip_frac_max"] == 1e-3 and "c >= 20" in criteria["rank_stability"]
+    assert criteria["gt_abs_z_survey"]["max_gt_clip_frac"] == pytest.approx(1 / 5000)

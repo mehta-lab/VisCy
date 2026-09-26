@@ -93,12 +93,23 @@ GT_MOMENT_ZERO_STD_ATOL = 1e-12
 #: Shared-space z is clipped to +-CP_Z_CLIP on both sides before KID/FID/cosine
 #: (:meth:`DatasetCPSpace.transform_clipped`). The cubic KID kernel otherwise lets one
 #: heavy-tailed predicted feature set the metric's magnitude (a pilot A549->iPSC nucleus
-#: eval had pred glcm_ASM at z up to 239, KID 4e9). Chosen from a survey of every GT cell
-#: of every registry dataset (lite included) in its own test set's scaler: global max
-#: |z| 26.55 (er, a549-mantis-sec61b-denv, kurtosis), so 50 leaves a 1.9x margin and no GT
-#: cell is ever clipped. :func:`fit_cp_reference` re-runs that survey on every build and
-#: refuses a reference whose GT would be clipped, so the margin is a checked invariant.
-CP_Z_CLIP = 50.0
+#: eval had pred glcm_ASM at z up to 239, KID 4e9). c = 20 was chosen by the paper owner
+#: from an offline sweep over c in {5, 8, 10, 15, 20, 30, 50, none} on the nucleus-lite
+#: pilot (see :data:`CP_Z_CLIP_RANK_STABILITY`). Surveying every registry GT cell in its
+#: own test set's scaler, only 3 of 36,019 cells exceed it (max |z| 26.55: er,
+#: a549-mantis-sec61b-denv, kurtosis).
+CP_Z_CLIP = 20.0
+
+#: Per-dataset bound on the GT cells the clip may touch: the fraction of a dataset's GT
+#: cells with any kept-feature |z| > CP_Z_CLIP in its own scaler (lite: the parent's).
+#: :func:`fit_cp_reference` refuses to build a reference that violates it for any
+#: dataset, lite included, so it is a checked invariant, not just a recorded number.
+CP_GT_CLIP_FRAC_MAX = 1e-3
+
+#: Why c = 20: recorded in the hashed criteria next to the clip.
+CP_Z_CLIP_RANK_STABILITY = (
+    "cross-domain model order on the nucleus-lite pilot identical for all c >= 20 (swept 5,8,10,15,20,30,50,none)"
+)
 
 #: A per-dataset std below this fraction of the feature's pooled GT std is floored to it.
 STD_FLOOR_FRACTION = 1e-3
@@ -522,6 +533,8 @@ def fit_cp_reference(
             "scaler_fit_on": "gt_only_per_dataset",
             "std_floor_fraction_of_pooled": STD_FLOOR_FRACTION,
             "z_clip": CP_Z_CLIP,
+            "gt_clip_frac_max": CP_GT_CLIP_FRAC_MAX,
+            "rank_stability": CP_Z_CLIP_RANK_STABILITY,
             "gt_abs_z_survey": {k: v for k, v in survey.items() if k != "datasets"},
         },
         "cp_identity": cp_identity,
@@ -549,13 +562,15 @@ def _gt_abs_z_survey(
     """Survey |z| of every fit dataset's GT cells in its OWN test set's scaler (lite: the parent's).
 
     Returns the global max |z|, the global p99.99 (pooled over every GT cell and kept
-    feature), where the max sits, and a per-dataset ``{max, p9999, max_feature}``.
+    feature), where the max sits, the largest per-dataset GT clip fraction, and per
+    dataset ``{gt_clip_frac, max, p9999, max_feature}``.
 
     Raises
     ------
     ValueError
-        If any GT |z| exceeds :data:`CP_Z_CLIP`: the clip would then discard GT
-        signal, which it must never do.
+        If any dataset's ``gt_clip_frac`` (fraction of its GT cells with any |z| >
+        :data:`CP_Z_CLIP`) exceeds :data:`CP_GT_CLIP_FRAC_MAX`: the clip would then
+        discard more GT signal than the bound allows.
     """
     per: dict[str, dict[str, Any]] = {}
     pooled: list[np.ndarray] = []
@@ -567,23 +582,25 @@ def _gt_abs_z_survey(
         )
         col = int(np.unravel_index(np.argmax(z), z.shape)[1])
         per[fit.dataset] = {
+            "gt_clip_frac": float((z > CP_Z_CLIP).any(axis=1).mean()),
             "max": float(z.max()),
             "p9999": float(np.quantile(z, 0.9999)),
             "max_feature": kept_names[col],
         }
         pooled.append(z.ravel())
-    worst = max(per, key=lambda d: per[d]["max"])
-    if per[worst]["max"] > CP_Z_CLIP:
+    over = {d: r["gt_clip_frac"] for d, r in per.items() if r["gt_clip_frac"] > CP_GT_CLIP_FRAC_MAX}
+    if over:
         raise ValueError(
-            f"GT cells of {worst} reach |z| {per[worst]['max']:.2f} on {per[worst]['max_feature']} in their own "
-            f"scaler, above the CP z clip {CP_Z_CLIP}; the clip must never touch GT. Raise CP_Z_CLIP (and re-survey) "
-            "or investigate the GT cache."
+            f"GT clip fraction above the bound {CP_GT_CLIP_FRAC_MAX} at z_clip {CP_Z_CLIP} for {over}: the clip "
+            "would discard too much GT signal. Revisit CP_Z_CLIP (and re-survey) or investigate the GT cache."
         )
+    worst = max(per, key=lambda d: per[d]["max"])
     return {
         "max": per[worst]["max"],
         "p9999": float(np.quantile(np.concatenate(pooled), 0.9999)),
         "max_dataset": worst,
         "max_feature": per[worst]["max_feature"],
+        "max_gt_clip_frac": max(r["gt_clip_frac"] for r in per.values()),
         "datasets": per,
     }
 
@@ -727,8 +744,9 @@ class DatasetCPSpace:
         """Return :meth:`transform` clipped to ``+-z_clip``: the space KID/FID/cosine score in.
 
         Applied identically to pred and GT, at dataset level and per row. The build
-        survey guarantees no GT cell of the fit is clipped, so this only bounds how far
-        one heavy-tailed predicted feature can push the cubic KID kernel.
+        survey guarantees at most ``CP_GT_CLIP_FRAC_MAX`` of any dataset's GT cells are
+        clipped, so this mainly bounds how far one heavy-tailed predicted feature can
+        push the cubic KID kernel.
         """
         return np.clip(self.transform(x), -self.z_clip, self.z_clip)
 
