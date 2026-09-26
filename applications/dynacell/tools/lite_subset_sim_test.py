@@ -60,10 +60,12 @@ def _write_reference(path: Path) -> dict:
     return payload
 
 
-def _reference_transform(payload: dict, x: np.ndarray) -> np.ndarray:
-    """Apply the pipeline's CP transform spelled out from the payload: mask, then this dataset's scaler."""
+def _reference_transform(payload: dict, x: np.ndarray, clip: bool = True) -> np.ndarray:
+    """Apply the pipeline's CP transform spelled out from the payload: mask, this dataset's scaler, then the z-clip."""
     scaler = payload["scalers"][_DATASET]
-    return (x[:, np.array(payload["keep_mask"])] - np.array(scaler["mean"])) / np.array(scaler["std"])
+    z = (x[:, np.array(payload["keep_mask"])] - np.array(scaler["mean"])) / np.array(scaler["std"])
+    c = payload["criteria"]["z_clip"]
+    return np.clip(z, -c, c) if clip else z
 
 
 def _pipeline_kid(pred: np.ndarray, gt: np.ndarray) -> float:
@@ -91,6 +93,8 @@ def _write_eval_dir(path: Path, seed: int, reference: Path) -> dict[str, dict[st
     for tok, d in (("dinov3", _D_DEEP), ("cp", _D_CP)):
         gt = rng.normal(size=(len(fov), d))
         pred = 1.5 * gt + 0.8 + 0.3 * rng.normal(size=gt.shape)
+        if tok == "cp":
+            pred[:4, 0] += 1e3  # a few pred cells far beyond the z-clip, so an unclipped tool diverges
         for side, arr in (("gt", gt), ("pred", pred)):
             np.savez(
                 path / "embeddings" / f"{side}_{tok}_single_cell_embeddings.npz", embeddings=arr, fov=fov, timepoint=tp
@@ -155,6 +159,11 @@ def test_block_sum_kid_matches_pipeline_kid(system, sel: np.ndarray) -> None:
     mask = np.array(payload["keep_mask"])
     old = _pipeline_kid(_per_side_zscore(raw_pred[:, mask]), _per_side_zscore(raw_gt[:, mask]))
     assert out["CP_KID"] != pytest.approx(old, rel=0.1)
+    if sel.tolist() == list(range(len(_BLOCKS))):  # the outlier cells are in block 0: only the full set holds them
+        unclipped = _pipeline_kid(
+            _reference_transform(payload, raw_pred, clip=False), _reference_transform(payload, raw_gt, clip=False)
+        )
+        assert abs(unclipped) > 10 * abs(out["CP_KID"])
 
 
 def test_multiset_weights_equal_brute_force_duplication(system) -> None:
