@@ -207,33 +207,50 @@ def build_fixture(root: Path):
     return pred_path, gt_path, gt_cache_dir, pred_cache_dir
 
 
-def make_cp_reference(config, path: Path, seed: int = 0) -> str:
+#: Dataset name the synthetic CP reference fits a scaler for (``benchmark.dataset_ref.dataset``).
+CP_TEST_DATASET = "synthetic-set"
+
+
+def make_cp_reference(config, path: Path, seed: int = 0, n_cells: int = 64) -> str:
     """Fit a real CP reference matching ``config``'s CP recipe and point ``config`` at it.
 
-    The GT matrix is synthetic but the reference is built by the production
-    :func:`~dynacell.evaluation.cp_reference.fit_cp_reference`, with the identity and
-    column names ``evaluate_predictions`` derives from the same config. Sets
-    ``config.feature_metrics.cp.reference_path`` and returns the reference's sha256.
+    The GT matrix is synthetic, but the reference is built by the production
+    :func:`~dynacell.evaluation.cp_reference.fit_cp_reference` with the identity and
+    column names :func:`~dynacell.evaluation.cp_reference.cp_space` derives from the
+    same config. It fits one scaler, for :data:`CP_TEST_DATASET` over the plate's
+    ``A/1/{i}`` positions, and records no GT cache stamp (so the re-cache check is
+    skipped). Sets ``feature_metrics.cp`` (GLCM off unless already configured),
+    ``feature_metrics.cp.reference_path`` and ``benchmark.dataset_ref.dataset``, and
+    returns the reference's sha256.
     """
-    from dynacell.evaluation.cp_reference import CP_REFERENCE_DIMENSION, fit_cp_reference, write_cp_reference
-    from dynacell.evaluation.metrics import CP_FEATURE_VERSION, active_cp_feature_names
-    from dynacell.evaluation.pipeline_cache import cp_recipe_identity
+    # Imported here like the other helpers in this file: live_pipeline_module() drops
+    # every dynacell.evaluation.* module, so a top-level binding would go stale.
+    from dynacell.evaluation.cp_reference import DatasetFit, cp_space, fit_cp_reference, write_cp_reference
 
-    cp = OmegaConf.select(config, "feature_metrics.cp", default=None)
-    norm = OmegaConf.to_container(cp.norm, resolve=True) if cp is not None and "norm" in cp else {}
-    glcm = OmegaConf.to_container(cp.glcm, resolve=True) if cp is not None and "glcm" in cp else {}
-    names = tuple(active_cp_feature_names(bool(glcm.get("enabled", False))))
-    gt = np.random.default_rng(seed).standard_normal((64, len(names)))
-    payload = fit_cp_reference(
-        gt,
-        target_name=config.target_name,
-        dimension=CP_REFERENCE_DIMENSION,
-        feature_names=names,
-        cp_identity=cp_recipe_identity(CP_FEATURE_VERSION, norm, glcm),
-        datasets=[{"dataset": "synthetic", "n_cells": gt.shape[0]}],
+    if OmegaConf.select(config, "feature_metrics.cp", default=None) is None:
+        OmegaConf.update(
+            config,
+            "feature_metrics.cp",
+            {"norm": {"p_lo": 1.0, "p_hi": 99.0}, "glcm": {"enabled": False}, "reference_path": None},
+            merge=True,
+        )
+    OmegaConf.update(config, "benchmark", {"dataset_ref": {"dataset": CP_TEST_DATASET, "target": "sec61b"}}, merge=True)
+    identity, names = cp_space(config)
+    fit = DatasetFit(
+        dataset=CP_TEST_DATASET,
+        cells=np.random.default_rng(seed).standard_normal((n_cells, len(names))),
+        record={
+            "positions": [f"A/1/{i}" for i in range(N_POSITIONS)],
+            "gt_cache_dir": None,
+            "cp_cache_built_at": None,
+        },
+        in_mask_fit=True,
     )
-    write_cp_reference(payload, path)
-    OmegaConf.update(config, "feature_metrics.cp.reference_path", str(path), merge=True)
+    payload = fit_cp_reference(
+        [fit], target_name=config.target_name, feature_names=names, cp_identity=identity, lite={}
+    )
+    write_cp_reference(payload, path, force=True)
+    config.feature_metrics.cp.reference_path = str(path)
     return payload["sha256"]
 
 

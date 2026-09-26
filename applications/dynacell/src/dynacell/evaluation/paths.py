@@ -960,25 +960,21 @@ def pred_cache_dir(
     return Path(data_root) / test_set / subroot / organelle / model / train_set / leaf
 
 
-#: Eval ``target_name`` values that have a CP reference (one per benchmark target).
-_CP_REFERENCE_TARGETS: frozenset[str] = frozenset({"nucleus", "membrane", "er", "mitochondria"})
-
-
-def cp_reference_path(target_name: str, dimension: str, data_root: str | Path = DATA_ROOT) -> Path:
+def cp_reference_path(target_name: str, data_root: str | Path = DATA_ROOT) -> Path:
     """Return the registry path of a target's CP (GLCM+) reference.
 
-    ``DATA_ROOT/cp_reference/<target_name>__<dimension>.json``. Keyed by the eval
+    ``DATA_ROOT/cp_reference/<target_name>.json``. Keyed by the eval
     ``target_name`` (``mitochondria``, not the grammar's ``mito``), since that is
     what an eval config carries. Lite evals use this same ``DATA_ROOT`` path, never
-    ``LITE_DATA_ROOT``: the reference is fit on the full test sets so lite and full
-    score in one feature space. See :mod:`dynacell.evaluation.cp_reference`.
+    ``LITE_DATA_ROOT``: one reference holds the mask and every test set's scaler,
+    and a lite dataset reuses its parent's scaler. See
+    :mod:`dynacell.evaluation.cp_reference`, which also owns the set of targets
+    that have a reference.
 
     Parameters
     ----------
     target_name : str
         Eval target (``nucleus``/``membrane``/``er``/``mitochondria``).
-    dimension : str
-        CP feature-space dimension (``3d``).
     data_root : str or pathlib.Path, optional
         Registry root. Defaults to :data:`DATA_ROOT`.
 
@@ -986,15 +982,8 @@ def cp_reference_path(target_name: str, dimension: str, data_root: str | Path = 
     -------
     pathlib.Path
         The reference JSON path.
-
-    Raises
-    ------
-    ValueError
-        If ``target_name`` has no CP reference.
     """
-    if target_name not in _CP_REFERENCE_TARGETS:
-        raise ValueError(f"no CP reference for target {target_name!r}; expected one of {sorted(_CP_REFERENCE_TARGETS)}")
-    return Path(data_root) / "cp_reference" / f"{target_name}__{dimension}.json"
+    return Path(data_root) / "cp_reference" / f"{target_name}.json"
 
 
 def metrics_repo_dir(

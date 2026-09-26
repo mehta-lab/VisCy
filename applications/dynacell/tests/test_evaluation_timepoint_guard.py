@@ -9,15 +9,20 @@ validation passed, and a mismatch must raise ``ValueError`` before it (and befor
 
 from __future__ import annotations
 
+import json
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
 import pytest
 from iohub.ngff import open_ome_zarr
 
-from dynacell.evaluation.provenance import write_metrics_provenance
+from dynacell.evaluation.cache import cache_paths, save_manifest
+from dynacell.evaluation.cp_reference import payload_sha256
+from dynacell.evaluation.model_loader import EvalModels
+from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
-from ._eval_fixtures import build_eval_config, live_pipeline_module, make_cp_reference
+from ._eval_fixtures import CP_TEST_DATASET, build_eval_config, live_pipeline_module, make_cp_reference
 
 D, H, W = 3, 8, 8
 
@@ -87,7 +92,11 @@ def test_matched_per_position_t_passes(tmp_path: Path, monkeypatch) -> None:
 
 
 def _feature_cache_config(tmp_path: Path, **flags: bool):
-    """Config with feature metrics on and the given ``feature_metrics.compute_*`` flags."""
+    """Config with feature metrics on, the given ``feature_metrics.compute_*`` flags, and a CP reference.
+
+    Returns ``(config, reference_sha256)``; the reference is built once, at
+    ``tmp_path / "cp_reference.json"``.
+    """
     config = build_eval_config(
         tmp_path / "pred.zarr",
         tmp_path / "gt.zarr",
@@ -100,17 +109,14 @@ def _feature_cache_config(tmp_path: Path, **flags: bool):
     config.compute_feature_metrics = True
     for name, value in flags.items():
         config.feature_metrics[name] = value
-    make_cp_reference(config, tmp_path / "cp_reference.json")
-    return config
+    return config, make_cp_reference(config, tmp_path / "cp_reference.json")
 
 
-def _write_final_caches(save_dir: Path, feature_row: dict) -> None:
-    """Write a stamped pixel/mask/feature NPY cache set holding one feature row."""
+def _write_final_caches(save_dir: Path, feature_row: dict, reference_sha256: str) -> None:
+    """Write a pixel/mask/feature NPY cache set holding one feature row, stamped with ``reference_sha256``."""
     np.save(save_dir / "pixel_metrics.npy", [{"SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}])
     np.save(save_dir / "mask_metrics.npy", [{"metric": "mask"}])
     np.save(save_dir / "feature_metrics.npy", [feature_row])
-    # The stamp must carry the hash of the reference _feature_cache_config points at.
-    reference_sha256 = make_cp_reference(_feature_cache_config(save_dir), save_dir / "cp_reference.json")
     write_metrics_provenance(save_dir, cp_reference_sha256=reference_sha256)
 
 
@@ -129,18 +135,20 @@ _ALL_FAMILIES = ("FID", "Precision", "Precision_std", "Recall", "Recall_std", "F
 def test_cache_without_fid_is_invalid_once_fid_is_enabled(tmp_path: Path) -> None:
     """A dir written with FID off is recomputed when FID is on, reused while it stays off."""
     pipeline = live_pipeline_module()
-    no_fid = tuple(f for f in _ALL_FAMILIES if f != "FID")
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3"), no_fid))
+    config, sha256 = _feature_cache_config(tmp_path)
+    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3"), tuple(f for f in _ALL_FAMILIES if f != "FID")), sha256)
 
-    assert not pipeline._final_metrics_cache_valid(_feature_cache_config(tmp_path))
-    assert pipeline._final_metrics_cache_valid(_feature_cache_config(tmp_path, compute_fid=False))
+    assert not pipeline._final_metrics_cache_valid(config)
+    config.feature_metrics.compute_fid = False
+    assert pipeline._final_metrics_cache_valid(config)
 
 
 def test_full_cache_stays_valid(tmp_path: Path) -> None:
     """A dir carrying every family for every prefix it scored remains reusable."""
     pipeline = live_pipeline_module()
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES))
-    assert pipeline._final_metrics_cache_valid(_feature_cache_config(tmp_path))
+    config, sha256 = _feature_cache_config(tmp_path)
+    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), sha256)
+    assert pipeline._final_metrics_cache_valid(config)
 
 
 def test_real_full_benchmark_columns_stay_valid(tmp_path: Path) -> None:
@@ -151,57 +159,147 @@ def test_real_full_benchmark_columns_stay_valid(tmp_path: Path) -> None:
     with real.open() as f:
         header = f.readline().rstrip("\n").split(",")
     pipeline = live_pipeline_module()
-    _write_final_caches(tmp_path, dict.fromkeys(header, 0.0))
-    assert pipeline._final_metrics_cache_valid(_feature_cache_config(tmp_path))
+    config, sha256 = _feature_cache_config(tmp_path)
+    _write_final_caches(tmp_path, dict.fromkeys(header, 0.0), sha256)
+    assert pipeline._final_metrics_cache_valid(config)
 
 
 def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None:
     """Rebuilding the CP reference invalidates every final-metrics cache stamped with the old one."""
     pipeline = live_pipeline_module()
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES))
-    config = _feature_cache_config(tmp_path)
+    config, sha256 = _feature_cache_config(tmp_path)
+    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), sha256)
     assert pipeline._final_metrics_cache_valid(config)
 
     make_cp_reference(config, tmp_path / "cp_reference.json", seed=1)  # same path, new content
     assert not pipeline._final_metrics_cache_valid(config)
 
 
-def test_missing_cp_reference_fails_before_any_work(tmp_path: Path, monkeypatch) -> None:
-    """A feature-metrics eval with no CP reference raises, naming the build command, before loading models."""
+def test_feature_less_cache_ignores_the_cp_reference(tmp_path: Path) -> None:
+    """A compute_feature_metrics=false dir with no CP hash in its stamp stays reusable, with no reference."""
     pipeline = live_pipeline_module()
-    config = _feature_cache_config(tmp_path)
+    config = build_eval_config(
+        tmp_path / "pred.zarr",
+        tmp_path / "gt.zarr",
+        tmp_path / "g",
+        tmp_path / "p",
+        tmp_path,
+        executor="serial",
+        fov_workers=1,
+    )
+    np.save(tmp_path / "pixel_metrics.npy", [{"SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}])
+    np.save(tmp_path / "mask_metrics.npy", [{"metric": "mask"}])
+    (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
+    assert pipeline._final_metrics_cache_valid(config)
+
+
+def test_missing_cp_reference_names_the_build_command(tmp_path: Path) -> None:
+    """Binding an eval with no CP reference raises FileNotFoundError with the build command."""
+    pipeline = live_pipeline_module()
+    config, _ = _feature_cache_config(tmp_path)
     config.feature_metrics.cp.reference_path = str(tmp_path / "absent.json")
-
-    def _no_models(*args, **kwargs):
-        raise AssertionError("models loaded before the CP reference was checked")
-
-    monkeypatch.setattr(pipeline, "load_eval_models", _no_models)
     with pytest.raises(FileNotFoundError, match="build_cp_reference.py --target er"):
-        pipeline.evaluate_predictions(config)
+        pipeline.eval_cp_space(config)
 
 
-def test_cp_reference_of_another_recipe_is_refused(tmp_path: Path, monkeypatch) -> None:
+def test_cp_reference_of_another_recipe_is_refused(tmp_path: Path) -> None:
     """A reference fit on GLCM-off caches cannot score a GLCM-on eval."""
     pipeline = live_pipeline_module()
-    # Import after the fresh pipeline import, which re-creates dynacell.evaluation.* modules.
-    from dynacell.evaluation.cache import StaleCacheError
-
-    config = _feature_cache_config(tmp_path)  # reference built for this (GLCM-off) recipe
+    config, _ = _feature_cache_config(tmp_path)  # reference built for this (GLCM-off) recipe
     config.feature_metrics.cp.glcm = {"enabled": True, "levels": 32, "distances": [1]}
-    monkeypatch.setattr(pipeline, "load_eval_models", lambda *a, **k: pytest.fail("models loaded"))
-    with pytest.raises(StaleCacheError, match="different CP recipe"):
+    with pytest.raises(Exception, match="different CP recipe") as err:
+        pipeline.eval_cp_space(config)
+    # Checked by name: live_pipeline_module() re-creates dynacell.evaluation.cache, so the
+    # class imported at the top of this file is not the one the fresh module raises.
+    assert type(err.value).__name__ == "StaleCacheError"
+
+
+def test_feature_metrics_need_a_cp_space(tmp_path: Path) -> None:
+    """``evaluate_predictions`` refuses feature metrics without the caller's CP space, before any model load."""
+    pipeline = live_pipeline_module()
+    config, _ = _feature_cache_config(tmp_path)
+    with pytest.raises(ValueError, match="cp_space must be given exactly when"):
         pipeline.evaluate_predictions(config)
 
 
-def test_save_metrics_stamps_the_cp_reference_hash(tmp_path: Path) -> None:
-    """``save_metrics`` records the hash of the reference the CP metrics were scored in."""
-    import json
+def test_evaluate_model_stamps_the_reference_it_scored_with(tmp_path: Path, monkeypatch) -> None:
+    """The hash stamped by save_metrics is the reference loaded before scoring, never a re-read.
 
-    from dynacell.evaluation.provenance import PROVENANCE_FILENAME
-
+    The reference file is rebuilt while "scoring" runs; the stamp must still carry the
+    hash of the space evaluate_predictions received.
+    """
     pipeline = live_pipeline_module()
-    config = _feature_cache_config(tmp_path)
-    reference_sha256 = make_cp_reference(config, tmp_path / "cp_reference.json")
-    pipeline.save_metrics(config, pixel_metrics=[{"FOV": "A/1/0", "Timepoint": 0, "PCC": 0.5}])
+    config, sha256 = _feature_cache_config(tmp_path)
+    config.force_recompute.final_metrics = True
+    seen = {}
+
+    def _fake_evaluate_predictions(cfg, *, cp_space):
+        seen["cp_space"] = cp_space
+        make_cp_reference(cfg, tmp_path / "cp_reference.json", seed=7)  # rebuilt mid-run
+        return [{"FOV": "A/1/0", "Timepoint": 0, "PCC": 0.5}], [], []
+
+    monkeypatch.setattr(pipeline, "check_cubic_pin", lambda: None)
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "evaluate_predictions", _fake_evaluate_predictions)
+    getattr(pipeline.evaluate_model, "__wrapped__", pipeline.evaluate_model)(config)
+
+    assert seen["cp_space"].reference_sha256 == sha256
     stamp = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
-    assert stamp["cp_reference_sha256"] == reference_sha256
+    assert stamp["cp_reference_sha256"] == sha256
+
+
+def _feature_plates(tmp_path: Path) -> None:
+    """Pred/GT/segmentation plates with three positions, as the feature path needs."""
+    _make_plate(tmp_path / "pred.zarr", "prediction", [2, 2, 2])
+    _make_plate(tmp_path / "gt.zarr", "target", [2, 2, 2])
+    _make_plate(tmp_path / "seg.zarr", "cell_segmentation", [2, 2, 2])
+
+
+def _stub_models() -> EvalModels:
+    """A model bundle whose extractors are never called: the run must stop before the FOV loop."""
+    return EvalModels(
+        seg_model=None,
+        dinov3=object(),
+        dynaclr=object(),
+        celldino=None,
+        morphem=None,
+        dinov3_model_name=None,
+        dynaclr_ckpt_path=None,
+        dynaclr_encoder_cfg=None,
+        celldino_weights_path=None,
+        morphem_model_name=None,
+    )
+
+
+def test_partial_position_walk_is_refused_for_cp(tmp_path: Path, monkeypatch) -> None:
+    """``limit_positions`` on a non-lite dataset fails before any per-FOV work: its CP cells are not the fit's."""
+    pipeline = live_pipeline_module()
+    _feature_plates(tmp_path)
+    config, _ = _feature_cache_config(tmp_path)
+    config.io.cell_segmentation_path = str(tmp_path / "seg.zarr")
+    config.limit_positions = 2
+    monkeypatch.setattr(pipeline, "_calibrate_microssim", lambda *a, **k: pytest.fail("reached per-FOV work"))
+    cp_space = pipeline.eval_cp_space(config)
+    with pytest.raises(ValueError, match="cannot be combined with compute_feature_metrics"):
+        pipeline.evaluate_predictions(config, models=_stub_models(), cp_space=cp_space)
+
+
+def test_gt_recache_after_the_reference_is_refused_up_front(tmp_path: Path, monkeypatch) -> None:
+    """A GT CP cache whose ``built_at`` moved since the build fails before any model load."""
+    pipeline = live_pipeline_module()
+    config, _ = _feature_cache_config(tmp_path)
+    save_manifest(
+        cache_paths(tmp_path / "gt_cache"),
+        {"artifacts": {"cp_features": {"path": "features/cp.zarr", "built_at": "2026-09-26T00:00:00+00:00"}}},
+    )
+    reference = json.loads((tmp_path / "cp_reference.json").read_text())
+    reference["scalers"][CP_TEST_DATASET].update(
+        gt_cache_dir=str(tmp_path / "gt_cache"), cp_cache_built_at="2026-09-01T00:00:00+00:00"
+    )
+    reference["sha256"] = payload_sha256(reference)
+    (tmp_path / "cp_reference.json").write_text(json.dumps(reference))
+    monkeypatch.setattr(pipeline, "load_eval_models", lambda *a, **k: pytest.fail("models loaded"))
+    cp_space = pipeline.eval_cp_space(config)
+    with pytest.raises(Exception, match="was built at 2026-09-26") as err:
+        pipeline.evaluate_predictions(config, cp_space=cp_space)
+    assert type(err.value).__name__ == "StaleCacheError"

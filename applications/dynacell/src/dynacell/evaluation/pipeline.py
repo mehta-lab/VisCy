@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.cache import FeatureKind
-from dynacell.evaluation.cp_reference import CPReference, load_checked_cp_reference
+from dynacell.evaluation.cp_reference import DatasetCPSpace, eval_cp_space
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -26,8 +26,6 @@ from dynacell.evaluation.feature_metrics import (
 )
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
-    CP_FEATURE_VERSION,
-    active_cp_feature_names,
     ascupy,
     build_crops,
     compute_pixel_metrics,
@@ -41,7 +39,6 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
-    cp_recipe_identity,
     cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
@@ -99,23 +96,15 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
     }
 
 
-def _eval_cp_reference(config: DictConfig) -> CPReference:
-    """Load the CP reference this eval scores in, refusing one of a different CP recipe.
+def _cp_row_features(pred_cp: np.ndarray, gt_cp: np.ndarray, cp_space: DatasetCPSpace) -> tuple[np.ndarray, np.ndarray]:
+    """Per-(FOV, timepoint) CP inputs: the reference mask + this dataset's GT scaler on both sides.
 
-    The recipe identity and column names come from the same ``feature_metrics.cp.*``
-    config and :data:`CP_FEATURE_VERSION` that key the CP feature caches, so a
-    reference built from caches of another recipe cannot be applied to this run's
-    features. See :mod:`dynacell.evaluation.cp_reference`.
+    The same transform as the dataset-level stage, so a per-row CP value is
+    comparable across models and FOVs. Empty inputs (no cells) pass through.
     """
-    norm_node = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
-    glcm_node = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
-    norm = OmegaConf.to_container(norm_node, resolve=True) if norm_node is not None else {}
-    glcm = OmegaConf.to_container(glcm_node, resolve=True) if glcm_node is not None else {}
-    return load_checked_cp_reference(
-        config,
-        cp_identity=cp_recipe_identity(CP_FEATURE_VERSION, norm, glcm),
-        feature_names=tuple(active_cp_feature_names(bool(glcm.get("enabled", False)))),
-    )
+    if not (pred_cp.size and gt_cp.size):
+        return pred_cp, gt_cp
+    return cp_space.transform(pred_cp), cp_space.transform(gt_cp)
 
 
 def _real_vs_pred_probe(
@@ -338,37 +327,53 @@ def _extend_backbone(
 
 
 def _stage_cp_dataset_inputs(
-    cp: _BackboneLists, cp_reference: CPReference, save_dir: Path
+    cp: _BackboneLists, cp_space: DatasetCPSpace, n_gt_cells: int, save_dir: Path
 ) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Stage the dataset-level CP inputs in the reference feature space.
 
-    KID/FID/cosine get the reference-masked features standardized by the shared GT
-    scaler (identical for pred and GT); the linear probe gets the reference-masked
-    raw features, since it fits its own per-fold scaler. Writes
-    ``cp_selected_feature_mask.json`` recording which reference was applied.
+    KID/FID/cosine get the reference-masked features standardized by this
+    dataset's GT scaler (identical for pred and GT); the linear probe gets the
+    reference-masked raw features, since it fits its own per-fold scaler. Writes
+    ``cp_selected_feature_mask.json`` recording which reference and scaler were
+    applied.
+
+    Parameters
+    ----------
+    cp : _BackboneLists
+        Aggregated CP rows of the run.
+    cp_space : DatasetCPSpace
+        Reference bound to the eval's dataset.
+    n_gt_cells : int
+        Finite GT CP rows the run scored (before the pairwise pred/GT drop);
+        must equal the scaler's fit count for a non-lite dataset.
+    save_dir : pathlib.Path
+        Eval dir receiving the sidecar.
 
     Returns
     -------
     tuple
         ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
     """
+    cp_space.check_n_cells(n_gt_cells)
     pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
     mask_payload = {
-        "reference_path": cp_reference.path,
-        "reference_sha256": cp_reference.sha256,
-        "feature_names": list(cp_reference.feature_names),
-        "keep_mask": [bool(b) for b in cp_reference.keep_mask],
-        "n_kept": int(cp_reference.keep_mask.sum()),
-        "n_total": int(cp_reference.keep_mask.size),
+        "reference_path": cp_space.reference_path,
+        "reference_sha256": cp_space.reference_sha256,
+        "dataset": cp_space.dataset,
+        "scaler_dataset": cp_space.scaler_dataset,
+        "feature_names": list(cp_space.feature_names),
+        "keep_mask": [bool(b) for b in cp_space.keep_mask],
+        "n_kept": int(cp_space.keep_mask.sum()),
+        "n_total": int(cp_space.keep_mask.size),
     }
     (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
     return (
         "CP",
-        cp_reference.transform(pred_cp_raw),
-        cp_reference.transform(target_cp_raw),
-        cp_reference.select(pred_cp_raw),
-        cp_reference.select(target_cp_raw),
+        cp_space.transform(pred_cp_raw),
+        cp_space.transform(target_cp_raw),
+        cp_space.select(pred_cp_raw),
+        cp_space.select(target_cp_raw),
         np.concatenate(cp.pred_fovs, axis=0),
         np.concatenate(cp.gt_fovs, axis=0),
     )
@@ -399,6 +404,7 @@ class FovResult:
     dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
     celldino: _BackboneLists = field(default_factory=_BackboneLists)
     morphem: _BackboneLists = field(default_factory=_BackboneLists)
+    n_gt_cp_finite: int = 0  # finite GT CP rows, before the pairwise pred/GT non-finite drop
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
@@ -581,14 +587,15 @@ def _process_one_fov(
     celldino_feature_extractor,
     morphem_feature_extractor,
     microssim_sim,
-    cp_reference: CPReference | None,
+    cp_space: DatasetCPSpace | None,
     predict_cached=None,
     target_cached=None,
 ) -> FovResult:
     """Compute everything one FOV contributes to the eval and return a FovResult.
 
-    ``cp_reference`` is the target's CP reference (``None`` only when
-    ``compute_feature_metrics=false``); per-timepoint CP metrics are scored in it.
+    ``cp_space`` is the target's CP reference bound to the eval's dataset (``None``
+    only when ``compute_feature_metrics=false``); per-timepoint CP metrics are
+    scored in it.
 
     No side effects on shared parent state (no segmentation_results plate
     writes, no manifest flush). The parent aggregator handles those — see
@@ -852,6 +859,7 @@ def _process_one_fov(
             )
 
     microssim_data: list[dict] = []
+    n_gt_cp_finite = 0
     fov_pixel_metrics: list[dict] = []
     fov_mask_metrics: list[dict] = []
     fov_feature_metrics: list[dict] = []
@@ -942,13 +950,10 @@ def _process_one_fov(
                 pred_dynaclr = pred_per_t["dynaclr"][t]
                 pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
                 pred_morphem = pred_per_t["morphem"][t] if pred_per_t["morphem"] is not None else None
+                if gt_cp_per_t[t].size:
+                    n_gt_cp_finite += int(np.isfinite(gt_cp_per_t[t]).all(axis=1).sum())
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
-                # Same reference mask + shared GT scaler as the dataset-level block, so a
-                # per-row CP value is comparable across models and FOVs.
-                if pred_cp.size and gt_cp_t.size:
-                    pred_cp_z, gt_cp_z = cp_reference.transform(pred_cp), cp_reference.transform(gt_cp_t)
-                else:
-                    pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
+                pred_cp_z, gt_cp_z = _cp_row_features(pred_cp, gt_cp_t, cp_space)
                 # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
                 # columns must match the dataset-level ones the parent derives from the
                 # same map, or the two halves of a <prefix>_* family drift apart.
@@ -1017,6 +1022,7 @@ def _process_one_fov(
         dynaclr=dynaclr,
         celldino=celldino,
         morphem=morphem,
+        n_gt_cp_finite=n_gt_cp_finite,
         timings=get_timings()[timings_start:],
     )
 
@@ -1197,7 +1203,7 @@ def _worker_run_fov(
     pos_name: str,
     cuda_empty_every_n: int,
     microssim_sim,
-    cp_reference: CPReference | None,
+    cp_space: DatasetCPSpace | None,
 ) -> FovResult:
     """Worker entry point: process one FOV by name and return FovResult.
 
@@ -1209,7 +1215,7 @@ def _worker_run_fov(
     ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
     ``compute_microssim=false``); shipped per submission rather than via
     worker state because the parent fits it after the position list is
-    finalized and before any worker pool spawns. ``cp_reference`` is shipped the
+    finalized and before any worker pool spawns. ``cp_space`` is shipped the
     same way so every worker scores CP in the parent's verified reference.
     """
     _worker_setup(config)
@@ -1253,7 +1259,7 @@ def _worker_run_fov(
             state["celldino"],
             state["morphem"],
             microssim_sim,
-            cp_reference,
+            cp_space,
         )
 
     # Worker-side manifest flush so interrupted runs preserve progress even
@@ -1265,7 +1271,9 @@ def _worker_run_fov(
     return result
 
 
-def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None):
+def evaluate_predictions(
+    config: DictConfig, *, models: EvalModels | None = None, cp_space: DatasetCPSpace | None = None
+):
     """Evaluate predictions on all test images.
 
     Parameters
@@ -1280,6 +1288,10 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
         preserves the historical single-condition behavior. Note: under
         ``runtime.executor=process``, workers still load their own model
         copies; this kwarg saves only the parent-side load.
+    cp_space : DatasetCPSpace | None, optional
+        The CP reference bound to this eval's dataset (:func:`eval_cp_space`).
+        Required exactly when ``compute_feature_metrics=true``; the caller loads it
+        so the same verified reference is stamped by :func:`save_metrics`.
     """
     # Phase 1 runtime resolution: lock in executor + thread caps before any
     # heavy work. fov_workers may be provisional when "auto"; re-resolved in
@@ -1294,9 +1306,15 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     OmegaConf.resolve(config)
     reset_timings()
     _validate_instance_ap_config(config)
-    # Before any model load or cache write: a missing or foreign-recipe CP reference
-    # must fail the run up front, not after the per-FOV loop.
-    cp_reference = _eval_cp_reference(config) if config.compute_feature_metrics else None
+    if config.compute_feature_metrics != (cp_space is not None):
+        raise ValueError(
+            f"cp_space must be given exactly when compute_feature_metrics=true "
+            f"(compute_feature_metrics={config.compute_feature_metrics}, cp_space={cp_space is not None})"
+        )
+    # Before any model load or cache write: a GT CP cache re-cached after the reference
+    # was fit must fail the run up front, not after the per-FOV loop.
+    if cp_space is not None:
+        cp_space.check_gt_cache(OmegaConf.select(config, "io.gt_cache_dir", default=None))
 
     use_gpu = bool(getattr(config, "use_gpu", True))
 
@@ -1335,6 +1353,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
     parent_lists: dict[str, _BackboneLists] = {name: _BackboneLists() for name in _BACKBONE_KEYS}
+    n_gt_cp_finite = [0]  # summed across FOVs by _aggregate; checked against the CP scaler's fit
 
     # Deep-feature extractors by backbone key. Bound at function scope because the
     # precompute gate and the dataset-metrics block both derive from it and sit in
@@ -1495,6 +1514,10 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                     t_counts["nuclei"] = nuclei_by_name[pos_name].data.shape[0]
                 if len(set(t_counts.values())) > 1:
                     raise ValueError(f"Timepoint count mismatch at position {pos_name!r}: {t_counts}")
+            # The CP scaler describes a fixed set of GT cells: refuse a position set it was not fit on
+            # before any per-FOV work (limit_positions / exclude_fov_names on a non-lite dataset).
+            if cp_space is not None:
+                cp_space.check_positions([name for name, _ in gt_positions])
 
             # Leaf-level MicroMS3IM calibration: fit α once on a random
             # subsample of (FOV, t) volumes and reuse the fitted sim for
@@ -1602,6 +1625,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             extend_worker_timings = runtime.executor == "process"
 
             def _aggregate(result: FovResult) -> None:
+                n_gt_cp_finite[0] += result.n_gt_cp_finite
                 _aggregate_fov_result(
                     result,
                     segmentation_results,
@@ -1643,7 +1667,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         celldino_feature_extractor,
                         morphem_feature_extractor,
                         microssim_sim,
-                        cp_reference,
+                        cp_space,
                         predict_cached=cached_pair[0],
                         target_cached=cached_pair[1],
                     )
@@ -1682,7 +1706,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                             pos_name,
                             runtime.cuda_empty_cache_every_n_timepoints,
                             microssim_sim,
-                            cp_reference,
+                            cp_space,
                         ): pos_name
                         for pos_name in pos_names_in_order
                     }
@@ -1726,7 +1750,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
             prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
             if parent_lists["cp"].pred_feats:
-                prefix_inputs.append(_stage_cp_dataset_inputs(parent_lists["cp"], cp_reference, save_dir))
+                prefix_inputs.append(
+                    _stage_cp_dataset_inputs(parent_lists["cp"], cp_space, n_gt_cp_finite[0], save_dir)
+                )
 
             for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]
@@ -1799,8 +1825,26 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     return all_pixel_metrics, all_mask_metrics, all_feature_metrics
 
 
-def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feature_metrics=None):
-    """Save metrics to files."""
+def save_metrics(
+    config: DictConfig,
+    pixel_metrics=None,
+    mask_metrics=None,
+    feature_metrics=None,
+    *,
+    cp_reference_sha256: str | None,
+):
+    """Save metrics to files.
+
+    ``cp_reference_sha256`` is the hash of the CP reference the run SCORED with
+    (``DatasetCPSpace.reference_sha256``; ``None`` without feature metrics). It is
+    passed in rather than re-read here, so a reference rebuilt mid-run cannot be
+    stamped on values it did not produce.
+    """
+    if config.compute_feature_metrics != (cp_reference_sha256 is not None):
+        raise ValueError(
+            "cp_reference_sha256 must be given exactly when compute_feature_metrics=true "
+            f"(compute_feature_metrics={config.compute_feature_metrics})"
+        )
     save_dir = Path(config.save.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1823,12 +1867,7 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
     # whether the cache is comparable instead of assuming it is. Stamping first meant a
     # crash partway through the loop above left a fresh stamp certifying a previous
     # run's rows -- the exact misattribution the sidecar exists to make detectable.
-    write_metrics_provenance(save_dir, cp_reference_sha256=_current_cp_reference_sha256(config))
-
-
-def _current_cp_reference_sha256(config: DictConfig) -> str | None:
-    """Content hash of the CP reference this config scores in; ``None`` without feature metrics."""
-    return _eval_cp_reference(config).sha256 if config.compute_feature_metrics else None
+    write_metrics_provenance(save_dir, cp_reference_sha256=cp_reference_sha256)
 
 
 #: Pixel columns that only a dual-scaling run writes. Their absence marks a pixel
@@ -1859,7 +1898,8 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # An unstamped dir has nothing to reuse, so it needs no reference to be rejected.
     if not (save_dir / PROVENANCE_FILENAME).is_file():
         return False
-    if not metrics_provenance_matches(save_dir, cp_reference_sha256=_current_cp_reference_sha256(config)):
+    current_sha256 = eval_cp_space(config).reference_sha256 if config.compute_feature_metrics else None
+    if not metrics_provenance_matches(save_dir, cp_reference_sha256=current_sha256):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
@@ -2170,12 +2210,16 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
             print(f"[grouped] ({idx + 1}/{len(conditions)}) {name!r}: reusing cached final metrics")
             pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(merged)
         else:
-            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(merged, models=get_models())
+            cp_space = eval_cp_space(merged) if merged.compute_feature_metrics else None
+            pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(
+                merged, models=get_models(), cp_space=cp_space
+            )
             save_metrics(
                 merged,
                 pixel_metrics=pixel_metrics,
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
+                cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
         condition_save_dirs.append(Path(merged.save.save_dir))
@@ -2215,13 +2259,17 @@ def evaluate_model(config: DictConfig):
         print("Found existing metrics.")
         pixel_metrics, mask_metrics, feature_metrics = _load_cached_final_metrics(config)
     else:
-        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config)
+        # Loaded here, before any model load, and threaded to both calls so the hash
+        # stamped by save_metrics is the reference the metrics were scored with.
+        cp_space = eval_cp_space(config) if config.compute_feature_metrics else None
+        pixel_metrics, mask_metrics, feature_metrics = evaluate_predictions(config, cp_space=cp_space)
         with region_timer("save_metrics_csvs", "<parent>"):
             save_metrics(
                 config,
                 pixel_metrics=pixel_metrics,
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
+                cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
             )
         # Re-dump so save_metrics_csvs lands in eval_timing.csv. evaluate_predictions
         # dumps once before save_metrics runs; this second dump overwrites with the
