@@ -1405,8 +1405,8 @@ def check_cp_cache_feature_names(ctx: _CacheContext, expected: tuple[str, ...]) 
     cached = cached_cp_feature_names(entry)
     if cached != tuple(expected):
         raise StaleCacheError(
-            f"{ctx.side} CP cache {ctx.paths.cp_features()} holds columns {list(cached)}, but the CP reference "
-            f"expects {list(expected)}. Masking by position would misalign them; rebuild the cache with "
+            f"{ctx.side} CP cache {ctx.paths.cp_features()} holds columns {list(cached)}, but "
+            f"{list(expected)} are expected. Masking by position would misalign them; rebuild the cache with "
             f"force_recompute.{ctx.side}_cp=true."
         )
 
@@ -1421,7 +1421,19 @@ def fov_cp_features(
 
     The cache side is taken from ``ctx.side``. Result is a list of ``T``
     arrays, each shape ``(n_cells_t, n_features)``.
+
+    Every writer goes through here (the eval and ``precompute-gt``), and it first
+    refuses a cache whose recorded columns are not the running code's
+    (:func:`check_cp_cache_feature_names`). Otherwise a write under a reordered
+    column list would restamp ``cp_feature_names`` over slots of the old order,
+    and the mixed cache would then pass the name check.
+
+    Raises
+    ------
+    StaleCacheError
+        If the cache's recorded CP column names differ from the running code's.
     """
+    check_cp_cache_feature_names(ctx, active_cp_feature_names(bool((ctx.cp_glcm or {}).get("enabled", False))))
     per_t, manifest_updated = _load_or_compute_feature_timepoints(
         ctx,
         kind="cp",

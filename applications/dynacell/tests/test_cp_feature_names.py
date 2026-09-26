@@ -83,3 +83,26 @@ def test_a_forced_recompute_skips_the_name_check(tmp_path: Path) -> None:
     config.force_recompute.gt_cp = True
     ctx = init_cache_context(config, side="gt")
     check_cp_cache_feature_names(ctx, _NAMES_BASE)
+
+
+def test_a_precompute_style_write_under_reordered_names_is_refused(tmp_path: Path, monkeypatch) -> None:
+    """The writer precompute-gt uses (``fov_cp_features``) refuses to write into a cache of another column order.
+
+    Simulates code whose live column order changed without a version bump: the
+    cache records the old order, the writer would compute (and restamp) the new one.
+    """
+    import dynacell.evaluation.pipeline_cache as pipeline_cache
+
+    config = _config(tmp_path)
+    ctx = init_cache_context(config, side="gt")
+    image = np.random.default_rng(0).uniform(size=(1, 11, 16, 16)).astype(np.float32)
+    seg = np.zeros((1, 11, 16, 16), dtype=np.int32)
+    seg[0, 2:8, 2:8, 2:8] = 1
+    fov_cp_features(ctx, "A/1/0", image, seg)  # written under the current order
+
+    reordered = list(_NAMES_BASE)
+    reordered[0], reordered[1] = reordered[1], reordered[0]
+    monkeypatch.setattr(pipeline_cache, "active_cp_feature_names", lambda glcm: tuple(reordered))
+    with pytest.raises(StaleCacheError, match="Masking by position would misalign them"):
+        fov_cp_features(ctx, "A/1/1", image, seg)
+    assert ctx.manifest["artifacts"]["cp_features"]["cp_feature_names"] == list(_NAMES_BASE)
