@@ -773,6 +773,8 @@ def eval_cp_space(config: DictConfig) -> DatasetCPSpace:
         If the reference's CP recipe identity or feature names differ from the eval's.
     KeyError
         If the reference has no scaler for the eval's dataset.
+    ValueError
+        If the config has no ``benchmark.dataset_ref.dataset``.
     """
     identity, names = cp_space(config)
     ref = load_cp_reference(resolve_cp_reference_path(config), target_name=config.target_name)
@@ -783,4 +785,11 @@ def eval_cp_space(config: DictConfig) -> DatasetCPSpace:
             f"  reference features: {len(ref.feature_names)}; eval features: {len(names)}\n"
             f"Rebuild it from caches of the current recipe:\n  {_build_command(ref.target_name)}"
         )
-    return ref.for_dataset(config.benchmark.dataset_ref.dataset)
+    dataset = OmegaConf.select(config, "benchmark.dataset_ref.dataset", default=None)
+    if dataset is None:
+        raise ValueError(
+            "CP feature metrics need benchmark.dataset_ref.dataset: the CP reference holds one GT scaler per "
+            "test set, keyed by that name. Set benchmark.dataset_ref (dataset + target) in the eval config, or "
+            "pass compute_feature_metrics=false."
+        )
+    return ref.for_dataset(dataset)

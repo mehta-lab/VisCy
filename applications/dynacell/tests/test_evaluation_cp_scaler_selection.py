@@ -141,3 +141,12 @@ def test_grouped_probe_failure_on_the_cp_reference_propagates(tmp_path: Path, mo
     monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
     with pytest.raises(KeyError, match="reference_path"):
         pipeline.evaluate_predictions_grouped(config)
+
+
+def test_missing_dataset_ref_names_the_config_key(tmp_path: Path) -> None:
+    """Without benchmark.dataset_ref the error names the key and the feature-less escape hatch."""
+    pipeline = live_pipeline_module()
+    config = _config(tmp_path)
+    config.benchmark = None
+    with pytest.raises(ValueError, match=r"benchmark\.dataset_ref\.dataset.*compute_feature_metrics=false"):
+        pipeline.eval_cp_space(config)
