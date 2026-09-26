@@ -82,8 +82,8 @@ def test_grouped_conditions_each_get_their_own_scaler(tmp_path: Path, monkeypatc
         seen[cfg.benchmark.dataset_ref.dataset] = cp_space
         return [], [], []
 
-    def _fake_save_metrics(cfg, *args, cp_reference_sha256, **kwargs):
-        stamped[cfg.benchmark.dataset_ref.dataset] = cp_reference_sha256
+    def _fake_save_metrics(cfg, *args, cp_space, **kwargs):
+        stamped[cfg.benchmark.dataset_ref.dataset] = cp_space.binding_sha256
 
     monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
     monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
@@ -98,7 +98,7 @@ def test_grouped_conditions_each_get_their_own_scaler(tmp_path: Path, monkeypatc
         assert space.scaler_dataset == _LITE.get(dataset, dataset)
         np.testing.assert_array_equal(space.mean, expected[dataset].mean)
         np.testing.assert_array_equal(space.std, expected[dataset].std)
-        assert stamped[dataset] == space.reference_sha256
+        assert stamped[dataset] == space.binding_sha256
     np.testing.assert_array_equal(seen["set-b-lite"].mean, seen["set-b"].mean)
     assert not np.allclose(seen["set-a"].mean, seen["set-c"].mean)
 

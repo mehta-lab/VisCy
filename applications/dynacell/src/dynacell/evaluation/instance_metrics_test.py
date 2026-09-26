@@ -148,7 +148,7 @@ def test_instance_ap_is_written_to_mask_metrics_csv(tmp_path):
             },
         }
     )
-    save_metrics(config, mask_metrics=[{"FOV": "0/0/0", "Timepoint": 0, **row}], cp_reference_sha256=None)
+    save_metrics(config, mask_metrics=[{"FOV": "0/0/0", "Timepoint": 0, **row}], cp_space=None)
 
     assert not list(tmp_path.glob("instance_ap*.csv"))
     written = tmp_path / "mask_metrics.csv"

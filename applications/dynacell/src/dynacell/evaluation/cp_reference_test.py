@@ -409,3 +409,28 @@ def test_sidecar_binds_the_recorded_reference_and_dataset(two_sets, tmp_path: Pa
     _reference(tmp_path, [_fit("set-a", _gt(seed=8))], lite={"set-a-lite": {"parent": "set-a"}})  # rebuilt in place
     with pytest.raises(ValueError, match="changed since the eval"):
         sidecar_cp_space(eval_dir)
+
+
+def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> None:
+    """The binding differs per dataset (lite vs parent too) and moves with GT matrix or lite stamp, not built_at."""
+    fits = [_fit("set-a", _gt(), built_at="t0"), _fit("set-b", _gt(seed=1), built_at="t0")]
+    lite = {"set-a-lite": {"parent": "set-a", "gt_cache_dir": "/lite", "cp_cache_built_at": "L0"}}
+    ref, payload = _reference(tmp_path, fits, lite=lite)
+    bindings = {d: ref.for_dataset(d).binding_sha256 for d in ("set-a", "set-b", "set-a-lite")}
+    assert len(set(bindings.values())) == 3
+
+    def rebound(edit) -> dict[str, str]:
+        moved = json.loads(json.dumps(payload))
+        edit(moved)
+        (tmp_path / "er.json").write_text(json.dumps(moved))
+        again = load_cp_reference(tmp_path / "er.json", target_name="er")
+        assert again.sha256 == ref.sha256  # provenance only: numeric hash unchanged
+        return {d: again.for_dataset(d).binding_sha256 for d in bindings}
+
+    built_at = rebound(lambda p: p["fit"]["datasets"]["set-a"].update(cp_cache_built_at="t1"))
+    assert built_at == bindings
+    gt = rebound(lambda p: p["fit"]["datasets"]["set-a"].update(gt_matrix_sha256="0" * 64))
+    assert gt["set-a"] != bindings["set-a"] and gt["set-a-lite"] != bindings["set-a-lite"]
+    assert gt["set-b"] == bindings["set-b"]
+    lite_stamp = rebound(lambda p: p["fit"]["lite"]["set-a-lite"].update(cp_cache_built_at="L1"))
+    assert lite_stamp["set-a-lite"] != bindings["set-a-lite"] and lite_stamp["set-a"] == bindings["set-a"]

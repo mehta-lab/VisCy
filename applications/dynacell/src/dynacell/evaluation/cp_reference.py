@@ -390,6 +390,40 @@ class DatasetCPSpace:
     fit_n_cells: int
     gt_cache_dir: str | None
     cp_cache_built_at: str | None
+    fit_gt_matrix_sha256: str
+    own_gt_matrix_sha256: str | None
+
+    @property
+    def binding_sha256(self) -> str:
+        """Return a sha256 identifying this eval's CP space AND the GT cells it describes.
+
+        The final-metrics stamp needs more than :attr:`reference_sha256`, which
+        deliberately leaves fit provenance unhashed: a cache scored for dataset A
+        must not be reused for dataset B, and a GT re-cache that changes the cells
+        while leaving mean/std/mask unchanged must not reuse CP rows scored on the
+        old cells. This hash covers the reference hash, the dataset, its scaler
+        dataset, the lite flag, and the recorded GT-matrix sha256. That is the
+        dataset's own for a non-lite set. A lite set uses its own when one is
+        recorded, else the parent's plus the lite cache's recorded ``built_at``.
+        A harmless rebuild that only moves ``built_at`` on a non-lite set keeps it.
+
+        Returns
+        -------
+        str
+            Hex sha256 over the canonical JSON of those fields.
+        """
+        if self.is_lite and self.own_gt_matrix_sha256 is None:
+            gt = {"parent_gt_matrix_sha256": self.fit_gt_matrix_sha256, "cp_cache_built_at": self.cp_cache_built_at}
+        else:
+            gt = {"gt_matrix_sha256": self.own_gt_matrix_sha256 or self.fit_gt_matrix_sha256}
+        body = {
+            "reference_sha256": self.reference_sha256,
+            "dataset": self.dataset,
+            "scaler_dataset": self.scaler_dataset,
+            "is_lite": self.is_lite,
+            **gt,
+        }
+        return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     def _check_width(self, x: np.ndarray) -> None:
         """Raise when a CP matrix does not have the reference's column count."""
@@ -568,6 +602,9 @@ class CPReference:
             fit_n_cells=int(scaler_fit["n_cells"]),
             gt_cache_dir=own["gt_cache_dir"],
             cp_cache_built_at=own["cp_cache_built_at"],
+            fit_gt_matrix_sha256=scaler_fit["gt_matrix_sha256"],
+            # A lite entry records no GT matrix today; the key is optional by design.
+            own_gt_matrix_sha256=own.get("gt_matrix_sha256") if is_lite else scaler_fit["gt_matrix_sha256"],
         )
 
 

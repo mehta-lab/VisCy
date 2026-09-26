@@ -111,12 +111,13 @@ def _feature_cache_config(tmp_path: Path, **flags: bool):
     return config, make_cp_reference(config, tmp_path / "cp_reference.json")
 
 
-def _write_final_caches(save_dir: Path, feature_row: dict, reference_sha256: str) -> None:
-    """Write a pixel/mask/feature NPY cache set holding one feature row, stamped with ``reference_sha256``."""
+def _write_final_caches(pipeline, save_dir: Path, feature_row: dict, config) -> None:
+    """Write a pixel/mask/feature NPY cache set holding one feature row, stamped as ``config`` would score it."""
     np.save(save_dir / "pixel_metrics.npy", [{"SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}])
     np.save(save_dir / "mask_metrics.npy", [{"metric": "mask"}])
     np.save(save_dir / "feature_metrics.npy", [feature_row])
-    write_metrics_provenance(save_dir, cp_reference_sha256=reference_sha256)
+    space = pipeline.eval_cp_space(config)
+    write_metrics_provenance(save_dir, cp_reference_sha256=space.reference_sha256, cp_space_sha256=space.binding_sha256)
 
 
 def _dataset_row(prefixes: tuple[str, ...], families: tuple[str, ...]) -> dict:
@@ -134,8 +135,10 @@ _ALL_FAMILIES = ("FID", "Precision", "Precision_std", "Recall", "Recall_std", "F
 def test_cache_without_fid_is_invalid_once_fid_is_enabled(tmp_path: Path) -> None:
     """A dir written with FID off is recomputed when FID is on, reused while it stays off."""
     pipeline = live_pipeline_module()
-    config, sha256 = _feature_cache_config(tmp_path)
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3"), tuple(f for f in _ALL_FAMILIES if f != "FID")), sha256)
+    config, _ = _feature_cache_config(tmp_path)
+    _write_final_caches(
+        pipeline, tmp_path, _dataset_row(("CP", "DINOv3"), tuple(f for f in _ALL_FAMILIES if f != "FID")), config
+    )
 
     assert not pipeline._final_metrics_cache_valid(config)
     config.feature_metrics.compute_fid = False
@@ -145,8 +148,8 @@ def test_cache_without_fid_is_invalid_once_fid_is_enabled(tmp_path: Path) -> Non
 def test_full_cache_stays_valid(tmp_path: Path) -> None:
     """A dir carrying every family for every prefix it scored remains reusable."""
     pipeline = live_pipeline_module()
-    config, sha256 = _feature_cache_config(tmp_path)
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), sha256)
+    config, _ = _feature_cache_config(tmp_path)
+    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
     assert pipeline._final_metrics_cache_valid(config)
 
 
@@ -158,16 +161,16 @@ def test_real_full_benchmark_columns_stay_valid(tmp_path: Path) -> None:
     with real.open() as f:
         header = f.readline().rstrip("\n").split(",")
     pipeline = live_pipeline_module()
-    config, sha256 = _feature_cache_config(tmp_path)
-    _write_final_caches(tmp_path, dict.fromkeys(header, 0.0), sha256)
+    config, _ = _feature_cache_config(tmp_path)
+    _write_final_caches(pipeline, tmp_path, dict.fromkeys(header, 0.0), config)
     assert pipeline._final_metrics_cache_valid(config)
 
 
 def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None:
     """Rebuilding the CP reference invalidates every final-metrics cache stamped with the old one."""
     pipeline = live_pipeline_module()
-    config, sha256 = _feature_cache_config(tmp_path)
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), sha256)
+    config, _ = _feature_cache_config(tmp_path)
+    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
     assert pipeline._final_metrics_cache_valid(config)
 
     make_cp_reference(config, tmp_path / "cp_reference.json", seed=1)  # same path, new content
@@ -177,8 +180,8 @@ def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None
 def test_cache_reuse_refuses_a_gt_recache(tmp_path: Path) -> None:
     """A reusable final-metrics cache is refused once the GT CP cache was re-cached after the build."""
     pipeline = live_pipeline_module()
-    config, sha256 = _feature_cache_config(tmp_path)  # records the cache's real built_at
-    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), sha256)
+    config, _ = _feature_cache_config(tmp_path)  # records the cache's real built_at
+    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
     assert pipeline._final_metrics_cache_valid(config)
 
     paths = cache_paths(tmp_path / "gt_cache")
@@ -188,6 +191,54 @@ def test_cache_reuse_refuses_a_gt_recache(tmp_path: Path) -> None:
     with pytest.raises(Exception, match="was built at 2099-01-01") as err:
         pipeline._final_metrics_cache_valid(config)
     assert type(err.value).__name__ == "StaleCacheError"
+
+
+def _two_set_cache(pipeline, tmp_path: Path):
+    """A final-metrics cache scored for set-a of a two-set reference; returns ``(config, reference path)``."""
+    config, _ = _feature_cache_config(tmp_path)
+    reference = tmp_path / "cp_reference.json"
+    make_cp_reference(config, reference, datasets=("set-a", "set-b"))  # binds config to set-a
+    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
+    assert pipeline._final_metrics_cache_valid(config)
+    return config, reference
+
+
+def test_cache_scored_for_another_dataset_is_invalid(tmp_path: Path) -> None:
+    """A save_dir scored with set-a's scaler is not reusable by a config bound to set-b (same reference)."""
+    pipeline = live_pipeline_module()
+    config, _ = _two_set_cache(pipeline, tmp_path)
+    config.benchmark.dataset_ref.dataset = "set-b"
+    assert not pipeline._final_metrics_cache_valid(config)
+
+
+def test_cache_is_invalid_once_the_gt_matrix_changed(tmp_path: Path) -> None:
+    """Same numeric reference hash, but the dataset's recorded GT matrix changed: CP rows are stale."""
+    pipeline = live_pipeline_module()
+    config, reference = _two_set_cache(pipeline, tmp_path)
+    payload = json.loads(reference.read_text())
+    payload["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64  # unhashed fit provenance
+    reference.write_text(json.dumps(payload))
+    assert pipeline.eval_cp_space(config).reference_sha256 == payload["sha256"]  # numeric hash unchanged
+    assert not pipeline._final_metrics_cache_valid(config)
+
+
+def test_cache_stays_valid_after_a_harmless_rebuild(tmp_path: Path) -> None:
+    """A rebuild that only moves built_at (same GT matrix) keeps the cache reusable.
+
+    check_gt_cache passes because the rebuild records the cache's new built_at, and
+    the binding is unchanged because the GT-matrix sha256 is.
+    """
+    pipeline = live_pipeline_module()
+    config, reference = _two_set_cache(pipeline, tmp_path)
+    paths = cache_paths(tmp_path / "gt_cache")
+    manifest = load_manifest(paths)
+    manifest["artifacts"]["cp_features"]["built_at"] = "2099-01-01T00:00:00+00:00"
+    save_manifest(paths, manifest)
+    payload = json.loads(reference.read_text())
+    for record in payload["fit"]["datasets"].values():
+        record["cp_cache_built_at"] = "2099-01-01T00:00:00+00:00"
+    reference.write_text(json.dumps(payload))
+    assert pipeline._final_metrics_cache_valid(config)
 
 
 def test_feature_less_cache_ignores_the_cp_reference(tmp_path: Path) -> None:
@@ -261,6 +312,7 @@ def test_evaluate_model_stamps_the_reference_it_scored_with(tmp_path: Path, monk
     assert seen["cp_space"].reference_sha256 == sha256
     stamp = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
     assert stamp["cp_reference_sha256"] == sha256
+    assert stamp["cp_space_sha256"] == seen["cp_space"].binding_sha256
 
 
 def _feature_plates(tmp_path: Path) -> None:

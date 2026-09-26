@@ -1831,7 +1831,7 @@ def save_metrics(
     mask_metrics=None,
     feature_metrics=None,
     *,
-    cp_reference_sha256: str | None,
+    cp_space: DatasetCPSpace | None,
 ):
     """Save metric rows as CSV + NPY (and plots), then stamp ``metrics_provenance.json``.
 
@@ -1842,21 +1842,20 @@ def save_metrics(
         ``compute_feature_metrics``).
     pixel_metrics, mask_metrics, feature_metrics : list of dict, optional
         Per-(FOV, timepoint) rows; an empty or ``None`` family is skipped.
-    cp_reference_sha256 : str or None
-        Hash of the CP reference the run SCORED with
-        (``DatasetCPSpace.reference_sha256``), ``None`` without feature metrics.
-        Passed in rather than re-read here, so a reference rebuilt mid-run cannot
-        be stamped on values it did not produce.
+    cp_space : DatasetCPSpace or None
+        The bound CP space the run SCORED with, ``None`` without feature metrics.
+        Its ``reference_sha256`` (audit) and ``binding_sha256`` (compared on cache
+        reuse) are stamped. It is passed in rather than re-read here, so a reference
+        rebuilt mid-run cannot be stamped on values it did not produce.
 
     Raises
     ------
     ValueError
-        If ``cp_reference_sha256`` is given without feature metrics, or missing
-        with them.
+        If ``cp_space`` is given without feature metrics, or missing with them.
     """
-    if config.compute_feature_metrics != (cp_reference_sha256 is not None):
+    if config.compute_feature_metrics != (cp_space is not None):
         raise ValueError(
-            "cp_reference_sha256 must be given exactly when compute_feature_metrics=true "
+            "cp_space must be given exactly when compute_feature_metrics=true "
             f"(compute_feature_metrics={config.compute_feature_metrics})"
         )
     save_dir = Path(config.save.save_dir)
@@ -1881,7 +1880,11 @@ def save_metrics(
     # whether the cache is comparable instead of assuming it is. Stamping first meant a
     # crash partway through the loop above left a fresh stamp certifying a previous
     # run's rows -- the exact misattribution the sidecar exists to make detectable.
-    write_metrics_provenance(save_dir, cp_reference_sha256=cp_reference_sha256)
+    write_metrics_provenance(
+        save_dir,
+        cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
+        cp_space_sha256=cp_space.binding_sha256 if cp_space is not None else None,
+    )
 
 
 #: Pixel columns that only a dual-scaling run writes. Their absence marks a pixel
@@ -1907,8 +1910,9 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # Metric values are not comparable across cubic versions — FSC/FRC/Spectral_PCC
     # move (see dynacell.evaluation.provenance). A cache with no stamp, or one
     # stamped with a different cubic, is not reusable regardless of its columns.
-    # Likewise for the CP reference: CP KID/FID/cosine were scored in the reference
-    # stamped beside them, so a rebuilt (or never-stamped) reference forces a recompute.
+    # Likewise for CP: KID/FID/cosine were scored in the CP space stamped beside them
+    # (reference + dataset + the GT cells it was fit on), so another dataset's space, a
+    # changed GT matrix, or a rebuilt (or never-stamped) reference forces a recompute.
     # An unstamped dir has nothing to reuse, so it needs no reference to be rejected.
     if not (save_dir / PROVENANCE_FILENAME).is_file():
         return False
@@ -1918,8 +1922,8 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
         # Same GT re-cache guard as the scoring path: cached CP rows scored against a
         # GT cache that has since been re-cached must not be reused silently.
         space.check_gt_cache(OmegaConf.select(config, "io.gt_cache_dir", default=None))
-        current_sha256 = space.reference_sha256
-    if not metrics_provenance_matches(save_dir, cp_reference_sha256=current_sha256):
+        current_sha256 = space.binding_sha256
+    if not metrics_provenance_matches(save_dir, cp_space_sha256=current_sha256):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename
@@ -2239,7 +2243,7 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
                 pixel_metrics=pixel_metrics,
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
-                cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
+                cp_space=cp_space,
             )
         results.append((name, (pixel_metrics, mask_metrics, feature_metrics)))
         condition_save_dirs.append(Path(merged.save.save_dir))
@@ -2289,7 +2293,7 @@ def evaluate_model(config: DictConfig):
                 pixel_metrics=pixel_metrics,
                 mask_metrics=mask_metrics,
                 feature_metrics=feature_metrics,
-                cp_reference_sha256=cp_space.reference_sha256 if cp_space is not None else None,
+                cp_space=cp_space,
             )
         # Re-dump so save_metrics_csvs lands in eval_timing.csv. evaluate_predictions
         # dumps once before save_metrics runs; this second dump overwrites with the

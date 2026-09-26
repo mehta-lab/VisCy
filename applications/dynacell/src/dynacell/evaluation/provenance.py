@@ -89,7 +89,7 @@ def check_cubic_pin() -> None:
         )
 
 
-def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None) -> None:
+def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None, cp_space_sha256: str | None) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
     Parameters
@@ -97,14 +97,29 @@ def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None)
     save_dir : pathlib.Path
         Directory that receives the metric CSV/NPY files.
     cp_reference_sha256 : str or None
-        Content hash of the CP reference the feature metrics were scored in;
-        ``None`` when the run computed no feature metrics.
+        Content hash of the CP reference the feature metrics were scored in
+        (recorded for audit); ``None`` when the run computed no feature metrics.
+    cp_space_sha256 : str or None
+        ``DatasetCPSpace.binding_sha256`` of the space the run scored in: the
+        reference bound to one dataset and the GT cells it was fit on. This is the
+        value cache reuse compares. ``None`` exactly when ``cp_reference_sha256`` is.
+
+    Raises
+    ------
+    ValueError
+        If only one of the two hashes is given.
     """
-    payload = {"versions": installed_versions(), "cp_reference_sha256": cp_reference_sha256}
+    if (cp_reference_sha256 is None) != (cp_space_sha256 is None):
+        raise ValueError("cp_reference_sha256 and cp_space_sha256 must both be given or both be None")
+    payload = {
+        "versions": installed_versions(),
+        "cp_reference_sha256": cp_reference_sha256,
+        "cp_space_sha256": cp_space_sha256,
+    }
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
-def metrics_provenance_matches(save_dir: Path, *, cp_reference_sha256: str | None) -> bool:
+def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -> bool:
     """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference.
 
     A missing sidecar returns False. Every cache written before this stamp
@@ -117,18 +132,18 @@ def metrics_provenance_matches(save_dir: Path, *, cp_reference_sha256: str | Non
     ----------
     save_dir : pathlib.Path
         Directory holding the metric CSV/NPY files.
-    cp_reference_sha256 : str or None
-        Content hash of the CP reference the current run would score in, or
-        ``None`` when it computes no feature metrics -- then no CP value is
-        reused and the recorded hash (or its absence) is irrelevant. When given,
-        a sidecar written before the CP reference existed carries no such key
-        and never matches.
+    cp_space_sha256 : str or None
+        ``DatasetCPSpace.binding_sha256`` of the space the current run would score
+        in, or ``None`` when it computes no feature metrics -- then no CP value is
+        reused and the recorded hash (or its absence) is irrelevant. When given, a
+        sidecar without a ``cp_space_sha256`` (written before the binding existed)
+        never matches.
 
     Returns
     -------
     bool
         True when the recorded ``cubic`` version equals the installed one and,
-        if ``cp_reference_sha256`` is given, the recorded hash equals it.
+        if ``cp_space_sha256`` is given, the recorded binding equals it.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
@@ -137,6 +152,6 @@ def metrics_provenance_matches(save_dir: Path, *, cp_reference_sha256: str | Non
     recorded = payload.get("versions", {}).get("cubic")
     if recorded != version("cubic"):
         return False
-    if cp_reference_sha256 is None:
+    if cp_space_sha256 is None:
         return True
-    return "cp_reference_sha256" in payload and payload["cp_reference_sha256"] == cp_reference_sha256
+    return "cp_space_sha256" in payload and payload["cp_space_sha256"] == cp_space_sha256

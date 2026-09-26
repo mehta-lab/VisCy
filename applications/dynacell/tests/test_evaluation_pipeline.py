@@ -116,7 +116,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     _write_metrics(tmp_path / config.save.mask_metrics_filename, expected_mask_metrics)
     # A reusable cache is one this code could have written, which includes the
     # numeric-provenance stamp save_metrics emits.
-    write_metrics_provenance(tmp_path, cp_reference_sha256=None)
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None)
 
     def fail_if_recomputed(_config):
         raise AssertionError("evaluate_predictions should not run when cache is valid")
