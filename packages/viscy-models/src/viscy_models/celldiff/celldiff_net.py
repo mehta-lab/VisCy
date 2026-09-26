@@ -57,6 +57,10 @@ class CELLDiffNet(UNet3DBase):
         Cubic patch size for the 3D patch embedding, or per-axis
         ``(D, H, W)`` extents. Use ``(1, p, p)`` at ``D=1`` for the
         Z-preserving 2D configuration.
+    cond_channels : int
+        Number of conditioning channels, fused additively with the noisy
+        target after the first convolution. ``1`` is phase alone; extra
+        channels carry further pixel-aligned conditions (e.g. a mask).
     """
 
     def __init__(
@@ -72,7 +76,10 @@ class CELLDiffNet(UNet3DBase):
         final_dropout: float = 0.0,
         num_hidden_layers: int = 2,
         patch_size: int | Sequence[int] = 4,
+        cond_channels: int = 1,
     ) -> None:
+        if cond_channels < 1:
+            raise ValueError(f"cond_channels must be >= 1, got {cond_channels}")
         if input_spatial_size is None:
             input_spatial_size = [8, 512, 512]
         if dims is None:
@@ -101,9 +108,10 @@ class CELLDiffNet(UNet3DBase):
             bottleneck=bottleneck,
             downsample_z=False,
             time_embed_dim=hidden_size,
-            cond_channels=1,
+            cond_channels=cond_channels,
         )
         self.input_spatial_size = input_spatial_size
+        self.cond_channels = cond_channels
 
     def forward(self, x: Tensor, cond: Tensor, t: Tensor) -> Tensor:
         """Predict velocity field for flow-matching.
@@ -113,7 +121,8 @@ class CELLDiffNet(UNet3DBase):
         x : Tensor
             Noisy target volume of shape ``(B, in_channels, D, H, W)``.
         cond : Tensor
-            Phase contrast conditioning of shape ``(B, 1, D, H, W)``.
+            Conditioning of shape ``(B, cond_channels, D, H, W)``; channel 0
+            is phase.
         t : Tensor
             Diffusion timesteps of shape ``(B,)``.
 
@@ -128,6 +137,6 @@ class CELLDiffNet(UNet3DBase):
             raise ValueError(
                 f"cond spatial size {list(cond.shape[2:])} does not match expected {self.input_spatial_size}"
             )
-        if cond.shape[1] != 1:
-            raise ValueError(f"cond must have 1 channel, got {cond.shape[1]}")
+        if cond.shape[1] != self.cond_channels:
+            raise ValueError(f"cond must have {self.cond_channels} channel(s), got {cond.shape[1]}")
         return super().forward(x, cond=cond, t=t)

@@ -130,6 +130,28 @@ _CELLDIFF_R2_VARIANTS: tuple[str, ...] = (
     "celldiff_r2",
 )
 
+# CellDiff recipe arms (Spotlight v2), matched as ckpt path SEGMENTS ahead of the R2
+# variants and the bare-`celldiff` fallback, so an arm leaf whose model_name still
+# reads a baseline token (`celldiff`, `celldiff_2d`) resolves to the arm its
+# checkpoint belongs to rather than onto that baseline.
+_CELLDIFF_ARM_MODELS: tuple[str, ...] = (
+    "celldiff_segaux_iterative",
+    "celldiff_cjoint_iterative",
+    "celldiff_ccond_iterative",
+    "celldiff_2d_segauxself",
+    "celldiff_2d_segaux",
+    "celldiff_2d_cjoint",
+    "celldiff_2d_ccond",
+    "celldiff_2d_seed1",
+    "celldiff_segaux",
+    "celldiff_cjoint",
+    "celldiff_ccond",
+)
+
+# Spotlight-v2 arms that predict their baseline's own checkpoint into their own
+# store (no fit): resolve_model must take them from model_name, not the ckpt path.
+_PREDICT_ONLY_ARM_MODELS: frozenset[str] = frozenset({"pix2pix2d_unetvit_last"})
+
 # ===========================================================================
 # Map (b): canonical -> paper display registry
 # ===========================================================================
@@ -200,6 +222,62 @@ PAPER_KEY: dict[str, str] = {
     "fnet2d_voxelmatched": "fnet2d_voxelmatched",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
+    # Spotlight-loss arms (masked MSE + soft-Dice, Otsu-centred target), iPSC-trained
+    # nucleus + membrane. Each is a recipe variant of the baseline directly above it,
+    # so it needs its own key: `canonical_model_name` resolves by LONGEST PREFIX, and
+    # without these entries `fnet2d_spotlight` silently collapses onto `fnet2d`,
+    # `pix2pix{2,3}d_unetvit_spotlight` onto their baselines, and the arms write into
+    # the baselines' eval/cache dirs. The paper keys drop `_unetvit`, matching
+    # `pix2pix3d_unetvit` -> `pix2pix3d`.
+    "fnet3d_spotlight": "fnet3d_spotlight",
+    "fnet2d_spotlight": "fnet2d_spotlight",
+    "pix2pix3d_unetvit_spotlight": "pix2pix3d_spotlight",
+    "pix2pix2d_unetvit_spotlight": "pix2pix2d_spotlight",
+    # Spotlight v2 first wave (tools/generate_spotlight_v2_leaves.py), iPSC-trained
+    # nucleus + membrane. Same longest-prefix hazard as the v1 arms above: each token
+    # extends its baseline's, so without an entry it collapses onto the baseline it is
+    # compared against. `_segaux` = baseline + SegAuxDice term; `_seed1` = baseline at
+    # seed 1 (noise floor); `fcmae_vscyto3d_scratch_v2` = the UNeXt2 baseline retrained
+    # fresh (`pix2pix3d_unetvit_v2` likewise, Run D); `fcmae_vscyto2d_scratch_{jointsteps,l1,safecrop}` = UNeXt2-2D membrane recipe
+    # probes. `celldiff_segaux` is the CellDiff-3D checkpoint dir and
+    # `celldiff_segaux_iterative` its store dir, mirroring celldiff_r2 /
+    # celldiff_r2_iterative.
+    "fnet2d_segaux": "fnet2d_segaux",
+    "fnet3d_paper_segaux": "fnet3d_segaux",
+    "fcmae_vscyto2d_scratch_segaux": "unext2_2d_segaux",
+    "fcmae_vscyto3d_scratch_segaux": "unext2_segaux",
+    "pix2pix2d_unetvit_segaux": "pix2pix2d_segaux",
+    "pix2pix3d_unetvit_segaux": "pix2pix3d_segaux",
+    "celldiff_2d_segaux": "celldiff_2d_segaux",
+    "celldiff_segaux": "celldiff_segaux",
+    "celldiff_segaux_iterative": "celldiff_segaux_iterative",
+    "fnet2d_seed1": "fnet2d_seed1",
+    "fnet3d_paper_seed1": "fnet3d_seed1",
+    "fcmae_vscyto2d_scratch_seed1": "unext2_2d_seed1",
+    "pix2pix2d_unetvit_seed1": "pix2pix2d_seed1",
+    "celldiff_2d_seed1": "celldiff_2d_seed1",
+    "fcmae_vscyto3d_scratch_v2": "unext2_v2",
+    "pix2pix3d_unetvit_v2": "pix2pix3d_v2",
+    "fcmae_vscyto2d_scratch_jointsteps": "unext2_2d_jointsteps",
+    "fcmae_vscyto2d_scratch_l1": "unext2_2d_l1",
+    "fcmae_vscyto2d_scratch_safecrop": "unext2_2d_safecrop",
+    # Stage 1b CellDiff with the mask inside the generative process: `_cjoint` =
+    # 2-channel [image, mask] flow, `_ccond` = mask as a conditioning channel. The
+    # 3D arms keep the same ckpt-dir / `_iterative` store-dir split as celldiff_segaux.
+    "celldiff_2d_cjoint": "celldiff_2d_cjoint",
+    "celldiff_2d_ccond": "celldiff_2d_ccond",
+    "celldiff_cjoint": "celldiff_cjoint",
+    "celldiff_cjoint_iterative": "celldiff_cjoint_iterative",
+    "celldiff_ccond": "celldiff_ccond",
+    "celldiff_ccond_iterative": "celldiff_ccond_iterative",
+    # Stage 2 #1: `_segauxself` = `_segaux` with SegAuxDice(label="target"), the
+    # self-consistent reference whose minimum is pred == target (2D families).
+    "fnet2d_segauxself": "fnet2d_segauxself",
+    "fcmae_vscyto2d_scratch_segauxself": "unext2_2d_segauxself",
+    "pix2pix2d_unetvit_segauxself": "pix2pix2d_segauxself",
+    "celldiff_2d_segauxself": "celldiff_2d_segauxself",
+    # Predict-only: the pix2pix2d baseline's own last.ckpt (canonical stores: best ckpts, nucleus ep 22 / membrane ep 37).
+    "pix2pix2d_unetvit_last": "pix2pix2d_last",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
@@ -537,6 +615,8 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
     variant lives in ``ckpt_path`` (``.../celldiff_r2/...``), and the documented
     rule "joint celldiff = R2" applies. Resolution order:
 
+    0. If ``ckpt_path`` (or ``model_name``) carries a CellDiff recipe-arm segment
+       (:data:`_CELLDIFF_ARM_MODELS`, e.g. ``celldiff_segaux``) -> that arm.
     1. If ``ckpt_path`` (or ``model_name``) carries a ``celldiff_r2`` variant
        segment -> that variant (``celldiff_r2_iterative`` / ``_sliding_window`` /
        ``_denoise``, else bare ``celldiff_r2``). Variants stay distinct on disk.
@@ -576,6 +656,9 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
 
     # CELL-Diff identity comes from the ckpt path, never the bare model_name.
     if model_name.startswith("celldiff") or "celldiff" in ckpt_str:
+        for arm in _CELLDIFF_ARM_MODELS:
+            if arm in ckpt_parts or model_name == arm:
+                return arm
         # Match the most specific R2 variant present as a path SEGMENT (or the
         # config model_name). A substring test on the full ckpt string would
         # collapse celldiff_r2_iterative/_sliding_window/_denoise onto bare
@@ -594,6 +677,10 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
         if model_name in PAPER_KEY:
             return model_name
 
+    # A predict-only arm reads its BASELINE's checkpoint, so the ckpt path names
+    # the baseline; only model_name can tell them apart.
+    if model_name in _PREDICT_ONLY_ARM_MODELS:
+        return model_name
     # Non-celldiff: prefer a recognizable ckpt-path segment, else the config name.
     for part in reversed(ckpt_parts):
         if part in PAPER_KEY:

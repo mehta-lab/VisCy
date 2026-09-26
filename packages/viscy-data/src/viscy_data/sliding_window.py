@@ -170,6 +170,7 @@ class SlidingWindowDataset(Dataset):
         tz: int,
         arr_idx: int = -1,
         _preloaded: list[Tensor] | None = None,
+        as_float: bool = True,
     ) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
 
@@ -188,6 +189,10 @@ class SlidingWindowDataset(Dataset):
         _preloaded : list[Tensor] or None
             Override for ``self._preloaded``. When set, uses this list
             instead of the dataset-level preloaded data.
+        as_float : bool
+            Cast the window to float32 (images). When False, keep the stored
+            dtype (foreground masks: uint8 is 4x smaller in every worker
+            buffer and pinned host copy; the datamodule casts on GPU).
 
         Returns
         -------
@@ -200,13 +205,16 @@ class SlidingWindowDataset(Dataset):
         z = tz - t * zs
         preloaded = _preloaded if _preloaded is not None else self._preloaded
         if preloaded is not None and arr_idx >= 0:
-            data = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size].to(torch.float32, copy=True)
+            window = preloaded[arr_idx][t : t + 1, :, z : z + self.z_window_size]
+            data = window.to(torch.float32 if as_float else window.dtype, copy=True)
             return data.unbind(dim=1), (f"/{img.path}", t, z)
         data = img.oindex[
             slice(t, t + 1),
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
-        ].astype(np.float32)
+        ]
+        if as_float:
+            data = data.astype(np.float32)
         return torch.from_numpy(data).unbind(dim=1), (f"/{img.path}", t, z)
 
     def __len__(self) -> int:

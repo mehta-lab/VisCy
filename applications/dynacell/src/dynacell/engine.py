@@ -20,6 +20,7 @@ from monai.transforms import DivisiblePad
 from torch import Tensor, nn
 
 from dynacell.celldiff_wrapper import CELLDiff3DVS
+from dynacell.mask_conditioning import CondMaskSource, MaskCorruption, binarize_mask, encode_mask
 from dynacell.tiling import window_starts
 from viscy_data import Sample
 from viscy_models import Unet3d, UNeXt2
@@ -37,6 +38,7 @@ from viscy_models.gan import (
 )
 from viscy_models.unet.fcmae import FullyConvolutionalMAE
 from viscy_utils.log_images import detach_sample, log_image_grid
+from viscy_utils.losses import SegAuxDice
 from viscy_utils.optimizers import configure_adamw_scheduler
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -96,6 +98,68 @@ def _log_samples(module: LightningModule, key: str, imgs: Sequence[Sequence[np.n
     if not imgs or not module.trainer.is_global_zero or module.logger is None:
         return
     log_image_grid(module.logger, key, imgs, module.current_epoch)
+
+
+def _check_seg_aux_args(
+    seg_aux: SegAuxDice | None, seg_aux_weight: float, base_loss: nn.Module, base_accepts_fg_mask: bool
+) -> None:
+    """Reject ``seg_aux`` configurations whose meaning would be silently different.
+
+    A weight without the module does nothing; and a base loss that accepts
+    ``fg_mask`` (v1 ``SpotlightLoss``) would be called without it once the mask
+    belongs to the aux term, silently switching it to its own runtime mask.
+    """
+    if seg_aux is None:
+        if seg_aux_weight != 0.0:
+            raise ValueError(f"seg_aux_weight={seg_aux_weight} has no effect without seg_aux.")
+        return
+    if base_accepts_fg_mask:
+        raise ValueError(
+            f"seg_aux consumes fg_mask, so the base loss is called without it; "
+            f"{type(base_loss).__name__} accepts fg_mask and would change meaning. "
+            "Use a mask-free base loss (e.g. MSELoss, L1Loss, MixedLoss) with seg_aux."
+        )
+
+
+def _require_fg_mask(batch: Sample) -> Tensor:
+    """Return the batch's ``fg_mask`` or raise naming the missing config."""
+    if "fg_mask" not in batch:
+        raise KeyError(
+            "seg_aux or mask_mode is set but the batch has no 'fg_mask'. Set fg_mask_key on the "
+            "datamodule (the store needs a generate_fg_masks array) or drop seg_aux / mask_mode."
+        )
+    return batch["fg_mask"]
+
+
+def _check_mask_mode_args(
+    mask_mode: str | None,
+    net_kwargs: dict,
+    seg_aux: SegAuxDice | None,
+    mask_velocity_weight: float,
+    mask_dice_weight: float,
+    mask_corruption: MaskCorruption | None,
+    cond_mask_source: CondMaskSource | None,
+) -> None:
+    """Reject ``mask_mode`` settings that would be silently ignored or ambiguous."""
+    if mask_mode not in (None, "joint", "cond"):
+        raise ValueError(f"mask_mode must be None, 'joint' or 'cond', got {mask_mode!r}")
+    if mask_mode != "joint" and (mask_velocity_weight != 1.0 or mask_dice_weight != 0.0):
+        raise ValueError("mask_velocity_weight and mask_dice_weight apply only to mask_mode='joint'.")
+    if mask_mode != "cond" and (mask_corruption is not None or cond_mask_source is not None):
+        raise ValueError("mask_corruption and cond_mask_source apply only to mask_mode='cond'.")
+    cond_channels = net_kwargs.get("cond_channels", 1)
+    if mask_mode == "cond" and cond_channels < 2:
+        raise ValueError(f"mask_mode='cond' needs net_config.cond_channels >= 2 (phase + mask), got {cond_channels}")
+    if mask_mode != "cond" and cond_channels != 1:
+        raise ValueError(f"net_config.cond_channels={cond_channels} needs mask_mode='cond'.")
+    if mask_mode == "joint":
+        if seg_aux is not None:
+            raise ValueError("mask_mode='joint' scores the generated mask channel; use mask_dice_weight, not seg_aux.")
+        if mask_velocity_weight < 0 or mask_dice_weight < 0:
+            raise ValueError(
+                f"mask weights must be >= 0, got mask_velocity_weight={mask_velocity_weight}, "
+                f"mask_dice_weight={mask_dice_weight}"
+            )
 
 
 def _make_divisible_pad(model: nn.Module) -> DivisiblePad:
@@ -518,6 +582,15 @@ class DynacellUNet(LightningModule):
         the resume checkpoint, and the resume state overwrites it. The
         file at ``ckpt_path`` must therefore remain accessible for the
         lifetime of any run based on a pretrained leaf.
+    seg_aux : SegAuxDice or None
+        Auxiliary segmentation loss scored against the batch's ``fg_mask``.
+        When set, the training loss is ``loss_function(pred, target) +
+        seg_aux_weight * seg_aux(pred, target, fg_mask)``; ``loss_function``
+        never sees the mask, and ``loss/validate`` stays the base term alone so
+        checkpoint selection means the same as for the baseline. Every batch
+        must then carry ``fg_mask`` (set ``fg_mask_key`` on the datamodule).
+    seg_aux_weight : float
+        Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
     """
 
     def __init__(
@@ -538,9 +611,11 @@ class DynacellUNet(LightningModule):
         predict_phase_shifts: Sequence[int] | Sequence[tuple[int, int]] | None = None,
         ckpt_path: str | None = None,
         encoder_only: bool = False,
+        seg_aux: SegAuxDice | None = None,
+        seg_aux_weight: float = 0.0,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["loss_function", "ckpt_path", "encoder_only"])
+        self.save_hyperparameters(ignore=["loss_function", "ckpt_path", "encoder_only", "seg_aux"])
         if model_config is None:
             model_config = {}
         net_class = _ARCHITECTURE.get(architecture)
@@ -558,10 +633,13 @@ class DynacellUNet(LightningModule):
         self.predict_overlap = predict_overlap
         self.predict_blend = predict_blend
         self.predict_phase_shifts = predict_phase_shifts
+        self.seg_aux = seg_aux
+        self.seg_aux_weight = seg_aux_weight
 
         self.training_step_outputs: list = []
         # Each entry is a list of (loss, batch_size) tuples for weighted aggregation.
         self.validation_losses: list[list[tuple[Tensor, int]]] = []
+        self.validation_dice_losses: list[list[tuple[Tensor, int]]] = []
         self.validation_step_outputs: list = []
 
         # Cache fg_mask compatibility to avoid per-batch inspect.signature().
@@ -569,6 +647,8 @@ class DynacellUNet(LightningModule):
         self._loss_accepts_fg_mask = "fg_mask" in sig.parameters or any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
+        self._loss_returns_components = "return_components" in sig.parameters
+        _check_seg_aux_args(seg_aux, seg_aux_weight, self.loss_function, self._loss_accepts_fg_mask)
 
         # Build example_input_array for graph logging (TensorBoard/W&B).
         in_channels = model_config.get("in_channels") or 1
@@ -609,16 +689,48 @@ class DynacellUNet(LightningModule):
         """
         return self.model(x)
 
-    def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> Tensor:
-        """Compute loss, optionally passing fg_mask to the loss function."""
-        if "fg_mask" in batch:
-            if not self._loss_accepts_fg_mask:
-                raise TypeError(
-                    f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
-                    f"Use SpotlightLoss or remove fg_mask_key from the data config."
-                )
-            return self.loss_function(pred, target, fg_mask=batch["fg_mask"])
-        return self.loss_function(pred, target)
+    def _compute_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, dict[str, Tensor]]:
+        """Compute loss, optionally passing fg_mask to the loss function.
+
+        Returns the components alongside the scalar so the Spotlight terms can
+        be logged separately. They come from the loss itself rather than being
+        re-derived here: a second derivation would silently fork from the
+        objective actually being optimized, which is the one thing that makes
+        the logged numbers worthless for calibration.
+
+        Returns
+        -------
+        tuple of (Tensor, dict of str to Tensor)
+            Scalar loss and its components (empty for a plain criterion).
+        """
+        if "fg_mask" not in batch:
+            return self.loss_function(pred, target), {}
+        if not self._loss_accepts_fg_mask:
+            raise TypeError(
+                f"{type(self.loss_function).__name__} does not accept 'fg_mask'. "
+                f"Use SpotlightLoss or remove fg_mask_key from the data config."
+            )
+        # Re-binarize: hcs.py patches fg_mask into gpu_augmentations, and the
+        # affine resamples it with bilinear interpolation, so the mask arrives
+        # with fractional values on any arm whose augmentation stack resamples.
+        # Flip-only stacks are unaffected; this keeps the two cases identical.
+        fg_mask = (batch["fg_mask"] > 0.5).float()
+        if not self._loss_returns_components:
+            return self.loss_function(pred, target, fg_mask=fg_mask), {}
+        return self.loss_function(pred, target, fg_mask=fg_mask, return_components=True)
+
+    def _compute_seg_aux_loss(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, Tensor, Tensor]:
+        """Compute the mask-free base loss and the unweighted ``seg_aux`` Dice.
+
+        Returns
+        -------
+        tuple of (Tensor, Tensor, Tensor)
+            Base loss, Dice loss, and the number of (sample, channel) patches
+            that contributed to the Dice.
+        """
+        base = self.loss_function(pred, target)
+        dice, comps = self.seg_aux(pred, target, _require_fg_mask(batch), return_components=True)
+        return base, dice, comps["n_valid"]
 
     def training_step(self, batch: Sample, batch_idx: int) -> Tensor:
         """Execute a single training step.
@@ -638,7 +750,12 @@ class DynacellUNet(LightningModule):
         source = batch["source"]
         target = batch["target"]
         pred = self.forward(source)
-        loss = self._compute_loss(pred, target, batch)
+        if self.seg_aux is None:
+            loss, components = self._compute_loss(pred, target, batch)
+        else:
+            base, dice, n_valid = self._compute_seg_aux_loss(pred, target, batch)
+            loss = base + self.seg_aux_weight * dice
+            components = {"base": base, "dice": dice, "dice_n_valid": n_valid}
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(detach_sample((source, target, pred), self.log_samples_per_batch))
         self.log(
@@ -651,6 +768,20 @@ class DynacellUNet(LightningModule):
             sync_dist=True,
             batch_size=source.shape[0],
         )
+        # Unweighted Spotlight terms, mirroring `loss/g_recon_*_train` on the GAN
+        # path. Without these the fused scalar cannot say whether the Dice term
+        # is contributing anything, which is what the lambda_mse choice rests on.
+        # With seg_aux: the base term, the unweighted Dice, and its valid-patch count.
+        for name, value in components.items():
+            self.log(
+                f"loss/{name}_train",
+                value,
+                on_step=True,
+                on_epoch=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=source.shape[0],
+            )
         return loss
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
@@ -668,7 +799,13 @@ class DynacellUNet(LightningModule):
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         pred = self.forward(source)
-        loss = self._compute_loss(pred, target, batch)
+        if self.seg_aux is None:
+            loss, _ = self._compute_loss(pred, target, batch)
+        else:
+            # loss/validate stays the base term so the checkpoint monitor means
+            # the same as the baseline's; the Dice goes to loss/validate_dice.
+            loss, dice, _ = self._compute_seg_aux_loss(pred, target, batch)
+            _record_val_loss(self.validation_dice_losses, dataloader_idx, dice.detach(), source.shape[0])
         _record_val_loss(self.validation_losses, dataloader_idx, loss.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
@@ -727,8 +864,11 @@ class DynacellUNet(LightningModule):
         _log_samples(self, "val_samples", self.validation_step_outputs)
         if self.validation_losses:
             self.log("loss/validate", _aggregate_validation_losses(self.validation_losses), sync_dist=True)
+        if self.validation_dice_losses:
+            self.log("loss/validate_dice", _aggregate_validation_losses(self.validation_dice_losses), sync_dist=True)
         self.validation_step_outputs.clear()
         self.validation_losses.clear()
+        self.validation_dice_losses.clear()
 
     def configure_optimizers(self):
         """Configure AdamW optimizer with LR scheduler."""
@@ -830,6 +970,43 @@ class DynacellFlowMatching(LightningModule):
         restored.  Bypasses LightningCLI's checkpoint hparam merging, so
         predict-time settings (``predict_method``, ``predict_overlap``,
         etc.) are taken from the config rather than the checkpoint.
+    seg_aux : SegAuxDice or None
+        Auxiliary segmentation loss on the one-step data estimate
+        ``x1_hat = x_t + (1 - t) * v_hat``, scored against the batch's
+        ``fg_mask`` and gated to ``t >= 1 - seg_aux_t0`` (see
+        :class:`~dynacell.celldiff_wrapper.CELLDiff3DVS`). The training loss
+        becomes ``velocity_mse + seg_aux_weight * dice``; ``loss/validate``
+        stays velocity-only and, with ``compute_validation_loss``, the Dice is
+        logged as ``loss/validate_dice``. Every batch whose loss is computed
+        must carry ``fg_mask``. Prediction and generation are unaffected.
+    seg_aux_weight : float
+        Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
+    seg_aux_t0 : float
+        Fraction of the time range, nearest the data end, in which ``seg_aux``
+        applies; it gates the C-joint mask Dice the same way.
+    mask_mode : {"joint", "cond"} or None
+        Segmentation inside the generative process (Spotlight v2 Stage 1b);
+        ``None`` is the baseline. Both variants take the mask from the batch's
+        ``fg_mask`` (binarized at 0.5) during fit, encoded ``{0, 1} -> {-1, 1}``
+        like the ``MinMaxSampled`` target. ``"joint"`` (C-joint): the flow
+        generates ``[image, mask]`` (``net_config.in_channels`` = 2 x target
+        channels); the loss is ``velocity_image + mask_velocity_weight *
+        velocity_mask + mask_dice_weight * dice``; ``loss/validate`` is
+        ``velocity_image`` alone, and prediction returns only the image half.
+        ``"cond"`` (C-cond): the mask is a conditioning channel after phase
+        (``net_config.cond_channels`` = 2): ``fg_mask`` corrupted by
+        ``mask_corruption`` in training, clean ``fg_mask`` in validation, and
+        ``cond_mask_source`` in prediction.
+    mask_velocity_weight : float
+        C-joint weight of the mask-channel velocity loss.
+    mask_dice_weight : float
+        C-joint weight of the gated soft Dice on the mask channel's one-step
+        estimate (see :meth:`~dynacell.celldiff_wrapper.CELLDiff3DVS.joint_mask_losses`).
+    mask_corruption : MaskCorruption or None
+        C-cond training-only mask corruption; ``None`` trains on the clean mask.
+    cond_mask_source : CondMaskSource or None
+        C-cond predict-time mask source; required to predict with
+        ``mask_mode="cond"``.
     """
 
     def __init__(
@@ -848,13 +1025,48 @@ class DynacellFlowMatching(LightningModule):
         predict_method: Literal["denoise", "generate", "sliding_window", "iterative"] = "generate",
         predict_overlap: int | tuple[int, int, int] = 256,
         ckpt_path: str | None = None,
+        seg_aux: SegAuxDice | None = None,
+        seg_aux_weight: float = 0.0,
+        seg_aux_t0: float = 0.7,
+        mask_mode: Literal["joint", "cond"] | None = None,
+        mask_velocity_weight: float = 1.0,
+        mask_dice_weight: float = 0.0,
+        mask_corruption: MaskCorruption | None = None,
+        cond_mask_source: CondMaskSource | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(
-            ignore=["predict_method", "predict_overlap", "num_generate_steps", "num_log_steps", "ckpt_path"]
+            ignore=[
+                "predict_method",
+                "predict_overlap",
+                "num_generate_steps",
+                "num_log_steps",
+                "ckpt_path",
+                "seg_aux",
+                "mask_corruption",
+                "cond_mask_source",
+            ]
         )
-        net = CELLDiffNet(**(net_config or {}))
-        self.model = CELLDiff3DVS(net, **(transport_config or {}))
+        if seg_aux is None and seg_aux_weight != 0.0:
+            raise ValueError(f"seg_aux_weight={seg_aux_weight} has no effect without seg_aux.")
+        net_kwargs = net_config or {}
+        _check_mask_mode_args(
+            mask_mode, net_kwargs, seg_aux, mask_velocity_weight, mask_dice_weight, mask_corruption, cond_mask_source
+        )
+        net = CELLDiffNet(**net_kwargs)
+        self.model = CELLDiff3DVS(
+            net,
+            **(transport_config or {}),
+            seg_aux=seg_aux,
+            seg_aux_t0=seg_aux_t0,
+            joint_mask=mask_mode == "joint",
+        )
+        self.seg_aux_weight = seg_aux_weight
+        self.mask_mode = mask_mode
+        self.mask_velocity_weight = mask_velocity_weight
+        self.mask_dice_weight = mask_dice_weight
+        self.mask_corruption = mask_corruption
+        self.cond_mask_source = cond_mask_source
         self.lr = lr
         self.schedule = schedule
         self.warmup_steps = warmup_steps
@@ -868,6 +1080,8 @@ class DynacellFlowMatching(LightningModule):
         self.predict_overlap = predict_overlap
         self._training_step_outputs: list = []
         self._validation_losses: list[list[tuple[Tensor, int]]] = []
+        self._validation_dice_losses: list[list[tuple[Tensor, int]]] = []
+        self._validation_mask_velocity_losses: list[list[tuple[Tensor, int]]] = []
         self._val_log_batch: tuple[Tensor, Tensor] | None = None
         if ckpt_path is not None:
             self.load_state_dict(_ckpt_state_dict(ckpt_path))
@@ -889,7 +1103,7 @@ class DynacellFlowMatching(LightningModule):
         """
         phase: Tensor = batch["source"]
         target: Tensor = batch["target"]
-        loss = self.model(phase, target)
+        loss, _, components = self._flow_losses(batch, corrupt=True)
         self.log(
             "loss/train",
             loss,
@@ -900,23 +1114,94 @@ class DynacellFlowMatching(LightningModule):
             sync_dist=True,
             batch_size=phase.shape[0],
         )
+        for name, value in components.items():
+            self.log(
+                f"loss/{name}_train",
+                value,
+                on_step=True,
+                on_epoch=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=phase.shape[0],
+            )
         if batch_idx < self.log_batches_per_epoch:
             self._training_step_outputs.extend(detach_sample((phase, target), self.log_samples_per_batch))
         return loss
 
+    def _conditioning(self, batch: dict, corrupt: bool) -> Tensor:
+        """Return the network conditioning: phase, plus the encoded mask for C-cond.
+
+        ``corrupt`` applies ``mask_corruption``; only the training step sets it.
+        """
+        phase: Tensor = batch["source"]
+        if self.mask_mode != "cond":
+            return phase
+        mask = binarize_mask(_require_fg_mask(batch))
+        if corrupt and self.mask_corruption is not None:
+            mask = self.mask_corruption(mask)
+        return torch.cat([phase, encode_mask(mask).to(phase.dtype)], dim=1)
+
+    def _flow_losses(self, batch: dict, corrupt: bool) -> tuple[Tensor, Tensor, dict[str, Tensor]]:
+        """Compute the training objective, its baseline-comparable part, and components.
+
+        Returns
+        -------
+        tuple of (Tensor, Tensor, dict of str to Tensor)
+            The weighted objective; the image velocity loss that
+            ``loss/validate`` reports (the whole objective for the baseline);
+            and the unweighted terms to log (empty for the baseline).
+        """
+        target: Tensor = batch["target"]
+        if self.mask_mode == "joint":
+            out = self.model.joint_mask_losses(batch["source"], target, _require_fg_mask(batch))
+            base = out["velocity_image"]
+            loss = base + self.mask_velocity_weight * out["velocity_mask"] + self.mask_dice_weight * out["dice"]
+            components = {
+                "base": base,
+                "mask_velocity": out["velocity_mask"],
+                "dice": out["dice"],
+                "dice_n_valid": out["n_valid"],
+                "dice_n_gated": out["n_gated"],
+            }
+            return loss, base, components
+        cond = self._conditioning(batch, corrupt)
+        if self.model.seg_aux is None:
+            loss = self.model(cond, target)
+            return loss, loss, {}
+        base, aux = self.model(cond, target, _require_fg_mask(batch))
+        components = {
+            "base": base,
+            "dice": aux["dice"],
+            "dice_n_valid": aux["n_valid"],
+            "dice_n_gated": aux["n_gated"],
+        }
+        return base + self.seg_aux_weight * aux["dice"], base, components
+
     def validation_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> None:
-        """Capture validation samples and optionally compute loss."""
+        """Capture validation samples and optionally compute loss.
+
+        C-cond conditions on the uncorrupted ``fg_mask`` here.
+        """
         if batch_idx == 0 and self._val_log_batch is None:
             n = self.log_samples_per_batch
             self._val_log_batch = (
-                batch["source"][:n].clone(),
+                self._conditioning(batch, corrupt=False)[:n].clone(),
                 batch["target"][:n].clone(),
             )
         if not self.compute_validation_loss:
             return
         phase: Tensor = batch["source"]
-        target: Tensor = batch["target"]
-        loss = self.model(phase, target)
+        # loss/validate stays the image velocity loss; aux terms are logged apart.
+        _, loss, components = self._flow_losses(batch, corrupt=False)
+        if "dice" in components:
+            _record_val_loss(self._validation_dice_losses, dataloader_idx, components["dice"].detach(), phase.shape[0])
+        if "mask_velocity" in components:
+            _record_val_loss(
+                self._validation_mask_velocity_losses,
+                dataloader_idx,
+                components["mask_velocity"].detach(),
+                phase.shape[0],
+            )
         _record_val_loss(self._validation_losses, dataloader_idx, loss.detach(), phase.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
@@ -943,13 +1228,25 @@ class DynacellFlowMatching(LightningModule):
             self._val_log_batch = None
         if self._validation_losses:
             self.log("loss/validate", _aggregate_validation_losses(self._validation_losses), sync_dist=True)
+        if self._validation_dice_losses:
+            self.log("loss/validate_dice", _aggregate_validation_losses(self._validation_dice_losses), sync_dist=True)
+        if self._validation_mask_velocity_losses:
+            self.log(
+                "loss/validate_mask_velocity",
+                _aggregate_validation_losses(self._validation_mask_velocity_losses),
+                sync_dist=True,
+            )
         self._validation_losses.clear()
+        self._validation_dice_losses.clear()
+        self._validation_mask_velocity_losses.clear()
 
     def predict_step(self, batch: dict, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Generate virtual staining for one batch via ODE sampling.
 
         Pads source if smaller than ``input_spatial_size``, dispatches to
         the configured predict method, then crops back to the original shape.
+        C-cond appends the encoded ``cond_mask_source`` mask to the source;
+        C-joint returns only the image half of the generated channels.
 
         Parameters
         ----------
@@ -967,6 +1264,11 @@ class DynacellFlowMatching(LightningModule):
         """
         source: Tensor = batch["source"]
         original_shape = source.shape[2:]
+        if self.mask_mode == "cond":
+            if self.cond_mask_source is None:
+                raise ValueError("mask_mode='cond' needs cond_mask_source to predict.")
+            mask = self.cond_mask_source.read(batch["index"], tuple(original_shape)).to(source)
+            source = torch.cat([source, encode_mask(mask)], dim=1)
 
         # Pad source if any spatial dim is smaller than input_spatial_size.
         patch_size = self.model.net.input_spatial_size
@@ -1008,6 +1310,8 @@ class DynacellFlowMatching(LightningModule):
                 "Choose 'denoise', 'generate', 'sliding_window', or 'iterative'."
             )
 
+        if self.mask_mode == "joint":
+            prediction = prediction[:, : self.model.net.inconv.in_channels // 2]
         return prediction[:, :, : original_shape[0], : original_shape[1], : original_shape[2]]
 
     def configure_optimizers(self):
@@ -1056,7 +1360,16 @@ class DynacellGAN(LightningModule):
     discriminator_config : dict or None
         Keyword arguments forwarded to :class:`MultiScalePatchGAN3D`.
     lambda_l1 : float
-        Weight of the L1 reconstruction loss in the generator objective.
+        Weight of the reconstruction loss in the generator objective. Named for
+        the L1 default; it weights whatever ``recon_loss`` is.
+    recon_loss : nn.Module or None
+        Generator reconstruction criterion. ``None`` (default) uses
+        :class:`torch.nn.L1Loss`, which is what every published pix2pix family
+        trained with. A loss accepting ``fg_mask`` (e.g.
+        :class:`viscy_utils.losses.SpotlightLoss`) receives the batch's
+        foreground mask. Note ``lambda_l1`` was tuned against L1's magnitude, so
+        a swapped loss on a different scale re-balances the generator objective
+        against the adversarial term — watch ``loss/g_recon_*_train``.
     loss_type : {"lsgan", "nonsat", "rpgan"}
         Adversarial loss family. Default ``"lsgan"`` matches the
         pre-modernization recipe. ``"nonsat"`` is the StyleGAN2 default;
@@ -1143,6 +1456,15 @@ class DynacellGAN(LightningModule):
         keys but EMA is enabled, the EMA submodule is seeded from the loaded
         generator weights (so inference matches the non-EMA inference path
         on legacy checkpoints).
+    seg_aux : SegAuxDice or None
+        Auxiliary segmentation loss on the generator output, scored against
+        the batch's ``fg_mask``. Adds ``seg_aux_weight * dice`` to the
+        generator objective as its own term (not scaled by ``lambda_l1``);
+        ``recon_loss`` is then called without the mask, and
+        ``loss/validate`` / ``loss/validate_ema`` stay reconstruction-only.
+        Every batch must carry ``fg_mask``.
+    seg_aux_weight : float
+        Weight of the ``seg_aux`` term. Must be ``0.0`` when ``seg_aux`` is None.
     """
 
     def __init__(
@@ -1151,6 +1473,7 @@ class DynacellGAN(LightningModule):
         generator_config: dict | None = None,
         discriminator_config: dict | None = None,
         lambda_l1: float = 100.0,
+        recon_loss: nn.Module | None = None,
         loss_type: Literal["lsgan", "nonsat", "rpgan"] = "lsgan",
         lambda_adv: float = 1.0,
         r1_gamma: float = 0.0,
@@ -1173,12 +1496,20 @@ class DynacellGAN(LightningModule):
         predict_blend: Literal["cosine", "uniform"] = "cosine",
         predict_phase_shifts: Sequence[int] | Sequence[tuple[int, int]] | None = None,
         ckpt_path: str | None = None,
+        seg_aux: SegAuxDice | None = None,
+        seg_aux_weight: float = 0.0,
     ) -> None:
         super().__init__()
         # Lightning's manual-optimization API: required because the GAN
         # alternates two optimizers per training_step.
         self.automatic_optimization = False
-        self.save_hyperparameters(ignore=["ckpt_path"])
+        # recon_loss is ignored for the same reason loss_function is on DynacellUNet:
+        # an nn.Module in hparams gets pickled into the checkpoint, and
+        # VisCyCLI._parse_ckpt_path lets checkpoint hparams win on non-fit
+        # subcommands for any key the predict leaf does not declare. A single
+        # pickled class also makes torch.load(weights_only=True) — which
+        # _ckpt_state_dict uses — raise for the whole file.
+        self.save_hyperparameters(ignore=["ckpt_path", "recon_loss", "seg_aux"])
 
         net_class = _ARCHITECTURE.get(architecture)
         if net_class is None:
@@ -1202,6 +1533,20 @@ class DynacellGAN(LightningModule):
             )
         self.generator = net_class(**(generator_config or {}))
         self.discriminator = MultiScalePatchGAN3D(**(discriminator_config or {}))
+
+        # Generator reconstruction term. Default keeps the published behaviour
+        # (plain L1 under lambda_l1); SpotlightLoss swaps in under the same weight.
+        self.recon_loss = recon_loss if recon_loss is not None else nn.L1Loss()
+        # Cache fg_mask compatibility to avoid per-batch inspect.signature(),
+        # mirroring DynacellUNet.
+        _recon_sig = inspect.signature(self.recon_loss.forward)
+        self._recon_accepts_fg_mask = "fg_mask" in _recon_sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in _recon_sig.parameters.values()
+        )
+        self._recon_returns_components = "return_components" in _recon_sig.parameters
+        _check_seg_aux_args(seg_aux, seg_aux_weight, self.recon_loss, self._recon_accepts_fg_mask)
+        self.seg_aux = seg_aux
+        self.seg_aux_weight = seg_aux_weight
 
         self.lambda_l1 = lambda_l1
         self.loss_type = loss_type
@@ -1252,6 +1597,8 @@ class DynacellGAN(LightningModule):
         # The second one is only populated when generator_ema exists.
         self.validation_losses_raw: list[list[tuple[Tensor, int]]] = []
         self.validation_losses_ema: list[list[tuple[Tensor, int]]] = []
+        self.validation_dice_raw: list[list[tuple[Tensor, int]]] = []
+        self.validation_dice_ema: list[list[tuple[Tensor, int]]] = []
         self.validation_step_outputs: list = []
 
         # Build example_input_array for graph logging (TensorBoard/W&B).
@@ -1430,6 +1777,53 @@ class DynacellGAN(LightningModule):
             raise ValueError("RpGAN G loss requires fresh d_real logits; got None.")
         return rpgan_g_loss(d_real, d_fake)
 
+    def _compute_recon(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, dict[str, Tensor]]:
+        """Compute the generator reconstruction term, with fg_mask when present.
+
+        Returns the scalar term and any per-component breakdown the loss exposes
+        (empty for plain L1). The components come from the loss itself rather
+        than being re-derived here: they are the campaign's only monitor on
+        whether ``lambda_l1`` still balances the adversarial term after the
+        objective is swapped, and a re-derivation would silently fork from what
+        is actually optimized.
+
+        Parameters
+        ----------
+        pred : Tensor
+            Generator output.
+        target : Tensor
+            Ground truth.
+        batch : Sample
+            The batch, read for an optional ``fg_mask``.
+
+        Returns
+        -------
+        tuple of (Tensor, dict of str to Tensor)
+            Scalar reconstruction loss and its components.
+        """
+        # With seg_aux the mask belongs to the aux term alone (see _compute_seg_aux).
+        if "fg_mask" not in batch or self.seg_aux is not None:
+            return self.recon_loss(pred, target), {}
+        if not self._recon_accepts_fg_mask:
+            raise TypeError(
+                f"{type(self.recon_loss).__name__} does not accept 'fg_mask'. "
+                f"Use SpotlightLoss or remove fg_mask_key from the data config."
+            )
+        # Re-binarize: the mask rides through the same gpu_augmentations as the
+        # image (hcs.py patches it into the list), and the affine resamples with
+        # bilinear interpolation, so ~40% of voxels arrive with fractional
+        # weight. SpotlightLoss would then compute a soft-weighted mean and a
+        # soft-vs-soft Dice — different semantics from the flip-only FNet arms.
+        fg_mask = (batch["fg_mask"] > 0.5).float()
+        if not self._recon_returns_components:
+            return self.recon_loss(pred, target, fg_mask=fg_mask), {}
+        return self.recon_loss(pred, target, fg_mask=fg_mask, return_components=True)
+
+    def _compute_seg_aux(self, pred: Tensor, target: Tensor, batch: Sample) -> tuple[Tensor, Tensor]:
+        """Compute the unweighted ``seg_aux`` Dice and its valid-patch count."""
+        dice, comps = self.seg_aux(pred, target, _require_fg_mask(batch), return_components=True)
+        return dice, comps["n_valid"]
+
     def training_step(self, batch: Sample, batch_idx: int) -> None:
         """Run one alternating D/G optimization step.
 
@@ -1525,8 +1919,11 @@ class DynacellGAN(LightningModule):
             adv_loss = self._adv_g_loss(d_real_for_g, d_fake_for_g)
         else:
             adv_loss = self._adv_g_loss(None, d_fake_for_g)
-        l1_loss = F.l1_loss(pred, target)
-        g_loss = self.lambda_adv * adv_loss + self.lambda_l1 * l1_loss
+        recon_train, recon_components = self._compute_recon(pred, target, batch)
+        g_loss = self.lambda_adv * adv_loss + self.lambda_l1 * recon_train
+        if self.seg_aux is not None:
+            dice_train, dice_n_valid = self._compute_seg_aux(pred, target, batch)
+            g_loss = g_loss + self.seg_aux_weight * dice_train
         opt_g.zero_grad(set_to_none=True)
         self.manual_backward(g_loss)
         opt_g.step()
@@ -1567,8 +1964,16 @@ class DynacellGAN(LightningModule):
             "loss/d_train": d_loss,
             "loss/g_train": g_loss,
             "loss/g_adv_train": adv_loss,
-            "loss/g_l1_train": l1_loss,
+            # Key kept as `g_l1_train` even when recon_loss is not L1: renaming it
+            # would break the existing dashboards and three engine tests. It now
+            # carries whatever reconstruction term is configured, which is why the
+            # components below are logged alongside it rather than instead of it.
+            "loss/g_l1_train": recon_train,
         }
+        log_payload.update({f"loss/g_recon_{name}_train": value for name, value in recon_components.items()})
+        if self.seg_aux is not None:
+            log_payload["loss/g_dice_train"] = dice_train
+            log_payload["loss/g_dice_n_valid_train"] = dice_n_valid
         self.log_dict(
             log_payload,
             on_step=True,
@@ -1586,7 +1991,7 @@ class DynacellGAN(LightningModule):
             self.log("reg/r2", r2_value.detach(), on_step=True, on_epoch=True, sync_dist=False)
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
-        """Compute generator L1 validation loss(es) and capture samples.
+        """Compute generator reconstruction validation loss(es) and capture samples.
 
         Always runs the raw generator forward and accumulates into
         ``validation_losses_raw`` (drives the back-compat ``loss/validate``
@@ -1610,17 +2015,23 @@ class DynacellGAN(LightningModule):
         Returns
         -------
         Tensor
-            Scalar L1 loss on this batch (raw generator).
+            Scalar reconstruction loss on this batch (raw generator). This is
+            whatever ``recon_loss`` is configured to be, matching the objective
+            the G step optimizes — otherwise ``monitor: loss/validate_ema``
+            would select checkpoints against a different objective.
         """
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         # Raw generator pass (always).
         pred_raw = self.generator(source)
-        l1_raw = F.l1_loss(pred_raw, target)
-        _record_val_loss(self.validation_losses_raw, dataloader_idx, l1_raw.detach(), source.shape[0])
+        recon_raw, _ = self._compute_recon(pred_raw, target, batch)
+        _record_val_loss(self.validation_losses_raw, dataloader_idx, recon_raw.detach(), source.shape[0])
+        if self.seg_aux is not None:
+            dice_raw, _ = self._compute_seg_aux(pred_raw, target, batch)
+            _record_val_loss(self.validation_dice_raw, dataloader_idx, dice_raw.detach(), source.shape[0])
         self.log(
             f"loss/val/{dataloader_idx}",
-            l1_raw,
+            recon_raw,
             sync_dist=True,
             batch_size=source.shape[0],
         )
@@ -1629,11 +2040,14 @@ class DynacellGAN(LightningModule):
         if self.generator_ema is not None:
             with torch.no_grad():
                 pred_ema = self.generator_ema(source)
-            l1_ema = F.l1_loss(pred_ema, target)
-            _record_val_loss(self.validation_losses_ema, dataloader_idx, l1_ema.detach(), source.shape[0])
+            recon_ema, _ = self._compute_recon(pred_ema, target, batch)
+            _record_val_loss(self.validation_losses_ema, dataloader_idx, recon_ema.detach(), source.shape[0])
+            if self.seg_aux is not None:
+                dice_ema, _ = self._compute_seg_aux(pred_ema, target, batch)
+                _record_val_loss(self.validation_dice_ema, dataloader_idx, dice_ema.detach(), source.shape[0])
             self.log(
                 f"loss/val_ema/{dataloader_idx}",
-                l1_ema,
+                recon_ema,
                 sync_dist=True,
                 batch_size=source.shape[0],
             )
@@ -1647,7 +2061,7 @@ class DynacellGAN(LightningModule):
             self.validation_step_outputs.extend(
                 detach_sample((source, target, pred_for_samples), self.log_samples_per_batch)
             )
-        return l1_raw
+        return recon_raw
 
     def on_train_epoch_end(self) -> None:
         """Log accumulated training image samples and reset the buffer."""
@@ -1674,9 +2088,16 @@ class DynacellGAN(LightningModule):
                 _aggregate_validation_losses(self.validation_losses_ema),
                 sync_dist=True,
             )
+        # seg_aux Dice, logged apart so the monitors above stay reconstruction-only.
+        if self.validation_dice_raw:
+            self.log("loss/validate_dice", _aggregate_validation_losses(self.validation_dice_raw), sync_dist=True)
+        if self.validation_dice_ema:
+            self.log("loss/validate_ema_dice", _aggregate_validation_losses(self.validation_dice_ema), sync_dist=True)
         self.validation_step_outputs.clear()
         self.validation_losses_raw.clear()
         self.validation_losses_ema.clear()
+        self.validation_dice_raw.clear()
+        self.validation_dice_ema.clear()
 
     def configure_optimizers(self):
         """Build two AdamW optimizers + WarmupCosine schedulers via the shared helper."""

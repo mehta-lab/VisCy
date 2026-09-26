@@ -14,9 +14,12 @@ import itertools
 import torch
 from torch import Tensor, nn
 
+from dynacell.mask_conditioning import binarize_mask, encode_mask
 from dynacell.tiling import window_starts
 from viscy_models.celldiff import CELLDiffNet
 from viscy_models.celldiff.modules.transport import Sampler, create_transport
+from viscy_models.celldiff.modules.transport.utils import expand_t_like_x
+from viscy_utils.losses import SegAuxDice
 
 
 class CELLDiff3DVS(nn.Module):
@@ -39,6 +42,24 @@ class CELLDiff3DVS(nn.Module):
         Training epsilon for transport stability.
     sample_eps : float or None
         Sampling epsilon for transport stability.
+    seg_aux : SegAuxDice or None
+        Auxiliary segmentation loss on the one-step data estimate
+        ``x1_hat = x_t + (1 - t) * v_hat`` (linear path, t=1 is data). Only
+        consulted when ``forward`` receives ``fg_mask``; requires
+        ``path_type="Linear"`` and ``prediction="velocity"``, the only case in
+        which that estimate is exact.
+    seg_aux_t0 : float
+        Gate for ``seg_aux``: a sample contributes only when
+        ``t >= 1 - seg_aux_t0``, i.e. the least-noisy ``seg_aux_t0`` fraction
+        of the time range. ``1.0`` is ungated. Also gates the mask Dice of
+        :meth:`joint_mask_losses`.
+    joint_mask : bool
+        C-joint: the flow generates ``[image, mask]``, the mask channels
+        being ``fg_mask`` encoded to ``{-1, 1}``; train with
+        :meth:`joint_mask_losses`. ``net.in_channels`` must then be twice the
+        target channel count, and every ``generate*`` method returns both
+        halves. Requires ``path_type="Linear"`` and ``prediction="velocity"``
+        (the mask Dice scores ``x1_hat``).
     """
 
     def __init__(
@@ -49,15 +70,32 @@ class CELLDiff3DVS(nn.Module):
         loss_weight: str | None = None,
         train_eps: float | None = None,
         sample_eps: float | None = None,
+        seg_aux: SegAuxDice | None = None,
+        seg_aux_t0: float = 0.7,
+        joint_mask: bool = False,
     ) -> None:
         super().__init__()
+        if (seg_aux is not None or joint_mask) and (path_type != "Linear" or prediction != "velocity"):
+            raise ValueError(
+                "seg_aux and joint_mask use x1_hat = x_t + (1 - t) * v_hat, which holds only for "
+                f"path_type='Linear' and prediction='velocity'; got {path_type!r}, {prediction!r}."
+            )
+        if not 0.0 < seg_aux_t0 <= 1.0:
+            raise ValueError(f"seg_aux_t0 must be in (0, 1], got {seg_aux_t0}")
         self.net = net
         self.path_type = path_type
         self.prediction = prediction
         self.transport = create_transport(path_type, prediction, loss_weight, train_eps, sample_eps)
         self.transport_sampler = Sampler(self.transport)
+        self.seg_aux = seg_aux
+        self.seg_aux_t0 = seg_aux_t0
+        self.joint_mask = joint_mask
+        if joint_mask and net.inconv.in_channels % 2:
+            raise ValueError(f"joint_mask needs net in_channels = 2 x target channels, got {net.inconv.in_channels}")
 
-    def forward(self, phase: Tensor, target: Tensor) -> Tensor:
+    def forward(
+        self, phase: Tensor, target: Tensor, fg_mask: Tensor | None = None
+    ) -> Tensor | tuple[Tensor, dict[str, Tensor]]:
         """Compute flow-matching training loss.
 
         Parameters
@@ -66,17 +104,96 @@ class CELLDiff3DVS(nn.Module):
             Phase contrast input of shape ``(B, 1, D, H, W)``.
         target : Tensor
             Fluorescence target of shape ``(B, C, D, H, W)``.
+        fg_mask : Tensor or None
+            Foreground mask shaped like ``target``. When given, ``seg_aux``
+            must be set and its gated Dice is returned alongside the loss.
 
         Returns
         -------
-        Tensor
-            Scalar training loss.
+        Tensor or tuple of (Tensor, dict of str to Tensor)
+            Scalar velocity loss; with ``fg_mask``, also
+            ``{"dice", "n_valid", "n_gated"}``. ``dice`` is the batch mean of
+            ``1[t >= 1 - t0] * Dice(x1_hat)`` over patches with a usable mask
+            (unweighted; the caller applies its weight), ``n_valid`` the
+            patches that contributed, ``n_gated`` the samples inside the gate.
+            The velocity loss is the same quantity as without ``fg_mask``.
         """
         t, x0, x1 = self.transport.sample(target)
         t, xt, ut = self.transport.path_sampler.plan(t, x0, x1)
         pred = self.net(xt, phase, t)
         loss_dict = self.transport.training_losses(pred, x0, x1, xt, ut, t)
-        return loss_dict["loss"].mean()
+        loss = loss_dict["loss"].mean()
+        if fg_mask is None:
+            return loss
+        if self.seg_aux is None:
+            raise ValueError("fg_mask was passed but seg_aux is not configured.")
+        x1_hat = xt + expand_t_like_x(1 - t, xt) * pred
+        dice, valid = self.seg_aux.per_channel(x1_hat, target, fg_mask)
+        gate = t >= 1 - self.seg_aux_t0
+        contrib = valid & gate.unsqueeze(1)
+        # Mean over valid patches of g(t) * Dice: gated-out samples add 0 but
+        # still count, so the term is an unbiased estimate of E[g(t) * Dice].
+        gated_dice = (dice * contrib).sum() / valid.sum().clamp(min=1)
+        return loss, {"dice": gated_dice, "n_valid": contrib.sum().float(), "n_gated": gate.sum().float()}
+
+    def joint_mask_losses(self, phase: Tensor, target: Tensor, fg_mask: Tensor) -> dict[str, Tensor]:
+        """Compute the C-joint losses on the flow over ``[target, encoded fg_mask]``.
+
+        One noise draw and one ``t`` per sample cover both halves. The mask
+        Dice is a squared-denominator soft Dice of
+        ``p = clamp((x1_hat_mask + 1) / 2, 0, 1)`` against the binary mask,
+        gated to ``t >= 1 - seg_aux_t0``; patches with an empty mask are
+        excluded from the mean (gated-out samples count as 0).
+
+        Parameters
+        ----------
+        phase : Tensor
+            Conditioning of shape ``(B, cond_channels, D, H, W)``.
+        target : Tensor
+            Fluorescence target of shape ``(B, C, D, H, W)``.
+        fg_mask : Tensor
+            Foreground mask shaped like ``target``; binarized at 0.5.
+
+        Returns
+        -------
+        dict of str to Tensor
+            ``velocity_image`` (the baseline's velocity loss, on the image
+            half), ``velocity_mask``, ``dice`` (unweighted), ``n_valid`` and
+            ``n_gated``.
+        """
+        if not self.joint_mask:
+            raise ValueError("joint_mask_losses needs joint_mask=True.")
+        if fg_mask.shape != target.shape:
+            raise ValueError(f"fg_mask {tuple(fg_mask.shape)} must match target {tuple(target.shape)}")
+        n = target.shape[1]
+        if 2 * n != self.net.inconv.in_channels:
+            raise ValueError(f"target has {n} channel(s) but the net generates {self.net.inconv.in_channels}")
+        mask = binarize_mask(fg_mask).to(target.dtype)
+        t, x0, x1 = self.transport.sample(torch.cat([target, encode_mask(mask)], dim=1))
+        t, xt, ut = self.transport.path_sampler.plan(t, x0, x1)
+        pred = self.net(xt, phase, t)
+        image, masked = slice(None, n), slice(n, None)
+        velocity = {
+            name: self.transport.training_losses(pred[:, sl], x0[:, sl], x1[:, sl], xt[:, sl], ut[:, sl], t)[
+                "loss"
+            ].mean()
+            for name, sl in (("velocity_image", image), ("velocity_mask", masked))
+        }
+        x1_hat = xt[:, masked] + expand_t_like_x(1 - t, xt) * pred[:, masked]
+        with torch.autocast(device_type=x1_hat.device.type, enabled=False):
+            p = ((x1_hat.float() + 1.0) / 2.0).clamp(0.0, 1.0).flatten(2)
+            m = mask.float().flatten(2)
+            dice = 1.0 - 2.0 * (p * m).sum(-1) / ((p * p).sum(-1) + m.sum(-1) + 1e-6)
+        valid = m.sum(-1) > 0
+        gate = t >= 1 - self.seg_aux_t0
+        contrib = valid & gate.unsqueeze(1)
+        gated_dice = (dice * contrib).sum() / valid.sum().clamp(min=1)
+        return {
+            **velocity,
+            "dice": gated_dice,
+            "n_valid": contrib.sum().float(),
+            "n_gated": gate.sum().float(),
+        }
 
     def _noise_like_target(self, phase: Tensor) -> Tensor:
         """Create Gaussian noise with the network's output channel count.
