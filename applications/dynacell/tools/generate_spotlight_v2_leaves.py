@@ -135,6 +135,12 @@ MASK_VELOCITY_WEIGHT = 1.0
 CCOND_MASK_MODEL: dict[str, str] = {"celldiff_2d": "fnet2d_segaux", "celldiff": "fnet3d_paper_segaux"}
 CCOND_MASK_CHANNEL = "Nuclei_prediction"
 CCOND_THRESHOLD_PLACEHOLDER = "PLACEHOLDER_val_tuned_threshold"
+# Val-tuned thresholds per C-cond baseline, in the FNet prediction's own units (z-score
+# of the training target). celldiff_2d: t maximizing mean Dice of (FNet-2D segaux pred
+# >= t) vs fg_mask on 20 training-store val FOVs, n=20: 0.30 -> 0.774, with 0.25-0.40
+# within 0.0021 (experiments/2026-09-24_spotlight-v2/ccond_threshold/). The 3D arm's
+# FNet-3D segaux store does not exist yet, so it keeps the placeholder.
+CCOND_THRESHOLDS: dict[str, float | str] = {"celldiff_2d": 0.30, "celldiff": CCOND_THRESHOLD_PLACEHOLDER}
 SAFE_CROP_COVERAGE = 0.9
 _UNEXT2_2D_DATA_OVERLAY = BENCHMARKS / "_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml"
 
@@ -484,7 +490,7 @@ def build_predict(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
             "init_args": {
                 "data_path": mask_store,
                 "channel": CCOND_MASK_CHANNEL,
-                "threshold": CCOND_THRESHOLD_PLACEHOLDER,
+                "threshold": CCOND_THRESHOLDS[arm.baseline],
             },
         }
     return cfg

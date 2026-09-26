@@ -31,9 +31,7 @@ model:
       init_args:
         data_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_segaux/ipsc/a549__mock/prediction.zarr
         channel: Nuclei_prediction
-        # PLACEHOLDER: set to the threshold tuned on the val FOVs (plan Stage 1b C-cond);
-        # data_path is the planned FNet _segaux store, which must be COMPLETE first.
-        threshold: PLACEHOLDER_val_tuned_threshold
+        threshold: 0.3
 data:
   init_args:
     normalizations:
