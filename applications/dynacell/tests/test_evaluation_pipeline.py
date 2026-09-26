@@ -44,9 +44,7 @@ def _import_pipeline_with_stubs(monkeypatch):
     feature_metrics_module.compute_feature_similarity_pairwise = lambda *args, **kwargs: {}
 
     feature_select_module = types.ModuleType("dynacell.evaluation.feature_select")
-    # ``cross_condition_probe`` imports ``select_features``; ``cp_reference`` imports
-    # ``select_gt_features``. Neither is exercised by these cache-reuse tests.
-    feature_select_module.select_features = lambda gt, pred, **kw: (gt, pred, np.ones(gt.shape[1], dtype=bool))
+    # ``cp_reference`` imports ``select_gt_features``; not exercised by these cache-reuse tests.
     feature_select_module.select_gt_features = lambda gt, **kw: np.ones(gt.shape[1], dtype=bool)
     feature_select_module.DEFAULT_FREQ_CUT = 0.05
     feature_select_module.DEFAULT_UNIQUE_CUT = 0.01

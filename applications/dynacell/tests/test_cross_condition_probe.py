@@ -5,10 +5,14 @@ per-cell embeddings written in the same NPZ layout the eval pipeline emits.
 """
 
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+import dynacell.evaluation.cross_condition_probe as probe
+from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, write_cp_reference
 from dynacell.evaluation.cross_condition_probe import (
     _FEATURE_TYPES,
     GROUP_PROBE_FILENAME,
@@ -16,8 +20,30 @@ from dynacell.evaluation.cross_condition_probe import (
     run_for_group,
 )
 
+_DIM = 16
+_DROPPED = 3  # constant in the reference GT, so the reference mask drops it
 
-def _write_group_embeddings(eval_dir: Path, *, seed: int, n_fovs: int = 4, n_per_fov: int = 25, dim: int = 16) -> None:
+
+def _write_reference(path: Path, seed: int = 0) -> str:
+    """Fit a real CP reference over ``_DIM`` features whose mask drops column ``_DROPPED``; return its sha256."""
+    gt = np.random.default_rng(seed).normal(size=(200, _DIM))
+    gt[:, _DROPPED] = 1.0
+    fit = DatasetFit(
+        dataset="ds",
+        cells=gt,
+        record={"positions": [], "gt_cache_dir": None, "cp_cache_built_at": None},
+        in_mask_fit=True,
+    )
+    payload = fit_cp_reference(
+        [fit], target_name="membrane", feature_names=tuple(f"f{i}" for i in range(_DIM)), cp_identity={}, lite={}
+    )
+    write_cp_reference(payload, path, force=True)
+    return payload["sha256"]
+
+
+def _write_group_embeddings(
+    eval_dir: Path, *, seed: int, n_fovs: int = 4, n_per_fov: int = 25, dim: int = _DIM
+) -> None:
     """Write gt+pred NPZ for every feature space into ``eval_dir/embeddings``.
 
     Cells are spread over ``n_fovs`` FOVs so the FOV-stratified GroupKFold has
@@ -36,6 +62,12 @@ def _write_group_embeddings(eval_dir: Path, *, seed: int, n_fovs: int = 4, n_per
         for feat in _FEATURE_TYPES:
             x = rng.normal(size=(n, dim)).astype(np.float32)
             np.savez(emb / f"{source}_{feat}_single_cell_embeddings.npz", embeddings=x, fov=fov, timepoint=tp)
+    # The CP sidecar every eval writes, naming the reference it scored in.
+    reference = eval_dir.parent / "cp_reference.json"
+    sha256 = _write_reference(reference) if not reference.exists() else json.loads(reference.read_text())["sha256"]
+    (eval_dir / "cp_selected_feature_mask.json").write_text(
+        json.dumps({"reference_path": str(reference), "reference_sha256": sha256, "dataset": "ds"})
+    )
 
 
 def _read_rows(csv_path: Path) -> list[dict]:
@@ -129,3 +161,38 @@ def test_run_longform_covers_all_pairs_and_sources(tmp_path):
     # 4 features x 2 pairs x 2 sources.
     assert len(rows) == len(_FEATURE_TYPES) * 2 * 2
     assert {r["pair"] for r in rows} == {"mock_vs_denv", "mock_vs_zikv"}
+
+
+def test_cp_probe_uses_the_reference_mask(tmp_path, monkeypatch):
+    """CP columns reaching the classifier are the reference's kept set, for GT and pred alike."""
+    mock = tmp_path / "eval_demo_membrane_mock"
+    denv = tmp_path / "eval_demo_membrane_denv"
+    _write_group_embeddings(mock, seed=1)
+    _write_group_embeddings(denv, seed=2)
+    widths = []
+    real = probe.paired_auroc
+
+    def _spy(x0, x1, *args, **kwargs):
+        widths.append((x0.shape[1], x1.shape[1]))
+        return real(x0, x1, *args, **kwargs)
+
+    monkeypatch.setattr(probe, "paired_auroc", _spy)
+    rows = probe._probe_one_group({"mock": mock, "denv": denv}, n_splits=2, rng_seed=0)
+    assert rows
+    cp_calls = widths[_FEATURE_TYPES.index("cp") * 2 : _FEATURE_TYPES.index("cp") * 2 + 2]
+    assert cp_calls == [(_DIM - 1, _DIM - 1)] * 2
+    assert all(w == (_DIM, _DIM) for i, w in enumerate(widths) if i // 2 != _FEATURE_TYPES.index("cp"))
+
+
+def test_cp_probe_refuses_evals_scored_in_different_references(tmp_path):
+    """Two conditions scored in different CP references are ambiguous and raise."""
+    mock = tmp_path / "eval_demo_membrane_mock"
+    denv = tmp_path / "eval_demo_membrane_denv"
+    _write_group_embeddings(mock, seed=1)
+    _write_group_embeddings(denv, seed=2)
+    other = tmp_path / "other.json"
+    sidecar = json.loads((denv / "cp_selected_feature_mask.json").read_text())
+    sidecar.update(reference_path=str(other), reference_sha256=_write_reference(other, seed=9))
+    (denv / "cp_selected_feature_mask.json").write_text(json.dumps(sidecar))
+    with pytest.raises(ValueError, match="different CP references"):
+        run([mock, denv], tmp_path / "probe.csv")

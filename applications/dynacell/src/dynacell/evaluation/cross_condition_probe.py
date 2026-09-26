@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 from typing import get_args
@@ -33,7 +34,7 @@ from typing import get_args
 import numpy as np
 
 from dynacell.evaluation.cache import FeatureKind
-from dynacell.evaluation.feature_select import select_features
+from dynacell.evaluation.cp_reference import load_cp_reference
 from dynacell.evaluation.linear_probe import MADScaler, paired_auroc
 
 _FEATURE_TYPES: tuple[str, ...] = get_args(FeatureKind)
@@ -117,6 +118,38 @@ def _load_embeddings(
     return result
 
 
+#: Sidecar the eval writes beside its CP embeddings, naming the CP reference it scored in.
+_CP_SIDECAR = "cp_selected_feature_mask.json"
+
+
+def _cp_reference_mask(eval_dirs: list[Path]) -> np.ndarray:
+    """Return the CP reference keep-mask shared by ``eval_dirs``.
+
+    Read from each eval dir's ``cp_selected_feature_mask.json``, which names the
+    target's CP reference (path + hash). The mask is a property of the target, not
+    of the model or condition, so the probe compares conditions on the same feature
+    subset every eval scored.
+
+    Raises
+    ------
+    FileNotFoundError
+        If an eval dir has no sidecar.
+    ValueError
+        If the dirs name different references (ambiguous), or the reference on
+        disk no longer has the recorded hash.
+    """
+    sidecars = [json.loads((d / _CP_SIDECAR).read_text()) for d in eval_dirs]
+    refs = {(s["reference_path"], s["reference_sha256"]) for s in sidecars}
+    if len(refs) != 1:
+        raise ValueError(f"eval dirs {[str(d) for d in eval_dirs]} were scored in different CP references: {refs}")
+    ((path, sha256),) = refs
+    ref_payload = json.loads(Path(path).read_text())
+    ref = load_cp_reference(Path(path), target_name=ref_payload["target_name"])
+    if ref.sha256 != sha256:
+        raise ValueError(f"CP reference {path} changed since these evals (sha256 {ref.sha256[:12]} vs {sha256[:12]})")
+    return ref.keep_mask
+
+
 def _probe_pair(
     eval_dirs_by_condition: dict[str, Path],
     pair: tuple[str, str],
@@ -160,19 +193,22 @@ def _probe_pair(
     if x0.shape[1] != x1.shape[1]:
         raise ValueError(f"feature dim mismatch for {feature} {source}: {c0}={x0.shape[1]} vs {c1}={x1.shape[1]}")
 
-    # CP regionprops: variance + correlation prune on the pooled cohort
-    # to drop near-constant or redundant columns. Skipped for the deep
-    # embeddings, which are dense learned features.
+    # CP regionprops: the target's CP reference mask (GT-only, pooled over the
+    # benchmark test sets), so the columns are the ones every eval scored and do not
+    # move with the model or the condition pair. Skipped for the deep embeddings,
+    # which are dense learned features.
     if feature == "cp":
-        x0, x1, _ = select_features(x0, x1)
-        if x0.size == 0 or x1.size == 0:
-            row["skipped_reason"] = "all CP columns dropped by select_features"
-            return row
+        mask = _cp_reference_mask([eval_dirs_by_condition[c0], eval_dirs_by_condition[c1]])
+        x0, x1 = x0[:, mask], x1[:, mask]
 
     # Per-plate MAD normalization: cancels per-plate intensity offsets
     # (illumination, exposure, gain) that would otherwise dominate the
     # classifier — especially on CP regionprops, where raw intensity
     # columns make different plates trivially separable (AUROC = 1.0).
+    # By design this also removes any per-condition feature OFFSET: the probe
+    # measures whether infection changes the within-plate cell distribution, not
+    # its location. This is deliberately NOT the CP reference's per-test-set
+    # scaler, which keeps pred-vs-GT offsets visible for the KID/FID metrics.
     x0_scaled = MADScaler().fit_transform(x0.astype(np.float64))
     x1_scaled = MADScaler().fit_transform(x1.astype(np.float64))
     # Tag FOV ids by condition so the two sides cannot collide.

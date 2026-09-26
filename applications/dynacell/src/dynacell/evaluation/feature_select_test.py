@@ -7,7 +7,6 @@ import pytest
 
 from dynacell.evaluation.feature_select import (
     correlation_threshold,
-    select_features,
     select_gt_features,
     variance_threshold,
 )
@@ -101,66 +100,6 @@ def test_correlation_threshold_rejects_unsupported_method(
         correlation_threshold(X, threshold=0.9, method="spearman")
 
 
-def test_select_features_applies_both_filters(
-    rng: np.random.Generator,
-) -> None:
-    # features: [constant, A, A+ε, B]
-    n_gt = 60
-    n_pred = 60
-    n_total = n_gt + n_pred
-
-    a = rng.standard_normal(n_total).astype(np.float64)
-    b = rng.standard_normal(n_total).astype(np.float64)
-    eps = 1e-4 * rng.standard_normal(n_total).astype(np.float64)
-
-    pooled = np.column_stack(
-        [
-            np.zeros(n_total),  # feature 0: constant
-            a,  # feature 1: A
-            a + eps,  # feature 2: A + ε
-            b,  # feature 3: independent
-        ]
-    )
-
-    gt = pooled[:n_gt]
-    pred = pooled[n_gt:]
-
-    gt_f, pred_f, keep_mask = select_features(gt, pred, freq_cut=0.05, unique_cut=0.01, corr_threshold=0.9)
-
-    assert keep_mask.dtype == bool
-    assert keep_mask.shape == (4,)
-    # Feature 0 dropped by variance pruning.
-    assert not keep_mask[0]
-    # Feature 3 always kept (independent).
-    assert keep_mask[3]
-    # Exactly one of {1, 2} survives the correlation pruning.
-    assert keep_mask[1] ^ keep_mask[2]
-    assert keep_mask.sum() == 2
-    assert gt_f.shape == (n_gt, 2)
-    assert pred_f.shape == (n_pred, 2)
-
-
-def test_select_features_shape_mismatch_raises(
-    rng: np.random.Generator,
-) -> None:
-    gt = rng.standard_normal((10, 5)).astype(np.float64)
-    pred = rng.standard_normal((10, 6)).astype(np.float64)
-    with pytest.raises(ValueError, match="dim mismatch|shape"):
-        select_features(gt, pred)
-
-
-def test_select_features_returns_aligned_filtered_arrays(
-    rng: np.random.Generator,
-) -> None:
-    gt = rng.standard_normal((30, 8)).astype(np.float64)
-    pred = rng.standard_normal((25, 8)).astype(np.float64)
-    gt_f, pred_f, keep_mask = select_features(gt, pred)
-
-    assert gt_f.shape[0] == 30
-    assert pred_f.shape[0] == 25
-    assert gt_f.shape[1] == pred_f.shape[1] == int(keep_mask.sum())
-
-
 def test_select_gt_features_drops_low_variance_and_correlated(
     rng: np.random.Generator,
 ) -> None:
@@ -188,14 +127,10 @@ def test_select_gt_features_drops_low_variance_and_correlated(
     assert keep[4] and keep[5]
 
 
-def test_select_gt_features_is_deterministic_and_ignores_predictions(
+def test_select_gt_features_is_deterministic(
     rng: np.random.Generator,
 ) -> None:
-    """The mask is a function of GT alone: repeated calls agree, and no pred enters.
-
-    ``select_features`` pools GT with a prediction, so two models get two masks; the
-    GT-only selector is what makes the CP feature space model-independent.
-    """
+    """Repeated calls on the same GT agree exactly, and the redundant column is the one dropped."""
     gt = rng.standard_normal((150, 10))
     gt[:, 7] = gt[:, 2] * 3.0 + 1e-6 * rng.standard_normal(150)
 
@@ -203,8 +138,6 @@ def test_select_gt_features_is_deterministic_and_ignores_predictions(
     second = select_gt_features(gt.copy())
 
     np.testing.assert_array_equal(first, second)
-    assert not (first[2] and first[7])
-    # A prediction that decorrelates column 7 would flip the pooled mask; GT-only cannot see it.
-    pred = rng.standard_normal((150, 10)) * 50.0
-    _, _, pooled_mask = select_features(gt, pred)
-    assert not np.array_equal(pooled_mask, first)
+    expected = np.ones(10, dtype=bool)
+    expected[7] = False  # tie on connectivity -> the higher index of the (2, 7) pair goes
+    np.testing.assert_array_equal(first, expected)
