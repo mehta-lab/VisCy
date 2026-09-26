@@ -433,3 +433,24 @@ def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> 
     assert gt["set-b"] == bindings["set-b"] and gt["set-a-lite"] == bindings["set-a-lite"]
     lite_gt = rebound(lambda p: p["fit"]["lite"]["set-a-lite"].update(gt_matrix_sha256="0" * 64))
     assert lite_gt["set-a-lite"] != bindings["set-a-lite"] and lite_gt["set-a"] == bindings["set-a"]
+
+
+def test_lite_staging_uses_the_parent_scaler(two_sets, tmp_path: Path) -> None:
+    """A lite eval's staged CP arrays are the PARENT scaler's transform of pred and GT, never a lite refit.
+
+    pred != GT and the lite cells' own statistics differ from the parent's, so an
+    eval-time refit on the lite cells (or on either side) gives different arrays.
+    """
+    ref, _, cells = two_sets
+    lite_gt = cells["set-a"][:_LITE_ROWS]
+    pred = 0.5 * lite_gt + 1.0
+    lite, parent = ref.for_dataset("set-a-lite"), ref.for_dataset("set-a")
+    staged = _stage_cp_dataset_inputs(_lists(pred, lite_gt), lite, _blocks(lite_gt), tmp_path)
+    np.testing.assert_array_equal(staged[1], parent.transform(pred))
+    np.testing.assert_array_equal(staged[2], parent.transform(lite_gt))
+    kept = lite_gt[:, ref.keep_mask]
+    refit = (kept - kept.mean(axis=0)) / kept.std(axis=0)
+    assert not np.allclose(staged[2], refit)
+    assert not np.allclose(staged[1], staged[2])
+    sidecar = json.loads((tmp_path / "cp_selected_feature_mask.json").read_text())
+    assert (sidecar["dataset"], sidecar["scaler_dataset"]) == ("set-a-lite", "set-a")
