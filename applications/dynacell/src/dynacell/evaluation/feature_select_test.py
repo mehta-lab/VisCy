@@ -8,6 +8,7 @@ import pytest
 from dynacell.evaluation.feature_select import (
     correlation_threshold,
     select_features,
+    select_gt_features,
     variance_threshold,
 )
 
@@ -158,3 +159,52 @@ def test_select_features_returns_aligned_filtered_arrays(
     assert gt_f.shape[0] == 30
     assert pred_f.shape[0] == 25
     assert gt_f.shape[1] == pred_f.shape[1] == int(keep_mask.sum())
+
+
+def test_select_gt_features_drops_low_variance_and_correlated(
+    rng: np.random.Generator,
+) -> None:
+    """GT-only selection drops a constant, a near-constant, and one of a correlated pair."""
+    n = 200
+    a = rng.standard_normal(n)
+    near_constant = np.zeros(n)
+    near_constant[0] = 1.0
+    gt = np.column_stack(
+        [
+            np.zeros(n),  # 0: constant -> variance drop
+            near_constant,  # 1: one dominant level -> variance drop
+            a,  # 2: A
+            a + 1e-4 * rng.standard_normal(n),  # 3: A + eps -> correlation drop (one of 2/3)
+            rng.standard_normal(n),  # 4: independent
+            rng.standard_normal(n),  # 5: independent
+        ]
+    )
+
+    keep = select_gt_features(gt)
+
+    assert keep.dtype == bool and keep.shape == (6,)
+    assert not keep[0] and not keep[1]
+    assert keep[2] ^ keep[3]
+    assert keep[4] and keep[5]
+
+
+def test_select_gt_features_is_deterministic_and_ignores_predictions(
+    rng: np.random.Generator,
+) -> None:
+    """The mask is a function of GT alone: repeated calls agree, and no pred enters.
+
+    ``select_features`` pools GT with a prediction, so two models get two masks; the
+    GT-only selector is what makes the CP feature space model-independent.
+    """
+    gt = rng.standard_normal((150, 10))
+    gt[:, 7] = gt[:, 2] * 3.0 + 1e-6 * rng.standard_normal(150)
+
+    first = select_gt_features(gt)
+    second = select_gt_features(gt.copy())
+
+    np.testing.assert_array_equal(first, second)
+    assert not (first[2] and first[7])
+    # A prediction that decorrelates column 7 would flip the pooled mask; GT-only cannot see it.
+    pred = rng.standard_normal((150, 10)) * 50.0
+    _, _, pooled_mask = select_features(gt, pred)
+    assert not np.array_equal(pooled_mask, first)
