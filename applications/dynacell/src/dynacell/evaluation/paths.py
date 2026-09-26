@@ -148,6 +148,10 @@ _CELLDIFF_ARM_MODELS: tuple[str, ...] = (
     "celldiff_ccond",
 )
 
+# Spotlight-v2 arms that predict their baseline's own checkpoint into their own
+# store (no fit): resolve_model must take them from model_name, not the ckpt path.
+_PREDICT_ONLY_ARM_MODELS: frozenset[str] = frozenset({"pix2pix2d_unetvit_last"})
+
 # ===========================================================================
 # Map (b): canonical -> paper display registry
 # ===========================================================================
@@ -673,6 +677,10 @@ def resolve_model(benchmark: dict | None, ckpt_path: str | Path | None, leaf_pat
         if model_name in PAPER_KEY:
             return model_name
 
+    # A predict-only arm reads its BASELINE's checkpoint, so the ckpt path names
+    # the baseline; only model_name can tell them apart.
+    if model_name in _PREDICT_ONLY_ARM_MODELS:
+        return model_name
     # Non-celldiff: prefer a recognizable ckpt-path segment, else the config name.
     for part in reversed(ckpt_parts):
         if part in PAPER_KEY:

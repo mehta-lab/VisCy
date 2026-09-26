@@ -494,6 +494,16 @@ def test_resolve_model_spotlight_v2_arm_not_collapsed(model_name: str, run_dir: 
     assert resolve_model({"model_name": model_name, "train_set": "ipsc_confocal"}, ckpt) == expected
 
 
+def test_predict_only_arm_resolves_from_model_name_not_the_baseline_ckpt() -> None:
+    """pix2pix2d_unetvit_last reads the baseline's last.ckpt but is its own model."""
+    ckpt = (
+        "/hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/nucleus/pix2pix2d_unetvit/checkpoints/last.ckpt"
+    )
+    bench = {"model_name": "pix2pix2d_unetvit_last", "train_set": "ipsc_confocal"}
+    assert resolve_model(bench, ckpt) == "pix2pix2d_unetvit_last"
+    assert resolve_model({"model_name": "pix2pix2d_unetvit", "train_set": "ipsc_confocal"}, ckpt) == "pix2pix2d_unetvit"
+
+
 def test_spotlight_v2_celldiff_store_dir_splits_into_model_and_variant() -> None:
     """The grouped parser reads each v2 store dir as the arm, not as a baseline variant."""
     assert _split_model_variant("celldiff_segaux_iterative", "x") == ("celldiff_segaux", "iterative")
