@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from iohub.ngff import open_ome_zarr
+from omegaconf import OmegaConf
 
 from dynacell.evaluation.cache import cache_paths, load_manifest, save_manifest
 from dynacell.evaluation.model_loader import EvalModels
@@ -174,6 +175,19 @@ def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None
     assert pipeline._final_metrics_cache_valid(config)
 
     make_cp_reference(config, tmp_path / "cp_reference.json", seed=1)  # same path, new content
+    assert not pipeline._final_metrics_cache_valid(config)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"), [("limit_positions", 1), ("io.exclude_fov_names", ["A/1/0"])], ids=["limit", "exclude"]
+)
+def test_partial_walk_never_reuses_cp_rows(tmp_path: Path, key: str, value) -> None:
+    """A partial position walk bypasses the cache so ``check_positions`` sees its GT position set."""
+    pipeline = live_pipeline_module()
+    config, _ = _feature_cache_config(tmp_path)
+    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
+    assert pipeline._final_metrics_cache_valid(config)
+    OmegaConf.update(config, key, value)
     assert not pipeline._final_metrics_cache_valid(config)
 
 
