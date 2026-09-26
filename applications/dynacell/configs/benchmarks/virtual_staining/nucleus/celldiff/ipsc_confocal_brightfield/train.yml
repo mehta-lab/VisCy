@@ -1,0 +1,65 @@
+# CellDiff fit on nucleus (Nuclei channel of cell.zarr) — AICS iPSC confocal, BRIGHTFIELD input.
+#
+# Brightfield-input ablation arm of nucleus/celldiff/ipsc_confocal/train.yml. Every
+# hyperparameter is identical to that baseline; the only change is the model input
+# channel (Brightfield instead of the Phase3D volume reconstructed from it), which
+# enters via train_sets/ipsc_confocal_brightfield.yml's dataset_ref.source_channel.
+#
+# Only the two channel-named lists are re-authored. gpu_augmentations and
+# val_gpu_augmentations key on `source`/`target` (post-collation names), so they are
+# channel-agnostic and inherited from data_overlays/celldiff_fit.yml untouched.
+# val_augmentations is deliberately absent, matching the baseline.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal_brightfield.yml
+  - ../../../_internal/shared/model/targets/nucleus_celldiff.yml
+  - ../../../_internal/shared/model/data_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_h200_single.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  train_set: ipsc_confocal_brightfield
+  model_name: celldiff
+  experiment_id: nucleus__ipsc_confocal_brightfield__celldiff
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Brightfield]
+          level: timepoint_statistics
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Nuclei]
+          level: timepoint_statistics
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Brightfield, Nuclei]
+          w_key: Nuclei
+          spatial_size: [13, 624, 624]
+          num_samples: 2
+
+trainer:
+  logger:
+    init_args:
+      name: CELLDiff_iPSCbf_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/celldiff_r2
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        every_n_epochs: 1
+        save_top_k: -1
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/celldiff_r2/checkpoints
+
+launcher:
+  job_name: CELLDiffBF_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc__bf/nucleus/celldiff_r2

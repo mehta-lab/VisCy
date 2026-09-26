@@ -1,0 +1,105 @@
+# FNet3D "same-augmentations" OOD-ablation fit-time HCS data hparams.
+#
+# Tests the paper claim that FNet3D underperforms out-of-distribution
+# because it does not use the augmentation stack the other virtual-staining
+# models use. This overlay grafts the VSCyto3D (FCMAE) augmentation
+# pipeline — the large weighted crop plus BatchedRandAffined /
+# AdjustContrast / ScaleIntensity / GaussianNoise / GaussianSmooth — onto
+# an otherwise-unchanged FNet3D fit. Model, optimizer, loss, schedule,
+# max_steps, precision and mean/std normalization are all inherited from
+# model_overlays/fnet3d_paper_fit.yml, so only the augmentations differ
+# from fnet3d_paper and any OOD change attributes to augmentation.
+#
+# Geometry: FNet3D's depth-4 encoder downsamples Z by 2**4 = 16, so the
+# model input Z must be divisible by 16. The VSCyto3D stack center-crops to
+# Z=15, which FNet3D cannot consume; we lift both the GPU center-crop and
+# the CPU weighted crop to Z=32 (in_stack_depth stays 32, z_window stays
+# 32 — the CPU crop takes the whole loaded z-slab, matching the VSCyto3D
+# convention of cropping the full z on CPU and letting the GPU affine +
+# center-crop do the yx work). Everything else (600 -> 384 weighted crop,
+# num_samples=4, the affine + intensity augmentations) is verbatim from
+# fcmae_vscyto3d_fit.yml.
+#
+# Structure-keyed like fnet3d_paper_fit.yml: single-set nucleus/membrane
+# leaves list-replace normalizations + the CPU augmentation to re-key onto
+# Nuclei/Membrane. Joint leaves author their own data: block inline.
+#
+# Paired with fnet3d_bigpatch_fit.yml (identical geometry + batch, flip-only
+# augs) so Arm A (this overlay's sibling) and Arm B (this overlay) differ
+# ONLY in the augmentation stack — a clean augmentation-effect comparison.
+#
+# batch_size is the on-GPU sample count for HCSDataModule (train_dataloader
+# divides by RandWeightedCropd num_samples). At bf16-mixed (set in the leaf)
+# a 384x384x32 patch halves the 32-true activation footprint, so batch_size
+# is 8 (2 FOVs x num_samples=4); tuned from a single-GPU H200 smoke.
+data:
+  init_args:
+    z_window_size: 32
+    batch_size: 8
+    num_workers: 4
+    yx_patch_size: [384, 384]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      # CPU: 4 large weighted crops per FOV (VSCyto3D policy), z = full
+      # z_window so the GPU center-crop keeps all 32 planes.
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [32, 600, 600]
+          num_samples: 4
+    gpu_augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [source, target]
+          prob: 0.8
+          rotate_range: [3.14, 0, 0]
+          shear_range: [0.0, 0.05, 0.05]
+          scale_range: [[0.7, 1.3], [0.5, 1.5], [0.5, 1.5]]
+      - class_path: viscy_transforms.BatchedCenterSpatialCropd
+        init_args:
+          keys: [source, target]
+          roi_size: [32, 384, 384]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [source]
+          prob: 0.5
+          mean: 0.0
+          std: 0.3
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [source]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0.25, 0.75]
+    val_augmentations:
+      # CPU center-crop on the raw channel keys (the fnet3d_paper val
+      # mechanism), sized to the training patch. Validation applies no
+      # augmentation — only the deterministic center crop.
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          roi_size: [32, 384, 384]

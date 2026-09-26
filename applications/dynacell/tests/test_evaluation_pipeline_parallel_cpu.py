@@ -154,6 +154,178 @@ def test_limit_positions_with_partial_pred_zarr(tmp_path: Path):
     assert len(mask_rows) == 1 * T
 
 
+@pytest.mark.parametrize("exclude", [["A/1/1"], ["1"]])
+def test_exclude_fov_names_drops_positions(tmp_path: Path, exclude: list[str]):
+    """``io.exclude_fov_names`` drops matching FOVs from pred/gt/seg before eval.
+
+    End-to-end via evaluate_predictions on the standard 3-position fixture:
+    excluding one position — matched either by its full name ``A/1/1`` or by
+    its leaf ``1`` — leaves ``N_POSITIONS - 1`` positions' worth of rows, and
+    the strict pred/gt count-alignment still holds because the filter is applied
+    uniformly.
+    """
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir()
+    pred_path, gt_path, gt_cache_dir, pred_cache_dir = build_fixture(fixture_root)
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+
+    cfg = build_eval_config(
+        pred_path,
+        gt_path,
+        gt_cache_dir,
+        pred_cache_dir,
+        save_dir,
+        executor="serial",
+        fov_workers=1,
+    )
+    cfg.io.exclude_fov_names = exclude
+    pipeline = live_pipeline_module()
+    pixel_rows, mask_rows, _ = pipeline.evaluate_predictions(cfg)
+    assert len(pixel_rows) == (N_POSITIONS - 1) * T
+    assert len(mask_rows) == (N_POSITIONS - 1) * T
+
+
+def test_exclude_fov_names_rejects_an_unmatched_entry(tmp_path: Path):
+    """A typo'd exclusion raises instead of silently evaluating the full set.
+
+    Failing open here is the worst outcome: the operator asked for a restricted
+    walk, got an unrestricted one, and nothing in the output says so.
+    """
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir()
+    pred_path, gt_path, gt_cache_dir, pred_cache_dir = build_fixture(fixture_root)
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+
+    cfg = build_eval_config(
+        pred_path,
+        gt_path,
+        gt_cache_dir,
+        pred_cache_dir,
+        save_dir,
+        executor="serial",
+        fov_workers=1,
+    )
+    cfg.io.exclude_fov_names = ["A/1/does-not-exist"]
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="matched no position"):
+        pipeline.evaluate_predictions(cfg)
+
+
+def test_exclude_fov_names_rejects_an_ambiguous_leaf():
+    """A bare leaf shared by two wells raises rather than dropping both.
+
+    ``exclude: ["1"]`` against ``A/1/1`` and ``B/2/1`` would remove both. Leaf
+    matching is deliberate (and covered above); silent ambiguity is not. Real
+    stores hit this -- the A549 recipe lists ``B/2/000004`` and ``B/3/000004``.
+    """
+    pipeline = live_pipeline_module()
+    with pytest.raises(ValueError, match="ambiguous"):
+        pipeline._validate_exclusions(["000004"], ["B/2/000004", "B/3/000004", "B/2/000005"])
+
+
+def test_exclusions_mark_the_walk_partial_without_hard_raising(tmp_path: Path):
+    """``exclude_fov_names`` sets ``excluded_walk`` but not ``partial_walk``.
+
+    The two flags differ on purpose. ``partial_walk`` (from ``limit_positions``)
+    hard-raises StaleCacheError on a version mismatch; that would defeat this
+    feature, whose whole job is evaluating the finished FOVs of a partially-run
+    predict. ``excluded_walk`` instead keeps the manifest from advancing its
+    identity stamp over FOVs the walk skipped.
+    """
+    from dynacell.evaluation.pipeline_cache import init_cache_context
+
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir()
+    pred_path, gt_path, gt_cache_dir, pred_cache_dir = build_fixture(fixture_root)
+    save_dir = tmp_path / "out"
+    save_dir.mkdir()
+
+    cfg = build_eval_config(
+        pred_path,
+        gt_path,
+        gt_cache_dir,
+        pred_cache_dir,
+        save_dir,
+        executor="serial",
+        fov_workers=1,
+    )
+    plain = init_cache_context(cfg, side="gt")
+    assert plain.excluded_walk is False
+    assert plain.partial_walk is False
+
+    cfg.io.exclude_fov_names = ["A/1/1"]
+    excluded = init_cache_context(cfg, side="gt")
+    assert excluded.excluded_walk is True
+    assert excluded.partial_walk is False
+
+
+def test_excluded_walk_does_not_advance_a_recorded_preprocess_version(tmp_path: Path):
+    """A partial walk keeps the older stamp so a later full walk still invalidates.
+
+    Advancing it would certify FOVs this run never touched: the next
+    unrestricted run compares v3 to v3, skips invalidation, and reads the
+    excluded FOV's v2 embeddings back as a cache hit -- mixed-recipe features
+    inside one published leaf.
+    """
+    from dynacell.evaluation.pipeline_cache import _update_manifest_entry
+
+    manifest = {
+        "artifacts": {
+            "dinov3_features": {
+                "dinov3_vitb16": {"preprocess_version": "imagenet_normalize_v2", "positions": ["A/1/0"]}
+            }
+        }
+    }
+    keys = ["dinov3_features", "dinov3_vitb16"]
+    entry = {"preprocess_version": "imagenet_normalize_v3", "patch_size": 16}
+
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    leaf = manifest["artifacts"]["dinov3_features"]["dinov3_vitb16"]
+    assert leaf["preprocess_version"] == "imagenet_normalize_v2"
+    # A missing parameter describes unknown identity for the excluded FOVs.
+    assert "patch_size" not in leaf
+
+    # A full walk advances it, which is what makes the cache self-heal.
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=False)
+    assert leaf["preprocess_version"] == "imagenet_normalize_v3"
+    assert leaf["patch_size"] == 16
+
+
+def test_excluded_walk_stamps_a_leaf_that_has_no_identity_yet():
+    """A first-ever write on an excluded walk must still record the identity.
+
+    There is nothing to preserve on a fresh leaf. Leaving it bare makes every
+    later run an all-keys mismatch in
+    ``_auto_invalidate_on_artifact_param_mismatch``: a perpetual recompute of
+    the walked FOVs, and a StaleCacheError under ``io.require_complete_cache``
+    or ``limit_positions``. A leaf that already carries any identity key keeps
+    dd97ae84's behaviour: missing keys stay unknown.
+    """
+    from dynacell.evaluation.pipeline_cache import _update_manifest_entry
+
+    keys = ["cp_features"]
+    entry = {"spacing": [0.29, 0.108, 0.108], "cp_norm_p_lo": 1.0, "cp_norm_p_hi": 99.0}
+
+    # Absent leaf: created and stamped in full.
+    manifest: dict = {}
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    assert manifest["artifacts"]["cp_features"] == entry
+
+    # Positions-only leaf (e.g. an earlier excluded write that recorded the FOV
+    # but no identity): stamped in full, positions kept.
+    manifest = {"artifacts": {"cp_features": {"positions": ["A/1/0"]}}}
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    assert manifest["artifacts"]["cp_features"] == {**entry, "positions": ["A/1/0"]}
+
+    # Leaf with an identity but a missing key: untouched on an excluded walk.
+    recorded = {"spacing": [0.29, 0.108, 0.108], "cp_norm_p_lo": 0.5, "positions": ["A/1/0"]}
+    manifest = {"artifacts": {"cp_features": dict(recorded)}}
+    _update_manifest_entry(manifest, keys, dict(entry), preserve_identity=True)
+    assert manifest["artifacts"]["cp_features"] == recorded
+
+
 def test_limit_positions_rejects_pred_with_unknown_position(tmp_path: Path):
     """``limit_positions`` only relaxes count strict equality when pred ⊂ gt.
 

@@ -1,0 +1,67 @@
+# pix2pix2d predict: nucleus trained on joint_ipsc_confocal_a549_mantis, tested on A549 mantis zikv.
+# In-focus 2D track. The Z=1 checkpoint predicts over the FULL-Z 3D test store
+# with z_window_size=1 (pix2pix2d_unetvit_predict overlay), emitting one window
+# per z-plane -> a full-Z prediction store the existing focus-aware eval consumes
+# unchanged.
+#
+# Source normalization is NormalizeSampled(Phase3D, fov_statistics, mean/std),
+# reproducing the pix2pix2d fit exactly — the fit inherits it from
+# targets/nucleus.yml and a MinMax source here would silently degrade every
+# prediction. The target-inherited RandWeightedCropd is cleared: predict has no
+# CPU augmentations.
+#
+# predict_method=sliding_window and predict_overlap Z=0 are overlay-owned; see
+# model_overlays/pix2pix2d_unetvit_predict.yml for why (the lateral ViT 512x512
+# limit, and Z patch 1) -- it states the per-test-set caveat this leaf cannot.
+#
+# No z_reduction: at z_window_size=1 each plane comes from exactly one window, so
+# there is nothing to reduce across (the 3D pix2pix leaves need `center` only
+# because their 8-plane windows overlap).
+#
+# Fit completion verified from the run log, not a checkpoint filename:
+#   `Trainer.fit` stopped: `max_epochs=40` reached.
+# Baked checkpoint is that run's best loss/validate_ema epoch.
+base:
+  - ../../../_internal/shared/model/predict_sets/a549_mantis_h2b_zikv.yml
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: joint_ipsc_confocal_a549_mantis
+  predict_set: a549_mantis_h2b_zikv
+  model_name: pix2pix2d_unetvit
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__pix2pix2d_unetvit__a549_mantis_h2b_zikv
+  # A549 keys this organelle by gene; override the iPSC-side target
+  # from the target fragment so the resolver finds it on the A549 set.
+  dataset_ref:
+    target: h2b
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/pix2pix2d_unetvit/checkpoints/epoch=18-step=15200-loss=1.271.ckpt
+
+data:
+  init_args:
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__zikv/prediction.zarr
+
+launcher:
+  job_name: pix2pix2D_PRED_JOINT_NUCL_ON_A549_ZIKV
+  run_root: /hpc/projects/virtual_staining/training/dynacell/nucleus/pix2pix2d_unetvit/joint/a549__zikv

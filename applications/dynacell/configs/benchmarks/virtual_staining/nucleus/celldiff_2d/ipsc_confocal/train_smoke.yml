@@ -1,0 +1,67 @@
+# Smoke sibling of nucleus/celldiff_2d/ipsc_confocal/train.yml.
+# Proves the CellDiff-2D stack is trainable before twelve multi-day fits launch:
+# that CELLDiffNet builds at input_spatial_size [1,512,512] with the per-axis
+# patch [1,4,4] (a cubic patch cannot consume a size-1 Z axis), that the
+# in-focus slab store feeds z_window_size=1 windows through
+# RandWeightedCropd[1,624,624] -> affine -> center-crop[1,512,512] at the exact
+# size the fixed ViT positional embeddings require, and that train + val
+# forward/backward give a finite flow-matching loss under bf16-mixed.
+#
+# Scratch run_root, no logger, no checkpoints (so no junk last.ckpt can shadow
+# the real run), 20 steps, bounded wall.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/nucleus_celldiff.yml
+  - ../../../_internal/shared/model/data_overlays/celldiff_2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/celldiff_2d_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_gpu_any_long.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+  - ../../../_internal/shared/model/launcher_profiles/wall_smoke.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  gene: Nuclei
+  target: nucleus
+  target_id: nucleus
+  train_set: ipsc_confocal
+  model_name: celldiff_2d
+  experiment_id: nucleus__ipsc_confocal__celldiff_2d__smoke
+  dataset_ref: null
+
+data:
+  init_args:
+    source_channel: Phase3D
+    target_channel: Nuclei
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+    normalizations:
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Phase3D]
+          level: timepoint_statistics
+      - class_path: viscy_transforms.MinMaxSampled
+        init_args:
+          keys: [Nuclei]
+          level: timepoint_statistics
+    augmentations:
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Nuclei]
+          w_key: Nuclei
+          spatial_size: [1, 624, 624]
+          num_samples: 2
+
+trainer:
+  max_steps: 20
+  max_epochs: 1
+  limit_val_batches: 2
+  logger: false
+  enable_checkpointing: false
+  callbacks: []
+
+launcher:
+  job_name: CELLDiff2D_NUCL_SMOKE
+  run_root: /hpc/mydata/alex.kalinin/VisCy/.tmp/celldiff2d_smoke
+  sbatch:
+    mem: "128G"

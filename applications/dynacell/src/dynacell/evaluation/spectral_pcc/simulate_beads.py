@@ -404,8 +404,6 @@ def plot_diagnostic_spectra(
     # x-axis extends to the true OTF cutoff
     x_max = max(1.05, otf_cutoff_norm)
 
-    to_2d(clean).shape
-
     # --- Row 0: 2D image slices (each panel auto-scaled) ---
     clean_2d = to_2d(clean).astype(np.float32)
     axes[0, 0].imshow(clean_2d, cmap="gray")
@@ -772,16 +770,6 @@ def plot_diagnostic_spectra(
     # --- Row 9: FRCW-weighted w*P ---
     w_frcw_c = frc_weights(clean_2d, bin_delta=bd)
     w_frcw_c_sn = w_frcw_c / (np.sum(w_frcw_c) + 1e-30)  # sum-normalized
-    # Map FRCW weights (index-unit bins) to the Nyquist-normalized radii
-    from cubic.metrics.spectral.radial import radial_edges as _radial_edges
-
-    frcw_edges_c, frcw_radii_c = _radial_edges(clean_2d.shape, bin_delta=bd, spacing=None)
-    frcw_radii_c_norm = frcw_radii_c / (0.5 * clean_2d.shape[0])  # normalize by Nyquist index
-    # Trim to weight length
-    frcw_radii_c_norm[: len(w_frcw_c)]
-    # Need power on index-unit bins for overlay
-    radii_idx_c, power_idx_c = radial_power_spectrum(clean_2d, spacing=sp_2d, bin_delta=bd)
-    power_idx_c / power_c_max
     # Use physical-unit radii for x-axis consistency with other rows
     axes[9, 0].semilogy(
         radii_c[: len(w_frcw_c_sn)],

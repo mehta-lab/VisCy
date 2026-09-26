@@ -1,0 +1,47 @@
+# VSCyto3D predict: nucleus trained on a549_mantis, predicting on the
+# cropped A549 TOMM20 DENV movie zarr (125 timepoints).
+# No predict_set base — data path set directly to bypass the manifest system.
+base:
+  - ../../../_internal/shared/model/targets/nucleus.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto3d_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  trained_on: a549_mantis
+  predict_set: a549_mantis_movie
+  model_name: fcmae_vscyto3d_pretrained
+  experiment_id: nucleus__a549_mantis__fcmae_vscyto3d_pretrained__a549_mantis_movie
+
+model:
+  init_args:
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/a549/nucleus/fcmae_vscyto3d_pretrained/checkpoints/epoch=134-step=29295.ckpt
+
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/training/dynacell/a549/movie/2024_11_21_A549_TOMM20_DENV_crop.zarr
+    source_channel: Phase3D
+    target_channel: Nucleus
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations: []
+    z_window_size: 15
+
+trainer:
+  callbacks:
+    - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
+      init_args:
+        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/movie_predictions/nucl_fcmae_vscyto3d_pretrained_a549trained_movie.zarr
+
+launcher:
+  job_name: FCMAE_VSCyto3D_Pretrained_PRED_NUCL_A549TR_MOVIE
+  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/movie_predictions

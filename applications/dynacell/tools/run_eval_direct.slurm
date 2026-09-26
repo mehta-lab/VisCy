@@ -16,7 +16,11 @@
 # all others invoke ``dynacell evaluate``.
 #
 # Extra positional args after the leaf path are passed verbatim as Hydra
-# overrides (e.g. ``limit_positions=2 force_recompute.final_metrics=true``).
+# overrides, e.g. a smoke run on two FOVs:
+#   ``limit_positions=2 compute_feature_metrics=false force_recompute.final_metrics=true``
+# (``compute_feature_metrics=false`` is required with ``limit_positions``: the CP
+# feature metrics are scored against a reference fit on every GT position, so a
+# partial walk with them on raises.)
 
 #SBATCH --job-name=eval_direct
 #SBATCH --time=1-00:00:00
@@ -57,6 +61,24 @@ cd "${REPO}"
 
 ml uv
 
+# ``segmentation.backend: cpdino`` is the eval.yaml default, and the cpdino stack
+# (cubic + cellpose 4.2.x) does not co-install with the workspace .venv, where
+# ``segmentation_cpdino`` dies on
+# ``ImportError: cannot import name 'segment_cellpose' from 'cubic.segmentation'``.
+# Route uv at the dedicated eval venv and read it read-only (``--no-sync``), the
+# same pattern as build_cpdino_seg_cleaned.slurm. Point DYNACELL_EVAL_VENV
+# elsewhere to use a different environment.
+#
+# The default MUST hold the cubic version pyproject declares. The older
+# ``cpdino-eval`` (cubic 0.8.0a2) was this default through 2026-07-29 even after
+# the 0.9.0a1 venv existed, so jobs that did not export DYNACELL_EVAL_VENV kept
+# silently producing 0.8.0a2 FSC/FRC/Spectral_PCC values — 62 of the 121
+# surviving eval logs. ``check_cubic_pin`` now fails such a run loudly, but the
+# default still has to be right.
+export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a1}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache}"
+export PYTHONUNBUFFERED=1
+
 # Decide single vs grouped from leaf basename. Grouped leaves carry a
 # ``conditions:`` list: ``eval_grouped`` (current convention, incl. the
 # instance-AP buckets) and ``eval__a549_mantis`` (legacy ablations).
@@ -67,6 +89,7 @@ case "${LEAF_BASENAME}" in
 esac
 
 echo "[run_eval_direct] subcmd=${SUBCMD} leaf=${LEAF} overrides=${EXTRA_OVERRIDES[*]:-<none>}"
+echo "[run_eval_direct] venv=${UV_PROJECT_ENVIRONMENT}"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-uv run dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"
+uv run --no-sync dynacell "${SUBCMD}" "leaf=${LEAF}" "${EXTRA_OVERRIDES[@]}"

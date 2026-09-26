@@ -1,0 +1,73 @@
+# FNet3D "larger-patch, simple-augs" ablation fit-time HCS data hparams
+# (Arm A of the patch-vs-augmentation split).
+#
+# Purpose: disentangle the two things that change when FNet3D adopts the
+# VSCyto3D training regime — the larger 384x384 spatial patch, and the
+# richer augmentation stack. This overlay applies ONLY the larger patch
+# with FNet3D's own simple augmentations (axis flips), so:
+#   fnet3d_paper (64x64, flips)  ->  fnet3d_bigpatch (384x384, flips)
+#       isolates the patch-size effect, and
+#   fnet3d_bigpatch (384x384, flips)  ->  fnet3d_vscyto3daug (384x384, augs)
+#       isolates the augmentation effect.
+# Geometry / batch / precision / model / optimizer are identical to
+# fnet3d_vscyto3daug_fit.yml (paired), so Arm A vs Arm B differ ONLY in the
+# gpu_augmentations stack.
+#
+# Geometry: FNet3D's depth-4 encoder needs Z divisible by 2**4=16, so
+# in_stack_depth stays 32 and the CPU weighted crop takes [32, 384, 384]
+# directly (no affine headroom is needed without the affine, so unlike
+# fnet3d_vscyto3daug there is no 600->384 GPU center-crop — the CPU crop
+# already yields the model input size).
+#
+# Structure-keyed like fnet3d_paper_fit.yml: single-set nucleus leaves
+# list-replace normalizations + the CPU augmentation to re-key onto Nuclei.
+#
+# batch_size 8 (2 FOVs x num_samples=4) at bf16-mixed (set in the leaf);
+# tuned from a single-GPU H200 smoke. Must match fnet3d_vscyto3daug_fit.yml.
+data:
+  init_args:
+    z_window_size: 32
+    batch_size: 8
+    num_workers: 4
+    yx_patch_size: [384, 384]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Structure]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      # CPU: crop directly to the 384x384x32 model input (no affine
+      # headroom needed), weighted by target intensity. num_samples=4
+      # matches fnet3d_vscyto3daug so the on-GPU batch math is identical.
+      - class_path: viscy_transforms.RandWeightedCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          w_key: Structure
+          spatial_size: [32, 384, 384]
+          num_samples: 4
+    gpu_augmentations:
+      # FNet3D's own simple augmentations: axis flips only (the fnet3d_paper
+      # policy). This is the ONLY difference from fnet3d_vscyto3daug_fit.yml.
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [source, target]
+          spatial_axes: [1]
+          prob: 0.5
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [source, target]
+          spatial_axes: [2]
+          prob: 0.5
+    val_augmentations:
+      - class_path: viscy_transforms.CenterSpatialCropd
+        init_args:
+          keys: [Phase3D, Structure]
+          roi_size: [32, 384, 384]

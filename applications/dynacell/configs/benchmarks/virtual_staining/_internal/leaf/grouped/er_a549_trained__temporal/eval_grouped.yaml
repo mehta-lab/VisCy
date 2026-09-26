@@ -1,0 +1,94 @@
+# @package _global_
+# Focused sibling of grouped/er_a549_trained: ONLY the 6 Phase 17 FNet3D
+# temporal-sampling conditions (fnet3d_t01, fnet3d_tspread x a549 mock/denv/zikv).
+# Condition blocks are copied verbatim from a generate_grouped_eval_configs.py run,
+# so they stay byte-identical to what the canonical bucket would emit -- only the
+# selection is narrowed.
+#
+# The two arms trained on equal frame budgets drawn differently in time: `t01` on
+# timepoints {0,1} (hpi 5 and 7) only, `tspread` spread over the whole course. The
+# A549 test set spans hpi 5->23, so these predicts are the ONLY valid cross-arm
+# comparison: each arm validates on its own frame subset, which makes
+# `loss/validate` incomparable across arms. Measured best-val bears this out --
+# nucleus favours t01 (0.027 vs 0.109) while ER favours tspread (0.747 vs 0.405),
+# i.e. the ordering flips by organelle and means nothing.
+#
+# Why not run the canonical bucket: the generator sets
+# force_recompute.final_metrics: true, so its already-evaluated conditions would
+# all recompute instead of cache-skipping.
+#
+# All 6 conditions are brand new, so nothing is cached and the cold deep-feature
+# extraction needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB
+# nodes and OOMs).
+target_name: er
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: fnet3d_t01__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_t01/a549/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet3d_t01/a549/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_t01/a549/a549__denv
+- name: fnet3d_tspread__a549_trained__a549_denv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-denv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_tspread/a549/a549__denv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet3d_tspread/a549/a549__denv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_tspread/a549/a549__denv
+- name: fnet3d_t01__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-mock
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_t01/a549/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet3d_t01/a549/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_t01/a549/a549__mock
+- name: fnet3d_tspread__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-mock
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_tspread/a549/a549__mock/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet3d_tspread/a549/a549__mock
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_tspread/a549/a549__mock
+- name: fnet3d_t01__a549_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-zikv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_t01/a549/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet3d_t01/a549/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_t01/a549/a549__zikv
+- name: fnet3d_tspread__a549_trained__a549_zikv
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-sec61b-zikv
+      target: sec61b
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_tspread/a549/a549__zikv/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache_pred/er/fnet3d_tspread/a549/a549__zikv
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_tspread/a549/a549__zikv

@@ -5,7 +5,7 @@ base:
   - ../../../_internal/shared/model/targets/membrane.yml
   - ../../../_internal/shared/model/model_overlays/celldiff_predict.yml
   - ../../../_internal/shared/model/launcher_profiles/mode_predict.yml
-  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_any_gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_predict_celldiff.yml
   - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
 
 benchmark:
@@ -18,7 +18,12 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/memb/celldiff/checkpoints/last.ckpt
+    # Explicit epoch pin, not `last.ckpt`: `last.ckpt` means "weights at the last
+    # ModelCheckpoint save", which is a moving target across resumes. This file is
+    # byte-equivalent to the last.ckpt this leaf previously used (both 1119473017 B,
+    # same mtime; last.ckpt recorded epoch=19/global_step=214400 and
+    # best_model_path=epoch=19-step=214400.ckpt), so predictions are unchanged.
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/cell_diff_vs_viscy/joint_ipsc_confocal_a549_mantis/memb/celldiff/checkpoints/epoch=19-step=214400.ckpt
     predict_method: iterative
     predict_overlap: [4, 256, 256]
 

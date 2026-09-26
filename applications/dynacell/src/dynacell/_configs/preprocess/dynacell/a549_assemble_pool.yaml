@@ -1,0 +1,106 @@
+# A549 mantis pool assembly.
+#
+# Consumed by `dynacell.preprocess.a549_mantis.assemble.assemble_pool`,
+# which takes this file as its DictConfig (see its docstring for the key
+# contract). There is no `dynacell preprocess assemble-pool` CLI; run it
+# directly:
+#   cfg = load_preprocess_config(Path(".../a549_assemble_pool.yaml"))
+#   assemble_pool(cfg)
+#
+# Produces one HCS store per (target, condition, split) under
+# <output_root>/<split>/<TARGET>_<CONDITION>.<ext>. Position naming is
+# pool-internal: 0/0/fov0000, 0/0/fov0001, … with sequential indexing
+# across all contributing plates. Plate provenance is in per-position
+# zattrs and the colocated <TARGET>_<CONDITION>.provenance.json sidecar.
+#
+# On the train side, also emits <output_root>/train/<TARGET>_all.zarr —
+# a directory zarr (not ozx) covering all conditions for one target.
+# Used as the single-store training corpus for downstream models.
+
+# Targets and conditions to assemble. Subset OK; pools that no plate
+# contributes to are logged as "skipped" with no error. `dual_nucl_memb`
+# is the combined nucleus+membrane target: both v2 fluor genes (h2b +
+# caax, co-imaged) merged into one [Phase3D, Brightfield, Nuclei,
+# Membrane] pool. ER/mito (sec61b/tomm20) stay single-gene and emit BOTH
+# raw Structure + Structure_deconvolved channels.
+targets: [sec61b, tomm20, dual_nucl_memb]
+conditions: [mock, ZIKV, DENV]
+
+# Optional plate restriction. Empty / null = every plate authored under
+# authoring_root. Useful for dev runs that should hit a single plate.
+plates: null
+
+# Source plate zarrs live under intracellular_dashboard and are read-only
+# for this pipeline. The /2-assemble/ and /dynacell/ subdirs under each
+# plate are the canonical upstream outputs — assembly never writes there
+# (enforced by _check_output_safety).
+plate_zarr_root: /hpc/projects/intracellular_dashboard/organelle_dynamics
+
+# Canonical output under the VS training tree. The corpus dir is ``mantis``
+# (was ``mantis_v1``, a misnomer — the corpus pools BOTH microscope
+# generations: v1 ER/mito plates @0.1494 µm/px + the v2 nucleus/membrane
+# plate @0.116 µm/px, resampled to 0.1494). ``mantis_v1``/``mantis_v2`` were
+# only ever pitch labels, never separate corpora. Old stores stay at
+# ``mantis_v1/`` as the byte-identity reference until this run is verified.
+output_root: /hpc/projects/virtual_staining/training/dynacell/a549/mantis
+
+# Refuse to clobber an existing output. Set true on intentional re-runs.
+overwrite: false
+
+# Per-plate (z, y, x) spacing is read from each source plate's NGFF
+# metadata at assembly time (`_read_source_spacing` in assemble.py).
+grid:
+  stride_h: 2.0
+  window: [5.0, 23.0]
+  tail_tol_h: 1.5
+
+# Per-condition store format (one of ozx, zarr). Set to zarr so the
+# INTERNAL per-condition test store is a directory zarr carrying all
+# channels (incl. Structure_deconvolved). The raw-only publication .ozx
+# is derived from it via emit_raw_only_ozx below.
+condition_format: zarr
+
+# Train-side <TARGET>_all store format. Default zarr — a directory store
+# (not ozx) so training pipelines that expect appendability can use it
+# directly. Setting this to ozx is allowed but uncommon.
+pool_all_format: zarr
+
+# Whether to emit <TARGET>_all on the train side in addition to the per-
+# condition stores. Set false to skip the pooled training store.
+emit_train_pool_all: true
+
+# Also derive a colocated raw-only <TARGET>_<COND>.ozx next to each
+# internal directory-zarr per-condition store, dropping every
+# *_deconvolved channel. This is the publication artifact (AWS Open Data
+# mirror). Requires condition_format: zarr. Targets without a deconvolved
+# channel (dual_nucl_memb → nuclei/membrane are raw-only) have nothing to
+# drop, so the internal store is packed as-is — the .ozx mirror is still
+# emitted for every target.
+emit_raw_only_ozx: true
+
+# Cap the number of assembled timepoints (after the 2-h hpi grid). null =
+# no cap. T=10 covers the full 5..23 hpi grid; plates with shorter native
+# runs (e.g. 2024_10_29 → 5 frames, 2024_10_31 → 7) emit fewer regardless
+# and are unaffected. The cap exists so future plates with longer
+# native_t don't silently inflate the train side beyond design.
+t_cap: 10
+
+# Per-split center-crop applied AFTER any pixel-size resample. Y, X in
+# pixels of the post-resample block. Both splits now ship at 640x960
+# (≈ 95.6 × 143.4 µm at 0.1494 µm/px): test is UNCROPPED from the old
+# 512x512 to the same 640x960 window as train so eval sees the full FOV.
+# Set null on either side to skip cropping.
+train_center_crop_yx: [640, 960]
+test_center_crop_yx: [640, 960]
+
+# Per-split target lateral pixel size (µm/px). When non-null and finer
+# than the source NGFF spacing, the (Y, X) plane is resampled to this
+# pixel size BEFORE center-crop so all plates land at a uniform size.
+# 0.1494 collapses mantis_v2 (0.116, the nuc/mem plate) onto v1's pitch;
+# v1 ER/mito plates already at 0.1494 are no-ops. Both splits now resample
+# so the uncropped 640x960 test window is uniform across microscopes.
+train_target_yx_pixel_size_um: 0.1494
+test_target_yx_pixel_size_um: 0.1494
+
+# Splits to write. Default builds both train and test in one run.
+splits: [train, test]

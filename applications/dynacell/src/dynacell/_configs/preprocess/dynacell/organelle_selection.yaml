@@ -1,0 +1,29 @@
+# Optics (for focus detection via waveorder).
+na_det: 1.25
+lambda_illumination: 0.405
+pixel_size_xy: 0.108
+
+# Selection.
+target_organelles: ["SEC61B", "TOMM20"]
+depth: 44
+random_seed: 42
+
+# Split sizes.
+num_train: 500
+num_test: 100
+
+# I/O.
+input_data_directory: /hpc/projects/virtual_staining/training/dynacell/ipsc
+output_save_directory: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4
+# Store-name stems, not WorkflowId tokens: each id selects
+# `<input_data_directory>/<id>_fluor.zarr` (4_fluor.zarr, 4_1_fluor.zarr,
+# 4_2_fluor.zarr). `is_target_workflow` expects the dotted form ("4.1")
+# parsed from per-FOV `[Pipeline 4.1]` metadata; do not pass these to it.
+pipeline_ids: ["4", "4_1", "4_2"]
+output_channel_names: ["Brightfield", "Nuclei", "Membrane", "Structure", "Phase3D"]
+
+# Zarr output.
+output_chunks: [1, 1, 8, 512, 512]
+shards_ratio: [2, 1, 8, 8, 8]
+zarr_version: "0.5"
+zarr_layout: hcs

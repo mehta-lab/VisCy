@@ -18,7 +18,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/sec61b/fnet3d_paper/checkpoints/epoch=183-step=134688.ckpt
+    ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fnet3d_paper/checkpoints/epoch=183-step=134688.ckpt
 
 data:
   init_args:
@@ -35,8 +35,8 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.prediction_writer.HCSPredictionWriter
       init_args:
-        output_store: /hpc/projects/virtual_staining/training/dynacell/a549/predictions/sec61b_fnet3d_paper__sec61b_mock.zarr
+        output_store: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/ipsc/a549__mock/prediction.zarr
 
 launcher:
   job_name: FNet3DPaper_PRED_SEC61B_ON_A549_sec61b_mock
-  run_root: /hpc/projects/virtual_staining/training/dynacell/a549/predictions
+  run_root: /hpc/projects/virtual_staining/training/dynacell/er/fnet3d_paper/ipsc/a549__mock

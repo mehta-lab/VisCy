@@ -18,6 +18,7 @@ CLI calls by passing ``hydra.searchpath`` overrides to ``compose``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,13 @@ def _compose_eval_cfg(overrides: list[str], config_name: str = "eval") -> DictCo
     with initialize_config_module(config_module="dynacell.evaluation._configs", version_base="1.2"):
         cfg = compose(config_name=config_name, overrides=[*overrides, _searchpath_override()])
     return cfg
+
+
+def test_default_eval_pins_morphem_to_a_hub_commit() -> None:
+    """The morphem group must carry a full commit SHA: the model is trust_remote_code."""
+    cfg = _compose_eval_cfg([])
+    assert cfg.feature_extractor.morphem.pretrained_model_name == "CaicedoLab/MorphEm"
+    assert re.fullmatch(r"[0-9a-f]{40}", cfg.feature_extractor.morphem.revision)
 
 
 # -- Layer 1: compose + hook produces correct resolved values ---------------
@@ -170,7 +178,7 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     """``evaluate_model`` runs ``apply_dataset_ref`` before ``evaluate_predictions``."""
     captured: list[DictConfig] = []
 
-    def _fake_evaluate_predictions(cfg: DictConfig):
+    def _fake_evaluate_predictions(cfg: DictConfig, *, cp_space):
         captured.append(cfg)
         return ([], [], [])
 
@@ -180,12 +188,15 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("dynacell.evaluation.pipeline.evaluate_predictions", _fake_evaluate_predictions)
     monkeypatch.setattr("dynacell.evaluation.pipeline.save_metrics", _fake_save_metrics)
 
+    # Feature metrics off: evaluate_model would otherwise load the CP reference before
+    # evaluate_predictions, and this test is about the dataset_ref splice only.
     cfg = _compose_eval_cfg(
         [
             "target=er_sec61b",
             "predict_set=ipsc_confocal",
             "io.pred_path=/tmp/fake",
             f"save.save_dir={tmp_path}",
+            "compute_feature_metrics=false",
         ]
     )
 
@@ -285,8 +296,11 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
     )
     apply_dataset_ref(cfg)
 
-    gt_suffix = f"{gene_token}_{cond_token}.ozx"
-    seg_suffix = f"{gene_token}_{cond_token}_seg_cleaned.zarr"
+    # Nucleus (h2b) + membrane (caax) GT now live in the merged dual store; ER/mito
+    # keep their per-marker stores. The suffix reflects the on-disk store stem.
+    store_stem = "dual_nucl_memb" if marker in ("caax", "h2b") else gene_token
+    gt_suffix = f"{store_stem}_{cond_token}.zarr"
+    seg_suffix = f"{store_stem}_{cond_token}_seg_cleaned.zarr"
     cache_suffix = f"eval_cache/{marker}_{cond_slug}"
 
     assert str(cfg.io.gt_path).endswith(gt_suffix), (

@@ -8,11 +8,11 @@ selection_criteria:
 train:
   count: 5
   fovs:
-  - 0/0/fov0000
-  - 0/0/fov0001
-  - 0/0/fov0002
-  - 0/0/fov0003
-  - 0/0/fov0004
+  - 0/0/fov0010
+  - 0/0/fov0011
+  - 0/0/fov0012
+  - 0/0/fov0013
+  - 0/0/fov0014
 test:
   count: 12
   fovs:

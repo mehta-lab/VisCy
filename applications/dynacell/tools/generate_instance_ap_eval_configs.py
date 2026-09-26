@@ -11,10 +11,20 @@ have an instance interpretation:
 - **membrane** → ``segmentation.backend=cellpose_watershed``: GT-nuclei-seeded
   membrane EDT watershed → cytoplasm-only whole-cell instances.
 
-Buckets are keyed by ``(organelle, test_set)`` so the 2D slice fraction is uniform
-within a grouped run (iPSC mid-slice 0.5, A549 in-focus 0.3 — the GT decides the
-plane, applied identically to the prediction). Conditions fold every in-scope
-``(train_set, model[, plate])``.
+Buckets are keyed by ``(organelle, test_set)`` so the 2D plane rule is uniform
+within a grouped run — the GT decides the plane, applied identically to the
+prediction. Conditions fold every in-scope ``(train_set, model[, plate])``.
+
+These leaves deliberately emit **no** ``slice_fraction``. ``eval.yaml`` defaults
+``segmentation.slice_selection: focus``, no leaf overrides it, and ``pipeline.py``
+reads ``slice_fraction`` only on the ``frac`` branch — so the plane is the focus
+plane (``focus_anchor: nucleus_area``, the max-nuclear-area cross-section), not a
+fractional depth. The leaves used to carry ``slice_fraction: 0.5/0.3`` from before
+focus anchoring became the default; it selected nothing, but until the companion
+fix to ``_instance_identity`` it still keyed the instance-mask cache, which made
+the dead value look load-bearing. Do not "restore" it by setting
+``slice_selection: frac``: focus anchoring is the canonical regime that produced
+the campaign's published AP numbers.
 
 GT nuclei for the membrane watershed: on iPSC they live in the same ``cell.zarr``
 as the GT membrane; on A549 they live in the **separate** ``H2B_<cond>.ozx`` store
@@ -51,21 +61,22 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 from generate_grouped_eval_configs import (  # noqa: E402
+    _CANONICAL_ORGANELLE_ROOTS,
     _CODE_TO_PAPER,
-    _DIR_INFIX,
+    _DEFAULT_TEST_SETS,
     _DYNACELL_ROOT,
-    _IGNORE_NAMES,
     _LEAF_OUT_ROOT,
     _MANIFEST_ROOT,
-    _SKIP_FILENAMES,
     _SKIP_MODELS,
     ParsedZarr,
-    _is_ablation_track_zarr,
     benchmark_dataset_ref,
     condition_name,
+    leaf_test_set,
     parse_zarr_name,
     walk_predictions,
 )
+
+from dynacell.evaluation.paths import eval_leaf, pred_cache_dir  # noqa: E402
 
 _INSTANCE_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane")
 # Opt-out model gate (see module docstring): models that genuinely have no
@@ -75,8 +86,7 @@ _INSTANCE_ORGANELLES: tuple[str, ...] = ("nucleus", "membrane")
 _INSTANCE_DENYLIST: frozenset[str] = frozenset()
 # CellDiff_r2 variants kept off the iPSC test set (iterative-only elsewhere).
 _IPSC_ONLY_VARIANTS: frozenset[str] = frozenset({"sliding_window", "denoise"})
-_SLICE_FRACTION: dict[str, float] = {"ipsc": 0.5, "a549": 0.3}
-_BACKEND: dict[str, str] = {"nucleus": "cellpose", "membrane": "cellpose_watershed"}
+_BACKEND: dict[str, str] = {"nucleus": "cpdino", "membrane": "cpdino"}
 
 _HYDRA_HEADER = "# @package _global_\n"
 _OUT_ROOT = _LEAF_OUT_ROOT.parent / "instance_ap"
@@ -113,37 +123,34 @@ def a549_nuclei_store(condition: str) -> str:
 
 
 def save_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Canonical instance-AP save_dir (parallel to the feature-metric campaign)."""
-    infix = _DIR_INFIX[p.train_set]
-    name = f"eval_{p.paper_variant}{infix}_{p.organelle}"
-    if p.test_set != "ipsc":
-        name += f"_{p.condition}"
-    return dynacell_root / p.test_set / "evaluations_instance_ap" / name
+    """Canonical instance-AP eval leaf dir (``paths.eval_leaf`` with the instance_ap track)."""
+    return eval_leaf(
+        organelle=p.organelle,
+        model=p.model_variant,
+        train_set=p.train_set_canonical,
+        test_set=p.test_set,
+        condition=p.condition,
+        track="instance_ap",
+        data_root=dynacell_root,
+    )
 
 
 def pred_cache_dir_for(p: ParsedZarr, dynacell_root: Path = _DYNACELL_ROOT) -> Path:
-    """Dedicated pred-side instance cache (kept apart from the mask/feature caches).
-
-    Namespaced by organelle: the cache manifest records a single ``pred.plate_path``
-    per dir, so nucleus (``nucl_*.zarr``) and membrane (``memb_*.zarr``) for the same
-    (train_set, model, condition) must not share a dir — otherwise the two grouped
-    jobs race over the manifest and the loser dies with ``StaleCacheError``.
-    """
-    cond_seg = "ipsc" if p.test_set == "ipsc" else str(p.condition)
-    return (
-        dynacell_root
-        / p.test_set
-        / "eval_cache_pred_instance_ap"
-        / p.organelle
-        / p.train_set
-        / p.model_variant
-        / cond_seg
+    """Canonical instance-AP pred-side feature cache (``paths.pred_cache_dir`` instance_ap track)."""
+    return pred_cache_dir(
+        organelle=p.organelle,
+        model=p.model_variant,
+        train_set=p.train_set_canonical,
+        test_set=p.test_set,
+        condition=p.condition,
+        track="instance_ap",
+        data_root=dynacell_root,
     )
 
 
 def build_leaf(organelle: str, test_set: str, conditions: list[ParsedZarr]) -> dict:
     """Return the grouped-leaf dict for one (organelle, test_set) bucket."""
-    seg: dict = {"backend": _BACKEND[organelle], "slice_fraction": _SLICE_FRACTION[test_set]}
+    seg: dict = {"backend": _BACKEND[organelle]}
     if organelle == "membrane":
         seg["nuclei_channel_name"] = "Nuclei"
     body: dict = {
@@ -205,26 +212,26 @@ def audit_prediction_coverage(dynacell_root: Path = _DYNACELL_ROOT) -> list[str]
     caller controls exit behavior; pure-string output keeps it unit-testable.
     """
     errors: list[str] = []
-    for dataset in ("ipsc", "a549"):
-        for subdir in ("predictions", "joint_predictions"):
-            root = dynacell_root / dataset / subdir
-            if not root.is_dir():
+    for organelle_root in _CANONICAL_ORGANELLE_ROOTS:
+        root = dynacell_root / organelle_root
+        if not root.is_dir():
+            continue
+        # Bounded 3-level glob mirroring walk_predictions (the canonical layout is
+        # <model>/<train_set>/<test>/prediction.zarr); rglob would descend chunk trees.
+        for zarr_path in sorted(root.glob("*/*/*/prediction.zarr")):
+            if leaf_test_set(zarr_path.parent.name) not in _DEFAULT_TEST_SETS:
+                # Out-of-scope test set (e.g. the hek__<arm> third-cell-type probe
+                # sharing this tree): skipped by walk_predictions too, so reporting
+                # it as "unregistered" here would fail main() on a prediction the
+                # campaign never intended to fold in.
                 continue
-            for entry in sorted(root.iterdir()):
-                name = entry.name
-                if name in _IGNORE_NAMES or name.startswith(("_", ".")):
-                    continue
-                if not name.endswith(".zarr") or name in _SKIP_FILENAMES:
-                    continue
-                if _is_ablation_track_zarr(name) or not entry.is_dir():
-                    continue
-                try:
-                    parse_zarr_name(entry, dynacell_root=dynacell_root)
-                except ValueError as exc:
-                    errors.append(
-                        f"unregistered/unparseable prediction {entry} -> {exc}; register its "
-                        f"model in generate_grouped_eval_configs (_DETERMINISTIC_MODELS + _CODE_TO_PAPER)"
-                    )
+            try:
+                parse_zarr_name(zarr_path, dynacell_root=dynacell_root)
+            except ValueError as exc:
+                errors.append(
+                    f"unregistered/unparseable prediction {zarr_path} -> {exc}; register its "
+                    f"model in generate_grouped_eval_configs (_DETERMINISTIC_MODELS + _CODE_TO_PAPER)"
+                )
     return errors
 
 
@@ -233,7 +240,8 @@ def emit_leaf(out_path: Path, organelle: str, test_set: str, body: dict) -> None
     out_path.parent.mkdir(parents=True, exist_ok=True)
     comment = (
         f"# Grouped instance-AP leaf: {organelle} × {test_set} test "
-        f"({len(body['conditions'])} conditions, slice_fraction={_SLICE_FRACTION[test_set]}). "
+        f"({len(body['conditions'])} conditions; 2D plane = the GT focus plane, "
+        f"segmentation.slice_selection=focus from eval.yaml). "
         f"Auto-generated by tools/generate_instance_ap_eval_configs.py.\n"
     )
     text = _HYDRA_HEADER + comment + yaml.safe_dump(body, default_flow_style=False, sort_keys=False)

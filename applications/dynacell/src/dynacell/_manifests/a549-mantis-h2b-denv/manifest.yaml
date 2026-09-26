@@ -20,8 +20,8 @@ targets:
     display_name: Nuclei (H2B)
     target_channel: Nuclei
     stores:
-      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/train/H2B_DENV.ozx
-      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV.ozx
-      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/a549/mantis_v1/test/H2B_DENV_seg_cleaned.zarr
+      train: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/dual_nucl_memb_all.zarr
+      test: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV.zarr
+      cell_segmentation: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_DENV_seg_cleaned.zarr
       gt_cache_dir: /hpc/projects/virtual_staining/training/dynacell/a549/eval_cache/h2b_denv
     splits: splits/h2b_train_test.yaml

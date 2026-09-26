@@ -1,0 +1,152 @@
+# @package _global_
+# Grouped leaf: HEK293T membrane (KRAS) third-cell-type probe, a549xy geometry.
+# NeurIPS response item O — the cell-type axis at fixed instrument (both HEK and
+# A549 are mantis; iPSC is confocal), so a drop here that A549 does not show is
+# cell type rather than microscope.
+#
+# Hand-written, NOT emitted by tools/generate_grouped_eval_configs.py: that
+# generator buckets by (organelle, train_set) with no test-set axis, so it cannot
+# express a HEK bucket, and re-running it would rewrite the twelve committed
+# ipsc/a549 buckets with the in-flight 2D campaign's fnet2d conditions.
+#
+# Six model conditions: the paper's regression pair (FNet3D, VSCyto3D) x three
+# training pools. CELL-Diff lives in the sibling membrane_hek_a549xy_celldiff
+# leaf — its predicts are ~25x slower, and splitting keeps this bucket off that
+# tail while both share one warm GT cache.
+#
+# Carve seeds are PREDICTED, not ground truth, and that is the one real
+# departure from the ipsc/a549 membrane buckets. Those carve a GT nucleus
+# channel (iPSC cell.zarr Nuclei; A549 the sibling H2B_*.ozx). The HEK release
+# ships no nucleus channel -- its nucleus target failed QC -- so the seeds come
+# from `Nuclei_prediction` in
+# hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr,
+# a Phase3D->nucleus prediction from the public VSCyto3D (cytoland) checkpoint
+# (_dual_nucl_memb/fcmae_vscyto3d_pretrained/_no_train_cytoland/predict__hek_mantis_kras_a549xy.yml).
+# Consequences to keep in view when reading this bucket's Dice/IoU/AP:
+#   * The carve inherits the seed model's error, so HEK whole-cell numbers carry
+#     one error source the ipsc/a549 rows do not. Treat a HEK-vs-A549 delta as
+#     including it; do not read it as a pure cell-type effect.
+#   * The seeds enter twice, not once: the resolved base sets
+#     slice_selection=focus with focus_anchor=nucleus_area, so the predicted
+#     nuclei also pick the 2-D instance plane (pipeline.py `_gt_nuclei` feeds
+#     resolve_focus_instance_planes for a membrane target). Self-consistent --
+#     GT, prediction and seeds all land on the same z -- but it means a seed-model
+#     failure shifts the plane as well as the carve.
+#   * The seed model is public cytoland weights -- never fine-tuned on dynacell
+#     and never exposed to HEK -- so it cannot leak a benchmarked checkpoint into
+#     its own evaluation. Every condition below carves the SAME seed stack, so
+#     the carve is a constant across the arms being compared.
+# What this buys: compute_instance_ap IS pipeline.py's ``instance_mode``, and
+# that flag switches what Dice/IoU/Precision/Recall are computed ON. True (here,
+# and in the ipsc/a549 membrane buckets) means binarized carved cpdino
+# WHOLE-CELL labels -- filled cells, ~30-50% foreground. False (this bucket
+# until now) meant SuperModel semantic membrane shells at ~2-5% foreground,
+# where a 1-2 voxel displacement alone drops Dice near zero. Those two are not
+# comparable, which is why this bucket previously had to omit membrane Dice from
+# every cross-cell-type table. It is now on the same footing as the paper's.
+#
+# Other deliberate departure:
+#   * cross_condition_probe disabled: it classifies infected-vs-mock, and HEK
+#     has a single (uninfected) condition. It is default-on whenever feature
+#     metrics run, and would otherwise log a skip every time.
+#
+# io.gt_path / gt_channel_name / cell_segmentation_path / gt_cache_dir and
+# pixel_metrics.spacing all come from the manifest via benchmark.dataset_ref.
+# focus.* is left at the eval.yaml defaults ON PURPOSE: lambda_ill 0.450 is what
+# the HEK stores' focus_slice zattrs were written with, and focus.estimator_sig
+# is hashed into every deep-feature preprocess_version, so raising it to the
+# acquisition's 0.5 would silently discard all four prewarmed embedding caches.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei_prediction
+cross_condition_probe:
+  enabled: false
+io:
+  require_complete_cache: false
+  # Shared across every condition (unlike the A549 buckets, whose H2B seed store
+  # varies per plate condition) -- HEK is a single uninfected condition.
+  nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/hek/predictions/dual_nucl_memb_fcmae_vscyto3d_pretrained_cytoland_a549xy.zarr
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+conditions:
+- name: fnet3d__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_paper/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fnet3d_paper/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_paper/ipsc/hek__a549xy
+- name: fnet3d__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_paper/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fnet3d_paper/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_paper/a549/hek__a549xy
+- name: fnet3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_paper/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fnet3d_paper/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fnet3d_paper/joint/hek__a549xy
+- name: vscyto3d__ipsc_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/ipsc/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/ipsc/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/ipsc/hek__a549xy
+- name: vscyto3d__a549_trained__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/a549/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/a549/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/a549/hek__a549xy
+- name: vscyto3d__joint__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/hek__a549xy/prediction.zarr
+    pred_cache_dir: /hpc/projects/virtual_staining/training/dynacell/hek/eval_cache_pred/membrane/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/joint/hek__a549xy
+# No-model floor, last so a failure here cannot cost the six model rows. Sets no
+# pred_path: io.pred_is_source makes _ref_hook read the manifest source channel
+# (Phase3D) as the prediction and default pred_path to the GT store, so positions
+# match by construction. Matches the mito/er phase leaves (no pred_cache_dir).
+- name: phase__no_model__hek
+  benchmark:
+    dataset_ref:
+      dataset: hek-mantis-kras-a549xy
+      target: kras
+  io:
+    pred_is_source: true
+  save:
+    save_dir: /hpc/projects/virtual_staining/training/dynacell/hek/evaluations_with_embeddings/eval_phase_membrane_a549xy

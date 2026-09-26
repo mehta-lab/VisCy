@@ -65,6 +65,72 @@ def test_resolve_happy_path_against_fixture():
     assert str(resolved.gt_cache_dir).endswith("eval_cache/SEC61B")
 
 
+def test_source_channel_override_selects_an_auxiliary_channel():
+    """An explicit source_channel overrides the manifest's channels.source.
+
+    The brightfield-input ablation's entire signal: same dataset, same target, same
+    stores, model input switched from the reconstructed ``Phase3D`` volume to the raw
+    ``Brightfield`` stack it was reconstructed from.
+    """
+    ref = DatasetRef(dataset="aics-hipsc", target="sec61b", source_channel="Brightfield")
+    resolved = resolve_dataset_ref(ref)
+    assert resolved.source_channel == "Brightfield"
+    # Nothing else moves — otherwise the ablation is confounded.
+    baseline = resolve_dataset_ref(DatasetRef(dataset="aics-hipsc", target="sec61b"))
+    assert baseline.source_channel == "Phase3D"
+    assert resolved.data_path_train == baseline.data_path_train
+    assert resolved.data_path_test == baseline.data_path_test
+    assert resolved.target_channel == baseline.target_channel
+    assert resolved.spacing == baseline.spacing
+    assert resolved.gt_cache_dir == baseline.gt_cache_dir
+
+
+def test_source_channel_omitted_keeps_the_manifest_default():
+    """Regression: every pre-existing ref (no source_channel) is unchanged."""
+    assert resolve_dataset_ref(DatasetRef(dataset="aics-hipsc", target="nucleus")).source_channel == "Phase3D"
+
+
+def test_unknown_source_channel_raises_listing_available_channels():
+    """A typo'd channel fails at resolution, not deep inside iohub."""
+    ref = DatasetRef(dataset="aics-hipsc", target="sec61b", source_channel="Brightfeild")
+    with pytest.raises(ValueError, match="not declared in manifest"):
+        resolve_dataset_ref(ref)
+
+
+def test_dataset_ref_forbids_extra_keys():
+    """A misspelled key must raise, never be silently dropped.
+
+    Pydantic's default ``extra="ignore"`` would drop ``source_chanel`` and resolve to
+    the manifest default, producing a run that trains on ``Phase3D`` while its config
+    and W&B name claim brightfield — a silent no-op ablation.
+    """
+    with pytest.raises(ValidationError):
+        DatasetRef(dataset="aics-hipsc", target="sec61b", source_chanel="Brightfield")
+
+
+def test_resolver_hook_splices_the_overridden_source_channel(tmp_path):
+    """End-to-end through the Lightning compose hook, not just the resolver."""
+    leaf = tmp_path / "train.yml"
+    leaf.write_text(
+        yaml.dump(
+            {
+                "launcher": {"mode": "fit"},
+                "benchmark": {
+                    "dataset_ref": {
+                        "dataset": "aics-hipsc",
+                        "target": "nucleus",
+                        "source_channel": "Brightfield",
+                    }
+                },
+            }
+        )
+    )
+    composed = _dynacell_ref_resolver(yaml.safe_load(leaf.read_text()))
+    assert composed["data"]["init_args"]["source_channel"] == "Brightfield"
+    assert composed["data"]["init_args"]["target_channel"] == "Nuclei"
+    assert str(composed["data"]["init_args"]["data_path"]).endswith("train/cell.zarr")
+
+
 _FIXTURE_TARGET_EXPECTATIONS = [
     ("sec61b", "SEC61B.zarr", "SEC61B_segmented_cleaned.zarr", "eval_cache/SEC61B", "Structure"),
     ("tomm20", "TOMM20.zarr", "TOMM20_segmented_cleaned.zarr", "eval_cache/TOMM20", "Structure"),
@@ -183,3 +249,44 @@ def test_resolver_hook_noop_when_no_dataset_ref():
     composed = {"benchmark": {"target": "er"}, "data": {"init_args": {}}}
     result = _dynacell_ref_resolver(composed)
     assert result == composed
+
+
+def _write_eval_only_manifest(monkeypatch, tmp_path) -> None:
+    """Register a train-less (evaluation-only) manifest as the sole manifest root."""
+    content = _make_manifest_dict(name="eval-only")
+    del content["targets"]["sec61b"]["stores"]["train"]
+    _write_manifest(tmp_path, "eval-only", content)
+    monkeypatch.setenv("DYNACELL_MANIFEST_ROOTS", str(tmp_path))
+
+
+def test_train_less_manifest_resolves_with_none_train(monkeypatch, tmp_path):
+    """An evaluation-only manifest (no train store) resolves, leaving train as None."""
+    _write_eval_only_manifest(monkeypatch, tmp_path)
+    resolved = resolve_dataset_ref(DatasetRef(dataset="eval-only", target="sec61b"))
+    assert resolved.data_path_train is None
+    assert str(resolved.data_path_test) == "/tmp/test.zarr"
+
+
+def test_resolver_hook_predict_accepts_train_less_dataset(monkeypatch, tmp_path):
+    """Predict mode reads the test store, so a missing train store is fine."""
+    _write_eval_only_manifest(monkeypatch, tmp_path)
+    composed = {
+        "launcher": {"mode": "predict"},
+        "benchmark": {"dataset_ref": {"dataset": "eval-only", "target": "sec61b"}},
+        "data": {"init_args": {}},
+    }
+    result = _dynacell_ref_resolver(composed)
+    assert result["data"]["init_args"]["data_path"] == "/tmp/test.zarr"
+
+
+@pytest.mark.parametrize("mode", ["fit", "validate"])
+def test_resolver_hook_rejects_train_less_dataset_outside_predict(monkeypatch, tmp_path, mode):
+    """Fit/validate against a train-less dataset raises instead of stringifying None."""
+    _write_eval_only_manifest(monkeypatch, tmp_path)
+    composed = {
+        "launcher": {"mode": mode},
+        "benchmark": {"dataset_ref": {"dataset": "eval-only", "target": "sec61b"}},
+        "data": {"init_args": {}},
+    }
+    with pytest.raises(ValueError, match="evaluation-only"):
+        _dynacell_ref_resolver(composed)

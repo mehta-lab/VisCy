@@ -1,0 +1,65 @@
+# CellDiff-2D fit overlay — model + trainer only — for the in-focus 2D
+# benchmark track. HCS data hparams live in
+# data_overlays/celldiff_2d_fit.yml; single-store train leaves compose
+# both, joint (BatchedConcatDataModule) leaves compose only this one and
+# author data: themselves.
+#
+# Mirrors model_overlays/celldiff_fit.yml but binds the celldiff_fm_2d
+# recipe (input_spatial_size [1,512,512], patch_size [1,4,4]). CellDiff was
+# already single-GPU, so topology is unchanged. lr / schedule / transport /
+# num_log_steps all match the 3D CellDiff baseline so the 2D-vs-3D
+# comparison isolates geometry.
+#
+# warmup_steps: 8500 is inherited from the 3D overlay deliberately —
+# steps/epoch differ at z_window_size=1, so this is a fraction-of-run knob
+# that was tuned for the 3D leaf, not a "~1 epoch" target. Same open
+# question flagged in model_overlays/fcmae_vscyto2d_fit.yml; left aligned
+# with 3D rather than silently re-tuned.
+base:
+  - ../../../../../../recipes/models/celldiff_fm_2d.yml
+  - ../../../../../../recipes/trainer/fit.yml
+  - ../../../../../../recipes/topology/single_gpu.yml
+seed_everything: 0
+model:
+  init_args:
+    net_config:
+      input_spatial_size: [1, 512, 512]
+    lr: 0.0003
+    schedule: WarmupCosine
+    warmup_steps: 8500
+    warmup_multiplier: 1e-3
+    num_log_steps: 10
+    # Log flow-matching validation loss. The engine defaults this off
+    # (engine.py:832) and without it CellDiff logs NO validation metric at
+    # all, so `save_top_k: -1` keeps all 20 epochs, there is no best-by-monitor
+    # checkpoint, and the arm cannot be checked for convergence — measured
+    # 2026-09-09 against the archived pre-fix runs, where every other 2D
+    # family had a `loss/validate` curve and this one had nothing.
+    #
+    # Cheap, despite CellDiff inference being slow: `validation_step` calls
+    # `self.model(phase, target)`, the same single velocity-field prediction at
+    # one sampled timestep as `training_step`. It does NOT integrate the ODE —
+    # that is `generate()` at `num_generate_steps: 100`, predict-mode only.
+    # At `split_ratio: 0.8` and no backward pass this is ~8% of epoch time.
+    #
+    # ⚠ The metric is noisy: `t` is resampled per example, so a 20-point curve
+    # has high epoch-to-epoch variance. Pin the validation timestep grid before
+    # reading it as a saturation monitor, not just as a logged number.
+    #
+    # 2D only, on request. `model_overlays/celldiff_fit.yml` (3D) is still off,
+    # so convergence is NOT yet comparable across the 2D/3D CellDiff pair.
+    #
+    # ⚠ PROVENANCE: the canonical post-affine-fix CellDiff-2D fits on disk
+    # (2026-09-09, 12/12 COMPLETED 0:0) PREDATE this flag and therefore carry
+    # NO `loss/validate` curve. A rerun to add one was launched and then
+    # deliberately cancelled — the existing fits are scientifically valid and
+    # re-spending ~15 GPU-h for a monitoring metric was judged not worth it.
+    # This flag applies to the NEXT CellDiff-2D fit, not to those weights.
+    compute_validation_loss: true
+trainer:
+  # bf16-mixed, matching the 3D CellDiff overlay. No GradScaler, so a NaN
+  # gradient surfaces as a non-finite loss instead of a silently skipped
+  # step — the failure mode that froze the first 24 FCMAE-2D fits at
+  # initialization. Do NOT switch to 16-mixed.
+  precision: bf16-mixed
+  max_epochs: 20

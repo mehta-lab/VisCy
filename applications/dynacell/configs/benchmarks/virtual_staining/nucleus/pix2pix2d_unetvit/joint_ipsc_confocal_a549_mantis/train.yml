@@ -1,0 +1,170 @@
+# pix2pix2d_unetvit (UNetViT generator + multi-scale PatchGAN, run
+# Z-preserving at Z=1) fit on nucleus (Nuclei channel) — joint ipsc_confocal + a549_mantis pooled,
+# in-focus 2D track. Mirror of the 3D
+# nucleus/pix2pix3d_unetvit/joint_ipsc_confocal_a549_mantis/train_4gpu_modernized.yml leaf,
+# flattened onto the offline 5-plane in-focus slab store (z_window_size=1
+# emits one in-focus window per plane).
+#
+# ⚠ Mirrors train_4gpu_modernized.yml, NOT the stale sibling train.yml. The
+# published pix2pix3d rows came from the modernized "Run D" recipe — the
+# checkpoints carry loss_type='nonsat', lr 2e-4/2e-4, r1_gamma=10,
+# ema_kimg=10, lecam_gamma=0.3, lambda_l1=10 and 201 generator_ema.* tensors
+# — while train.yml still composes the LSGAN baseline overlay. All of Run D is
+# baked into model_overlays/pix2pix2d_unetvit_fit.yml, so unlike the 3D leaves
+# this file repeats none of it.
+#
+# BatchedConcatDataModule + two explicit HCSDataModule children; only
+# model_overlays/pix2pix2d_unetvit_fit.yml is composed (the data block is
+# authored inline here, not via data_overlays).
+#
+# Normalization is NormalizeSampled (fov_statistics), matching the single-set
+# pix2pix2d leaves — divergent from the celldiff joint, which uses
+# MinMaxSampled. Per-organelle prior is to keep joint and single-set
+# normalizations identical so ablations are apples-to-apples.
+#
+# batch_size 2 here, NOT the single-set 4: BatchedConcatDataModule's
+# train_dataloader uses batch_size as-is, while HCSDataModule divides by
+# RandWeightedCropd num_samples. 2 indices * 2 num_samples = 4 GPU samples per
+# rank, x 4 DDP ranks = the same 16 samples/step as the 3D arm.
+base:
+  - ../../../_internal/shared/model/model_overlays/pix2pix2d_unetvit_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: nucleus
+  gene: Nuclei
+  target: nucleus
+  target_id: nucleus
+  train_set: joint_ipsc_confocal_a549_mantis
+  model_name: pix2pix2d_unetvit
+  experiment_id: nucleus__joint_ipsc_confocal_a549_mantis__pix2pix2d_unetvit
+
+trainer:
+  logger:
+    init_args:
+      name: pix2pix2d_unetvit_JOINT_NUCL
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/pix2pix2d_unetvit
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    # monitor loss/validate_ema, matching the 3D Run-D leaves: ema_kimg is set,
+    # so the EMA generator is the one the recipe selects on and the one predict
+    # reports. Monitoring the raw loss/validate would pin a different epoch.
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate_ema
+        filename: "epoch={epoch}-step={step}-loss={loss/validate_ema:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/pix2pix2d_unetvit/checkpoints
+
+_hcs_init_args: &hcs_init_args
+  source_channel: Phase3D
+  target_channel: Nuclei
+  z_window_size: 1
+  batch_size: 2
+  num_workers: 4
+  yx_patch_size: [512, 512]
+  split_ratio: 0.8
+  mmap_preload: true
+  scratch_dir: /dev/shm
+  persistent_workers: true
+  normalizations:
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy_transforms.NormalizeSampled
+      init_args:
+        keys: [Nuclei]
+        level: fov_statistics
+        subtrahend: median
+        divisor: iqr
+  augmentations:
+    - class_path: viscy_transforms.RandWeightedCropd
+      init_args:
+        keys: [Phase3D, Nuclei]
+        w_key: Nuclei
+        spatial_size: [1, 624, 624]
+        num_samples: 2
+  gpu_augmentations:
+    - class_path: viscy_transforms.BatchedRandAffined
+      init_args:
+        keys: [source, target]
+        prob: 0.8
+        rotate_range: [0, 0, 0]
+        shear_range: [0.0, 0.05, 0.05]
+        scale_range: [[1, 1], [0.5, 1.5], [0.5, 1.5]]
+        safe_crop_size: [1, 512, 512]
+        safe_crop_coverage: 0.9
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [1, 512, 512]
+    - class_path: viscy_transforms.BatchedRandAdjustContrastd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        gamma: [0.8, 1.2]
+    - class_path: viscy_transforms.BatchedRandScaleIntensityd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        factors: 0.5
+    - class_path: viscy_transforms.BatchedRandGaussianNoised
+      init_args:
+        keys: [source]
+        prob: 0.5
+        mean: 0.0
+        std: 0.3
+    - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+      init_args:
+        keys: [source]
+        prob: 0.5
+        sigma_x: [0.25, 0.75]
+        sigma_y: [0.25, 0.75]
+        sigma_z: [0, 0]
+  val_gpu_augmentations:
+    - class_path: viscy_transforms.BatchedCenterSpatialCropd
+      init_args:
+        keys: [source, target]
+        roi_size: [1, 512, 512]
+
+data:
+  class_path: viscy_data.BatchedConcatDataModule
+  init_args:
+    data_modules:
+      # ipsc_confocal — aics-hipsc in-focus slab store (Nuclei channel)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/cell_focus.zarr
+      # a549_mantis — pooled A549 in-focus slab store (Nuclei channel)
+      - class_path: viscy_data.hcs.HCSDataModule
+        init_args:
+          <<: *hcs_init_args
+          data_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/train/dual_nucl_memb_all_focus.zarr
+
+launcher:
+  job_name: pix2pix2d_unetvit_JOINT_NUCL
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/joint/nucleus/pix2pix2d_unetvit
+  sbatch:
+    # Narrow OFF the hardware_4gpu h100|h200 default, the opposite of the 3D
+    # leaf. 3D needed h200 because the GAN OOMs 80 GB at Z=8; measured at Z=1
+    # on an A40 (44.7 GiB) peak is 13.3 GiB/rank at batch_size 4, so the 48 GB
+    # cards have 3x headroom and reserving Hopper for this would be queue
+    # squatting. The profile documents this opt-out explicitly.
+    constraint: "a40|a6000|l40s|h100|h200"
+    # 128G: the in-focus slab store is a 5-plane slice of the full-Z 3D store
+    # (~1/4 the Z), so the profile's 512G mmap_preload headroom is inherited 3D
+    # scale. Set in the LEAF BODY because launcher_profiles compose after model
+    # overlays and would otherwise win.
+    mem: "128G"

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 
 try:
     from segmenter_model_zoo.zoo import SegModel, SuperModel
@@ -14,13 +15,7 @@ except ImportError:
 try:
     from aicssegmentation.structure_wrapper.seg_lamp1 import Workflow_lamp1
     from aicssegmentation.structure_wrapper.seg_npm1 import Workflow_npm1
-    from aicssegmentation.structure_wrapper.seg_npm1_SR import (
-        Workflow_npm1_SR,  # noqa: F401
-    )
     from aicssegmentation.structure_wrapper.seg_sec61b import Workflow_sec61b
-    from aicssegmentation.structure_wrapper.seg_sec61b_dual import (
-        Workflow_sec61b_dual,  # noqa: F401
-    )
     from aicssegmentation.structure_wrapper.seg_tomm20 import Workflow_tomm20
 except ImportError:
     Workflow_npm1 = None  # type: ignore[assignment, misc]
@@ -113,6 +108,18 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
             if seg_model is None or spacing_zyx is None:
                 raise ValueError("cellpose nucleus segmentation requires seg_model (CellposeModel) and spacing_zyx.")
             return segment_nucleus(img, tuple(spacing_zyx), seg_model).astype(bool)
+        if backend != "supermodel":
+            # cpdino / cellpose_watershed produce LABELS, not binary masks, and their
+            # loaders return a CellposeModel -- which has no apply_on_single_zstack, so
+            # falling through below raises an opaque AttributeError on the first cold
+            # position. Only the eval path is protected (_validate_instance_ap_config
+            # forces compute_instance_ap=true, which routes around this function);
+            # precompute-gt never calls that validator.
+            raise ValueError(
+                f"segment() has no binary-mask path for backend={backend!r}: the instance "
+                "backends produce labels, not masks. Set build.masks=false for "
+                "precompute-gt, or compute_instance_ap=true for eval."
+            )
         _require_segmenter_model_zoo()
         if seg_model is None:
             raise ValueError("seg_model (a loaded SuperModel) must be provided for nucleus and membrane segmentation.")
@@ -120,18 +127,19 @@ def segment(img, target_name=None, seg_model=None, *, backend="supermodel", spac
             img = _smooth_nucleus_input(img)
         mask = seg_model.apply_on_single_zstack(img[None, ...])
 
-    elif target_name == "nucleoli":
+    elif target_name in ("nucleoli", "lysosomes", "er", "mitochondria"):
         _require_aicssegmentation()
-        mask = Workflow_npm1(img, output_type="array")
-    elif target_name == "lysosomes":
-        _require_aicssegmentation()
-        mask = Workflow_lamp1(img, output_type="array")
-    elif target_name == "er":
-        _require_aicssegmentation()
-        mask = Workflow_sec61b(img, output_type="array")
-    elif target_name == "mitochondria":
-        _require_aicssegmentation()
-        mask = Workflow_tomm20(img, output_type="array")
+        # The aicssegmentation workflows normalize their input IN PLACE (intensity_normalization
+        # clips to [m - a*s, m + b*s]). Callers pass views of the GT / prediction volumes they go
+        # on to score, so without a copy a cold mask cache silently scores a clipped GT.
+        img = np.array(img, copy=True)
+        workflow = {
+            "nucleoli": Workflow_npm1,
+            "lysosomes": Workflow_lamp1,
+            "er": Workflow_sec61b,
+            "mitochondria": Workflow_tomm20,
+        }[target_name]
+        mask = workflow(img, output_type="array")
     else:
         raise ValueError(f"Unsupported target_name: {target_name}")
 
@@ -179,25 +187,33 @@ def prepare_segmentation_model(config):
     if config.target_name in ["nucleus", "membrane"]:
         seg_cfg = getattr(config, "segmentation", None)
         backend = getattr(seg_cfg, "backend", "supermodel") if seg_cfg is not None else "supermodel"
-        if backend in ("cellpose", "cellpose_watershed"):
+        if backend in ("cellpose", "cellpose_watershed", "cpdino"):
             if backend == "cellpose" and config.target_name != "nucleus":
                 raise NotImplementedError("segmentation.backend='cellpose' supports nucleus only")
             if backend == "cellpose_watershed" and config.target_name != "membrane":
                 raise NotImplementedError("segmentation.backend='cellpose_watershed' supports membrane only")
+            # cpdino serves both nucleus (direct) and membrane (whole-cell + nucleus carve),
+            # so it is valid for either target — no target restriction.
             use_gpu = bool(getattr(config, "use_gpu", True))
             if not (use_gpu and torch.cuda.is_available()):
                 # The cellpose backends run inference through
-                # ``cubic.segmentation.segment_cpsam``, which is GPU-only by
+                # ``cubic.segmentation.segment_cellpose``, which is GPU-only by
                 # contract (raises in its CUDA precondition). Fail here with a
                 # clear message instead of building a CPU CellposeModel that
                 # would die deeper in the per-FOV segmentation loop.
                 raise RuntimeError(
-                    f"segmentation.backend={backend!r} requires CUDA (cubic.segment_cpsam "
+                    f"segmentation.backend={backend!r} requires CUDA (cubic.segment_cellpose "
                     f"is GPU-only), but use_gpu={use_gpu} and "
                     f"torch.cuda.is_available()={torch.cuda.is_available()}. "
                     "Run on a CUDA device with use_gpu=true."
                 )
-            return load_cellpose_model(use_gpu=use_gpu)
+            # cpdino loads the Cellpose-DINO ViT-L weights; cellpose/cellpose_watershed
+            # load Cellpose-SAM. The model name comes from segmentation.cpdino.model_name
+            # for cpdino (default "cpdino"), else the built-in "cpsam".
+            model_name = "cpsam"
+            if backend == "cpdino":
+                model_name = str(OmegaConf.select(config, "segmentation.cpdino.model_name", default="cpdino"))
+            return load_cellpose_model(use_gpu=use_gpu, model_name=model_name)
         _require_segmenter_model_zoo()
         if config.target_name == "nucleus":
             checkpoint_name = "structure_H2B_100x_hipsc"

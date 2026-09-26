@@ -242,3 +242,83 @@ def test_seed_reproducibility() -> None:
         or result_a["CP_Recall"] != result_c["CP_Recall"]
         or result_a["CP_F1"] != result_c["CP_F1"]
     )
+
+
+_FID_KEYS = {"CP_FID"}
+_PRC_KEYS = {"CP_Precision", "CP_Precision_std", "CP_Recall", "CP_Recall_std", "CP_F1", "CP_F1_std"}
+_MIND_KEYS = {"CP_MIND"}
+
+
+@pytest.mark.parametrize(
+    ("flag", "dropped"),
+    [("compute_fid", _FID_KEYS), ("compute_prc", _PRC_KEYS), ("compute_mind", _MIND_KEYS)],
+)
+def test_disabled_metric_is_omitted_and_others_unchanged(flag: str, dropped: set[str]) -> None:
+    """A switched-off metric loses its keys; every remaining value is bit-identical."""
+    rng = np.random.default_rng(3)
+    target = rng.standard_normal((120, 16)).astype(np.float32)
+    pred = target + 0.5 * rng.standard_normal((120, 16)).astype(np.float32)
+    kwargs = dict(prefix="CP", kid_subsets=20, kid_subset_size=50, prc_bootstrap_subsets=10, mind_num_projections=100)
+
+    full = compute_feature_similarity(pred, target, **kwargs)
+    reduced = compute_feature_similarity(pred, target, **kwargs, **{flag: False})
+
+    assert set(reduced) == set(full) - dropped
+    # Remaining columns keep their relative order and exact values.
+    assert list(reduced) == [k for k in full if k not in dropped]
+    for key, value in reduced.items():
+        assert value == full[key], key
+
+
+def test_all_flags_on_preserves_column_order() -> None:
+    """Defaults emit the historical 11-column order the saved CSVs carry."""
+    rng = np.random.default_rng(4)
+    x = rng.standard_normal((60, 8)).astype(np.float32)
+    result = compute_feature_similarity(
+        x, x, "CP", kid_subsets=5, kid_subset_size=20, prc_bootstrap_subsets=5, mind_num_projections=20
+    )
+    expected = [
+        "CP_FID",
+        "CP_KID",
+        "CP_KID_std",
+        "CP_Precision",
+        "CP_Precision_std",
+        "CP_Recall",
+        "CP_Recall_std",
+        "CP_F1",
+        "CP_F1_std",
+        "CP_MIND",
+        "CP_Median_Cosine_Similarity",
+    ]
+    assert list(result) == expected
+    assert list(compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), "CP")) == expected
+
+
+def test_empty_input_honours_flags() -> None:
+    """The all-NaN path carries exactly the enabled keys, matching a populated call."""
+    rng = np.random.default_rng(5)
+    x = rng.standard_normal((60, 8)).astype(np.float32)
+    flags = dict(compute_fid=False, compute_prc=False, compute_mind=False)
+    empty = compute_feature_similarity(np.empty((0, 0)), np.empty((0, 0)), "CP", **flags)
+    populated = compute_feature_similarity(x, x, "CP", kid_subsets=5, kid_subset_size=20, **flags)
+
+    assert list(empty) == list(populated) == ["CP_KID", "CP_KID_std", "CP_Median_Cosine_Similarity"]
+    assert np.isnan(np.array(list(empty.values()))).all()
+
+
+def test_pairwise_fid_flag() -> None:
+    """``compute_fid=False`` drops the per-timepoint FID; KID/cosine are bit-identical."""
+    rng = np.random.default_rng(6)
+    target = rng.standard_normal((50, 16)).astype(np.float32)
+    pred = target + 0.3 * rng.standard_normal((50, 16)).astype(np.float32)
+
+    full = compute_feature_similarity_pairwise(pred, target, "CP", kid_subsets=20, kid_subset_size=20)
+    reduced = compute_feature_similarity_pairwise(
+        pred, target, "CP", kid_subsets=20, kid_subset_size=20, compute_fid=False
+    )
+    empty = compute_feature_similarity_pairwise(np.empty((0, 0)), np.empty((0, 0)), "CP", compute_fid=False)
+
+    assert list(reduced) == ["CP_KID", "CP_KID_std", "CP_Median_Cosine_Similarity"]
+    assert list(empty) == list(reduced)
+    for key, value in reduced.items():
+        assert value == full[key], key
