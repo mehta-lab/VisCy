@@ -832,14 +832,40 @@ def load_cp_reference(path: Path, *, target_name: str) -> CPReference:
     return ref
 
 
+def cp_sidecar_payload(space: DatasetCPSpace) -> dict[str, Any]:
+    """Return the :data:`CP_SIDECAR_FILENAME` payload an eval writes for the space it scored in.
+
+    ``reference_path`` + ``dataset`` + ``cp_space_sha256`` are what
+    :func:`sidecar_cp_space` reads back; the rest (whole-reference sha256, scaler
+    dataset, mask) is audit.
+    """
+    return {
+        "reference_path": space.reference_path,
+        "dataset": space.dataset,
+        # What post-hoc readers compare: this dataset's CP space, which survives rebuilds
+        # that leave it unchanged. The whole-reference hash is audit only.
+        "cp_space_sha256": space.binding_sha256,
+        "reference_sha256": space.reference_sha256,
+        "scaler_dataset": space.scaler_dataset,
+        "feature_names": list(space.feature_names),
+        "keep_mask": [bool(b) for b in space.keep_mask],
+        "n_kept": int(space.keep_mask.sum()),
+        "n_total": int(space.keep_mask.size),
+    }
+
+
 def sidecar_cp_space(eval_dir: Path) -> DatasetCPSpace:
     """Return the CP space a finished eval dir was scored in, from its :data:`CP_SIDECAR_FILENAME`.
 
-    The sidecar records the reference path, its sha256 and the eval's dataset. The
-    reference is loaded from that path and must still carry that sha256; it is then
-    bound to the recorded dataset, so a lite eval gets its parent's scaler exactly as
-    the pipeline did. Used by post-hoc consumers of eval dirs (the cross-condition
-    probe, the lite subset tools) so they score CP the way the eval did.
+    The sidecar records the reference path, the eval's dataset and that dataset's
+    ``cp_space_sha256`` (:attr:`DatasetCPSpace.binding_sha256`). The current
+    reference at that path is loaded and bound to the recorded dataset (a lite eval
+    gets its parent's scaler exactly as the pipeline did), and its binding must equal
+    the recorded one. A rebuild that leaves this dataset's CP space unchanged (another
+    dataset added or refit, an audit field moved) therefore keeps the sidecar
+    readable; one that changes it is refused. Used by post-hoc consumers of eval dirs
+    (the cross-condition probe, the lite subset tools) so they score CP the way the
+    eval did.
 
     Parameters
     ----------
@@ -856,17 +882,20 @@ def sidecar_cp_space(eval_dir: Path) -> DatasetCPSpace:
     FileNotFoundError
         If the sidecar or the reference it names is missing.
     ValueError
-        If the reference on disk no longer has the sha256 the eval recorded.
+        If the dataset's CP space in the current reference differs from the one the
+        eval recorded.
     """
     sidecar = json.loads((eval_dir / CP_SIDECAR_FILENAME).read_text())
     path = Path(sidecar["reference_path"])
     ref = _read_cp_reference(path, build_hint="the reference this eval was scored in")
-    if ref.sha256 != sidecar["reference_sha256"]:
+    space = ref.for_dataset(sidecar["dataset"])
+    if space.binding_sha256 != sidecar["cp_space_sha256"]:
         raise ValueError(
-            f"{eval_dir}: CP reference {path} changed since the eval "
-            f"(sha256 {ref.sha256[:12]} now, {sidecar['reference_sha256'][:12]} at eval time)"
+            f"{eval_dir}: the CP space of {sidecar['dataset']} in {path} changed since the eval "
+            f"(cp_space_sha256 {space.binding_sha256[:12]} now, {sidecar['cp_space_sha256'][:12]} at eval time); "
+            "re-evaluate this dir"
         )
-    return ref.for_dataset(sidecar["dataset"])
+    return space
 
 
 def resolve_cp_reference_path(config: DictConfig) -> Path:

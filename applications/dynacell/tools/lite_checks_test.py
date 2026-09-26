@@ -25,7 +25,13 @@ import pytest
 from lite_checks import check_b2, check_e
 from lite_subset_sim import mmd2_from_features, poly3_features
 
-from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, write_cp_reference
+from dynacell.evaluation.cp_reference import (
+    DatasetFit,
+    cp_sidecar_payload,
+    fit_cp_reference,
+    load_cp_reference,
+    write_cp_reference,
+)
 
 _BUCKET = "a549__mock"
 _FOVS = [f"0/0/fov{i:04d}" for i in range(12)]
@@ -119,7 +125,7 @@ def test_check_e_scores_cp_in_the_reference_space(tmp_path: Path) -> None:
     for side, arr in (("gt", gt), ("pred", pred)):
         np.savez(path / "embeddings" / f"{side}_cp_single_cell_embeddings.npz", embeddings=arr, fov=fov)
     (path / "cp_selected_feature_mask.json").write_text(
-        json.dumps({"reference_path": str(reference), "reference_sha256": payload["sha256"], "dataset": "ds"})
+        json.dumps(cp_sidecar_payload(load_cp_reference(reference, target_name="nucleus").for_dataset("ds")))
     )
 
     result = check_e("nucleus", "ipsc", ["fnet3d_paper/ipsc"], tmp_path, sizes=(50,), draws=2, data_root=tmp_path)

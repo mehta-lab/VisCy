@@ -22,6 +22,7 @@ from dynacell.evaluation.cp_reference import (
     CP_SIDECAR_FILENAME,
     DatasetCPSpace,
     complete_cached_gt_cp_blocks,
+    cp_sidecar_payload,
     eval_cp_space,
 )
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
@@ -367,16 +368,7 @@ def _stage_cp_dataset_inputs(
     cp_space.check_gt_cells(gt_cp_blocks)
     pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
-    mask_payload = {
-        "reference_path": cp_space.reference_path,
-        "reference_sha256": cp_space.reference_sha256,
-        "dataset": cp_space.dataset,
-        "scaler_dataset": cp_space.scaler_dataset,
-        "feature_names": list(cp_space.feature_names),
-        "keep_mask": [bool(b) for b in cp_space.keep_mask],
-        "n_kept": int(cp_space.keep_mask.sum()),
-        "n_total": int(cp_space.keep_mask.size),
-    }
+    mask_payload = cp_sidecar_payload(cp_space)
     (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(mask_payload, indent=2))
     return (
         "CP",

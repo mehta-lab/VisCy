@@ -22,7 +22,13 @@ import pandas as pd
 import pytest
 from lite_subset_sim import System, load_systems, mmd2_from_features, poly3_features, poly_kernel
 
-from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, write_cp_reference
+from dynacell.evaluation.cp_reference import (
+    DatasetFit,
+    cp_sidecar_payload,
+    fit_cp_reference,
+    load_cp_reference,
+    write_cp_reference,
+)
 from dynacell.evaluation.feature_metrics import _kid, _median_cosine_similarity
 
 _BLOCKS = [("A/1/0", 0), ("A/1/0", 1), ("A/1/1", 0), ("A/1/1", 1), ("A/1/2", 0), ("A/1/2", 1)]
@@ -90,10 +96,8 @@ def _write_eval_dir(path: Path, seed: int, reference: Path) -> dict[str, dict[st
                 path / "embeddings" / f"{side}_{tok}_single_cell_embeddings.npz", embeddings=arr, fov=fov, timepoint=tp
             )
         cells[tok] = {"pred": pred, "gt": gt, "fov": fov, "timepoint": tp}
-    sha256 = json.loads(reference.read_text())["sha256"]
-    (path / "cp_selected_feature_mask.json").write_text(
-        json.dumps({"reference_path": str(reference), "reference_sha256": sha256, "dataset": _DATASET})
-    )
+    space = load_cp_reference(reference, target_name="nucleus").for_dataset(_DATASET)
+    (path / "cp_selected_feature_mask.json").write_text(json.dumps(cp_sidecar_payload(space)))
     return cells
 
 

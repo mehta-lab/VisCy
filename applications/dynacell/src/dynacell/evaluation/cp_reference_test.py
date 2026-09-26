@@ -524,3 +524,27 @@ def test_cosine_is_blind_to_contraction_toward_the_gt_mean_but_kid_is_not(two_se
     floor = compute_feature_similarity_pairwise(space.transform(gt), space.transform(gt), "CP", compute_fid=False)
     assert got["CP_Median_Cosine_Similarity"] == pytest.approx(1.0, abs=1e-6)
     assert got["CP_KID"] > floor["CP_KID"] + 0.1
+
+
+def test_old_sidecar_survives_a_rebuild_that_leaves_its_dataset_unchanged(tmp_path: Path) -> None:
+    """A sidecar pins its dataset's CP space, not the whole reference.
+
+    Adding an unrelated dataset (a new HEK scaler, outside the mask fit) rebuilds the
+    reference with a new sha256 but leaves set-a's binding, so the old sidecar still
+    loads; refitting set-a's own scaler makes it raise.
+    """
+    a, b = _gt(), _gt(seed=1)
+    base = [_fit("set-a", a), _fit("set-b", b)]
+    ref, _ = _reference(tmp_path, base)
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    _stage_cp_dataset_inputs(_lists(a, a), ref.for_dataset("set-a"), _blocks(a), eval_dir)
+    old_sha = ref.sha256
+
+    added, _ = _reference(tmp_path, [*base, _fit("hek", _gt(seed=2, offset=-5.0), in_mask_fit=False)])
+    assert added.sha256 != old_sha
+    assert sidecar_cp_space(eval_dir).reference_sha256 == added.sha256  # bound to the current reference
+
+    _reference(tmp_path, [_fit("set-a", a * 1.1), _fit("set-b", b)])  # set-a's scaler moves
+    with pytest.raises(ValueError, match="CP space of set-a .* changed since the eval"):
+        sidecar_cp_space(eval_dir)

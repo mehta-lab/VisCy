@@ -134,9 +134,11 @@ def _cp_reference_mask(eval_dirs: list[Path]) -> np.ndarray:
         no longer has the recorded hash.
     """
     spaces = [sidecar_cp_space(d) for d in eval_dirs]
-    refs = {(s.reference_path, s.reference_sha256) for s in spaces}
-    if len(refs) != 1:
-        raise ValueError(f"eval dirs {[str(d) for d in eval_dirs]} were scored in different CP references: {refs}")
+    paths = {s.reference_path for s in spaces}
+    if len(paths) != 1 or any(not np.array_equal(s.keep_mask, spaces[0].keep_mask) for s in spaces):
+        raise ValueError(
+            f"eval dirs {[str(d) for d in eval_dirs]} were scored in different CP references or masks: {paths}"
+        )
     return spaces[0].keep_mask
 
 

@@ -12,7 +12,13 @@ import numpy as np
 import pytest
 
 import dynacell.evaluation.cross_condition_probe as probe
-from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, write_cp_reference
+from dynacell.evaluation.cp_reference import (
+    DatasetFit,
+    cp_sidecar_payload,
+    fit_cp_reference,
+    load_cp_reference,
+    write_cp_reference,
+)
 from dynacell.evaluation.cross_condition_probe import (
     _FEATURE_TYPES,
     GROUP_PROBE_FILENAME,
@@ -64,10 +70,15 @@ def _write_group_embeddings(
             np.savez(emb / f"{source}_{feat}_single_cell_embeddings.npz", embeddings=x, fov=fov, timepoint=tp)
     # The CP sidecar every eval writes, naming the reference it scored in.
     reference = eval_dir.parent / "cp_reference.json"
-    sha256 = _write_reference(reference) if not reference.exists() else json.loads(reference.read_text())["sha256"]
-    (eval_dir / "cp_selected_feature_mask.json").write_text(
-        json.dumps({"reference_path": str(reference), "reference_sha256": sha256, "dataset": "ds"})
-    )
+    if not reference.exists():
+        _write_reference(reference)
+    _write_sidecar(eval_dir, reference)
+
+
+def _write_sidecar(eval_dir: Path, reference: Path) -> None:
+    """Write the sidecar the pipeline writes for dataset ``ds`` of ``reference``."""
+    space = load_cp_reference(reference, target_name="membrane").for_dataset("ds")
+    (eval_dir / "cp_selected_feature_mask.json").write_text(json.dumps(cp_sidecar_payload(space)))
 
 
 def _read_rows(csv_path: Path) -> list[dict]:
@@ -191,8 +202,7 @@ def test_cp_probe_refuses_evals_scored_in_different_references(tmp_path):
     _write_group_embeddings(mock, seed=1)
     _write_group_embeddings(denv, seed=2)
     other = tmp_path / "other.json"
-    sidecar = json.loads((denv / "cp_selected_feature_mask.json").read_text())
-    sidecar.update(reference_path=str(other), reference_sha256=_write_reference(other, seed=9))
-    (denv / "cp_selected_feature_mask.json").write_text(json.dumps(sidecar))
+    _write_reference(other, seed=9)
+    _write_sidecar(denv, other)
     with pytest.raises(ValueError, match="different CP references"):
         run([mock, denv], tmp_path / "probe.csv")
