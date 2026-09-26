@@ -48,7 +48,6 @@ def _dataset(
     skip: tuple[str, int] | None = None,
     lite_of: str | None = None,
     positions: tuple[str, ...] = _POSITIONS,
-    cache: bool = True,
 ) -> None:
     """Register one dataset: manifest, split, GT store, and a GT CP cache holding every (pos, t)."""
     store = root / "stores" / f"{name}.zarr"
@@ -86,8 +85,6 @@ def _dataset(
     (root / "manifests" / name / "splits").mkdir(parents=True)
     (root / "manifests" / name / "manifest.yaml").write_text(yaml.dump(manifest))
     (root / "manifests" / name / "splits" / "sec61b.yaml").write_text(yaml.dump(split))
-    if not cache:
-        return
     rng = np.random.default_rng(seed)
     with open_features_group(cache_paths(cache_dir), "cp", mode="a") as group:
         for pos_name in positions:
@@ -141,7 +138,8 @@ def _build_all(root: Path) -> Path:
     _dataset(root, "ds-a", seed=0)
     _dataset(root, "ds-b", seed=1)
     _dataset(root, "ds-h", seed=2)
-    _dataset(root, "ds-a-lite", seed=0, lite_of="ds-a", positions=_POSITIONS[:1], cache=False)
+    # Same seed + first position: the lite cache holds exactly ds-a's A/1/0 cells, as a real lite subset does.
+    _dataset(root, "ds-a-lite", seed=0, lite_of="ds-a", positions=_POSITIONS[:1])
     return _leaves(root, ["ds-a", "ds-b", "ds-h", "ds-a-lite"])
 
 
@@ -158,13 +156,10 @@ def test_build_writes_a_loadable_reference(registry: Path) -> None:
     assert sorted(payload["scalers"]) == ["ds-a", "ds-b", "ds-h"]
     assert fit["datasets"]["ds-h"]["in_mask_fit"] is False
     assert payload["lite"] == {"ds-a-lite": {"parent": "ds-a"}}
-    assert fit["lite"] == {
-        "ds-a-lite": {
-            "target": "sec61b",
-            "gt_cache_dir": str(registry / "caches" / "ds-a-lite"),
-            "cp_cache_built_at": None,
-        }
-    }
+    lite = fit["lite"]["ds-a-lite"]
+    assert lite["gt_cache_dir"] == str(registry / "caches" / "ds-a-lite")
+    assert lite["positions"] == ["A/1/0"] and lite["n_cells"] == _T * 5 - 1  # lite GT recorded from its own cache
+    assert lite["gt_matrix_sha256"] != fit["datasets"]["ds-a"]["gt_matrix_sha256"]
     a = {**payload["scalers"]["ds-a"], **fit["datasets"]["ds-a"]}
     assert a["n_cells"] == 2 * _T * 5 - 1  # one non-finite cell dropped
     assert a["n_cells_dropped_nonfinite"] == 1
@@ -199,7 +194,7 @@ def test_dry_run_writes_nothing(registry: Path, capsys) -> None:
     main(["--target", "er", "--leaves-root", str(leaves), "--out", str(out), "--dry-run"])
     assert not out.exists()
     printed = capsys.readouterr().out
-    assert "mask fit: 38 cells" in printed and "ds-a-lite -> scaler of ds-a" in printed
+    assert "mask fit: 38 cells" in printed and "ds-a-lite -> scaler of ds-a: 1 positions, 9 cells" in printed
 
 
 def test_missing_timepoint_raises(registry: Path) -> None:
@@ -228,7 +223,7 @@ def test_lite_outside_its_parent_is_refused(registry: Path) -> None:
     """A lite store holding a position its parent's scaler was not fit on is refused at build time."""
     _dataset(registry, "ds-a", seed=0)
     _dataset(registry, "ds-b", seed=1)
-    _dataset(registry, "ds-a-lite", seed=0, lite_of="ds-a", positions=("B/1/0",), cache=False)
+    _dataset(registry, "ds-a-lite", seed=0, lite_of="ds-a", positions=("B/1/0",))
     leaves = _leaves(registry, ["ds-a", "ds-b", "ds-a-lite"])
     with pytest.raises(ValueError, match="outside its parent"):
         main(["--target", "er", "--leaves-root", str(leaves), "--out", str(registry / "x.json")])

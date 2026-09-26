@@ -10,7 +10,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from dynacell.evaluation import cp_reference
-from dynacell.evaluation.cache import StaleCacheError, cache_paths, save_manifest
+from dynacell.evaluation.cache import StaleCacheError
 from dynacell.evaluation.cp_reference import (
     STD_FLOOR_FRACTION,
     DatasetFit,
@@ -34,6 +34,13 @@ from dynacell.evaluation.pipeline import (
 _N_FEATURES = 8
 _NAMES = tuple(f"f{i}" for i in range(_N_FEATURES))
 _POSITIONS = ["A/1/0", "A/1/1"]
+_LITE_ROWS = 150  # the lite set's GT cells: set-a's first position
+
+
+def _blocks(gt: np.ndarray) -> dict[tuple[str, int], np.ndarray]:
+    """GT cells as the eval stages them: the two halves as timepoints 0 and 1 of A/1/0."""
+    half = gt.shape[0] // 2
+    return {("A/1/0", 0): gt[:half], ("A/1/0", 1): gt[half:]}
 
 
 def _gt(n: int = 300, seed: int = 0, offset: float = 10.0, scale: float = 1.0) -> np.ndarray:
@@ -45,20 +52,27 @@ def _gt(n: int = 300, seed: int = 0, offset: float = 10.0, scale: float = 1.0) -
     return x
 
 
-def _fit(dataset: str, cells: np.ndarray, *, in_mask_fit: bool = True, built_at: str | None = None) -> DatasetFit:
+def _fit(
+    dataset: str,
+    cells: np.ndarray,
+    *,
+    in_mask_fit: bool = True,
+    built_at: str | None = None,
+    parent: str | None = None,
+    positions: list[str] = _POSITIONS,
+) -> DatasetFit:
     return DatasetFit(
         dataset=dataset,
         cells=cells,
-        record={"positions": _POSITIONS, "gt_cache_dir": "/c/" + dataset, "cp_cache_built_at": built_at},
+        record={"positions": positions, "cp_cache_built_at": built_at},
         in_mask_fit=in_mask_fit,
+        parent=parent,
     )
 
 
-def _reference(tmp_path: Path, fits: list[DatasetFit], lite: dict | None = None):
+def _reference(tmp_path: Path, fits: list[DatasetFit]):
     """Fit, write and load a reference; returns ``(CPReference, payload)``."""
-    payload = fit_cp_reference(
-        fits, target_name="er", feature_names=_NAMES, cp_identity={"cp_feature_version": "test"}, lite=lite or {}
-    )
+    payload = fit_cp_reference(fits, target_name="er", feature_names=_NAMES, cp_identity={"cp_feature_version": "test"})
     path = tmp_path / "er.json"
     write_cp_reference(payload, path, force=True)
     return load_cp_reference(path, target_name="er"), payload
@@ -68,11 +82,8 @@ def _reference(tmp_path: Path, fits: list[DatasetFit], lite: dict | None = None)
 def two_sets(tmp_path: Path):
     """A reference over two test sets whose GT differ by a large offset and scale, plus HEK and one lite."""
     a, b, hek = _gt(seed=0), _gt(seed=1, offset=40.0, scale=3.0), _gt(seed=2, offset=-5.0)
-    ref, payload = _reference(
-        tmp_path,
-        [_fit("set-a", a), _fit("set-b", b), _fit("hek", hek, in_mask_fit=False)],
-        lite={"set-a-lite": {"parent": "set-a", "gt_cache_dir": "/lite", "cp_cache_built_at": None}},
-    )
+    lite = _fit("set-a-lite", a[:_LITE_ROWS], in_mask_fit=False, parent="set-a", positions=_POSITIONS[:1])
+    ref, payload = _reference(tmp_path, [_fit("set-a", a), _fit("set-b", b), _fit("hek", hek, in_mask_fit=False), lite])
     return ref, payload, {"set-a": a, "set-b": b, "hek": hek}
 
 
@@ -144,13 +155,13 @@ def test_pooled_zero_variance_is_refused(monkeypatch) -> None:
     # in sys.modules, so a dotted-path patch could land on a different module.
     monkeypatch.setattr(cp_reference, "select_gt_features", lambda gt, **kw: np.ones(gt.shape[1], dtype=bool))
     with pytest.raises(ValueError, match="zero-variance"):
-        fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={}, lite={})
+        fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
 
 
 def test_empty_dataset_is_refused() -> None:
     with pytest.raises(ValueError, match="no GT cells"):
         fit_cp_reference(
-            [_fit("set-a", np.empty((0, _N_FEATURES)))], target_name="er", feature_names=_NAMES, cp_identity={}, lite={}
+            [_fit("set-a", np.empty((0, _N_FEATURES)))], target_name="er", feature_names=_NAMES, cp_identity={}
         )
 
 
@@ -175,12 +186,11 @@ def test_harmless_recache_keeps_the_hash(tmp_path: Path) -> None:
     """
     cells = _gt()
     first = fit_cp_reference(
-        [_fit("set-a", cells, built_at="t0")], target_name="er", feature_names=_NAMES, cp_identity={}, lite={}
+        [_fit("set-a", cells, built_at="t0")], target_name="er", feature_names=_NAMES, cp_identity={}
     )
     fit_b = _fit("set-a", cells, built_at="t1")
     fit_b.record["positions"] = [*_POSITIONS]
-    fit_b.record["gt_cache_dir"] = "/moved/cache"
-    second = fit_cp_reference([fit_b], target_name="er", feature_names=_NAMES, cp_identity={}, lite={})
+    second = fit_cp_reference([fit_b], target_name="er", feature_names=_NAMES, cp_identity={})
     assert first["sha256"] == second["sha256"]
     assert first["fit"] != second["fit"]
 
@@ -193,12 +203,9 @@ def test_harmless_recache_keeps_the_hash(tmp_path: Path) -> None:
 
 def test_changed_scaler_changes_the_hash() -> None:
     """Anything that moves a CP number -- here one dataset's mean -- changes the hash."""
+    lite = _fit("set-a-lite", _gt()[:10], in_mask_fit=False, parent="set-a")
     payload = fit_cp_reference(
-        [_fit("set-a", _gt()), _fit("set-b", _gt(seed=1))],
-        target_name="er",
-        feature_names=_NAMES,
-        cp_identity={},
-        lite={"set-a-lite": {"parent": "set-a", "gt_cache_dir": None, "cp_cache_built_at": None}},
+        [_fit("set-a", _gt()), _fit("set-b", _gt(seed=1)), lite], target_name="er", feature_names=_NAMES, cp_identity={}
     )
     moved = json.loads(json.dumps(payload))
     moved["scalers"]["set-b"]["mean"][0] += 1e-9
@@ -213,10 +220,8 @@ def test_changed_scaler_changes_the_hash() -> None:
 
 def test_write_is_atomic_and_refuses_a_different_reference(tmp_path: Path) -> None:
     """Identical hash is a no-op; a different one needs force; no tmp file is left behind."""
-    first = fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={}, lite={})
-    other = fit_cp_reference(
-        [_fit("set-a", _gt(seed=5))], target_name="er", feature_names=_NAMES, cp_identity={}, lite={}
-    )
+    first = fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
+    other = fit_cp_reference([_fit("set-a", _gt(seed=5))], target_name="er", feature_names=_NAMES, cp_identity={})
     path = tmp_path / "er.json"
     assert write_cp_reference(first, path) is True
     assert write_cp_reference({**first, "created_at": "later"}, path) is False
@@ -251,44 +256,35 @@ def test_registry_path_is_shared_by_lite_and_full() -> None:
 
 
 def test_positions_must_match_the_fit(two_sets) -> None:
-    """Non-lite: exactly the fit's positions. Lite: any subset of its parent's."""
+    """Every dataset (lite included) must score exactly the positions its cells were recorded over."""
     ref, _, _ = two_sets
     ref.for_dataset("set-a").check_positions(_POSITIONS)
-    with pytest.raises(ValueError, match="cannot be combined"):
+    with pytest.raises(ValueError, match="compute_feature_metrics=false for smoke runs"):
         ref.for_dataset("set-a").check_positions(_POSITIONS[:1])
-    with pytest.raises(ValueError, match="not in the CP reference fit"):
+    with pytest.raises(ValueError, match="adds \\['B/1/0'\\]"):
         ref.for_dataset("set-a").check_positions([*_POSITIONS, "B/1/0"])
     ref.for_dataset("set-a-lite").check_positions(_POSITIONS[:1])
-    with pytest.raises(ValueError, match="not in the CP reference fit"):
+    with pytest.raises(ValueError, match="skips 1"):
         ref.for_dataset("set-a-lite").check_positions(["B/1/0"])
 
 
-def test_gt_recache_is_detected(tmp_path: Path) -> None:
-    """A GT cache whose cp_features.built_at moved after the build is refused."""
-    cache_dir = tmp_path / "cache"
-    save_manifest(cache_paths(cache_dir), {"artifacts": {"cp_features": {"built_at": "t0"}}})
-    fit = DatasetFit(
-        dataset="set-a",
-        cells=_gt(),
-        record={"positions": _POSITIONS, "gt_cache_dir": str(cache_dir), "cp_cache_built_at": "t0"},
-        in_mask_fit=True,
-    )
-    ref, _ = _reference(tmp_path, [fit])
+def test_content_gate_passes_identical_cells_and_refuses_a_value_change(two_sets) -> None:
+    """The gate hashes the staged GT cells: an identical re-cache passes, a same-count value change raises."""
+    ref, _, cells = two_sets
     space = ref.for_dataset("set-a")
-    space.check_gt_cache(str(cache_dir))
-    with pytest.raises(ValueError, match="this eval reads"):
-        space.check_gt_cache(str(tmp_path / "elsewhere"))
-    save_manifest(cache_paths(cache_dir), {"artifacts": {"cp_features": {"built_at": "t1"}}})
-    with pytest.raises(StaleCacheError, match="was built at t1"):
-        space.check_gt_cache(str(cache_dir))
-
-
-def test_lite_without_a_recorded_cache_skips_the_recache_check(two_sets) -> None:
-    """A lite dataset with no recorded cache stamp skips the check; a non-lite one refuses."""
-    ref, _, _ = two_sets
-    ref.for_dataset("set-a-lite").check_gt_cache(None)
-    with pytest.raises(ValueError, match="records no GT-cache built_at for this non-lite dataset"):
-        ref.for_dataset("set-b").check_gt_cache("/c/set-b")
+    gt = cells["set-a"]
+    space.check_gt_cells(_blocks(gt.copy()))  # e.g. force_recompute.gt_cp reproducing the same cells
+    space.check_gt_cells(dict(reversed(list(_blocks(gt).items()))))  # staging order does not matter
+    changed = gt.copy()
+    changed[5, 2] += 1e-6  # same count, one value moved
+    with pytest.raises(StaleCacheError, match="(?s)differ from the CP reference fit .*--target er --force"):
+        space.check_gt_cells(_blocks(changed))
+    with pytest.raises(StaleCacheError, match="299 cells"):
+        space.check_gt_cells(_blocks(gt[:-1]))
+    lite = ref.for_dataset("set-a-lite")
+    lite.check_gt_cells(_blocks(gt[:_LITE_ROWS]))
+    with pytest.raises(StaleCacheError):
+        lite.check_gt_cells(_blocks(gt))  # the parent's cells are not the lite set's
 
 
 def test_staged_dataset_arrays_are_the_dataset_scaler_transform(two_sets, tmp_path: Path) -> None:
@@ -301,7 +297,7 @@ def test_staged_dataset_arrays_are_the_dataset_scaler_transform(two_sets, tmp_pa
     gt = cells["set-b"]
     pred = 0.5 * gt + 7.0
     space = ref.for_dataset("set-b")
-    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, gt.shape[0], tmp_path)
+    staged = _stage_cp_dataset_inputs(_lists(pred, gt), space, _blocks(gt), tmp_path)
     np.testing.assert_array_equal(staged[1], space.transform(pred))
     np.testing.assert_array_equal(staged[2], space.transform(gt))
     np.testing.assert_array_equal(staged[3], pred[:, ref.keep_mask])  # probe: masked, unscaled
@@ -317,13 +313,13 @@ def test_staged_dataset_arrays_are_the_dataset_scaler_transform(two_sets, tmp_pa
     )
 
 
-def test_staged_cell_count_must_match_the_fit(two_sets, tmp_path: Path) -> None:
-    """A non-lite eval scoring a different number of GT cells than the fit is refused; lite is exempt."""
+def test_staging_refuses_gt_cells_that_differ_from_the_fit(two_sets, tmp_path: Path) -> None:
+    """The dataset-level stage runs the content gate before writing its sidecar."""
     ref, _, cells = two_sets
     gt = cells["set-a"]
-    with pytest.raises(ValueError, match="scores 299 finite GT CP cells"):
-        _stage_cp_dataset_inputs(_lists(gt, gt), ref.for_dataset("set-a"), 299, tmp_path)
-    _stage_cp_dataset_inputs(_lists(gt[:40], gt[:40]), ref.for_dataset("set-a-lite"), 40, tmp_path)
+    with pytest.raises(StaleCacheError, match="differ from the CP reference fit"):
+        _stage_cp_dataset_inputs(_lists(gt[:-1], gt[:-1]), ref.for_dataset("set-a"), _blocks(gt[:-1]), tmp_path)
+    assert not (tmp_path / "cp_selected_feature_mask.json").exists()
 
 
 def test_row_features_use_the_dataset_scaler(two_sets) -> None:
@@ -359,7 +355,7 @@ def test_two_models_share_one_mask(two_sets, tmp_path: Path) -> None:
     for i, pred in enumerate((pred_a, pred_b)):
         save_dir = tmp_path / f"model_{i}"
         save_dir.mkdir()
-        _stage_cp_dataset_inputs(_lists(pred, gt), ref.for_dataset("set-a"), gt.shape[0], save_dir)
+        _stage_cp_dataset_inputs(_lists(pred, gt), ref.for_dataset("set-a"), _blocks(gt), save_dir)
         masks.append(json.loads((save_dir / "cp_selected_feature_mask.json").read_text())["keep_mask"])
     assert masks[0] == masks[1] == [bool(b) for b in ref.keep_mask]
     old_a = select_gt_features(np.vstack([gt, pred_a]))
@@ -399,23 +395,27 @@ def test_sidecar_binds_the_recorded_reference_and_dataset(two_sets, tmp_path: Pa
     ref, _, cells = two_sets
     eval_dir = tmp_path / "eval"
     eval_dir.mkdir()
-    _stage_cp_dataset_inputs(
-        _lists(cells["set-a"][:40], cells["set-a"][:40]), ref.for_dataset("set-a-lite"), 40, eval_dir
-    )
+    lite_gt = cells["set-a"][:_LITE_ROWS]
+    _stage_cp_dataset_inputs(_lists(lite_gt, lite_gt), ref.for_dataset("set-a-lite"), _blocks(lite_gt), eval_dir)
     space = sidecar_cp_space(eval_dir)
     assert (space.dataset, space.scaler_dataset, space.reference_sha256) == ("set-a-lite", "set-a", ref.sha256)
     np.testing.assert_array_equal(space.mean, ref.for_dataset("set-a").mean)
 
-    _reference(tmp_path, [_fit("set-a", _gt(seed=8))], lite={"set-a-lite": {"parent": "set-a"}})  # rebuilt in place
+    rebuilt = [_fit("set-a", _gt(seed=8)), _fit("set-a-lite", lite_gt, in_mask_fit=False, parent="set-a")]
+    _reference(tmp_path, rebuilt)  # rebuilt in place
     with pytest.raises(ValueError, match="changed since the eval"):
         sidecar_cp_space(eval_dir)
 
 
 def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> None:
-    """The binding differs per dataset (lite vs parent too) and moves with GT matrix or lite stamp, not built_at."""
-    fits = [_fit("set-a", _gt(), built_at="t0"), _fit("set-b", _gt(seed=1), built_at="t0")]
-    lite = {"set-a-lite": {"parent": "set-a", "gt_cache_dir": "/lite", "cp_cache_built_at": "L0"}}
-    ref, payload = _reference(tmp_path, fits, lite=lite)
+    """The binding differs per dataset (lite vs parent too) and moves with that dataset's GT matrix, not built_at."""
+    a = _gt()
+    fits = [
+        _fit("set-a", a, built_at="t0"),
+        _fit("set-b", _gt(seed=1), built_at="t0"),
+        _fit("set-a-lite", a[:_LITE_ROWS], in_mask_fit=False, parent="set-a", positions=_POSITIONS[:1]),
+    ]
+    ref, payload = _reference(tmp_path, fits)
     bindings = {d: ref.for_dataset(d).binding_sha256 for d in ("set-a", "set-b", "set-a-lite")}
     assert len(set(bindings.values())) == 3
 
@@ -427,10 +427,9 @@ def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> 
         assert again.sha256 == ref.sha256  # provenance only: numeric hash unchanged
         return {d: again.for_dataset(d).binding_sha256 for d in bindings}
 
-    built_at = rebound(lambda p: p["fit"]["datasets"]["set-a"].update(cp_cache_built_at="t1"))
-    assert built_at == bindings
+    assert rebound(lambda p: p["fit"]["datasets"]["set-a"].update(cp_cache_built_at="t1")) == bindings
     gt = rebound(lambda p: p["fit"]["datasets"]["set-a"].update(gt_matrix_sha256="0" * 64))
-    assert gt["set-a"] != bindings["set-a"] and gt["set-a-lite"] != bindings["set-a-lite"]
-    assert gt["set-b"] == bindings["set-b"]
-    lite_stamp = rebound(lambda p: p["fit"]["lite"]["set-a-lite"].update(cp_cache_built_at="L1"))
-    assert lite_stamp["set-a-lite"] != bindings["set-a-lite"] and lite_stamp["set-a"] == bindings["set-a"]
+    assert gt["set-a"] != bindings["set-a"]
+    assert gt["set-b"] == bindings["set-b"] and gt["set-a-lite"] == bindings["set-a-lite"]
+    lite_gt = rebound(lambda p: p["fit"]["lite"]["set-a-lite"].update(gt_matrix_sha256="0" * 64))
+    assert lite_gt["set-a-lite"] != bindings["set-a-lite"] and lite_gt["set-a"] == bindings["set-a"]

@@ -24,13 +24,13 @@ A CP reference fixes both. Per target it holds:
 
 Each scaler is fit on exactly the GT cells an eval of that dataset scores: every
 position and timepoint of the GT store, read from the GT CP cache, with the
-non-finite rows dropped. The reference records each dataset's position list, cell
-count and GT-cache ``cp_features.built_at``, and an eval refuses to score if its
-positions or cell count differ, or the cache stamp moved
-(:meth:`DatasetCPSpace.check_positions`, :meth:`DatasetCPSpace.check_n_cells`,
-:meth:`DatasetCPSpace.check_gt_cache`). The per-dataset GT-matrix sha256 is
-recorded for audit and checked by ``build_cp_reference.py --verify``, not at eval
-time.
+non-finite rows dropped. The reference records every dataset's (lite included)
+position list and the sha256 of those cells in canonical order
+(:func:`canonical_gt_matrix`). An eval refuses a different position set up front
+(:meth:`DatasetCPSpace.check_positions`) and, once its GT CP cells are staged,
+refuses to score unless they hash to the recorded value
+(:meth:`DatasetCPSpace.check_gt_cells`). That content gate is independent of the
+cache manifest's ``built_at``, which is kept in the fit record for audit only.
 
 A per-dataset std can collapse on a feature the pooled mask keeps (a feature
 that is near-constant within one test set). Such a std is floored at
@@ -55,9 +55,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from iohub.ngff import open_ome_zarr
 from omegaconf import DictConfig, OmegaConf
 
-from dynacell.evaluation.cache import StaleCacheError, cache_paths, load_manifest
+from dynacell.evaluation.cache import StaleCacheError, open_features_group, read_features_from_group
 from dynacell.evaluation.feature_select import (
     DEFAULT_CORR_THRESHOLD,
     DEFAULT_FREQ_CUT,
@@ -69,7 +70,7 @@ from dynacell.evaluation.paths import cp_reference_path
 from dynacell.evaluation.pipeline_cache import cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
-CP_REFERENCE_SCHEMA = 3
+CP_REFERENCE_SCHEMA = 4
 
 #: Sidecar each eval writes beside its metrics, naming the CP reference it scored in.
 CP_SIDECAR_FILENAME = "cp_selected_feature_mask.json"
@@ -110,7 +111,7 @@ MASK_FIT_DATASETS: dict[str, tuple[tuple[str, str], ...]] = {
 #: Keys excluded from the content hash. The hash covers only what changes CP numbers
 #: (recipe identity, criteria, feature names, keep-mask, every scaler's mean/std and
 #: floored features, the lite -> parent map). ``fit`` holds the fit provenance the eval
-#: checks read (positions, cell counts, GT-cache ``built_at``, GT-matrix hashes), so a
+#: checks read (positions, cell counts, GT-matrix hashes; ``built_at`` for audit), so a
 #: rebuild after a harmless GT re-cache that leaves every scaler unchanged keeps the
 #: hash and invalidates no final-metrics cache stamped with it.
 _UNHASHED_KEYS = frozenset({"sha256", "created_at", "fit"})
@@ -195,18 +196,99 @@ class DatasetFit:
     dataset : str
         ``benchmark.dataset_ref.dataset`` of the test set.
     cells : np.ndarray
-        ``(n_cells, n_features)`` finite raw GT CP cells, every position and timepoint.
+        ``(n_cells, n_features)`` finite raw GT CP cells in canonical order
+        (:func:`canonical_gt_matrix`): every position and timepoint.
     record : dict
-        JSON-serializable provenance: at least ``positions`` (sorted names),
-        ``gt_cache_dir`` and ``cp_cache_built_at``.
+        JSON-serializable provenance: at least ``positions`` (sorted names).
     in_mask_fit : bool
         Whether these cells enter the pooled mask fit.
+    parent : str or None, optional
+        For a lite dataset, the dataset whose scaler it reuses; its cells are then
+        recorded (hash, count, positions) but never fit.
     """
 
     dataset: str
     cells: np.ndarray
     record: dict[str, Any]
     in_mask_fit: bool
+    parent: str | None = None
+
+
+def canonical_gt_matrix(blocks: dict[tuple[str, int], np.ndarray], n_features: int) -> np.ndarray:
+    """Stack per-``(position, timepoint)`` GT CP rows in the canonical order the fit is hashed in.
+
+    Sorted position names, then ``t`` ascending, then cell (row) order within a
+    block, as float64. The builder and the eval both hash this matrix, so it is the
+    single definition of "the GT cells a scaler describes". Callers pass only
+    GT-finite rows (non-finite GT rows dropped, BEFORE the pred/GT paired drop), so
+    the matrix does not depend on the prediction.
+
+    Parameters
+    ----------
+    blocks : dict
+        ``{(position, t): (n_cells_t, n_features) array}``; empty blocks may be omitted.
+    n_features : int
+        Column count, for the empty result.
+
+    Returns
+    -------
+    np.ndarray
+        ``(n_cells, n_features)`` float64 matrix.
+    """
+    rows = [np.asarray(blocks[key], dtype=np.float64) for key in sorted(blocks) if blocks[key].shape[0]]
+    return np.concatenate(rows, axis=0) if rows else np.empty((0, n_features))
+
+
+def read_gt_cp_cells(ctx, gt_path: Path, n_features: int) -> tuple[np.ndarray, dict[str, Any]]:
+    """Read every finite GT CP cell of one GT store from its cache, read-only, in canonical order.
+
+    Parameters
+    ----------
+    ctx : pipeline_cache._CacheContext
+        Enabled GT-side cache context of the store.
+    gt_path : pathlib.Path
+        GT HCS store; its positions and per-position ``T`` define what must be cached.
+    n_features : int
+        Expected CP column count.
+
+    Returns
+    -------
+    tuple
+        ``(cells, record)``: the :func:`canonical_gt_matrix` of the GT-finite rows,
+        and ``{"positions", "n_timepoints", "n_cells_dropped_nonfinite"}``.
+
+    Raises
+    ------
+    StaleCacheError
+        If the CP cache is missing, a ``(position, timepoint)`` of the GT store is
+        missing from it, or an entry has the wrong column count.
+    ValueError
+        If a GT position is not a 3-D volume.
+    """
+    with open_ome_zarr(gt_path, mode="r") as plate:
+        shapes = {name: (int(pos.data.shape[0]), int(pos.data.shape[2])) for name, pos in plate.positions()}
+    blocks: dict[tuple[str, int], np.ndarray] = {}
+    n_timepoints = n_dropped = 0
+    with open_features_group(ctx.paths, "cp", mode="r") as group:
+        if group is None:
+            raise StaleCacheError(f"no CP feature cache at {ctx.paths.cp_features()}")
+        for pos_name, (t_count, z_depth) in sorted(shapes.items()):
+            if z_depth < 2:
+                raise ValueError(f"{gt_path}/{pos_name} has Z={z_depth}; CP regionprops are 3-D")
+            for t in range(t_count):
+                feats = read_features_from_group(group, pos_name, t)
+                if feats is None:
+                    raise StaleCacheError(f"CP cache miss at {pos_name}/t{t} in {ctx.paths.cp_features()}")
+                n_timepoints += 1
+                if feats.shape[0] == 0:
+                    continue
+                if feats.shape[1] != n_features:
+                    raise StaleCacheError(f"{pos_name}/t{t} has {feats.shape[1]} CP columns, expected {n_features}")
+                finite = np.isfinite(feats).all(axis=1)
+                n_dropped += int((~finite).sum())
+                blocks[(pos_name, t)] = feats[finite]
+    record = {"positions": sorted(shapes), "n_timepoints": n_timepoints, "n_cells_dropped_nonfinite": n_dropped}
+    return canonical_gt_matrix(blocks, n_features), record
 
 
 def fit_cp_reference(
@@ -215,25 +297,22 @@ def fit_cp_reference(
     target_name: str,
     feature_names: tuple[str, ...],
     cp_identity: dict[str, Any],
-    lite: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     """Fit a CP reference and return its JSON payload.
 
     Parameters
     ----------
     fits : list of DatasetFit
-        Every non-lite test set that needs a scaler. Those with ``in_mask_fit``
-        are pooled for the feature mask and the floor's pooled std.
+        Every test set of the target. A fit without ``parent`` gets a scaler; those
+        with ``in_mask_fit`` are pooled for the feature mask and the floor's pooled
+        std. A fit with ``parent`` (lite) is mapped to that parent's scaler, and
+        only its cell hash, count and positions are recorded.
     target_name : str
         Eval ``target_name`` (``nucleus``/``membrane``/``er``/``mitochondria``).
     feature_names : tuple of str
         Column names of every ``cells`` matrix.
     cp_identity : dict
         Dataset-independent CP recipe identity (from :func:`cp_space`).
-    lite : dict
-        ``{lite dataset: {"parent": ..., "gt_cache_dir": ..., "cp_cache_built_at": ...}}``.
-        Each parent must be one of ``fits``. Only ``parent`` enters the hash; the
-        rest is fit provenance.
 
     Returns
     -------
@@ -245,12 +324,13 @@ def fit_cp_reference(
     ValueError
         If a matrix does not match ``feature_names`` or holds a non-finite value,
         a dataset has no cells, a dataset appears twice, a lite parent has no
-        scaler, no dataset is in the mask fit, or the pooled fit keeps a
-        zero-variance feature.
+        scaler, a lite fit is in the mask fit, no dataset is in the mask fit, or
+        the pooled fit keeps a zero-variance feature.
     """
     names = [f.dataset for f in fits]
     if len(set(names)) != len(names):
         raise ValueError(f"duplicate datasets: {names}")
+    scaled = [f for f in fits if f.parent is None]
     for fit in fits:
         if fit.cells.ndim != 2 or fit.cells.shape[1] != len(feature_names):
             raise ValueError(f"{fit.dataset}: GT matrix shape {fit.cells.shape} does not match {len(feature_names)}")
@@ -258,11 +338,10 @@ def fit_cp_reference(
             raise ValueError(f"{fit.dataset}: no GT cells")
         if not np.isfinite(fit.cells).all():
             raise ValueError(f"{fit.dataset}: GT matrix holds non-finite values; drop them before fitting")
-    for lite_name, entry in lite.items():
-        if entry["parent"] not in names:
-            raise ValueError(f"lite dataset {lite_name} reuses {entry['parent']}, which has no scaler")
+        if fit.parent is not None and (fit.in_mask_fit or fit.parent not in {f.dataset for f in scaled}):
+            raise ValueError(f"lite dataset {fit.dataset} must reuse a scaled parent, not {fit.parent!r}")
 
-    pooled = np.concatenate([np.asarray(f.cells, dtype=np.float64) for f in fits if f.in_mask_fit], axis=0)
+    pooled = np.concatenate([np.asarray(f.cells, dtype=np.float64) for f in scaled if f.in_mask_fit], axis=0)
     if pooled.shape[0] == 0:
         raise ValueError("no dataset is in the mask fit")
     keep_mask = select_gt_features(
@@ -274,9 +353,16 @@ def fit_cp_reference(
         raise ValueError(f"pooled fit kept zero-variance features: {np.array(kept_names)[pooled_std == 0]}")
     floor = STD_FLOOR_FRACTION * pooled_std
 
+    def _provenance(fit: DatasetFit) -> dict[str, Any]:
+        return {
+            **fit.record,
+            "in_mask_fit": fit.in_mask_fit,
+            "n_cells": int(fit.cells.shape[0]),
+            "gt_matrix_sha256": gt_matrix_sha256(fit.cells),
+        }
+
     scalers: dict[str, dict[str, Any]] = {}
-    provenance: dict[str, dict[str, Any]] = {}
-    for fit in fits:
+    for fit in scaled:
         kept = np.asarray(fit.cells, dtype=np.float64)[:, keep_mask]
         std = kept.std(axis=0)
         floored = std < floor
@@ -285,12 +371,7 @@ def fit_cp_reference(
             "std": [float(v) for v in np.where(floored, floor, std)],
             "floored_features": [n for n, f in zip(kept_names, floored, strict=True) if f],
         }
-        provenance[fit.dataset] = {
-            **fit.record,
-            "in_mask_fit": fit.in_mask_fit,
-            "n_cells": int(kept.shape[0]),
-            "gt_matrix_sha256": gt_matrix_sha256(fit.cells),
-        }
+    lite = [f for f in fits if f.parent is not None]
 
     payload: dict[str, Any] = {
         "schema": CP_REFERENCE_SCHEMA,
@@ -308,16 +389,16 @@ def fit_cp_reference(
         },
         "cp_identity": cp_identity,
         "scalers": scalers,
-        "lite": {name: {"parent": entry["parent"]} for name, entry in lite.items()},
+        "lite": {f.dataset: {"parent": f.parent} for f in lite},
         "fit": {
             "mask_fit": {
-                "datasets": [f.dataset for f in fits if f.in_mask_fit],
+                "datasets": [f.dataset for f in scaled if f.in_mask_fit],
                 "n_cells": int(pooled.shape[0]),
                 "gt_matrix_sha256": gt_matrix_sha256(pooled),
                 "pooled_std": [float(v) for v in pooled_std],
             },
-            "datasets": provenance,
-            "lite": {name: {k: v for k, v in entry.items() if k != "parent"} for name, entry in lite.items()},
+            "datasets": {f.dataset: _provenance(f) for f in scaled},
+            "lite": {f.dataset: _provenance(f) for f in lite},
         },
         "created_at": datetime.now(UTC).isoformat(),
     }
@@ -342,8 +423,8 @@ def write_cp_reference(payload: dict[str, Any], path: Path, *, force: bool = Fal
     bool
         ``True`` if the file was written, ``False`` if an identical reference (same
         hash AND same fit provenance) was already there (no-op). Same hash with new
-        provenance -- a harmless GT re-cache -- is written without ``force``: no CP
-        number changes, and the eval checks need the new ``built_at``.
+        provenance (e.g. a re-cache that moved ``built_at``, or a lite dataset's
+        record) is written without ``force``: no scaler or mask changes.
 
     Raises
     ------
@@ -388,40 +469,28 @@ class DatasetCPSpace:
     std: np.ndarray
     fit_positions: frozenset[str]
     fit_n_cells: int
-    gt_cache_dir: str | None
-    cp_cache_built_at: str | None
-    fit_gt_matrix_sha256: str
-    own_gt_matrix_sha256: str | None
+    gt_matrix_sha256: str
 
     @property
     def binding_sha256(self) -> str:
-        """Return a sha256 identifying this eval's CP space AND the GT cells it describes.
+        """Return a sha256 identifying this eval's CP space AND the GT cells it was fit on.
 
-        The final-metrics stamp needs more than :attr:`reference_sha256`, which
-        deliberately leaves fit provenance unhashed: a cache scored for dataset A
-        must not be reused for dataset B, and a GT re-cache that changes the cells
-        while leaving mean/std/mask unchanged must not reuse CP rows scored on the
-        old cells. This hash covers the reference hash, the dataset, its scaler
-        dataset, the lite flag, and the recorded GT-matrix sha256. That is the
-        dataset's own for a non-lite set. A lite set uses its own when one is
-        recorded, else the parent's plus the lite cache's recorded ``built_at``.
-        A harmless rebuild that only moves ``built_at`` on a non-lite set keeps it.
+        Stamped as ``cp_space_sha256`` so cache reuse refuses another dataset's
+        space and GT cells that differ from the fit. Covers the reference hash, the
+        dataset, its scaler dataset, the lite flag, and this dataset's recorded
+        GT-matrix sha256 (a lite set's own).
 
         Returns
         -------
         str
             Hex sha256 over the canonical JSON of those fields.
         """
-        if self.is_lite and self.own_gt_matrix_sha256 is None:
-            gt = {"parent_gt_matrix_sha256": self.fit_gt_matrix_sha256, "cp_cache_built_at": self.cp_cache_built_at}
-        else:
-            gt = {"gt_matrix_sha256": self.own_gt_matrix_sha256 or self.fit_gt_matrix_sha256}
         body = {
             "reference_sha256": self.reference_sha256,
             "dataset": self.dataset,
             "scaler_dataset": self.scaler_dataset,
             "is_lite": self.is_lite,
-            **gt,
+            "gt_matrix_sha256": self.gt_matrix_sha256,
         }
         return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -445,62 +514,8 @@ class DatasetCPSpace:
         """Return the kept columns of a raw CP matrix, standardized by this dataset's GT scaler."""
         return (self.select(x) - self.mean) / self.std
 
-    def check_gt_cache(self, gt_cache_dir: str | None) -> None:
-        """Refuse an eval whose GT CP cache was re-cached after the reference was fit.
-
-        Compares the eval's GT cache manifest ``cp_features.built_at`` with the one
-        recorded at build time. A non-lite dataset must have one recorded. A lite
-        dataset is checked against its own cache only when the build recorded one
-        (its scaler is the parent's, so a lite cache is otherwise not what the
-        scaler describes); when nothing is recorded the check is skipped.
-
-        This is a best-effort re-cache signal, not a content check. ``built_at``
-        moves whenever any slot of the cache's CP artifact is rewritten, and the
-        cache-manifest merge (``pipeline_cache._merge_manifests``) takes
-        ``built_at`` from whichever writer flushes last, so it can also move
-        without a value change (a false alarm) or be restored by a concurrent
-        flush (a miss). :meth:`check_n_cells` catches a change in the GT cell
-        count; a value-only change with the same count is caught by neither, only
-        by ``build_cp_reference.py --verify``, which recomputes each dataset's
-        GT-matrix sha256 from the caches.
-
-        Parameters
-        ----------
-        gt_cache_dir : str or None
-            The eval's ``io.gt_cache_dir``.
-
-        Raises
-        ------
-        ValueError
-            If the eval reads a different GT cache dir than the recorded one, or a
-            non-lite dataset's reference records no ``built_at``.
-        StaleCacheError
-            If the recorded and current ``built_at`` differ.
-        """
-        if self.cp_cache_built_at is None:
-            if self.is_lite:
-                return
-            raise ValueError(
-                f"{self.dataset}: the CP reference {self.reference_path} records no GT-cache built_at for this "
-                f"non-lite dataset, so a GT re-cache could not be detected. Rebuild it:\n"
-                f"  {_build_command(self.target_name)}"
-            )
-        if gt_cache_dir is None or Path(gt_cache_dir) != Path(self.gt_cache_dir):
-            raise ValueError(
-                f"{self.dataset}: the CP reference was fit on GT cache {self.gt_cache_dir}, "
-                f"this eval reads {gt_cache_dir}"
-            )
-        entry = load_manifest(cache_paths(gt_cache_dir))["artifacts"].get("cp_features")
-        built_at = entry["built_at"] if entry is not None else None
-        if built_at != self.cp_cache_built_at:
-            raise StaleCacheError(
-                f"{self.dataset}: GT CP cache {gt_cache_dir} was built at {built_at}, but the CP reference "
-                f"{self.reference_path} was fit on the cache built at {self.cp_cache_built_at}. "
-                f"Rebuild the reference:\n  {_build_command(self.target_name)}"
-            )
-
     def check_positions(self, positions: list[str]) -> None:
-        """Refuse an eval whose GT positions are not the ones the scaler was fit on.
+        """Refuse an eval whose GT positions are not exactly the ones the fit recorded.
 
         Parameters
         ----------
@@ -510,47 +525,49 @@ class DatasetCPSpace:
         Raises
         ------
         ValueError
-            If the positions are not a subset of the fit's, or, for a non-lite
-            dataset, not exactly the fit's (e.g. ``limit_positions`` or
-            ``io.exclude_fov_names``: a partial walk's CP values are not the
-            cells the scaler describes).
+            If the positions differ from the fit's (e.g. ``limit_positions`` or
+            ``io.exclude_fov_names``: a partial walk's CP cells are not the cells
+            the scaler was fit on and hashed over).
         """
-        extra = set(positions) - self.fit_positions
-        if extra:
-            raise ValueError(
-                f"{self.dataset}: GT positions {sorted(extra)[:5]} are not in the CP reference fit of "
-                f"{self.scaler_dataset} ({self.reference_path})"
-            )
-        if not self.is_lite and set(positions) != self.fit_positions:
+        if set(positions) != self.fit_positions:
+            extra = sorted(set(positions) - self.fit_positions)
             missing = sorted(self.fit_positions - set(positions))
             raise ValueError(
-                f"{self.dataset}: CP metrics need every GT position the scaler was fit on; this eval "
-                f"skips {len(missing)} (e.g. {missing[:5]}). limit_positions / io.exclude_fov_names "
-                "cannot be combined with compute_feature_metrics=true."
+                f"{self.dataset}: CP metrics need exactly the GT positions the CP reference recorded; this eval "
+                f"adds {extra[:5]} and skips {len(missing)} (e.g. {missing[:5]}). limit_positions / "
+                "io.exclude_fov_names cannot be combined with CP feature metrics: pass "
+                "compute_feature_metrics=false for smoke runs."
             )
 
-    def check_n_cells(self, n_gt_cells: int) -> None:
-        """Refuse a dataset-level CP stage whose GT cell count differs from the fit's.
+    def check_gt_cells(self, blocks: dict[tuple[str, int], np.ndarray]) -> None:
+        """Refuse to score unless the eval's GT CP cells are exactly the reference's fit cells.
 
-        Lite datasets are exempt: they score a subset of the parent's cells, and
-        :meth:`CPReference.for_dataset` already required the parent to be recorded.
-        A value-only GT change with the same count passes; see :meth:`check_gt_cache`.
+        The content gate. It hashes the GT cells this run actually staged -- after
+        any GT CP recompute -- in the builder's canonical form
+        (:func:`canonical_gt_matrix`) and compares with the recorded GT-matrix
+        sha256. So a GT re-cache that leaves the cells identical (``--overwrite``,
+        ``force_recompute.gt_cp``/``all``) passes, and any value or count change
+        fails, however the cache manifest was merged.
 
         Parameters
         ----------
-        n_gt_cells : int
-            Finite GT CP rows the eval scored, summed over every position and
-            timepoint, before the pairwise pred/GT non-finite drop.
+        blocks : dict
+            ``{(position, t): GT-finite CP rows}`` over every scored FOV and
+            timepoint, before the pred/GT paired non-finite drop.
 
         Raises
         ------
-        ValueError
-            If ``n_gt_cells`` (finite GT CP rows scored) differs from the recorded count.
+        StaleCacheError
+            If the hash differs from the recorded one.
         """
-        if not self.is_lite and n_gt_cells != self.fit_n_cells:
-            raise ValueError(
-                f"{self.dataset}: this eval scores {n_gt_cells} finite GT CP cells, the CP reference scaler was "
-                f"fit on {self.fit_n_cells}. The GT CP cache changed since the reference was built."
+        cells = canonical_gt_matrix(blocks, len(self.feature_names))
+        sha256 = gt_matrix_sha256(cells)
+        if sha256 != self.gt_matrix_sha256:
+            raise StaleCacheError(
+                f"{self.dataset}: the GT CP cells this eval scores ({cells.shape[0]} cells, sha256 {sha256[:12]}) "
+                f"differ from the CP reference fit ({self.fit_n_cells} cells, sha256 {self.gt_matrix_sha256[:12]}) "
+                f"in {self.reference_path}. The GT CP cache changed since the reference was built; rebuild it:\n"
+                f"  {_build_command(self.target_name)} --force"
             )
 
 
@@ -585,8 +602,7 @@ class CPReference:
             )
         scaler_dataset = self.lite[dataset]["parent"] if is_lite else dataset
         scaler = self.scalers[scaler_dataset]
-        scaler_fit = self.fit["datasets"][scaler_dataset]
-        own = self.fit["lite"][dataset] if is_lite else scaler_fit
+        own = self.fit["lite"][dataset] if is_lite else self.fit["datasets"][dataset]
         return DatasetCPSpace(
             reference_path=self.path,
             reference_sha256=self.sha256,
@@ -598,13 +614,9 @@ class CPReference:
             keep_mask=self.keep_mask,
             mean=np.asarray(scaler["mean"], dtype=np.float64),
             std=np.asarray(scaler["std"], dtype=np.float64),
-            fit_positions=frozenset(scaler_fit["positions"]),
-            fit_n_cells=int(scaler_fit["n_cells"]),
-            gt_cache_dir=own["gt_cache_dir"],
-            cp_cache_built_at=own["cp_cache_built_at"],
-            fit_gt_matrix_sha256=scaler_fit["gt_matrix_sha256"],
-            # A lite entry records no GT matrix today; the key is optional by design.
-            own_gt_matrix_sha256=own.get("gt_matrix_sha256") if is_lite else scaler_fit["gt_matrix_sha256"],
+            fit_positions=frozenset(own["positions"]),
+            fit_n_cells=int(own["n_cells"]),
+            gt_matrix_sha256=own["gt_matrix_sha256"],
         )
 
 

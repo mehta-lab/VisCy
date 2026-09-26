@@ -226,17 +226,14 @@ def make_cp_reference(
     column names :func:`~dynacell.evaluation.cp_reference.cp_space` derives from the
     same config. It fits one scaler per entry of ``datasets`` over the plate's
     ``A/1/{i}`` positions; dataset ``i`` is drawn with offset ``10 * i`` and scale
-    ``1 + i``, so every scaler differs. ``lite`` maps lite dataset -> parent. Every
-    non-lite dataset records ``config.io.gt_cache_dir`` and a real ``built_at``, and a
-    matching ``cp_features`` entry (full CP identity) is written into that cache's
-    manifest, so the eval's re-cache check passes the way it does on real data. Sets
-    ``feature_metrics.cp`` (GLCM off unless already configured),
-    ``feature_metrics.cp.reference_path`` and ``benchmark.dataset_ref.dataset``
-    (the first dataset), and returns the reference's sha256.
+    ``1 + i``, so every scaler differs. ``lite`` maps lite dataset -> parent; a lite
+    set's cells are its parent's first half. Sets ``feature_metrics.cp`` (GLCM off
+    unless already configured), ``feature_metrics.cp.reference_path`` and
+    ``benchmark.dataset_ref.dataset`` (the first dataset), and returns the
+    reference's sha256.
     """
     # Imported here like the other helpers in this file: live_pipeline_module() drops
     # every dynacell.evaluation.* module, so a top-level binding would go stale.
-    from dynacell.evaluation.cache import built_at_now, cache_paths, load_manifest, save_manifest
     from dynacell.evaluation.cp_reference import DatasetFit, cp_space, fit_cp_reference, write_cp_reference
 
     if OmegaConf.select(config, "feature_metrics.cp", default=None) is None:
@@ -248,38 +245,24 @@ def make_cp_reference(
         )
     OmegaConf.update(config, "benchmark", {"dataset_ref": {"dataset": datasets[0], "target": "sec61b"}}, merge=True)
     identity, names = cp_space(config)
-    gt_cache_dir = str(config.io.gt_cache_dir)
-    paths = cache_paths(gt_cache_dir)
-    manifest = load_manifest(paths)
-    built_at = built_at_now()
-    manifest["artifacts"]["cp_features"] = {
-        "path": "features/cp.zarr",
-        "built_at": built_at,
-        "spacing": list(config.pixel_metrics.spacing),
-        **identity,
-    }
-    save_manifest(paths, manifest)
     rng = np.random.default_rng(seed)
+    positions = [f"A/1/{p}" for p in range(N_POSITIONS)]
+    cells = {name: rng.standard_normal((n_cells, len(names))) * (1 + i) + 10.0 * i for i, name in enumerate(datasets)}
     fits = [
+        DatasetFit(dataset=name, cells=c, record={"positions": positions}, in_mask_fit=True)
+        for name, c in cells.items()
+    ]
+    fits += [
         DatasetFit(
             dataset=name,
-            cells=rng.standard_normal((n_cells, len(names))) * (1 + i) + 10.0 * i,
-            record={
-                "positions": [f"A/1/{p}" for p in range(N_POSITIONS)],
-                "gt_cache_dir": gt_cache_dir,
-                "cp_cache_built_at": built_at,
-            },
-            in_mask_fit=True,
+            cells=cells[parent][: n_cells // 2],
+            record={"positions": positions},
+            in_mask_fit=False,
+            parent=parent,
         )
-        for i, name in enumerate(datasets)
-    ]
-    lite_entries = {
-        name: {"parent": parent, "gt_cache_dir": None, "cp_cache_built_at": None}
         for name, parent in (lite or {}).items()
-    }
-    payload = fit_cp_reference(
-        fits, target_name=config.target_name, feature_names=names, cp_identity=identity, lite=lite_entries
-    )
+    ]
+    payload = fit_cp_reference(fits, target_name=config.target_name, feature_names=names, cp_identity=identity)
     write_cp_reference(payload, path, force=True)
     config.feature_metrics.cp.reference_path = str(path)
     return payload["sha256"]

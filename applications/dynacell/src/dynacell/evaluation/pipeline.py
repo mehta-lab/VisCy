@@ -327,7 +327,10 @@ def _extend_backbone(
 
 
 def _stage_cp_dataset_inputs(
-    cp: _BackboneLists, cp_space: DatasetCPSpace, n_gt_cells: int, save_dir: Path
+    cp: _BackboneLists,
+    cp_space: DatasetCPSpace,
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray],
+    save_dir: Path,
 ) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Stage the dataset-level CP inputs in the reference feature space.
 
@@ -343,9 +346,10 @@ def _stage_cp_dataset_inputs(
         Aggregated CP rows of the run.
     cp_space : DatasetCPSpace
         Reference bound to the eval's dataset.
-    n_gt_cells : int
-        Finite GT CP rows the run scored (before the pairwise pred/GT drop);
-        must equal the scaler's fit count for a non-lite dataset.
+    gt_cp_blocks : dict
+        ``{(position, t): GT-finite CP rows}`` the run scored, before the pairwise
+        pred/GT non-finite drop; must hash to the reference's recorded GT matrix
+        (:meth:`DatasetCPSpace.check_gt_cells`) before anything is written.
     save_dir : pathlib.Path
         Eval dir receiving the sidecar.
 
@@ -354,7 +358,7 @@ def _stage_cp_dataset_inputs(
     tuple
         ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
     """
-    cp_space.check_n_cells(n_gt_cells)
+    cp_space.check_gt_cells(gt_cp_blocks)
     pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
     target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
     mask_payload = {
@@ -404,7 +408,9 @@ class FovResult:
     dynaclr: _BackboneLists = field(default_factory=_BackboneLists)
     celldino: _BackboneLists = field(default_factory=_BackboneLists)
     morphem: _BackboneLists = field(default_factory=_BackboneLists)
-    n_gt_cp_finite: int = 0  # finite GT CP rows, before the pairwise pred/GT non-finite drop
+    # GT-finite CP rows per timepoint, before the pairwise pred/GT non-finite drop: the
+    # cells the dataset-level content gate hashes.
+    gt_cp_blocks: dict[int, np.ndarray] = field(default_factory=dict)
     timings: list[tuple[str, int | None, str, float]] = field(default_factory=list)
 
 
@@ -859,7 +865,7 @@ def _process_one_fov(
             )
 
     microssim_data: list[dict] = []
-    n_gt_cp_finite = 0
+    gt_cp_blocks: dict[int, np.ndarray] = {}
     fov_pixel_metrics: list[dict] = []
     fov_mask_metrics: list[dict] = []
     fov_feature_metrics: list[dict] = []
@@ -951,7 +957,7 @@ def _process_one_fov(
                 pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
                 pred_morphem = pred_per_t["morphem"][t] if pred_per_t["morphem"] is not None else None
                 if gt_cp_per_t[t].size:
-                    n_gt_cp_finite += int(np.isfinite(gt_cp_per_t[t]).all(axis=1).sum())
+                    gt_cp_blocks[t] = gt_cp_per_t[t][np.isfinite(gt_cp_per_t[t]).all(axis=1)]
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
                 pred_cp_z, gt_cp_z = _cp_row_features(pred_cp, gt_cp_t, cp_space)
                 # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
@@ -1022,7 +1028,7 @@ def _process_one_fov(
         dynaclr=dynaclr,
         celldino=celldino,
         morphem=morphem,
-        n_gt_cp_finite=n_gt_cp_finite,
+        gt_cp_blocks=gt_cp_blocks,
         timings=get_timings()[timings_start:],
     )
 
@@ -1311,10 +1317,6 @@ def evaluate_predictions(
             f"cp_space must be given exactly when compute_feature_metrics=true "
             f"(compute_feature_metrics={config.compute_feature_metrics}, cp_space={cp_space is not None})"
         )
-    # Before any model load or cache write: a GT CP cache re-cached after the reference
-    # was fit must fail the run up front, not after the per-FOV loop.
-    if cp_space is not None:
-        cp_space.check_gt_cache(OmegaConf.select(config, "io.gt_cache_dir", default=None))
 
     use_gpu = bool(getattr(config, "use_gpu", True))
 
@@ -1353,7 +1355,9 @@ def evaluate_predictions(
     seg_path = Path(io_config.cell_segmentation_path) if io_config.cell_segmentation_path is not None else None
 
     parent_lists: dict[str, _BackboneLists] = {name: _BackboneLists() for name in _BACKBONE_KEYS}
-    n_gt_cp_finite = [0]  # summed across FOVs by _aggregate; checked against the CP scaler's fit
+    # GT-finite CP rows by (position, t), merged across FOVs by _aggregate; hashed against
+    # the CP reference fit before any dataset-level metric is computed.
+    gt_cp_blocks: dict[tuple[str, int], np.ndarray] = {}
 
     # Deep-feature extractors by backbone key. Bound at function scope because the
     # precompute gate and the dataset-metrics block both derive from it and sit in
@@ -1625,7 +1629,7 @@ def evaluate_predictions(
             extend_worker_timings = runtime.executor == "process"
 
             def _aggregate(result: FovResult) -> None:
-                n_gt_cp_finite[0] += result.n_gt_cp_finite
+                gt_cp_blocks.update({(result.pos_name, t): rows for t, rows in result.gt_cp_blocks.items()})
                 _aggregate_fov_result(
                     result,
                     segmentation_results,
@@ -1750,9 +1754,7 @@ def evaluate_predictions(
             prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
             if parent_lists["cp"].pred_feats:
-                prefix_inputs.append(
-                    _stage_cp_dataset_inputs(parent_lists["cp"], cp_space, n_gt_cp_finite[0], save_dir)
-                )
+                prefix_inputs.append(_stage_cp_dataset_inputs(parent_lists["cp"], cp_space, gt_cp_blocks, save_dir))
 
             for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]
@@ -1919,9 +1921,6 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     current_sha256 = None
     if config.compute_feature_metrics:
         space = eval_cp_space(config)
-        # Same GT re-cache guard as the scoring path: cached CP rows scored against a
-        # GT cache that has since been re-cached must not be reused silently.
-        space.check_gt_cache(OmegaConf.select(config, "io.gt_cache_dir", default=None))
         # The cached rows cover the positions of the run that wrote them; a partial walk
         # must go through the scoring path so ``check_positions`` sees its GT position set.
         if config.limit_positions is not None or OmegaConf.select(config, "io.exclude_fov_names", default=None):

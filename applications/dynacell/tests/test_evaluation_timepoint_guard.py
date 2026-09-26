@@ -18,7 +18,6 @@ import pytest
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
-from dynacell.evaluation.cache import cache_paths, load_manifest, save_manifest
 from dynacell.evaluation.model_loader import EvalModels
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
@@ -205,22 +204,6 @@ def test_cache_reuse_refuses_a_gt_store_extended_since_the_fit(tmp_path: Path) -
         pipeline._final_metrics_cache_valid(config)
 
 
-def test_cache_reuse_refuses_a_gt_recache(tmp_path: Path) -> None:
-    """A reusable final-metrics cache is refused once the GT CP cache was re-cached after the build."""
-    pipeline = live_pipeline_module()
-    config, _ = _feature_cache_config(tmp_path)  # records the cache's real built_at
-    _write_final_caches(pipeline, tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), config)
-    assert pipeline._final_metrics_cache_valid(config)
-
-    paths = cache_paths(tmp_path / "gt_cache")
-    manifest = load_manifest(paths)
-    manifest["artifacts"]["cp_features"]["built_at"] = "2099-01-01T00:00:00+00:00"  # re-cached after the build
-    save_manifest(paths, manifest)
-    with pytest.raises(Exception, match="was built at 2099-01-01") as err:
-        pipeline._final_metrics_cache_valid(config)
-    assert type(err.value).__name__ == "StaleCacheError"
-
-
 def _two_set_cache(pipeline, tmp_path: Path):
     """A final-metrics cache scored for set-a of a two-set reference; returns ``(config, reference path)``."""
     config, _ = _feature_cache_config(tmp_path)
@@ -251,17 +234,9 @@ def test_cache_is_invalid_once_the_gt_matrix_changed(tmp_path: Path) -> None:
 
 
 def test_cache_stays_valid_after_a_harmless_rebuild(tmp_path: Path) -> None:
-    """A rebuild that only moves built_at (same GT matrix) keeps the cache reusable.
-
-    check_gt_cache passes because the rebuild records the cache's new built_at, and
-    the binding is unchanged because the GT-matrix sha256 is.
-    """
+    """A rebuild that only moves the audit-only built_at (same GT matrix) keeps the cache reusable."""
     pipeline = live_pipeline_module()
     config, reference = _two_set_cache(pipeline, tmp_path)
-    paths = cache_paths(tmp_path / "gt_cache")
-    manifest = load_manifest(paths)
-    manifest["artifacts"]["cp_features"]["built_at"] = "2099-01-01T00:00:00+00:00"
-    save_manifest(paths, manifest)
     payload = json.loads(reference.read_text())
     for record in payload["fit"]["datasets"].values():
         record["cp_cache_built_at"] = "2099-01-01T00:00:00+00:00"
@@ -375,20 +350,5 @@ def test_partial_position_walk_is_refused_for_cp(tmp_path: Path, monkeypatch) ->
     config.limit_positions = 2
     monkeypatch.setattr(pipeline, "_calibrate_microssim", lambda *a, **k: pytest.fail("reached per-FOV work"))
     cp_space = pipeline.eval_cp_space(config)
-    with pytest.raises(ValueError, match="cannot be combined with compute_feature_metrics"):
+    with pytest.raises(ValueError, match="compute_feature_metrics=false for smoke runs"):
         pipeline.evaluate_predictions(config, models=_stub_models(), cp_space=cp_space)
-
-
-def test_gt_recache_after_the_reference_is_refused_up_front(tmp_path: Path, monkeypatch) -> None:
-    """A GT CP cache whose ``built_at`` moved since the build fails before any model load."""
-    pipeline = live_pipeline_module()
-    config, _ = _feature_cache_config(tmp_path)  # records the cache's real built_at
-    paths = cache_paths(tmp_path / "gt_cache")
-    manifest = load_manifest(paths)
-    manifest["artifacts"]["cp_features"]["built_at"] = "2099-01-01T00:00:00+00:00"  # re-cached after the build
-    save_manifest(paths, manifest)
-    monkeypatch.setattr(pipeline, "load_eval_models", lambda *a, **k: pytest.fail("models loaded"))
-    cp_space = pipeline.eval_cp_space(config)
-    with pytest.raises(Exception, match="was built at 2099-01-01") as err:
-        pipeline.evaluate_predictions(config, cp_space=cp_space)
-    assert type(err.value).__name__ == "StaleCacheError"

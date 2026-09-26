@@ -48,7 +48,7 @@ def _write_reference(path: Path) -> dict:
         in_mask_fit=True,
     )
     payload = fit_cp_reference(
-        [fit], target_name="nucleus", feature_names=tuple(f"f{i}" for i in range(_D_CP)), cp_identity={}, lite={}
+        [fit], target_name="nucleus", feature_names=tuple(f"f{i}" for i in range(_D_CP)), cp_identity={}
     )
     write_cp_reference(payload, path)
     return payload

@@ -35,7 +35,7 @@ def _write_reference(path: Path, seed: int = 0) -> str:
         in_mask_fit=True,
     )
     payload = fit_cp_reference(
-        [fit], target_name="membrane", feature_names=tuple(f"f{i}" for i in range(_DIM)), cp_identity={}, lite={}
+        [fit], target_name="membrane", feature_names=tuple(f"f{i}" for i in range(_DIM)), cp_identity={}
     )
     write_cp_reference(payload, path, force=True)
     return payload["sha256"]

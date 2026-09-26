@@ -209,7 +209,7 @@ def test_worker_run_fov_hands_the_cp_space_to_process_one_fov(tmp_path, monkeypa
         in_mask_fit=True,
     )
     write_cp_reference(
-        fit_cp_reference([fit], target_name="er", feature_names=names, cp_identity={}, lite={}), tmp_path / "er.json"
+        fit_cp_reference([fit], target_name="er", feature_names=names, cp_identity={}), tmp_path / "er.json"
     )
     cp_space = pickle.loads(pickle.dumps(load_cp_reference(tmp_path / "er.json", target_name="er").for_dataset("ds")))
 

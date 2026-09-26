@@ -107,7 +107,7 @@ def test_check_e_scores_cp_in_the_reference_space(tmp_path: Path) -> None:
         in_mask_fit=True,
     )
     payload = fit_cp_reference(
-        [fit], target_name="nucleus", feature_names=tuple(f"f{i}" for i in range(d)), cp_identity={}, lite={}
+        [fit], target_name="nucleus", feature_names=tuple(f"f{i}" for i in range(d)), cp_identity={}
     )
     reference = tmp_path / "nucleus.json"
     write_cp_reference(payload, reference)
