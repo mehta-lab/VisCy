@@ -14,6 +14,7 @@ views of the same GT cells.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import zlib
 from pathlib import Path
@@ -312,7 +313,13 @@ def test_no_finite_pred_cp_rows_still_gates_the_gt_and_writes_the_sidecar(harnes
     monkeypatch.setattr(harness.pipeline, "fov_cp_features", nan_pred_side)
     row, _ = harness.run("nanpred", [g.copy() for g in harness.gt])
     assert np.isnan(row["Dataset_CP_KID"])
-    assert (harness.root / "nanpred" / "cp_selected_feature_mask.json").exists()
+    sidecar_text = (harness.root / "nanpred" / "cp_selected_feature_mask.json").read_text()
+
+    def _reject(const: str) -> None:
+        raise ValueError(f"non-strict JSON constant {const}")
+
+    sidecar = json.loads(sidecar_text, parse_constant=_reject)  # strict JSON: no NaN/Infinity
+    assert sidecar["clip"]["pred_clip_frac"] is None
 
     # A GT recompute from a changed GT store bypasses the up-front cache check, so only the
     # post-staging gate can refuse it -- and it must, even with no finite pred CP rows.

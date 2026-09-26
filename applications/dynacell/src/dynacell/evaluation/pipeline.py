@@ -359,15 +359,20 @@ def _gate_and_record_cp_space(
         the sidecar so what the z-clip discarded stays inspectable per feature.
     """
     cp_space.check_gt_cells(gt_cp_blocks)
+
+    def _json_frac(v: float) -> float | None:
+        # No pred CP rows -> NaN fraction; strict JSON has no NaN, so record null.
+        return None if np.isnan(v) else v
+
     payload = {
         **cp_sidecar_payload(cp_space),
         "clip": {
             "z_clip": cp_space.z_clip,
-            "pred_clip_frac": pred_clip["any"],
-            "pred_clip_frac_per_feature": pred_clip["per_feature"],
+            "pred_clip_frac": _json_frac(pred_clip["any"]),
+            "pred_clip_frac_per_feature": {k: _json_frac(v) for k, v in pred_clip["per_feature"].items()},
         },
     }
-    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(payload, indent=2))
+    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(payload, indent=2, allow_nan=False))
 
 
 def _stage_cp_dataset_inputs(
