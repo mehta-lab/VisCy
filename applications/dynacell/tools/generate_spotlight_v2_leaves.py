@@ -211,8 +211,9 @@ ARMS: tuple[Arm, ...] = (
     # Stage 2 #1: the segaux arm with a self-consistent Dice reference (2D families first).
     *(Arm(m, "segauxself", ORGANELLES, a549=True) for m in SEGAUXSELF_BASELINES),
     # Predict-only: the pix2pix2d BASELINE's own last.ckpt into a v2-only store. Its canonical
-    # stores were predicted from the epoch-37 best checkpoint, while every GAN arm predicts from
-    # last.ckpt (recorded EMA val L1 does not track the weights), so arm-vs-baseline needs this.
+    # stores were predicted from a best-by-val checkpoint (nucleus epoch 22, membrane epoch 37),
+    # while every GAN arm predicts from last.ckpt (recorded EMA val L1 does not track the
+    # weights), so arm-vs-baseline needs this.
     Arm("pix2pix2d_unetvit", "last", ORGANELLES, a549=True, fit=False),
 )
 
