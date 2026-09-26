@@ -2266,7 +2266,10 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     # mock (FOV-stratified logistic probe, per feature space, GT and pred).
     # Default-on whenever feature metrics were computed (the probe consumes the
     # embeddings those produce) and a mock + >=1 infected condition are present.
-    # Gated by ``cross_condition_probe.enabled``; never fails the eval.
+    # Gated by ``cross_condition_probe.enabled``. It runs after every condition's metrics
+    # are saved, so a failure loses nothing already written; it is not swallowed, since a
+    # CP reference/sidecar failure there means the probe would score in the wrong space.
+    # (Missing embeddings of one side are already a recorded skip inside the probe.)
     probe_enabled = bool(
         OmegaConf.select(
             config,
@@ -2277,12 +2280,9 @@ def evaluate_predictions_grouped(config: DictConfig) -> list[tuple[str, tuple]]:
     if probe_enabled:
         n_splits = int(OmegaConf.select(config, "cross_condition_probe.n_splits", default=5))
         rng_seed = int(OmegaConf.select(config, "cross_condition_probe.rng_seed", default=2020))
-        try:
-            written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
-            if written:
-                print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
-        except Exception as e:  # noqa: BLE001 -- diagnostic add-on must not fail the eval
-            print(f"[grouped] cross-condition probe skipped: {type(e).__name__}: {e}")
+        written = _cross_condition_run_for_group(condition_save_dirs, n_splits=n_splits, rng_seed=rng_seed)
+        if written:
+            print(f"[grouped] cross-condition probe wrote {len(written)} CSV(s): {[str(p) for p in written]}")
 
     return results
 

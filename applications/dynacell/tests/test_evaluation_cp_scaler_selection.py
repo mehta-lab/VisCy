@@ -110,3 +110,34 @@ def test_unknown_dataset_is_refused(tmp_path: Path) -> None:
     config.benchmark.dataset_ref.dataset = "unknown-set"
     with pytest.raises(KeyError, match="no scaler for dataset 'unknown-set'"):
         pipeline.eval_cp_space(config)
+
+
+def test_grouped_probe_failure_on_the_cp_reference_propagates(tmp_path: Path, monkeypatch) -> None:
+    """A cross-condition probe that cannot load the CP reference fails the grouped run, not a print."""
+    pipeline = live_pipeline_module()
+    base = _config(tmp_path)
+    conditions = []
+    for cond in ("mock", "denv"):
+        save_dir = tmp_path / "er" / "model" / "ipsc" / f"a549__{cond}"
+        emb = save_dir / "embeddings"
+        emb.mkdir(parents=True)
+        for side in ("pred", "gt"):
+            for kind in ("cp", "dinov3", "dynaclr", "celldino", "morphem"):
+                np.savez(emb / f"{side}_{kind}_single_cell_embeddings.npz", embeddings=np.zeros((4, 3)), fov=["f"] * 4)
+        # A pre-PR sidecar: no reference_path, so the CP mask cannot be resolved.
+        (save_dir / "cp_selected_feature_mask.json").write_text('{"keep_mask": [true, true, true]}')
+        conditions.append({"name": cond, "save": {"save_dir": str(save_dir)}})
+    config = OmegaConf.merge(
+        base,
+        {
+            "conditions": conditions,
+            "force_recompute": {"final_metrics": True},
+            "cross_condition_probe": {"enabled": True},
+        },
+    )
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
+    monkeypatch.setattr(pipeline, "evaluate_predictions", lambda cfg, *, models, cp_space: ([], [], []))
+    monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
+    with pytest.raises(KeyError, match="reference_path"):
+        pipeline.evaluate_predictions_grouped(config)
