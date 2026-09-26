@@ -34,6 +34,11 @@ waves:
       - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
     membrane:
       - {model: pix2pix2d_unetvit_seed1, leaves: [ipsc]}
+  # The pix2pix2d BASELINE re-predicted from its own last.ckpt (predict-only arm), so GAN
+  # arm-vs-baseline compares final checkpoints on both sides. Generate with --wave wave1c.
+  wave1c:
+    nucleus: [pix2pix2d_unetvit_last]
+    membrane: [pix2pix2d_unetvit_last]
   # Stage 1, second batch of finished predicts (2026-09-25): FNet-2D, UNeXt2-2D membrane
   # (segaux, seed1, l1/safecrop probes) and pix2pix2d membrane segaux. Generate with --wave wave1b.
   wave1b:
