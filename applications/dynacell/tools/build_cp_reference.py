@@ -19,7 +19,7 @@ opened through the pipeline's own ``init_cache_context`` with
 ``require_complete_cache=true`` (so a cache of another store or CP recipe is
 refused), and every ``(position, timepoint)`` of the GT store must already be in
 the CP cache. A miss raises; features are never computed. Non-finite GT cells are
-dropped and the rest stacked in the canonical order the eval hashes
+dropped and the rest stacked in the canonical order the eval stages
 (``cp_reference.read_gt_cp_cells`` / ``canonical_gt_matrix``).
 
 The write is atomic, and an existing reference with a different content hash is
