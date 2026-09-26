@@ -153,23 +153,24 @@ def test_build_writes_a_loadable_reference(registry: Path) -> None:
     main(["--target", "er", "--leaves-root", str(leaves), "--out", str(out)])
 
     payload = json.loads(out.read_text())
-    assert payload["mask_fit"]["datasets"] == ["ds-a", "ds-b"]
+    fit = payload["fit"]
+    assert fit["mask_fit"]["datasets"] == ["ds-a", "ds-b"]
     assert sorted(payload["scalers"]) == ["ds-a", "ds-b", "ds-h"]
-    assert payload["scalers"]["ds-h"]["in_mask_fit"] is False
-    assert payload["lite"] == {
+    assert fit["datasets"]["ds-h"]["in_mask_fit"] is False
+    assert payload["lite"] == {"ds-a-lite": {"parent": "ds-a"}}
+    assert fit["lite"] == {
         "ds-a-lite": {
-            "parent": "ds-a",
             "target": "sec61b",
             "gt_cache_dir": str(registry / "caches" / "ds-a-lite"),
             "cp_cache_built_at": None,
         }
     }
-    a = payload["scalers"]["ds-a"]
+    a = {**payload["scalers"]["ds-a"], **fit["datasets"]["ds-a"]}
     assert a["n_cells"] == 2 * _T * 5 - 1  # one non-finite cell dropped
     assert a["n_cells_dropped_nonfinite"] == 1
     assert a["positions"] == list(_POSITIONS)
     assert a["cp_cache_built_at"] == _BUILT_AT
-    assert payload["mask_fit"]["n_cells"] == 38
+    assert fit["mask_fit"]["n_cells"] == 38
     ref = load_cp_reference(out, target_name="er")
     assert ref.for_dataset("ds-a-lite").scaler_dataset == "ds-a"
     # Scalers differ per set: ds-b was drawn with a different offset and scale.
@@ -183,7 +184,7 @@ def test_rebuild_is_a_no_op_and_a_changed_reference_needs_force(registry: Path, 
     args = ["--target", "er", "--leaves-root", str(leaves), "--out", str(out)]
     main(args)
     main(args)
-    assert "unchanged (identical hash)" in capsys.readouterr().out
+    assert "unchanged (identical reference)" in capsys.readouterr().out
     with open_features_group(cache_paths(registry / "caches" / "ds-b"), "cp", mode="a") as group:
         write_features_to_group(group, "A/1/0", 0, np.ones((5, _N_FEATURES)) * 9.0)
     with pytest.raises(FileExistsError, match="--force"):

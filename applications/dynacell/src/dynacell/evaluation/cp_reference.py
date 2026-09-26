@@ -66,7 +66,7 @@ from dynacell.evaluation.paths import cp_reference_path
 from dynacell.evaluation.pipeline_cache import cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
-CP_REFERENCE_SCHEMA = 2
+CP_REFERENCE_SCHEMA = 3
 
 #: A per-dataset std below this fraction of the feature's pooled GT std is floored to it.
 STD_FLOOR_FRACTION = 1e-3
@@ -101,10 +101,13 @@ MASK_FIT_DATASETS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
-#: Keys excluded from the content hash: the hash itself, and the build timestamp,
-#: so rebuilding from identical GT caches yields an identical hash and does not
-#: needlessly invalidate every final-metrics cache stamped with it.
-_UNHASHED_KEYS = frozenset({"sha256", "created_at"})
+#: Keys excluded from the content hash. The hash covers only what changes CP numbers
+#: (recipe identity, criteria, feature names, keep-mask, every scaler's mean/std and
+#: floored features, the lite -> parent map). ``fit`` holds the fit provenance the eval
+#: checks read (positions, cell counts, GT-cache ``built_at``, GT-matrix hashes), so a
+#: rebuild after a harmless GT re-cache that leaves every scaler unchanged keeps the
+#: hash and invalidates no final-metrics cache stamped with it.
+_UNHASHED_KEYS = frozenset({"sha256", "created_at", "fit"})
 
 
 def _build_command(target_name: str) -> str:
@@ -210,7 +213,8 @@ def fit_cp_reference(
         Dataset-independent CP recipe identity (from :func:`cp_space`).
     lite : dict
         ``{lite dataset: {"parent": ..., "gt_cache_dir": ..., "cp_cache_built_at": ...}}``.
-        Each parent must be one of ``fits``.
+        Each parent must be one of ``fits``. Only ``parent`` enters the hash; the
+        rest is fit provenance.
 
     Returns
     -------
@@ -252,16 +256,19 @@ def fit_cp_reference(
     floor = STD_FLOOR_FRACTION * pooled_std
 
     scalers: dict[str, dict[str, Any]] = {}
+    provenance: dict[str, dict[str, Any]] = {}
     for fit in fits:
         kept = np.asarray(fit.cells, dtype=np.float64)[:, keep_mask]
         std = kept.std(axis=0)
         floored = std < floor
         scalers[fit.dataset] = {
-            **fit.record,
-            "in_mask_fit": fit.in_mask_fit,
             "mean": [float(v) for v in kept.mean(axis=0)],
             "std": [float(v) for v in np.where(floored, floor, std)],
             "floored_features": [n for n, f in zip(kept_names, floored, strict=True) if f],
+        }
+        provenance[fit.dataset] = {
+            **fit.record,
+            "in_mask_fit": fit.in_mask_fit,
             "n_cells": int(kept.shape[0]),
             "gt_matrix_sha256": gt_matrix_sha256(fit.cells),
         }
@@ -281,14 +288,18 @@ def fit_cp_reference(
             "std_floor_fraction_of_pooled": STD_FLOOR_FRACTION,
         },
         "cp_identity": cp_identity,
-        "mask_fit": {
-            "datasets": [f.dataset for f in fits if f.in_mask_fit],
-            "n_cells": int(pooled.shape[0]),
-            "gt_matrix_sha256": gt_matrix_sha256(pooled),
-            "pooled_std": [float(v) for v in pooled_std],
-        },
         "scalers": scalers,
-        "lite": lite,
+        "lite": {name: {"parent": entry["parent"]} for name, entry in lite.items()},
+        "fit": {
+            "mask_fit": {
+                "datasets": [f.dataset for f in fits if f.in_mask_fit],
+                "n_cells": int(pooled.shape[0]),
+                "gt_matrix_sha256": gt_matrix_sha256(pooled),
+                "pooled_std": [float(v) for v in pooled_std],
+            },
+            "datasets": provenance,
+            "lite": {name: {k: v for k, v in entry.items() if k != "parent"} for name, entry in lite.items()},
+        },
         "created_at": datetime.now(UTC).isoformat(),
     }
     payload["sha256"] = payload_sha256(payload)
@@ -310,8 +321,10 @@ def write_cp_reference(payload: dict[str, Any], path: Path, *, force: bool = Fal
     Returns
     -------
     bool
-        ``True`` if the file was written, ``False`` if an identical reference was
-        already there (no-op).
+        ``True`` if the file was written, ``False`` if an identical reference (same
+        hash AND same fit provenance) was already there (no-op). Same hash with new
+        provenance -- a harmless GT re-cache -- is written without ``force``: no CP
+        number changes, and the eval checks need the new ``built_at``.
 
     Raises
     ------
@@ -320,13 +333,15 @@ def write_cp_reference(payload: dict[str, Any], path: Path, *, force: bool = Fal
         replacing it changes CP values and invalidates every eval stamped with it.
     """
     if path.exists():
-        existing = json.loads(path.read_text())["sha256"]
-        if existing == payload["sha256"]:
-            return False
-        if not force:
+        existing = json.loads(path.read_text())
+        if existing["sha256"] == payload["sha256"]:
+            if existing["fit"] == payload["fit"]:
+                return False
+        elif not force:
             raise FileExistsError(
-                f"{path} holds a different CP reference (sha256 {existing[:12]} vs new {payload['sha256'][:12]}); "
-                "replacing it invalidates every eval scored with it. Pass --force to replace it."
+                f"{path} holds a different CP reference (sha256 {existing['sha256'][:12]} vs new "
+                f"{payload['sha256'][:12]}); replacing it invalidates every eval scored with it. "
+                "Pass --force to replace it."
             )
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -474,6 +489,7 @@ class CPReference:
     cp_identity: dict[str, Any]
     scalers: dict[str, dict[str, Any]]
     lite: dict[str, dict[str, Any]]
+    fit: dict[str, Any]
 
     def for_dataset(self, dataset: str) -> DatasetCPSpace:
         """Bind the reference to one eval dataset (a lite dataset gets its parent's scaler).
@@ -492,7 +508,8 @@ class CPReference:
             )
         scaler_dataset = self.lite[dataset]["parent"] if is_lite else dataset
         scaler = self.scalers[scaler_dataset]
-        own = self.lite[dataset] if is_lite else scaler
+        scaler_fit = self.fit["datasets"][scaler_dataset]
+        own = self.fit["lite"][dataset] if is_lite else scaler_fit
         return DatasetCPSpace(
             reference_path=self.path,
             reference_sha256=self.sha256,
@@ -504,8 +521,8 @@ class CPReference:
             keep_mask=self.keep_mask,
             mean=np.asarray(scaler["mean"], dtype=np.float64),
             std=np.asarray(scaler["std"], dtype=np.float64),
-            fit_positions=frozenset(scaler["positions"]),
-            fit_n_cells=int(scaler["n_cells"]),
+            fit_positions=frozenset(scaler_fit["positions"]),
+            fit_n_cells=int(scaler_fit["n_cells"]),
             gt_cache_dir=own["gt_cache_dir"],
             cp_cache_built_at=own["cp_cache_built_at"],
         )
@@ -556,6 +573,7 @@ def load_cp_reference(path: Path, *, target_name: str) -> CPReference:
         cp_identity=payload["cp_identity"],
         scalers=payload["scalers"],
         lite=payload["lite"],
+        fit=payload["fit"],
     )
 
 

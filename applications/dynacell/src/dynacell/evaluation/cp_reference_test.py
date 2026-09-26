@@ -93,9 +93,9 @@ def test_mask_is_pooled_over_the_mask_fit_sets_only(two_sets) -> None:
     # HEK entering the fit would change the mask: its offset reshapes the pooled correlations.
     with_hek = select_gt_features(np.vstack([cells["set-a"], cells["set-b"], cells["hek"]]))
     assert not np.array_equal(with_hek, expected)
-    assert payload["mask_fit"]["datasets"] == ["set-a", "set-b"]
-    assert payload["mask_fit"]["n_cells"] == 600
-    assert payload["scalers"]["hek"]["in_mask_fit"] is False
+    assert payload["fit"]["mask_fit"]["datasets"] == ["set-a", "set-b"]
+    assert payload["fit"]["mask_fit"]["n_cells"] == 600
+    assert payload["fit"]["datasets"]["hek"]["in_mask_fit"] is False
 
 
 def test_each_set_gets_its_own_gt_scaler(two_sets) -> None:
@@ -106,7 +106,7 @@ def test_each_set_gets_its_own_gt_scaler(two_sets) -> None:
         z = space.transform(cells[name])
         np.testing.assert_allclose(z.mean(axis=0), 0.0, atol=1e-9)
         np.testing.assert_allclose(z.std(axis=0), 1.0, atol=1e-9)
-        assert payload["scalers"][name]["n_cells"] == 300
+        assert payload["fit"]["datasets"][name]["n_cells"] == 300
     # set-b's GT in set-a's space is far from standardized: the scalers really differ.
     assert np.abs(ref.for_dataset("set-a").transform(cells["set-b"]).mean(axis=0)).max() > 5
     lite = ref.for_dataset("set-a-lite")
@@ -163,6 +163,51 @@ def test_hash_ignores_build_time_and_detects_edits(tmp_path: Path) -> None:
     path.write_text(json.dumps(edited))
     with pytest.raises(ValueError, match="does not match its recorded sha256"):
         load_cp_reference(path, target_name="er")
+
+
+def test_harmless_recache_keeps_the_hash(tmp_path: Path) -> None:
+    """A rebuild whose scalers are identical but whose fit provenance moved keeps the hash.
+
+    The new provenance (e.g. a GT cache re-stamped with the same values) is written
+    without ``force``, so the eval checks see the new ``built_at`` while no
+    final-metrics cache stamped with the old hash is invalidated.
+    """
+    cells = _gt()
+    first = fit_cp_reference(
+        [_fit("set-a", cells, built_at="t0")], target_name="er", feature_names=_NAMES, cp_identity={}, lite={}
+    )
+    fit_b = _fit("set-a", cells, built_at="t1")
+    fit_b.record["positions"] = [*_POSITIONS]
+    fit_b.record["gt_cache_dir"] = "/moved/cache"
+    second = fit_cp_reference([fit_b], target_name="er", feature_names=_NAMES, cp_identity={}, lite={})
+    assert first["sha256"] == second["sha256"]
+    assert first["fit"] != second["fit"]
+
+    path = tmp_path / "er.json"
+    write_cp_reference(first, path)
+    assert write_cp_reference(second, path) is True  # same hash, new provenance: no --force needed
+    assert json.loads(path.read_text())["fit"]["datasets"]["set-a"]["cp_cache_built_at"] == "t1"
+    assert write_cp_reference(second, path) is False
+
+
+def test_changed_scaler_changes_the_hash() -> None:
+    """Anything that moves a CP number -- here one dataset's mean -- changes the hash."""
+    payload = fit_cp_reference(
+        [_fit("set-a", _gt()), _fit("set-b", _gt(seed=1))],
+        target_name="er",
+        feature_names=_NAMES,
+        cp_identity={},
+        lite={"set-a-lite": {"parent": "set-a", "gt_cache_dir": None, "cp_cache_built_at": None}},
+    )
+    moved = json.loads(json.dumps(payload))
+    moved["scalers"]["set-b"]["mean"][0] += 1e-9
+    assert payload_sha256(moved) != payload["sha256"]
+    relinked = json.loads(json.dumps(payload))
+    relinked["lite"]["set-a-lite"]["parent"] = "set-b"
+    assert payload_sha256(relinked) != payload["sha256"]
+    provenance_only = json.loads(json.dumps(payload))
+    provenance_only["fit"]["datasets"]["set-b"]["n_cells"] = 1
+    assert payload_sha256(provenance_only) == payload["sha256"]
 
 
 def test_write_is_atomic_and_refuses_a_different_reference(tmp_path: Path) -> None:

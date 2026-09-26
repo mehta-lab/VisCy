@@ -18,7 +18,6 @@ import pytest
 from iohub.ngff import open_ome_zarr
 
 from dynacell.evaluation.cache import cache_paths, save_manifest
-from dynacell.evaluation.cp_reference import payload_sha256
 from dynacell.evaluation.model_loader import EvalModels
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME, write_metrics_provenance
 
@@ -293,10 +292,10 @@ def test_gt_recache_after_the_reference_is_refused_up_front(tmp_path: Path, monk
         {"artifacts": {"cp_features": {"path": "features/cp.zarr", "built_at": "2026-09-26T00:00:00+00:00"}}},
     )
     reference = json.loads((tmp_path / "cp_reference.json").read_text())
-    reference["scalers"][CP_TEST_DATASET].update(
+    # Fit provenance is outside the content hash, so it can be edited without re-hashing.
+    reference["fit"]["datasets"][CP_TEST_DATASET].update(
         gt_cache_dir=str(tmp_path / "gt_cache"), cp_cache_built_at="2026-09-01T00:00:00+00:00"
     )
-    reference["sha256"] = payload_sha256(reference)
     (tmp_path / "cp_reference.json").write_text(json.dumps(reference))
     monkeypatch.setattr(pipeline, "load_eval_models", lambda *a, **k: pytest.fail("models loaded"))
     cp_space = pipeline.eval_cp_space(config)

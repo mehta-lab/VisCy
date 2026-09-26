@@ -231,15 +231,18 @@ def _summary(payload: dict[str, Any]) -> str:
     lines = [
         f"kept {len(payload['kept_feature_names'])}/{len(payload['feature_names'])}: {payload['kept_feature_names']}"
     ]
-    lines.append(f"mask fit: {payload['mask_fit']['n_cells']} cells from {payload['mask_fit']['datasets']}")
-    for name, s in sorted(payload["scalers"].items()):
+    fit = payload["fit"]
+    lines.append(f"mask fit: {fit['mask_fit']['n_cells']} cells from {fit['mask_fit']['datasets']}")
+    for name, scaler in sorted(payload["scalers"].items()):
+        d = fit["datasets"][name]
         lines.append(
-            f"  {name}{' [mask]' if s['in_mask_fit'] else ''}: {len(s['positions'])} positions, "
-            f"{s['n_timepoints']} timepoints, {s['n_cells']} cells ({s['n_cells_dropped_nonfinite']} non-finite "
-            f"dropped), floored {s['floored_features'] or 'none'}"
+            f"  {name}{' [mask]' if d['in_mask_fit'] else ''}: {len(d['positions'])} positions, "
+            f"{d['n_timepoints']} timepoints, {d['n_cells']} cells ({d['n_cells_dropped_nonfinite']} non-finite "
+            f"dropped), floored {scaler['floored_features'] or 'none'}"
         )
     for name, entry in sorted(payload["lite"].items()):
-        lines.append(f"  {name} -> scaler of {entry['parent']} (own cache built_at {entry['cp_cache_built_at']})")
+        built_at = fit["lite"][name]["cp_cache_built_at"]
+        lines.append(f"  {name} -> scaler of {entry['parent']} (own cache built_at {built_at})")
     return "\n".join(lines)
 
 
@@ -262,7 +265,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"dry run: would write {out} sha256={payload['sha256']} ({elapsed:.1f} s)")
         return
     written = write_cp_reference(payload, out, force=args.force)
-    print(f"{'wrote' if written else 'unchanged (identical hash)'} {out} sha256={payload['sha256']} ({elapsed:.1f} s)")
+    status = "wrote" if written else "unchanged (identical reference)"
+    print(f"{status} {out} sha256={payload['sha256']} ({elapsed:.1f} s)")
 
 
 if __name__ == "__main__":
