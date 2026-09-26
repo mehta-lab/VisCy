@@ -18,7 +18,12 @@ from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.cache import FeatureKind
-from dynacell.evaluation.cp_reference import CP_SIDECAR_FILENAME, DatasetCPSpace, eval_cp_space
+from dynacell.evaluation.cp_reference import (
+    CP_SIDECAR_FILENAME,
+    DatasetCPSpace,
+    complete_cached_gt_cp_blocks,
+    eval_cp_space,
+)
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -1528,6 +1533,14 @@ def evaluate_predictions(
             # before any per-FOV work (limit_positions / exclude_fov_names on a non-lite dataset).
             if cp_space is not None:
                 cp_space.check_positions([name for name, _ in gt_positions])
+                # Early content gate: when the GT CP cache already holds every slot and this run
+                # will not recompute it, the cells the loop will score are known now, so a GT
+                # that no longer matches the fit fails in seconds instead of after the loop. The
+                # post-staging gate in _stage_cp_dataset_inputs stays the authoritative check.
+                if not cache_ctx.force["gt_cp"]:
+                    cached = complete_cached_gt_cp_blocks(cache_ctx, gt_path, len(cp_space.feature_names))
+                    if cached is not None:
+                        cp_space.check_gt_cells(cached)
 
             # Leaf-level MicroMS3IM calibration: fit α once on a random
             # subsample of (FOV, t) volumes and reuse the fitted sim for

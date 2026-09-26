@@ -396,6 +396,23 @@ def read_gt_cp_cells(ctx, gt_path: Path, n_features: int) -> tuple[np.ndarray, d
     return canonical_gt_matrix(blocks, n_features), record
 
 
+def complete_cached_gt_cp_blocks(ctx, gt_path: Path, n_features: int) -> dict[tuple[str, int], np.ndarray] | None:
+    """Return the GT-finite CP blocks of a GT store when its CP cache holds every slot, else ``None``.
+
+    Lets the eval run the content gate before its FOV loop when the GT CP cache is
+    already complete (the common re-eval case), so a doomed run fails in seconds
+    rather than after the loop. ``None`` for a disabled cache or any missing slot:
+    the post-staging gate is then the only (and always the authoritative) check.
+    """
+    if not ctx.enabled:
+        return None
+    with open_features_group(ctx.paths, "cp", mode="r") as group:
+        if group is None:
+            return None
+    blocks, _, missing = _read_gt_cp_blocks(ctx, gt_path, n_features)
+    return None if missing else blocks
+
+
 def fit_cp_reference(
     fits: list[DatasetFit],
     *,

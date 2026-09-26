@@ -287,3 +287,15 @@ def test_cp_kid_registers_offset_and_contraction_end_to_end(harness: Harness, na
     old = _old_per_side_kid(Path(config.save.save_dir), harness.pipeline.eval_cp_space(config))
     assert kid > floor + 1.0, (kid, floor)
     assert abs(old - floor) < 0.1 * (kid - floor), (old, floor, kid)
+
+
+def test_a_complete_stale_gt_cache_fails_before_the_fov_loop(harness: Harness, monkeypatch) -> None:
+    """With every GT CP slot cached and no GT recompute, the content gate runs before any FOV is scored."""
+    with open_features_group(cache_paths(harness.root / "gt_cache"), "cp", mode="a") as group:
+        feats = np.asarray(group["A/1/0/t0"])
+        feats[0, 0] += 0.5
+        write_features_to_group(group, "A/1/0", 0, feats)
+    monkeypatch.setattr(harness.pipeline, "_process_one_fov", lambda *a, **k: pytest.fail("reached the FOV loop"))
+    with pytest.raises(Exception, match="differ from the CP reference fit") as err:
+        harness.run("early", [g.copy() for g in harness.gt])
+    assert type(err.value).__name__ == "StaleCacheError"
