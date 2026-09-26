@@ -188,3 +188,46 @@ def test_gt_cache_with_reordered_columns_is_refused(harness: Harness) -> None:
     with pytest.raises(Exception, match="Masking by position would misalign them") as err:
         harness.run("reordered", [g.copy() for g in harness.gt])
     assert type(err.value).__name__ == "StaleCacheError"
+
+
+def _inside_cells(harness: Harness, fn) -> list[np.ndarray]:
+    """A prediction equal to the GT outside the cells and ``fn(GT)`` inside them."""
+    inside = (harness.seg > 0) & (harness.seg <= 16)
+    return [np.where(inside, fn(g), g).astype(np.float32) for g in harness.gt]
+
+
+def _old_per_side_kid(save_dir: Path, cp_space) -> float:
+    """The retired transform on the same run's cells: reference mask, then each side by its own stats."""
+    from dynacell.evaluation.feature_metrics import compute_feature_similarity
+
+    def zscore(x: np.ndarray) -> np.ndarray:
+        return (x - x.mean(0)) / (x.std(0) + 1e-8)
+
+    emb = {
+        side: np.load(save_dir / "embeddings" / f"{side}_cp_single_cell_embeddings.npz")["embeddings"]
+        for side in ("pred", "gt")
+    }
+    pred, gt = cp_space.select(emb["pred"]), cp_space.select(emb["gt"])
+    return compute_feature_similarity(
+        zscore(pred), zscore(gt), "CP", compute_fid=False, compute_prc=False, compute_mind=False
+    )["CP_KID"]
+
+
+@pytest.mark.parametrize(
+    ("name", "fn"),
+    [("offset", lambda g: g + 0.15), ("contracted", lambda g: 0.5 * g)],
+    ids=["pred=GT+offset", "pred=GTx0.5"],
+)
+def test_cp_kid_registers_offset_and_contraction_end_to_end(harness: Harness, name: str, fn) -> None:
+    """Through the real pipeline, an offset or contracted prediction scores clearly above the pred==GT floor.
+
+    Contrast: the retired per-side z-score, applied to the same run's CP cells,
+    scores both near the floor, because it standardizes each side by its own
+    statistics and so absorbs a per-feature offset or scale.
+    """
+    floor_row, _ = harness.run("identity", [g.copy() for g in harness.gt])
+    row, config = harness.run(name, _inside_cells(harness, fn))
+    floor, kid = floor_row["Dataset_CP_KID"], row["Dataset_CP_KID"]
+    old = _old_per_side_kid(Path(config.save.save_dir), harness.pipeline.eval_cp_space(config))
+    assert kid > floor + 1.0, (kid, floor)
+    assert abs(old - floor) < 0.1 * (kid - floor), (old, floor, kid)
