@@ -16,11 +16,16 @@ Run::
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from lite_checks import check_b2
+import pytest
+from lite_checks import check_b2, check_e
+from lite_subset_sim import mmd2_from_features, poly3_features
+
+from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, write_cp_reference
 
 _BUCKET = "a549__mock"
 _FOVS = [f"0/0/fov{i:04d}" for i in range(12)]
@@ -85,3 +90,50 @@ def test_lite_subset_that_reverses_the_gap_loses_the_pair(tmp_path: Path) -> Non
     assert row.retention == 0.0
     assert row.confidently_wrong == 1
     assert row.n_rows == 3
+
+
+def test_check_e_scores_cp_in_the_reference_space(tmp_path: Path) -> None:
+    """Check E's full-pool GLCM+ KID is the pipeline's: reference mask + the eval dataset's GT scaler.
+
+    The reference scaler is far from the eval cells' own statistics, so the retired
+    per-side z-score gives a clearly different KID on the same cells.
+    """
+    rng = np.random.default_rng(5)
+    d, n = 4, 120
+    fit = DatasetFit(
+        dataset="ds",
+        cells=rng.normal(size=(300, d)) * 3.0 + 5.0,
+        record={"positions": ["0/0/fov0000"], "gt_cache_dir": None, "cp_cache_built_at": None},
+        in_mask_fit=True,
+    )
+    payload = fit_cp_reference(
+        [fit], target_name="nucleus", feature_names=tuple(f"f{i}" for i in range(d)), cp_identity={}, lite={}
+    )
+    reference = tmp_path / "nucleus.json"
+    write_cp_reference(payload, reference)
+    path = tmp_path / "nucleus" / "fnet3d_paper" / "ipsc" / "ipsc"
+    (path / "embeddings").mkdir(parents=True)
+    gt = rng.normal(size=(n, d))
+    pred = 0.5 * gt + 0.2 * rng.normal(size=gt.shape)
+    fov = np.array([f"0/0/fov{i % 6:04d}" for i in range(n)])
+    for side, arr in (("gt", gt), ("pred", pred)):
+        np.savez(path / "embeddings" / f"{side}_cp_single_cell_embeddings.npz", embeddings=arr, fov=fov)
+    (path / "cp_selected_feature_mask.json").write_text(
+        json.dumps({"reference_path": str(reference), "reference_sha256": payload["sha256"], "dataset": "ds"})
+    )
+
+    result = check_e("nucleus", "ipsc", ["fnet3d_paper/ipsc"], tmp_path, sizes=(50,), draws=2, data_root=tmp_path)
+
+    mask = np.array(payload["keep_mask"])
+    mean, std = np.array(payload["scalers"]["ds"]["mean"]), np.array(payload["scalers"]["ds"]["std"])
+    expected = mmd2_from_features(
+        poly3_features((pred[:, mask] - mean) / std), poly3_features((gt[:, mask] - mean) / std)
+    )
+    full = result.loc[result.extractor == "CP", "full"].iloc[0]
+    assert full == pytest.approx(expected, rel=1e-10)
+
+    def zscore(x: np.ndarray) -> np.ndarray:
+        return (x - x.mean(0)) / (x.std(0) + 1e-8)
+
+    old = mmd2_from_features(poly3_features(zscore(pred[:, mask])), poly3_features(zscore(gt[:, mask])))
+    assert full != pytest.approx(old, rel=0.1)

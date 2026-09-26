@@ -14,9 +14,11 @@ O(|S|^2) instead of O(n^2 d).
 KID estimator: a single unbiased MMD^2 over all selected cells (poly kernel degree 3,
 gamma 1/d, coef0 1) -- identical to torch-fidelity's per-subset estimator, so it
 equals the pipeline's ``100 x min(1000, n)`` subset mean exactly when n <= 1000 and
-in expectation above that. GLCM+ (``cp``) is z-scored over the scored cells after
-the run's ``select_features`` mask, so it depends on the cell subset and is scored
-directly through an exact degree-3 feature map instead of block sums.
+in expectation above that. GLCM+ (``cp``) is scored in the pipeline's CP space:
+the target's CP reference mask plus the eval dataset's GT scaler (the parent's for a
+lite dataset), both read via the run's ``cp_selected_feature_mask.json`` sidecar.
+That transform is fixed, so it does not depend on the cell subset; CP is still
+scored directly through an exact degree-3 feature map (22-dim: cheap).
 
 Run (on a compute node; the login node has one CPU)::
 
@@ -39,6 +41,7 @@ import pandas as pd
 from build_temporal_subset_zarr import spread_timepoints
 from scipy.stats import kendalltau, spearmanr
 
+from dynacell.evaluation.cp_reference import DatasetCPSpace, load_cp_reference
 from dynacell.evaluation.paths import DATA_ROOT
 
 EXTRACTORS = {"cp": "CP", "dinov3": "DINOv3", "dynaclr": "DynaCLR", "celldino": "CellDINO", "morphem": "MorphEm"}
@@ -61,6 +64,26 @@ MODELS_2D = ["fcmae_vscyto2d_scratch", "fcmae_vscyto2d_pretrained", "fnet2d", "c
 TRAIN_SETS = ["ipsc", "a549", "joint"]
 KID_MIN = 16
 _EVAL_CSVS = ("pixel_metrics.csv", "mask_metrics.csv", "feature_metrics.csv")
+
+
+def cp_space_of(eval_dir: Path) -> DatasetCPSpace:
+    """Return the CP space an eval dir was scored in, from its ``cp_selected_feature_mask.json``.
+
+    The sidecar names the reference (path + hash) and the eval's dataset; the
+    reference is loaded, hash-checked and bound to that dataset, so a lite eval
+    gets its parent's scaler exactly as the pipeline did.
+
+    Raises
+    ------
+    ValueError
+        If the reference on disk no longer has the hash the eval recorded.
+    """
+    sidecar = json.loads((eval_dir / "cp_selected_feature_mask.json").read_text())
+    path = Path(sidecar["reference_path"])
+    ref = load_cp_reference(path, target_name=json.loads(path.read_text())["target_name"])
+    if ref.sha256 != sidecar["reference_sha256"]:
+        raise ValueError(f"{eval_dir}: CP reference {path} changed since the eval ({ref.sha256[:12]})")
+    return ref.for_dataset(sidecar["dataset"])
 
 
 def poly_kernel(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
@@ -141,9 +164,6 @@ class System:
         Eval dir ``<root>/<org>/<model>/<train_set>/<bucket>``.
     blocks : list of tuple of (str, int)
         The shared ``(FOV, Timepoint)`` universe, in block-index order.
-    cp_frozen_norm : bool
-        Z-score GLCM+ subsets with the full pool's statistics instead of the subset's
-        own (a candidate lite estimator; the pipeline uses the subset's own).
 
     Raises
     ------
@@ -151,10 +171,9 @@ class System:
         If an extractor's pred and GT embeddings are not cell-aligned.
     """
 
-    def __init__(self, path: Path, blocks: list[tuple[str, int]], cp_frozen_norm: bool = False):
+    def __init__(self, path: Path, blocks: list[tuple[str, int]]):
         self.path = path
         self.name = f"{path.parts[-3]}/{path.parts[-2]}"
-        self.cp_frozen_norm = cp_frozen_norm
         self.block_index = {b: i for i, b in enumerate(blocks)}
         nb = len(blocks)
         px = pd.read_csv(path / "pixel_metrics.csv")
@@ -195,20 +214,9 @@ class System:
             ok = cell_block >= 0
             X, Y, cell_block = X[ok], Y[ok], cell_block[ok]
             if tok == "cp":
-                # pipeline: select_features() mask (read from the run's sidecar), then per-side
-                # z-score over the scored cells, then KID / median cosine. Both depend on the
-                # cell subset, so CP is scored directly (22-dim: cheap) instead of via block sums.
-                mask = np.array(json.loads((path / "cp_selected_feature_mask.json").read_text())["keep_mask"], bool)
-                Xm, Ym = X[:, mask], Y[:, mask]
-                self.cp = dict(
-                    X=Xm,
-                    Y=Ym,
-                    cell_block=cell_block,
-                    mu_x=Xm.mean(0),
-                    sd_x=Xm.std(0) + 1e-8,
-                    mu_y=Ym.mean(0),
-                    sd_y=Ym.std(0) + 1e-8,
-                )
+                # pipeline: the CP reference mask + this dataset's GT scaler, on both sides.
+                space = cp_space_of(path)
+                self.cp = dict(X=space.transform(X), Y=space.transform(Y), cell_block=cell_block)
                 continue
             # one-hot block membership (n x nb) -> block sums via M^T K M
             M = np.zeros((len(cell_block), nb))
@@ -281,14 +289,8 @@ class System:
             X, Y = np.repeat(self.cp["X"], reps, axis=0), np.repeat(self.cp["Y"], reps, axis=0)
             m = X.shape[0]
             if m >= KID_MIN:
-                if self.cp_frozen_norm:
-                    Xz = (X - self.cp["mu_x"]) / self.cp["sd_x"]
-                    Yz = (Y - self.cp["mu_y"]) / self.cp["sd_y"]
-                else:
-                    Xz = (X - X.mean(0)) / (X.std(0) + 1e-8)
-                    Yz = (Y - Y.mean(0)) / (Y.std(0) + 1e-8)
-                out["CP_KID"] = mmd2_from_features(poly3_features(Xz), poly3_features(Yz))
-                cos = np.einsum("ij,ij->i", Xz, Yz) / (np.linalg.norm(Xz, axis=1) * np.linalg.norm(Yz, axis=1))
+                out["CP_KID"] = mmd2_from_features(poly3_features(X), poly3_features(Y))
+                cos = np.einsum("ij,ij->i", X, Y) / (np.linalg.norm(X, axis=1) * np.linalg.norm(Y, axis=1))
                 out["CP_MedCos"] = float(np.nanmedian(cos))
             else:
                 out["CP_KID"] = out["CP_MedCos"] = np.nan
@@ -300,7 +302,6 @@ def load_systems(
     bucket: str,
     models: list[str],
     data_root: Path = DATA_ROOT,
-    cp_frozen_norm: bool = False,
 ) -> tuple[list[System], list[tuple[str, int]]]:
     """Load every (model, train_set) eval dir of one bucket that has all three eval CSVs.
 
@@ -314,8 +315,6 @@ def load_systems(
         Model code names to look for, crossed with :data:`TRAIN_SETS`.
     data_root : Path
         Benchmark root laid out as ``<org>/<model>/<train_set>/<bucket>``.
-    cp_frozen_norm : bool
-        Forwarded to :class:`System`.
 
     Returns
     -------
@@ -338,7 +337,7 @@ def load_systems(
             "using common"
         )
     blocks = sorted(common)
-    return [System(p, blocks, cp_frozen_norm) for p in paths], blocks
+    return [System(p, blocks) for p in paths], blocks
 
 
 def t_rules() -> dict[str, Callable[[int], list[int]] | None]:
@@ -445,7 +444,6 @@ def run(
     out: Path,
     designs: list[str] | None = None,
     data_root: Path = DATA_ROOT,
-    cp_frozen_norm: bool = False,
 ) -> None:
     """Score every design of one bucket over ``reps`` random FOV draws and write the records.
 
@@ -466,11 +464,9 @@ def run(
         Restrict to these design names.
     data_root : Path
         Benchmark root.
-    cp_frozen_norm : bool
-        Forwarded to :class:`System`.
     """
     models = MODELS_3D + (MODELS_2D if include_2d else [])
-    systems, blocks = load_systems(org, bucket, models, data_root, cp_frozen_norm)
+    systems, blocks = load_systems(org, bucket, models, data_root)
     if len(systems) < 3:
         print(f"{org}/{bucket}: only {len(systems)} systems, skipping")
         return
@@ -604,7 +600,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--include-2d", action="store_true")
     ap.add_argument("--summarize-only", action="store_true")
     ap.add_argument("--designs", nargs="*", default=None, help="restrict to these design names, e.g. fov12_t_ord")
-    ap.add_argument("--cp-frozen-norm", action="store_true", help="z-score GLCM+ subsets with full-pool statistics")
     ap.add_argument("--data-root", type=Path, default=DATA_ROOT)
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
@@ -612,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
     if not a.summarize_only:
         for org in a.org:
             for bucket in a.bucket:
-                run(org, bucket, a.reps, a.include_2d, a.out, a.designs, a.data_root, a.cp_frozen_norm)
+                run(org, bucket, a.reps, a.include_2d, a.out, a.designs, a.data_root)
     summary = summarize(a.out)
     pd.set_option("display.width", 250)
     print(summary.round(3).to_string())
