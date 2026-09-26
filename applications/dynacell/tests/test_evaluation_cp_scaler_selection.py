@@ -9,6 +9,7 @@ dataset. Only the heavy per-condition work (``evaluate_predictions``,
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -150,3 +151,59 @@ def test_missing_dataset_ref_names_the_config_key(tmp_path: Path) -> None:
     config.benchmark = None
     with pytest.raises(ValueError, match=r"benchmark\.dataset_ref\.dataset.*compute_feature_metrics=false"):
         pipeline.eval_cp_space(config)
+
+
+_REAL_SETS = ("aics-hipsc", "a549-mantis-sec61b-mock", "a549-mantis-sec61b-denv", "a549-mantis-sec61b-zikv")
+_REAL_LITE = {"a549-mantis-sec61b-denv-lite": "a549-mantis-sec61b-denv"}
+
+
+def test_real_dataset_names_are_not_swapped(tmp_path: Path, monkeypatch) -> None:
+    """With the benchmark's own dataset names, mock/denv/zikv conditions each get their own scaler.
+
+    A swap between conditions that share a prefix (mock for denv) would still pass the
+    synthetic-name tests; here every condition is checked against the reference's
+    scaler for exactly its name, and the three A549 scalers are pairwise distinct.
+    """
+    pipeline = live_pipeline_module()
+    config = build_eval_config(
+        tmp_path / "pred.zarr",
+        tmp_path / "gt.zarr",
+        tmp_path / "g",
+        tmp_path / "p",
+        tmp_path / "out",
+        executor="serial",
+        fov_workers=1,
+    )
+    config.compute_feature_metrics = True
+    make_cp_reference(config, tmp_path / "er.json", datasets=_REAL_SETS, lite=_REAL_LITE)
+    reference = json.loads((tmp_path / "er.json").read_text())
+    names = (*_REAL_SETS, *_REAL_LITE)
+    conditions = [
+        {"name": d, "benchmark": {"dataset_ref": {"dataset": d}}, "save": {"save_dir": str(tmp_path / d)}}
+        for d in names
+    ]
+    grouped = OmegaConf.merge(
+        config,
+        {
+            "conditions": conditions,
+            "force_recompute": {"final_metrics": True},
+            "cross_condition_probe": {"enabled": False},
+        },
+    )
+    seen = {}
+    monkeypatch.setattr(pipeline, "apply_dataset_ref", lambda cfg: None)
+    monkeypatch.setattr(pipeline, "load_eval_models", lambda cfg: object())
+    monkeypatch.setattr(
+        pipeline,
+        "evaluate_predictions",
+        lambda cfg, *, models, cp_space: seen.__setitem__(cfg.benchmark.dataset_ref.dataset, cp_space) or ([], [], []),
+    )
+    monkeypatch.setattr(pipeline, "save_metrics", lambda *a, **k: None)
+    pipeline.evaluate_predictions_grouped(grouped)
+
+    for dataset in names:
+        scaler = _REAL_LITE.get(dataset, dataset)
+        assert seen[dataset].scaler_dataset == scaler
+        np.testing.assert_array_equal(seen[dataset].mean, reference["scalers"][scaler]["mean"])
+    a549 = [seen[d].mean for d in _REAL_SETS[1:]]
+    assert all(not np.allclose(x, y) for i, x in enumerate(a549) for y in a549[i + 1 :])
