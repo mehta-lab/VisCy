@@ -174,6 +174,22 @@ def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None
     assert not pipeline._final_metrics_cache_valid(config)
 
 
+def test_cache_reuse_refuses_a_gt_recache(tmp_path: Path) -> None:
+    """A reusable final-metrics cache is refused once the GT CP cache was re-cached after the build."""
+    pipeline = live_pipeline_module()
+    config, sha256 = _feature_cache_config(tmp_path)  # records the cache's real built_at
+    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES), sha256)
+    assert pipeline._final_metrics_cache_valid(config)
+
+    paths = cache_paths(tmp_path / "gt_cache")
+    manifest = load_manifest(paths)
+    manifest["artifacts"]["cp_features"]["built_at"] = "2099-01-01T00:00:00+00:00"  # re-cached after the build
+    save_manifest(paths, manifest)
+    with pytest.raises(Exception, match="was built at 2099-01-01") as err:
+        pipeline._final_metrics_cache_valid(config)
+    assert type(err.value).__name__ == "StaleCacheError"
+
+
 def test_feature_less_cache_ignores_the_cp_reference(tmp_path: Path) -> None:
     """A compute_feature_metrics=false dir with no CP hash in its stamp stays reusable, with no reference."""
     pipeline = live_pipeline_module()

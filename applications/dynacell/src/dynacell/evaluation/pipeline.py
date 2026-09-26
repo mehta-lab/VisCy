@@ -1912,7 +1912,13 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # An unstamped dir has nothing to reuse, so it needs no reference to be rejected.
     if not (save_dir / PROVENANCE_FILENAME).is_file():
         return False
-    current_sha256 = eval_cp_space(config).reference_sha256 if config.compute_feature_metrics else None
+    current_sha256 = None
+    if config.compute_feature_metrics:
+        space = eval_cp_space(config)
+        # Same GT re-cache guard as the scoring path: cached CP rows scored against a
+        # GT cache that has since been re-cached must not be reused silently.
+        space.check_gt_cache(OmegaConf.select(config, "io.gt_cache_dir", default=None))
+        current_sha256 = space.reference_sha256
     if not metrics_provenance_matches(save_dir, cp_reference_sha256=current_sha256):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
