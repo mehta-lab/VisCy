@@ -135,20 +135,34 @@ def test_fov_result_pickle_handles_empty_backbones():
     assert restored.celldino.gt_feats == []
 
 
-def test_cp_dropzero_zscore_raises_on_dim_mismatch():
-    """Mismatched pred/GT CP dims raise an actionable StaleCacheError, not IndexError.
+def test_cp_reference_raises_on_dim_mismatch(tmp_path):
+    """A CP matrix of another width raises an actionable StaleCacheError, not IndexError.
 
     A stale CP cache built with a different recipe (e.g. a GLCM toggle or a
-    CP_FEATURE_VERSION change without a rebuild) used to crash _cp_dropzero_zscore
-    with a cryptic boolean-index IndexError; it must instead name the remedy.
+    CP_FEATURE_VERSION change without a rebuild) would otherwise crash the
+    boolean-mask indexing with a cryptic IndexError; it must instead name the remedy.
     """
-    pipeline = _live_pipeline_module()
     from dynacell.evaluation.cache import StaleCacheError
+    from dynacell.evaluation.cp_reference import (
+        CP_REFERENCE_DIMENSION,
+        fit_cp_reference,
+        load_cp_reference,
+        write_cp_reference,
+    )
 
-    pred = np.ones((4, 58), dtype=np.float32)
-    gt = np.ones((4, 22), dtype=np.float32)
+    names = tuple(f"f{i}" for i in range(22))
+    payload = fit_cp_reference(
+        np.random.default_rng(0).standard_normal((40, 22)),
+        target_name="er",
+        dimension=CP_REFERENCE_DIMENSION,
+        feature_names=names,
+        cp_identity={},
+        datasets=[{"n_cells": 40}],
+    )
+    write_cp_reference(payload, tmp_path / "ref.json")
+    ref = load_cp_reference(tmp_path / "ref.json", target_name="er", dimension=CP_REFERENCE_DIMENSION)
     with pytest.raises(StaleCacheError, match="CP feature dimension mismatch"):
-        pipeline._cp_dropzero_zscore(pred, gt)
+        ref.transform(np.ones((4, 58), dtype=np.float32))
 
 
 def test_aggregate_fov_result_extends_backbone_lists():

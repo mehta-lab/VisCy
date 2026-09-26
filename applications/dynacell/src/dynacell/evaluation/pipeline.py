@@ -17,20 +17,16 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
-from dynacell.evaluation.cache import FeatureKind, StaleCacheError
+from dynacell.evaluation.cache import FeatureKind
+from dynacell.evaluation.cp_reference import CPReference, load_checked_cp_reference
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
     compute_feature_similarity_pairwise,
 )
-from dynacell.evaluation.feature_select import (
-    DEFAULT_CORR_THRESHOLD,
-    DEFAULT_FREQ_CUT,
-    DEFAULT_UNIQUE_CUT,
-    select_features,
-)
 from dynacell.evaluation.linear_probe import indistinguishability, paired_auroc
 from dynacell.evaluation.metrics import (
+    CP_FEATURE_VERSION,
     active_cp_feature_names,
     ascupy,
     build_crops,
@@ -45,6 +41,7 @@ from dynacell.evaluation.metrics import (
 )
 from dynacell.evaluation.model_loader import EvalModels, init_cache_contexts, load_eval_models
 from dynacell.evaluation.pipeline_cache import (
+    cp_recipe_identity,
     cpdino_infer_kwargs,
     flush_manifest,
     fov_cp_features,
@@ -59,6 +56,7 @@ from dynacell.evaluation.pipeline_cache import (
     seg_spacing,
 )
 from dynacell.evaluation.provenance import (
+    PROVENANCE_FILENAME,
     check_cubic_pin,
     metrics_provenance_matches,
     write_metrics_provenance,
@@ -101,34 +99,23 @@ def _build_focus_slabs_map(config: DictConfig, gt_positions) -> dict[str, list[s
     }
 
 
-def _zscore_per_side(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-side z-score: separate (mean, std) computed for each matrix."""
-    pred_z = (pred - pred.mean(axis=0)) / (pred.std(axis=0) + 1e-8)
-    target_z = (target - target.mean(axis=0)) / (target.std(axis=0) + 1e-8)
-    return pred_z, target_z
+def _eval_cp_reference(config: DictConfig) -> CPReference:
+    """Load the CP reference this eval scores in, refusing one of a different CP recipe.
 
-
-def _cp_dropzero_zscore(pred_raw: np.ndarray, target_raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-(FOV, timepoint) CP cleanup: drop target-zero columns then z-score.
-
-    Returns ``(np.empty(...), np.empty(...))`` when all columns drop, so
-    the caller can short-circuit and emit a NaN row.
+    The recipe identity and column names come from the same ``feature_metrics.cp.*``
+    config and :data:`CP_FEATURE_VERSION` that key the CP feature caches, so a
+    reference built from caches of another recipe cannot be applied to this run's
+    features. See :mod:`dynacell.evaluation.cp_reference`.
     """
-    if pred_raw.ndim == 2 and target_raw.ndim == 2 and pred_raw.shape[1] and target_raw.shape[1]:
-        if pred_raw.shape[1] != target_raw.shape[1]:
-            raise StaleCacheError(
-                f"CP feature dimension mismatch: pred has {pred_raw.shape[1]} columns, "
-                f"GT has {target_raw.shape[1]}. A CP feature cache was built with a different "
-                "recipe (e.g. a GLCM toggle or a CP_FEATURE_VERSION change without a cache "
-                "rebuild). Rebuild with force_recompute.gt_cp=true and/or pred_cp=true "
-                "(or force_recompute.all=true)."
-            )
-    non_zero_cols = ~np.all(target_raw == 0, axis=0)
-    pred_mat = pred_raw[:, non_zero_cols]
-    target_mat = target_raw[:, non_zero_cols]
-    if pred_mat.size == 0:
-        return pred_mat, target_mat
-    return _zscore_per_side(pred_mat, target_mat)
+    norm_node = OmegaConf.select(config, "feature_metrics.cp.norm", default=None)
+    glcm_node = OmegaConf.select(config, "feature_metrics.cp.glcm", default=None)
+    norm = OmegaConf.to_container(norm_node, resolve=True) if norm_node is not None else {}
+    glcm = OmegaConf.to_container(glcm_node, resolve=True) if glcm_node is not None else {}
+    return load_checked_cp_reference(
+        config,
+        cp_identity=cp_recipe_identity(CP_FEATURE_VERSION, norm, glcm),
+        feature_names=tuple(active_cp_feature_names(bool(glcm.get("enabled", False)))),
+    )
 
 
 def _real_vs_pred_probe(
@@ -350,6 +337,43 @@ def _extend_backbone(
     bb.gt_ts.append(t_arr)
 
 
+def _stage_cp_dataset_inputs(
+    cp: _BackboneLists, cp_reference: CPReference, save_dir: Path
+) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Stage the dataset-level CP inputs in the reference feature space.
+
+    KID/FID/cosine get the reference-masked features standardized by the shared GT
+    scaler (identical for pred and GT); the linear probe gets the reference-masked
+    raw features, since it fits its own per-fold scaler. Writes
+    ``cp_selected_feature_mask.json`` recording which reference was applied.
+
+    Returns
+    -------
+    tuple
+        ``("CP", pred_metric, target_metric, pred_probe, target_probe, pred_fovs, target_fovs)``.
+    """
+    pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
+    target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
+    mask_payload = {
+        "reference_path": cp_reference.path,
+        "reference_sha256": cp_reference.sha256,
+        "feature_names": list(cp_reference.feature_names),
+        "keep_mask": [bool(b) for b in cp_reference.keep_mask],
+        "n_kept": int(cp_reference.keep_mask.sum()),
+        "n_total": int(cp_reference.keep_mask.size),
+    }
+    (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
+    return (
+        "CP",
+        cp_reference.transform(pred_cp_raw),
+        cp_reference.transform(target_cp_raw),
+        cp_reference.select(pred_cp_raw),
+        cp_reference.select(target_cp_raw),
+        np.concatenate(cp.pred_fovs, axis=0),
+        np.concatenate(cp.gt_fovs, axis=0),
+    )
+
+
 @dataclass
 class FovResult:
     """Output of ``_process_one_fov``: everything one FOV contributes to the run.
@@ -557,10 +581,14 @@ def _process_one_fov(
     celldino_feature_extractor,
     morphem_feature_extractor,
     microssim_sim,
+    cp_reference: CPReference | None,
     predict_cached=None,
     target_cached=None,
 ) -> FovResult:
     """Compute everything one FOV contributes to the eval and return a FovResult.
+
+    ``cp_reference`` is the target's CP reference (``None`` only when
+    ``compute_feature_metrics=false``); per-timepoint CP metrics are scored in it.
 
     No side effects on shared parent state (no segmentation_results plate
     writes, no manifest flush). The parent aggregator handles those — see
@@ -915,8 +943,10 @@ def _process_one_fov(
                 pred_celldino = pred_per_t["celldino"][t] if pred_per_t["celldino"] is not None else None
                 pred_morphem = pred_per_t["morphem"][t] if pred_per_t["morphem"] is not None else None
                 pred_cp, gt_cp_t = drop_paired_nonfinite_rows(pred_cp, gt_cp_per_t[t])
+                # Same reference mask + shared GT scaler as the dataset-level block, so a
+                # per-row CP value is comparable across models and FOVs.
                 if pred_cp.size and gt_cp_t.size:
-                    pred_cp_z, gt_cp_z = _cp_dropzero_zscore(pred_cp, gt_cp_t)
+                    pred_cp_z, gt_cp_z = cp_reference.transform(pred_cp), cp_reference.transform(gt_cp_t)
                 else:
                     pred_cp_z, gt_cp_z = pred_cp, gt_cp_t
                 # Prefixes come from _COLUMN_PREFIX, not literals: these per-timepoint
@@ -1167,6 +1197,7 @@ def _worker_run_fov(
     pos_name: str,
     cuda_empty_every_n: int,
     microssim_sim,
+    cp_reference: CPReference | None,
 ) -> FovResult:
     """Worker entry point: process one FOV by name and return FovResult.
 
@@ -1178,7 +1209,8 @@ def _worker_run_fov(
     ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
     ``compute_microssim=false``); shipped per submission rather than via
     worker state because the parent fits it after the position list is
-    finalized and before any worker pool spawns.
+    finalized and before any worker pool spawns. ``cp_reference`` is shipped the
+    same way so every worker scores CP in the parent's verified reference.
     """
     _worker_setup(config)
     state = _WORKER_STATE
@@ -1221,6 +1253,7 @@ def _worker_run_fov(
             state["celldino"],
             state["morphem"],
             microssim_sim,
+            cp_reference,
         )
 
     # Worker-side manifest flush so interrupted runs preserve progress even
@@ -1261,6 +1294,9 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
     OmegaConf.resolve(config)
     reset_timings()
     _validate_instance_ap_config(config)
+    # Before any model load or cache write: a missing or foreign-recipe CP reference
+    # must fail the run up front, not after the per-FOV loop.
+    cp_reference = _eval_cp_reference(config) if config.compute_feature_metrics else None
 
     use_gpu = bool(getattr(config, "use_gpu", True))
 
@@ -1607,6 +1643,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                         celldino_feature_extractor,
                         morphem_feature_extractor,
                         microssim_sim,
+                        cp_reference,
                         predict_cached=cached_pair[0],
                         target_cached=cached_pair[1],
                     )
@@ -1645,6 +1682,7 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
                             pos_name,
                             runtime.cuda_empty_cache_every_n_timepoints,
                             microssim_sim,
+                            cp_reference,
                         ): pos_name
                         for pos_name in pos_names_in_order
                     }
@@ -1682,45 +1720,15 @@ def evaluate_predictions(config: DictConfig, *, models: EvalModels | None = None
 
             # Stage per-prefix inputs: (pred_for_metric, target_for_metric,
             # pred_for_probe, target_for_probe, pred_fovs, target_fovs).
-            # CP gets pruning + z-score; the pre-prune CP arrays feed the
-            # linear probe so MADScaler can normalize per-fold.
+            # CP is scored in the target's reference space (GT-only mask + shared GT
+            # scaler); the masked-but-unscaled CP arrays feed the linear probe so
+            # MADScaler can normalize per-fold.
             prefix_inputs: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
-            cp = parent_lists["cp"]
-            if cp.pred_feats:
-                pred_cp_raw = np.concatenate(cp.pred_feats, axis=0)
-                target_cp_raw = np.concatenate(cp.gt_feats, axis=0)
-                target_cp_filtered, pred_cp_filtered, cp_keep_mask = select_features(target_cp_raw, pred_cp_raw)
-                cp_glcm_enabled = bool(OmegaConf.select(config, "feature_metrics.cp.glcm.enabled", default=False))
-                mask_payload = {
-                    "feature_names": list(active_cp_feature_names(cp_glcm_enabled)),
-                    "keep_mask": [bool(b) for b in cp_keep_mask],
-                    "n_kept": int(cp_keep_mask.sum()),
-                    "n_total": int(cp_keep_mask.size),
-                    "criteria": {
-                        "freq_cut": DEFAULT_FREQ_CUT,
-                        "unique_cut": DEFAULT_UNIQUE_CUT,
-                        "corr_threshold": DEFAULT_CORR_THRESHOLD,
-                    },
-                }
-                (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
-                if pred_cp_filtered.size and target_cp_filtered.size:
-                    pred_cp_z, target_cp_z = _zscore_per_side(pred_cp_filtered, target_cp_filtered)
-                else:
-                    pred_cp_z, target_cp_z = pred_cp_filtered, target_cp_filtered
-                prefix_inputs.append(
-                    (
-                        "CP",
-                        pred_cp_z,
-                        target_cp_z,
-                        pred_cp_filtered,
-                        target_cp_filtered,
-                        np.concatenate(cp.pred_fovs, axis=0),
-                        np.concatenate(cp.gt_fovs, axis=0),
-                    )
-                )
+            if parent_lists["cp"].pred_feats:
+                prefix_inputs.append(_stage_cp_dataset_inputs(parent_lists["cp"], cp_reference, save_dir))
 
-            for key in deep_kinds:  # cp is handled above (pruning + z-score)
+            for key in deep_kinds:  # cp is handled above (reference space)
                 bb = parent_lists[key]
                 if bb.pred_feats:
                     pred_arr = np.concatenate(bb.pred_feats, axis=0)
@@ -1815,7 +1823,12 @@ def save_metrics(config: DictConfig, pixel_metrics=None, mask_metrics=None, feat
     # whether the cache is comparable instead of assuming it is. Stamping first meant a
     # crash partway through the loop above left a fresh stamp certifying a previous
     # run's rows -- the exact misattribution the sidecar exists to make detectable.
-    write_metrics_provenance(save_dir)
+    write_metrics_provenance(save_dir, cp_reference_sha256=_current_cp_reference_sha256(config))
+
+
+def _current_cp_reference_sha256(config: DictConfig) -> str | None:
+    """Content hash of the CP reference this config scores in; ``None`` without feature metrics."""
+    return _eval_cp_reference(config).sha256 if config.compute_feature_metrics else None
 
 
 #: Pixel columns that only a dual-scaling run writes. Their absence marks a pixel
@@ -1841,7 +1854,12 @@ def _final_metrics_cache_valid(config: DictConfig) -> bool:
     # Metric values are not comparable across cubic versions — FSC/FRC/Spectral_PCC
     # move (see dynacell.evaluation.provenance). A cache with no stamp, or one
     # stamped with a different cubic, is not reusable regardless of its columns.
-    if not metrics_provenance_matches(save_dir):
+    # Likewise for the CP reference: CP KID/FID/cosine were scored in the reference
+    # stamped beside them, so a rebuilt (or never-stamped) reference forces a recompute.
+    # An unstamped dir has nothing to reuse, so it needs no reference to be rejected.
+    if not (save_dir / PROVENANCE_FILENAME).is_file():
+        return False
+    if not metrics_provenance_matches(save_dir, cp_reference_sha256=_current_cp_reference_sha256(config)):
         return False
     pixel_ok = (save_dir / config.save.pixel_metrics_filename).exists()
     mask_path = save_dir / config.save.mask_metrics_filename

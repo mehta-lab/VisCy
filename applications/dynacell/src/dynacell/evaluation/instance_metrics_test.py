@@ -136,6 +136,7 @@ def test_instance_ap_is_written_to_mask_metrics_csv(tmp_path):
     row = instance_average_precision(lab, lab)
     config = OmegaConf.create(
         {
+            "compute_feature_metrics": False,
             "save": {
                 "save_dir": str(tmp_path),
                 "mask_csv_filename": "mask_metrics.csv",
@@ -144,7 +145,7 @@ def test_instance_ap_is_written_to_mask_metrics_csv(tmp_path):
                 "pixel_metrics_filename": "pixel_metrics.npy",
                 "feature_csv_filename": "feature_metrics.csv",
                 "feature_metrics_filename": "feature_metrics.npy",
-            }
+            },
         }
     )
     save_metrics(config, mask_metrics=[{"FOV": "0/0/0", "Timepoint": 0, **row}])

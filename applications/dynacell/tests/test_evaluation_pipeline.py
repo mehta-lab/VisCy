@@ -44,11 +44,10 @@ def _import_pipeline_with_stubs(monkeypatch):
     feature_metrics_module.compute_feature_similarity_pairwise = lambda *args, **kwargs: {}
 
     feature_select_module = types.ModuleType("dynacell.evaluation.feature_select")
-    feature_select_module.select_features = lambda gt, pred, **kw: (
-        gt,
-        pred,
-        np.ones(gt.shape[1] if gt is not None and gt.ndim >= 2 else 0, dtype=bool),
-    )
+    # ``cross_condition_probe`` imports ``select_features``; ``cp_reference`` imports
+    # ``select_gt_features``. Neither is exercised by these cache-reuse tests.
+    feature_select_module.select_features = lambda gt, pred, **kw: (gt, pred, np.ones(gt.shape[1], dtype=bool))
+    feature_select_module.select_gt_features = lambda gt, **kw: np.ones(gt.shape[1], dtype=bool)
     feature_select_module.DEFAULT_FREQ_CUT = 0.05
     feature_select_module.DEFAULT_UNIQUE_CUT = 0.01
     feature_select_module.DEFAULT_CORR_THRESHOLD = 0.9
@@ -119,7 +118,7 @@ def test_evaluate_model_reuses_cache_without_feature_metrics(
     _write_metrics(tmp_path / config.save.mask_metrics_filename, expected_mask_metrics)
     # A reusable cache is one this code could have written, which includes the
     # numeric-provenance stamp save_metrics emits.
-    write_metrics_provenance(tmp_path)
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None)
 
     def fail_if_recomputed(_config):
         raise AssertionError("evaluate_predictions should not run when cache is valid")

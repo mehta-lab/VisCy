@@ -980,16 +980,46 @@ def _cp_identity(ctx: _CacheContext) -> dict[str, Any]:
     ``diff_artifact_params`` compares the current identity's keys, so dropping
     them is sufficient (any stale stored value is simply ignored).
     """
-    glcm = ctx.cp_glcm or {}
-    norm = ctx.cp_norm or {}
+    return {
+        "spacing": ctx.spacing,
+        **cp_recipe_identity(ctx.cp_feature_version, ctx.cp_norm, ctx.cp_glcm),
+        **ctx.source_tag,
+    }
+
+
+def cp_recipe_identity(
+    cp_feature_version: str | None, cp_norm: dict[str, Any], cp_glcm: dict[str, Any]
+) -> dict[str, Any]:
+    """Return the dataset-independent part of the CP feature identity.
+
+    Everything in :func:`_cp_identity` except ``spacing`` (which differs between
+    iPSC, A549 and HEK) and the side tag: the recipe that decides what the CP
+    columns *mean*. The per-target CP reference records it, and an eval refuses a
+    reference whose recipe differs from its own (see
+    :mod:`dynacell.evaluation.cp_reference`).
+
+    Parameters
+    ----------
+    cp_feature_version : str or None
+        :data:`~dynacell.evaluation.metrics.CP_FEATURE_VERSION` for the run.
+    cp_norm : dict
+        Resolved ``feature_metrics.cp.norm`` (empty = defaults).
+    cp_glcm : dict
+        Resolved ``feature_metrics.cp.glcm`` (empty = GLCM off).
+
+    Returns
+    -------
+    dict
+        Flat scalar/list identity, stable across YAML/JSON round-trips.
+    """
+    glcm = cp_glcm or {}
+    norm = cp_norm or {}
     glcm_enabled = bool(glcm.get("enabled", False))
     identity: dict[str, Any] = {
-        "spacing": ctx.spacing,
-        "cp_feature_version": ctx.cp_feature_version,
+        "cp_feature_version": cp_feature_version,
         "cp_glcm_enabled": glcm_enabled,
         "cp_norm_p_lo": float(norm.get("p_lo", 1.0)),
         "cp_norm_p_hi": float(norm.get("p_hi", 99.0)),
-        **ctx.source_tag,
     }
     if glcm_enabled:
         identity["cp_glcm_levels"] = int(glcm.get("levels", 32))

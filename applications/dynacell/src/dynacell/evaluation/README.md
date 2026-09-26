@@ -24,6 +24,7 @@ End-to-end evaluation pipeline for virtual staining predictions against fluoresc
 - `io.gt_path` — fluorescence ground truth (channel: `io.gt_channel_name`)
 - `io.cell_segmentation_path` — *optional* precomputed cell segmentation HCS OME-Zarr. Required when `compute_feature_metrics=true` or when building CP/DINOv3/DynaCLR/CELL-DINO cache entries. Position layout must match GT/pred 1:1.
 - `io.gt_cache_dir`, `io.pred_cache_dir` — *optional* artifact cache directories; must be distinct. See [Caches](#caches).
+- `feature_metrics.cp.reference_path` — the target's CP (GLCM+) reference, required when `compute_feature_metrics=true`. `null` (default) resolves to `DATA_ROOT/cp_reference/<target_name>__3d.json` for full and lite evals alike. The reference holds a feature mask chosen on GT cells only, pooled over iPSC + A549 mock/denv/zikv, and one shared GT mean/std. Every eval applies both to pred AND GT, so all models are scored in one CP space. Build it from existing GT caches with `tools/build_cp_reference.py --target <target>`. Its hash is stamped in `metrics_provenance.json`, and a rebuilt reference invalidates the final-metrics cache.
 
 ## Quick start
 

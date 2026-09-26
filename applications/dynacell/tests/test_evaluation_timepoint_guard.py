@@ -17,7 +17,7 @@ from iohub.ngff import open_ome_zarr
 
 from dynacell.evaluation.provenance import write_metrics_provenance
 
-from ._eval_fixtures import build_eval_config, live_pipeline_module
+from ._eval_fixtures import build_eval_config, live_pipeline_module, make_cp_reference
 
 D, H, W = 3, 8, 8
 
@@ -100,6 +100,7 @@ def _feature_cache_config(tmp_path: Path, **flags: bool):
     config.compute_feature_metrics = True
     for name, value in flags.items():
         config.feature_metrics[name] = value
+    make_cp_reference(config, tmp_path / "cp_reference.json")
     return config
 
 
@@ -108,7 +109,9 @@ def _write_final_caches(save_dir: Path, feature_row: dict) -> None:
     np.save(save_dir / "pixel_metrics.npy", [{"SI_PSNR": 1.0, "SI_SSIM": 1.0, "SI_NRMSE": 1.0}])
     np.save(save_dir / "mask_metrics.npy", [{"metric": "mask"}])
     np.save(save_dir / "feature_metrics.npy", [feature_row])
-    write_metrics_provenance(save_dir)
+    # The stamp must carry the hash of the reference _feature_cache_config points at.
+    reference_sha256 = make_cp_reference(_feature_cache_config(save_dir), save_dir / "cp_reference.json")
+    write_metrics_provenance(save_dir, cp_reference_sha256=reference_sha256)
 
 
 def _dataset_row(prefixes: tuple[str, ...], families: tuple[str, ...]) -> dict:
@@ -150,3 +153,55 @@ def test_real_full_benchmark_columns_stay_valid(tmp_path: Path) -> None:
     pipeline = live_pipeline_module()
     _write_final_caches(tmp_path, dict.fromkeys(header, 0.0))
     assert pipeline._final_metrics_cache_valid(_feature_cache_config(tmp_path))
+
+
+def test_cache_scored_in_another_cp_reference_is_invalid(tmp_path: Path) -> None:
+    """Rebuilding the CP reference invalidates every final-metrics cache stamped with the old one."""
+    pipeline = live_pipeline_module()
+    _write_final_caches(tmp_path, _dataset_row(("CP", "DINOv3", "DynaCLR"), _ALL_FAMILIES))
+    config = _feature_cache_config(tmp_path)
+    assert pipeline._final_metrics_cache_valid(config)
+
+    make_cp_reference(config, tmp_path / "cp_reference.json", seed=1)  # same path, new content
+    assert not pipeline._final_metrics_cache_valid(config)
+
+
+def test_missing_cp_reference_fails_before_any_work(tmp_path: Path, monkeypatch) -> None:
+    """A feature-metrics eval with no CP reference raises, naming the build command, before loading models."""
+    pipeline = live_pipeline_module()
+    config = _feature_cache_config(tmp_path)
+    config.feature_metrics.cp.reference_path = str(tmp_path / "absent.json")
+
+    def _no_models(*args, **kwargs):
+        raise AssertionError("models loaded before the CP reference was checked")
+
+    monkeypatch.setattr(pipeline, "load_eval_models", _no_models)
+    with pytest.raises(FileNotFoundError, match="build_cp_reference.py --target er"):
+        pipeline.evaluate_predictions(config)
+
+
+def test_cp_reference_of_another_recipe_is_refused(tmp_path: Path, monkeypatch) -> None:
+    """A reference fit on GLCM-off caches cannot score a GLCM-on eval."""
+    pipeline = live_pipeline_module()
+    # Import after the fresh pipeline import, which re-creates dynacell.evaluation.* modules.
+    from dynacell.evaluation.cache import StaleCacheError
+
+    config = _feature_cache_config(tmp_path)  # reference built for this (GLCM-off) recipe
+    config.feature_metrics.cp.glcm = {"enabled": True, "levels": 32, "distances": [1]}
+    monkeypatch.setattr(pipeline, "load_eval_models", lambda *a, **k: pytest.fail("models loaded"))
+    with pytest.raises(StaleCacheError, match="different CP recipe"):
+        pipeline.evaluate_predictions(config)
+
+
+def test_save_metrics_stamps_the_cp_reference_hash(tmp_path: Path) -> None:
+    """``save_metrics`` records the hash of the reference the CP metrics were scored in."""
+    import json
+
+    from dynacell.evaluation.provenance import PROVENANCE_FILENAME
+
+    pipeline = live_pipeline_module()
+    config = _feature_cache_config(tmp_path)
+    reference_sha256 = make_cp_reference(config, tmp_path / "cp_reference.json")
+    pipeline.save_metrics(config, pixel_metrics=[{"FOV": "A/1/0", "Timepoint": 0, "PCC": 0.5}])
+    stamp = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
+    assert stamp["cp_reference_sha256"] == reference_sha256

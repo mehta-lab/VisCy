@@ -38,10 +38,30 @@ def test_installed_versions_records_cubic():
 
 
 def test_roundtrip_matches_running_environment(tmp_path):
-    write_metrics_provenance(tmp_path)
+    write_metrics_provenance(tmp_path, cp_reference_sha256="abc")
     payload = json.loads((tmp_path / PROVENANCE_FILENAME).read_text())
     assert payload["versions"]["cubic"] == version("cubic")
-    assert metrics_provenance_matches(tmp_path)
+    assert payload["cp_reference_sha256"] == "abc"
+    assert metrics_provenance_matches(tmp_path, cp_reference_sha256="abc")
+
+
+def test_feature_less_stamp_matches_only_a_feature_less_run(tmp_path):
+    """A run without feature metrics stamps ``None``; a CP-scoring run must not reuse it."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None)
+    assert metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256="abc")
+
+
+def test_other_cp_reference_is_not_a_match(tmp_path):
+    """CP values scored in another reference are not reusable after a rebuild."""
+    write_metrics_provenance(tmp_path, cp_reference_sha256="old")
+    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256="new")
+
+
+def test_stamp_predating_cp_reference_is_not_a_match(tmp_path):
+    """A sidecar written before the CP reference existed carries no hash and never matches."""
+    (tmp_path / PROVENANCE_FILENAME).write_text(json.dumps({"versions": {"cubic": version("cubic")}}))
+    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
 
 
 def test_missing_sidecar_is_not_a_match(tmp_path):
@@ -50,16 +70,16 @@ def test_missing_sidecar_is_not_a_match(tmp_path):
     Every cache written before the stamp existed is exactly the ambiguous
     0.8.0a2-or-0.9.0a1 case that has to be recomputed.
     """
-    assert not metrics_provenance_matches(tmp_path)
+    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
 
 
 def test_foreign_cubic_version_is_not_a_match(tmp_path):
-    write_metrics_provenance(tmp_path)
+    write_metrics_provenance(tmp_path, cp_reference_sha256=None)
     path = tmp_path / PROVENANCE_FILENAME
     payload = json.loads(path.read_text())
     payload["versions"]["cubic"] = "0.8.0a2"
     path.write_text(json.dumps(payload))
-    assert not metrics_provenance_matches(tmp_path)
+    assert not metrics_provenance_matches(tmp_path, cp_reference_sha256=None)
 
 
 def test_check_cubic_pin_accepts_the_declared_version():

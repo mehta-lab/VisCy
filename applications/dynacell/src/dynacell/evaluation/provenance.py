@@ -28,6 +28,12 @@ This module makes that boundary detectable and non-repeatable:
 * :func:`write_metrics_provenance` stamps the versions beside the metrics,
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
+
+The same sidecar stamps the content hash of the CP reference the CP feature
+metrics were scored in (:mod:`dynacell.evaluation.cp_reference`). CP KID/FID/
+cosine move whenever the reference is rebuilt, so a cache stamped with another
+reference -- or with none, i.e. written before the shared CP space existed -- is
+refused the same way.
 """
 
 import json
@@ -83,20 +89,23 @@ def check_cubic_pin() -> None:
         )
 
 
-def write_metrics_provenance(save_dir: Path) -> None:
+def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
     Parameters
     ----------
     save_dir : pathlib.Path
         Directory that receives the metric CSV/NPY files.
+    cp_reference_sha256 : str or None
+        Content hash of the CP reference the feature metrics were scored in;
+        ``None`` when the run computed no feature metrics.
     """
-    payload = {"versions": installed_versions()}
+    payload = {"versions": installed_versions(), "cp_reference_sha256": cp_reference_sha256}
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
-def metrics_provenance_matches(save_dir: Path) -> bool:
-    """Return True when ``save_dir``'s metrics were built by the running ``cubic``.
+def metrics_provenance_matches(save_dir: Path, *, cp_reference_sha256: str | None) -> bool:
+    """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference.
 
     A missing sidecar returns False. Every cache written before this stamp
     existed predates the fix and is exactly the ambiguous case that has to be
@@ -108,14 +117,22 @@ def metrics_provenance_matches(save_dir: Path) -> bool:
     ----------
     save_dir : pathlib.Path
         Directory holding the metric CSV/NPY files.
+    cp_reference_sha256 : str or None
+        Content hash of the CP reference the current run would score in
+        (``None`` when it computes no feature metrics). A sidecar written before
+        the CP reference existed carries no such key and never matches.
 
     Returns
     -------
     bool
-        True when the recorded ``cubic`` version equals the installed one.
+        True when the recorded ``cubic`` version equals the installed one and
+        the recorded CP reference hash equals ``cp_reference_sha256``.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
         return False
-    recorded = json.loads(path.read_text()).get("versions", {}).get("cubic")
-    return recorded == version("cubic")
+    payload = json.loads(path.read_text())
+    recorded = payload.get("versions", {}).get("cubic")
+    if recorded != version("cubic"):
+        return False
+    return "cp_reference_sha256" in payload and payload["cp_reference_sha256"] == cp_reference_sha256
