@@ -454,3 +454,27 @@ def test_lite_staging_uses_the_parent_scaler(two_sets, tmp_path: Path) -> None:
     assert not np.allclose(staged[1], staged[2])
     sidecar = json.loads((tmp_path / "cp_selected_feature_mask.json").read_text())
     assert (sidecar["dataset"], sidecar["scaler_dataset"]) == ("set-a-lite", "set-a")
+
+
+def test_binding_covers_only_this_datasets_space(tmp_path: Path) -> None:
+    """Adding an unrelated dataset keeps an existing dataset's binding; changing its own scaler moves it."""
+    a, b = _gt(), _gt(seed=1)
+    base = [_fit("set-a", a), _fit("set-b", b)]
+    ref, payload = _reference(tmp_path, base)
+    before = ref.for_dataset("set-a").binding_sha256
+
+    (tmp_path / "added").mkdir()
+    added, _ = _reference(tmp_path / "added", [*base, _fit("hek", _gt(seed=2, offset=-5.0), in_mask_fit=False)])
+    assert added.sha256 != ref.sha256  # the whole reference did change
+    assert added.for_dataset("set-a").binding_sha256 == before
+
+    moved = json.loads(json.dumps(payload))
+    moved["scalers"]["set-a"]["std"][0] *= 1.5
+    moved["sha256"] = payload_sha256(moved)
+    (tmp_path / "er.json").write_text(json.dumps(moved))
+    assert load_cp_reference(tmp_path / "er.json", target_name="er").for_dataset("set-a").binding_sha256 != before
+    floored = json.loads(json.dumps(payload))
+    floored["scalers"]["set-a"]["floored_features"] = ["f0"]
+    floored["sha256"] = payload_sha256(floored)
+    (tmp_path / "er.json").write_text(json.dumps(floored))
+    assert load_cp_reference(tmp_path / "er.json", target_name="er").for_dataset("set-a").binding_sha256 != before

@@ -470,15 +470,23 @@ class DatasetCPSpace:
     fit_positions: frozenset[str]
     fit_n_cells: int
     gt_matrix_sha256: str
+    cp_identity: dict[str, Any]
+    criteria: dict[str, Any]
+    floored_features: tuple[str, ...]
 
     @property
     def binding_sha256(self) -> str:
-        """Return a sha256 identifying this eval's CP space AND the GT cells it was fit on.
+        """Return a sha256 over exactly what this eval's CP numbers depend on.
 
-        Stamped as ``cp_space_sha256`` so cache reuse refuses another dataset's
-        space and GT cells that differ from the fit. Covers the reference hash, the
-        dataset, its scaler dataset, the lite flag, and this dataset's recorded
-        GT-matrix sha256 (a lite set's own).
+        Stamped as ``cp_space_sha256`` and compared on final-metrics cache reuse.
+        It covers the CP recipe identity, the selection criteria, the feature
+        names and keep-mask, THIS dataset's scaler (mean, std, floored features --
+        the parent's for a lite set, plus the lite -> parent link), and this
+        dataset's recorded GT-matrix sha256 (a lite set's own). It deliberately
+        leaves out the whole-reference hash, so adding or refitting another dataset
+        of the target does not invalidate this dataset's cached eval dirs (whose
+        cache is all-or-nothing, pixel and mask metrics included), while another
+        dataset's space, a changed scaler, or different GT cells all do.
 
         Returns
         -------
@@ -486,10 +494,18 @@ class DatasetCPSpace:
             Hex sha256 over the canonical JSON of those fields.
         """
         body = {
-            "reference_sha256": self.reference_sha256,
+            "cp_identity": self.cp_identity,
+            "criteria": self.criteria,
+            "feature_names": list(self.feature_names),
+            "keep_mask": [bool(b) for b in self.keep_mask],
             "dataset": self.dataset,
             "scaler_dataset": self.scaler_dataset,
             "is_lite": self.is_lite,
+            "scaler": {
+                "mean": [float(v) for v in self.mean],
+                "std": [float(v) for v in self.std],
+                "floored_features": list(self.floored_features),
+            },
             "gt_matrix_sha256": self.gt_matrix_sha256,
         }
         return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -581,6 +597,7 @@ class CPReference:
     feature_names: tuple[str, ...]
     keep_mask: np.ndarray
     cp_identity: dict[str, Any]
+    criteria: dict[str, Any]
     scalers: dict[str, dict[str, Any]]
     lite: dict[str, dict[str, Any]]
     fit: dict[str, Any]
@@ -617,6 +634,9 @@ class CPReference:
             fit_positions=frozenset(own["positions"]),
             fit_n_cells=int(own["n_cells"]),
             gt_matrix_sha256=own["gt_matrix_sha256"],
+            cp_identity=self.cp_identity,
+            criteria=self.criteria,
+            floored_features=tuple(scaler["floored_features"]),
         )
 
 
@@ -640,6 +660,7 @@ def _read_cp_reference(path: Path, *, build_hint: str) -> CPReference:
         feature_names=tuple(payload["feature_names"]),
         keep_mask=np.asarray(payload["keep_mask"], dtype=bool),
         cp_identity=payload["cp_identity"],
+        criteria=payload["criteria"],
         scalers=payload["scalers"],
         lite=payload["lite"],
         fit=payload["fit"],
