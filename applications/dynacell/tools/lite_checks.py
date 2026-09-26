@@ -32,7 +32,6 @@ import pandas as pd
 from lite_subset_sim import (
     EXTRACTORS,
     MODELS_3D,
-    cp_space_of,
     designs_for,
     load_systems,
     mmd2_from_features,
@@ -41,6 +40,7 @@ from lite_subset_sim import (
     subset_keys,
 )
 
+from dynacell.evaluation.cp_reference import sidecar_cp_space
 from dynacell.evaluation.paths import DATA_ROOT
 
 E_SYSTEMS = [
@@ -206,7 +206,7 @@ def check_e(
             keep = np.isfinite(X).all(1) & np.isfinite(Y).all(1)
             X, Y = X[keep], Y[keep]
             if tok == "cp":  # the pipeline's CP space: reference mask + this dataset's GT scaler
-                space = cp_space_of(path)
+                space = sidecar_cp_space(path)
                 X, Y = space.transform(X), space.transform(Y)
             n_all = X.shape[0]
             if tok != "cp":  # deep extractors: precompute cell-level kernels once, slice per draw

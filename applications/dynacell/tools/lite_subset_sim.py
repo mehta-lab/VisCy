@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import json
 from collections import Counter
 from collections.abc import Callable, Iterator
 from math import comb, factorial
@@ -41,7 +40,7 @@ import pandas as pd
 from build_temporal_subset_zarr import spread_timepoints
 from scipy.stats import kendalltau, spearmanr
 
-from dynacell.evaluation.cp_reference import DatasetCPSpace, load_cp_reference
+from dynacell.evaluation.cp_reference import sidecar_cp_space
 from dynacell.evaluation.paths import DATA_ROOT
 
 EXTRACTORS = {"cp": "CP", "dinov3": "DINOv3", "dynaclr": "DynaCLR", "celldino": "CellDINO", "morphem": "MorphEm"}
@@ -64,26 +63,6 @@ MODELS_2D = ["fcmae_vscyto2d_scratch", "fcmae_vscyto2d_pretrained", "fnet2d", "c
 TRAIN_SETS = ["ipsc", "a549", "joint"]
 KID_MIN = 16
 _EVAL_CSVS = ("pixel_metrics.csv", "mask_metrics.csv", "feature_metrics.csv")
-
-
-def cp_space_of(eval_dir: Path) -> DatasetCPSpace:
-    """Return the CP space an eval dir was scored in, from its ``cp_selected_feature_mask.json``.
-
-    The sidecar names the reference (path + hash) and the eval's dataset; the
-    reference is loaded, hash-checked and bound to that dataset, so a lite eval
-    gets its parent's scaler exactly as the pipeline did.
-
-    Raises
-    ------
-    ValueError
-        If the reference on disk no longer has the hash the eval recorded.
-    """
-    sidecar = json.loads((eval_dir / "cp_selected_feature_mask.json").read_text())
-    path = Path(sidecar["reference_path"])
-    ref = load_cp_reference(path, target_name=json.loads(path.read_text())["target_name"])
-    if ref.sha256 != sidecar["reference_sha256"]:
-        raise ValueError(f"{eval_dir}: CP reference {path} changed since the eval ({ref.sha256[:12]})")
-    return ref.for_dataset(sidecar["dataset"])
 
 
 def poly_kernel(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
@@ -215,7 +194,7 @@ class System:
             X, Y, cell_block = X[ok], Y[ok], cell_block[ok]
             if tok == "cp":
                 # pipeline: the CP reference mask + this dataset's GT scaler, on both sides.
-                space = cp_space_of(path)
+                space = sidecar_cp_space(path)
                 self.cp = dict(X=space.transform(X), Y=space.transform(Y), cell_block=cell_block)
                 continue
             # one-hot block membership (n x nb) -> block sums via M^T K M

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import sys
 from pathlib import Path
 from typing import get_args
@@ -34,7 +33,7 @@ from typing import get_args
 import numpy as np
 
 from dynacell.evaluation.cache import FeatureKind
-from dynacell.evaluation.cp_reference import load_cp_reference
+from dynacell.evaluation.cp_reference import sidecar_cp_space
 from dynacell.evaluation.linear_probe import MADScaler, paired_auroc
 
 _FEATURE_TYPES: tuple[str, ...] = get_args(FeatureKind)
@@ -118,36 +117,27 @@ def _load_embeddings(
     return result
 
 
-#: Sidecar the eval writes beside its CP embeddings, naming the CP reference it scored in.
-_CP_SIDECAR = "cp_selected_feature_mask.json"
-
-
 def _cp_reference_mask(eval_dirs: list[Path]) -> np.ndarray:
     """Return the CP reference keep-mask shared by ``eval_dirs``.
 
-    Read from each eval dir's ``cp_selected_feature_mask.json``, which names the
-    target's CP reference (path + hash). The mask is a property of the target, not
-    of the model or condition, so the probe compares conditions on the same feature
-    subset every eval scored.
+    Each eval dir's sidecar names the target's CP reference (path + hash); see
+    :func:`~dynacell.evaluation.cp_reference.sidecar_cp_space`. The mask is a
+    property of the target, not of the model or condition, so the probe compares
+    conditions on the same feature subset every eval scored.
 
     Raises
     ------
     FileNotFoundError
         If an eval dir has no sidecar.
     ValueError
-        If the dirs name different references (ambiguous), or the reference on
-        disk no longer has the recorded hash.
+        If the dirs name different references (ambiguous), or a reference on disk
+        no longer has the recorded hash.
     """
-    sidecars = [json.loads((d / _CP_SIDECAR).read_text()) for d in eval_dirs]
-    refs = {(s["reference_path"], s["reference_sha256"]) for s in sidecars}
+    spaces = [sidecar_cp_space(d) for d in eval_dirs]
+    refs = {(s.reference_path, s.reference_sha256) for s in spaces}
     if len(refs) != 1:
         raise ValueError(f"eval dirs {[str(d) for d in eval_dirs]} were scored in different CP references: {refs}")
-    ((path, sha256),) = refs
-    ref_payload = json.loads(Path(path).read_text())
-    ref = load_cp_reference(Path(path), target_name=ref_payload["target_name"])
-    if ref.sha256 != sha256:
-        raise ValueError(f"CP reference {path} changed since these evals (sha256 {ref.sha256[:12]} vs {sha256[:12]})")
-    return ref.keep_mask
+    return spaces[0].keep_mask
 
 
 def _probe_pair(

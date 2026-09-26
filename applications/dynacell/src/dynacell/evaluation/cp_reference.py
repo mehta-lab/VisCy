@@ -71,6 +71,9 @@ from dynacell.evaluation.pipeline_cache import cp_recipe_identity
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
 CP_REFERENCE_SCHEMA = 3
 
+#: Sidecar each eval writes beside its metrics, naming the CP reference it scored in.
+CP_SIDECAR_FILENAME = "cp_selected_feature_mask.json"
+
 #: A per-dataset std below this fraction of the feature's pooled GT std is floored to it.
 STD_FLOOR_FRACTION = 1e-3
 
@@ -561,6 +564,32 @@ class CPReference:
         )
 
 
+def _read_cp_reference(path: Path, *, build_hint: str) -> CPReference:
+    """Load a CP reference and verify its content hash and schema (no target check)."""
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"CP reference {path} not found. CP (GLCM+) feature metrics are scored in a per-target "
+            f"GT feature space; build it with:\n  {build_hint}\n"
+            "(or point feature_metrics.cp.reference_path at an existing reference)."
+        )
+    payload = json.loads(path.read_text())
+    if payload["sha256"] != payload_sha256(payload):
+        raise ValueError(f"CP reference {path} content does not match its recorded sha256 (edited by hand?)")
+    if payload["schema"] != CP_REFERENCE_SCHEMA:
+        raise ValueError(f"CP reference {path} has schema {payload['schema']}, expected {CP_REFERENCE_SCHEMA}")
+    return CPReference(
+        path=str(path),
+        sha256=payload["sha256"],
+        target_name=payload["target_name"],
+        feature_names=tuple(payload["feature_names"]),
+        keep_mask=np.asarray(payload["keep_mask"], dtype=bool),
+        cp_identity=payload["cp_identity"],
+        scalers=payload["scalers"],
+        lite=payload["lite"],
+        fit=payload["fit"],
+    )
+
+
 def load_cp_reference(path: Path, *, target_name: str) -> CPReference:
     """Load and hash-verify a CP reference.
 
@@ -584,30 +613,47 @@ def load_cp_reference(path: Path, *, target_name: str) -> CPReference:
         If the stored hash disagrees with the content, or the reference was fit
         for another target or schema.
     """
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"CP reference {path} not found. CP (GLCM+) feature metrics are scored in a per-target "
-            f"GT feature space; build it with:\n  {_build_command(target_name)}\n"
-            "(or point feature_metrics.cp.reference_path at an existing reference)."
+    ref = _read_cp_reference(path, build_hint=_build_command(target_name))
+    if ref.target_name != target_name:
+        raise ValueError(f"CP reference {path} was fit for {ref.target_name!r}, this eval is {target_name!r}")
+    return ref
+
+
+def sidecar_cp_space(eval_dir: Path) -> DatasetCPSpace:
+    """Return the CP space a finished eval dir was scored in, from its :data:`CP_SIDECAR_FILENAME`.
+
+    The sidecar records the reference path, its sha256 and the eval's dataset. The
+    reference is loaded from that path and must still carry that sha256; it is then
+    bound to the recorded dataset, so a lite eval gets its parent's scaler exactly as
+    the pipeline did. Used by post-hoc consumers of eval dirs (the cross-condition
+    probe, the lite subset tools) so they score CP the way the eval did.
+
+    Parameters
+    ----------
+    eval_dir : pathlib.Path
+        Eval save dir holding the sidecar.
+
+    Returns
+    -------
+    DatasetCPSpace
+        The reference bound to the eval's dataset.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the sidecar or the reference it names is missing.
+    ValueError
+        If the reference on disk no longer has the sha256 the eval recorded.
+    """
+    sidecar = json.loads((eval_dir / CP_SIDECAR_FILENAME).read_text())
+    path = Path(sidecar["reference_path"])
+    ref = _read_cp_reference(path, build_hint="the reference this eval was scored in")
+    if ref.sha256 != sidecar["reference_sha256"]:
+        raise ValueError(
+            f"{eval_dir}: CP reference {path} changed since the eval "
+            f"(sha256 {ref.sha256[:12]} now, {sidecar['reference_sha256'][:12]} at eval time)"
         )
-    payload = json.loads(path.read_text())
-    if payload["sha256"] != payload_sha256(payload):
-        raise ValueError(f"CP reference {path} content does not match its recorded sha256 (edited by hand?)")
-    if payload["schema"] != CP_REFERENCE_SCHEMA:
-        raise ValueError(f"CP reference {path} has schema {payload['schema']}, expected {CP_REFERENCE_SCHEMA}")
-    if payload["target_name"] != target_name:
-        raise ValueError(f"CP reference {path} was fit for {payload['target_name']!r}, this eval is {target_name!r}")
-    return CPReference(
-        path=str(path),
-        sha256=payload["sha256"],
-        target_name=payload["target_name"],
-        feature_names=tuple(payload["feature_names"]),
-        keep_mask=np.asarray(payload["keep_mask"], dtype=bool),
-        cp_identity=payload["cp_identity"],
-        scalers=payload["scalers"],
-        lite=payload["lite"],
-        fit=payload["fit"],
-    )
+    return ref.for_dataset(sidecar["dataset"])
 
 
 def resolve_cp_reference_path(config: DictConfig) -> Path:

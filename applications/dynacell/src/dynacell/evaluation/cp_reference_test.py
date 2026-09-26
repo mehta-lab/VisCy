@@ -18,6 +18,7 @@ from dynacell.evaluation.cp_reference import (
     load_cp_reference,
     payload_sha256,
     resolve_cp_reference_path,
+    sidecar_cp_space,
     write_cp_reference,
 )
 from dynacell.evaluation.feature_metrics import compute_feature_similarity_pairwise
@@ -391,3 +392,20 @@ def test_over_smoothing_registers_in_the_shared_space(two_sets) -> None:
     assert new["CP_Median_Cosine_Similarity"] < 0.9
     assert new["CP_KID"] > 1.0
     assert new["CP_KID"] > 20 * abs(floor["CP_KID"])
+
+
+def test_sidecar_binds_the_recorded_reference_and_dataset(two_sets, tmp_path: Path) -> None:
+    """An eval dir's sidecar resolves to its reference + dataset; a changed reference is refused."""
+    ref, _, cells = two_sets
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    _stage_cp_dataset_inputs(
+        _lists(cells["set-a"][:40], cells["set-a"][:40]), ref.for_dataset("set-a-lite"), 40, eval_dir
+    )
+    space = sidecar_cp_space(eval_dir)
+    assert (space.dataset, space.scaler_dataset, space.reference_sha256) == ("set-a-lite", "set-a", ref.sha256)
+    np.testing.assert_array_equal(space.mean, ref.for_dataset("set-a").mean)
+
+    _reference(tmp_path, [_fit("set-a", _gt(seed=8))], lite={"set-a-lite": {"parent": "set-a"}})  # rebuilt in place
+    with pytest.raises(ValueError, match="changed since the eval"):
+        sidecar_cp_space(eval_dir)

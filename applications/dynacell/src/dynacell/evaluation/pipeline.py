@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from dynacell.evaluation._ref_hook import apply_dataset_ref
 from dynacell.evaluation.cache import FeatureKind
-from dynacell.evaluation.cp_reference import DatasetCPSpace, eval_cp_space
+from dynacell.evaluation.cp_reference import CP_SIDECAR_FILENAME, DatasetCPSpace, eval_cp_space
 from dynacell.evaluation.cross_condition_probe import run_for_group as _cross_condition_run_for_group
 from dynacell.evaluation.feature_metrics import (
     compute_feature_similarity,
@@ -367,7 +367,7 @@ def _stage_cp_dataset_inputs(
         "n_kept": int(cp_space.keep_mask.sum()),
         "n_total": int(cp_space.keep_mask.size),
     }
-    (save_dir / "cp_selected_feature_mask.json").write_text(json.dumps(mask_payload, indent=2))
+    (save_dir / CP_SIDECAR_FILENAME).write_text(json.dumps(mask_payload, indent=2))
     return (
         "CP",
         cp_space.transform(pred_cp_raw),
