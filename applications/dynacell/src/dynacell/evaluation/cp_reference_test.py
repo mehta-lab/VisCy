@@ -610,7 +610,10 @@ def test_lite_clip_fraction_is_recorded_but_not_enforced(monkeypatch) -> None:
     assert lite["gt_clip_frac"] == pytest.approx(1 / 500)
     assert lite["gt_clip_frac"] > cp_reference.CP_GT_CLIP_FRAC_MAX
     assert lite["enforced"] is False and payload["fit"]["datasets"]["set-a"]["gt_abs_z"]["enforced"] is True
-    assert payload["criteria"]["gt_abs_z_survey"]["max_gt_clip_frac"] == pytest.approx(1 / 5000)
+    survey = payload["criteria"]["gt_abs_z_survey"]
+    assert survey["max_gt_clip_frac"] == pytest.approx(1 / 5000)
+    # Full test sets only: the lite set's copy of the parent's outlier is not counted twice.
+    assert (survey["n_cells"], survey["n_cells_beyond_clip"]) == (5000, 1)
 
     monkeypatch.setattr(cp_reference, "CP_GT_CLIP_FRAC_MAX", 1e-4)  # now the parent itself is over
     with pytest.raises(ValueError, match=r"for \{'set-a': 0\.0002\}"):

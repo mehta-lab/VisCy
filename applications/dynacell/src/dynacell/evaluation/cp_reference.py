@@ -95,9 +95,9 @@ GT_MOMENT_ZERO_STD_ATOL = 1e-12
 #: heavy-tailed predicted feature set the metric's magnitude (a pilot A549->iPSC nucleus
 #: eval had pred glcm_ASM at z up to 239, KID 4e9). c = 20 was chosen by the paper owner
 #: from an offline sweep over c in {5, 8, 10, 15, 20, 30, 50, none} on the nucleus-lite
-#: pilot (see :data:`CP_Z_CLIP_RANK_STABILITY`). Surveying every registry GT cell in its
-#: own test set's scaler, only 3 of 36,019 cells exceed it (max |z| 26.55: er,
-#: a549-mantis-sec61b-denv, kurtosis).
+#: pilot (see :data:`CP_Z_CLIP_RANK_STABILITY`). Surveying every registry GT cell of the
+#: full test sets in its own test set's scaler, 2 of 23,970 distinct cells exceed it (max
+#: |z| 26.55: er, a549-mantis-sec61b-denv, kurtosis); enforced max clip fraction 5.3e-4.
 CP_Z_CLIP = 20.0
 
 #: Per-dataset bound on the GT cells the clip may touch: the fraction of a dataset's GT
@@ -561,9 +561,12 @@ def _gt_abs_z_survey(
 ) -> dict[str, Any]:
     """Survey |z| of every fit dataset's GT cells in its OWN test set's scaler (lite: the parent's).
 
-    Returns the global max |z|, the global p99.99 (pooled over every GT cell and kept
-    feature), where the max sits, the largest per-dataset GT clip fraction, and per
-    dataset ``{gt_clip_frac, max, p9999, max_feature}``.
+    Returns, over the FULL (non-lite) test sets -- lite cells are subsets of their
+    parent's, so pooling them would count cells twice -- the max |z|, the p99.99
+    (pooled over every GT cell and kept feature), where the max sits, the largest
+    enforced per-dataset GT clip fraction, the number of GT cells and of those with any
+    |z| > :data:`CP_Z_CLIP`; plus, for every dataset (lite included, unenforced),
+    ``{gt_clip_frac, enforced, max, p9999, max_feature}``.
 
     Raises
     ------
@@ -575,7 +578,8 @@ def _gt_abs_z_survey(
         parent's scaler, so one extra cell on ~1000 must not brick every build.
     """
     per: dict[str, dict[str, Any]] = {}
-    pooled: list[np.ndarray] = []
+    pooled: list[np.ndarray] = []  # full (non-lite) datasets only: lite cells duplicate their parent's
+    n_full = n_full_beyond = 0
     for fit in fits:
         scaler = scalers[fit.parent or fit.dataset]
         z = np.abs(
@@ -592,20 +596,26 @@ def _gt_abs_z_survey(
             "p9999": float(np.quantile(z, 0.9999)),
             "max_feature": kept_names[col],
         }
-        pooled.append(z.ravel())
+        if fit.parent is None:
+            pooled.append(z.ravel())
+            n_full += z.shape[0]
+            n_full_beyond += int((z > CP_Z_CLIP).any(axis=1).sum())
     over = {d: r["gt_clip_frac"] for d, r in per.items() if r["enforced"] and r["gt_clip_frac"] > CP_GT_CLIP_FRAC_MAX}
     if over:
         raise ValueError(
             f"GT clip fraction above the bound {CP_GT_CLIP_FRAC_MAX} at z_clip {CP_Z_CLIP} for {over}: the clip "
             "would discard too much GT signal. Revisit CP_Z_CLIP (and re-survey) or investigate the GT cache."
         )
-    worst = max(per, key=lambda d: per[d]["max"])
+    worst = max((d for d in per if per[d]["enforced"]), key=lambda d: per[d]["max"])
     return {
+        # Over FULL test sets only, so no GT cell is counted twice through a lite subset.
         "max": per[worst]["max"],
         "p9999": float(np.quantile(np.concatenate(pooled), 0.9999)),
         "max_dataset": worst,
         "max_feature": per[worst]["max_feature"],
         "max_gt_clip_frac": max(r["gt_clip_frac"] for r in per.values() if r["enforced"]),
+        "n_cells": n_full,
+        "n_cells_beyond_clip": n_full_beyond,
         "datasets": per,
     }
 
