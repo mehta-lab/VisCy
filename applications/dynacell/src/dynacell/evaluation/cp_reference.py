@@ -25,12 +25,17 @@ A CP reference fixes both. Per target it holds:
 Each scaler is fit on exactly the GT cells an eval of that dataset scores: every
 position and timepoint of the GT store, read from the GT CP cache, with the
 non-finite rows dropped. The reference records every dataset's (lite included)
-position list and the sha256 of those cells in canonical order
-(:func:`canonical_gt_matrix`). An eval refuses a different position set up front
+position list, cell count and raw per-feature GT moments (mean/std over ALL CP
+columns). An eval refuses a different position set up front
 (:meth:`DatasetCPSpace.check_positions`) and, once its GT CP cells are staged,
-refuses to score unless they hash to the recorded value
-(:meth:`DatasetCPSpace.check_gt_cells`). That content gate is independent of the
-cache manifest's ``built_at``, which is kept in the fit record for audit only.
+refuses to score unless the count matches exactly and every feature's mean/std
+matches the recorded moments within :data:`GT_MOMENT_RTOL`
+(:meth:`DatasetCPSpace.check_gt_cells`). The gate is a tolerance, not an exact
+hash, because GPU ``cp_regionprops`` is not bit-reproducible (run-to-run jitter
+~1e-15 on an A40), so a GPU recompute of identical GT must pass; any real value
+change is many orders of magnitude larger. The exact sha256 of the canonical GT
+matrix (:func:`canonical_gt_matrix`) is kept for audit and ``--verify`` only, and
+the cache manifest's ``built_at`` for audit only.
 
 A per-dataset std can collapse on a feature the pooled mask keeps (a feature
 that is near-constant within one test set). Such a std is floored at
@@ -70,10 +75,19 @@ from dynacell.evaluation.paths import cp_reference_path
 from dynacell.evaluation.pipeline_cache import cp_recipe_identity
 
 #: Schema of the reference JSON. Bump on any change to its keys or their meaning.
-CP_REFERENCE_SCHEMA = 4
+CP_REFERENCE_SCHEMA = 5
 
 #: Sidecar each eval writes beside its metrics, naming the CP reference it scored in.
 CP_SIDECAR_FILENAME = "cp_selected_feature_mask.json"
+
+#: Content-gate tolerance on each CP feature's GT moments (see
+#: :meth:`DatasetCPSpace.check_gt_cells`): |mean - mean_fit| <= GT_MOMENT_RTOL * std_fit
+#: and |std / std_fit - 1| <= GT_MOMENT_RTOL. GPU regionprops jitter is ~1e-15
+#: relative, a real GT change is >= ~1e-3, so 1e-6 separates them by >= 3 decades each way.
+GT_MOMENT_RTOL = 1e-6
+#: For a feature constant in the fit (std_fit == 0): |mean - mean_fit| and the staged std
+#: must both be <= GT_MOMENT_ZERO_STD_ATOL * (1 + |mean_fit|).
+GT_MOMENT_ZERO_STD_ATOL = 1e-12
 
 #: A per-dataset std below this fraction of the feature's pooled GT std is floored to it.
 STD_FLOOR_FRACTION = 1e-3
@@ -115,8 +129,9 @@ _UNHASHED_KEYS = frozenset({"sha256", "created_at"})
 #: Everything else in ``fit`` -- positions, cell counts and GT-matrix hashes, which the
 #: content gate enforces -- is hashed, so a hand-edited gate field fails the load-time
 #: hash check. Paths and ``built_at`` are excluded because they move on a harmless GT
-#: re-cache (identical cells) or a relocation, which must not change the hash.
-_AUDIT_FIT_KEYS = frozenset({"gt_path", "gt_cache_dir", "cp_cache_path", "cp_cache_built_at"})
+#: re-cache (identical cells) or a relocation, which must not change the hash; the exact
+#: ``gt_matrix_sha256`` because GPU jitter moves it too (audit / ``--verify`` info only).
+_AUDIT_FIT_KEYS = frozenset({"gt_path", "gt_cache_dir", "cp_cache_path", "cp_cache_built_at", "gt_matrix_sha256"})
 
 
 def _hashed_fit(fit: dict[str, Any]) -> dict[str, Any]:
@@ -183,10 +198,11 @@ def gt_matrix_sha256(gt: np.ndarray) -> str:
     """Return a sha256 over a stacked GT cell matrix.
 
     The digest covers the shape and the float64 C-order bytes, so it changes with
-    any cell value or the cell count. It is recorded per dataset in the reference's
-    ``fit`` section; the eval recomputes it over the GT cells it stages and refuses to
-    score on a mismatch (:meth:`DatasetCPSpace.check_gt_cells`), and
-    ``build_cp_reference.py --verify`` recomputes it from the current caches.
+    any cell value (GPU jitter of ~1e-15 included) or the cell count. It is recorded
+    per dataset in the reference's ``fit`` section for audit, and
+    ``build_cp_reference.py --verify`` reports an exact mismatch as information. It
+    gates nothing: the eval's content gate compares tolerance-checked moments
+    (:func:`gt_moments_mismatch`).
 
     Parameters
     ----------
@@ -202,6 +218,61 @@ def gt_matrix_sha256(gt: np.ndarray) -> str:
     digest = hashlib.sha256(f"{arr.shape[0]}x{arr.shape[1]}:".encode())
     digest.update(arr.tobytes())
     return digest.hexdigest()
+
+
+def gt_moments(cells: np.ndarray) -> dict[str, list[float]]:
+    """Return the raw per-feature GT moments the content gate compares.
+
+    Parameters
+    ----------
+    cells : np.ndarray
+        ``(n_cells, n_features)`` GT-finite CP cells, all columns.
+
+    Returns
+    -------
+    dict
+        ``{"mean": [...], "std": [...]}`` over axis 0, float64, one entry per column.
+    """
+    arr = np.asarray(cells, dtype=np.float64)
+    return {"mean": [float(v) for v in arr.mean(axis=0)], "std": [float(v) for v in arr.std(axis=0)]}
+
+
+def gt_moments_mismatch(
+    cells: np.ndarray, mean_fit: np.ndarray, std_fit: np.ndarray, feature_names: tuple[str, ...]
+) -> list[str]:
+    """Return the features whose staged GT moments are outside the gate tolerance.
+
+    Criterion per feature: ``|mean - mean_fit| <= GT_MOMENT_RTOL * std_fit`` and
+    ``|std / std_fit - 1| <= GT_MOMENT_RTOL``; for ``std_fit == 0`` both
+    ``|mean - mean_fit|`` and ``std`` must be ``<= GT_MOMENT_ZERO_STD_ATOL * (1 + |mean_fit|)``.
+
+    Parameters
+    ----------
+    cells : np.ndarray
+        Staged ``(n_cells, n_features)`` GT-finite CP cells.
+    mean_fit, std_fit : np.ndarray
+        The recorded raw moments of the fit cells.
+    feature_names : tuple of str
+        Column names, for the report.
+
+    Returns
+    -------
+    list of str
+        ``"name: mean a vs b, std c vs d"`` for every failing feature (empty = pass).
+    """
+    now = gt_moments(cells)
+    mean, std = np.asarray(now["mean"]), np.asarray(now["std"])
+    constant = std_fit == 0
+    safe = np.where(constant, 1.0, std_fit)
+    ok_var = (np.abs(mean - mean_fit) <= GT_MOMENT_RTOL * std_fit) & (np.abs(std / safe - 1) <= GT_MOMENT_RTOL)
+    zero_tol = GT_MOMENT_ZERO_STD_ATOL * (1 + np.abs(mean_fit))
+    ok_const = (np.abs(mean - mean_fit) <= zero_tol) & (std <= zero_tol)
+    ok = np.where(constant, ok_const, ok_var)
+    return [
+        f"{name}: mean {mean[i]:.9g} vs {mean_fit[i]:.9g}, std {std[i]:.9g} vs {std_fit[i]:.9g}"
+        for i, name in enumerate(feature_names)
+        if not ok[i]
+    ]
 
 
 @dataclass
@@ -256,6 +327,43 @@ def canonical_gt_matrix(blocks: dict[tuple[str, int], np.ndarray], n_features: i
     return np.concatenate(rows, axis=0) if rows else np.empty((0, n_features))
 
 
+def _read_gt_cp_blocks(
+    ctx, gt_path: Path, n_features: int
+) -> tuple[dict[tuple[str, int], np.ndarray], dict[str, Any], list[str]]:
+    """Read the GT-finite CP rows of every cached ``(position, t)`` of a GT store.
+
+    Returns ``(blocks, record, missing)``: ``missing`` lists the ``pos/t`` slots the
+    cache does not hold. Raises on a malformed store or slot (non-3-D position,
+    wrong column count, no CP cache at all).
+    """
+    with open_ome_zarr(gt_path, mode="r") as plate:
+        shapes = {name: (int(pos.data.shape[0]), int(pos.data.shape[2])) for name, pos in plate.positions()}
+    blocks: dict[tuple[str, int], np.ndarray] = {}
+    missing: list[str] = []
+    n_timepoints = n_dropped = 0
+    with open_features_group(ctx.paths, "cp", mode="r") as group:
+        if group is None:
+            raise StaleCacheError(f"no CP feature cache at {ctx.paths.cp_features()}")
+        for pos_name, (t_count, z_depth) in sorted(shapes.items()):
+            if z_depth < 2:
+                raise ValueError(f"{gt_path}/{pos_name} has Z={z_depth}; CP regionprops are 3-D")
+            for t in range(t_count):
+                feats = read_features_from_group(group, pos_name, t)
+                if feats is None:
+                    missing.append(f"{pos_name}/t{t}")
+                    continue
+                n_timepoints += 1
+                if feats.shape[0] == 0:
+                    continue
+                if feats.shape[1] != n_features:
+                    raise StaleCacheError(f"{pos_name}/t{t} has {feats.shape[1]} CP columns, expected {n_features}")
+                finite = np.isfinite(feats).all(axis=1)
+                n_dropped += int((~finite).sum())
+                blocks[(pos_name, t)] = feats[finite]
+    record = {"positions": sorted(shapes), "n_timepoints": n_timepoints, "n_cells_dropped_nonfinite": n_dropped}
+    return blocks, record, missing
+
+
 def read_gt_cp_cells(ctx, gt_path: Path, n_features: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Read every finite GT CP cell of one GT store from its cache, read-only, in canonical order.
 
@@ -282,29 +390,9 @@ def read_gt_cp_cells(ctx, gt_path: Path, n_features: int) -> tuple[np.ndarray, d
     ValueError
         If a GT position is not a 3-D volume.
     """
-    with open_ome_zarr(gt_path, mode="r") as plate:
-        shapes = {name: (int(pos.data.shape[0]), int(pos.data.shape[2])) for name, pos in plate.positions()}
-    blocks: dict[tuple[str, int], np.ndarray] = {}
-    n_timepoints = n_dropped = 0
-    with open_features_group(ctx.paths, "cp", mode="r") as group:
-        if group is None:
-            raise StaleCacheError(f"no CP feature cache at {ctx.paths.cp_features()}")
-        for pos_name, (t_count, z_depth) in sorted(shapes.items()):
-            if z_depth < 2:
-                raise ValueError(f"{gt_path}/{pos_name} has Z={z_depth}; CP regionprops are 3-D")
-            for t in range(t_count):
-                feats = read_features_from_group(group, pos_name, t)
-                if feats is None:
-                    raise StaleCacheError(f"CP cache miss at {pos_name}/t{t} in {ctx.paths.cp_features()}")
-                n_timepoints += 1
-                if feats.shape[0] == 0:
-                    continue
-                if feats.shape[1] != n_features:
-                    raise StaleCacheError(f"{pos_name}/t{t} has {feats.shape[1]} CP columns, expected {n_features}")
-                finite = np.isfinite(feats).all(axis=1)
-                n_dropped += int((~finite).sum())
-                blocks[(pos_name, t)] = feats[finite]
-    record = {"positions": sorted(shapes), "n_timepoints": n_timepoints, "n_cells_dropped_nonfinite": n_dropped}
+    blocks, record, missing = _read_gt_cp_blocks(ctx, gt_path, n_features)
+    if missing:
+        raise StaleCacheError(f"CP cache miss at {missing[0]} in {ctx.paths.cp_features()} ({len(missing)} missing)")
     return canonical_gt_matrix(blocks, n_features), record
 
 
@@ -375,6 +463,7 @@ def fit_cp_reference(
             **fit.record,
             "in_mask_fit": fit.in_mask_fit,
             "n_cells": int(fit.cells.shape[0]),
+            "gt_moments": gt_moments(fit.cells),
             "gt_matrix_sha256": gt_matrix_sha256(fit.cells),
         }
 
@@ -486,7 +575,8 @@ class DatasetCPSpace:
     std: np.ndarray
     fit_positions: frozenset[str]
     fit_n_cells: int
-    gt_matrix_sha256: str
+    gt_mean: np.ndarray
+    gt_std: np.ndarray
     cp_identity: dict[str, Any]
     criteria: dict[str, Any]
     floored_features: tuple[str, ...]
@@ -499,7 +589,8 @@ class DatasetCPSpace:
         It covers the CP recipe identity, the selection criteria, the feature
         names and keep-mask, THIS dataset's scaler (mean, std, floored features --
         the parent's for a lite set, plus the lite -> parent link), and this
-        dataset's recorded GT-matrix sha256 (a lite set's own). It deliberately
+        dataset's recorded GT cell count and raw moments (a lite set's own) --
+        not the exact GT-matrix sha256, so GPU jitter never moves it. It deliberately
         leaves out the whole-reference hash, so adding or refitting another dataset
         of the target does not invalidate this dataset's cached eval dirs (whose
         cache is all-or-nothing, pixel and mask metrics included), while another
@@ -523,7 +614,8 @@ class DatasetCPSpace:
                 "std": [float(v) for v in self.std],
                 "floored_features": list(self.floored_features),
             },
-            "gt_matrix_sha256": self.gt_matrix_sha256,
+            "gt_n_cells": self.fit_n_cells,
+            "gt_moments": {"mean": [float(v) for v in self.gt_mean], "std": [float(v) for v in self.gt_std]},
         }
         return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -572,15 +664,26 @@ class DatasetCPSpace:
                 "compute_feature_metrics=false for smoke runs."
             )
 
-    def check_gt_cells(self, blocks: dict[tuple[str, int], np.ndarray]) -> None:
-        """Refuse to score unless the eval's GT CP cells are exactly the reference's fit cells.
+    def gt_cells_problems(self, cells: np.ndarray) -> list[str]:
+        """Return why a canonical GT matrix fails the content gate (empty = it passes).
 
-        The content gate. It hashes the GT cells this run actually staged -- after
-        any GT CP recompute -- in the builder's canonical form
-        (:func:`canonical_gt_matrix`) and compares with the recorded GT-matrix
-        sha256. So a GT re-cache that leaves the cells identical (``--overwrite``,
-        ``force_recompute.gt_cp``/``all``) passes, and any value or count change
-        fails, however the cache manifest was merged.
+        Shared by the eval (:meth:`check_gt_cells`) and ``build_cp_reference.py
+        --verify``: exact cell count, then per-feature moments within tolerance.
+        """
+        if cells.shape[0] != self.fit_n_cells:
+            return [f"{cells.shape[0]} GT cells vs {self.fit_n_cells} in the fit"]
+        return gt_moments_mismatch(cells, self.gt_mean, self.gt_std, self.feature_names)
+
+    def check_gt_cells(self, blocks: dict[tuple[str, int], np.ndarray]) -> None:
+        """Refuse to score unless the eval's GT CP cells are the reference's fit cells.
+
+        The content gate, on the GT cells this run actually staged (after any GT CP
+        recompute): the GT-finite cell count must equal the fit's exactly, and every
+        CP feature's raw mean/std must match the recorded moments within
+        :data:`GT_MOMENT_RTOL` (:func:`gt_moments_mismatch`). So a GT re-cache that
+        reproduces the cells -- on CPU bit-exactly, on GPU up to ~1e-15 jitter
+        (``--overwrite``, ``force_recompute.gt_cp``/``all``) -- passes, while a
+        value or count change fails, however the cache manifest was merged.
 
         Parameters
         ----------
@@ -591,16 +694,14 @@ class DatasetCPSpace:
         Raises
         ------
         StaleCacheError
-            If the hash differs from the recorded one.
+            If the count differs or any feature's moments are out of tolerance.
         """
-        cells = canonical_gt_matrix(blocks, len(self.feature_names))
-        sha256 = gt_matrix_sha256(cells)
-        if sha256 != self.gt_matrix_sha256:
+        problems = self.gt_cells_problems(canonical_gt_matrix(blocks, len(self.feature_names)))
+        if problems:
             raise StaleCacheError(
-                f"{self.dataset}: the GT CP cells this eval scores ({cells.shape[0]} cells, sha256 {sha256[:12]}) "
-                f"differ from the CP reference fit ({self.fit_n_cells} cells, sha256 {self.gt_matrix_sha256[:12]}) "
-                f"in {self.reference_path}. The GT CP cache changed since the reference was built; rebuild it:\n"
-                f"  {_build_command(self.target_name)} --force"
+                f"{self.dataset}: the GT CP cells this eval scores differ from the CP reference fit in "
+                f"{self.reference_path}: {'; '.join(problems[:5])}. The GT CP cache changed since the reference "
+                f"was built; rebuild it:\n  {_build_command(self.target_name)} --force"
             )
 
 
@@ -650,7 +751,8 @@ class CPReference:
             std=np.asarray(scaler["std"], dtype=np.float64),
             fit_positions=frozenset(own["positions"]),
             fit_n_cells=int(own["n_cells"]),
-            gt_matrix_sha256=own["gt_matrix_sha256"],
+            gt_mean=np.asarray(own["gt_moments"]["mean"], dtype=np.float64),
+            gt_std=np.asarray(own["gt_moments"]["std"], dtype=np.float64),
             cp_identity=self.cp_identity,
             criteria=self.criteria,
             floored_features=tuple(scaler["floored_features"]),

@@ -14,11 +14,13 @@ views of the same GT cells.
 
 from __future__ import annotations
 
+import tempfile
 import zlib
 from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 from iohub.ngff import open_ome_zarr
 
 from dynacell.evaluation.cache import (
@@ -36,8 +38,12 @@ _DATASET = "a549-mantis-sec61b-mock"
 _POSITIONS = [f"A/1/{i}" for i in range(N_POSITIONS)]
 
 
-def _segmentation() -> np.ndarray:
-    """``(T, D, H, W)`` labels: a 4 x 4 grid of 6 x 6 x 6 cells plus one single-voxel cell."""
+def _segmentation(single_voxel: bool = True) -> np.ndarray:
+    """``(T, D, H, W)`` labels: a 4 x 4 grid of 6 x 6 x 6 cells, plus (optionally) one single-voxel cell.
+
+    The GPU variants leave the single voxel out: cuCIM's GPU ``regionprops_table``
+    raises a TypeError on a one-voxel region (a cuCIM limitation, not this code's).
+    """
     seg = np.zeros((T, D, H, W), dtype=np.int32)
     label = 1
     for row in range(4):
@@ -45,7 +51,8 @@ def _segmentation() -> np.ndarray:
             y, x = 1 + 8 * row, 1 + 8 * col
             seg[:, 2:8, y : y + 6, x : x + 6] = label
             label += 1
-    seg[:, 9, 0, 0] = label  # one voxel: skewness/kurtosis are NaN -> a non-finite GT row
+    if single_voxel:
+        seg[:, 9, 0, 0] = label  # one voxel: skewness/kurtosis are NaN -> a non-finite GT row
     return seg
 
 
@@ -90,14 +97,14 @@ def _stub_models() -> EvalModels:
 class Harness:
     """GT/seg plates, mask caches, a CP reference fit on the GT CP cache, and a runner."""
 
-    def __init__(self, root: Path, monkeypatch):
+    def __init__(self, root: Path, monkeypatch, single_voxel: bool = True):
         self.root = root
         self.pipeline = live_pipeline_module()
         from dynacell.evaluation import cp_reference, pipeline_cache
 
         self.cp_reference = cp_reference
         self.gt = [_gt_volume(seed=i) for i in range(N_POSITIONS)]
-        self.seg = _segmentation()
+        self.seg = _segmentation(single_voxel)
         _write_plate(root / "gt.zarr", "target", self.gt)
         _write_plate(root / "seg.zarr", "cell_segmentation", [self.seg] * N_POSITIONS, dtype=np.int32)
         make_mask_cache(root / "gt_cache", root / "gt.zarr", "target", side="gt")
@@ -140,11 +147,12 @@ class Harness:
         config.benchmark = {"dataset_ref": {"dataset": _DATASET, "target": "sec61b"}}
         return config
 
-    def run(self, name: str, pred: list[np.ndarray], **overrides) -> tuple[dict, object]:
+    def run(self, name: str, pred: list[np.ndarray], use_gpu: bool = False, **overrides) -> tuple[dict, object]:
         """Evaluate ``pred`` against the GT; return the dataset-level feature row and the config."""
         pred_path = self.root / f"{name}.zarr"
         _write_plate(pred_path, "prediction", pred)
         config = self.config(pred_path, self.root / name)
+        config.use_gpu = use_gpu
         make_mask_cache(Path(config.io.pred_cache_dir), pred_path, "prediction", side="pred")
         for key, value in overrides.items():
             config.force_recompute[key] = value
@@ -163,6 +171,54 @@ def test_identical_gt_recache_passes_the_content_gate(harness: Harness) -> None:
     """``force_recompute.gt_cp`` rewrites the GT CP cache (new built_at) with identical cells: scoring proceeds."""
     row, _ = harness.run("recache", [g.copy() for g in harness.gt], gt_cp=True)
     assert np.isfinite(row["Dataset_CP_KID"])
+
+
+def test_gpu_level_jitter_in_every_gt_cell_passes(harness: Harness) -> None:
+    """Every cached GT CP cell scaled by (1 + 1e-12) -- far above GPU regionprops jitter -- still scores."""
+    with open_features_group(cache_paths(harness.root / "gt_cache"), "cp", mode="a") as group:
+        for pos in _POSITIONS:
+            for t in range(T):
+                write_features_to_group(group, pos, t, np.asarray(group[f"{pos}/t{t}"]) * (1 + 1e-12))
+    row, _ = harness.run("jitter", [g.copy() for g in harness.gt])
+    assert np.isfinite(row["Dataset_CP_KID"])
+
+
+_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
+
+
+@_CUDA
+def test_gpu_recompute_of_the_gt_passes_the_content_gate(tmp_path: Path, monkeypatch) -> None:
+    """``force_recompute.gt_cp`` with ``use_gpu=True`` against the CPU-built reference scores (no exact-bit gate)."""
+    harness = Harness(tmp_path, monkeypatch, single_voxel=False)
+    row, _ = harness.run("gpu_recache", [g.copy() for g in harness.gt], use_gpu=True, gt_cp=True)
+    assert np.isfinite(row["Dataset_CP_KID"])
+
+
+@_CUDA
+def test_two_gpu_recomputes_of_one_block_pass_the_gate() -> None:
+    """One real-shaped block recomputed twice on the GPU: whatever the bit-level jitter, the gate passes."""
+    from dynacell.evaluation.cp_reference import DatasetFit, fit_cp_reference, write_cp_reference
+    from dynacell.evaluation.cp_reference import load_cp_reference as load
+    from dynacell.evaluation.metrics import active_cp_feature_names, cp_regionprops
+
+    image, seg = _gt_volume(seed=3)[0], _segmentation(single_voxel=False)[0]
+    runs = [
+        cp_regionprops(
+            image, seg, [1.0, 1.0, 1.0], norm={"p_lo": 1.0, "p_hi": 99.0}, glcm_cfg={"enabled": True}, use_gpu=True
+        )
+        for _ in range(2)
+    ]
+    finite = [r[np.isfinite(r).all(axis=1)] for r in runs]
+    names = active_cp_feature_names(True)
+    fit = DatasetFit(dataset="gpu", cells=finite[0], record={"positions": ["A/1/0"]}, in_mask_fit=True)
+    payload = fit_cp_reference([fit], target_name="er", feature_names=names, cp_identity={})
+    path = Path(tempfile.mkdtemp()) / "er.json"
+    write_cp_reference(payload, path)
+    load(path, target_name="er").for_dataset("gpu").check_gt_cells({("A/1/0", 0): finite[1]})
+    print(
+        f"GPU runs bit-identical: {np.array_equal(runs[0], runs[1], equal_nan=True)}, "
+        f"max |diff| {np.nanmax(np.abs(runs[0] - runs[1])):.3g}"
+    )
 
 
 def test_same_count_gt_value_change_is_refused(harness: Harness) -> None:

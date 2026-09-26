@@ -222,9 +222,13 @@ def test_changed_scaler_changes_the_hash() -> None:
 
 
 def test_hand_edited_gate_field_fails_the_load(tmp_path: Path) -> None:
-    """Editing a recorded GT-matrix hash without re-hashing is refused at load, not trusted by the gate."""
+    """Editing a recorded gate moment without re-hashing is refused at load; the exact GT sha is audit only."""
     payload = fit_cp_reference([_fit("set-a", _gt())], target_name="er", feature_names=_NAMES, cp_identity={})
-    payload["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64
+    audit = json.loads(json.dumps(payload))
+    audit["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64
+    (tmp_path / "er.json").write_text(json.dumps(audit))
+    load_cp_reference(tmp_path / "er.json", target_name="er")  # audit-only field: not hashed
+    payload["fit"]["datasets"]["set-a"]["gt_moments"]["mean"][0] += 1.0
     (tmp_path / "er.json").write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="does not match its recorded sha256"):
         load_cp_reference(tmp_path / "er.json", target_name="er")
@@ -290,17 +294,18 @@ def test_positions_must_match_the_fit(two_sets) -> None:
 
 
 def test_content_gate_passes_identical_cells_and_refuses_a_value_change(two_sets) -> None:
-    """The gate hashes the staged GT cells: an identical re-cache passes, a same-count value change raises."""
+    """Identical cells, or cells jittered at GPU level, pass; a same-count value change or a count change raises."""
     ref, _, cells = two_sets
     space = ref.for_dataset("set-a")
     gt = cells["set-a"]
     space.check_gt_cells(_blocks(gt.copy()))  # e.g. force_recompute.gt_cp reproducing the same cells
     space.check_gt_cells(dict(reversed(list(_blocks(gt).items()))))  # staging order does not matter
+    space.check_gt_cells(_blocks(gt * (1 + 1e-12)))  # far above GPU jitter (~1e-15), still passes
     changed = gt.copy()
-    changed[5, 2] += 1e-6  # same count, one value moved
+    changed[5, 2] += 1.0  # same count, one cell moved by ~1/3 sd
     with pytest.raises(StaleCacheError, match="(?s)differ from the CP reference fit .*--target er --force"):
         space.check_gt_cells(_blocks(changed))
-    with pytest.raises(StaleCacheError, match="299 cells"):
+    with pytest.raises(StaleCacheError, match="299 GT cells vs 300"):
         space.check_gt_cells(_blocks(gt[:-1]))
     lite = ref.for_dataset("set-a-lite")
     lite.check_gt_cells(_blocks(gt[:_LITE_ROWS]))
@@ -449,10 +454,11 @@ def test_binding_separates_datasets_and_tracks_the_gt_matrix(tmp_path: Path) -> 
         return {d: again.for_dataset(d).binding_sha256 for d in bindings}
 
     assert rebound(lambda p: p["fit"]["datasets"]["set-a"].update(cp_cache_built_at="t1")) == bindings
-    gt = rebound(lambda p: p["fit"]["datasets"]["set-a"].update(gt_matrix_sha256="0" * 64))
+    assert rebound(lambda p: p["fit"]["datasets"]["set-a"].update(gt_matrix_sha256="0" * 64)) == bindings
+    gt = rebound(lambda p: p["fit"]["datasets"]["set-a"]["gt_moments"]["mean"].__setitem__(0, 1.0))
     assert gt["set-a"] != bindings["set-a"]
     assert gt["set-b"] == bindings["set-b"] and gt["set-a-lite"] == bindings["set-a-lite"]
-    lite_gt = rebound(lambda p: p["fit"]["lite"]["set-a-lite"].update(gt_matrix_sha256="0" * 64))
+    lite_gt = rebound(lambda p: p["fit"]["lite"]["set-a-lite"]["gt_moments"]["std"].__setitem__(0, 1.0))
     assert lite_gt["set-a-lite"] != bindings["set-a-lite"] and lite_gt["set-a"] == bindings["set-a"]
 
 

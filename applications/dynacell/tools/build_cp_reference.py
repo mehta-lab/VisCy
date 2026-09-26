@@ -189,7 +189,12 @@ def build(target_name: str, leaves_root: Path) -> dict[str, Any]:
 
 
 def verify(target_name: str, path: Path) -> list[str]:
-    """Recompute every dataset's (lite included) GT-matrix sha256 from the caches and compare.
+    """Re-read every dataset's (lite included) GT CP cells from the caches and apply the content gate.
+
+    The same tolerance gate the eval applies (exact cell count, per-feature GT
+    moments within tolerance; ``DatasetCPSpace.gt_cells_problems``). An exact
+    GT-matrix sha256 difference alone is reported as information: GPU
+    recomputes move it by ~1e-15 without changing any number that matters.
 
     Parameters
     ----------
@@ -201,21 +206,18 @@ def verify(target_name: str, path: Path) -> list[str]:
     Returns
     -------
     list of str
-        One message per dataset whose recomputed sha256 or cell count differs from
-        the recorded one; empty when all match.
+        One message per dataset that fails the gate; empty when all pass.
     """
     ref = load_cp_reference(path, target_name=target_name)
     mismatches = []
     for name, record in sorted({**ref.fit["datasets"], **ref.fit["lite"]}.items()):
         fit = read_dataset_fit(target_name, (name, record["target"]), ref.feature_names, record["in_mask_fit"])
+        problems = ref.for_dataset(name).gt_cells_problems(fit.cells)
         sha256 = gt_matrix_sha256(fit.cells)
-        ok = sha256 == record["gt_matrix_sha256"] and fit.cells.shape[0] == record["n_cells"]
-        print(f"  {name}: {'OK' if ok else 'MISMATCH'} ({fit.cells.shape[0]} cells, sha256 {sha256[:12]})")
-        if not ok:
-            mismatches.append(
-                f"{name}: recorded {record['n_cells']} cells sha256 {record['gt_matrix_sha256'][:12]}, "
-                f"caches now give {fit.cells.shape[0]} cells sha256 {sha256[:12]}"
-            )
+        exact = "exact sha256 match" if sha256 == record["gt_matrix_sha256"] else "info: exact sha256 differs"
+        print(f"  {name}: {'OK' if not problems else 'MISMATCH'} ({fit.cells.shape[0]} cells; {exact})")
+        if problems:
+            mismatches.append(f"{name}: {'; '.join(problems[:5])}")
     return mismatches
 
 

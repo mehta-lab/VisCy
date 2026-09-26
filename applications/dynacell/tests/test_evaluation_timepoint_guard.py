@@ -228,7 +228,7 @@ def test_cache_is_invalid_once_the_gt_matrix_changed(tmp_path: Path) -> None:
     pipeline = live_pipeline_module()
     config, reference = _two_set_cache(pipeline, tmp_path)
     payload = json.loads(reference.read_text())
-    payload["fit"]["datasets"]["set-a"]["gt_matrix_sha256"] = "0" * 64
+    payload["fit"]["datasets"]["set-a"]["gt_moments"]["mean"][0] += 1.0
     payload["sha256"] = payload_sha256(payload)  # a legitimate rebuild re-hashes
     reference.write_text(json.dumps(payload))
     assert not pipeline._final_metrics_cache_valid(config)
