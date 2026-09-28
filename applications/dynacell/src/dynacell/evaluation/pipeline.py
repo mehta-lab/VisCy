@@ -560,7 +560,7 @@ def _calibrate_microssim(
     predictions = np.concatenate(all_predictions, axis=0)
     # cubic fits α with each GT slice's own data_range (max - min) and raises on
     # a constant one, e.g. the all-zero z-slices in A549 TOMM20_mock.zarr.
-    gt_range = targets.max(axis=(1, 2)) - targets.min(axis=(1, 2))
+    gt_range = np.ptp(targets, axis=(1, 2))
     degenerate = ~(np.isfinite(gt_range) & (gt_range > 0))
     if degenerate.any():
         print(
