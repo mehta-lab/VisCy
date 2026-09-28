@@ -170,9 +170,8 @@ def test_ccond_predict_reads_the_same_leg_fnet_segaux_mask() -> None:
             source["data_path"] == f"/hpc/projects/virtual_staining/training/dynacell/nucleus/{fnet[model]}/ipsc/{leg}"
         )
         assert source["channel"] == "Nuclei_prediction"
-        # 2D is val-tuned; 3D stays an unparseable placeholder until its FNet-3D store exists and is tuned.
-        expected = 0.30 if model == "celldiff_2d_ccond" else "PLACEHOLDER_val_tuned_threshold"
-        assert source["threshold"] == expected
+        # Both are val-tuned (2D on FNet-2D predictions, 3D on the GT target; see CCOND_THRESHOLDS).
+        assert source["threshold"] == {"celldiff_2d_ccond": 0.30, "celldiff_ccond": 0.40}[model]
         assert "fg_mask_key" not in cfg.get("data", {}).get("init_args", {})
         n += 1
     assert n == 8
