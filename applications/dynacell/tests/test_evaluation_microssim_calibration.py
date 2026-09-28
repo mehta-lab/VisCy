@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 import torch
 from iohub.ngff import open_ome_zarr
+from omegaconf import OmegaConf
 
 from ._eval_fixtures import build_eval_config, build_fixture, live_pipeline_module
 
@@ -101,3 +102,47 @@ def test_non_finite_prediction_fails_the_eval(tmp_path: Path, bad_value: float) 
 
     with pytest.raises(RuntimeError, match="RI factor failed to bracket"):
         live_pipeline_module().evaluate_predictions(config)
+
+
+def _write_plate(path: Path, channel_name: str, volumes: np.ndarray) -> None:
+    """Write one HCS position per leading entry of ``volumes`` (each ``(T, D, H, W)``)."""
+    with open_ome_zarr(path, mode="w", layout="hcs", channel_names=[channel_name], version="0.5") as plate:
+        for i, volume in enumerate(volumes):
+            plate.create_position("A", "1", str(i)).create_image("0", volume[:, None])
+
+
+def test_healthy_leaf_calibrates_and_scores_finite(tmp_path: Path) -> None:
+    """Real calibration on healthy GT returns a fitted sim, and scoring with it gives finite MicroMS3IM.
+
+    MS-SSIM needs spatial dims >= 176, so this uses its own 192x192 plates rather
+    than the 32x32 cache-only fixture.
+    """
+    rng = np.random.default_rng(0)
+    gt = rng.gamma(2.0, 100.0, size=(2, 1, 2, 192, 192)).astype(np.float32)
+    pred = (0.5 * gt + 20.0 + rng.normal(0.0, 10.0, size=gt.shape)).astype(np.float32)
+    _write_plate(tmp_path / "gt.zarr", "target", gt)
+    _write_plate(tmp_path / "pred.zarr", "prediction", pred)
+    io_config = OmegaConf.create({"pred_channel_name": "prediction", "gt_channel_name": "target"})
+    pipeline = live_pipeline_module()
+
+    with (
+        open_ome_zarr(tmp_path / "pred.zarr", mode="r") as pred_plate,
+        open_ome_zarr(tmp_path / "gt.zarr", mode="r") as gt_plate,
+    ):
+        sim, _ = pipeline._calibrate_microssim(
+            list(pred_plate.positions()),
+            list(gt_plate.positions()),
+            io_config,
+            use_gpu=False,
+            max_pairs=12,
+            seed=42,
+            cache_reads=False,
+        )
+
+    assert sim is not None
+    scores = pipeline.score_microssim(
+        [{"target": gt[i, 0], "predict": pred[i, 0]} for i in range(len(gt))], sim, use_gpu=False
+    )
+    values = [row["MicroMS3IM"] for row in scores]
+    assert len(values) == len(gt)
+    assert all(math.isfinite(v) and 0.0 < v <= 1.0 for v in values)
