@@ -39,6 +39,23 @@ waves:
   wave1c:
     nucleus: [pix2pix2d_unetvit_last]
     membrane: [pix2pix2d_unetvit_last]
+  # Stage 1/2, third batch of finished 2D predicts (2026-09-27): CELL-Diff-2D segaux/seed1/cjoint,
+  # UNeXt2-2D nucleus segaux/seed1, the first segauxself arms, the jointsteps probe and the l1
+  # probe's A549 legs (its iPSC leg is in wave1b). Generate with --wave wave1d.
+  wave1d:
+    nucleus:
+      - fcmae_vscyto2d_scratch_segaux
+      - celldiff_2d_segaux
+      - celldiff_2d_cjoint
+      - fnet2d_segauxself
+      - celldiff_2d_segauxself
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
+      - {model: celldiff_2d_seed1, leaves: [ipsc]}
+    membrane:
+      - celldiff_2d_segaux
+      - {model: celldiff_2d_seed1, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_jointsteps, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_l1, leaves: [a549__mock, a549__denv, a549__zikv]}
   # Stage 1, second batch of finished predicts (2026-09-25): FNet-2D, UNeXt2-2D membrane
   # (segaux, seed1, l1/safecrop probes) and pix2pix2d membrane segaux. Generate with --wave wave1b.
   wave1b:
@@ -62,18 +79,13 @@ waves:
   wave1:
     nucleus:
       - fnet3d_paper_segaux
-      - fcmae_vscyto2d_scratch_segaux
       - fcmae_vscyto3d_scratch_segaux
       - pix2pix3d_unetvit_segaux
-      - celldiff_2d_segaux
       - celldiff_segaux_iterative
       - fcmae_vscyto3d_scratch_v2
       - pix2pix3d_unetvit_v2
       - {model: fnet3d_paper_seed1, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
-      - {model: celldiff_2d_seed1, leaves: [ipsc]}
       # Stage 1b (nucleus only for now): mask in the generative process.
-      - celldiff_2d_cjoint
       - celldiff_2d_ccond
       - celldiff_cjoint_iterative
       - celldiff_ccond_iterative
@@ -81,9 +93,6 @@ waves:
       - fnet3d_paper_segaux
       - fcmae_vscyto3d_scratch_segaux
       - pix2pix3d_unetvit_segaux
-      - celldiff_2d_segaux
       - celldiff_segaux_iterative
       - fcmae_vscyto3d_scratch_v2
       - pix2pix3d_unetvit_v2
-      - {model: celldiff_2d_seed1, leaves: [ipsc]}
-      - {model: fcmae_vscyto2d_scratch_jointsteps, leaves: [ipsc]}
