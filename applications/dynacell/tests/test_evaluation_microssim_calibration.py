@@ -90,3 +90,14 @@ def test_saturated_gt_scores_nan(tmp_path: Path) -> None:
 
     assert pixel_rows
     assert all(math.isnan(row["MicroMS3IM"]) for row in pixel_rows)
+
+
+@pytest.mark.parametrize("bad_value", [np.nan, np.inf], ids=["nan", "inf"])
+def test_non_finite_prediction_fails_the_eval(tmp_path: Path, bad_value: float) -> None:
+    """One non-finite prediction pixel fails the eval: cubic's α bracket raises and nothing catches it."""
+    config, _ = _config(tmp_path)
+    with open_ome_zarr(config.io.pred_path, mode="r+") as plate:
+        plate["A/1/0"].data[0, 0, 0, 3, 3] = bad_value
+
+    with pytest.raises(RuntimeError, match="RI factor failed to bracket"):
+        live_pipeline_module().evaluate_predictions(config)
