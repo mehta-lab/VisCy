@@ -29,7 +29,7 @@ model:
       init_args:
         data_path: /hpc/projects/virtual_staining/training/dynacell/nucleus/fnet2d_segaux/ipsc/ipsc/prediction.zarr
         channel: Nuclei_prediction
-        threshold: 0.3
+        threshold: otsu
 data:
   init_args:
     normalizations:

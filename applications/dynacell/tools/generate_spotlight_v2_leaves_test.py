@@ -170,8 +170,8 @@ def test_ccond_predict_reads_the_same_leg_fnet_segaux_mask() -> None:
             source["data_path"] == f"/hpc/projects/virtual_staining/training/dynacell/nucleus/{fnet[model]}/ipsc/{leg}"
         )
         assert source["channel"] == "Nuclei_prediction"
-        # Both are val-tuned (2D on FNet-2D predictions, 3D on the GT target; see CCOND_THRESHOLDS).
-        assert source["threshold"] == {"celldiff_2d_ccond": 0.30, "celldiff_ccond": 0.40}[model]
+        # Per-window Otsu, which transfers across intensity scales (see CCOND_THRESHOLDS).
+        assert source["threshold"] == "otsu"
         assert "fg_mask_key" not in cfg.get("data", {}).get("init_args", {})
         n += 1
     assert n == 8

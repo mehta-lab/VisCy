@@ -142,7 +142,12 @@ CCOND_THRESHOLD_PLACEHOLDER = "PLACEHOLDER_val_tuned_threshold"
 # 0.40 from the GT fallback -- z-scored GT target >= t vs fg_mask, 20 val FOVs x 44
 # planes, Dice 0.699, 0.30-0.50 within 0.004 (ccond_threshold_3d/); a CPU forward of
 # FNet-3D over val FOVs took ~57 min/FOV, so the prediction-based optimum is unmeasured.
-CCOND_THRESHOLDS: dict[str, float | str] = {"celldiff_2d": 0.30, "celldiff": 0.40}
+# SUPERSEDED by "otsu" (2026-09-28): the fixed values do not transfer to A549, where FNet
+# predictions sit on another intensity scale and t marked 96-98% of pixels foreground
+# (FNet-2D baseline A549 p50 +3.0; FNet-3D segaux shifts A549 to 97.6% >= 0.40). Per-window
+# Otsu is label-free and scale-free: iPSC val Dice 0.769 (vs 0.774 fixed); A549 fg fraction
+# 7-9% (2D) / 26-35% (3D) against 12.5% [4.8-18.6%] for the A549 training targets' own masks.
+CCOND_THRESHOLDS: dict[str, float | str] = {"celldiff_2d": "otsu", "celldiff": "otsu"}
 SAFE_CROP_COVERAGE = 0.9
 _UNEXT2_2D_DATA_OVERLAY = BENCHMARKS / "_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml"
 
