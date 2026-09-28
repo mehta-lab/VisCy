@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 from iohub.ngff import open_ome_zarr
@@ -65,6 +66,25 @@ def test_constant_gt_slice_scores_nan(tmp_path: Path) -> None:
     config, gt_path = _config(tmp_path)
     with open_ome_zarr(gt_path, mode="r+") as plate:
         plate["A/1/0"].data[0, 0, 0] = 0.0
+
+    pixel_rows, _, _ = live_pipeline_module().evaluate_predictions(config)
+
+    assert pixel_rows
+    assert all(math.isnan(row["MicroMS3IM"]) for row in pixel_rows)
+
+
+def test_saturated_gt_scores_nan(tmp_path: Path) -> None:
+    """A GT pool whose background percentile equals its max (max_val == 0) yields NaN, not a crash.
+
+    Every slice keeps a raw range > 0 (five zero pixels in a field of 10.0), but
+    cubic normalizes by ``max - percentile_3 == 0``, so its per-slice data range is NaN.
+    """
+    config, gt_path = _config(tmp_path)
+    with open_ome_zarr(gt_path, mode="r+") as plate:
+        for _, pos in plate.positions():
+            data = np.full(pos.data.shape, 10.0, dtype=np.float32)
+            data[..., 0, :5] = 0.0
+            pos.data[:] = data
 
     pixel_rows, _, _ = live_pipeline_module().evaluate_predictions(config)
 

@@ -13,15 +13,18 @@ try:
     from cubic.metrics import frc_resolution, fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
+    from cubic.metrics.microssim import compute_norm_parameters, normalize_min_max
     from cubic.scipy import ndimage as _cubic_ndimage
     from cubic.skimage import filters as _cubic_filters
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
+    compute_norm_parameters = None  # type: ignore[assignment]
     cubic_ssim = None  # type: ignore[assignment]
     frc_resolution = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
     glcm_features = None  # type: ignore[assignment]
+    normalize_min_max = None  # type: ignore[assignment]
     nrmse = None  # type: ignore[assignment]
     pcc = None  # type: ignore[assignment]
     psnr = None  # type: ignore[assignment]
@@ -280,26 +283,36 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
     -------
     MicroMS3IM or None
         Fitted instance — ``sim.score(target_slice, pred_slice)`` may
-        then be called without further fitting. ``None`` when a target
-        slice is constant or non-finite, where α is undefined.
+        then be called without further fitting. ``None`` when a
+        normalized target slice has a data range that is not finite and
+        positive, where α is undefined.
     """
-    # cubic fits α with each GT slice's own data_range (max - min) and raises on
-    # a constant one, e.g. the all-zero z-slices in A549 TOMM20_mock.zarr.
-    gt_range = np.ptp(targets, axis=(1, 2))
-    degenerate = ~(np.isfinite(gt_range) & (gt_range > 0))
-    if degenerate.any():
-        print(
-            f"[microssim] {int(degenerate.sum())} of {len(gt_range)} calibration GT slices are "
-            "constant or non-finite; MicroMS3IM will be NaN for all FOVs."
-        )
-        return None
     MicroMS3IM = _require_microms3im()
     # Convert to cupy when GPU is requested — cubic.skimage dispatches to
     # cucim (GPU Gaussian filters) when inputs carry a .device attribute.
     to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
     targets = to_xp(targets)
     predictions = to_xp(predictions)
-    sim = MicroMS3IM()
+    # cubic fits α with each normalized GT slice's own data_range (max - min) and
+    # raises unless it is finite and positive: a constant slice (the all-zero
+    # z-slices in A549 TOMM20_mock.zarr) or a pool whose background percentile
+    # equals its max (max_val == 0). The normalization is monotone, so normalizing
+    # each slice's extrema with cubic's own parameters reproduces that range; the
+    # same parameters are then handed to the fit.
+    offset_gt, offset_pred, max_val = compute_norm_parameters(targets, predictions)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        gt_range = asnumpy(
+            normalize_min_max(targets.max(axis=(1, 2)), offset_gt, max_val)
+            - normalize_min_max(targets.min(axis=(1, 2)), offset_gt, max_val)
+        )
+    degenerate = ~(np.isfinite(gt_range) & (gt_range > 0))
+    if degenerate.any():
+        print(
+            f"[microssim] {int(degenerate.sum())} of {len(gt_range)} calibration GT slices have a "
+            "normalized data range that is not finite and positive; MicroMS3IM will be NaN for all FOVs."
+        )
+        return None
+    sim = MicroMS3IM(offset_gt=offset_gt, offset_pred=offset_pred, max_val=max_val)
     sim.fit(targets, predictions)
     return sim
 
