@@ -209,11 +209,13 @@ class Arm:
 
 ARMS: tuple[Arm, ...] = (
     *(Arm(m, "segaux", ORGANELLES, a549=True) for m in BASELINES),
+    # Seed replicates predict the A549 legs too: most arm effects are A549-transfer effects,
+    # and without an A549 seed spread they have no noise floor (readout 2026-09-28).
     *(
-        Arm(m, "seed1", ORGANELLES, a549=False)
+        Arm(m, "seed1", ORGANELLES, a549=True)
         for m in ("fnet2d", "fcmae_vscyto2d_scratch", "pix2pix2d_unetvit", "celldiff_2d")
     ),
-    Arm("fnet3d_paper", "seed1", ("nucleus",), a549=False),
+    Arm("fnet3d_paper", "seed1", ("nucleus",), a549=True),
     Arm("fcmae_vscyto3d_scratch", "v2", ORGANELLES, a549=True),
     Arm("pix2pix3d_unetvit", "v2", ORGANELLES, a549=True),
     *(Arm("fcmae_vscyto2d_scratch", s, ("membrane",), a549=False) for s in ("jointsteps", "safecrop")),
@@ -221,7 +223,7 @@ ARMS: tuple[Arm, ...] = (
     Arm("fcmae_vscyto2d_scratch", "l1", ("membrane",), a549=True),
     # The comparison rebuilt on the recipe that trains: the l1 probe is the baseline for these.
     Arm("fcmae_vscyto2d_scratch", "l1segaux", ("membrane",), a549=True),
-    Arm("fcmae_vscyto2d_scratch", "l1seed1", ("membrane",), a549=False),
+    Arm("fcmae_vscyto2d_scratch", "l1seed1", ("membrane",), a549=True),
     # Stage 1b, nucleus first: segmentation inside the generative process.
     *(Arm(m, s, ("nucleus",), a549=True) for s in ("cjoint", "ccond") for m in ("celldiff_2d", "celldiff")),
     # Stage 2 #1: the segaux arm with a self-consistent Dice reference (2D families first).
