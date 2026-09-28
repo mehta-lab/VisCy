@@ -39,6 +39,31 @@ waves:
   wave1c:
     nucleus: [pix2pix2d_unetvit_last]
     membrane: [pix2pix2d_unetvit_last]
+  # Stage 1/2 batch of finished predicts (2026-09-28): 2D segauxself + l1 arms, FNet-3D,
+  # pix2pix3d and CELL-Diff-3D legs that completed, and the CELL-Diff-2D C-cond arm (t=0.30).
+  # Generate with --wave wave2a.
+  wave2a:
+    nucleus:
+      - celldiff_2d_ccond
+      - {model: celldiff_cjoint_iterative, leaves: [ipsc]}
+      - {model: celldiff_segaux_iterative, leaves: [ipsc]}
+      - fcmae_vscyto2d_scratch_segauxself
+      - {model: fnet3d_paper_seed1, leaves: [ipsc]}
+      - fnet3d_paper_segaux
+      - pix2pix2d_unetvit_segauxself
+      - {model: pix2pix3d_unetvit_segaux, leaves: [ipsc, a549__mock, a549__denv]}
+      - {model: pix2pix3d_unetvit_v2, leaves: [ipsc, a549__zikv]}
+    membrane:
+      - {model: celldiff_2d_segauxself, leaves: [ipsc]}
+      - {model: celldiff_segaux_iterative, leaves: [ipsc]}
+      - {model: fcmae_vscyto2d_scratch_l1seed1, leaves: [ipsc]}
+      - fcmae_vscyto2d_scratch_l1segaux
+      - fcmae_vscyto2d_scratch_segauxself
+      - fnet2d_segauxself
+      - fnet3d_paper_segaux
+      - pix2pix2d_unetvit_segauxself
+      - pix2pix3d_unetvit_segaux
+      - pix2pix3d_unetvit_v2
   # Stage 1/2, third batch of finished 2D predicts (2026-09-27): CELL-Diff-2D segaux/seed1/cjoint,
   # UNeXt2-2D nucleus segaux/seed1, the first segauxself arms, the jointsteps probe and the l1
   # probe's A549 legs (its iPSC leg is in wave1b). Generate with --wave wave1d.
@@ -78,21 +103,15 @@ waves:
   # .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
-      - fnet3d_paper_segaux
       - fcmae_vscyto3d_scratch_segaux
-      - pix2pix3d_unetvit_segaux
-      - celldiff_segaux_iterative
+      - {model: pix2pix3d_unetvit_segaux, leaves: [a549__zikv]}
+      - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - fcmae_vscyto3d_scratch_v2
-      - pix2pix3d_unetvit_v2
-      - {model: fnet3d_paper_seed1, leaves: [ipsc]}
+      - {model: pix2pix3d_unetvit_v2, leaves: [a549__mock, a549__denv]}
       # Stage 1b (nucleus only for now): mask in the generative process.
-      - celldiff_2d_ccond
-      - celldiff_cjoint_iterative
+      - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - celldiff_ccond_iterative
     membrane:
-      - fnet3d_paper_segaux
       - fcmae_vscyto3d_scratch_segaux
-      - pix2pix3d_unetvit_segaux
-      - celldiff_segaux_iterative
+      - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - fcmae_vscyto3d_scratch_v2
-      - pix2pix3d_unetvit_v2
