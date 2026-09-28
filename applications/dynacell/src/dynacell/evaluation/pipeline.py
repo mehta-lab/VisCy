@@ -1265,10 +1265,11 @@ def _worker_run_fov(
     file descriptors close before the worker accepts its next FOV. Models
     + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
 
-    ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
-    ``compute_microssim=false``); shipped per submission rather than via
-    worker state because the parent fits it after the position list is
-    finalized and before any worker pool spawns. ``cp_space`` is shipped the
+    ``microssim_sim`` is the leaf-level fitted MicroMS3IM, or ``None`` when
+    ``compute_microssim=false``, when a calibration GT slice is degenerate,
+    or when the leaf has no positions or (FOV, t) pairs to fit. It is shipped
+    per submission rather than via worker state because the parent fits it
+    after the position list is finalized and before any worker pool spawns. ``cp_space`` is shipped the
     same way so every worker scores CP in the parent's verified reference.
     """
     _worker_setup(config)
