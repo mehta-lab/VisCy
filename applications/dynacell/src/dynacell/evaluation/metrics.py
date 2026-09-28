@@ -278,10 +278,21 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
 
     Returns
     -------
-    MicroMS3IM
+    MicroMS3IM or None
         Fitted instance — ``sim.score(target_slice, pred_slice)`` may
-        then be called without further fitting.
+        then be called without further fitting. ``None`` when a target
+        slice is constant or non-finite, where α is undefined.
     """
+    # cubic fits α with each GT slice's own data_range (max - min) and raises on
+    # a constant one, e.g. the all-zero z-slices in A549 TOMM20_mock.zarr.
+    gt_range = np.ptp(targets, axis=(1, 2))
+    degenerate = ~(np.isfinite(gt_range) & (gt_range > 0))
+    if degenerate.any():
+        print(
+            f"[microssim] {int(degenerate.sum())} of {len(gt_range)} calibration GT slices are "
+            "constant or non-finite; MicroMS3IM will be NaN for all FOVs."
+        )
+        return None
     MicroMS3IM = _require_microms3im()
     # Convert to cupy when GPU is requested — cubic.skimage dispatches to
     # cucim (GPU Gaussian filters) when inputs carry a .device attribute.

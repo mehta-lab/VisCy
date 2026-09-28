@@ -558,16 +558,6 @@ def _calibrate_microssim(
 
     targets = np.concatenate(all_targets, axis=0)
     predictions = np.concatenate(all_predictions, axis=0)
-    # cubic fits α with each GT slice's own data_range (max - min) and raises on
-    # a constant one, e.g. the all-zero z-slices in A549 TOMM20_mock.zarr.
-    gt_range = np.ptp(targets, axis=(1, 2))
-    degenerate = ~(np.isfinite(gt_range) & (gt_range > 0))
-    if degenerate.any():
-        print(
-            f"[microssim] {int(degenerate.sum())} of {len(gt_range)} calibration GT slices are "
-            "constant or non-finite; MicroMS3IM will be NaN for all FOVs."
-        )
-        return None, read_cache
     sim = fit_microssim(targets, predictions, use_gpu=use_gpu)
     return sim, read_cache
 
