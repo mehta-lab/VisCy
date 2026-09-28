@@ -956,6 +956,57 @@ def test_cond_predict_reads_the_mask_source(tmp_path, tiny_hcs_zarr, monkeypatch
         module.predict_step({"source": torch.randn(1, 1, 8, 32, 32)}, 0)
 
 
+def _mask_source_store(path: Path, images: list[np.ndarray]) -> Path:
+    """Write one ``(Z, Y, X)`` image per position of a single-channel HCS store."""
+    with open_ome_zarr(path, layout="hcs", mode="w", channel_names=["Nuclei_prediction"]) as plate:
+        for i, image in enumerate(images):
+            plate.create_position("A", "1", str(i)).create_image("0", image[None, None].astype(np.float32))
+    return path
+
+
+def _bimodal_image() -> tuple[np.ndarray, np.ndarray]:
+    """A (2, 32, 32) noisy dim background with a bright square, and the square's mask."""
+    rng = np.random.default_rng(0)
+    bright = np.zeros((2, 32, 32), dtype=bool)
+    bright[:, 8:20, 10:26] = True
+    image = np.where(bright, 1.0, 0.0) + 0.1 * rng.standard_normal(bright.shape)
+    return image, bright
+
+
+def test_cond_mask_source_otsu_adapts_to_the_intensity_scale(tmp_path):
+    """Per-window Otsu recovers the bright region on the raw and on an affinely
+    rescaled store; the fixed float threshold tuned on the raw store does not
+    survive the rescale."""
+    image, bright = _bimodal_image()
+    store = _mask_source_store(tmp_path / "mask.zarr", [image, 10.0 * image + 5.0])
+    index = (["/A/1/0/0", "/A/1/1/0"], [0, 0], [0, 0])
+    otsu = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold="otsu").read(index, (2, 32, 32))
+    fixed = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold=0.5).read(index, (2, 32, 32))
+    expected = torch.from_numpy(bright).float()
+    assert otsu.shape == (2, 1, 2, 32, 32)
+    assert torch.equal(otsu[0, 0], expected)
+    assert torch.equal(otsu[1, 0], expected)
+    # The float path is unchanged: right on the raw store, all-foreground after the shift.
+    assert torch.equal(fixed[0, 0], torch.from_numpy(image >= 0.5).float())
+    assert torch.equal(fixed[0, 0], expected)
+    assert fixed[1, 0].mean() == 1.0
+
+
+@pytest.mark.filterwarnings("error")
+def test_cond_mask_source_otsu_constant_window_is_background(tmp_path):
+    """A constant window has no Otsu split: it yields an all-background mask, silently."""
+    store = _mask_source_store(tmp_path / "mask.zarr", [np.full((2, 32, 32), 3.0)])
+    source = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold="otsu")
+    mask = source.read((["/A/1/0/0"], [0], [0]), (2, 32, 32))
+    assert mask.shape == (1, 1, 2, 32, 32)
+    assert mask.sum() == 0
+
+
+def test_cond_mask_source_rejects_unknown_threshold_string(tmp_path):
+    with pytest.raises(ValueError, match="float or 'otsu'"):
+        CondMaskSource(data_path=str(tmp_path), channel="Nuclei_prediction", threshold="triangle")
+
+
 # ---- Predict integration tests (CPU) ----
 
 

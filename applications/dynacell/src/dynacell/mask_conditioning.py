@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from iohub.ngff import open_ome_zarr
+from skimage.filters import threshold_otsu
 from torch import Tensor
 
 __all__ = ["CondMaskSource", "MaskCorruption", "binarize_mask", "encode_mask"]
@@ -146,11 +147,22 @@ class CondMaskSource:
         ``_segaux`` ``prediction.zarr``.
     channel : str
         Channel to threshold, e.g. ``"Nuclei_prediction"``.
-    threshold : float
-        Voxels ``>= threshold`` are foreground, in the channel's own units.
+    threshold : float or str
+        A float marks voxels ``>= threshold`` as foreground, in the channel's
+        own units. ``"otsu"`` instead thresholds each predict window (each
+        sample of a batch) at the Otsu threshold of its own values, so the
+        mask adapts to a source whose intensity scale shifts between
+        datasets; a constant window gives an all-background mask.
+
+    Raises
+    ------
+    ValueError
+        If ``threshold`` is a string other than ``"otsu"``.
     """
 
-    def __init__(self, data_path: str, channel: str, threshold: float) -> None:
+    def __init__(self, data_path: str, channel: str, threshold: float | str) -> None:
+        if isinstance(threshold, str) and threshold != "otsu":
+            raise ValueError(f"threshold must be a float or 'otsu', got {threshold!r}")
         self.data_path = Path(data_path)
         self.channel = channel
         self.threshold = threshold
@@ -196,5 +208,12 @@ class CondMaskSource:
                     f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} holds NaN at t={int(t)}, "
                     f"z={int(z)}; the mask source is incomplete."
                 )
-            windows.append(torch.from_numpy(window >= self.threshold).float())
+            windows.append(torch.from_numpy(self._binarize(window)).float())
         return torch.stack(windows).unsqueeze(1)
+
+    def _binarize(self, window: np.ndarray) -> np.ndarray:
+        if self.threshold != "otsu":
+            return window >= self.threshold
+        if window.min() == window.max():
+            return np.zeros(window.shape, dtype=bool)
+        return window >= threshold_otsu(window.ravel())
