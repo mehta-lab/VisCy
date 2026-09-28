@@ -1048,10 +1048,11 @@ def _process_one_fov(
 
     if config.compute_microssim:
         if microssim_sim is None:
-            # Leaf-level calibration found a constant GT slice — the parent
-            # already logged it. Emit NaN per timepoint so the column exists
-            # and the rest of the pixel / mask / feature metrics still get
-            # computed.
+            # Leaf-level calibration returned no sim: a degenerate GT slice
+            # (logged by fit_microssim) or no (FOV, t) pairs to fit (then T is
+            # 0 here and nothing is emitted). Emit NaN per timepoint so the
+            # column exists and the rest of the pixel / mask / feature metrics
+            # still get computed.
             for i in range(T):
                 fov_pixel_metrics[i]["MicroMS3IM"] = float("nan")
         else:
