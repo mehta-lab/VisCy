@@ -39,6 +39,11 @@ waves:
   wave1c:
     nucleus: [pix2pix2d_unetvit_last]
     membrane: [pix2pix2d_unetvit_last]
+  # pix2pix3d nucleus legs that finished after wave2a (2026-09-28). Generate with --wave wave2b.
+  wave2b:
+    nucleus:
+      - {model: pix2pix3d_unetvit_segaux, leaves: [a549__zikv]}
+      - {model: pix2pix3d_unetvit_v2, leaves: [a549__mock, a549__denv]}
   # Stage 1/2 batch of finished predicts (2026-09-28): 2D segauxself + l1 arms, FNet-3D,
   # pix2pix3d and CELL-Diff-3D legs that completed, and the CELL-Diff-2D C-cond arm (t=0.30).
   # Generate with --wave wave2a.
@@ -104,10 +109,8 @@ waves:
   wave1:
     nucleus:
       - fcmae_vscyto3d_scratch_segaux
-      - {model: pix2pix3d_unetvit_segaux, leaves: [a549__zikv]}
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - fcmae_vscyto3d_scratch_v2
-      - {model: pix2pix3d_unetvit_v2, leaves: [a549__mock, a549__denv]}
       # Stage 1b (nucleus only for now): mask in the generative process.
       - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - celldiff_ccond_iterative
