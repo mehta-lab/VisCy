@@ -69,6 +69,41 @@ def _configure_wandb_logger(
         init_args["group"] = base_name
 
 
+# Trainer-level ckpt_path values that Lightning resolves itself, not file paths.
+_LIGHTNING_CKPT_PATH_KEYWORDS = ("best", "last", "hpc")
+
+
+def _check_ckpt_paths_exist(config: Namespace, subcommand: str | None) -> None:
+    """Fail fast when a configured checkpoint file does not exist.
+
+    Checks the subcommand-level ``ckpt_path`` (e.g. ``viscy predict
+    --ckpt_path``) and ``model.init_args.ckpt_path``. Lightning's own
+    ``_parse_ckpt_path`` silently skips a missing file, so without this
+    check the error only surfaces after the trainer and data are set up.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a configured ``ckpt_path`` is not an existing file.
+    """
+    root = config[subcommand] if subcommand is not None else config
+    if not isinstance(root, Namespace):
+        return
+    ckpt_path = root.get("ckpt_path")
+    if (
+        ckpt_path
+        and ckpt_path not in _LIGHTNING_CKPT_PATH_KEYWORDS
+        and not str(ckpt_path).startswith("registry")
+        and not Path(ckpt_path).is_file()
+    ):
+        raise FileNotFoundError(f"ckpt_path does not exist or is not a file: {ckpt_path}")
+    model = root.get("model")
+    init_args = model.get("init_args") if isinstance(model, Namespace) else None
+    model_ckpt_path = init_args.get("ckpt_path") if isinstance(init_args, Namespace) else None
+    if model_ckpt_path and not Path(model_ckpt_path).is_file():
+        raise FileNotFoundError(f"model.init_args.ckpt_path does not exist or is not a file: {model_ckpt_path}")
+
+
 class VisCyCLI(LightningCLI):
     """Extending lightning CLI arguments and defaults."""
 
@@ -100,6 +135,7 @@ class VisCyCLI(LightningCLI):
         # parser defaults (important for training resumption — lr, architecture,
         # model_config, etc. must come from the checkpoint, not defaults).
         subcommand = self.config.get("subcommand")
+        _check_ckpt_paths_exist(self.config, subcommand)
         saved_init_args: dict = {}
         if subcommand and subcommand != "fit":
             sc = self.config.get(subcommand)

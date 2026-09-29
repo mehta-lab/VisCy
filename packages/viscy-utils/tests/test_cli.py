@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 from jsonargparse import Namespace
 
-from viscy_utils.cli import _configure_wandb_logger
+from viscy_utils.cli import _check_ckpt_paths_exist, _configure_wandb_logger
 
 
 @pytest.fixture
@@ -121,6 +121,60 @@ def test_configure_wandb_logger_does_not_double_prefix(monkeypatch):
 
     init_args = config["fit"]["trainer"]["logger"]["init_args"]
     assert init_args["name"] == "20260401-143045_FNet3D_iPSC_SEC61B"
+
+
+# ---------------------------------------------------------------------------
+# _check_ckpt_paths_exist — fail fast on missing checkpoints
+# ---------------------------------------------------------------------------
+
+
+def _make_predict_config(ckpt_path=None, model_ckpt_path=None) -> Namespace:
+    return Namespace(
+        predict=Namespace(
+            ckpt_path=ckpt_path,
+            model=Namespace(init_args=Namespace(ckpt_path=model_ckpt_path)),
+        )
+    )
+
+
+def test_check_ckpt_paths_exist_accepts_existing_files(tmp_path):
+    ckpt = tmp_path / "model.ckpt"
+    ckpt.touch()
+    _check_ckpt_paths_exist(_make_predict_config(ckpt, ckpt), "predict")
+
+
+def test_check_ckpt_paths_exist_accepts_unset():
+    _check_ckpt_paths_exist(_make_predict_config(), "predict")
+
+
+@pytest.mark.parametrize("keyword", ["best", "last", "hpc", "registry:model:latest"])
+def test_check_ckpt_paths_exist_accepts_lightning_keywords(keyword):
+    _check_ckpt_paths_exist(_make_predict_config(ckpt_path=keyword), "predict")
+
+
+def test_check_ckpt_paths_exist_raises_on_missing_trainer_ckpt(tmp_path):
+    missing = tmp_path / "missing.ckpt"
+    with pytest.raises(FileNotFoundError, match="missing.ckpt"):
+        _check_ckpt_paths_exist(_make_predict_config(ckpt_path=missing), "predict")
+
+
+def test_check_ckpt_paths_exist_raises_on_missing_model_ckpt(tmp_path):
+    missing = tmp_path / "missing.ckpt"
+    with pytest.raises(FileNotFoundError, match="model.init_args.ckpt_path"):
+        _check_ckpt_paths_exist(_make_predict_config(model_ckpt_path=missing), "predict")
+
+
+def test_cli_predict_missing_ckpt_fails_early(run_viscy, tmp_path):
+    missing = tmp_path / "missing.ckpt"
+    result = run_viscy(
+        "predict",
+        "--model=lightning.pytorch.demos.boring_classes.BoringModel",
+        "--data=lightning.pytorch.demos.boring_classes.BoringDataModule",
+        f"--ckpt_path={missing}",
+    )
+    assert result.returncode != 0
+    assert "ckpt_path does not exist or is not a file" in result.stderr
+    assert str(missing) in result.stderr
 
 
 # ---------------------------------------------------------------------------
