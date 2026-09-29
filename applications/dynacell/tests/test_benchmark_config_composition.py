@@ -1129,21 +1129,25 @@ def test_predict_leaf_wall_limit_matches_its_family(leaf: Path) -> None:
 # all eight sit on hardware_4gpu_long.yml (7 days) instead. Every other 4-GPU
 # leaf finishes inside 4 days; a 7-day 4-GPU H100/H200 allocation backfills far
 # worse, so this list should grow only on evidence.
-_LONG_WALL_TRAIN_LEAVES = frozenset(
-    f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
-    for organelle in ("er", "mito", "nucleus", "membrane")
-    for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
-) | frozenset(
-    # Spotlight-v2 UNeXt2-3D iPSC fits from scratch (fresh v2 baseline + its segaux arm).
-    # Measured on the April iPSC runs of the same 4-GPU recipe, consecutive checkpoint
-    # mtimes within one allocation (2026-04-30): nucleus e96 00:39:27 -> e98 01:38:24
-    # = 2.04 ep/h, e98 -> e111 08:09:59 = 1.99 ep/h; membrane e134 09:21:15 -> e136
-    # 10:21:36 = 1.99 ep/h, e146 15:52:49 -> e147 16:22:49 = 2.00 ep/h. 200 epochs at
-    # ~2.0 ep/h is ~100 h, over the 96 h default. The `_seed1` second draws are the same
-    # recipe with seed_everything: 1, so the same rate applies.
-    f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
-    for organelle in ("nucleus", "membrane")
-    for suffix in ("v2", "segaux", "v2_seed1", "segaux_seed1")
+_LONG_WALL_TRAIN_LEAVES = (
+    frozenset(
+        f"{organelle}/{model}/joint_ipsc_confocal_a549_mantis/train.yml"
+        for organelle in ("er", "mito", "nucleus", "membrane")
+        for model in ("fcmae_vscyto3d_pretrained", "fcmae_vscyto3d_scratch")
+    )
+    | frozenset(
+        # Spotlight-v2 UNeXt2-3D iPSC fits from scratch (fresh v2 baseline + its segaux arm).
+        # Measured on the April iPSC runs of the same 4-GPU recipe, consecutive checkpoint
+        # mtimes within one allocation (2026-04-30): nucleus e96 00:39:27 -> e98 01:38:24
+        # = 2.04 ep/h, e98 -> e111 08:09:59 = 1.99 ep/h; membrane e134 09:21:15 -> e136
+        # 10:21:36 = 1.99 ep/h, e146 15:52:49 -> e147 16:22:49 = 2.00 ep/h. 200 epochs at
+        # ~2.0 ep/h is ~100 h, over the 96 h default. The `_seed1` second draws are the same
+        # recipe with seed_everything: 1, so the same rate applies.
+        f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
+        for organelle in ("nucleus", "membrane")
+        for suffix in ("v2", "segaux", "v2_seed1")
+    )
+    | frozenset({"membrane/fcmae_vscyto3d_scratch_segaux_seed1/ipsc_confocal/train.yml"})
 )
 _LONG_WALL_TIME = "7-00:00:00"
 _DEFAULT_4GPU_TIME = "4-00:00:00"
