@@ -654,6 +654,83 @@ def test_voxel_matched_fnet2d_predicts_agree_on_one_checkpoint(organelle: str) -
     assert len(pinned) == 1, f"{organelle}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
 
 
+# Sample-matched UNeXt2-2D ablation: fcmae_vscyto2d_scratch with the optimizer
+# budget of fcmae_vscyto3d_scratch (global batch, warmup, cosine horizon) and
+# nothing else changed. Steps/epoch are data-dependent, so they are pinned from
+# each fit's own checkpoint names: 3D nucleus epoch=80-step=25272, er
+# epoch=122-step=32472; 2D baseline latest-epoch=199-step=100000 / =84400.
+_SAMPLE_MATCHED_3D_STEPS_PER_EPOCH = {"nucleus": 312, "er": 264}
+_UNEXT2_2D_BASELINE_STEPS_PER_EPOCH = {"nucleus": 500, "er": 422}
+
+
+@pytest.mark.parametrize("organelle", sorted(_SAMPLE_MATCHED_3D_STEPS_PER_EPOCH))
+def test_sample_matched_unext2_2d_differs_from_baseline_only_in_budget(organelle: str, monkeypatch) -> None:
+    """The arm equals fcmae_vscyto2d_scratch except the budget, which equals the 3D fit's.
+
+    Samples/step, warmup and cosine horizon are derived from the composed 3D leaf, so
+    a change to either UNeXt2 config breaks the ablation loudly instead of silently
+    turning it into a mismatched comparison.
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "fit"])
+
+    def _load(model: str) -> dict:
+        return load_composed_config(
+            BENCHMARKS / organelle / model / "ipsc_confocal" / "train.yml",
+            resolver=_dynacell_ref_resolver,
+        )
+
+    arm = _load("fcmae_vscyto2d_scratch_samplematched")
+    base = _load("fcmae_vscyto2d_scratch")
+    three_d = _load("fcmae_vscyto3d_scratch")
+    arm_t, base_t, d3_t = arm["trainer"], base["trainer"], three_d["trainer"]
+
+    def _global_batch(cfg: dict) -> int:
+        return cfg["data"]["init_args"]["batch_size"] * cfg["trainer"]["devices"]
+
+    # The substantive delta: the 3D fit's optimizer budget.
+    assert _global_batch(arm) == _global_batch(three_d) != _global_batch(base)
+    assert arm["model"]["init_args"]["warmup_steps"] == three_d["model"]["init_args"]["warmup_steps"]
+    assert arm["model"]["init_args"]["lr"] == three_d["model"]["init_args"]["lr"]
+    assert arm_t["max_steps"] == d3_t["max_epochs"] * _SAMPLE_MATCHED_3D_STEPS_PER_EPOCH[organelle]
+    # max_epochs must never bind before max_steps, or the cosine horizon shrinks.
+    # The same train windows split over a larger global batch give proportionally
+    # fewer steps per epoch.
+    arm_steps_per_epoch = _UNEXT2_2D_BASELINE_STEPS_PER_EPOCH[organelle] * _global_batch(base) / _global_batch(arm)
+    assert arm_t["max_epochs"] * arm_steps_per_epoch > arm_t["max_steps"]
+    assert arm_t["strategy"] == d3_t["strategy"], f"{organelle}: DDP strategy differs from the 3D fit"
+    assert arm_t["devices"] == d3_t["devices"]
+    # Deliberately the 2D baseline's bf16, not the 3D fit's 16-mixed.
+    assert arm_t["precision"] == base_t["precision"] == "bf16-mixed"
+
+    # Everything else in data and model must be the baseline's: store, channels,
+    # norms, crop sampler, augmentations, geometry, loss.
+    arm_data = copy.deepcopy(arm["data"])
+    arm_data["init_args"]["batch_size"] = base["data"]["init_args"]["batch_size"]
+    assert arm_data == base["data"], f"{organelle}: data config differs from the baseline by more than batch_size"
+    arm_model = copy.deepcopy(arm["model"])
+    arm_model["init_args"]["warmup_steps"] = base["model"]["init_args"]["warmup_steps"]
+    assert arm_model == base["model"], f"{organelle}: model config differs by more than warmup_steps"
+    assert arm["launcher"]["sbatch"]["mem"] == base["launcher"]["sbatch"]["mem"]
+
+
+@pytest.mark.parametrize("organelle", sorted(_SAMPLE_MATCHED_3D_STEPS_PER_EPOCH))
+def test_sample_matched_unext2_2d_writes_to_its_own_tree(organelle: str) -> None:
+    """Checkpoints, run root and wandb name never collide with the 2D baseline."""
+    arm = load_composed_config(
+        BENCHMARKS / organelle / "fcmae_vscyto2d_scratch_samplematched" / "ipsc_confocal" / "train.yml"
+    )
+    base = load_composed_config(BENCHMARKS / organelle / "fcmae_vscyto2d_scratch" / "ipsc_confocal" / "train.yml")
+    ckpt = next(
+        c["init_args"]["dirpath"]
+        for c in arm["trainer"]["callbacks"]
+        if c["class_path"].endswith("ModelCheckpoint") and "dirpath" in c.get("init_args", {})
+    )
+    assert "/fcmae_vscyto2d_scratch_samplematched/" in ckpt, f"{organelle}: checkpoint dirpath not in the arm's tree"
+    assert arm["launcher"]["run_root"] != base["launcher"]["run_root"]
+    assert arm["trainer"]["logger"]["init_args"]["name"] != base["trainer"]["logger"]["init_args"]["name"]
+    assert arm["benchmark"]["model_name"] == "fcmae_vscyto2d_scratch_samplematched"
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 

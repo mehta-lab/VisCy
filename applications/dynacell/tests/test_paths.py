@@ -437,6 +437,8 @@ def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
         ("fnet2d", "fnet2d"),
         # the voxel-matched ablation must not prefix-collapse onto fnet2d.
         ("fnet2d_voxelmatched", "fnet2d_voxelmatched"),
+        # the sample-matched ablation must not prefix-collapse onto fcmae_vscyto2d_scratch.
+        ("fcmae_vscyto2d_scratch_samplematched", "fcmae_vscyto2d_scratch_samplematched"),
         # celldiff_2d must not collapse onto the 3D celldiff/celldiff_r2 keys —
         # prefix matching on the CellDiff family would otherwise truncate it.
         ("celldiff_2d", "celldiff_2d"),
@@ -720,6 +722,7 @@ def test_paper_key_2d_track() -> None:
     assert paper_key("fcmae_vscyto2d_pretrained") == "vscyto2d"
     assert paper_key("fnet2d") == "fnet2d"
     assert paper_key("fnet2d_voxelmatched") == "fnet2d_voxelmatched"
+    assert paper_key("fcmae_vscyto2d_scratch_samplematched") == "unext2_2d_samplematched"
     assert paper_key("fcmae_vscyto3d_scratch") == "unext2"
     assert paper_key("fcmae_vscyto3d_pretrained") == "vscyto3d"
     assert paper_key("fnet3d_paper") == "fnet3d"

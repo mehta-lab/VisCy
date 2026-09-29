@@ -1,0 +1,86 @@
+# Sample-matched UNeXt2-2D ablation — ER (SEC61B), iPSC-trained.
+#
+# IDENTICAL to er/fcmae_vscyto2d_scratch/ipsc_confocal/train.yml except the
+# optimizer budget, copied from er/fcmae_vscyto3d_scratch (the 3D UNeXt2 it is
+# compared against):
+#   - 4-GPU DDP x batch_size 32 per rank = 128 samples/step (was 1 GPU x 16)
+#   - warmup_steps 8500 (was 4000)
+#   - cosine horizon 52800 steps = the 3D fit's 200 epochs x 264 steps/epoch
+#     (WarmupCosine t_total = trainer.estimated_stepping_batches, capped here by
+#     max_steps; max_epochs is raised only so it never binds first)
+#   - validation + checkpoint cadence every 5 epochs x ~53 steps ~= 265 steps,
+#     matching the 3D fit's once per 264-step epoch
+# The 2D baseline trained 84400 steps x 16 samples = 1.35M samples; the 3D fit
+# 44089 steps x 128 = 5.6M (it stopped at epoch 167/200; the paper predicts from
+# its epoch=122-step=32472 checkpoint). This arm sees 52800 x 128 = 6.8M.
+#
+# See nucleus/fcmae_vscyto2d_scratch_samplematched/ipsc_confocal/train.yml for the
+# question this answers, why target planes are not matched, and why precision
+# stays bf16-mixed rather than the 3D fit's 16-mixed.
+base:
+  - ../../../_internal/shared/model/train_sets/ipsc_confocal.yml
+  - ../../../_internal/shared/model/targets/er_sec61b.yml
+  - ../../../_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../_internal/shared/model/model_overlays/fcmae_vscyto2d_fit.yml
+  - ../../../../../recipes/topology/ddp_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/mode_fit.yml
+  - ../../../_internal/shared/model/launcher_profiles/hardware_4gpu.yml
+  - ../../../_internal/shared/model/launcher_profiles/runtime_shared.yml
+
+benchmark:
+  task: virtual_staining
+  organelle: er
+  train_set: ipsc_confocal
+  model_name: fcmae_vscyto2d_scratch_samplematched
+  experiment_id: er__ipsc_confocal__fcmae_vscyto2d_scratch_samplematched
+  # Disable the manifest resolver: the 2D track reads the offline focus
+  # store, not the manifest-registered SEC61B.zarr. dataset_ref: null makes
+  # the compose hook a no-op so data fields can be declared inline.
+  dataset_ref: null
+
+data:
+  init_args:
+    # Per rank; x 4 ranks = 128 samples/step, the 3D fit's global batch.
+    batch_size: 32
+    # iPSC in-focus slab store + channels — resolver disabled above.
+    source_channel: Phase3D
+    target_channel: Structure
+    data_path: /hpc/projects/virtual_staining/training/dynacell/ipsc/dataset_v4/train/SEC61B_focus.zarr
+
+model:
+  init_args:
+    warmup_steps: 8500
+
+trainer:
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      find_unused_parameters: true
+      timeout: "3:00:00"
+  max_steps: 52800
+  max_epochs: 2000
+  check_val_every_n_epoch: 5
+  logger:
+    init_args:
+      name: FCMAE_VSCyto2D_Scratch_SampleMatch_iPSC_SEC61B
+      save_dir: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto2d_scratch_samplematched
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        filename: "epoch={epoch}-step={step}-loss={loss/validate:.3f}"
+        auto_insert_metric_name: false
+        every_n_epochs: 5
+        save_top_k: 5
+        save_last: true
+        dirpath: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto2d_scratch_samplematched/checkpoints
+
+launcher:
+  job_name: FCMAE_VSCyto2D_Scratch_SampleMatch_SEC61B
+  run_root: /hpc/projects/comp.micro/virtual_staining/models/dynacell/ipsc/er/fcmae_vscyto2d_scratch_samplematched
+  # Same 128G as the 2D baseline (focus-store mmap buffer is ~5-11 GiB).
+  sbatch:
+    mem: "128G"

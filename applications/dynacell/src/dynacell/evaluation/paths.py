@@ -220,6 +220,11 @@ PAPER_KEY: dict[str, str] = {
     # key: canonical_model_name() prefix-matches, so without it this run dir
     # resolves to fnet2d and its eval outputs land in the baseline's dirs.
     "fnet2d_voxelmatched": "fnet2d_voxelmatched",
+    # Sample-matched UNeXt2-2D ablation (nucleus + ER, iPSC-trained):
+    # fcmae_vscyto2d_scratch with fcmae_vscyto3d_scratch's optimizer budget
+    # (128 samples/step, warmup, cosine horizon). Own key for the same
+    # prefix-collapse reason as fnet2d_voxelmatched.
+    "fcmae_vscyto2d_scratch_samplematched": "unext2_2d_samplematched",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
     # Spotlight-loss arms (masked MSE + soft-Dice, Otsu-centred target), iPSC-trained
