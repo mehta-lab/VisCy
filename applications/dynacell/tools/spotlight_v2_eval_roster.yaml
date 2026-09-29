@@ -39,6 +39,30 @@ waves:
   wave1c:
     nucleus: [pix2pix2d_unetvit_last]
     membrane: [pix2pix2d_unetvit_last]
+  # Cosmetic-vs-structural control for the 3D nucleus segaux A549 gain (2026-09-29): each v2
+  # baseline's prediction histogram-matched per (position, T) volume to its segaux arm's, spatial
+  # structure kept. Stores written by experiments/2026-09-24_spotlight-v2/histmatch_control.py.
+  # Generate with --wave ctrl1.
+  ctrl1:
+    nucleus:
+      - model: fnet3d_paper_histmatch
+        leaves: [a549__mock, a549__denv, a549__zikv]
+        pred_paths:
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_paper_histmatch/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_paper_histmatch/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fnet3d_paper_histmatch/ipsc/a549__zikv/prediction.zarr
+      - model: pix2pix3d_unetvit_v2_histmatch
+        leaves: [a549__mock, a549__denv, a549__zikv]
+        pred_paths:
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/pix2pix3d_unetvit_v2_histmatch/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/pix2pix3d_unetvit_v2_histmatch/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/pix2pix3d_unetvit_v2_histmatch/ipsc/a549__zikv/prediction.zarr
+      - model: fcmae_vscyto3d_scratch_v2_histmatch
+        leaves: [a549__mock, a549__denv, a549__zikv]
+        pred_paths:
+          a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__mock/prediction.zarr
+          a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__denv/prediction.zarr
+          a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__zikv/prediction.zarr
   # pix2pix3d nucleus legs that finished after wave2a (2026-09-28). Generate with --wave wave2b.
   # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
   # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
