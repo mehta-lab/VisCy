@@ -19,7 +19,7 @@ benchmark:
 
 model:
   init_args:
-    ckpt_path: /hpc/projects/organelle_phenotyping/models/VSCyto3D-A549-infection-finetune/4gpu_bf16_bs16_to_ep7/checkpoints/epoch=7-step=832.ckpt
+    ckpt_path: /hpc/projects/organelle_phenotyping/models/Cytoland-VSCyto3D_A549-infection-finetune/4gpu_bf16_bs16_to_ep7/checkpoints/epoch=7-step=832.ckpt
 
 data:
   init_args:
