@@ -246,9 +246,10 @@ ARMS: tuple[Arm, ...] = (
     Arm("fnet2d", "segaux_seed1", ORGANELLES, a549=True),
     Arm("fnet3d_paper", "segaux_seed1", ("nucleus",), a549=True),
     Arm("pix2pix3d_unetvit", "v2_seed1", ORGANELLES, a549=True),
-    # UNeXt2-3D nucleus v2 baseline, drawn once its segaux verdict came back non-null
-    # (wave2d, 2026-09-28: A549 instance Dice +0.029..+0.047, PCC -0.020..-0.025, CIs exclude 0).
-    Arm("fcmae_vscyto3d_scratch", "v2_seed1", ("nucleus",), a549=True),
+    # UNeXt2-3D v2 baseline, drawn per organelle once its segaux verdict came back non-null
+    # (nucleus, wave2d 2026-09-28: A549 instance Dice +0.029..+0.047, PCC -0.020..-0.025;
+    # membrane, wave2f 2026-09-29: iPSC mAP +0.128, instance Dice +0.099, PCC +0.027; CIs exclude 0).
+    Arm("fcmae_vscyto3d_scratch", "v2_seed1", ORGANELLES, a549=True),
     # Loss-weight sweep on the one cell whose effect held against both baseline draws
     # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
