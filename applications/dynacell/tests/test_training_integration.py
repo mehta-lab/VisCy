@@ -992,14 +992,16 @@ def test_cond_mask_source_otsu_adapts_to_the_intensity_scale(tmp_path):
     assert fixed[1, 0].mean() == 1.0
 
 
-@pytest.mark.filterwarnings("error")
-def test_cond_mask_source_otsu_constant_window_is_background(tmp_path):
-    """A constant window has no Otsu split: it yields an all-background mask, silently."""
-    store = _mask_source_store(tmp_path / "mask.zarr", [np.full((2, 32, 32), 3.0)])
-    source = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold="otsu")
-    mask = source.read((["/A/1/0/0"], [0], [0]), (2, 32, 32))
-    assert mask.shape == (1, 1, 2, 32, 32)
-    assert mask.sum() == 0
+@pytest.mark.parametrize("threshold", ["otsu", 0.5])
+def test_cond_mask_source_rejects_an_unwritten_window(tmp_path, threshold):
+    """The prediction writer zero-fills, so an unwritten window reads back constant 0.0: it
+    must raise under either threshold, not become an all-background mask."""
+    image, _ = _bimodal_image()
+    store = _mask_source_store(tmp_path / "mask.zarr", [image, np.zeros((2, 32, 32))])
+    source = CondMaskSource(data_path=str(store), channel="Nuclei_prediction", threshold=threshold)
+    assert source.read((["/A/1/0/0"], [0], [0]), (2, 32, 32)).shape == (1, 1, 2, 32, 32)
+    with pytest.raises(ValueError, match="is constant"):
+        source.read((["/A/1/0/0", "/A/1/1/0"], [0, 0], [0, 0]), (2, 32, 32))
 
 
 def test_cond_mask_source_rejects_unknown_threshold_string(tmp_path):

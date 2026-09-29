@@ -152,7 +152,7 @@ class CondMaskSource:
         own units. ``"otsu"`` instead thresholds each predict window (each
         sample of a batch) at the Otsu threshold of its own values, so the
         mask adapts to a source whose intensity scale shifts between
-        datasets; a constant window gives an all-background mask.
+        datasets.
 
     Raises
     ------
@@ -186,8 +186,9 @@ class CondMaskSource:
         Raises
         ------
         ValueError
-            If the source image's YX shape differs from the window or the
-            window holds NaN (an unwritten prediction).
+            If the source image's YX shape differs from the window, or the
+            window holds NaN or a single value: the prediction writer zero-fills
+            its store, so an unwritten window reads back constant, not NaN.
         """
         img_names, t_indices, z_indices = index
         depth = spatial[0]
@@ -208,12 +209,16 @@ class CondMaskSource:
                     f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} holds NaN at t={int(t)}, "
                     f"z={int(z)}; the mask source is incomplete."
                 )
+            if window.min() == window.max():
+                raise ValueError(
+                    f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} is constant "
+                    f"({window.flat[0]}) at t={int(t)}, z={int(z)}; the mask source is unwritten "
+                    "(the prediction writer zero-fills) or incomplete."
+                )
             windows.append(torch.from_numpy(self._binarize(window)).float())
         return torch.stack(windows).unsqueeze(1)
 
     def _binarize(self, window: np.ndarray) -> np.ndarray:
         if self.threshold != "otsu":
             return window >= self.threshold
-        if window.min() == window.max():
-            return np.zeros(window.shape, dtype=bool)
         return window >= threshold_otsu(window.ravel())
