@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from generate_spotlight_v2_leaves import ARMS
 
 from dynacell.evaluation import paths
 from dynacell.evaluation.paths import PAPER_KEY, eval_leaf, pred_cache_dir
@@ -445,53 +446,20 @@ _SKIP_MODELS: frozenset[str] = frozenset(
 # separate _spotlight_v2 root. They share the canonical prediction-store tree, so
 # without this skip a canonical regen would fold them into the paper buckets and
 # write their eval dirs under the canonical root. Keys are parsed model tokens
-# (`celldiff_segaux_iterative` parses to `celldiff_segaux`).
+# (`celldiff_segaux_iterative` parses to `celldiff_segaux`): the v1 arms, the v2
+# post-hoc controls (histogram-matched baselines, no training leaf) and every arm
+# the v2 leaf generator emits.
 _SPOTLIGHT_ARM_MODELS: frozenset[str] = frozenset(
     {
         "fnet3d_spotlight",
         "fnet2d_spotlight",
         "pix2pix3d_unetvit_spotlight",
         "pix2pix2d_unetvit_spotlight",
-        "fnet2d_segaux",
-        "fnet3d_paper_segaux",
-        "fcmae_vscyto2d_scratch_segaux",
-        "fcmae_vscyto3d_scratch_segaux",
-        "pix2pix2d_unetvit_segaux",
-        "pix2pix3d_unetvit_segaux",
-        "celldiff_2d_segaux",
-        "celldiff_segaux",
-        "fnet2d_seed1",
-        "fnet3d_paper_seed1",
-        "fcmae_vscyto2d_scratch_seed1",
-        "pix2pix2d_unetvit_seed1",
-        "celldiff_2d_seed1",
-        "fcmae_vscyto3d_scratch_v2",
-        "pix2pix3d_unetvit_v2",
-        "fcmae_vscyto2d_scratch_jointsteps",
-        "fcmae_vscyto2d_scratch_l1",
-        "fcmae_vscyto2d_scratch_safecrop",
-        "celldiff_2d_cjoint",
-        "celldiff_2d_ccond",
-        "celldiff_cjoint",
-        "celldiff_ccond",
-        "fnet2d_segauxself",
-        "fcmae_vscyto2d_scratch_segauxself",
-        "pix2pix2d_unetvit_segauxself",
-        "celldiff_2d_segauxself",
-        "pix2pix2d_unetvit_last",
-        "fcmae_vscyto2d_scratch_l1segaux",
-        "fcmae_vscyto2d_scratch_l1seed1",
-        "fnet2d_segaux_seed1",
-        "fnet3d_paper_segaux_seed1",
-        "pix2pix3d_unetvit_v2_seed1",
-        "fcmae_vscyto3d_scratch_v2_seed1",
-        "fcmae_vscyto3d_scratch_segaux_seed1",
-        "fnet3d_paper_segaux_halfw",
-        "fnet3d_paper_segaux_doublew",
         "fnet3d_paper_histmatch",
         "pix2pix3d_unetvit_v2_histmatch",
         "fcmae_vscyto3d_scratch_v2_histmatch",
     }
+    | {arm.model for arm in ARMS}
 )
 
 

@@ -32,7 +32,6 @@ from generate_grouped_eval_configs import (  # noqa: E402
     _CANONICAL_TRAIN_SET_TO_BUCKET,
     _DYNACELL_ROOT,
     _LEAF_OUT_ROOT,
-    _SPOTLIGHT_ARM_MODELS,
     _TRAIN_SETS,
     ParsedZarr,
     benchmark_dataset_ref,
@@ -43,7 +42,6 @@ from generate_grouped_eval_configs import (  # noqa: E402
     save_dir_for,
     walk_predictions,
 )
-from generate_spotlight_v2_leaves import ARMS  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 1. Grammar dispatch
@@ -357,14 +355,6 @@ def test_walk_predictions_skips_spotlight_arms(tmp_path: Path) -> None:
     _touch_prediction(tmp_path, "nucleus", "pix2pix2d_unetvit_last", "ipsc", "a549__mock")
 
     assert [p.model for p in walk_predictions(tmp_path)] == ["fnet2d"]
-
-
-def test_spotlight_arm_skip_list_covers_every_generated_arm() -> None:
-    """Every v2 arm the leaf generator emits (plus the v1 arms and v2 controls) is skipped, and nothing else."""
-    v1 = {"fnet3d_spotlight", "fnet2d_spotlight", "pix2pix3d_unetvit_spotlight", "pix2pix2d_unetvit_spotlight"}
-    # Post-hoc histogram-matched baseline stores: no training leaf, scored in the v2 root.
-    controls = {"fnet3d_paper_histmatch", "pix2pix3d_unetvit_v2_histmatch", "fcmae_vscyto3d_scratch_v2_histmatch"}
-    assert _SPOTLIGHT_ARM_MODELS == v1 | controls | {arm.model for arm in ARMS}
 
 
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:
