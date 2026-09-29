@@ -36,8 +36,9 @@
 # cubic 0.9.0a2 bounds the fit: on an L40S (job 36696972, grouped er_a549_trained
 # conditions, max_pairs=12, cold pred features) peak device use was 15.9 GB,
 # including a 12.0 GiB cupy pool, leaving ~24 GB even on a 40 GB A100 (bare `a100`
-# matches a100_40 and a100_80). Leaves that note a larger need (cold 2D deep-feature extraction) still
-# pass their own --constraint.
+# matches a100_40 and a100_80). A fully cold A549 membrane eval (fresh GT cache,
+# all five feature extractors on GT and prediction) peaked at 29.6 GB on an A40
+# (2026-09-29), so cold deep-feature extraction also fits a 40 GB card.
 
 set -euo pipefail
 
