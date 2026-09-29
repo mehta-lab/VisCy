@@ -33,22 +33,27 @@ def _suffix(leaf_dir_name: str) -> str:
     return next(arm.suffix for arm in ARMS if arm.model == leaf_dir_name)
 
 
-def test_committed_leaves_match_the_generator() -> None:
+@pytest.fixture(scope="module")
+def leaves() -> dict:
+    """One generation for the whole module (~6-8 s each); tests only read it."""
+    return build_leaves()
+
+
+def test_committed_leaves_match_the_generator(leaves: dict) -> None:
     """Every generated leaf on disk is byte-identical to a fresh generation."""
-    stale = [str(p.relative_to(BENCHMARKS)) for p, t in build_leaves().items() if not p.is_file() or p.read_text() != t]
+    stale = [str(p.relative_to(BENCHMARKS)) for p, t in leaves.items() if not p.is_file() or p.read_text() != t]
     assert not stale, f"regenerate with generate_spotlight_v2_leaves.py: {stale}"
 
 
-def test_leaf_counts_per_arm() -> None:
+def test_leaf_counts_per_arm(leaves: dict) -> None:
     """Count 56 fits and 226 predicts per arm (fit+predict).
 
     segaux 16+64, segauxself 8+32, seed1 9+36, v2 4+16, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
     l1segaux 1+4, l1seed1 1+4, segaux_seed1 4+16, v2_seed1 4+16,
     segaux_halfw 1+4, segaux_doublew 1+4.
 
-    The probes and seed replicates are iPSC-only; every other arm also predicts the 3 A549 legs.
+    The jointsteps and safecrop probes are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
-    leaves = build_leaves()
     fits = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name == "train.yml")
     predicts = Counter(_suffix(p.parent.parent.name) for p in leaves if p.name != "train.yml")
     assert fits == {
@@ -149,12 +154,12 @@ def test_segaux_composes_with_the_engine_args_and_keeps_the_baseline_recipe(base
         assert arm_cfg["trainer"].get(key) == base_cfg["trainer"].get(key)
 
 
-def test_predict_leaves_point_at_the_arm_checkpoint_and_store() -> None:
+def test_predict_leaves_point_at_the_arm_checkpoint_and_store(leaves: dict) -> None:
     """Predict leaves name the arm's own store dir, never the baseline's, and the arm's own ckpt dir.
 
     The exception is a predict-only arm (no fit), which reads its baseline's checkpoint dir.
     """
-    for path, text in build_leaves().items():
+    for path, text in leaves.items():
         if path.name == "train.yml":
             continue
         cfg = yaml.safe_load(text)
@@ -167,11 +172,11 @@ def test_predict_leaves_point_at_the_arm_checkpoint_and_store() -> None:
         assert store.startswith(cfg["launcher"]["run_root"] + "/")
 
 
-def test_ccond_predict_reads_the_same_leg_fnet_segaux_mask() -> None:
+def test_ccond_predict_reads_the_same_leg_fnet_segaux_mask(leaves: dict) -> None:
     """C-cond predicts condition on the same-dim FNet segaux store of the same test leg, with no fg_mask_key."""
     fnet = {"celldiff_2d_ccond": "fnet2d_segaux", "celldiff_ccond": "fnet3d_paper_segaux"}
     n = 0
-    for path, text in build_leaves().items():
+    for path, text in leaves.items():
         model = path.parent.parent.name
         if model not in fnet or path.name == "train.yml":
             continue
@@ -203,9 +208,8 @@ def test_segauxself_differs_from_segaux_by_the_dice_label_only(baseline: str, or
     assert segauxself["model"]["init_args"]["seg_aux"]["init_args"]["label"] == "target"
 
 
-def test_last_arm_predicts_the_baselines_own_checkpoint_into_its_own_store() -> None:
+def test_last_arm_predicts_the_baselines_own_checkpoint_into_its_own_store(leaves: dict) -> None:
     """The predict-only `last` arm reads the baseline's ckpt dir but never writes the baseline's store."""
-    leaves = build_leaves()
     last = [p for p in leaves if p.parent.parent.name == "pix2pix2d_unetvit_last"]
     assert len(last) == 8 and not any(p.name == "train.yml" for p in last)
     for p in last:
@@ -232,9 +236,8 @@ def test_l1_arms_differ_from_the_l1_probe_by_their_own_term_only() -> None:
     assert changed_keys(l1, load("l1seed1")) - renames == {"seed_everything"}
 
 
-def test_second_draws_differ_from_their_source_arm_by_the_seed_only() -> None:
+def test_second_draws_differ_from_their_source_arm_by_the_seed_only(leaves: dict) -> None:
     """Second-draw fit leaves equal their source arm's, up to renames and ``seed_everything: 1``."""
-    leaves = build_leaves()
     second_draws = [arm for arm in ARMS if arm.suffix in SEED_SOURCES]
     assert {arm.suffix for arm in second_draws} == set(SEED_SOURCES)
     for arm in second_draws:
@@ -246,9 +249,8 @@ def test_second_draws_differ_from_their_source_arm_by_the_seed_only() -> None:
             assert changed_keys(src, draw) == _FIT_RENAMES
 
 
-def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only() -> None:
+def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only(leaves: dict) -> None:
     """Sweep fit leaves equal the segaux arm's, up to renames and ``seg_aux_weight`` x its scale."""
-    leaves = build_leaves()
     sweep = [arm for arm in ARMS if arm.suffix in WEIGHT_SCALES]
     assert {arm.suffix for arm in sweep} == {"segaux_halfw", "segaux_doublew"}
     for arm in sweep:
@@ -258,12 +260,4 @@ def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only() -> No
             w_arm = arm_leaf["model"]["init_args"].pop("seg_aux_weight")
             w_src = src["model"]["init_args"].pop("seg_aux_weight")
             assert w_arm == pytest.approx(w_src * WEIGHT_SCALES[arm.suffix])
-            assert changed_keys(src, arm_leaf) == {
-                "benchmark.model_name",
-                "benchmark.experiment_id",
-                "trainer.logger.init_args.name",
-                "trainer.logger.init_args.save_dir",
-                "trainer.callbacks.1.init_args.dirpath",
-                "launcher.job_name",
-                "launcher.run_root",
-            }
+            assert changed_keys(src, arm_leaf) == _FIT_RENAMES
