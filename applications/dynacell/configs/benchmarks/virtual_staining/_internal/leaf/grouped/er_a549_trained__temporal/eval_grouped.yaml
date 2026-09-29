@@ -17,9 +17,7 @@
 # force_recompute.final_metrics: true, so its already-evaluated conditions would
 # all recompute instead of cache-skipping.
 #
-# All 6 conditions are brand new, so nothing is cached and the cold deep-feature
-# extraction needs --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB
-# nodes and OOMs).
+# All 6 conditions are brand new, so nothing is cached.
 target_name: er
 compute_feature_metrics: true
 use_gpu: true
