@@ -34,10 +34,10 @@
 # >=40 GB. MicroMS3IM calibration plus the resident segmenter/extractors OOMed on
 # 40-48 GB cards under cubic 0.9.0a1 (6 L40S + 2 A100-40GB units, 2026-09-26).
 # cubic 0.9.0a2 bounds the fit: on an L40S (job 36696972, grouped er_a549_trained
-# conditions, max_pairs=12, cold pred features) peak device use was 15.9 GB,
-# including a 12.0 GiB cupy pool, leaving ~24 GB even on a 40 GB A100 (bare `a100`
+# conditions, max_pairs=12, cold pred features) peak device use was 15.6 GiB,
+# including a 12.0 GiB cupy pool, leaving ~21 GiB even on a 40 GB A100 (bare `a100`
 # matches a100_40 and a100_80). A fully cold A549 membrane eval (fresh GT cache,
-# all five feature extractors on GT and prediction) peaked at 29.6 GB on an A40
+# all five feature extractors on GT and prediction) peaked at 28.9 GiB on an A40
 # (2026-09-29), so cold deep-feature extraction also fits a 40 GB card.
 
 set -euo pipefail
