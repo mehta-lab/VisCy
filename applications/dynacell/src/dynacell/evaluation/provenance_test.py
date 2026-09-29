@@ -83,15 +83,6 @@ def test_missing_sidecar_is_not_a_match(tmp_path):
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
 
 
-def test_foreign_cubic_version_is_not_a_match(tmp_path):
-    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None)
-    path = tmp_path / PROVENANCE_FILENAME
-    payload = json.loads(path.read_text())
-    payload["versions"]["cubic"] = "0.8.0a2"
-    path.write_text(json.dumps(payload))
-    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
-
-
 def _stamp_cubic(save_dir, cubic, *, cp_space_sha256):
     """Write a sidecar as if a run under ``cubic`` had produced it."""
     cp_reference_sha256 = None if cp_space_sha256 is None else f"ref-{cp_space_sha256}"
@@ -100,6 +91,11 @@ def _stamp_cubic(save_dir, cubic, *, cp_space_sha256):
     payload = json.loads(path.read_text())
     payload["versions"]["cubic"] = cubic
     path.write_text(json.dumps(payload))
+
+
+def test_foreign_cubic_version_is_not_a_match(tmp_path):
+    _stamp_cubic(tmp_path, "0.8.0a2", cp_space_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
 
 
 @pytest.fixture
