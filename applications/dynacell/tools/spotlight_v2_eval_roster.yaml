@@ -40,6 +40,21 @@ waves:
     nucleus: [pix2pix2d_unetvit_last]
     membrane: [pix2pix2d_unetvit_last]
   # pix2pix3d nucleus legs that finished after wave2a (2026-09-28). Generate with --wave wave2b.
+  # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
+  # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
+  # Generate with --wave wave2c.
+  wave2c:
+    nucleus:
+      - {model: fnet2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: pix2pix2d_unetvit_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fnet3d_paper_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+    membrane:
+      - {model: fnet2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fcmae_vscyto2d_scratch_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: pix2pix2d_unetvit_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: fcmae_vscyto2d_scratch_l1seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - fcmae_vscyto3d_scratch_v2
   wave2b:
     nucleus:
       - {model: pix2pix3d_unetvit_segaux, leaves: [a549__zikv]}
@@ -120,4 +135,3 @@ waves:
     membrane:
       - fcmae_vscyto3d_scratch_segaux
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
-      - fcmae_vscyto3d_scratch_v2
