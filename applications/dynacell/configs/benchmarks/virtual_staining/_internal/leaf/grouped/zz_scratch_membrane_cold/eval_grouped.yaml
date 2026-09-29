@@ -1,0 +1,30 @@
+# @package _global_
+# SCRATCH (untracked, never commit): cold GT+pred A549 membrane eval, 2026-09-29.
+# Mirrors grouped/membrane_a549_trained; run with DYNACELL_MANIFEST_ROOTS pointing at
+# /hpc/mydata/alex.kalinin/VisCy/applications/dynacell/experiments/2026-09-29_l40s-microssim-verify/membrane_cold/manifests so the GT cache is a scratch dir.
+target_name: membrane
+compute_feature_metrics: true
+use_gpu: true
+io:
+  require_complete_cache: false
+runtime:
+  executor: serial
+  fov_workers: 1
+  threads_per_worker: auto
+force_recompute:
+  final_metrics: true
+compute_instance_ap: true
+segmentation:
+  backend: cpdino
+  nuclei_channel_name: Nuclei
+conditions:
+- name: vscyto3d__a549_trained__a549_mock
+  benchmark:
+    dataset_ref:
+      dataset: a549-mantis-caax-mock
+      target: caax
+  io:
+    pred_path: /hpc/projects/virtual_staining/training/dynacell/membrane/fcmae_vscyto3d_pretrained/a549/a549__mock/prediction.zarr
+    nuclei_gt_path: /hpc/projects/virtual_staining/training/dynacell/a549/mantis/test/dual_nucl_memb_mock.zarr
+  save:
+    save_dir: /hpc/mydata/alex.kalinin/VisCy/applications/dynacell/experiments/2026-09-29_l40s-microssim-verify/membrane_cold/out

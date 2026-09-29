@@ -61,9 +61,6 @@
 # gt_* stays false deliberately. The ground truth did not change, and the GT-side deep
 # features are the expensive half of a cold extraction. Do not set force_recompute.all
 # -- it forces gt_* too (see _resolve_force in evaluation/pipeline_cache.py).
-#
-# The cold pred-side deep-feature extraction still needs
-# --constraint a100_80|h100_80|h200 (bare a100 matches the 40 GB nodes and OOMs).
 target_name: mitochondria
 compute_feature_metrics: true
 use_gpu: true
