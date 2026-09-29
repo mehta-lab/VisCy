@@ -43,6 +43,12 @@ waves:
   # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
   # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
   # Generate with --wave wave2c.
+  # UNeXt2-3D nucleus: the segaux arm and its fresh v2 baseline (fits ep199/200, --ckpt best
+  # ep95 / ep81), 2026-09-28. Generate with --wave wave2d.
+  wave2d:
+    nucleus:
+      - fcmae_vscyto3d_scratch_segaux
+      - fcmae_vscyto3d_scratch_v2
   wave2c:
     nucleus:
       - {model: fnet2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
@@ -123,9 +129,7 @@ waves:
   # .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
-      - fcmae_vscyto3d_scratch_segaux
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
-      - fcmae_vscyto3d_scratch_v2
       # Stage 1b (nucleus only for now): mask in the generative process.
       - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - celldiff_ccond_iterative
