@@ -29,9 +29,9 @@ This module makes that boundary detectable and non-repeatable:
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
 
-A version bump that is measured not to move any value lists the old version
-under the new version in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`, so its caches stay reusable
-instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a bump:
+A version bump measured to move no value beyond a stated tolerance lists the old
+version under the new one in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`, so its caches
+stay reusable instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a bump:
 it only bounds the MicroSSIM RI-factor fit's memory.
 
 The same sidecar stamps the content hash of the CP reference the CP feature
@@ -51,13 +51,20 @@ from pathlib import Path
 REQUIRED_CUBIC_VERSION = "0.9.0a2"
 
 #: For each declared ``cubic`` version, the earlier versions whose metric values it
-#: reproduces, so their caches stay reusable. Keyed by the declared version so a
-#: bump starts with no equivalents until one is measured against it. 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM
-#: RI-factor fit's memory use (chunked float64 reduction). Measured 2026-09-28 on
-#: one FOV x 7 timepoints of the A549-trained ``fnet3d_paper`` ER ``a549__denv``
-#: predictions: every ``pixel_metrics`` and ``mask_metrics`` column, ``MicroMS3IM``
-#: included, is bit-identical across the two, as is the fitted alpha
-#: (20.037598609924316 on a 192x640x960 float32 pool).
+#: reproduces within a stated tolerance, so their caches stay reusable. Keyed by the
+#: declared version so a bump starts with no equivalents until one is measured
+#: against it.
+#:
+#: 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM RI-factor fit's memory use
+#: (chunked float64 reduction). Tolerance: MicroMS3IM relative delta <= 1e-6, far
+#: below the tables' 2-decimal rounding. Measured 2026-09-28 on the A549-trained
+#: ``fnet3d_paper`` ER ``a549__denv`` leaf at the production calibration settings
+#: (``max_pairs=12``, seed 42, a 576x640x960 float32 pool): the fitted alpha is
+#: 17.883591651916504 under both versions, and MicroMS3IM over all 108 (FOV, t)
+#: differs by 0 abs / 0 rel. The fit objective itself moves ~7e-8 relative between
+#: the versions; the root finder lands on the same alpha. The other
+#: ``pixel_metrics`` / ``mask_metrics`` columns do not use the RI-factor code and
+#: were bit-identical on 1 FOV x 7 timepoints.
 CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a2": frozenset({"0.9.0a1"})}
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
