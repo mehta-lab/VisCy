@@ -690,8 +690,8 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     names = active_cp_feature_names(glcm_enabled)
     # Drop 1-voxel regions on both devices: cuCIM's GPU regionprops_table raises
     # TypeError on one, and GLCM raises ValueError (no voxel pair) on either device.
-    # Their CP row was all-NaN, which every metric already dropped. The kept labels
-    # are renumbered 1..n in order, because a gap in the label sequence makes the
+    # Their CP row was non-finite (zero std -> NaN skewness/kurtosis), and every
+    # metric already dropped non-finite rows. The kept labels are renumbered 1..n in order, because a gap in the label sequence makes the
     # GPU extra_properties callbacks hit an illegal memory access.
     labels_host = asnumpy(cell_segmentation)
     counts = np.bincount(labels_host.ravel())
