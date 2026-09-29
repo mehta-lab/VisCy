@@ -688,6 +688,21 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     img = _robust_norm(image, norm.get("p_lo", 1.0), norm.get("p_hi", 99.0))
 
     names = active_cp_feature_names(glcm_enabled)
+    # Drop 1-voxel regions on both devices: cuCIM's GPU regionprops_table raises
+    # TypeError on one, and GLCM raises ValueError (no voxel pair) on either device.
+    # Their CP row was all-NaN (zero std -> NaN skewness/kurtosis), so the
+    # non-finite-row filters already excluded them from every metric and the CP
+    # reference fit. The kept labels are renumbered 1..n in their original order,
+    # because a gap in the label sequence makes the GPU extra_properties callbacks
+    # hit an illegal memory access. Rows stay in ascending-label order, so every
+    # other region's row is unchanged.
+    labels_host = asnumpy(cell_segmentation)
+    counts = np.bincount(labels_host.ravel())
+    kept = np.flatnonzero(counts >= 2)
+    kept = kept[kept > 0]
+    relabel = np.zeros(counts.size, dtype=labels_host.dtype)
+    relabel[kept] = np.arange(1, kept.size + 1)
+    cell_segmentation = relabel[labels_host]
     # cuCIM's GPU regionprops_dict indexes results[0] on an empty list and raises
     # IndexError when the label image has no regions, so short-circuit a no-cell
     # FOV before any regionprops_table call. Some iPSC nucleus/membrane FOVs have

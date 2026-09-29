@@ -258,6 +258,55 @@ def test_cp_regionprops_cpu_gpu_parity() -> None:
     np.testing.assert_allclose(gpu, cpu, rtol=0, atol=1e-4)
 
 
+def _labels_with_single_voxel_region() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(image, labels, labels_without_it)``: two cells, a 2-voxel cell and a 1-voxel label 3."""
+    labels = np.zeros((4, 24, 24), dtype=np.int32)
+    labels[:, 2:11, 2:11] = 1
+    labels[:, 12:22, 12:22] = 2
+    labels[3, 0, 20] = 3
+    labels[3, 0, 22:24] = 4
+    image = np.random.default_rng(9).random((4, 24, 24)).astype(np.float32)
+    return image, labels, np.where(labels == 3, 0, labels)
+
+
+@pytest.mark.skipif(not _HAS_EXTRA_PROPS, reason="needs cubic>=0.7.0a12 glcm_features + extra_properties")
+@pytest.mark.parametrize("glcm", [False, True], ids=["glcm_off", "glcm_on"])
+def test_cp_regionprops_drops_single_voxel_regions_on_cpu(glcm: bool) -> None:
+    """A 1-voxel region gets no CP row; every other row is bit-identical to a run without it."""
+    image, labels, without = _labels_with_single_voxel_region()
+    glcm_cfg = {"enabled": glcm, "levels": 16, "distances": [1]}
+    feats = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=False)
+    ref = cp_regionprops(image, without, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=False)
+    assert feats.shape == (3, len(active_cp_feature_names(glcm)))
+    np.testing.assert_array_equal(feats, ref)
+
+
+@pytest.mark.skipif(not _HAS_EXTRA_PROPS, reason="needs cubic>=0.7.0a12 glcm_features + extra_properties")
+def test_cp_regionprops_only_single_voxel_regions_is_empty() -> None:
+    """A segmentation holding only 1-voxel regions yields the empty CP matrix."""
+    labels = np.zeros((1, 8, 8), dtype=np.int32)
+    labels[0, 1, 1] = 1
+    labels[0, 5, 5] = 2
+    image = np.random.default_rng(10).random((1, 8, 8)).astype(np.float32)
+    feats = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], use_gpu=False)
+    assert feats.shape == (0, len(active_cp_feature_names(False)))
+
+
+@pytest.mark.skipif(
+    not (_HAS_EXTRA_PROPS and torch.cuda.is_available()),
+    reason="needs cubic>=0.7.0a12 + CUDA (cuCIM regionprops)",
+)
+@pytest.mark.parametrize("glcm", [False, True], ids=["glcm_off", "glcm_on"])
+def test_cp_regionprops_gpu_handles_single_voxel_regions(glcm: bool) -> None:
+    """cuCIM's GPU regionprops raises TypeError on a 1-voxel region; the region is dropped first."""
+    image, labels, _ = _labels_with_single_voxel_region()
+    glcm_cfg = {"enabled": glcm, "levels": 16, "distances": [1]}
+    gpu = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=True)
+    cpu = cp_regionprops(image, labels, spacing=[1.0, 1.0, 1.0], glcm_cfg=glcm_cfg, use_gpu=False)
+    assert gpu.shape == cpu.shape == (3, len(active_cp_feature_names(glcm)))
+    np.testing.assert_allclose(gpu, cpu, rtol=0, atol=1e-4)
+
+
 # --- device-consistent intensity_min / intensity_max --------------------------
 _MINMAX = ("intensity_min", "intensity_max")
 
