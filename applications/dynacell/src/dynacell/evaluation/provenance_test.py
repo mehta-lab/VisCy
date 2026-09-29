@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dynacell.evaluation.provenance import (
+    CUBIC_VERSIONS_EQUIVALENT_TO,
     PROVENANCE_FILENAME,
     REQUIRED_CUBIC_VERSION,
     check_cubic_pin,
@@ -82,12 +83,66 @@ def test_missing_sidecar_is_not_a_match(tmp_path):
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
 
 
-def test_foreign_cubic_version_is_not_a_match(tmp_path):
-    write_metrics_provenance(tmp_path, cp_reference_sha256=None, cp_space_sha256=None)
-    path = tmp_path / PROVENANCE_FILENAME
+def _stamp_cubic(save_dir, cubic, *, cp_space_sha256):
+    """Write a sidecar as if a run under ``cubic`` had produced it."""
+    cp_reference_sha256 = None if cp_space_sha256 is None else f"ref-{cp_space_sha256}"
+    write_metrics_provenance(save_dir, cp_reference_sha256=cp_reference_sha256, cp_space_sha256=cp_space_sha256)
+    path = save_dir / PROVENANCE_FILENAME
     payload = json.loads(path.read_text())
-    payload["versions"]["cubic"] = "0.8.0a2"
+    payload["versions"]["cubic"] = cubic
     path.write_text(json.dumps(payload))
+
+
+def test_foreign_cubic_version_is_not_a_match(tmp_path):
+    _stamp_cubic(tmp_path, "0.8.0a2", cp_space_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+
+
+@pytest.fixture
+def running_the_declared_pin(monkeypatch):
+    """Report the declared cubic as installed, whatever the test venv holds."""
+    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: REQUIRED_CUBIC_VERSION)
+
+
+def test_equivalent_versions_exclude_the_declared_one():
+    equivalents = CUBIC_VERSIONS_EQUIVALENT_TO[REQUIRED_CUBIC_VERSION]
+    assert "0.9.0a1" in equivalents
+    assert REQUIRED_CUBIC_VERSION not in equivalents
+
+
+def test_equivalent_cubic_version_is_a_match(tmp_path, running_the_declared_pin):
+    """A 0.9.0a1 cache holds the values the declared pin reproduces, so it is reused."""
+    _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256=None)
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+
+
+def test_older_cubic_version_is_still_not_a_match(tmp_path, running_the_declared_pin):
+    """0.8.0a2 moved FSC/FRC/Spectral_PCC, so its caches stay refused."""
+    _stamp_cubic(tmp_path, "0.8.0a2", cp_space_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+
+
+def test_equivalent_cubic_version_keeps_the_cp_rules(tmp_path, running_the_declared_pin):
+    """Accepting the cubic stamp does not relax the CP-space binding check."""
+    _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256="abc")
+    assert metrics_provenance_matches(tmp_path, cp_space_sha256="abc")
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256="other")
+    _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256="abc")
+
+
+def test_equivalence_only_applies_under_the_declared_pin(tmp_path, monkeypatch):
+    """An environment off the pin gets no equivalence: only its own version matches."""
+    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.8.0a2")
+    _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256=None)
+    assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
+
+
+def test_unmeasured_pin_has_no_equivalents(tmp_path, monkeypatch):
+    """A newly declared pin with no measured entry reuses no older cache."""
+    monkeypatch.setattr("dynacell.evaluation.provenance.REQUIRED_CUBIC_VERSION", "0.9.0a3")
+    monkeypatch.setattr("dynacell.evaluation.provenance.version", lambda _name: "0.9.0a3")
+    _stamp_cubic(tmp_path, "0.9.0a1", cp_space_sha256=None)
     assert not metrics_provenance_matches(tmp_path, cp_space_sha256=None)
 
 

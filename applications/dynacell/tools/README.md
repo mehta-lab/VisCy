@@ -40,6 +40,8 @@ builders. Not part of the installable package — run with `uv run python applic
 
 - `smoke_joint_leaf.py` — smoke a joint (multi-dataset) training leaf.
 - `nccl_smoke_test.py` — probe multi-GPU NCCL connectivity before a DDP fit.
+- `scan_nan_microssim_caches.py` — read-only: list eval caches stamped with a cubic version (default 0.9.0a1)
+  whose MicroMS3IM is entirely NaN, i.e. caches a cubic-equivalence reuse would carry a NaN forward in.
 - `*_test.py` — pytest for the generators (`generate_grouped_eval_configs_test.py`,
   `generate_instance_ap_eval_configs_test.py`); further tool tests live in [`../tests/`](../tests/README.md).
 - `slurm_logs/` — captured job logs (runtime output, not source).
