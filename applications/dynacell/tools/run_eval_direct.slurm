@@ -75,7 +75,7 @@ ml uv
 # silently producing 0.8.0a2 FSC/FRC/Spectral_PCC values — 62 of the 121
 # surviving eval logs. ``check_cubic_pin`` now fails such a run loudly, but the
 # default still has to be right.
-export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a1}"
+export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a2}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache}"
 export PYTHONUNBUFFERED=1
 

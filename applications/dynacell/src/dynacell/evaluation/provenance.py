@@ -43,7 +43,7 @@ from pathlib import Path
 #: The ``cubic`` version this repo is built against. Must equal the pin in
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
 #: they cannot drift apart.
-REQUIRED_CUBIC_VERSION = "0.9.0a1"
+REQUIRED_CUBIC_VERSION = "0.9.0a2"
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"

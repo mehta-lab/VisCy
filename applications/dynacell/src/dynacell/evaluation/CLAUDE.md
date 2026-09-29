@@ -5,7 +5,7 @@ computing) for any GPU-accelerated numerical work — image preprocessing
 before / after model inference, metric calculations, cropping/resizing,
 percentile clips, Gaussian filters, etc. Cubic is a hard runtime
 dependency of the eval extras (`applications/dynacell/pyproject.toml`
-pins `cubic @ git+…@v0.9.0a1`). Do not gate cubic imports behind `try/except`
+pins `cubic @ git+…@v0.9.0a2`). Do not gate cubic imports behind `try/except`
 or fall back to scipy/skimage paths.
 
 **The cubic version is part of the numeric contract, not just a dep.** Metric
