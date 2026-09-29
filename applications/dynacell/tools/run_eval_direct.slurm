@@ -34,9 +34,9 @@
 # >=40 GB. MicroMS3IM calibration plus the resident segmenter/extractors OOMed on
 # 40-48 GB cards under cubic 0.9.0a1 (6 L40S + 2 A100-40GB units, 2026-09-26).
 # cubic 0.9.0a2 bounds the fit: on an L40S (job 36696972, grouped er_a549_trained
-# conditions, max_pairs=12, cold pred features) the peak was 15.9 GB, the cupy pool
-# 12.0 GiB, leaving ~24 GB even on a 40 GB A100 (bare `a100` matches a100_40 and
-# a100_80). Leaves that note a larger need (cold 2D deep-feature extraction) still
+# conditions, max_pairs=12, cold pred features) peak device use was 15.9 GB,
+# including a 12.0 GiB cupy pool, leaving ~24 GB even on a 40 GB A100 (bare `a100`
+# matches a100_40 and a100_80). Leaves that note a larger need (cold 2D deep-feature extraction) still
 # pass their own --constraint.
 
 set -euo pipefail
