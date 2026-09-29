@@ -31,8 +31,8 @@ This module makes that boundary detectable and non-repeatable:
 
 A version bump measured to move no value beyond a stated tolerance lists the old
 version under the new one in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`, so its caches
-stay reusable instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a bump:
-it only bounds the MicroSSIM RI-factor fit's memory.
+stay reusable instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a
+bump: it rewrites only the MicroSSIM RI-factor fit.
 
 The same sidecar stamps the content hash of the CP reference the CP feature
 metrics were scored in (:mod:`dynacell.evaluation.cp_reference`). CP KID/FID/
@@ -55,8 +55,9 @@ REQUIRED_CUBIC_VERSION = "0.9.0a2"
 #: declared version so a bump starts with no equivalents until one is measured
 #: against it.
 #:
-#: 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM RI-factor fit's memory use
-#: (chunked float64 reduction). Tolerance: MicroMS3IM relative delta <= 1e-6, far
+#: 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM RI-factor fit: it reduces the
+#: objective in bounded chunks, accumulating in float64 where 0.9.0a1 took a
+#: float32 ``.mean()``, and raises ``ValueError`` on an empty pool. Tolerance: MicroMS3IM relative delta <= 1e-6, far
 #: below the tables' 2-decimal rounding. Measured 2026-09-28 on the A549-trained
 #: ``fnet3d_paper`` ER ``a549__denv`` leaf at the production calibration settings
 #: (``max_pairs=12``, seed 42, a 576x640x960 float32 pool): the fitted alpha is

@@ -62,10 +62,11 @@ optional-dependencies.eval = [
   # with `normalize`/`normalization` rather than returning a quietly wrong
   # number, and the FSC/spectral, MicroSSIM, MS-SSIM, feature (KID/FID) and
   # average_precision modules were rewritten. Every pixel/feature metric in the
-  # benchmark can move across this pin, so it is paired with a full re-eval --
-  # do not bump it casually. Tag, not a bare commit. v0.9.0a2 only chunks the
-  # MicroSSIM RI-factor fit, bounding its memory (peak 40.5 -> 12.9 GB on
-  # 576x640x960 float32).
+  # benchmark can move across this pin, so a bump needs either a full re-eval or
+  # a measured entry in dynacell.evaluation.provenance.CUBIC_VERSIONS_EQUIVALENT_TO
+  # -- do not bump it casually. Tag, not a bare commit. v0.9.0a2 rewrites only the
+  # MicroSSIM RI-factor fit: chunked float64 reduction (peak 40.5 -> 12.9 GB on
+  # 576x640x960 float32) and a ValueError on empty input; measured equivalent.
   "cubic @ git+https://github.com/alxndrkalinin/cubic.git@v0.9.0a2",
   "dinov3 @ git+https://github.com/facebookresearch/dinov3",
   "dynaclr",
