@@ -83,6 +83,8 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fnet3d_paper_segaux_seed1",
     "pix2pix3d_unetvit_v2_seed1",
     "fcmae_vscyto3d_scratch_v2_seed1",
+    "fnet3d_paper_segaux_halfw",
+    "fnet3d_paper_segaux_doublew",
 )
 
 # ---------------------------------------------------------------------------
