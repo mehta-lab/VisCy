@@ -19,6 +19,8 @@ from iohub.ngff import open_ome_zarr
 from skimage.filters import threshold_otsu
 from torch import Tensor
 
+from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY
+
 __all__ = ["CondMaskSource", "MaskCorruption", "binarize_mask", "encode_mask"]
 
 
@@ -186,9 +188,11 @@ class CondMaskSource:
         Raises
         ------
         ValueError
-            If the source image's YX shape differs from the window, or the
-            window holds NaN or a single value: the prediction writer zero-fills
-            its store, so an unwritten window reads back constant, not NaN.
+            If a source position's channel has no completion marker (it is
+            unwritten, partly written, or predates markers: the prediction
+            writer zero-fills, so no pixel test can tell), its YX shape differs
+            from the window, the window holds NaN, or an ``"otsu"`` window is
+            constant (Otsu has no split).
         """
         img_names, t_indices, z_indices = index
         depth = spatial[0]
@@ -196,6 +200,12 @@ class CondMaskSource:
         for img_name, t, z in zip(img_names, t_indices, z_indices):
             _, row, col, pos, arr = img_name.split("/")
             with open_ome_zarr(self.data_path / row / col / pos, mode="r") as position:
+                marker = position.zattrs.get(PREDICTION_COMPLETE_KEY, {}).get(self.channel)
+                if not isinstance(marker, dict) or "source_shape" not in marker:
+                    raise ValueError(
+                        f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} has no completion "
+                        f"marker ({PREDICTION_COMPLETE_KEY}); the mask source is incomplete or predates markers."
+                    )
                 ch = position.get_channel_index(self.channel)
                 image = position[arr]
                 window = np.asarray(image[int(t), ch, int(z) : int(z) + depth])
@@ -209,11 +219,10 @@ class CondMaskSource:
                     f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} holds NaN at t={int(t)}, "
                     f"z={int(z)}; the mask source is incomplete."
                 )
-            if window.min() == window.max():
+            if self.threshold == "otsu" and window.min() == window.max():
                 raise ValueError(
                     f"{self.data_path}/{row}/{col}/{pos} channel {self.channel!r} is constant "
-                    f"({window.flat[0]}) at t={int(t)}, z={int(z)}; the mask source is unwritten "
-                    "(the prediction writer zero-fills) or incomplete."
+                    f"({window.flat[0]}) at t={int(t)}, z={int(z)}; Otsu has no split."
                 )
             windows.append(torch.from_numpy(self._binarize(window)).float())
         return torch.stack(windows).unsqueeze(1)
