@@ -320,3 +320,28 @@ def test_a549_eval_leaf_composes_and_splices(organelle: str, model: str, cond_sl
     # store scale metadata for caax/h2b/sec61b/tomm20.
     spacing = list(cfg.pixel_metrics.spacing)
     assert spacing == [0.174, 0.1494, 0.1494]
+
+
+# Every canonical ``eval__a549_mantis_*`` leaf in the benchmark tree, not only the
+# celldiff/unetvit3d matrix above. The matrix never listed pix2pix3d_unetvit, whose
+# leaves also had no ``_internal/leaf`` symlink, so their missing gene-keyed
+# ``dataset_ref.target`` went unnoticed until an eval raised TargetNotFoundError.
+_BENCHMARKS = _INTERNAL.parent
+_ALL_A549_EVAL_LEAVES = sorted(
+    p.relative_to(_BENCHMARKS) for p in _BENCHMARKS.glob("*/*/*/eval__a549_mantis_*.yaml") if "_internal" not in p.parts
+)
+
+
+@pytest.mark.parametrize("leaf", _ALL_A549_EVAL_LEAVES, ids=str)
+def test_every_a549_eval_leaf_composes(leaf: Path) -> None:
+    """Each A549 eval leaf is selectable via ``leaf=`` and resolves against its manifest."""
+    link = _LEAF_ROOT / leaf
+    assert link.is_symlink(), f"missing symlink: {link}"
+    assert link.resolve() == (_BENCHMARKS / leaf).resolve()
+
+    cfg = _compose_eval_cfg([f"leaf={leaf.with_suffix('')}"])
+    apply_dataset_ref(cfg)
+
+    marker = cfg.benchmark.dataset_ref.dataset.split("-")[2]
+    assert cfg.benchmark.dataset_ref.target == marker
+    assert list(cfg.pixel_metrics.spacing) == [0.174, 0.1494, 0.1494]
