@@ -30,7 +30,7 @@ This module makes that boundary detectable and non-repeatable:
   refuse a cache built by a different ``cubic``.
 
 A version bump that is measured not to move any value lists the old version
-in :data:`CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED`, so its caches stay reusable
+under the new version in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`, so its caches stay reusable
 instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a bump:
 it only bounds the MicroSSIM RI-factor fit's memory.
 
@@ -50,14 +50,15 @@ from pathlib import Path
 #: they cannot drift apart.
 REQUIRED_CUBIC_VERSION = "0.9.0a2"
 
-#: Earlier ``cubic`` versions whose metric values the declared version reproduces,
-#: so their caches stay reusable. 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM
+#: For each declared ``cubic`` version, the earlier versions whose metric values it
+#: reproduces, so their caches stay reusable. Keyed by the declared version so a
+#: bump starts with no equivalents until one is measured against it. 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM
 #: RI-factor fit's memory use (chunked float64 reduction). Measured 2026-09-28 on
 #: one FOV x 7 timepoints of the A549-trained ``fnet3d_paper`` ER ``a549__denv``
 #: predictions: every ``pixel_metrics`` and ``mask_metrics`` column, ``MicroMS3IM``
 #: included, is bit-identical across the two, as is the fitted alpha
 #: (20.037598609924316 on a 192x640x960 float32 pool).
-CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED = frozenset({"0.9.0a1"})
+CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a2": frozenset({"0.9.0a1"})}
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"
@@ -157,7 +158,7 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
     -------
     bool
         True when the recorded ``cubic`` version equals the installed one (or is
-        in :data:`CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED` while the installed one is
+        in :data:`CUBIC_VERSIONS_EQUIVALENT_TO` for the declared pin while the installed one is
         the declared pin) and, if ``cp_space_sha256`` is given, the recorded binding
         equals it.
     """
@@ -167,7 +168,8 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
     payload = json.loads(path.read_text())
     recorded = payload.get("versions", {}).get("cubic")
     installed = version("cubic")
-    reproduced = installed == REQUIRED_CUBIC_VERSION and recorded in CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED
+    equivalents = CUBIC_VERSIONS_EQUIVALENT_TO.get(REQUIRED_CUBIC_VERSION, frozenset())
+    reproduced = installed == REQUIRED_CUBIC_VERSION and recorded in equivalents
     if recorded != installed and not reproduced:
         return False
     if cp_space_sha256 is None:
