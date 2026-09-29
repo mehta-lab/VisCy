@@ -29,7 +29,7 @@ Arms (``<baseline>_<suffix>``):
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
   pass, so the arm and its v2 control share one recipe by construction.
-- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,segaux}`` compose
+- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
   allocation each): nucleus e96 00:39:27 -> e98 01:38:24 (2.04 ep/h), e98 ->
@@ -122,7 +122,9 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "celldiff_cjoint"): 1.4,
 }
 JOINTSTEPS_MAX_EPOCHS = 320
-LONG_WALL_MODELS: frozenset[str] = frozenset({"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux"})
+LONG_WALL_MODELS: frozenset[str] = frozenset(
+    {"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_v2_seed1", "fcmae_vscyto3d_scratch_segaux"}
+)
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
 SAFE_CROP_SIZE = [1, 384, 384]
@@ -244,6 +246,9 @@ ARMS: tuple[Arm, ...] = (
     Arm("fnet2d", "segaux_seed1", ORGANELLES, a549=True),
     Arm("fnet3d_paper", "segaux_seed1", ("nucleus",), a549=True),
     Arm("pix2pix3d_unetvit", "v2_seed1", ORGANELLES, a549=True),
+    # UNeXt2-3D nucleus v2 baseline, drawn once its segaux verdict came back non-null
+    # (wave2d, 2026-09-28: A549 instance Dice +0.029..+0.047, PCC -0.020..-0.025, CIs exclude 0).
+    Arm("fcmae_vscyto3d_scratch", "v2_seed1", ("nucleus",), a549=True),
 )
 SEED_SUFFIX = "_seed1"
 
