@@ -29,6 +29,11 @@ This module makes that boundary detectable and non-repeatable:
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
 
+A version bump that is measured not to move any value lists the old version
+in :data:`CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED`, so its caches stay reusable
+instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a bump:
+it only bounds the MicroSSIM RI-factor fit's memory.
+
 The same sidecar stamps the content hash of the CP reference the CP feature
 metrics were scored in (:mod:`dynacell.evaluation.cp_reference`). CP KID/FID/
 cosine move whenever the reference is rebuilt, so a cache stamped with another
@@ -44,6 +49,15 @@ from pathlib import Path
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
 #: they cannot drift apart.
 REQUIRED_CUBIC_VERSION = "0.9.0a2"
+
+#: Earlier ``cubic`` versions whose metric values the declared version reproduces,
+#: so their caches stay reusable. 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM
+#: RI-factor fit's memory use (chunked float64 reduction). Measured 2026-09-28 on
+#: one FOV x 7 timepoints of the A549-trained ``fnet3d_paper`` ER ``a549__denv``
+#: predictions: every ``pixel_metrics`` and ``mask_metrics`` column, ``MicroMS3IM``
+#: included, is bit-identical across the two, as is the fitted alpha
+#: (20.037598609924316 on a 192x640x960 float32 pool).
+CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED = frozenset({"0.9.0a1"})
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"
@@ -142,15 +156,19 @@ def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -
     Returns
     -------
     bool
-        True when the recorded ``cubic`` version equals the installed one and,
-        if ``cp_space_sha256`` is given, the recorded binding equals it.
+        True when the recorded ``cubic`` version equals the installed one (or is
+        in :data:`CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED` while the installed one is
+        the declared pin) and, if ``cp_space_sha256`` is given, the recorded binding
+        equals it.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
         return False
     payload = json.loads(path.read_text())
     recorded = payload.get("versions", {}).get("cubic")
-    if recorded != version("cubic"):
+    installed = version("cubic")
+    reproduced = installed == REQUIRED_CUBIC_VERSION and recorded in CUBIC_VERSIONS_EQUIVALENT_TO_REQUIRED
+    if recorded != installed and not reproduced:
         return False
     if cp_space_sha256 is None:
         return True
