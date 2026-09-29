@@ -63,10 +63,6 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__zikv/prediction.zarr
-  # pix2pix3d nucleus legs that finished after wave2a (2026-09-28). Generate with --wave wave2b.
-  # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
-  # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
-  # Generate with --wave wave2c.
   # Second draw of the FNet-2D segaux arm (both organelles) and the UNeXt2-3D membrane segaux
   # arm (fit ep199/200, --ckpt best ep125), 2026-09-29. Generate with --wave wave2f.
   wave2f:
@@ -89,6 +85,9 @@ waves:
     nucleus:
       - fcmae_vscyto3d_scratch_segaux
       - fcmae_vscyto3d_scratch_v2
+  # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
+  # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
+  # Generate with --wave wave2c.
   wave2c:
     nucleus:
       - {model: fnet2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
@@ -101,6 +100,7 @@ waves:
       - {model: pix2pix2d_unetvit_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
       - {model: fcmae_vscyto2d_scratch_l1seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
       - fcmae_vscyto3d_scratch_v2
+  # pix2pix3d nucleus legs that finished after wave2a (2026-09-28). Generate with --wave wave2b.
   wave2b:
     nucleus:
       - {model: pix2pix3d_unetvit_segaux, leaves: [a549__zikv]}
@@ -161,12 +161,10 @@ waves:
       - {model: fcmae_vscyto2d_scratch_seed1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_l1, leaves: [ipsc]}
       - {model: fcmae_vscyto2d_scratch_safecrop, leaves: [ipsc]}
-  # Stage 0b/0c/0g + Stage 1 first wave (leaves from tools/generate_spotlight_v2_leaves.py).
-  # Stores do not exist yet: do NOT run the generator on this wave until every predict has
-  # COMPLETED -- its store gate refuses absent or partial stores. Seed replicates and the
-  # UNeXt2-2D membrane recipe probes are predicted on the iPSC test only. The CellDiff-3D
-  # arm is keyed by its store dir celldiff_segaux_iterative (checkpoints under
-  # .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
+  # Stage 1 first wave, now only the CELL-Diff A549 legs still predicting: do NOT run the
+  # generator on it until every predict has COMPLETED -- its store gate refuses absent or
+  # partial stores. The CellDiff-3D arm is keyed by its store dir celldiff_segaux_iterative
+  # (checkpoints under .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
