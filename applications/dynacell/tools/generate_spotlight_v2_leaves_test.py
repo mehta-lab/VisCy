@@ -7,14 +7,17 @@ from collections import Counter
 import pytest
 import yaml
 from generate_spotlight_v2_leaves import (
+    _FIT_RENAMES,
     ARMS,
     BASELINES,
     BENCHMARKS,
     POOL,
+    SEED_SOURCES,
     SEG_AUX_WEIGHTS,
     SEGAUXSELF_BASELINES,
     WEIGHT_SCALES,
     Arm,
+    _unseeded,
     allowed_diff,
     build_fit,
     build_leaves,
@@ -180,7 +183,7 @@ def test_ccond_predict_reads_the_same_leg_fnet_segaux_mask() -> None:
             source["data_path"] == f"/hpc/projects/virtual_staining/training/dynacell/nucleus/{fnet[model]}/ipsc/{leg}"
         )
         assert source["channel"] == "Nuclei_prediction"
-        # Per-window Otsu, which transfers across intensity scales (see CCOND_THRESHOLDS).
+        # Per-window Otsu, which transfers across intensity scales (see CCOND_THRESHOLD).
         assert source["threshold"] == "otsu"
         assert "fg_mask_key" not in cfg.get("data", {}).get("init_args", {})
         n += 1
@@ -230,26 +233,17 @@ def test_l1_arms_differ_from_the_l1_probe_by_their_own_term_only() -> None:
 
 
 def test_second_draws_differ_from_their_source_arm_by_the_seed_only() -> None:
-    """``<suffix>_seed1`` fit leaves equal the ``<suffix>`` arm's, up to renames and ``seed_everything: 1``."""
+    """Second-draw fit leaves equal their source arm's, up to renames and ``seed_everything: 1``."""
     leaves = build_leaves()
-    second_draws = [arm for arm in ARMS if arm.suffix.endswith("_seed1")]
-    assert {arm.suffix for arm in second_draws} == {"segaux_seed1", "v2_seed1"}
+    second_draws = [arm for arm in ARMS if arm.suffix in SEED_SOURCES]
+    assert {arm.suffix for arm in second_draws} == set(SEED_SOURCES)
     for arm in second_draws:
-        source = f"{arm.baseline}_{arm.suffix.removesuffix('_seed1')}"
         for organelle in arm.organelles:
             draw = yaml.safe_load(leaves[BENCHMARKS / organelle / arm.model / POOL / "train.yml"])
-            src = yaml.safe_load(leaves[BENCHMARKS / organelle / source / POOL / "train.yml"])
+            src = yaml.safe_load(leaves[BENCHMARKS / organelle / _unseeded(arm).model / POOL / "train.yml"])
             assert draw.pop("seed_everything") == 1
             assert "seed_everything" not in src
-            assert changed_keys(src, draw) == {
-                "benchmark.model_name",
-                "benchmark.experiment_id",
-                "trainer.logger.init_args.name",
-                "trainer.logger.init_args.save_dir",
-                "trainer.callbacks.1.init_args.dirpath",
-                "launcher.job_name",
-                "launcher.run_root",
-            }
+            assert changed_keys(src, draw) == _FIT_RENAMES
 
 
 def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only() -> None:

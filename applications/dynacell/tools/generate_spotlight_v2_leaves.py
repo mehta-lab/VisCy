@@ -122,39 +122,22 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
     ("nucleus", "celldiff_cjoint"): 1.4,
 }
 JOINTSTEPS_MAX_EPOCHS = 320
-LONG_WALL_MODELS: frozenset[str] = frozenset(
-    {
-        "fcmae_vscyto3d_scratch_v2",
-        "fcmae_vscyto3d_scratch_v2_seed1",
-        "fcmae_vscyto3d_scratch_segaux",
-        "fcmae_vscyto3d_scratch_segaux_seed1",
-    }
-)
+# Second draws (see SEED_SOURCES) inherit their source arm's wall.
+LONG_WALL_MODELS: frozenset[str] = frozenset({"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_segaux"})
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
 SAFE_CROP_SIZE = [1, 384, 384]
 MASK_VELOCITY_WEIGHT = 1.0
-# C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction
-# for the same test leg, thresholded at a val-tuned t. The store path is the
-# planned one (it exists once that predict completes); the threshold is a STRING
-# placeholder on purpose, so a submit before it is tuned fails at config parse
-# instead of silently conditioning on an all-background (or all-foreground) mask.
+# C-cond predict conditions on the same-dimensionality FNet `_segaux` prediction for the
+# same test leg (that predict must be COMPLETE first), thresholded per window.
 CCOND_MASK_MODEL: dict[str, str] = {"celldiff_2d": "fnet2d_segaux", "celldiff": "fnet3d_paper_segaux"}
 CCOND_MASK_CHANNEL = "Nuclei_prediction"
-CCOND_THRESHOLD_PLACEHOLDER = "PLACEHOLDER_val_tuned_threshold"
-# Val-tuned thresholds per C-cond baseline, in the FNet prediction's own units (z-score
-# of the training target). celldiff_2d: t maximizing mean Dice of (FNet-2D segaux pred
-# >= t) vs fg_mask on 20 training-store val FOVs, n=20: 0.30 -> 0.774, with 0.25-0.40
-# within 0.0021 (experiments/2026-09-24_spotlight-v2/ccond_threshold/). celldiff (3D):
-# 0.40 from the GT fallback -- z-scored GT target >= t vs fg_mask, 20 val FOVs x 44
-# planes, Dice 0.699, 0.30-0.50 within 0.004 (ccond_threshold_3d/); a CPU forward of
-# FNet-3D over val FOVs took ~57 min/FOV, so the prediction-based optimum is unmeasured.
-# SUPERSEDED by "otsu" (2026-09-28): the fixed values do not transfer to A549, where FNet
-# predictions sit on another intensity scale and t marked 96-98% of pixels foreground
-# (FNet-2D baseline A549 p50 +3.0; FNet-3D segaux shifts A549 to 97.6% >= 0.40). Per-window
-# Otsu is label-free and scale-free: iPSC val Dice 0.769 (vs 0.774 fixed); A549 fg fraction
-# 7-9% (2D) / 26-35% (3D) against 12.5% [4.8-18.6%] for the A549 training targets' own masks.
-CCOND_THRESHOLDS: dict[str, float | str] = {"celldiff_2d": "otsu", "celldiff": "otsu"}
+# Per-window Otsu (2026-09-28), label- and scale-free. The val-tuned fixed thresholds it
+# replaced (2D 0.30, Dice 0.774; 3D 0.40) marked 96-98% of A549 pixels foreground, where
+# FNet predictions sit on another intensity scale. Otsu: iPSC val Dice 0.769; A549 fg
+# fraction 7-9% (2D) / 26-35% (3D) vs 12.5% [4.8-18.6%] for the A549 training masks
+# (experiments/2026-09-24_spotlight-v2/ccond_threshold*/).
+CCOND_THRESHOLD = "otsu"
 SAFE_CROP_COVERAGE = 0.9
 _UNEXT2_2D_DATA_OVERLAY = BENCHMARKS / "_internal/shared/model/data_overlays/fcmae_vscyto2d_fit.yml"
 
@@ -264,14 +247,19 @@ ARMS: tuple[Arm, ...] = (
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
     Arm("fnet3d_paper", "segaux_doublew", ("nucleus",), a549=True),
 )
-SEED_SUFFIX = "_seed1"
+# Second draws: suffix -> the arm whose recipe it re-draws with seed_everything: 1.
+SEED_SOURCES: dict[str, str] = {"segaux_seed1": "segaux", "v2_seed1": "v2", "l1seed1": "l1"}
 # Loss-weight sweep arms: the segaux arm's recipe with seg_aux_weight scaled by this factor.
 WEIGHT_SCALES: dict[str, float] = {"segaux_halfw": 0.5, "segaux_doublew": 2.0}
 
 
 def _unseeded(arm: Arm) -> Arm:
-    """Return the arm a ``<suffix>_seed1`` replicate re-draws (its suffix without ``_seed1``)."""
-    return replace(arm, suffix=arm.suffix.removesuffix(SEED_SUFFIX))
+    """Return the arm a second draw re-draws (:data:`SEED_SOURCES`); any other arm unchanged."""
+    return replace(arm, suffix=SEED_SOURCES.get(arm.suffix, arm.suffix))
+
+
+def _long_wall(arm: Arm) -> bool:
+    return _unseeded(arm).model in LONG_WALL_MODELS
 
 
 _DESCRIPTION: dict[str, str] = {
@@ -362,11 +350,14 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
                 }
             )
         return _PREDICT_RENAMES, frozenset()
-    if arm.suffix.endswith(SEED_SUFFIX):
+    if arm.suffix in SEED_SOURCES:
         renames, recipe_keys = allowed_diff(_unseeded(arm), kind)
         return renames, recipe_keys | {"seed_everything"}
     if arm.suffix in WEIGHT_SCALES:
         return allowed_diff(replace(arm, suffix="segaux"), kind)
+    if arm.suffix == "l1segaux":
+        renames, l1_keys = allowed_diff(replace(arm, suffix="l1"), kind)
+        return renames, l1_keys | allowed_diff(replace(arm, suffix="segaux"), kind)[1]
     recipe: set[str] = set()
     if arm.suffix in ("segaux", "segauxself"):
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
@@ -378,15 +369,6 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
         recipe.add("trainer.max_epochs")
     elif arm.suffix == "l1":
         recipe.add("model.init_args.loss_function")
-    elif arm.suffix == "l1segaux":
-        recipe |= {
-            "model.init_args.loss_function",
-            "data.init_args.fg_mask_key",
-            "model.init_args.seg_aux",
-            "model.init_args.seg_aux_weight",
-        }
-    elif arm.suffix == "l1seed1":
-        recipe |= {"model.init_args.loss_function", "seed_everything"}
     elif arm.suffix == "safecrop":
         recipe.add("data.init_args.gpu_augmentations")
     elif arm.suffix == "cjoint":
@@ -405,7 +387,7 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
             "model.init_args.mask_mode",
             "model.init_args.mask_corruption",
         }
-    if arm.model in LONG_WALL_MODELS:
+    if _long_wall(arm):
         recipe.add("base")
     return _FIT_RENAMES, frozenset(recipe)
 
@@ -435,13 +417,19 @@ def _safecrop_gpu_augmentations() -> list[dict]:
 
 def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     """Apply the arm's recipe delta to a fit-leaf dict in place."""
-    if arm.suffix.endswith(SEED_SUFFIX):
+    if arm.suffix in SEED_SOURCES:
         _apply_recipe(_unseeded(arm), organelle, cfg)
         cfg["seed_everything"] = 1
         return
     if arm.suffix in WEIGHT_SCALES:
         _apply_recipe(replace(arm, suffix="segaux"), organelle, cfg)
         cfg["model"]["init_args"]["seg_aux_weight"] *= WEIGHT_SCALES[arm.suffix]
+        return
+    if arm.suffix == "l1segaux":
+        # The l1 recipe plus the segaux terms, at the weight calibrated on the l1 probe.
+        _apply_recipe(replace(arm, suffix="l1"), organelle, cfg)
+        _apply_recipe(replace(arm, suffix="segaux"), organelle, cfg)
+        cfg["model"]["init_args"]["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, arm.model)]
         return
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
@@ -459,17 +447,11 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
         cfg["seed_everything"] = 1
     elif arm.suffix == "jointsteps":
         cfg.setdefault("trainer", {})["max_epochs"] = JOINTSTEPS_MAX_EPOCHS
-    elif arm.suffix in ("l1", "l1segaux", "l1seed1"):
+    elif arm.suffix == "l1":
         model_args["loss_function"] = {
             "class_path": "viscy_utils.losses.MixedLoss",
             "init_args": {"l1_alpha": 1.0, "l2_alpha": 0.0, "ms_dssim_alpha": 0.0},
         }
-        if arm.suffix == "l1segaux":
-            data_args["fg_mask_key"] = "fg_mask"
-            model_args["seg_aux"] = {"class_path": "viscy_utils.losses.SegAuxDice", "init_args": {"c": SEG_AUX_C}}
-            model_args["seg_aux_weight"] = SEG_AUX_WEIGHTS[(organelle, arm.model)]
-        elif arm.suffix == "l1seed1":
-            cfg["seed_everything"] = 1
     elif arm.suffix == "safecrop":
         data_args["gpu_augmentations"] = _safecrop_gpu_augmentations()
     elif arm.suffix == "cjoint":
@@ -510,7 +492,7 @@ def build_fit(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
     cfg["launcher"]["job_name"] = f"{cfg['launcher']['job_name']}_{arm.suffix}"
     cfg["launcher"]["run_root"] = _replace_segment(cfg["launcher"]["run_root"], base.ckpt_dir, arm.model)
     _apply_recipe(arm, organelle, cfg)
-    if arm.model in LONG_WALL_MODELS:
+    if _long_wall(arm):
         walls = [i for i, entry in enumerate(cfg["base"]) if entry.endswith(_WALL_4GPU)]
         if len(walls) != 1:
             raise ValueError(f"{arm.model}/{organelle}: expected one {_WALL_4GPU} in base, got {len(walls)}")
@@ -550,7 +532,7 @@ def build_predict(arm: Arm, organelle: str, baseline_cfg: dict) -> dict:
             "init_args": {
                 "data_path": mask_store,
                 "channel": CCOND_MASK_CHANNEL,
-                "threshold": CCOND_THRESHOLDS[arm.baseline],
+                "threshold": CCOND_THRESHOLD,
             },
         }
     return cfg
@@ -565,7 +547,7 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
     ]
     if kind == "fit":
         lines.append(f"# Recipe delta vs that leaf: {_DESCRIPTION[arm.suffix]}.")
-        if arm.model in LONG_WALL_MODELS:
+        if _long_wall(arm):
             lines.append(
                 "# Wall: hardware_4gpu_long (7 d); 200 epochs at the measured ~2.0 ep/h is ~100 h > 4 d"
                 " (checkpoint-mtime pairs in the generator docstring)."
@@ -581,14 +563,7 @@ def _header(arm: Arm, organelle: str, baseline_leaf: Path, kind: str) -> str:
 
 
 def _render(cfg: dict, header: str) -> str:
-    text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)
-    threshold_line = f"        threshold: {CCOND_THRESHOLD_PLACEHOLDER}\n"
-    text = text.replace(
-        threshold_line,
-        "        # PLACEHOLDER: set to the threshold tuned on the val FOVs (plan Stage 1b C-cond);\n"
-        "        # data_path is the planned FNet _segaux store, which must be COMPLETE first.\n" + threshold_line,
-    )
-    return header + text
+    return header + yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False)
 
 
 def build_leaves(benchmarks: Path = BENCHMARKS) -> dict[Path, str]:
