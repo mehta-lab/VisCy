@@ -67,6 +67,10 @@ _CODE_TO_PAPER: dict[str, str] = {
     # evaluate it in a filtered focused sibling bucket, never by regenerating
     # into the canonical buckets (see the fnet2d DON'T-FOLD precedent).
     "fnet2d_voxelmatched": "fnet2d_voxelmatched",
+    # Sample-matched UNeXt2-2D ablation (nucleus + ER, iPSC-trained):
+    # fcmae_vscyto2d_scratch with fcmae_vscyto3d_scratch's optimizer budget.
+    # Parse-only registration, same rule as fnet2d_voxelmatched.
+    "fcmae_vscyto2d_scratch_samplematched": "unext2_2d_samplematched",
     "celldiff_2d": "celldiff_2d",
     "pix2pix2d_unetvit": "pix2pix2d",
     # Spotlight-loss arms (iPSC-trained nucleus + membrane). Must agree with
@@ -155,6 +159,7 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto2d_pretrained",
     "fnet2d",
     "fnet2d_voxelmatched",
+    "fcmae_vscyto2d_scratch_samplematched",
     "pix2pix2d_unetvit",
     # Spotlight-loss arms. Deterministic for the same reason their baselines are;
     # spotlight changes the training objective only, never inference. Matching here

@@ -139,6 +139,16 @@ from generate_spotlight_v2_leaves import ARMS  # noqa: E402
             "er/fnet2d_voxelmatched/ipsc/a549__mock/prediction.zarr",
             ("er", "fnet2d_voxelmatched", None, "ipsc_trained", "ipsc", "a549", "mock"),
         ),
+        # Sample-matched UNeXt2-2D ablation: parses as its own model, never as
+        # fcmae_vscyto2d_scratch.
+        (
+            "nucleus/fcmae_vscyto2d_scratch_samplematched/ipsc/ipsc/prediction.zarr",
+            ("nucleus", "fcmae_vscyto2d_scratch_samplematched", None, "ipsc_trained", "ipsc", "ipsc", None),
+        ),
+        (
+            "er/fcmae_vscyto2d_scratch_samplematched/ipsc/a549__mock/prediction.zarr",
+            ("er", "fcmae_vscyto2d_scratch_samplematched", None, "ipsc_trained", "ipsc", "a549", "mock"),
+        ),
     ],
 )
 def test_parse_zarr_name(rel: str, expect: tuple) -> None:
