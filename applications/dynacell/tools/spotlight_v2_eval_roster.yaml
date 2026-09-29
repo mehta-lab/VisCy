@@ -43,6 +43,14 @@ waves:
   # Seed-replicate A549 legs (the A549 noise floor; fnet3d_paper_seed1 also checks the April
   # FNet-3D baseline store) and the fresh UNeXt2-3D membrane baseline (2026-09-28).
   # Generate with --wave wave2c.
+  # Second draw of the FNet-2D segaux arm (both organelles) and the UNeXt2-3D membrane segaux
+  # arm (fit ep199/200, --ckpt best ep125), 2026-09-29. Generate with --wave wave2f.
+  wave2f:
+    nucleus:
+      - fnet2d_segaux_seed1
+    membrane:
+      - fnet2d_segaux_seed1
+      - fcmae_vscyto3d_scratch_segaux
   # Otsu-threshold C-cond iPSC legs (CELL-Diff-2D and -3D) and the CELL-Diff-2D membrane
   # segauxself ZIKV leg, 2026-09-28. Generate with --wave wave2e.
   wave2e:
@@ -145,5 +153,4 @@ waves:
       # kept aside as _spotlight_v2/nucleus/celldiff_2d_ccond/ipsc/<leg>.fixed_t030.
       - {model: celldiff_2d_ccond, leaves: [a549__mock, a549__denv, a549__zikv]}
     membrane:
-      - fcmae_vscyto3d_scratch_segaux
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
