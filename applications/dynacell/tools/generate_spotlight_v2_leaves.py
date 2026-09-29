@@ -72,7 +72,7 @@ from __future__ import annotations
 import argparse
 import copy
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -238,7 +238,20 @@ ARMS: tuple[Arm, ...] = (
     # while every GAN arm predicts from last.ckpt (recorded EMA val L1 does not track the
     # weights), so arm-vs-baseline needs this.
     Arm("pix2pix2d_unetvit", "last", ORGANELLES, a549=True, fit=False),
+    # Second draws where the verdict rests on one run (readout 2026-09-28: on A549 the two FNet
+    # baseline draws differ by up to 0.39 Dice): the arm itself for the FNet cells whose effect
+    # holds against both baseline draws, and the pix2pix3d v2 baseline, which had no replicate.
+    Arm("fnet2d", "segaux_seed1", ORGANELLES, a549=True),
+    Arm("fnet3d_paper", "segaux_seed1", ("nucleus",), a549=True),
+    Arm("pix2pix3d_unetvit", "v2_seed1", ORGANELLES, a549=True),
 )
+SEED_SUFFIX = "_seed1"
+
+
+def _unseeded(arm: Arm) -> Arm:
+    """Return the arm a ``<suffix>_seed1`` replicate re-draws (its suffix without ``_seed1``)."""
+    return replace(arm, suffix=arm.suffix.removesuffix(SEED_SUFFIX))
+
 
 _DESCRIPTION: dict[str, str] = {
     "segaux": "data fg_mask_key: fg_mask; model seg_aux (SegAuxDice c=0.1) + seg_aux_weight (+ seg_aux_t0 for flow)",
@@ -246,6 +259,8 @@ _DESCRIPTION: dict[str, str] = {
     "arm's seg_aux_weight (+ seg_aux_t0 for flow). One field from the segaux arm: the Dice reference is the "
     "target through the same sigmoid, so the term is zero at pred == target",
     "seed1": "seed_everything: 1",
+    "segaux_seed1": "the segaux arm's recipe + seed_everything: 1 (a second draw of the arm)",
+    "v2_seed1": "seed_everything: 1 (a second draw of the v2 baseline)",
     "v2": "nothing (fresh retrain of the baseline recipe under its own run root)",
     "jointsteps": f"trainer max_epochs: {JOINTSTEPS_MAX_EPOCHS}. Step budget matched to the joint membrane run, "
     "measured from final checkpoints: baseline latest-epoch=199-step=100000 (500 steps/ep), joint "
@@ -324,6 +339,9 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
                 }
             )
         return _PREDICT_RENAMES, frozenset()
+    if arm.suffix.endswith(SEED_SUFFIX):
+        renames, recipe_keys = allowed_diff(_unseeded(arm), kind)
+        return renames, recipe_keys | {"seed_everything"}
     recipe: set[str] = set()
     if arm.suffix in ("segaux", "segauxself"):
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
@@ -392,6 +410,10 @@ def _safecrop_gpu_augmentations() -> list[dict]:
 
 def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     """Apply the arm's recipe delta to a fit-leaf dict in place."""
+    if arm.suffix.endswith(SEED_SUFFIX):
+        _apply_recipe(_unseeded(arm), organelle, cfg)
+        cfg["seed_everything"] = 1
+        return
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})
     if arm.suffix in ("segaux", "segauxself"):

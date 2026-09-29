@@ -36,10 +36,10 @@ def test_committed_leaves_match_the_generator() -> None:
 
 
 def test_leaf_counts_per_arm() -> None:
-    """Count 46 fits and 186 predicts per arm (fit+predict).
+    """Count 51 fits and 206 predicts per arm (fit+predict).
 
     segaux 16+64, segauxself 8+32, seed1 9+36, v2 4+16, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
-    l1segaux 1+4, l1seed1 1+4.
+    l1segaux 1+4, l1seed1 1+4, segaux_seed1 3+12, v2_seed1 2+8.
 
     The probes and seed replicates are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -58,6 +58,8 @@ def test_leaf_counts_per_arm() -> None:
         "ccond": 2,
         "l1segaux": 1,
         "l1seed1": 1,
+        "segaux_seed1": 3,
+        "v2_seed1": 2,
     }
     assert predicts == {
         "segaux": 64,
@@ -72,6 +74,8 @@ def test_leaf_counts_per_arm() -> None:
         "ccond": 8,
         "l1segaux": 4,
         "l1seed1": 4,
+        "segaux_seed1": 12,
+        "v2_seed1": 8,
     }
 
 
@@ -217,3 +221,26 @@ def test_l1_arms_differ_from_the_l1_probe_by_their_own_term_only() -> None:
         "model.init_args.seg_aux_weight",
     }
     assert changed_keys(l1, load("l1seed1")) - renames == {"seed_everything"}
+
+
+def test_second_draws_differ_from_their_source_arm_by_the_seed_only() -> None:
+    """``<suffix>_seed1`` fit leaves equal the ``<suffix>`` arm's, up to renames and ``seed_everything: 1``."""
+    leaves = build_leaves()
+    second_draws = [arm for arm in ARMS if arm.suffix.endswith("_seed1")]
+    assert {arm.suffix for arm in second_draws} == {"segaux_seed1", "v2_seed1"}
+    for arm in second_draws:
+        source = f"{arm.baseline}_{arm.suffix.removesuffix('_seed1')}"
+        for organelle in arm.organelles:
+            draw = yaml.safe_load(leaves[BENCHMARKS / organelle / arm.model / POOL / "train.yml"])
+            src = yaml.safe_load(leaves[BENCHMARKS / organelle / source / POOL / "train.yml"])
+            assert draw.pop("seed_everything") == 1
+            assert "seed_everything" not in src
+            assert changed_keys(src, draw) == {
+                "benchmark.model_name",
+                "benchmark.experiment_id",
+                "trainer.logger.init_args.name",
+                "trainer.logger.init_args.save_dir",
+                "trainer.callbacks.1.init_args.dirpath",
+                "launcher.job_name",
+                "launcher.run_root",
+            }
