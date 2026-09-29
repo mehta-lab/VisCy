@@ -5,7 +5,7 @@ computing) for any GPU-accelerated numerical work — image preprocessing
 before / after model inference, metric calculations, cropping/resizing,
 percentile clips, Gaussian filters, etc. Cubic is a hard runtime
 dependency of the eval extras (`applications/dynacell/pyproject.toml`
-pins `cubic @ git+…@v0.9.0a1`). Do not gate cubic imports behind `try/except`
+pins `cubic @ git+…@v0.9.0a2`). Do not gate cubic imports behind `try/except`
 or fall back to scipy/skimage paths.
 
 **The cubic version is part of the numeric contract, not just a dep.** Metric
@@ -23,6 +23,10 @@ values move across pins — measured 0.8.0a2 → 0.9.0a1: `Z_FSC_Resolution`
   Unstamped means "written before the stamp existed", i.e. an unknown pin —
   it must recompute, unlike the per-extractor `preprocess_version` bootstrap
   which treats an untagged entry as unconstrained.
+- A bump measured to move no value beyond a stated tolerance lists the old
+  version under the new one in `CUBIC_VERSIONS_EQUIVALENT_TO` so its caches are still reused
+  (0.9.0a1 under 0.9.0a2). The map is keyed by the declared version, so the
+  next bump reuses nothing until someone measures an equivalence against it.
 
 The GPU-resident Cellpose-SAM entry point is
 `cubic.segmentation.segment_cpsam` (single host→device upload, masks

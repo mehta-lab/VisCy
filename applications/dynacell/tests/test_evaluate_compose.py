@@ -178,7 +178,7 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     """``evaluate_model`` runs ``apply_dataset_ref`` before ``evaluate_predictions``."""
     captured: list[DictConfig] = []
 
-    def _fake_evaluate_predictions(cfg: DictConfig):
+    def _fake_evaluate_predictions(cfg: DictConfig, *, cp_space):
         captured.append(cfg)
         return ([], [], [])
 
@@ -188,12 +188,15 @@ def test_evaluate_model_wires_hook(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("dynacell.evaluation.pipeline.evaluate_predictions", _fake_evaluate_predictions)
     monkeypatch.setattr("dynacell.evaluation.pipeline.save_metrics", _fake_save_metrics)
 
+    # Feature metrics off: evaluate_model would otherwise load the CP reference before
+    # evaluate_predictions, and this test is about the dataset_ref splice only.
     cfg = _compose_eval_cfg(
         [
             "target=er_sec61b",
             "predict_set=ipsc_confocal",
             "io.pred_path=/tmp/fake",
             f"save.save_dir={tmp_path}",
+            "compute_feature_metrics=false",
         ]
     )
 

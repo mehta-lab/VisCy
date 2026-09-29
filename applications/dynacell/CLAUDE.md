@@ -173,6 +173,26 @@ runtime:
 - `DYNACELL_FORCE_PER_T_HYGIENE=1` — runtime escape hatch to force per-T
   `cuda_empty_cache` + `gc_collect` without a YAML change.
 
+## Device-agnostic array code (NumPy / CuPy)
+
+Eval code runs on NumPy or CuPy arrays depending on `use_gpu`. Follow cubic's
+rule (`cubic/AGENTS.md`, *Device-Agnostic Code Pattern*): **call `np.` functions
+and array methods directly on either kind of array, and avoid the `xp`
+array-module interface.** NumPy dispatches `np.isfinite`, `np.abs`,
+`np.fft.fftn`, `np.bincount` and the like to CuPy for CuPy inputs, and
+`.max()`, `.astype()`, boolean indexing and friends are the same on both.
+
+- Keep derived arrays (masks, ranges, indices) on the input's device: build them
+  with `np.`/array methods from the input itself, and never round-trip to the host
+  just to index back into a device array.
+- `get_array_module` (`xp`) only for **creating** a new array that must live on
+  a given device (`xp.zeros`, `xp.asarray`) or for the rare function NumPy does
+  not dispatch.
+- Move arrays between devices with `cubic.cuda` (`asnumpy`, `ascupy`,
+  `to_same_device`, `get_device`), never with direct `cupy.*` calls.
+- Some older eval modules (`segmentation_whole_cell.py`, `segmentation_cellpose.py`,
+  `spectral_pcc/evaluate.py`) still use `xp`. Don't copy that into new code.
+
 ## Grouped multi-condition eval
 
 For the same `(model, organelle)` across multiple I/O variants (typically the 3
@@ -266,7 +286,7 @@ UNetViT3D A549 stores predate the 2026-07-27 tiling fix and differ). Predict cos
   the committed files to its output. To put a new model on the lite: give it a production predict
   leaf, add its dir to `ROSTER_MODELS`, regenerate, then predict with `submit_benchmark_batch.py
   --array --allow-mixed-directives` and evaluate with `tools/run_eval_direct.slurm
-  grouped/<bucket>__lite/eval_grouped` on a >= 80 GB GPU.
+  grouped/<bucket>__lite/eval_grouped`.
 - **Reported metrics:** si-SSIM, Spectral PCC, Dice, the five deep KIDs and cosines. GLCM+ KID is
   dropped (biased low at lite cell counts); GLCM+ cosine is kept but flagged. MicroSSIM, FID, PRC and
   MIND are off (`compute_microssim`, `feature_metrics.compute_{fid,prc,mind}`).

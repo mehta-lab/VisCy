@@ -16,7 +16,11 @@
 # all others invoke ``dynacell evaluate``.
 #
 # Extra positional args after the leaf path are passed verbatim as Hydra
-# overrides (e.g. ``limit_positions=2 force_recompute.final_metrics=true``).
+# overrides, e.g. a smoke run on two FOVs:
+#   ``limit_positions=2 compute_feature_metrics=false force_recompute.final_metrics=true``
+# (``compute_feature_metrics=false`` is required with ``limit_positions``: the CP
+# feature metrics are scored against a reference fit on every GT position, so a
+# partial walk with them on raises.)
 
 #SBATCH --job-name=eval_direct
 #SBATCH --time=1-00:00:00
@@ -26,7 +30,15 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus=1
 #SBATCH --mem=256G
-#SBATCH --constraint="a40|l40s|a100|h100|h200"
+#SBATCH --constraint="a40|l40s|a100|h100_80|h200"
+# >=40 GB. MicroMS3IM calibration plus the resident segmenter/extractors OOMed on
+# 40-48 GB cards under cubic 0.9.0a1 (6 L40S + 2 A100-40GB units, 2026-09-26).
+# cubic 0.9.0a2 bounds the fit: on an L40S (job 36696972, grouped er_a549_trained
+# conditions, max_pairs=12, cold pred features) peak device use was 15.6 GiB,
+# including a 12.0 GiB cupy pool, leaving ~21 GiB even on a 40 GB A100 (bare `a100`
+# matches a100_40 and a100_80). A fully cold A549 membrane eval (fresh GT cache,
+# all five feature extractors on GT and prediction) peaked at 28.9 GiB on an A40
+# (2026-09-29), so cold deep-feature extraction also fits a 40 GB card.
 
 set -euo pipefail
 
@@ -70,8 +82,10 @@ ml uv
 # the 0.9.0a1 venv existed, so jobs that did not export DYNACELL_EVAL_VENV kept
 # silently producing 0.8.0a2 FSC/FRC/Spectral_PCC values — 62 of the 121
 # surviving eval logs. ``check_cubic_pin`` now fails such a run loudly, but the
-# default still has to be right.
-export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a1}"
+# default still has to be right. ``cpdino-eval-cubic090a2`` is the
+# ``cpdino-eval-cubic090a1`` freeze with only cubic changed; 0.9.0a1 caches stay
+# reusable under it (``provenance.CUBIC_VERSIONS_EQUIVALENT_TO``).
+export UV_PROJECT_ENVIRONMENT="${DYNACELL_EVAL_VENV:-/hpc/mydata/alex.kalinin/VisCy-venvs/cpdino-eval-cubic090a2}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-/hpc/projects/comp.micro/virtual_staining/models/dynacell/evaluation/hf_cache}"
 export PYTHONUNBUFFERED=1
 

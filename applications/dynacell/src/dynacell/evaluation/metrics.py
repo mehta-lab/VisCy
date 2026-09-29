@@ -1,5 +1,6 @@
 """Metric computation for evaluation: pixel metrics, mask metrics, MicroMS3IM."""
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -12,15 +13,18 @@ try:
     from cubic.metrics import frc_resolution, fsc_resolution, nrmse, pcc, psnr
     from cubic.metrics import ssim as cubic_ssim  # aliased — dynacell keeps a local ssim() wrapper
     from cubic.metrics.bandlimited import spectral_pcc
+    from cubic.metrics.microssim import compute_norm_parameters, normalize_min_max
     from cubic.scipy import ndimage as _cubic_ndimage
     from cubic.skimage import filters as _cubic_filters
 except ImportError:
     ascupy = None  # type: ignore[assignment]
     asnumpy = None  # type: ignore[assignment]
+    compute_norm_parameters = None  # type: ignore[assignment]
     cubic_ssim = None  # type: ignore[assignment]
     frc_resolution = None  # type: ignore[assignment]
     fsc_resolution = None  # type: ignore[assignment]
     glcm_features = None  # type: ignore[assignment]
+    normalize_min_max = None  # type: ignore[assignment]
     nrmse = None  # type: ignore[assignment]
     pcc = None  # type: ignore[assignment]
     psnr = None  # type: ignore[assignment]
@@ -277,9 +281,15 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
 
     Returns
     -------
-    MicroMS3IM
+    MicroMS3IM or None
         Fitted instance — ``sim.score(target_slice, pred_slice)`` may
-        then be called without further fitting.
+        then be called without further fitting. Constant target slices
+        carry no data range, so they are dropped from the pool before
+        fitting (``score_microssim`` still scores them 0.0). ``None`` when
+        every slice is constant, or when a remaining normalized target
+        slice has a data range that is not finite and positive (a
+        non-finite GT pixel, or a degenerate pool normalization), where α
+        is undefined.
     """
     MicroMS3IM = _require_microms3im()
     # Convert to cupy when GPU is requested — cubic.skimage dispatches to
@@ -287,7 +297,39 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
     to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
     targets = to_xp(targets)
     predictions = to_xp(predictions)
-    sim = MicroMS3IM()
+    # A constant GT slice (the all-zero z-slices in A549 TOMM20_mock.zarr) has no
+    # data range, so cubic cannot fit α on it. Drop it from the pool and fit on the
+    # rest. Only exact constants go: a NaN/inf GT pixel gives a non-finite range,
+    # which is kept so the check below still makes the leaf NaN.
+    constant = targets.max(axis=(1, 2)) - targets.min(axis=(1, 2)) == 0
+    if constant.all():
+        print(
+            f"[microssim] all {len(constant)} calibration GT slices are constant; MicroMS3IM will be NaN for all FOVs."
+        )
+        return None
+    if constant.any():
+        print(f"[microssim] dropped {int(constant.sum())} of {len(constant)} constant calibration GT slices.")
+        targets = targets[~constant]
+        predictions = predictions[~constant]
+    # cubic fits α with each normalized GT slice's own data_range (max - min) and
+    # raises unless it is finite and positive: a non-finite GT pixel, or a pool
+    # whose background percentile equals its max (max_val == 0). The normalization
+    # is monotone, so normalizing each slice's extrema with cubic's own parameters
+    # reproduces that range; the same parameters are then handed to the fit.
+    offset_gt, offset_pred, max_val = compute_norm_parameters(targets, predictions)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        gt_range = asnumpy(
+            normalize_min_max(targets.max(axis=(1, 2)), offset_gt, max_val)
+            - normalize_min_max(targets.min(axis=(1, 2)), offset_gt, max_val)
+        )
+    degenerate = ~(np.isfinite(gt_range) & (gt_range > 0))
+    if degenerate.any():
+        print(
+            f"[microssim] {int(degenerate.sum())} of {len(gt_range)} calibration GT slices have a "
+            "normalized data range that is not finite and positive; MicroMS3IM will be NaN for all FOVs."
+        )
+        return None
+    sim = MicroMS3IM(offset_gt=offset_gt, offset_pred=offset_pred, max_val=max_val)
     sim.fit(targets, predictions)
     return sim
 
@@ -452,18 +494,107 @@ _CP_GLCM_FEATURE_NAMES: tuple[str, ...] = tuple(f"glcm_{key}" for key in _GLCM_P
 # :func:`pipeline_cache._auto_invalidate_on_artifact_param_mismatch`.
 CP_FEATURE_VERSION = "v2_dist_texture"
 
+#: The CP column order each recipe version wrote, frozen as literals (GLCM on; with
+#: GLCM off the ``glcm_*`` columns are absent). CP caches written before the feature
+#: names were recorded in the manifest carry only ``cp_feature_version`` +
+#: ``cp_glcm_enabled``, and this table reads their exact column order back from
+#: those -- no re-cache needed. It is deliberately NOT derived from
+#: :func:`active_cp_feature_names`: a reorder of the live tuples without a version
+#: bump then disagrees with this table (and fails its test), instead of
+#: silently re-labelling old caches (see tests/test_cp_feature_names.py).
+CP_FEATURE_NAMES_BY_VERSION: dict[str, tuple[str, ...]] = {
+    "v2_dist_texture": (
+        "intensity_mean",
+        "intensity_std",
+        "intensity_min",
+        "intensity_max",
+        "p10",
+        "p25",
+        "p50",
+        "p75",
+        "p90",
+        "iqr",
+        "skewness",
+        "kurtosis",
+        "gradient_mean",
+        "gradient_std",
+        "laplacian_var",
+        "glcm_contrast",
+        "glcm_dissimilarity",
+        "glcm_homogeneity",
+        "glcm_ASM",
+        "glcm_energy",
+        "glcm_correlation",
+        "glcm_entropy",
+    ),
+}
+
 
 def active_cp_feature_names(glcm_enabled: bool) -> tuple[str, ...]:
     """Return the ordered CP column names for the active config.
 
     The schema is GLCM-dependent: the base distribution/texture columns are
     always emitted; the seven ``glcm_*`` columns are appended only when GLCM is
-    enabled. Used by both the matrix assembly and the
-    ``cp_selected_feature_mask.json`` sidecar so they never drift.
+    enabled. Used by both the matrix assembly and the CP reference's recipe
+    identity (``cp_reference.cp_space``), so a reference built for another
+    column set is refused instead of silently misaligned.
     """
     if glcm_enabled:
         return _CP_BASE_FEATURE_NAMES + _CP_GLCM_FEATURE_NAMES
     return _CP_BASE_FEATURE_NAMES
+
+
+#: CP columns whose value depends on the device that computed them. cuCIM's GPU
+#: regionprops reduces the built-in min/max in float32, while skimage on CPU keeps
+#: float64 (~1e-8 rel apart; every other column agrees to <= 1e-14). That is enough
+#: to move the GT-only variance filter: a cell holding the p99-clipped pixel has
+#: intensity_max exactly 1.0 on GPU but ``1 - eps / (hi - lo)`` on CPU, which
+#: changes the exact-tie counts and hence the feature mask.
+_DEVICE_DEPENDENT_CP_COLUMNS: tuple[str, ...] = ("intensity_min", "intensity_max")
+
+
+def round_device_dependent_cp_columns(features: np.ndarray, feature_names: Sequence[str]) -> np.ndarray:
+    """Round the device-dependent CP columns to float32, returning float64.
+
+    The single definition of the CP min/max rounding, applied both by
+    :func:`cp_regionprops` and to every CP array read from a cache. It aligns
+    CPU to GPU, the device that built every production CP cache; on GPU output
+    (already float32-exact) it is a no-op, and on a CPU-built cache it yields
+    exactly what the fixed extractor computes, so such a cache needs no
+    recompute.
+
+    Parameters
+    ----------
+    features : np.ndarray
+        ``(n_cells, n_features)`` CP matrix. A zero-row array (including the
+        ``(0, 0)`` empty-FOV cache sentinel) is returned unchanged.
+    feature_names : sequence of str
+        Column names of ``features``, in order; the columns are located by name.
+
+    Returns
+    -------
+    np.ndarray
+        A float64 copy with :data:`_DEVICE_DEPENDENT_CP_COLUMNS` rounded.
+
+    Raises
+    ------
+    ValueError
+        If ``features`` is not 2-D or its column count does not match
+        ``feature_names``.
+    """
+    features = np.asarray(features)
+    if features.ndim != 2:
+        raise ValueError(f"CP features must be 2-D (n_cells, n_features); got shape {features.shape}")
+    if features.shape[0] == 0:
+        return features
+    names = list(feature_names)
+    if features.shape[1] != len(names):
+        raise ValueError(f"CP features have {features.shape[1]} columns but {len(names)} names: {names}")
+    out = features.astype(np.float64, copy=True)
+    for name in _DEVICE_DEPENDENT_CP_COLUMNS:
+        j = names.index(name)
+        out[:, j] = out[:, j].astype(np.float32).astype(np.float64)
+    return out
 
 
 def drop_paired_nonfinite_rows(pred: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -607,7 +738,10 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
 
     if columns["intensity_mean"].shape[0] == 0:
         return np.empty((0, len(names)), dtype=float)
-    return np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1)
+    # Round min/max to float32 so CPU output matches GPU (no-op on GPU).
+    return round_device_dependent_cp_columns(
+        np.stack([np.asarray(columns[name], dtype=float) for name in names], axis=1), names
+    )
 
 
 def _cell_ssim(gt_crop, pred_crop, mask, *, min_size: int = 7) -> float:

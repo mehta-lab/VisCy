@@ -28,6 +28,17 @@ This module makes that boundary detectable and non-repeatable:
 * :func:`write_metrics_provenance` stamps the versions beside the metrics,
   and :func:`metrics_provenance_matches` lets the final-metrics cache gate
   refuse a cache built by a different ``cubic``.
+
+A version bump measured to move no value beyond a stated tolerance lists the old
+version under the new one in :data:`CUBIC_VERSIONS_EQUIVALENT_TO`, so its caches
+stay reusable instead of forcing every leaf to recompute. 0.9.0a1 -> 0.9.0a2 is such a
+bump: it rewrites only the MicroSSIM RI-factor fit.
+
+The same sidecar stamps the content hash of the CP reference the CP feature
+metrics were scored in (:mod:`dynacell.evaluation.cp_reference`). CP KID/FID/
+cosine move whenever the reference is rebuilt, so a cache stamped with another
+reference -- or with none, i.e. written before the shared CP space existed -- is
+refused the same way.
 """
 
 import json
@@ -37,7 +48,25 @@ from pathlib import Path
 #: The ``cubic`` version this repo is built against. Must equal the pin in
 #: ``applications/dynacell/pyproject.toml``; ``provenance_test.py`` asserts
 #: they cannot drift apart.
-REQUIRED_CUBIC_VERSION = "0.9.0a1"
+REQUIRED_CUBIC_VERSION = "0.9.0a2"
+
+#: For each declared ``cubic`` version, the earlier versions whose metric values it
+#: reproduces within a stated tolerance, so their caches stay reusable. Keyed by the
+#: declared version so a bump starts with no equivalents until one is measured
+#: against it.
+#:
+#: 0.9.0a1 -> 0.9.0a2 changes only the MicroSSIM RI-factor fit: it reduces the
+#: objective in bounded chunks, accumulating in float64 where 0.9.0a1 took a
+#: float32 ``.mean()``, and raises ``ValueError`` on an empty pool. Tolerance: MicroMS3IM relative delta <= 1e-6, far
+#: below the tables' 2-decimal rounding. Measured 2026-09-28 on the A549-trained
+#: ``fnet3d_paper`` ER ``a549__denv`` leaf at the production calibration settings
+#: (``max_pairs=12``, seed 42, a 576x640x960 float32 pool): the fitted alpha is
+#: 17.883591651916504 under both versions, and MicroMS3IM over all 108 (FOV, t)
+#: differs by 0 abs / 0 rel. The fit objective itself moves ~7e-8 relative between
+#: the versions; the root finder lands on the same alpha. The other
+#: ``pixel_metrics`` / ``mask_metrics`` columns do not use the RI-factor code and
+#: were bit-identical on 1 FOV x 7 timepoints.
+CUBIC_VERSIONS_EQUIVALENT_TO = {"0.9.0a2": frozenset({"0.9.0a1"})}
 
 #: Sidecar written next to ``pixel_metrics.csv`` by :func:`write_metrics_provenance`.
 PROVENANCE_FILENAME = "metrics_provenance.json"
@@ -83,20 +112,38 @@ def check_cubic_pin() -> None:
         )
 
 
-def write_metrics_provenance(save_dir: Path) -> None:
+def write_metrics_provenance(save_dir: Path, *, cp_reference_sha256: str | None, cp_space_sha256: str | None) -> None:
     """Write the numeric-provenance sidecar into ``save_dir``.
 
     Parameters
     ----------
     save_dir : pathlib.Path
         Directory that receives the metric CSV/NPY files.
+    cp_reference_sha256 : str or None
+        Content hash of the CP reference the feature metrics were scored in
+        (recorded for audit); ``None`` when the run computed no feature metrics.
+    cp_space_sha256 : str or None
+        ``DatasetCPSpace.binding_sha256`` of the space the run scored in: the
+        reference bound to one dataset and the GT cells it was fit on. This is the
+        value cache reuse compares. ``None`` exactly when ``cp_reference_sha256`` is.
+
+    Raises
+    ------
+    ValueError
+        If only one of the two hashes is given.
     """
-    payload = {"versions": installed_versions()}
+    if (cp_reference_sha256 is None) != (cp_space_sha256 is None):
+        raise ValueError("cp_reference_sha256 and cp_space_sha256 must both be given or both be None")
+    payload = {
+        "versions": installed_versions(),
+        "cp_reference_sha256": cp_reference_sha256,
+        "cp_space_sha256": cp_space_sha256,
+    }
     (save_dir / PROVENANCE_FILENAME).write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
 
 
-def metrics_provenance_matches(save_dir: Path) -> bool:
-    """Return True when ``save_dir``'s metrics were built by the running ``cubic``.
+def metrics_provenance_matches(save_dir: Path, *, cp_space_sha256: str | None) -> bool:
+    """Return True when ``save_dir``'s metrics were built by the running ``cubic`` and CP reference.
 
     A missing sidecar returns False. Every cache written before this stamp
     existed predates the fix and is exactly the ambiguous case that has to be
@@ -108,14 +155,31 @@ def metrics_provenance_matches(save_dir: Path) -> bool:
     ----------
     save_dir : pathlib.Path
         Directory holding the metric CSV/NPY files.
+    cp_space_sha256 : str or None
+        ``DatasetCPSpace.binding_sha256`` of the space the current run would score
+        in, or ``None`` when it computes no feature metrics -- then no CP value is
+        reused and the recorded hash (or its absence) is irrelevant. When given, a
+        sidecar without a ``cp_space_sha256`` (written before the binding existed)
+        never matches.
 
     Returns
     -------
     bool
-        True when the recorded ``cubic`` version equals the installed one.
+        True when the recorded ``cubic`` version equals the installed one (or is
+        in :data:`CUBIC_VERSIONS_EQUIVALENT_TO` for the declared pin while the installed one is
+        the declared pin) and, if ``cp_space_sha256`` is given, the recorded binding
+        equals it.
     """
     path = save_dir / PROVENANCE_FILENAME
     if not path.is_file():
         return False
-    recorded = json.loads(path.read_text()).get("versions", {}).get("cubic")
-    return recorded == version("cubic")
+    payload = json.loads(path.read_text())
+    recorded = payload.get("versions", {}).get("cubic")
+    installed = version("cubic")
+    equivalents = CUBIC_VERSIONS_EQUIVALENT_TO.get(REQUIRED_CUBIC_VERSION, frozenset())
+    reproduced = installed == REQUIRED_CUBIC_VERSION and recorded in equivalents
+    if recorded != installed and not reproduced:
+        return False
+    if cp_space_sha256 is None:
+        return True
+    return "cp_space_sha256" in payload and payload["cp_space_sha256"] == cp_space_sha256
