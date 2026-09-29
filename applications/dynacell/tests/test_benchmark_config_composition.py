@@ -1143,7 +1143,7 @@ _LONG_WALL_TRAIN_LEAVES = frozenset(
     # recipe with seed_everything: 1, so the same rate applies.
     f"{organelle}/fcmae_vscyto3d_scratch_{suffix}/ipsc_confocal/train.yml"
     for organelle in ("nucleus", "membrane")
-    for suffix in ("v2", "segaux", "v2_seed1")
+    for suffix in ("v2", "segaux", "v2_seed1", "segaux_seed1")
 )
 _LONG_WALL_TIME = "7-00:00:00"
 _DEFAULT_4GPU_TIME = "4-00:00:00"

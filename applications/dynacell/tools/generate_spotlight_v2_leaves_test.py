@@ -37,10 +37,10 @@ def test_committed_leaves_match_the_generator() -> None:
 
 
 def test_leaf_counts_per_arm() -> None:
-    """Count 55 fits and 222 predicts per arm (fit+predict).
+    """Count 56 fits and 226 predicts per arm (fit+predict).
 
     segaux 16+64, segauxself 8+32, seed1 9+36, v2 4+16, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
-    l1segaux 1+4, l1seed1 1+4, segaux_seed1 3+12, v2_seed1 4+16,
+    l1segaux 1+4, l1seed1 1+4, segaux_seed1 4+16, v2_seed1 4+16,
     segaux_halfw 1+4, segaux_doublew 1+4.
 
     The probes and seed replicates are iPSC-only; every other arm also predicts the 3 A549 legs.
@@ -60,7 +60,7 @@ def test_leaf_counts_per_arm() -> None:
         "ccond": 2,
         "l1segaux": 1,
         "l1seed1": 1,
-        "segaux_seed1": 3,
+        "segaux_seed1": 4,
         "v2_seed1": 4,
         "segaux_halfw": 1,
         "segaux_doublew": 1,
@@ -78,7 +78,7 @@ def test_leaf_counts_per_arm() -> None:
         "ccond": 8,
         "l1segaux": 4,
         "l1seed1": 4,
-        "segaux_seed1": 12,
+        "segaux_seed1": 16,
         "v2_seed1": 16,
         "segaux_halfw": 4,
         "segaux_doublew": 4,

@@ -29,7 +29,7 @@ Arms (``<baseline>_<suffix>``):
   its selectable checkpoints at ep <= 25 of 40, while its S arm will have all 40).
   Each model's ``_segaux`` arm is generated from the same baseline leaf in the same
   pass, so the arm and its v2 control share one recipe by construction.
-- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux}`` compose
+- UNeXt2-3D wall: ``fcmae_vscyto3d_scratch_{v2,v2_seed1,segaux,segaux_seed1}`` compose
   ``hardware_4gpu_long.yml`` (7 d) instead of ``hardware_4gpu.yml`` (4 d). Measured
   from consecutive April checkpoint mtimes of the same 4-GPU recipe (one
   allocation each): nucleus e96 00:39:27 -> e98 01:38:24 (2.04 ep/h), e98 ->
@@ -123,7 +123,12 @@ MASK_DICE_WEIGHTS: dict[tuple[str, str], float] = {
 }
 JOINTSTEPS_MAX_EPOCHS = 320
 LONG_WALL_MODELS: frozenset[str] = frozenset(
-    {"fcmae_vscyto3d_scratch_v2", "fcmae_vscyto3d_scratch_v2_seed1", "fcmae_vscyto3d_scratch_segaux"}
+    {
+        "fcmae_vscyto3d_scratch_v2",
+        "fcmae_vscyto3d_scratch_v2_seed1",
+        "fcmae_vscyto3d_scratch_segaux",
+        "fcmae_vscyto3d_scratch_segaux_seed1",
+    }
 )
 _WALL_4GPU = "launcher_profiles/hardware_4gpu.yml"
 _WALL_4GPU_LONG = "launcher_profiles/hardware_4gpu_long.yml"
@@ -250,6 +255,10 @@ ARMS: tuple[Arm, ...] = (
     # (nucleus, wave2d 2026-09-28: A549 instance Dice +0.029..+0.047, PCC -0.020..-0.025;
     # membrane, wave2f 2026-09-29: iPSC mAP +0.128, instance Dice +0.099, PCC +0.027; CIs exclude 0).
     Arm("fcmae_vscyto3d_scratch", "v2_seed1", ORGANELLES, a549=True),
+    # ... and the UNeXt2-3D membrane segaux arm itself, so the one arm that improves every
+    # in-domain metric gets the full 2x2 (arm draw x baseline draw) on A549, where the
+    # FNet-2D arm's two draws disagreed (nucleus Dice +0.15..+0.20 vs +0.01..+0.02).
+    Arm("fcmae_vscyto3d_scratch", "segaux_seed1", ("membrane",), a549=True),
     # Loss-weight sweep on the one cell whose effect held against both baseline draws
     # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
     Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
