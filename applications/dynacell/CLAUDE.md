@@ -266,7 +266,7 @@ UNetViT3D A549 stores predate the 2026-07-27 tiling fix and differ). Predict cos
   the committed files to its output. To put a new model on the lite: give it a production predict
   leaf, add its dir to `ROSTER_MODELS`, regenerate, then predict with `submit_benchmark_batch.py
   --array --allow-mixed-directives` and evaluate with `tools/run_eval_direct.slurm
-  grouped/<bucket>__lite/eval_grouped` on a >= 80 GB GPU.
+  grouped/<bucket>__lite/eval_grouped`.
 - **Reported metrics:** si-SSIM, Spectral PCC, Dice, the five deep KIDs and cosines. GLCM+ KID is
   dropped (biased low at lite cell counts); GLCM+ cosine is kept but flagged. MicroSSIM, FID, PRC and
   MIND are off (`compute_microssim`, `feature_metrics.compute_{fid,prc,mind}`).
