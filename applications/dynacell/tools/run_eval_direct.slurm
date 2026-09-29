@@ -30,7 +30,10 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus=1
 #SBATCH --mem=256G
-#SBATCH --constraint="a40|l40s|a100|h100|h200"
+#SBATCH --constraint="a100_80|h100_80|h200"
+# >=80 GB only. MicroMS3IM calibration plus the resident segmenter/extractors
+# OOMed on 40-48 GB cards (6 L40S + 2 A100-40GB units, 2026-09-26); bare `a100`
+# also matches the 40 GB gpu-a nodes.
 
 set -euo pipefail
 

@@ -507,16 +507,17 @@ def _calibrate_microssim(
     Returns
     -------
     (sim, read_cache)
-        ``sim`` is the fitted MicroMS3IM (or raises on degenerate input).
-        ``read_cache`` is the per-position array dict; empty when
-        ``cache_reads=False``.
+        ``sim`` is the fitted MicroMS3IM, or ``None`` when a sampled GT
+        slice is constant or non-finite (α is undefined there, so the
+        leaf scores MicroMS3IM=NaN). ``read_cache`` is the per-position
+        array dict; empty when ``cache_reads=False``.
 
     Raises
     ------
-    ValueError, RuntimeError
-        Propagated from ``fit_microssim``; the caller wraps this call in
-        ``try/except`` so a degenerate leaf falls back to MicroMS3IM=NaN
-        instead of aborting the rest of the eval.
+    Exception
+        Anything ``fit_microssim`` raises propagates, GPU/host OOM
+        included, so a resource failure fails the job instead of
+        overwriting valid MicroMS3IM with NaN.
     """
     n_positions = len(pred_positions)
     if n_positions == 0:
@@ -1047,10 +1048,11 @@ def _process_one_fov(
 
     if config.compute_microssim:
         if microssim_sim is None:
-            # Leaf-level calibration failed (degenerate slice / OOM / cubic
-            # bracket failure) — the parent already logged the cause. Emit
-            # NaN per timepoint so the column exists and the rest of the
-            # pixel / mask / feature metrics still get computed.
+            # Leaf-level calibration returned no sim: a degenerate GT slice
+            # (logged by fit_microssim) or no (FOV, t) pairs to fit (then T is
+            # 0 here and nothing is emitted). Emit NaN per timepoint so the
+            # column exists and the rest of the pixel / mask / feature metrics
+            # still get computed.
             for i in range(T):
                 fov_pixel_metrics[i]["MicroMS3IM"] = float("nan")
         else:
@@ -1264,10 +1266,11 @@ def _worker_run_fov(
     file descriptors close before the worker accepts its next FOV. Models
     + cache contexts stay cached in ``_WORKER_STATE`` across FOVs.
 
-    ``microssim_sim`` is the leaf-level fitted MicroMS3IM (or ``None`` when
-    ``compute_microssim=false``); shipped per submission rather than via
-    worker state because the parent fits it after the position list is
-    finalized and before any worker pool spawns. ``cp_space`` is shipped the
+    ``microssim_sim`` is the leaf-level fitted MicroMS3IM, or ``None`` when
+    ``compute_microssim=false``, when a calibration GT slice is degenerate,
+    or when the leaf has no positions or (FOV, t) pairs to fit. It is shipped
+    per submission rather than via worker state because the parent fits it
+    after the position list is finalized and before any worker pool spawns. ``cp_space`` is shipped the
     same way so every worker scores CP in the parent's verified reference.
     """
     _worker_setup(config)
@@ -1598,24 +1601,16 @@ def evaluate_predictions(
                 max_pairs = int(OmegaConf.select(config, "microssim.calibration.max_pairs", default=12))
                 seed = int(OmegaConf.select(config, "microssim.calibration.seed", default=42))
                 cache_reads = bool(OmegaConf.select(config, "microssim.calibration.cache", default=False))
-                try:
-                    with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
-                        microssim_sim, microssim_read_cache = _calibrate_microssim(
-                            pred_positions,
-                            gt_positions,
-                            io_config,
-                            use_gpu=use_gpu,
-                            max_pairs=max_pairs,
-                            seed=seed,
-                            cache_reads=cache_reads,
-                        )
-                except (ValueError, RuntimeError, MemoryError) as exc:
-                    print(
-                        f"[microssim] leaf-level calibration failed "
-                        f"({type(exc).__name__}: {exc}); MicroMS3IM will be NaN for all FOVs."
+                with region_timer("microssim_calibrate", "(leaf)"), gpu_serialization_lock(gate=use_gpu):
+                    microssim_sim, microssim_read_cache = _calibrate_microssim(
+                        pred_positions,
+                        gt_positions,
+                        io_config,
+                        use_gpu=use_gpu,
+                        max_pairs=max_pairs,
+                        seed=seed,
+                        cache_reads=cache_reads,
                     )
-                    microssim_sim = None
-                    microssim_read_cache = {}
 
             if config.compute_feature_metrics:
                 flush_threshold = int(
