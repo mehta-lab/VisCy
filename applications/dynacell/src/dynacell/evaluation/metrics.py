@@ -702,9 +702,11 @@ def cp_regionprops(image, cell_segmentation, spacing, *, norm=None, glcm_cfg=Non
     # an empty cleaned segmentation; er/mito FOVs always have cells.
     if kept.size == 0:
         return np.empty((0, len(names)), dtype=float)
-    relabel = np.zeros(counts.size, dtype=labels_host.dtype)
-    relabel[kept] = np.arange(1, kept.size + 1)
-    cell_segmentation = relabel[labels_host]
+    # Labels already 1..n with none dropped (the common case): skip the full-volume copy.
+    if kept.size < counts.size - 1:
+        relabel = np.zeros(counts.size, dtype=labels_host.dtype)
+        relabel[kept] = np.arange(1, kept.size + 1)
+        cell_segmentation = relabel[labels_host]
 
     use_cuda = bool(use_gpu and torch.cuda.is_available())
     if use_cuda:
