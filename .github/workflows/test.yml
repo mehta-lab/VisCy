@@ -154,7 +154,8 @@ jobs:
         # needs the eval stack). test_evaluation_grouped drives the
         # multi-condition driver against the same cache-only fixture.
         # test_evaluation_microssim_calibration pins that MicroMS3IM calibration
-        # propagates OOM and scores NaN only on degenerate GT (real cubic, CPU).
+        # propagates OOM, drops constant GT slices from the fit pool, and scores
+        # NaN only on a degenerate GT pool (real cubic, CPU).
         #
         # test_submit_benchmark_batch covers the OTHER two srun emitters (array
         # + chained-serial), which drifted out of sync with the single-job

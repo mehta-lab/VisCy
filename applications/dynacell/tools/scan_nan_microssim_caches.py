@@ -8,11 +8,13 @@ wrote ``MicroMS3IM = NaN`` for every FOV. 0.9.0a2's bounded-memory fit would sco
 those leaves, but the reused cache keeps the NaN. This scan finds them so they can
 be re-run with ``force_recompute.final_metrics=true``.
 
-Mito A549 mock caches are all-NaN for a reason that predates this bump (the
-MicroSSIM ``data_range`` case), so they are reported as known rather than
-unexplained. Read-only: the tool never writes.
+That includes the mito A549 mock caches: their GT holds all-zero z-slices, which
+calibration now drops from the fit pool instead of scoring the leaf NaN. That fix
+does not change the provenance stamp, so a mito mock cache written under 0.9.0a2
+before it landed is all-NaN too: rescan with ``--cubic 0.9.0a2`` to find those.
+Read-only: the tool never writes.
 
-Exit status: 0 when no unexplained cache is found, 1 otherwise.
+Exit status: 0 when no all-NaN cache is found, 1 otherwise.
 
 Usage::
 
@@ -25,18 +27,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
 import pandas as pd
 
 from dynacell.evaluation.provenance import PROVENANCE_FILENAME
-
-#: Save dirs whose all-NaN MicroMS3IM is the mito A549 mock ``data_range`` case:
-#: canonical ``mito/<model>/<train>/a549__mock`` and legacy
-#: ``a549/evaluations_with_embeddings/eval_<model>_mitochondria_mock``.
-_KNOWN_ALL_NAN = re.compile(r"(/mito/[^/]+/[^/]+/a549__mock|/a549/[^/]+/eval_[^/]*mitochondria_mock)$")
 
 
 def find_sidecars(root: Path, max_depth: int) -> list[Path]:
@@ -63,11 +59,6 @@ def all_nan_microssim(sidecars: list[Path], cubic: str) -> list[Path]:
     return hits
 
 
-def is_known_all_nan(save_dir: Path) -> bool:
-    """Whether ``save_dir`` is the mito A549 mock case, all-NaN independent of cubic."""
-    return _KNOWN_ALL_NAN.search(save_dir.as_posix()) is not None
-
-
 def main(argv: list[str] | None = None) -> int:
     """Run the scan and print one line per all-NaN cache."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -78,14 +69,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sidecars = find_sidecars(args.root, args.max_depth)
     hits = all_nan_microssim(sidecars, args.cubic)
-    unexplained = [d for d in hits if not is_known_all_nan(d)]
     for save_dir in hits:
-        print(f"{'known' if is_known_all_nan(save_dir) else 'UNEXPLAINED'}\t{save_dir}")
-    print(
-        f"{len(sidecars)} sidecars, {len(hits)} all-NaN MicroMS3IM stamped cubic {args.cubic}, "
-        f"{len(unexplained)} unexplained"
-    )
-    return 1 if unexplained else 0
+        print(f"ALL-NAN\t{save_dir}")
+    print(f"{len(sidecars)} sidecars, {len(hits)} all-NaN MicroMS3IM stamped cubic {args.cubic}")
+    return 1 if hits else 0
 
 
 if __name__ == "__main__":

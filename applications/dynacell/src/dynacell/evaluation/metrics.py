@@ -283,9 +283,13 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
     -------
     MicroMS3IM or None
         Fitted instance — ``sim.score(target_slice, pred_slice)`` may
-        then be called without further fitting. ``None`` when a
-        normalized target slice has a data range that is not finite and
-        positive, where α is undefined.
+        then be called without further fitting. Constant target slices
+        carry no data range, so they are dropped from the pool before
+        fitting (``score_microssim`` still scores them 0.0). ``None`` when
+        every slice is constant, or when a remaining normalized target
+        slice has a data range that is not finite and positive (a
+        non-finite GT pixel, or a degenerate pool normalization), where α
+        is undefined.
     """
     MicroMS3IM = _require_microms3im()
     # Convert to cupy when GPU is requested — cubic.skimage dispatches to
@@ -293,12 +297,25 @@ def fit_microssim(targets: np.ndarray, predictions: np.ndarray, use_gpu: bool = 
     to_xp = ascupy if (use_gpu and ascupy is not None and torch.cuda.is_available()) else asnumpy
     targets = to_xp(targets)
     predictions = to_xp(predictions)
+    # A constant GT slice (the all-zero z-slices in A549 TOMM20_mock.zarr) has no
+    # data range, so cubic cannot fit α on it. Drop it from the pool and fit on the
+    # rest. Only exact constants go: a NaN/inf GT pixel gives a non-finite range,
+    # which is kept so the check below still makes the leaf NaN.
+    constant = targets.max(axis=(1, 2)) - targets.min(axis=(1, 2)) == 0
+    if constant.all():
+        print(
+            f"[microssim] all {len(constant)} calibration GT slices are constant; MicroMS3IM will be NaN for all FOVs."
+        )
+        return None
+    if constant.any():
+        print(f"[microssim] dropped {int(constant.sum())} of {len(constant)} constant calibration GT slices.")
+        targets = targets[~constant]
+        predictions = predictions[~constant]
     # cubic fits α with each normalized GT slice's own data_range (max - min) and
-    # raises unless it is finite and positive: a constant slice (the all-zero
-    # z-slices in A549 TOMM20_mock.zarr) or a pool whose background percentile
-    # equals its max (max_val == 0). The normalization is monotone, so normalizing
-    # each slice's extrema with cubic's own parameters reproduces that range; the
-    # same parameters are then handed to the fit.
+    # raises unless it is finite and positive: a non-finite GT pixel, or a pool
+    # whose background percentile equals its max (max_val == 0). The normalization
+    # is monotone, so normalizing each slice's extrema with cubic's own parameters
+    # reproduces that range; the same parameters are then handed to the fit.
     offset_gt, offset_pred, max_val = compute_norm_parameters(targets, predictions)
     with np.errstate(divide="ignore", invalid="ignore"):
         gt_range = asnumpy(

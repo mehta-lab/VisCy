@@ -1,9 +1,11 @@
-"""Leaf-level MicroMS3IM calibration: degenerate GT scores NaN, resource errors fail the job.
+"""Leaf-level MicroMS3IM calibration: constant GT slices are dropped, a degenerate pool scores NaN, errors fail.
 
 Drives the real ``evaluate_predictions`` on the cache-only fixture from
 ``_eval_fixtures`` with ``compute_microssim=true``. The 2026-09-26 re-eval
 swallowed a cupy OOM inside calibration, exited 0 and overwrote valid
-MicroMS3IM with NaN; only a constant GT slice may produce NaN.
+MicroMS3IM with NaN; only a degenerate GT pool may produce NaN. A single
+constant GT slice (A549 TOMM20_mock.zarr has six all-zero ones) is dropped
+from the fit pool instead of making the whole leaf NaN.
 """
 
 from __future__ import annotations
@@ -62,11 +64,13 @@ def test_calibration_failure_propagates(tmp_path: Path, monkeypatch, make_error)
     assert excinfo.value is error
 
 
-def test_constant_gt_slice_scores_nan(tmp_path: Path) -> None:
-    """A constant GT z-slice in the calibration pool yields MicroMS3IM=NaN for every row."""
+def test_all_constant_gt_slices_score_nan(tmp_path: Path) -> None:
+    """When every GT z-slice in the calibration pool is constant, MicroMS3IM is NaN for every row."""
     config, gt_path = _config(tmp_path)
     with open_ome_zarr(gt_path, mode="r+") as plate:
-        plate["A/1/0"].data[0, 0, 0] = 0.0
+        for _, pos in plate.positions():
+            data = np.asarray(pos.data)
+            pos.data[:] = np.broadcast_to(data.mean(axis=(-2, -1), keepdims=True), data.shape)
 
     pixel_rows, _, _ = live_pipeline_module().evaluate_predictions(config)
 
@@ -146,3 +150,50 @@ def test_healthy_leaf_calibrates_and_scores_finite(tmp_path: Path) -> None:
     values = [row["MicroMS3IM"] for row in scores]
     assert len(values) == len(gt)
     assert all(math.isfinite(v) and 0.0 < v <= 1.0 for v in values)
+
+
+def test_constant_gt_slice_is_dropped_from_calibration(tmp_path: Path) -> None:
+    """A constant GT slice is left out of the α fit: the leaf fits exactly as on the pool without it.
+
+    The dropped slice still scores through ``score_microssim``, where its
+    data_range ValueError counts as 0.0 for that (FOV, t).
+    """
+    rng = np.random.default_rng(0)
+    gt = rng.gamma(2.0, 100.0, size=(2, 1, 2, 192, 192)).astype(np.float32)
+    pred = (0.5 * gt + 20.0 + rng.normal(0.0, 10.0, size=gt.shape)).astype(np.float32)
+    gt[1, 0, 0] = 0.0
+    _write_plate(tmp_path / "gt.zarr", "target", gt)
+    _write_plate(tmp_path / "pred.zarr", "prediction", pred)
+    io_config = OmegaConf.create({"pred_channel_name": "prediction", "gt_channel_name": "target"})
+    pipeline = live_pipeline_module()
+
+    with (
+        open_ome_zarr(tmp_path / "pred.zarr", mode="r") as pred_plate,
+        open_ome_zarr(tmp_path / "gt.zarr", mode="r") as gt_plate,
+    ):
+        sim, _ = pipeline._calibrate_microssim(
+            list(pred_plate.positions()),
+            list(gt_plate.positions()),
+            io_config,
+            use_gpu=False,
+            max_pairs=12,
+            seed=42,
+            cache_reads=False,
+        )
+
+    assert sim is not None
+    keep = [(0, 0), (0, 1), (1, 1)]
+    expected = pipeline.fit_microssim(
+        np.stack([gt[i, 0, z] for i, z in keep]), np.stack([pred[i, 0, z] for i, z in keep]), use_gpu=False
+    )
+    for attr in ("_offset_gt", "_offset_pred", "_max_val"):
+        assert getattr(sim, attr) == pytest.approx(getattr(expected, attr), rel=1e-6), attr
+    # cubic's α depends weakly on slice order (C1/C2 come from the last slice; ~1e-4
+    # relative on this pool), and the draw decides the order, so compare α loosely.
+    assert sim._ri_factor == pytest.approx(expected._ri_factor, rel=1e-3)
+    scores = pipeline.score_microssim(
+        [{"target": gt[i, 0], "predict": pred[i, 0]} for i in range(len(gt))], sim, use_gpu=False
+    )
+    values = [row["MicroMS3IM"] for row in scores]
+    assert all(math.isfinite(v) and 0.0 < v <= 1.0 for v in values)
+    assert values[1] < values[0]
