@@ -249,8 +249,14 @@ ARMS: tuple[Arm, ...] = (
     # UNeXt2-3D nucleus v2 baseline, drawn once its segaux verdict came back non-null
     # (wave2d, 2026-09-28: A549 instance Dice +0.029..+0.047, PCC -0.020..-0.025, CIs exclude 0).
     Arm("fcmae_vscyto3d_scratch", "v2_seed1", ("nucleus",), a549=True),
+    # Loss-weight sweep on the one cell whose effect held against both baseline draws
+    # (FNet-3D nucleus at w=1.9: A549 Dice +0.21..+0.44, mAP +0.15..+0.22, readout 2026-09-28).
+    Arm("fnet3d_paper", "segaux_halfw", ("nucleus",), a549=True),
+    Arm("fnet3d_paper", "segaux_doublew", ("nucleus",), a549=True),
 )
 SEED_SUFFIX = "_seed1"
+# Loss-weight sweep arms: the segaux arm's recipe with seg_aux_weight scaled by this factor.
+WEIGHT_SCALES: dict[str, float] = {"segaux_halfw": 0.5, "segaux_doublew": 2.0}
 
 
 def _unseeded(arm: Arm) -> Arm:
@@ -266,6 +272,8 @@ _DESCRIPTION: dict[str, str] = {
     "seed1": "seed_everything: 1",
     "segaux_seed1": "the segaux arm's recipe + seed_everything: 1 (a second draw of the arm)",
     "v2_seed1": "seed_everything: 1 (a second draw of the v2 baseline)",
+    "segaux_halfw": "the segaux arm's recipe with seg_aux_weight x0.5 (loss-weight sweep)",
+    "segaux_doublew": "the segaux arm's recipe with seg_aux_weight x2 (loss-weight sweep)",
     "v2": "nothing (fresh retrain of the baseline recipe under its own run root)",
     "jointsteps": f"trainer max_epochs: {JOINTSTEPS_MAX_EPOCHS}. Step budget matched to the joint membrane run, "
     "measured from final checkpoints: baseline latest-epoch=199-step=100000 (500 steps/ep), joint "
@@ -347,6 +355,8 @@ def allowed_diff(arm: Arm, kind: str) -> tuple[frozenset[str], frozenset[str]]:
     if arm.suffix.endswith(SEED_SUFFIX):
         renames, recipe_keys = allowed_diff(_unseeded(arm), kind)
         return renames, recipe_keys | {"seed_everything"}
+    if arm.suffix in WEIGHT_SCALES:
+        return allowed_diff(replace(arm, suffix="segaux"), kind)
     recipe: set[str] = set()
     if arm.suffix in ("segaux", "segauxself"):
         recipe |= {"data.init_args.fg_mask_key", "model.init_args.seg_aux", "model.init_args.seg_aux_weight"}
@@ -418,6 +428,10 @@ def _apply_recipe(arm: Arm, organelle: str, cfg: dict) -> None:
     if arm.suffix.endswith(SEED_SUFFIX):
         _apply_recipe(_unseeded(arm), organelle, cfg)
         cfg["seed_everything"] = 1
+        return
+    if arm.suffix in WEIGHT_SCALES:
+        _apply_recipe(replace(arm, suffix="segaux"), organelle, cfg)
+        cfg["model"]["init_args"]["seg_aux_weight"] *= WEIGHT_SCALES[arm.suffix]
         return
     data_args = cfg.setdefault("data", {}).setdefault("init_args", {})
     model_args = cfg.setdefault("model", {}).setdefault("init_args", {})

@@ -13,6 +13,7 @@ from generate_spotlight_v2_leaves import (
     POOL,
     SEG_AUX_WEIGHTS,
     SEGAUXSELF_BASELINES,
+    WEIGHT_SCALES,
     Arm,
     allowed_diff,
     build_fit,
@@ -36,10 +37,11 @@ def test_committed_leaves_match_the_generator() -> None:
 
 
 def test_leaf_counts_per_arm() -> None:
-    """Count 52 fits and 210 predicts per arm (fit+predict).
+    """Count 54 fits and 218 predicts per arm (fit+predict).
 
     segaux 16+64, segauxself 8+32, seed1 9+36, v2 4+16, probes 3+6 (l1 adds A549), cjoint/ccond 2+8 each, last 0+8,
-    l1segaux 1+4, l1seed1 1+4, segaux_seed1 3+12, v2_seed1 3+12.
+    l1segaux 1+4, l1seed1 1+4, segaux_seed1 3+12, v2_seed1 3+12,
+    segaux_halfw 1+4, segaux_doublew 1+4.
 
     The probes and seed replicates are iPSC-only; every other arm also predicts the 3 A549 legs.
     """
@@ -60,6 +62,8 @@ def test_leaf_counts_per_arm() -> None:
         "l1seed1": 1,
         "segaux_seed1": 3,
         "v2_seed1": 3,
+        "segaux_halfw": 1,
+        "segaux_doublew": 1,
     }
     assert predicts == {
         "segaux": 64,
@@ -76,6 +80,8 @@ def test_leaf_counts_per_arm() -> None:
         "l1seed1": 4,
         "segaux_seed1": 12,
         "v2_seed1": 12,
+        "segaux_halfw": 4,
+        "segaux_doublew": 4,
     }
 
 
@@ -236,6 +242,29 @@ def test_second_draws_differ_from_their_source_arm_by_the_seed_only() -> None:
             assert draw.pop("seed_everything") == 1
             assert "seed_everything" not in src
             assert changed_keys(src, draw) == {
+                "benchmark.model_name",
+                "benchmark.experiment_id",
+                "trainer.logger.init_args.name",
+                "trainer.logger.init_args.save_dir",
+                "trainer.callbacks.1.init_args.dirpath",
+                "launcher.job_name",
+                "launcher.run_root",
+            }
+
+
+def test_weight_sweep_arms_differ_from_the_segaux_arm_by_the_weight_only() -> None:
+    """Sweep fit leaves equal the segaux arm's, up to renames and ``seg_aux_weight`` x its scale."""
+    leaves = build_leaves()
+    sweep = [arm for arm in ARMS if arm.suffix in WEIGHT_SCALES]
+    assert {arm.suffix for arm in sweep} == {"segaux_halfw", "segaux_doublew"}
+    for arm in sweep:
+        for organelle in arm.organelles:
+            arm_leaf = yaml.safe_load(leaves[BENCHMARKS / organelle / arm.model / POOL / "train.yml"])
+            src = yaml.safe_load(leaves[BENCHMARKS / organelle / f"{arm.baseline}_segaux" / POOL / "train.yml"])
+            w_arm = arm_leaf["model"]["init_args"].pop("seg_aux_weight")
+            w_src = src["model"]["init_args"].pop("seg_aux_weight")
+            assert w_arm == pytest.approx(w_src * WEIGHT_SCALES[arm.suffix])
+            assert changed_keys(src, arm_leaf) == {
                 "benchmark.model_name",
                 "benchmark.experiment_id",
                 "trainer.logger.init_args.name",
