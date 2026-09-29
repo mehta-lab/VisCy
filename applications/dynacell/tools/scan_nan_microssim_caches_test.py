@@ -27,33 +27,25 @@ def _save_dir(root, rel, microssim, cubic="0.9.0a1"):
     return save_dir
 
 
-def test_unexplained_all_nan_cache_fails(tmp_path, capsys):
-    """An all-NaN cache outside the known case is reported and fails the scan; a partial NaN is not."""
+def test_all_nan_cache_fails(tmp_path, capsys):
+    """An all-NaN cache is reported and fails the scan; a partial NaN is not."""
     hit = _save_dir(tmp_path, "er/fnet3d_paper/a549/a549__denv", [np.nan, np.nan])
     _save_dir(tmp_path, "er/fnet3d_paper/a549/a549__zikv", [0.8, np.nan])
     assert main(["--root", str(tmp_path)]) == 1
     out = capsys.readouterr().out
-    assert f"UNEXPLAINED\t{hit}" in out
+    assert f"ALL-NAN\t{hit}" in out
     assert "a549__zikv" not in out
-    assert "2 sidecars, 1 all-NaN MicroMS3IM stamped cubic 0.9.0a1, 1 unexplained" in out
+    assert "2 sidecars, 1 all-NaN MicroMS3IM stamped cubic 0.9.0a1" in out
 
 
-def test_mito_a549_mock_is_known(tmp_path, capsys):
-    """Canonical and legacy mito A549 mock dirs are reported as known and pass."""
+def test_mito_a549_mock_is_no_longer_exempt(tmp_path, capsys):
+    """Calibration now drops constant GT slices, so an all-NaN mito A549 mock cache is stale too."""
     canonical = _save_dir(tmp_path, "mito/fnet2d/joint/a549__mock", [np.nan, np.nan])
     legacy = _save_dir(tmp_path, "a549/evaluations_with_embeddings/eval_phase_mitochondria_mock", [np.nan, np.nan])
-    assert main(["--root", str(tmp_path)]) == 0
-    out = capsys.readouterr().out
-    assert f"known\t{canonical}" in out
-    assert f"known\t{legacy}" in out
-    assert "0 unexplained" in out
-
-
-def test_mito_other_conditions_are_not_known(tmp_path, capsys):
-    """The known case is mito A549 mock only, not every mito condition."""
-    hit = _save_dir(tmp_path, "mito/fnet2d/joint/a549__denv", [np.nan, np.nan])
     assert main(["--root", str(tmp_path)]) == 1
-    assert f"UNEXPLAINED\t{hit}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"ALL-NAN\t{canonical}" in out
+    assert f"ALL-NAN\t{legacy}" in out
 
 
 def test_other_cubic_stamps_and_zarr_contents_are_skipped(tmp_path, capsys):
