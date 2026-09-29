@@ -289,6 +289,11 @@ PAPER_KEY: dict[str, str] = {
     # FNet-3D nucleus loss-weight sweep: the segaux arm at 0.5x and 2x seg_aux_weight.
     "fnet3d_paper_segaux_halfw": "fnet3d_segaux_halfw",
     "fnet3d_paper_segaux_doublew": "fnet3d_segaux_doublew",
+    # Cosmetic-vs-structural control: each 3D nucleus v2 baseline's A549 prediction
+    # histogram-matched per volume to its segaux arm's (spatial structure kept).
+    "fnet3d_paper_histmatch": "fnet3d_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch": "pix2pix3d_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch": "unext2_v2_histmatch",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form

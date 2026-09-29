@@ -86,6 +86,13 @@ _SPOTLIGHT_V2_MODELS: tuple[str, ...] = (
     "fnet3d_paper_segaux_halfw",
     "fnet3d_paper_segaux_doublew",
 )
+# Spotlight-v2 post-hoc control stores (no training leaf): each 3D nucleus baseline
+# histogram-matched to its segaux arm. Same longest-prefix hazard as the arms.
+_SPOTLIGHT_V2_CONTROLS: tuple[str, ...] = (
+    "fnet3d_paper_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch",
+)
 
 # ---------------------------------------------------------------------------
 # Canonical tuple enumeration
@@ -462,6 +469,7 @@ def test_resolve_model_celldiff_r2_variant_not_collapsed(variant: str) -> None:
         # Spotlight v2 first wave: every arm token extends its baseline's, so each
         # must resolve to itself, never to the baseline it is compared against.
         *((m, m) for m in _SPOTLIGHT_V2_MODELS),
+        *((m, m) for m in _SPOTLIGHT_V2_CONTROLS),
     ],
 )
 def test_canonical_model_name(run_dir_name: str, expected: str) -> None:

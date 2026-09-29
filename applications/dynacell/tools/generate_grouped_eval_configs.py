@@ -115,6 +115,9 @@ _CODE_TO_PAPER: dict[str, str] = {
     "fcmae_vscyto3d_scratch_v2_seed1": "unext2_v2_seed1",
     "fnet3d_paper_segaux_halfw": "fnet3d_segaux_halfw",
     "fnet3d_paper_segaux_doublew": "fnet3d_segaux_doublew",
+    "fnet3d_paper_histmatch": "fnet3d_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch": "pix2pix3d_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch": "unext2_v2_histmatch",
 }
 
 # iPSC: target key in aics-hipsc manifest.
@@ -200,6 +203,9 @@ _DETERMINISTIC_MODELS: tuple[str, ...] = (
     "fcmae_vscyto3d_scratch_v2_seed1",
     "fnet3d_paper_segaux_halfw",
     "fnet3d_paper_segaux_doublew",
+    "fnet3d_paper_histmatch",
+    "pix2pix3d_unetvit_v2_histmatch",
+    "fcmae_vscyto3d_scratch_v2_histmatch",
 )
 _CELLDIFF_MODELS: tuple[str, ...] = (
     "celldiff_2d_segauxself",
@@ -479,6 +485,9 @@ _SPOTLIGHT_ARM_MODELS: frozenset[str] = frozenset(
         "fcmae_vscyto3d_scratch_v2_seed1",
         "fnet3d_paper_segaux_halfw",
         "fnet3d_paper_segaux_doublew",
+        "fnet3d_paper_histmatch",
+        "pix2pix3d_unetvit_v2_histmatch",
+        "fcmae_vscyto3d_scratch_v2_histmatch",
     }
 )
 

@@ -360,9 +360,11 @@ def test_walk_predictions_skips_spotlight_arms(tmp_path: Path) -> None:
 
 
 def test_spotlight_arm_skip_list_covers_every_generated_arm() -> None:
-    """Every v2 arm the leaf generator emits (plus the four v1 arms) is skipped, and nothing else."""
+    """Every v2 arm the leaf generator emits (plus the v1 arms and v2 controls) is skipped, and nothing else."""
     v1 = {"fnet3d_spotlight", "fnet2d_spotlight", "pix2pix3d_unetvit_spotlight", "pix2pix2d_unetvit_spotlight"}
-    assert _SPOTLIGHT_ARM_MODELS == v1 | {arm.model for arm in ARMS}
+    # Post-hoc histogram-matched baseline stores: no training leaf, scored in the v2 root.
+    controls = {"fnet3d_paper_histmatch", "pix2pix3d_unetvit_v2_histmatch", "fcmae_vscyto3d_scratch_v2_histmatch"}
+    assert _SPOTLIGHT_ARM_MODELS == v1 | controls | {arm.model for arm in ARMS}
 
 
 def test_walk_predictions_can_opt_in_a_test_set(tmp_path: Path) -> None:
