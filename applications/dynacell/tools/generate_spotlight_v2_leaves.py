@@ -52,8 +52,8 @@ Arms (``<baseline>_<suffix>``):
   second conditioning channel (``net_config.cond_channels: 2``, ``mask_mode: cond``)
   seen through ``MaskCorruption`` in training; its predict leaves read the mask
   from the same-dim FNet ``_segaux`` store of the same test leg via
-  ``CondMaskSource`` (``Nuclei_prediction``, threshold a string PLACEHOLDER so an
-  untuned submit fails at parse) and set no ``fg_mask_key``.
+  ``CondMaskSource`` (``Nuclei_prediction``, thresholded per window at Otsu) and
+  set no ``fg_mask_key``.
 
 Leaves are emitted with ``yaml.safe_dump``, so they carry no inline comments: the
 recipe rationale stays in the baseline leaf each header names, and the reasons for
