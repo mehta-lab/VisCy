@@ -153,6 +153,8 @@ jobs:
         # segmenter + feature-extractor model loads — but pipeline import still
         # needs the eval stack). test_evaluation_grouped drives the
         # multi-condition driver against the same cache-only fixture.
+        # test_evaluation_microssim_calibration pins that MicroMS3IM calibration
+        # propagates OOM and scores NaN only on degenerate GT (real cubic, CPU).
         #
         # test_submit_benchmark_batch covers the OTHER two srun emitters (array
         # + chained-serial), which drifted out of sync with the single-job
@@ -170,6 +172,7 @@ jobs:
             tests/test_evaluation_pipeline_parallel.py \
             tests/test_evaluation_pipeline_parallel_cpu.py \
             tests/test_evaluation_grouped.py \
+            tests/test_evaluation_microssim_calibration.py \
             tests/test_distribution.py \
             tests/test_croissant.py \
             tests/test_main_cli_routing.py \
