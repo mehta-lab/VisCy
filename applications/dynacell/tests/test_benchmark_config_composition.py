@@ -731,6 +731,56 @@ def test_sample_matched_unext2_2d_writes_to_its_own_tree(organelle: str) -> None
     assert arm["benchmark"]["model_name"] == "fcmae_vscyto2d_scratch_samplematched"
 
 
+@pytest.mark.parametrize("predict_file", _FNET2D_PREDICT_FILES)
+@pytest.mark.parametrize("organelle", sorted(_SAMPLE_MATCHED_3D_STEPS_PER_EPOCH))
+def test_sample_matched_unext2_2d_predict_differs_from_baseline_only_in_identity(
+    organelle: str, predict_file: str, monkeypatch
+) -> None:
+    """Each arm predict leaf is its fcmae_vscyto2d_scratch sibling with only the identity swapped.
+
+    Same test store, overlay and normalization, so the only difference the eval can
+    see is the checkpoint. Output store, run root and ckpt must sit in the arm's own
+    tree, or the arm would overwrite / re-score the baseline.
+    """
+    monkeypatch.setattr("sys.argv", ["dynacell", "predict"])
+    arm_model, base_model = "fcmae_vscyto2d_scratch_samplematched", "fcmae_vscyto2d_scratch"
+    arm = load_composed_config(
+        BENCHMARKS / organelle / arm_model / "ipsc_confocal" / predict_file, resolver=_dynacell_ref_resolver
+    )
+    base = load_composed_config(
+        BENCHMARKS / organelle / base_model / "ipsc_confocal" / predict_file, resolver=_dynacell_ref_resolver
+    )
+
+    ckpt = arm["model"]["init_args"]["ckpt_path"]
+    assert f"/{organelle}/{arm_model}/checkpoints/" in ckpt, f"ckpt is not this arm's: {ckpt}"
+    assert "last" not in Path(ckpt).name, f"pins {Path(ckpt).name}"
+    store = arm["trainer"]["callbacks"][0]["init_args"]["output_store"]
+    base_store = base["trainer"]["callbacks"][0]["init_args"]["output_store"]
+    assert store == base_store.replace(f"/{organelle}/{base_model}/", f"/{organelle}/{arm_model}/")
+    assert store != base_store
+    assert arm["benchmark"]["model_name"] == arm_model
+
+    for cfg in (arm, base):
+        cfg["model"]["init_args"]["ckpt_path"] = None
+        cfg["trainer"]["callbacks"][0]["init_args"]["output_store"] = None
+        for key in ("model_name", "experiment_id"):
+            cfg["benchmark"][key] = None
+        for key in ("job_name", "run_root"):
+            cfg["launcher"][key] = None
+    assert arm == base
+
+
+@pytest.mark.parametrize("organelle", sorted(_SAMPLE_MATCHED_3D_STEPS_PER_EPOCH))
+def test_sample_matched_unext2_2d_predicts_agree_on_one_checkpoint(organelle: str) -> None:
+    """All four test sets are scored against the same arm checkpoint."""
+    leaves = sorted(
+        (BENCHMARKS / organelle / "fcmae_vscyto2d_scratch_samplematched" / "ipsc_confocal").glob("predict__*.yml")
+    )
+    assert [p.name for p in leaves] == sorted(_FNET2D_PREDICT_FILES)
+    pinned = {yaml.safe_load(p.read_text())["model"]["init_args"]["ckpt_path"] for p in leaves}
+    assert len(pinned) == 1, f"{organelle}: predict leaves disagree on the checkpoint: {sorted(pinned)}"
+
+
 # -- dataset_ref resolver integration tests -------------------------------
 
 
