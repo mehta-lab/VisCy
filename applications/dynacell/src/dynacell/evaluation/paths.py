@@ -281,10 +281,11 @@ PAPER_KEY: dict[str, str] = {
     # UNeXt2-2D membrane rebuilt on the L1 recipe: seg-aux arm and its seed replicate.
     "fcmae_vscyto2d_scratch_l1segaux": "unext2_2d_l1segaux",
     "fcmae_vscyto2d_scratch_l1seed1": "unext2_2d_l1seed1",
-    # Second draws: the FNet segaux arms and the pix2pix3d v2 baseline.
+    # Second draws: the FNet segaux arms and the pix2pix3d and UNeXt2-3D v2 baselines.
     "fnet2d_segaux_seed1": "fnet2d_segaux_seed1",
     "fnet3d_paper_segaux_seed1": "fnet3d_segaux_seed1",
     "pix2pix3d_unetvit_v2_seed1": "pix2pix3d_v2_seed1",
+    "fcmae_vscyto3d_scratch_v2_seed1": "unext2_v2_seed1",
 }
 
 # Organelle code token -> paper-script organelle key. Mito uses the long form
