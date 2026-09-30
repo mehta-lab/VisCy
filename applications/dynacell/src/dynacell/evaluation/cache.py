@@ -14,7 +14,6 @@ position also records the :func:`prediction_sources` entry it was built from.
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
 import os
 import shutil
@@ -306,32 +305,24 @@ def _chunk_files(directory: Path) -> Iterator[os.DirEntry]:
                 yield entry
 
 
-#: Directory entries a ``.``-separated chunk-key fallback scans before giving up. Only
-#: zarr v2 flat layouts reach it, and a store holding more entries than this ahead of
-#: the channel's chunks reads as having none (``written_ns=None``); the current writer
-#: only writes zarr v3, so those stores are not re-predicted.
-_FLAT_CHUNK_SCAN_LIMIT = 4096
-
-
 def _stored_chunk(array_dir: Path, key: str, spatial: int) -> os.DirEntry | Path | None:
     """Return the chunk stored at *key*, else the first stored chunk sharing its ``(t, c)`` prefix.
 
     A chunk never written, or reset to the fill value (zarr deletes it), is absent. The
-    prefix scan is bounded: one directory batch per level for ``/``-separated keys, at
-    most :data:`_FLAT_CHUNK_SCAN_LIMIT` entries for ``.``-separated ones.
+    prefix fallback exists only for ``/``-separated keys, whose ``(t, c)`` chunks share
+    one directory subtree, read one directory batch per level. A ``.``-separated key (a
+    flat zarr v2 layout) resolves only exactly; when that chunk is absent the position
+    reads as unwritten (``written_ns=None``), which rebuilds a legacy entry over it once.
+    Every evaluated non-v3 store uses ``/`` separators.
     """
     chunk = array_dir / key
     if chunk.is_file():
         return chunk
     parts = key.split("/")
-    if len(parts) > spatial:
-        # "/"-separated coordinates: the (t, c) chunks share one directory subtree.
-        prefix = array_dir.joinpath(*parts[:-spatial])
-        return next(_chunk_files(prefix), None) if prefix.is_dir() else None
-    # "."-separated coordinates: the (t, c) chunks share a name prefix.
-    stem = key.rsplit(".", spatial)[0] + "."
-    with os.scandir(array_dir) as entries:
-        return next((e for e in itertools.islice(entries, _FLAT_CHUNK_SCAN_LIMIT) if e.name.startswith(stem)), None)
+    if len(parts) <= spatial:
+        return None
+    prefix = array_dir.joinpath(*parts[:-spatial])
+    return next(_chunk_files(prefix), None) if prefix.is_dir() else None
 
 
 def _first_channel_chunk_mtime_ns(plate_path: Path, array: ImageArray, channel_index: int) -> int | None:

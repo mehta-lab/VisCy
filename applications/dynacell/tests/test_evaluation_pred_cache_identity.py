@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import warnings
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pytest
-import zarr
 from iohub.ngff import open_ome_zarr
 from omegaconf import OmegaConf
 
@@ -599,24 +597,7 @@ def test_sources_track_marker_and_chunk_not_provenance(tmp_path: Path, version: 
     assert prediction_sources(pred, _CHANNEL)["A/1/1"]["written_ns"] > first["A/1/1"]["written_ns"]
 
 
-def _flat_v2(path: Path, data: np.ndarray) -> None:
-    """Replace array ``0`` of every position with a zarr v2 array using ``.``-separated chunk keys."""
-    for name in _POSITIONS:
-        shutil.rmtree(path / name / "0")
-        array = zarr.create_array(
-            store=str(path / name),
-            name="0",
-            shape=data.shape,
-            chunks=(1, 1, 1, _H, _W),
-            dtype="f4",
-            zarr_format=2,
-            chunk_key_encoding={"name": "v2", "separator": "."},
-            fill_value=0,
-        )
-        array[:] = data
-
-
-@pytest.mark.parametrize("layout", ["zarr-v3", "zarr-v3-sharded", "zarr-v2", "zarr-v2-flat"])
+@pytest.mark.parametrize("layout", ["zarr-v3", "zarr-v3-sharded", "zarr-v2"])
 def test_source_chunk_is_found_in_every_layout(tmp_path: Path, layout: str) -> None:
     """The channel's ``t=0`` chunk is found through the array's own key encoding, past a fill-value first chunk."""
     pred = tmp_path / "pred.zarr"
@@ -627,8 +608,6 @@ def test_source_chunk_is_found_in_every_layout(tmp_path: Path, layout: str) -> N
     with open_ome_zarr(pred, mode="w", layout="hcs", channel_names=[_CHANNEL, _OTHER], version=version) as plate:
         for name in _POSITIONS:
             plate.create_position(*name.split("/")).create_image("0", data, chunks=(1, 1, 1, _H, _W), **extra)
-    if layout == "zarr-v2-flat":
-        _flat_v2(pred, data)
     chunks = sorted(
         f for f in (pred / "A/1/0/0").rglob("*") if f.is_file() and f.name != "zarr.json" and f.name[0] != "."
     )
@@ -637,7 +616,7 @@ def test_source_chunk_is_found_in_every_layout(tmp_path: Path, layout: str) -> N
 
     written = prediction_sources(pred, _OTHER)["A/1/0"]["written_ns"]
     (match,) = [chunk for chunk in chunks if chunk.stat().st_mtime_ns == written]
-    key = str(match.relative_to(pred / "A/1/0/0")).replace(".", "/").removeprefix("c/")
+    key = str(match.relative_to(pred / "A/1/0/0")).removeprefix("c/")
     assert key.split("/")[:2] == ["0", "1"], key  # t=0, channel 1
 
 
