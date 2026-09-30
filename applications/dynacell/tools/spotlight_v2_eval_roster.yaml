@@ -63,6 +63,15 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__zikv/prediction.zarr
+  # CELL-Diff A549 legs that finished after wave2g (2026-09-30): the CELL-Diff-2D membrane
+  # segauxself DENV/MOCK legs, the last CELL-Diff-3D nucleus segaux leg and the first
+  # CELL-Diff-2D membrane seed1 A549 leg. Generate with --wave wave2j.
+  wave2j:
+    nucleus:
+      - {model: celldiff_segaux_iterative, leaves: [a549__denv]}
+    membrane:
+      - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__denv]}
   # Second draw of the FNet-3D nucleus segaux arm (fit max_steps 200000, --ckpt best
   # epoch=180-step=156746), 2026-09-30. Generate with --wave wave2h.
   wave2h:
@@ -181,12 +190,10 @@ waves:
   # (checkpoints under .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
-      - {model: celldiff_segaux_iterative, leaves: [a549__denv]}
       # Stage 1b (nucleus only for now): mask in the generative process.
       - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - {model: celldiff_ccond_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__zikv]}
     membrane:
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
-      - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
-      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__zikv]}
