@@ -451,13 +451,18 @@ def test_a_position_added_after_init_is_recorded_and_reused(tmp_path: Path, monk
     assert _masks(_open_quietly(lambda: init_cache_context(config, side="pred")), monkeypatch, everything) == {}
 
 
-def test_pred_context_uses_the_callers_snapshot(tmp_path: Path) -> None:
-    """A snapshot the caller already read (and hashed) is used as is, not re-read, and copied."""
+def test_pred_context_uses_the_callers_snapshot(tmp_path: Path, monkeypatch) -> None:
+    """A snapshot the caller already read (and hashed) is used as is, and positions read on demand stay out of it."""
     _write_prediction(tmp_path / "pred.zarr", "run-1")
-    snapshot = {name: {"marker": "caller", "written_ns": 1} for name in _POSITIONS}
+    first, late = _POSITIONS
+    snapshot = {first: {"marker": "caller", "written_ns": 1}}
     ctx = init_cache_context(_config(tmp_path), side="pred", prediction_snapshot=snapshot)
     assert ctx.prediction_sources == snapshot
-    assert ctx.prediction_sources is not snapshot
+
+    _masks(ctx, monkeypatch)
+    assert ctx.prediction_sources[first] == {"marker": "caller", "written_ns": 1}
+    assert late in ctx.prediction_sources
+    assert snapshot == {first: {"marker": "caller", "written_ns": 1}}
 
 
 def test_multichannel_repredict_invalidates_only_its_channel(tmp_path: Path, monkeypatch) -> None:
