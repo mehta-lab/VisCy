@@ -27,13 +27,20 @@ from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
+import yaml
 import zarr
 from iohub.ngff import ImageArray, Position, open_ome_zarr
-from omegaconf import OmegaConf
 
 from viscy_utils.prediction_metadata import PREDICTION_COMPLETE_KEY, marker_identity
 
 FeatureKind = Literal["cp", "dinov3", "dynaclr", "celldino", "morphem"]
+
+# The manifest is read and written once per FOV, and its per-position ``sources``
+# make it large; libyaml's C loader and dumper are an order of magnitude faster than
+# the pure-Python ones. They are absent only from a PyYAML built without libyaml,
+# which then falls back to the pure-Python classes.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 
 CACHE_SCHEMA_VERSION = 1
 
@@ -118,7 +125,8 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
             "cell_segmentation": None,
             "artifacts": {},
         }
-    raw = OmegaConf.to_container(OmegaConf.load(paths.manifest), resolve=True)
+    with open(paths.manifest) as f:
+        raw = yaml.load(f, Loader=_YAML_LOADER)
     if not isinstance(raw, dict):
         raise StaleCacheError(f"Manifest at {paths.manifest} is not a mapping")
     raw.setdefault("gt", None)
@@ -131,7 +139,8 @@ def load_manifest(paths: CachePaths) -> dict[str, Any]:
 def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
     """Persist *manifest* as YAML under *paths.manifest*, creating parents."""
     paths.root.mkdir(parents=True, exist_ok=True)
-    OmegaConf.save(OmegaConf.create(manifest), paths.manifest)
+    with open(paths.manifest, "w") as f:
+        yaml.dump(manifest, f, Dumper=_YAML_DUMPER, sort_keys=False)
 
 
 def check_cache_identity(
