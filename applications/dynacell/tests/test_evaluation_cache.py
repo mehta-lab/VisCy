@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -122,6 +123,22 @@ def test_save_manifest_interrupted_leaves_the_old_file(tmp_path: Path, monkeypat
         save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {"b": 2}})
     assert paths.manifest.read_bytes() == before
     assert sorted(p.name for p in tmp_path.iterdir()) == ["manifest.yaml"]
+
+
+def test_save_manifest_never_writes_through_a_planted_temp_path(tmp_path: Path, monkeypatch) -> None:
+    """A path already at the temp name (here a symlink to another file) is refused, not followed or removed."""
+    paths = cache_paths(tmp_path / "cache")
+    paths.root.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    monkeypatch.setattr("dynacell.evaluation.cache.uuid.uuid4", lambda: uuid.UUID(int=0))
+    planted = paths.root / f".manifest.yaml.{uuid.UUID(int=0).hex}.tmp"
+    planted.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        save_manifest(paths, {"cache_schema_version": CACHE_SCHEMA_VERSION, "artifacts": {}})
+    assert victim.read_text() == "keep me"
+    assert planted.is_symlink()
+    assert not paths.manifest.exists()
 
 
 def test_check_cache_identity_version_mismatch(tmp_path: Path) -> None:

@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import shutil
-import socket
+import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -170,14 +170,18 @@ def save_manifest(paths: CachePaths, manifest: dict[str, Any]) -> None:
 
     The YAML goes to a sibling temp file that is then renamed over the manifest, so a
     reader that does not hold the manifest lock (``init_cache_context``) sees the old
-    file or the new one, never a truncated one.
+    file or the new one, never a truncated one. The temp name is unguessable and created
+    exclusively, so in a group-writable cache dir it never truncates or writes through a
+    path (or symlink) that another process made.
     """
     paths.root.mkdir(parents=True, exist_ok=True)
-    tmp = paths.manifest.with_name(f".{paths.manifest.name}.{socket.gethostname()}.{os.getpid()}.tmp")
+    tmp = paths.manifest.with_name(f".{paths.manifest.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with open(tmp, "w") as f:
+        with open(tmp, "x") as f:
             yaml.dump(manifest, f, Dumper=_ManifestDumper, sort_keys=False, allow_unicode=True)
         os.replace(tmp, paths.manifest)
+    except FileExistsError:
+        raise  # only open(tmp, "x") raises this; the path is not ours to remove
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
