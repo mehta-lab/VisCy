@@ -1765,7 +1765,7 @@ def flush_manifest(ctx: _CacheContext) -> None:
         return
     with _pos_write_lock(ctx, "manifest", "global"):
         on_disk = load_manifest(ctx.paths)
-        merged = _merge_manifests(on_disk, ctx.manifest, written=ctx._written_sources)
+        merged = _merge_manifests(on_disk, ctx.manifest, ctx._written_sources)
         save_manifest(ctx.paths, merged)
         ctx.manifest = merged
         ctx._written_sources = {}
@@ -1798,10 +1798,7 @@ def _merge_entry(on_disk: dict[str, Any], in_memory: dict[str, Any], written: se
 
 
 def _merge_manifests(
-    on_disk: dict[str, Any],
-    in_memory: dict[str, Any],
-    *,
-    written: dict[tuple[str, ...], set[str]] | None = None,
+    on_disk: dict[str, Any], in_memory: dict[str, Any], written: dict[tuple[str, ...], set[str]]
 ) -> dict[str, Any]:
     """Merge an in-memory manifest on top of the on-disk one, unioning per-position bookkeeping.
 
@@ -1811,7 +1808,6 @@ def _merge_manifests(
     (see :func:`_merge_entry`); *written* maps each entry's manifest path to the
     positions this process wrote since its last flush.
     """
-    written = written or {}
     merged = {**on_disk, **{k: v for k, v in in_memory.items() if k != "artifacts"}}
     merged["artifacts"] = dict(on_disk.get("artifacts", {}))
     in_artifacts = in_memory.get("artifacts", {})
