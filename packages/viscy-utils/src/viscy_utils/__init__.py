@@ -21,3 +21,7 @@ def __getattr__(name: str):
     if name not in _LAZY_ATTRS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     return getattr(importlib.import_module(_LAZY_ATTRS[name]), name)
+
+
+def __dir__() -> list[str]:
+    return sorted([*globals(), *__all__])

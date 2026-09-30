@@ -32,3 +32,7 @@ def test_public_names_importable(name):
 def test_unknown_attribute_raises():
     with pytest.raises(AttributeError):
         viscy_utils.not_a_name  # noqa: B018
+
+
+def test_dir_lists_public_names():
+    assert set(viscy_utils.__all__) <= set(dir(viscy_utils))
