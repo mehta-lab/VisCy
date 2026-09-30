@@ -63,6 +63,15 @@ waves:
           a549__mock: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__mock/prediction.zarr
           a549__denv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__denv/prediction.zarr
           a549__zikv: /hpc/projects/virtual_staining/training/dynacell/_spotlight_v2_controls/nucleus/fcmae_vscyto3d_scratch_v2_histmatch/ipsc/a549__zikv/prediction.zarr
+  # CELL-Diff A549 legs that finished after wave2f (2026-09-29): the CELL-Diff-2D C-cond arm
+  # re-predicted with threshold="otsu" (its fixed-t=0.30 wave2a scores are kept aside as
+  # _spotlight_v2/nucleus/celldiff_2d_ccond/ipsc/<leg>.fixed_t030), two CELL-Diff-3D segaux legs
+  # and the first CELL-Diff-2D seed1 A549 leg. Generate with --wave wave2g.
+  wave2g:
+    nucleus:
+      - {model: celldiff_2d_ccond, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__denv]}
   # Second draw of the FNet-2D segaux arm (both organelles) and the UNeXt2-3D membrane segaux
   # arm (fit ep199/200, --ckpt best ep125), 2026-09-29. Generate with --wave wave2f.
   wave2f:
@@ -167,12 +176,12 @@ waves:
   # (checkpoints under .../celldiff_segaux/), as stage0 keys the baseline by celldiff_r2_iterative.
   wave1:
     nucleus:
-      - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_segaux_iterative, leaves: [a549__denv]}
       # Stage 1b (nucleus only for now): mask in the generative process.
       - {model: celldiff_cjoint_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
       - {model: celldiff_ccond_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
-      # Re-predicted with threshold="otsu" (2026-09-28); its fixed-t=0.30 wave2a scores are
-      # kept aside as _spotlight_v2/nucleus/celldiff_2d_ccond/ipsc/<leg>.fixed_t030.
-      - {model: celldiff_2d_ccond, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__zikv]}
     membrane:
       - {model: celldiff_segaux_iterative, leaves: [a549__mock, a549__denv, a549__zikv]}
+      - {model: celldiff_2d_segauxself, leaves: [a549__mock, a549__denv]}
+      - {model: celldiff_2d_seed1, leaves: [a549__mock, a549__denv, a549__zikv]}
