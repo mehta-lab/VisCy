@@ -7,8 +7,6 @@ readers, feature names and focus helpers; torch costs seconds per process there.
 import subprocess
 import sys
 
-import pytest
-
 LIGHT_MODULES = [
     "dynacell.evaluation.cp_reference",
     "dynacell.evaluation.cross_condition_probe",
@@ -20,10 +18,19 @@ LIGHT_MODULES = [
     "dynacell.evaluation.paths",
 ]
 
+# One interpreter for all modules: shared heavy deps (iohub, cubic, zarr) load once.
+# Checking after each import names the first module that pulls torch in.
+_PROBE = """
+import importlib, sys
+for name in sys.argv[1:]:
+    importlib.import_module(name)
+    if "torch" in sys.modules:
+        print(name)
+        break
+"""
 
-@pytest.mark.parametrize("module", LIGHT_MODULES)
-def test_light_evaluation_module_does_not_import_torch(module: str) -> None:
-    """Importing ``module`` in a fresh interpreter leaves torch unloaded."""
-    code = f"import sys, {module}; print('torch' in sys.modules)"
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
-    assert result.stdout.strip() == "False", f"{module} imports torch at module load"
+
+def test_light_evaluation_modules_do_not_import_torch() -> None:
+    """Importing the light modules in a fresh interpreter leaves torch unloaded."""
+    result = subprocess.run([sys.executable, "-c", _PROBE, *LIGHT_MODULES], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "", f"{result.stdout.strip()} imports torch at module load"
